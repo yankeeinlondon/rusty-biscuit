@@ -1,0 +1,31 @@
+{
+  "name": "@rusty-biscuit/test-audit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared test-suite audit tooling: JUnit gates, inventory reconciliation, cost attribution, local measurement, and work-count evidence for rusty-biscuit package areas.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "bin": {
+    "test-audit": "./src/cli.ts"
+  },
+  "scripts": {
+    "audit": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.11.1",
+    "tree-sitter-rust": "0.24.0",
+    "web-tree-sitter": "0.27.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}
