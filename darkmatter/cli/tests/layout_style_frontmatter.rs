@@ -1,19 +1,35 @@
 mod common;
 
-use common::{md_cmd, md_file};
-use common::layout::*;
 use biscuit_terminal::terminal::Terminal;
+use common::layout::*;
+use common::{CliProcessFixture, md_file};
+
+fn rendering_command(fixture: &CliProcessFixture) -> assert_cmd::Command {
+    let mut command = fixture.command();
+    command
+        .env("COLUMNS", "80")
+        .env("LINES", "24")
+        .env("TERM", "dumb")
+        .env_remove("COLORTERM")
+        .env("NO_COLOR", "1")
+        .env_remove("FORCE_COLOR");
+    command
+}
 use darkmatter::layout::DarkmatterPage;
 
 #[test]
 fn style_fixture_cli_pipe_smoke_passes() {
+    let fixture = CliProcessFixture::named("style_fixture_cli_pipe_smoke_passes");
     // Smoke check that `md style-prop.md` exits successfully and emits a
     // non-empty stdout when stdout is a pipe (the CLI test runner captures
     // stdout, so `OutputFormat::Auto` takes the markdown pass-through path
     // here — this test does NOT exercise the terminal renderer). Terminal
     // layout coverage lives in the Level 2 WezTerm pane tests
     // (`darkmatter/cli/tests/level2_layout.rs::level2_style_fixture_*`).
-    let output = md_cmd().arg(style_prop_fixture()).output().unwrap();
+    let output = rendering_command(&fixture)
+        .arg(style_prop_fixture())
+        .output()
+        .unwrap();
     assert!(
         output.status.success(),
         "md style-prop.md must succeed: {}",
@@ -29,10 +45,11 @@ fn style_fixture_cli_pipe_smoke_passes() {
 
 #[test]
 fn style_fixture_renders_html_successfully() {
+    let fixture = CliProcessFixture::named("style_fixture_renders_html_successfully");
     // Acceptance: `md --output html style-prop.md` uses the same page-level
     // frontmatter values through `render_to_browser_document` (a complete
     // standalone document). MD_DRY_RUN avoids launching a browser.
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(style_prop_fixture())
         .arg("--output")
         .arg("html")
@@ -48,13 +65,15 @@ fn style_fixture_renders_html_successfully() {
 
 #[test]
 fn style_fixture_html_document_has_non_empty_ordered_head() {
+    let fixture =
+        CliProcessFixture::named("style_fixture_html_document_has_non_empty_ordered_head");
     // The decorated `style-prop.md` fixture (it configures page margins) drives
     // `render_to_browser_document`'s decorated branch. The emitted standalone
     // document must carry a REAL, non-empty `<head>` — charset/viewport/title
     // then the design-token `:root` block — not the old empty `<head></head>`,
     // and its `<body>` holds the `.darkmatter-page` frame. Without `--show`, the
     // CLI prints the HTML artifact to stdout, so we assert on it directly.
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(style_prop_fixture())
         .arg("--output")
         .arg("html")
@@ -83,7 +102,9 @@ fn style_fixture_html_document_has_non_empty_ordered_head() {
     let charset_at = head
         .find("<meta charset")
         .expect("head carries a charset meta");
-    let root_at = head.find(":root").expect("head carries the design-token :root block");
+    let root_at = head
+        .find(":root")
+        .expect("head carries the design-token :root block");
     assert!(
         charset_at < root_at,
         "charset/title precede the design-token block in the head, got: {head}"
@@ -106,10 +127,11 @@ fn style_fixture_html_document_has_non_empty_ordered_head() {
 
 #[test]
 fn style_fixture_strict_style_passes_on_schema_clean_doc() {
+    let fixture = CliProcessFixture::named("style_fixture_strict_style_passes_on_schema_clean_doc");
     // The fixture only generates `KnownButInactive` warnings (the ul / ol
     // keys are wired in later sub-specs). `--strict-style` must NOT fail on
     // `KnownButInactive`.
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(style_prop_fixture())
         .arg("--strict-style")
         .output()
@@ -123,6 +145,7 @@ fn style_fixture_strict_style_passes_on_schema_clean_doc() {
 
 #[test]
 fn style_strict_style_fails_on_unknown_key() {
+    let fixture = CliProcessFixture::named("style_strict_style_fails_on_unknown_key");
     // Spec test #5: `--strict-style` fails on `UnknownKey`. We route through
     // `--output html` so the frontmatter pipeline (which lives in the
     // terminal / HTML render paths) runs. The markdown-only artifact path
@@ -135,7 +158,7 @@ fn style_strict_style_fails_on_unknown_key() {
         ---\n\n# Doc\n",
     );
 
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--output")
         .arg("html")
@@ -151,6 +174,7 @@ fn style_strict_style_fails_on_unknown_key() {
 
 #[test]
 fn style_strict_style_fails_on_deprecated_key() {
+    let fixture = CliProcessFixture::named("style_strict_style_fails_on_deprecated_key");
     // `--strict-style` promotes `Deprecated` warnings to errors. The
     // canonical key is `style.page.left-margin`; the alias
     // `style.page.left_margin` should trigger a Deprecated warning, which
@@ -164,7 +188,7 @@ fn style_strict_style_fails_on_deprecated_key() {
         ---\n\n# Doc\n",
     );
 
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--output")
         .arg("html")
@@ -180,6 +204,7 @@ fn style_strict_style_fails_on_deprecated_key() {
 
 #[test]
 fn style_non_strict_renders_with_unknown_key() {
+    let fixture = CliProcessFixture::named("style_non_strict_renders_with_unknown_key");
     // Without `--strict-style`, an unknown key must NOT fail the render; it
     // becomes an informational warning. Route through `--output html` to
     // exercise the frontmatter pipeline.
@@ -190,7 +215,7 @@ fn style_non_strict_renders_with_unknown_key() {
         \x20       made-up-key: 2ch\n\
         ---\n\n# Doc\n",
     );
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--output")
         .arg("html")

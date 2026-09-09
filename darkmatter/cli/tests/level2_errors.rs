@@ -7,10 +7,10 @@
 
 mod common;
 
-use common::level2::md_shim;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness, capture_settled};
+use common::level2::md_shim;
 use serial_test::serial;
 use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -52,12 +52,7 @@ fn run_with_sentinel(harness: &mut WezTermHarness, cmd: &str) -> CapturedFrame {
         .send_command_with_env(&wrapped, &[("DARKMATTER_NO_BASELINE_SCHEMA", "1")])
         .expect("send_command_with_env failed");
     match wait_for_sentinel(harness, &sentinel) {
-        Ok(frame) => {
-            // Let the pane settle before the final capture so assertions see
-            // the stable frame, not a transitional redraw.
-            std::thread::sleep(Duration::from_millis(250));
-            harness.capture().unwrap_or(frame)
-        }
+        Ok(frame) => capture_settled(harness).unwrap_or(frame),
         Err(last) => panic!(
             "timed out waiting for sentinel {sentinel} after {SENTINEL_TIMEOUT:?}. \
              last plain capture:\n{}",
@@ -436,8 +431,7 @@ const STALE_DIRECTORY_SUGGESTION: &str = "2026-06-28-real-errors/spec.md";
 #[test]
 #[serial(level2_terminal)]
 fn level2_invalid_file_reference_renders_headline_excerpt_and_osc8_link() {
-    let Some((frame, canonical)) =
-        run_md_compose_named("invalid-ref.md", INVALID_FILE_REFERENCE)
+    let Some((frame, canonical)) = run_md_compose_named("invalid-ref.md", INVALID_FILE_REFERENCE)
     else {
         return;
     };

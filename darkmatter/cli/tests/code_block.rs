@@ -11,13 +11,11 @@
 //! rather than byte-exact strings so the suite stays stable across
 //! downstream rendering tweaks while still failing on real regressions.
 
+mod common;
+
+use common::CliProcessFixture;
 use predicates::prelude::*;
 use std::io::Write;
-
-/// Helper to create a `md` command from cargo bin.
-fn md_cmd() -> assert_cmd::Command {
-    assert_cmd::Command::cargo_bin("md").unwrap()
-}
 
 /// Creates a temporary file with the given content and suffix.
 ///
@@ -75,7 +73,9 @@ fn assert_ansi_contains(stdout: &[u8], needle: &str) -> String {
 
 #[test]
 fn code_block_help_lists_all_options() {
-    md_cmd()
+    let process = CliProcessFixture::new();
+    process
+        .command()
         .args(["code-block", "--help"])
         .assert()
         .success()
@@ -92,7 +92,9 @@ fn code_block_help_lists_all_options() {
 
 #[test]
 fn code_block_subcommand_appears_in_top_level_help() {
-    md_cmd()
+    let process = CliProcessFixture::new();
+    process
+        .command()
         .arg("--help")
         .assert()
         .success()
@@ -105,9 +107,11 @@ fn code_block_subcommand_appears_in_top_level_help() {
 
 #[test]
 fn code_block_renders_rust_file_with_explicit_language() {
+    let process = CliProcessFixture::new();
     let tmp = code_file("fn main() {\n    println!(\"hi\");\n}\n", ".rs");
 
-    let output = md_cmd()
+    let output = process
+        .command()
         .args(["code-block"])
         .arg(tmp.path())
         .args(["--language", "rust"])
@@ -123,11 +127,13 @@ fn code_block_renders_rust_file_with_explicit_language() {
 
 #[test]
 fn code_block_renders_file_inferred_from_extension() {
+    let process = CliProcessFixture::new();
     // The CLI should resolve the language from the .py extension when
     // --language is omitted.
     let tmp = code_file("def greet():\n    print('hello')\n", ".py");
 
-    let output = md_cmd()
+    let output = process
+        .command()
         .args(["code-block"])
         .arg(tmp.path())
         .assert()
@@ -140,9 +146,11 @@ fn code_block_renders_file_inferred_from_extension() {
 
 #[test]
 fn code_block_explicit_file_flag_treats_input_as_path() {
+    let process = CliProcessFixture::new();
     // --file must error when the path does not exist, even if the user
     // happened to type literal content that happens to be a valid path.
-    md_cmd()
+    process
+        .command()
         .args(["code-block", "fn main() {}", "--file"])
         .assert()
         .failure();
@@ -150,8 +158,10 @@ fn code_block_explicit_file_flag_treats_input_as_path() {
 
 #[test]
 fn code_block_file_flag_reads_existing_file() {
+    let process = CliProcessFixture::new();
     let tmp = code_file("fn a() {}\nfn b() {}\n", ".rs");
-    let output = md_cmd()
+    let output = process
+        .command()
         .args(["code-block", "--file"])
         .arg(tmp.path())
         .assert()
@@ -167,7 +177,9 @@ fn code_block_file_flag_reads_existing_file() {
 
 #[test]
 fn code_block_renders_literal_content_with_language_flag() {
-    let output = md_cmd()
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
         .args([
             "code-block",
             "fn main() { println!(\"hi\"); }",
@@ -184,10 +196,18 @@ fn code_block_renders_literal_content_with_language_flag() {
 
 #[test]
 fn code_block_content_flag_treats_input_as_literal() {
+    let process = CliProcessFixture::new();
     // The string "examples/sample.rs" reads as a file path, but with
     // --content it must be rendered verbatim.
-    let output = md_cmd()
-        .args(["code-block", "examples/sample.rs", "--content", "--language", "text"])
+    let output = process
+        .command()
+        .args([
+            "code-block",
+            "examples/sample.rs",
+            "--content",
+            "--language",
+            "text",
+        ])
         .assert()
         .success();
     let stdout = output.get_output().stdout.clone();
@@ -196,7 +216,9 @@ fn code_block_content_flag_treats_input_as_literal() {
 
 #[test]
 fn code_block_falls_back_to_literal_when_path_does_not_exist() {
-    let output = md_cmd()
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
         .args([
             "code-block",
             "fn standalone_literal() {}",
@@ -215,9 +237,18 @@ fn code_block_falls_back_to_literal_when_path_does_not_exist() {
 
 #[test]
 fn code_block_language_alias_resolves() {
+    let process = CliProcessFixture::new();
     // `py` is the documented alias for Python.
-    md_cmd()
-        .args(["code-block", "x = 1", "--language", "py", "--output", "html"])
+    process
+        .command()
+        .args([
+            "code-block",
+            "x = 1",
+            "--language",
+            "py",
+            "--output",
+            "html",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("language-python"));
@@ -225,7 +256,9 @@ fn code_block_language_alias_resolves() {
 
 #[test]
 fn code_block_yml_alias_resolves_to_yaml() {
-    md_cmd()
+    let process = CliProcessFixture::new();
+    process
+        .command()
         .args([
             "code-block",
             "k: v",
@@ -241,9 +274,11 @@ fn code_block_yml_alias_resolves_to_yaml() {
 
 #[test]
 fn code_block_unknown_language_renders_as_text() {
+    let process = CliProcessFixture::new();
     // An unknown language token still renders, just with no syntax
     // highlighting (the panel is text-only).
-    md_cmd()
+    process
+        .command()
         .args([
             "code-block",
             "some content",
@@ -261,7 +296,9 @@ fn code_block_unknown_language_renders_as_text() {
 
 #[test]
 fn code_block_title_appears_in_header_row() {
-    md_cmd()
+    let process = CliProcessFixture::new();
+    process
+        .command()
         .args([
             "code-block",
             "fn main() {}",
@@ -277,7 +314,9 @@ fn code_block_title_appears_in_header_row() {
 
 #[test]
 fn code_block_line_numbering_renders_gutter() {
-    let output = md_cmd()
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
         .args([
             "code-block",
             "fn a() {}\nfn b() {}\nfn c() {}",
@@ -300,11 +339,12 @@ fn code_block_line_numbering_renders_gutter() {
 
 #[test]
 fn code_block_highlight_range_changes_panel_background() {
+    let process = CliProcessFixture::new();
     // The highlight background color differs from the default panel
     // background, so two captures with different highlight lines must
     // differ. This locks in the rendering plumbing reaching the body.
     let make_block = |highlight: &str| {
-        let mut cmd = md_cmd();
+        let mut cmd = process.command();
         cmd.args([
             "code-block",
             "fn a() {}\nfn b() {}\nfn c() {}\nfn d() {}",
@@ -329,8 +369,10 @@ fn code_block_highlight_range_changes_panel_background() {
 
 #[test]
 fn code_block_highlight_invalid_range_errors() {
+    let process = CliProcessFixture::new();
     // "1-2-3" is structurally invalid: a range must be start-end, not three parts.
-    md_cmd()
+    process
+        .command()
         .args([
             "code-block",
             "fn a() {}\nfn b() {}",
@@ -346,8 +388,10 @@ fn code_block_highlight_invalid_range_errors() {
 
 #[test]
 fn code_block_highlight_inverted_range_errors() {
+    let process = CliProcessFixture::new();
     // Start > end is an invalid range.
-    md_cmd()
+    process
+        .command()
         .args([
             "code-block",
             "fn a() {}\nfn b() {}",
@@ -363,7 +407,9 @@ fn code_block_highlight_inverted_range_errors() {
 
 #[test]
 fn code_block_highlight_non_numeric_errors() {
-    md_cmd()
+    let process = CliProcessFixture::new();
+    process
+        .command()
         .args([
             "code-block",
             "fn a() {}\nfn b() {}",
@@ -383,7 +429,9 @@ fn code_block_highlight_non_numeric_errors() {
 
 #[test]
 fn code_block_html_output_emits_pre_code_class() {
-    md_cmd()
+    let process = CliProcessFixture::new();
+    process
+        .command()
         .args([
             "code-block",
             "fn main() {}",
@@ -401,7 +449,9 @@ fn code_block_html_output_emits_pre_code_class() {
 
 #[test]
 fn code_block_html_output_escapes_special_chars() {
-    md_cmd()
+    let process = CliProcessFixture::new();
+    process
+        .command()
         .args([
             "code-block",
             "x = \"<script>alert(1)</script>\"",
@@ -413,12 +463,17 @@ fn code_block_html_output_escapes_special_chars() {
         .assert()
         .success()
         // The literal `<script>` text must not survive unescaped.
-        .stdout(predicate::str::contains("&lt;script&gt;").or(predicate::str::contains("&#60;script&#62;")));
+        .stdout(
+            predicate::str::contains("&lt;script&gt;")
+                .or(predicate::str::contains("&#60;script&#62;")),
+        );
 }
 
 #[test]
 fn code_block_markdown_output_emits_fence_with_language() {
-    md_cmd()
+    let process = CliProcessFixture::new();
+    process
+        .command()
         .args([
             "code-block",
             "fn main() {}",
@@ -436,7 +491,9 @@ fn code_block_markdown_output_emits_fence_with_language() {
 
 #[test]
 fn code_block_markdown_output_preserves_title_and_line_numbering() {
-    md_cmd()
+    let process = CliProcessFixture::new();
+    process
+        .command()
         .args([
             "code-block",
             "fn a() {}\nfn b() {}",
@@ -450,12 +507,16 @@ fn code_block_markdown_output_preserves_title_and_line_numbering() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("```rust title=\"Demo\" line-numbering=true"));
+        .stdout(predicate::str::contains(
+            "```rust title=\"Demo\" line-numbering=true",
+        ));
 }
 
 #[test]
 fn code_block_markdown_output_preserves_highlight() {
-    md_cmd()
+    let process = CliProcessFixture::new();
+    process
+        .command()
         .args([
             "code-block",
             "fn a() {}\nfn b() {}\nfn c() {}",
@@ -473,8 +534,10 @@ fn code_block_markdown_output_preserves_highlight() {
 
 #[test]
 fn code_block_terminal_output_contains_ansi() {
+    let process = CliProcessFixture::new();
     // Default output is terminal; ANSI escapes should be present.
-    md_cmd()
+    process
+        .command()
         .args(["code-block", "fn main() {}", "--language", "rust"])
         .assert()
         .success()
@@ -487,12 +550,13 @@ fn code_block_terminal_output_contains_ansi() {
 
 #[test]
 fn code_block_theme_override_changes_terminal_output() {
+    let process = CliProcessFixture::new();
     // review-1 finding 1: `--theme` must actually reach the renderer and
     // change the resolved terminal output — not be a silent no-op. `github`
     // and `nord` are distinct themes, so their highlighted SGR colors must
     // differ for the same source.
     let capture = |theme: &str| {
-        let mut cmd = md_cmd();
+        let mut cmd = process.command();
         cmd.args([
             "code-block",
             "fn demo() -> usize { 42 }",
@@ -506,10 +570,8 @@ fn code_block_theme_override_changes_terminal_output() {
 
     let github = capture("github");
     let nord = capture("nord");
-    let stdout_github =
-        String::from_utf8(github.get_output().stdout.clone()).unwrap();
-    let stdout_nord =
-        String::from_utf8(nord.get_output().stdout.clone()).unwrap();
+    let stdout_github = String::from_utf8(github.get_output().stdout.clone()).unwrap();
+    let stdout_nord = String::from_utf8(nord.get_output().stdout.clone()).unwrap();
     assert!(stdout_github.contains("\x1b["));
     assert!(stdout_nord.contains("\x1b["));
     // The plain-text body survives the strip, proving the renderer ran.
@@ -527,11 +589,12 @@ fn code_block_theme_override_changes_terminal_output() {
 
 #[test]
 fn code_block_theme_override_changes_html_output() {
+    let process = CliProcessFixture::new();
     // review-1 finding 1: `--theme` must change the resolved HTML output.
     // `github` and `nord` paint different syntax colors, so the emitted
     // `<span style="color: …">` markup must differ for the same source.
     let capture = |theme: &str| {
-        let mut cmd = md_cmd();
+        let mut cmd = process.command();
         cmd.args([
             "code-block",
             "fn demo() -> usize { 42 }",
@@ -547,10 +610,8 @@ fn code_block_theme_override_changes_html_output() {
 
     let github = capture("github");
     let nord = capture("nord");
-    let stdout_github =
-        String::from_utf8(github.get_output().stdout.clone()).unwrap();
-    let stdout_nord =
-        String::from_utf8(nord.get_output().stdout.clone()).unwrap();
+    let stdout_github = String::from_utf8(github.get_output().stdout.clone()).unwrap();
+    let stdout_nord = String::from_utf8(nord.get_output().stdout.clone()).unwrap();
     assert!(stdout_github.contains("language-rust"));
     assert!(stdout_nord.contains("language-rust"));
     // Tokens are split across `<span>` elements by the syntax highlighter.
@@ -572,17 +633,23 @@ fn code_block_theme_override_changes_html_output() {
 
 #[test]
 fn code_block_theme_env_changes_terminal_output_without_flag() {
+    let process = CliProcessFixture::new();
     // review-2 finding 1: with no `--theme`, the `THEME` env var must drive the
     // resolved code theme on the direct `md code-block` terminal surface. The
     // page path bakes env in at construction, but the page-less direct surface
     // resolves env in the render hook. `github` and `nord` are distinct themes,
     // so their highlighted ANSI must differ for the same source.
     let capture = |theme: &str| {
-        let mut cmd = md_cmd();
+        let mut cmd = process.command();
         cmd.env_remove("NO_COLOR")
             .env_remove("CODE_THEME")
             .env("THEME", theme)
-            .args(["code-block", "fn demo() -> usize { 42 }", "--language", "rust"]);
+            .args([
+                "code-block",
+                "fn demo() -> usize { 42 }",
+                "--language",
+                "rust",
+            ]);
         cmd.assert().success()
     };
 
@@ -597,20 +664,19 @@ fn code_block_theme_env_changes_terminal_output_without_flag() {
 
 #[test]
 fn code_block_code_theme_env_changes_html_output_without_flag() {
+    let process = CliProcessFixture::new();
     // review-2 finding 1: `CODE_THEME` must drive the resolved code theme on the
     // direct `md code-block` browser surface when `--theme` is absent.
     let capture = |theme: &str| {
-        let mut cmd = md_cmd();
-        cmd.env_remove("THEME")
-            .env("CODE_THEME", theme)
-            .args([
-                "code-block",
-                "fn demo() -> usize { 42 }",
-                "--language",
-                "rust",
-                "--output",
-                "html",
-            ]);
+        let mut cmd = process.command();
+        cmd.env_remove("THEME").env("CODE_THEME", theme).args([
+            "code-block",
+            "fn demo() -> usize { 42 }",
+            "--language",
+            "rust",
+            "--output",
+            "html",
+        ]);
         cmd.assert().success()
     };
 
@@ -625,10 +691,11 @@ fn code_block_code_theme_env_changes_html_output_without_flag() {
 
 #[test]
 fn code_block_theme_flag_wins_over_theme_env() {
+    let process = CliProcessFixture::new();
     // review-2 finding 1: an explicit `--theme` must override `THEME`, so the
     // resolved output is identical regardless of the env value.
     let capture = |env_theme: &str| {
-        let mut cmd = md_cmd();
+        let mut cmd = process.command();
         cmd.env_remove("NO_COLOR")
             .env_remove("CODE_THEME")
             .env("THEME", env_theme)
@@ -643,8 +710,7 @@ fn code_block_theme_flag_wins_over_theme_env() {
         cmd.assert().success()
     };
 
-    let with_github_env =
-        String::from_utf8(capture("github").get_output().stdout.clone()).unwrap();
+    let with_github_env = String::from_utf8(capture("github").get_output().stdout.clone()).unwrap();
     let with_nord_env = String::from_utf8(capture("nord").get_output().stdout.clone()).unwrap();
     assert_eq!(
         with_github_env, with_nord_env,
@@ -669,6 +735,7 @@ fn code_block_theme_flag_wins_over_theme_env() {
 
 #[test]
 fn code_block_html_output_matches_fenced_markdown_fence() {
+    let process = CliProcessFixture::new();
     // SAME-SURFACE HTML-to-HTML parity (review-4 finding 2): both surfaces
     // render the same code to the HTML target through `render_html_code_block`,
     // so the `.code-block` fragment must be byte-for-byte identical — not merely
@@ -678,7 +745,8 @@ fn code_block_html_output_matches_fenced_markdown_fence() {
     // any ambient `CODE_THEME` / `THEME`.
     let code = "fn a() {}\nfn b() {}\n";
 
-    let direct = md_cmd()
+    let direct = process
+        .command()
         .args([
             "code-block",
             code,
@@ -691,16 +759,15 @@ fn code_block_html_output_matches_fenced_markdown_fence() {
         ])
         .assert()
         .success();
-    let direct_stdout =
-        String::from_utf8(direct.get_output().stdout.clone()).unwrap();
+    let direct_stdout = String::from_utf8(direct.get_output().stdout.clone()).unwrap();
 
-    let fence = md_cmd()
+    let fence = process
+        .command()
         .args(["--output", "html", "--code-theme", "one-half"])
         .write_stdin(format!("```rust\n{code}```\n"))
         .assert()
         .success();
-    let fence_stdout =
-        String::from_utf8(fence.get_output().stdout.clone()).unwrap();
+    let fence_stdout = String::from_utf8(fence.get_output().stdout.clone()).unwrap();
 
     assert_eq!(
         extract_code_block_fragment(&direct_stdout),
@@ -737,7 +804,9 @@ fn extract_code_block_fragment(html: &str) -> String {
         .find(block_marker)
         .unwrap_or_else(|| panic!("code-block div not found in: {html}"));
     let title_marker = "<div class=\"code-block-title\">";
-    let start = html[..block_start].rfind(title_marker).unwrap_or(block_start);
+    let start = html[..block_start]
+        .rfind(title_marker)
+        .unwrap_or(block_start);
     let close_rel = html[block_start..]
         .find("</div>")
         .unwrap_or_else(|| panic!("code-block close not found in: {html}"));

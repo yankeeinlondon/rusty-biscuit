@@ -1,8 +1,7 @@
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 use predicates::prelude::*;
-
 
 // =============================================================================
 //                     HASH KIND / SAVE / DIFF TESTS
@@ -10,7 +9,11 @@ use predicates::prelude::*;
 
 #[test]
 fn test_hash_kind_structured_outputs_four_parts() {
-    md_cmd()
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-kind-structured-outputs-four-parts",
+    );
+    fixture
+        .command()
         .args(["hash", "--kind", "structured", "-"])
         .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
         .assert()
@@ -23,7 +26,11 @@ fn test_hash_kind_structured_outputs_four_parts() {
 
 #[test]
 fn test_hash_kind_structured_strict_outputs_four_parts() {
-    md_cmd()
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-kind-structured-strict-outputs-four-parts",
+    );
+    fixture
+        .command()
         .args(["hash", "--kind", "structured", "--strict", "-"])
         .write_stdin("---\nbeta: 1\nalpha: 2\n---\n# Hello\n\nWorld")
         .assert()
@@ -36,14 +43,19 @@ fn test_hash_kind_structured_strict_outputs_four_parts() {
 
 #[test]
 fn test_hash_kind_structured_strict_respects_key_order() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-kind-structured-strict-respects-key-order",
+    );
     let reordered = |args: &[&str]| {
-        let beta_first = md_cmd()
+        let beta_first = fixture
+            .command()
             .args(args)
             .write_stdin("---\nbeta: 1\nalpha: 2\n---\n# H\n\nBody.")
             .output()
             .unwrap()
             .stdout;
-        let alpha_first = md_cmd()
+        let alpha_first = fixture
+            .command()
             .args(args)
             .write_stdin("---\nalpha: 2\nbeta: 1\n---\n# H\n\nBody.")
             .output()
@@ -63,6 +75,9 @@ fn test_hash_kind_structured_strict_respects_key_order() {
 
 #[test]
 fn test_hash_diff_malformed_stored_hash_exits_one() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-diff-malformed-stored-hash-exits-one",
+    );
     // A corrupt stored hash is an operational error (exit 1), never a content
     // difference (exit 2).
     let dir = tempfile::tempdir().unwrap();
@@ -73,11 +88,20 @@ fn test_hash_diff_malformed_stored_hash_exits_one() {
     )
     .unwrap();
 
-    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(1);
+    fixture
+        .command()
+        .arg("hash")
+        .arg("--diff")
+        .arg(&file)
+        .assert()
+        .code(1);
 }
 
 #[test]
 fn test_hash_diff_detailed_bad_section_level_exits_one() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-diff-detailed-bad-section-level-exits-one",
+    );
     // A stored detailed hash whose section level is outside 1-6 is a malformed
     // baseline (operational error, exit 1), never a content difference (exit 2).
     let dir = tempfile::tempdir().unwrap();
@@ -102,12 +126,21 @@ fn test_hash_diff_detailed_bad_section_level_exits_one() {
     )
     .unwrap();
 
-    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(1);
+    fixture
+        .command()
+        .arg("hash")
+        .arg("--diff")
+        .arg(&file)
+        .assert()
+        .code(1);
 }
 
 #[test]
 fn test_hash_kind_detailed_outputs_nested_yaml() {
-    md_cmd()
+    let fixture =
+        CliProcessFixture::named("hash-kind-save-diff-test-hash-kind-detailed-outputs-nested-yaml");
+    fixture
+        .command()
         .args(["hash", "--kind", "detailed", "-"])
         .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
         .assert()
@@ -118,13 +151,17 @@ fn test_hash_kind_detailed_outputs_nested_yaml() {
 
 #[test]
 fn test_hash_kind_fm_matches_frontmatter_flag() {
+    let fixture =
+        CliProcessFixture::named("hash-kind-save-diff-test-hash-kind-fm-matches-frontmatter-flag");
     let input = "---\ntitle: Hello\n---\n# Content";
-    let by_kind = md_cmd()
+    let by_kind = fixture
+        .command()
         .args(["hash", "--kind", "fm", "-"])
         .write_stdin(input)
         .output()
         .unwrap();
-    let by_flag = md_cmd()
+    let by_flag = fixture
+        .command()
         .args(["hash", "--frontmatter", "-"])
         .write_stdin(input)
         .output()
@@ -134,7 +171,10 @@ fn test_hash_kind_fm_matches_frontmatter_flag() {
 
 #[test]
 fn test_hash_kind_conflicts_with_body() {
-    md_cmd()
+    let fixture =
+        CliProcessFixture::named("hash-kind-save-diff-test-hash-kind-conflicts-with-body");
+    fixture
+        .command()
         .args(["hash", "--kind", "fm", "--body", "-"])
         .write_stdin("# H")
         .assert()
@@ -143,7 +183,9 @@ fn test_hash_kind_conflicts_with_body() {
 
 #[test]
 fn test_hash_save_and_diff_conflict() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("hash-kind-save-diff-test-hash-save-and-diff-conflict");
+    fixture
+        .command()
         .args(["hash", "--save", "--diff", "-"])
         .write_stdin("# H")
         .assert()
@@ -152,12 +194,14 @@ fn test_hash_save_and_diff_conflict() {
 
 #[test]
 fn test_hash_env_property_override() {
+    let fixture = CliProcessFixture::named("hash-kind-save-diff-test-hash-env-property-override");
     // HASH_PROPERTY changes which frontmatter key the hash is written to.
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("doc.md");
     std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .env("HASH_PROPERTY", "fingerprint")
         .arg("hash")
         .arg("--save")
@@ -172,14 +216,18 @@ fn test_hash_env_property_override() {
 
 #[test]
 fn test_hash_ignore_properties_excludes_key() {
+    let fixture =
+        CliProcessFixture::named("hash-kind-save-diff-test-hash-ignore-properties-excludes-key");
     // A document differing only in an ignored property hashes identically.
-    let with_draft = md_cmd()
+    let with_draft = fixture
+        .command()
         .env("HASH_IGNORE_PROPERTIES", "draft")
         .args(["hash", "--frontmatter", "-"])
         .write_stdin("---\ntitle: T\ndraft: true\n---\n# H")
         .output()
         .unwrap();
-    let without_draft = md_cmd()
+    let without_draft = fixture
+        .command()
         .env("HASH_IGNORE_PROPERTIES", "draft")
         .args(["hash", "--frontmatter", "-"])
         .write_stdin("---\ntitle: T\n---\n# H")
@@ -190,11 +238,15 @@ fn test_hash_ignore_properties_excludes_key() {
 
 #[test]
 fn test_hash_save_writes_baseline_and_exits_zero() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-save-writes-baseline-and-exits-zero",
+    );
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("doc.md");
     std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .arg("hash")
         .arg("--save")
         .arg(&file)
@@ -208,6 +260,9 @@ fn test_hash_save_writes_baseline_and_exits_zero() {
 
 #[test]
 fn test_hash_save_preserves_raw_frontmatter_and_is_idempotent() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-save-preserves-raw-frontmatter-and-is-idempotent",
+    );
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("doc.md");
     let source = concat!(
@@ -222,29 +277,59 @@ fn test_hash_save_preserves_raw_frontmatter_and_is_idempotent() {
     );
     std::fs::write(&file, source).unwrap();
 
-    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+    fixture
+        .command()
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success();
     let first = std::fs::read_to_string(&file).unwrap();
     assert!(first.contains("title: T # keep\r\nprompt: |-\r\n    Keep trailing space  \r\n"));
     assert!(first.ends_with("---\r\n# H\r\n\r\nBody.\r\n"));
 
-    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+    fixture
+        .command()
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success();
     assert_eq!(std::fs::read_to_string(&file).unwrap(), first);
-    md_cmd().arg("hash").arg("--diff").arg(&file).assert().success();
+    fixture
+        .command()
+        .arg("hash")
+        .arg("--diff")
+        .arg(&file)
+        .assert()
+        .success();
 }
 
 #[test]
 fn test_hash_save_failure_does_not_modify_flow_mapping() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-save-failure-does-not-modify-flow-mapping",
+    );
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("doc.md");
     let source = "---\n{title: T}\n---\nBody.\n";
     std::fs::write(&file, source).unwrap();
 
-    md_cmd().arg("hash").arg("--save").arg(&file).assert().failure();
+    fixture
+        .command()
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .failure();
     assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
 }
 
 #[test]
 fn test_hash_save_honors_quoted_custom_property() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-save-honors-quoted-custom-property",
+    );
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("doc.md");
     let source = concat!(
@@ -256,7 +341,8 @@ fn test_hash_save_honors_quoted_custom_property() {
     );
     std::fs::write(&file, source).unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .env("HASH_PROPERTY", "fingerprint")
         .arg("hash")
         .arg("--save")
@@ -266,7 +352,8 @@ fn test_hash_save_honors_quoted_custom_property() {
     let written = std::fs::read_to_string(&file).unwrap();
     assert!(written.contains("title: T # keep\n'fingerprint': "));
     assert!(!written.contains("\nhash:"));
-    md_cmd()
+    fixture
+        .command()
         .env("HASH_PROPERTY", "fingerprint")
         .arg("hash")
         .arg("--diff")
@@ -277,12 +364,16 @@ fn test_hash_save_honors_quoted_custom_property() {
 
 #[test]
 fn test_hash_save_detailed_value_preserves_authored_neighbors() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-save-detailed-value-preserves-authored-neighbors",
+    );
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("doc.md");
     let source = "---\ntitle: T # keep\n---\n# Heading\n\nBody.\n";
     std::fs::write(&file, source).unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .args(["hash", "--kind", "detailed", "--save"])
         .arg(&file)
         .assert()
@@ -290,12 +381,21 @@ fn test_hash_save_detailed_value_preserves_authored_neighbors() {
     let written = std::fs::read_to_string(&file).unwrap();
     assert!(written.contains("title: T # keep\nhash:\n  kind: detailed\n"));
     assert!(written.ends_with("---\n# Heading\n\nBody.\n"));
-    md_cmd().arg("hash").arg("--diff").arg(&file).assert().success();
+    fixture
+        .command()
+        .arg("hash")
+        .arg("--diff")
+        .arg(&file)
+        .assert()
+        .success();
 }
 
 #[test]
 fn test_hash_save_requires_file_not_stdin() {
-    md_cmd()
+    let fixture =
+        CliProcessFixture::named("hash-kind-save-diff-test-hash-save-requires-file-not-stdin");
+    fixture
+        .command()
         .args(["hash", "--save", "-"])
         .write_stdin("# H")
         .assert()
@@ -304,24 +404,38 @@ fn test_hash_save_requires_file_not_stdin() {
 
 #[test]
 fn test_hash_diff_no_stored_hash_exits_two() {
-    md_cmd()
+    let fixture =
+        CliProcessFixture::named("hash-kind-save-diff-test-hash-diff-no-stored-hash-exits-two");
+    fixture
+        .command()
         .args(["hash", "--diff", "-"])
         .write_stdin("---\ntitle: T\n---\n# H\n\nBody.")
         .assert()
         .code(2)
-        .stdout(predicate::str::contains("No stored hash to compare against"));
+        .stdout(predicate::str::contains(
+            "No stored hash to compare against",
+        ));
 }
 
 #[test]
 fn test_hash_diff_unchanged_exits_zero() {
+    let fixture =
+        CliProcessFixture::named("hash-kind-save-diff-test-hash-diff-unchanged-exits-zero");
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("doc.md");
     std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
 
     // Establish a baseline, then diff against it without any edit.
-    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+    fixture
+        .command()
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success();
 
-    md_cmd()
+    fixture
+        .command()
         .arg("hash")
         .arg("--diff")
         .arg(&file)
@@ -332,22 +446,38 @@ fn test_hash_diff_unchanged_exits_zero() {
 
 #[test]
 fn test_hash_diff_changed_exits_two() {
+    let fixture = CliProcessFixture::named("hash-kind-save-diff-test-hash-diff-changed-exits-two");
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("doc.md");
     std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
 
-    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+    fixture
+        .command()
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success();
 
     // Edit the body, leaving the stored hash in place.
     let stored = std::fs::read_to_string(&file).unwrap();
     let edited = stored.replace("Body.", "Different body.");
     std::fs::write(&file, edited).unwrap();
 
-    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(2);
+    fixture
+        .command()
+        .arg("hash")
+        .arg("--diff")
+        .arg(&file)
+        .assert()
+        .code(2);
 }
 
 #[test]
 fn test_hash_save_preservation_matrix_covers_representations_and_newlines() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-save-preservation-matrix-covers-representations-and-newlines",
+    );
     struct Case {
         name: &'static str,
         kind: Option<&'static str>,
@@ -438,7 +568,7 @@ fn test_hash_save_preservation_matrix_covers_representations_and_newlines() {
             );
             std::fs::write(&file, source).unwrap();
 
-            let mut save = md_cmd();
+            let mut save = fixture.command();
             save.arg("hash");
             if let Some(kind) = case.kind {
                 save.args(["--kind", kind]);
@@ -479,7 +609,7 @@ fn test_hash_save_preservation_matrix_covers_representations_and_newlines() {
                 );
             }
 
-            let mut diff = md_cmd();
+            let mut diff = fixture.command();
             diff.arg("hash");
             if case.property != "hash" {
                 diff.env("HASH_PROPERTY", case.property);
@@ -491,6 +621,9 @@ fn test_hash_save_preservation_matrix_covers_representations_and_newlines() {
 
 #[test]
 fn test_hash_save_flow_root_no_write_matrix_covers_newlines() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-save-flow-root-no-write-matrix-covers-newlines",
+    );
     for newline in ["\n", "\r\n"] {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("flow.md");
@@ -506,7 +639,13 @@ fn test_hash_save_flow_root_no_write_matrix_covers_newlines() {
         .join(newline);
         std::fs::write(&file, &source).unwrap();
 
-        md_cmd().arg("hash").arg("--save").arg(&file).assert().failure();
+        fixture
+            .command()
+            .arg("hash")
+            .arg("--save")
+            .arg(&file)
+            .assert()
+            .failure();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
     }
 }

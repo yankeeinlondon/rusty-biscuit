@@ -12,20 +12,18 @@
 
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// A repo-shaped fixture: a Git root, a `schemas/` trigger root, and `docs/`.
 struct Repo {
-    _dir: tempfile::TempDir,
     root: PathBuf,
 }
 
 impl Repo {
-    fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_path_buf();
+    fn new(fixture: &CliProcessFixture) -> Self {
+        let root = fixture.workspace_path().join("repo");
         let git_dir = root.join(".git");
         fs::create_dir_all(git_dir.join("objects")).unwrap();
         fs::create_dir_all(git_dir.join("refs/heads")).unwrap();
@@ -37,7 +35,7 @@ impl Repo {
         .unwrap();
         fs::create_dir_all(root.join("schemas")).unwrap();
         fs::create_dir_all(root.join("docs")).unwrap();
-        Self { _dir: dir, root }
+        Self { root }
     }
 
     fn write(&self, relative: &str, content: &str) -> PathBuf {
@@ -66,8 +64,9 @@ const RELEASE_IS_STRING: &str = "$schema:\n  release: string(required)\n";
 const RELEASE_UNCONSTRAINED: &str = "$schema:\n  other: string\n";
 
 /// Runs `md clean` and returns STDOUT.
-fn clean(path: &Path, args: &[&str]) -> String {
-    let assert = md_cmd()
+fn clean(fixture: &CliProcessFixture, path: &Path, args: &[&str]) -> String {
+    let assert = fixture
+        .command()
         .arg("clean")
         .arg(path)
         .args(args)
@@ -91,14 +90,21 @@ fn release_quoted(stdout: &str) -> bool {
 /// reach the quoting tier.
 #[test]
 fn test_baseline_schema_flag_drives_schema_proven_quoting() {
-    let repo = Repo::new();
+    let fixture = CliProcessFixture::named(
+        "clean-schema-test-baseline-schema-flag-drives-schema-proven-quoting",
+    );
+    let repo = Repo::new(&fixture);
     let schema = repo.write("strict.yaml", RELEASE_IS_STRING);
     let doc = repo.write("docs/doc.md", "---\nrelease: 1.20\n---\n\n# Body\n");
 
-    let with_flag = clean(&doc, &["--baseline-schema", schema.to_str().unwrap()]);
+    let with_flag = clean(
+        &fixture,
+        &doc,
+        &["--baseline-schema", schema.to_str().unwrap()],
+    );
     assert!(release_quoted(&with_flag), "expected quoting:\n{with_flag}");
 
-    let without = clean(&doc, &[]);
+    let without = clean(&fixture, &doc, &[]);
     assert!(
         !release_quoted(&without),
         "the built-in baseline does not constrain `release`:\n{without}"
@@ -109,17 +115,24 @@ fn test_baseline_schema_flag_drives_schema_proven_quoting() {
 /// probe is a Darkmatter-owned key (`ctx`), which only the baseline declares.
 #[test]
 fn test_default_baseline_is_active_and_no_baseline_schema_disables_it() {
-    let repo = Repo::new();
-    let doc = repo.write("docs/doc.md", "---\nctx:\n  undeclared_key: 1\n---\n\n# Body\n");
+    let fixture = CliProcessFixture::named(
+        "clean-schema-test-default-baseline-is-active-and-no-baseline-schema-disables-it",
+    );
+    let repo = Repo::new(&fixture);
+    let doc = repo.write(
+        "docs/doc.md",
+        "---\nctx:\n  undeclared_key: 1\n---\n\n# Body\n",
+    );
 
-    let default = md_cmd().arg("clean").arg(&doc).assert().success();
+    let default = fixture.command().arg("clean").arg(&doc).assert().success();
     let default_stderr = String::from_utf8(default.get_output().stderr.clone()).unwrap();
     assert!(
         default_stderr.contains("schema.key-correction"),
         "the default baseline must declare `ctx`, got:\n{default_stderr}"
     );
 
-    let disabled = md_cmd()
+    let disabled = fixture
+        .command()
         .arg("clean")
         .arg(&doc)
         .arg("--no-baseline-schema")
@@ -135,21 +148,30 @@ fn test_default_baseline_is_active_and_no_baseline_schema_disables_it() {
 /// `--no-baseline-schema` also removes a baseline's quoting proof.
 #[test]
 fn test_no_baseline_schema_suppresses_quoting() {
-    let repo = Repo::new();
+    let fixture =
+        CliProcessFixture::named("clean-schema-test-no-baseline-schema-suppresses-quoting");
+    let repo = Repo::new(&fixture);
     let schema = repo.write("strict.yaml", RELEASE_IS_STRING);
     let doc = repo.write("docs/doc.md", "---\nrelease: 1.20\n---\n\n# Body\n");
 
     assert!(release_quoted(&clean(
+        &fixture,
         &doc,
         &["--baseline-schema", schema.to_str().unwrap()]
     )));
-    assert!(!release_quoted(&clean(&doc, &["--no-baseline-schema"])));
+    assert!(!release_quoted(&clean(
+        &fixture,
+        &doc,
+        &["--no-baseline-schema"]
+    )));
 }
 
 /// The two baseline flags are mutually exclusive, matching `md compose`.
 #[test]
 fn test_baseline_schema_flags_conflict() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("clean-schema-test-baseline-schema-flags-conflict");
+    fixture
+        .command()
         .args([
             "clean",
             "doc.md",
@@ -167,39 +189,45 @@ fn test_baseline_schema_flags_conflict() {
 /// A file-reference `$schema` in the document's own frontmatter is honored.
 #[test]
 fn test_document_schema_file_reference_drives_quoting() {
-    let repo = Repo::new();
+    let fixture =
+        CliProcessFixture::named("clean-schema-test-document-schema-file-reference-drives-quoting");
+    let repo = Repo::new(&fixture);
     repo.write("docs/own.yaml", RELEASE_IS_STRING);
     let doc = repo.write(
         "docs/doc.md",
         "---\n$schema: ./own.yaml\nrelease: 1.20\n---\n\n# Body\n",
     );
 
-    assert!(release_quoted(&clean(&doc, &[])));
+    assert!(release_quoted(&clean(&fixture, &doc, &[])));
 }
 
 /// An inline mapping `$schema` is honored too.
 #[test]
 fn test_document_inline_schema_drives_quoting() {
-    let repo = Repo::new();
+    let fixture =
+        CliProcessFixture::named("clean-schema-test-document-inline-schema-drives-quoting");
+    let repo = Repo::new(&fixture);
     let doc = repo.write(
         "docs/doc.md",
         "---\n$schema:\n  release: string(required)\nrelease: 1.20\n---\n\n# Body\n",
     );
 
-    assert!(release_quoted(&clean(&doc, &[])));
+    assert!(release_quoted(&clean(&fixture, &doc, &[])));
 }
 
 /// A root-union `$schema` sequence resolves; the arm constraining `release`
 /// still proves the quoting.
 #[test]
 fn test_document_root_union_schema_drives_quoting() {
-    let repo = Repo::new();
+    let fixture =
+        CliProcessFixture::named("clean-schema-test-document-root-union-schema-drives-quoting");
+    let repo = Repo::new(&fixture);
     let doc = repo.write(
         "docs/doc.md",
         "---\n$schema:\n  - release: string(required)\nrelease: 1.20\n---\n\n# Body\n",
     );
 
-    assert!(release_quoted(&clean(&doc, &[])));
+    assert!(release_quoted(&clean(&fixture, &doc, &[])));
 }
 
 // --- `--schema` override --------------------------------------------------
@@ -207,12 +235,16 @@ fn test_document_root_union_schema_drives_quoting() {
 /// `--schema` supplies a schema to a document that declares none.
 #[test]
 fn test_schema_flag_supplies_schema_to_document_without_one() {
-    let repo = Repo::new();
+    let fixture = CliProcessFixture::named(
+        "clean-schema-test-schema-flag-supplies-schema-to-document-without-one",
+    );
+    let repo = Repo::new(&fixture);
     let schema = repo.write("strict.yaml", RELEASE_IS_STRING);
     let doc = repo.write("docs/doc.md", "---\nrelease: 1.20\n---\n\n# Body\n");
 
-    assert!(!release_quoted(&clean(&doc, &[])));
+    assert!(!release_quoted(&clean(&fixture, &doc, &[])));
     assert!(release_quoted(&clean(
+        &fixture,
         &doc,
         &["--schema", schema.to_str().unwrap()]
     )));
@@ -223,7 +255,9 @@ fn test_schema_flag_supplies_schema_to_document_without_one() {
 /// override does not, so quoting must stop.
 #[test]
 fn test_schema_flag_replaces_document_schema_layer() {
-    let repo = Repo::new();
+    let fixture =
+        CliProcessFixture::named("clean-schema-test-schema-flag-replaces-document-schema-layer");
+    let repo = Repo::new(&fixture);
     repo.write("docs/own.yaml", RELEASE_IS_STRING);
     let loose = repo.write("loose.yaml", RELEASE_UNCONSTRAINED);
     let doc = repo.write(
@@ -232,11 +266,15 @@ fn test_schema_flag_replaces_document_schema_layer() {
     );
 
     assert!(
-        release_quoted(&clean(&doc, &[])),
+        release_quoted(&clean(&fixture, &doc, &[])),
         "the document's own schema proves the quoting"
     );
     assert!(
-        !release_quoted(&clean(&doc, &["--schema", loose.to_str().unwrap()])),
+        !release_quoted(&clean(
+            &fixture,
+            &doc,
+            &["--schema", loose.to_str().unwrap()]
+        )),
         "--schema must replace, not merge with, the document layer"
     );
 }
@@ -246,41 +284,50 @@ fn test_schema_flag_replaces_document_schema_layer() {
 /// A matching trigger schema reaches the quoting tier.
 #[test]
 fn test_matching_trigger_schema_drives_quoting() {
-    let repo = Repo::new();
+    let fixture =
+        CliProcessFixture::named("clean-schema-test-matching-trigger-schema-drives-quoting");
+    let repo = Repo::new(&fixture);
     repo.with_release_trigger();
     let doc = repo.write(
         "docs/doc.md",
         "---\nkind: thing\nrelease: 1.20\n---\n\n# Body\n",
     );
 
-    assert!(release_quoted(&clean(&doc, &[])));
+    assert!(release_quoted(&clean(&fixture, &doc, &[])));
 }
 
 /// A trigger whose arm does not match contributes nothing.
 #[test]
 fn test_nonmatching_trigger_schema_is_inert() {
-    let repo = Repo::new();
+    let fixture = CliProcessFixture::named("clean-schema-test-nonmatching-trigger-schema-is-inert");
+    let repo = Repo::new(&fixture);
     repo.with_release_trigger();
     let doc = repo.write(
         "docs/doc.md",
         "---\nkind: other\nrelease: 1.20\n---\n\n# Body\n",
     );
 
-    assert!(!release_quoted(&clean(&doc, &[])));
+    assert!(!release_quoted(&clean(&fixture, &doc, &[])));
 }
 
 /// `--no-trigger-schemas` disables discovery even when an arm would match.
 #[test]
 fn test_no_trigger_schemas_disables_discovery() {
-    let repo = Repo::new();
+    let fixture =
+        CliProcessFixture::named("clean-schema-test-no-trigger-schemas-disables-discovery");
+    let repo = Repo::new(&fixture);
     repo.with_release_trigger();
     let doc = repo.write(
         "docs/doc.md",
         "---\nkind: thing\nrelease: 1.20\n---\n\n# Body\n",
     );
 
-    assert!(release_quoted(&clean(&doc, &[])));
-    assert!(!release_quoted(&clean(&doc, &["--no-trigger-schemas"])));
+    assert!(release_quoted(&clean(&fixture, &doc, &[])));
+    assert!(!release_quoted(&clean(
+        &fixture,
+        &doc,
+        &["--no-trigger-schemas"]
+    )));
 }
 
 // --- Stdin and the top-level shorthand ------------------------------------
@@ -289,10 +336,12 @@ fn test_no_trigger_schemas_disables_discovery() {
 /// discovery to.
 #[test]
 fn test_stdin_honors_schema_flag() {
-    let repo = Repo::new();
+    let fixture = CliProcessFixture::named("clean-schema-test-stdin-honors-schema-flag");
+    let repo = Repo::new(&fixture);
     let schema = repo.write("strict.yaml", RELEASE_IS_STRING);
 
-    let assert = md_cmd()
+    let assert = fixture
+        .command()
         .args(["clean", "-"])
         .arg("--schema")
         .arg(&schema)
@@ -308,18 +357,23 @@ fn test_stdin_honors_schema_flag() {
 /// inert even when the process runs below a Git root with a matching trigger.
 #[test]
 fn test_stdin_does_not_discover_repository_trigger_schemas() {
-    let repo = Repo::new();
+    let fixture = CliProcessFixture::named(
+        "clean-schema-test-stdin-does-not-discover-repository-trigger-schemas",
+    );
+    let repo = Repo::new(&fixture);
     repo.with_release_trigger();
     let source = "---\nkind: thing\nrelease: 1.20\n---\n\n# Body\n";
 
     let file = repo.write("docs/positive-control.md", source);
     assert!(
-        release_quoted(&clean(&file, &[])),
+        release_quoted(&clean(&fixture, &file, &[])),
         "the matching trigger must be active for file input"
     );
 
-    let assert = md_cmd()
-        .current_dir(repo.root.join("docs"))
+    let assert = fixture
+        .command_builder()
+        .ambient_context(&repo.root.join("docs"))
+        .build()
         .args(["clean", "-"])
         .write_stdin(source)
         .assert()
@@ -336,14 +390,17 @@ fn test_stdin_does_not_discover_repository_trigger_schemas() {
 /// same schema defaults.
 #[test]
 fn test_save_shorthand_uses_default_schema_state_and_repairs() {
-    let repo = Repo::new();
+    let fixture = CliProcessFixture::named(
+        "clean-schema-test-save-shorthand-uses-default-schema-state-and-repairs",
+    );
+    let repo = Repo::new(&fixture);
     repo.with_release_trigger();
     let doc = repo.write(
         "docs/doc.md",
         "---\nkind: thing\ntitle: @daily-report\nrelease: 1.20\n---\n\n# Body\n",
     );
 
-    md_cmd().arg(&doc).arg("--save").assert().success();
+    fixture.command().arg(&doc).arg("--save").assert().success();
 
     let saved = fs::read_to_string(&doc).unwrap();
     assert!(
@@ -368,13 +425,17 @@ fn test_save_shorthand_uses_default_schema_state_and_repairs() {
 /// ancestor walk — was attempted.
 #[test]
 fn test_absent_and_empty_frontmatter_perform_no_schema_work() {
-    let repo = Repo::new();
+    let fixture = CliProcessFixture::named(
+        "clean-schema-test-absent-and-empty-frontmatter-perform-no-schema-work",
+    );
+    let repo = Repo::new(&fixture);
     repo.with_release_trigger();
     let missing = repo.root.join("does-not-exist.yaml");
 
     // Positive control: the probe fires when frontmatter is present.
     let with_frontmatter = repo.write("docs/has-fm.md", "---\ntitle: Fine\n---\n\n# Body\n");
-    md_cmd()
+    fixture
+        .command()
         .arg("clean")
         .arg(&with_frontmatter)
         .arg("--baseline-schema")
@@ -390,7 +451,8 @@ fn test_absent_and_empty_frontmatter_perform_no_schema_work() {
         ("empty", "---\n---\n\n# Body\n"),
     ] {
         let doc = repo.write(&format!("docs/{label}.md"), source);
-        md_cmd()
+        fixture
+            .command()
             .arg("clean")
             .arg(&doc)
             .arg("--baseline-schema")
@@ -403,11 +465,15 @@ fn test_absent_and_empty_frontmatter_perform_no_schema_work() {
 /// The same counter proof for the `--schema` layer.
 #[test]
 fn test_absent_frontmatter_never_resolves_the_schema_override() {
-    let repo = Repo::new();
+    let fixture = CliProcessFixture::named(
+        "clean-schema-test-absent-frontmatter-never-resolves-the-schema-override",
+    );
+    let repo = Repo::new(&fixture);
     let missing = repo.root.join("nope.yaml");
 
     let with_frontmatter = repo.write("docs/has-fm.md", "---\ntitle: Fine\n---\n\n# Body\n");
-    md_cmd()
+    fixture
+        .command()
         .arg("clean")
         .arg(&with_frontmatter)
         .arg("--schema")
@@ -416,7 +482,8 @@ fn test_absent_frontmatter_never_resolves_the_schema_override() {
         .failure();
 
     let without = repo.write("docs/no-fm.md", "# Body Only\n");
-    md_cmd()
+    fixture
+        .command()
         .arg("clean")
         .arg(&without)
         .arg("--schema")

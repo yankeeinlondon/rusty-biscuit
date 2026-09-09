@@ -21,6 +21,20 @@ Shared input loading is in `src/io/`, output artifact handling is in
 precedence is lowered to `darkmatter::style::CliStyleClaims` in
 `src/style_claims.rs`.
 
+## Integration tests
+
+L1 tests that launch the shipped `md` binary must construct a
+`CliProcessFixture` from `tests/common/fixture.rs` and build the command through
+its `command()` or `command_builder()` surface. The fixture owns the child's
+disposable CWD, home, config, cache, temporary directory, Git plumbing,
+rendering inputs, and PATH through process completion.
+
+Use `host_path()`, `fake_only_path()`, `ambient_context()`, or
+`inherit_no_env()` only when the behavior under test requires that named
+policy, with a call-site comment stating the reason. Do not modify CWD, PATH,
+or environment clearing after `build()`; the L1 spawn/isolation guard rejects
+raw spawns, such overrides, and stale exemptions.
+
 ## Installation
 
 ```bash

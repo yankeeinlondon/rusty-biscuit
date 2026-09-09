@@ -1,12 +1,11 @@
 //! Integration tests for `md schema about`.
 
+mod common;
+
+use common::CliProcessFixture;
 use darkmatter::markdown::schemas::schema_type_descriptors;
 use darkmatter::testing::strip_ansi_codes;
 use predicates::prelude::*;
-
-fn md_cmd() -> assert_cmd::Command {
-    assert_cmd::Command::cargo_bin("md").unwrap()
-}
 
 /// Whether `keyword` renders as the left-most (`Type`) column cell of a row in
 /// the type table `section`.
@@ -31,7 +30,12 @@ fn type_table_has_row(section: &str, keyword: &str) -> bool {
 
 #[test]
 fn schema_about_prints_simplified_schema_reference() {
-    let output = md_cmd().args(["schema", "about"]).output().expect("run md schema about");
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
+        .args(["schema", "about"])
+        .output()
+        .expect("run md schema about");
     assert!(output.status.success(), "schema about should succeed");
     // Strip ANSI: the `--verbose` hint styles the flag token inline, so the
     // phrase is only contiguous after color codes are removed.
@@ -49,7 +53,11 @@ fn schema_about_prints_simplified_schema_reference() {
     ] {
         assert!(stdout.contains(needle), "schema about missing `{needle}`");
     }
-    for absent in ["Nested Objects", "Compose-time Coercion", "Validation Notes"] {
+    for absent in [
+        "Nested Objects",
+        "Compose-time Coercion",
+        "Validation Notes",
+    ] {
         assert!(
             !stdout.contains(absent),
             "schema about should not show `{absent}` without --verbose"
@@ -59,11 +67,16 @@ fn schema_about_prints_simplified_schema_reference() {
 
 #[test]
 fn verbose_schema_about_projects_shipped_git_context_descriptors() {
-    let output = md_cmd()
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
         .args(["--verbose", "schema", "about"])
         .output()
         .expect("run verbose md schema about");
-    assert!(output.status.success(), "verbose schema about should succeed");
+    assert!(
+        output.status.success(),
+        "verbose schema about should succeed"
+    );
     let stdout = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
     let normalized = stdout.split_whitespace().collect::<Vec<_>>().join(" ");
 
@@ -75,14 +88,21 @@ fn verbose_schema_about_projects_shipped_git_context_descriptors() {
         "ctx.merge_conflicts",
         "Repository-relative paths currently in an unresolved Git index state.",
     ] {
-        assert!(normalized.contains(needle), "schema about missing `{needle}`");
+        assert!(
+            normalized.contains(needle),
+            "schema about missing `{needle}`"
+        );
     }
 }
 
 #[test]
 fn schema_about_lists_every_supported_type_keyword() {
-    let mut cmd = md_cmd();
-    let output = cmd.args(["schema", "about"]).output().expect("run md schema about");
+    let process = CliProcessFixture::new();
+    let mut cmd = process.command();
+    let output = cmd
+        .args(["schema", "about"])
+        .output()
+        .expect("run md schema about");
     assert!(output.status.success(), "schema about should succeed");
     let plain = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
 
@@ -117,7 +137,9 @@ fn schema_about_lists_every_supported_type_keyword() {
 
 #[test]
 fn schema_about_describes_semantic_meta_types() {
-    let output = md_cmd()
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
         .args(["schema", "about"])
         .output()
         .expect("run md schema about");
@@ -133,13 +155,18 @@ fn schema_about_describes_semantic_meta_types() {
         "Parse-only",
         "DMLS",
     ] {
-        assert!(normalized.contains(needle), "schema about missing `{needle}`");
+        assert!(
+            normalized.contains(needle),
+            "schema about missing `{needle}`"
+        );
     }
 }
 
 #[test]
 fn schema_about_mentions_inline_object_rules() {
-    md_cmd()
+    let process = CliProcessFixture::new();
+    process
+        .command()
         .args(["--verbose", "schema", "about"])
         .assert()
         .success()
@@ -150,32 +177,45 @@ fn schema_about_mentions_inline_object_rules() {
 
 #[test]
 fn schema_about_exits_zero() {
-    md_cmd().args(["schema", "about"]).assert().success();
+    let process = CliProcessFixture::new();
+    process
+        .command()
+        .args(["schema", "about"])
+        .assert()
+        .success();
 }
 
 #[test]
 fn schema_about_is_documentation_only() {
+    let process = CliProcessFixture::new();
     // Running `md schema about` must not require or read any markdown file.
     // We assert that:
-    //   1. Running from an empty / non-existent working directory produces
-    //      the same key sections as running from the project root.
+    //   1. Running from a separate empty working directory produces the same
+    //      key sections as running from the fixture's default working directory.
     //   2. Both invocations exit with status `0`.
     // (Strict byte-for-byte equality is not portable: terminal capability
     // detection in the prose renderer can change the exact escape sequences
     // emitted between sessions, but the textual content is stable.)
-    let tmp = tempfile::TempDir::new().unwrap();
-    let output_a = md_cmd()
+    let empty = process.workspace_path().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    let output_a = process
+        .command_builder()
+        .ambient_context(&empty)
+        .build()
         .args(["schema", "about"])
-        .current_dir(tmp.path())
         .output()
         .expect("run md schema about from temp dir");
-    let output_b = md_cmd()
+    let output_b = process
+        .command()
         .args(["schema", "about"])
         .output()
         .expect("run md schema about from project root");
 
     assert!(output_a.status.success(), "first invocation should succeed");
-    assert!(output_b.status.success(), "second invocation should succeed");
+    assert!(
+        output_b.status.success(),
+        "second invocation should succeed"
+    );
 
     // Strip ANSI: the `--verbose` hint styles the flag token inline.
     let a = strip_ansi_codes(&String::from_utf8_lossy(&output_a.stdout));
@@ -195,7 +235,9 @@ fn schema_about_is_documentation_only() {
 
 #[test]
 fn schema_about_uses_readable_terminal_components() {
-    let output = md_cmd()
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
         .args(["schema", "about"])
         .output()
         .expect("run md schema about");
@@ -208,7 +250,10 @@ fn schema_about_uses_readable_terminal_components() {
         .and_then(|after_heading| after_heading.split("Constraint Vocabulary").next())
         .expect("type system section should precede constraint vocabulary");
 
-    assert!(plain.contains("┌"), "type/constraint sections should render real tables");
+    assert!(
+        plain.contains("┌"),
+        "type/constraint sections should render real tables"
+    );
     assert!(
         !plain.contains("file://"),
         "schema examples must not be interpreted as Markdown links"
@@ -262,7 +307,9 @@ fn schema_about_uses_readable_terminal_components() {
         "constraint table headings should be author-facing"
     );
     assert!(
-        plain.contains("│ Write ") && plain.contains("│ Applies To ") && plain.contains("│ Meaning "),
+        plain.contains("│ Write ")
+            && plain.contains("│ Applies To ")
+            && plain.contains("│ Meaning "),
         "constraint table should name usage and applicability clearly"
     );
     assert!(
@@ -321,14 +368,19 @@ fn schema_about_uses_readable_terminal_components() {
         "advanced schema details should only render with --verbose"
     );
     assert!(
-        plain.lines().filter(|line| !line.is_empty()).all(|line| line.starts_with(' ')),
+        plain
+            .lines()
+            .filter(|line| !line.is_empty())
+            .all(|line| line.starts_with(' ')),
         "nonblank report lines should use the document left margin"
     );
 }
 
 #[test]
 fn schema_about_verbose_prints_advanced_sections_as_readable_lists() {
-    let output = md_cmd()
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
         .args(["--verbose", "schema", "about"])
         .output()
         .expect("run verbose md schema about");
@@ -357,7 +409,9 @@ fn schema_about_verbose_prints_advanced_sections_as_readable_lists() {
 
 #[test]
 fn schema_about_verbose_prints_context_and_expression_sections() {
-    let output = md_cmd()
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
         .args(["--verbose", "schema", "about"])
         .output()
         .expect("run verbose md schema about");
@@ -378,7 +432,10 @@ fn schema_about_verbose_prints_context_and_expression_sections() {
         "Expression Functions",
         "as_csv(list: any[]) -> string | error",
     ] {
-        assert!(plain.contains(needle), "verbose schema about missing `{needle}`");
+        assert!(
+            plain.contains(needle),
+            "verbose schema about missing `{needle}`"
+        );
     }
 
     for retired in ["packages_list", "dirty_files_list"] {
@@ -391,7 +448,9 @@ fn schema_about_verbose_prints_context_and_expression_sections() {
 
 #[test]
 fn schema_about_accepts_code_block_flag() {
-    md_cmd()
+    let process = CliProcessFixture::new();
+    process
+        .command()
         .args(["schema", "about", "--code-block", "light"])
         .assert()
         .success()
@@ -400,7 +459,9 @@ fn schema_about_accepts_code_block_flag() {
 
 #[test]
 fn schema_about_rejects_invalid_code_block_value() {
-    md_cmd()
+    let process = CliProcessFixture::new();
+    process
+        .command()
         .args(["schema", "about", "--code-block", "sideways"])
         .assert()
         .failure()
@@ -409,17 +470,20 @@ fn schema_about_rejects_invalid_code_block_value() {
 
 #[test]
 fn schema_about_code_block_dark_and_light_differ() {
+    let process = CliProcessFixture::new();
     // The OneHalf code theme is paired, so forcing the dark vs light variant
     // must change the code-block background SGR. We assert each run carries a
     // background SGR the other does not, independent of exact RGB.
-    let dark = md_cmd()
+    let dark = process
+        .command()
         .args(["schema", "about", "--code-block", "dark"])
         .env("FORCE_COLOR", "1")
         .env("COLORTERM", "truecolor")
         .env_remove("NO_COLOR")
         .output()
         .expect("run dark");
-    let light = md_cmd()
+    let light = process
+        .command()
         .args(["schema", "about", "--code-block", "light"])
         .env("FORCE_COLOR", "1")
         .env("COLORTERM", "truecolor")
@@ -438,7 +502,9 @@ fn schema_about_code_block_dark_and_light_differ() {
 
 #[test]
 fn schema_about_emits_table_stripes_when_color_is_enabled() {
-    let output = md_cmd()
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
         .args(["schema", "about"])
         .env("FORCE_COLOR", "1")
         .env_remove("NO_COLOR")

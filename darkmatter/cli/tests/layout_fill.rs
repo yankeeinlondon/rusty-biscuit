@@ -1,8 +1,20 @@
 mod common;
 
-use common::{md_cmd, md_file};
-use common::layout::*;
 use biscuit_terminal::terminal::Terminal;
+use common::layout::*;
+use common::{CliProcessFixture, md_file};
+
+fn rendering_command(fixture: &CliProcessFixture) -> assert_cmd::Command {
+    let mut command = fixture.command();
+    command
+        .env("COLUMNS", "80")
+        .env("LINES", "24")
+        .env("TERM", "dumb")
+        .env_remove("COLORTERM")
+        .env("NO_COLOR", "1")
+        .env_remove("FORCE_COLOR");
+    command
+}
 use darkmatter::layout::{DarkmatterPage, PageComponent};
 use darkmatter_cli::render::apply_cli_layout_flags;
 use renderable::layout::{Alignment, Length};
@@ -185,9 +197,10 @@ style:\n\
 
 #[test]
 fn style_fixture_renders_with_align_tables_override() {
+    let fixture = CliProcessFixture::named("style_fixture_renders_with_align_tables_override");
     // End-to-end sanity check: the canonical fixture renders successfully
     // when the user overrides table alignment from the CLI.
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(style_prop_fixture())
         .arg("--align-tables")
         .arg("center")
@@ -202,9 +215,10 @@ fn style_fixture_renders_with_align_tables_override() {
 
 #[test]
 fn style_fixture_renders_html_with_fill_override() {
+    let fixture = CliProcessFixture::named("style_fixture_renders_html_with_fill_override");
     // End-to-end sanity check: --output html runs the same component-style
     // path as the terminal pipeline.
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(style_prop_fixture())
         .arg("--output")
         .arg("html")
@@ -222,6 +236,7 @@ fn style_fixture_renders_html_with_fill_override() {
 
 #[test]
 fn style_frontmatter_html_emits_component_layout_css() {
+    let fixture = CliProcessFixture::named("style_frontmatter_html_emits_component_layout_css");
     // Sub-spec #3 acceptance (review-3 finding #3): `md --output html` on a
     // document carrying `style.table.*`, `style.images.*`, and
     // `style.block-quote.*` must emit the matching component layout CSS
@@ -251,7 +266,7 @@ fn style_frontmatter_html_emits_component_layout_css() {
         > quote\n",
     );
 
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--output")
         .arg("html")
@@ -269,12 +284,17 @@ fn style_frontmatter_html_emits_component_layout_css() {
     // renderable browser fold (build_component_css was deleted in the cutover).
     // Table: center alignment + max-width: 60ch → margin-left:auto;margin-right:auto.
     assert!(
-        html.contains("<table") && html.contains("max-width:60ch") && html.contains("margin-left:auto") && html.contains("margin-right:auto"),
+        html.contains("<table")
+            && html.contains("max-width:60ch")
+            && html.contains("margin-left:auto")
+            && html.contains("margin-right:auto"),
         "expected centered table with inline max-width and auto margins in HTML. html:\n{html}",
     );
     // Block-quote: right alignment + max-width: 50ch → margin-left:auto.
     assert!(
-        html.contains("<blockquote") && html.contains("max-width:50ch") && html.contains("margin-left:auto"),
+        html.contains("<blockquote")
+            && html.contains("max-width:50ch")
+            && html.contains("margin-left:auto"),
         "expected right-aligned blockquote with inline max-width and auto margin in HTML. html:\n{html}",
     );
     // Image: max-width and alignment are applied to the wrapping paragraph via
@@ -288,11 +308,12 @@ fn style_frontmatter_html_emits_component_layout_css() {
 
 #[test]
 fn style_prop_fixture_html_emits_table_layout_css() {
+    let fixture = CliProcessFixture::named("style_prop_fixture_html_emits_table_layout_css");
     // Acceptance from sub-spec #3: `md --output html style-prop.md` must emit
     // the expected table layout CSS (right alignment + 50% max-width that
     // lowers to the page-content base, i.e. 50ch when the page builds at
     // its 120-col default for HTML).
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(style_prop_fixture())
         .arg("--output")
         .arg("html")
@@ -418,10 +439,26 @@ fn style_prop_fixture_resolves_to_expected_page_margins() {
     let page = apply_style_for(&raw, &["doc.md"]);
 
     let m = page.page_margin();
-    assert_eq!(tv_cells(&m.left), 2, "fixture left-margin: 2ch must reach the page");
-    assert_eq!(tv_cells(&m.right), 4, "fixture right-margin: 4ch must reach the page");
-    assert_eq!(tv_cells(&m.top), 1, "fixture top-margin: 1 must reach the page");
-    assert_eq!(tv_cells(&m.bottom), 0, "fixture bottom-margin: 0 must reach the page");
+    assert_eq!(
+        tv_cells(&m.left),
+        2,
+        "fixture left-margin: 2ch must reach the page"
+    );
+    assert_eq!(
+        tv_cells(&m.right),
+        4,
+        "fixture right-margin: 4ch must reach the page"
+    );
+    assert_eq!(
+        tv_cells(&m.top),
+        1,
+        "fixture top-margin: 1 must reach the page"
+    );
+    assert_eq!(
+        tv_cells(&m.bottom),
+        0,
+        "fixture bottom-margin: 0 must reach the page"
+    );
 }
 
 #[test]
@@ -470,9 +507,7 @@ terminal is reasonably wide.\n";
         .filter(|l| {
             let trimmed = l.trim_start();
             // Common blockquote indicators across themes (`│`, `▌`, `▐`).
-            trimmed.starts_with('│')
-                || trimmed.starts_with('▌')
-                || trimmed.starts_with('▐')
+            trimmed.starts_with('│') || trimmed.starts_with('▌') || trimmed.starts_with('▐')
         })
         .map(|l| l.trim_end().to_string())
         .collect();
@@ -492,4 +527,3 @@ terminal is reasonably wide.\n";
         "blockquote visible width should be capped under max-width: 50% on a 100-col terminal, got max={max_len}. plain:\n{plain}",
     );
 }
-
