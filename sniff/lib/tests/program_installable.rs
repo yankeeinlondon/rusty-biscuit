@@ -1,4 +1,4 @@
-use sniff::programs::{ProgramDetector, ProgramsInfo};
+use sniff::programs::{CategoryDetector, ProgramDetector};
 
 #[cfg(target_os = "macos")]
 use sniff::programs::TerminalApp;
@@ -11,25 +11,21 @@ use sniff::programs::TtsClient;
 
 #[test]
 fn test_installable_false_for_os_specific_programs() {
-    let programs = ProgramsInfo::detect();
-
     #[cfg(target_os = "macos")]
     assert!(
-        !programs
-            .terminal_apps
-            .installable(TerminalApp::WindowsTerminal),
+        !CategoryDetector::<TerminalApp>::default().installable(TerminalApp::WindowsTerminal),
         "Windows Terminal should not be installable on macOS"
     );
 
     #[cfg(target_os = "linux")]
     assert!(
-        !programs.editors.installable(Editor::TextMate),
+        !CategoryDetector::<Editor>::default().installable(Editor::TextMate),
         "TextMate should not be installable on Linux"
     );
 
     #[cfg(target_os = "windows")]
     assert!(
-        !programs.editors.installable(Editor::TextMate),
+        !CategoryDetector::<Editor>::default().installable(Editor::TextMate),
         "TextMate should not be installable on Windows"
     );
 }
@@ -37,9 +33,8 @@ fn test_installable_false_for_os_specific_programs() {
 #[cfg(target_os = "windows")]
 #[test]
 fn test_installable_false_for_builtin_tts() {
-    let programs = ProgramsInfo::detect();
     assert!(
-        !programs.tts_clients.installable(TtsClient::WindowsSapi),
+        !CategoryDetector::<TtsClient>::default().installable(TtsClient::WindowsSapi),
         "Windows SAPI has no install methods"
     );
 }

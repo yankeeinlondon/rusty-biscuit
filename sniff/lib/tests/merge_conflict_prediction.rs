@@ -190,9 +190,19 @@ fn branch_tip(repo: &Repository, branch: &str) -> Oid {
 
 fn canonical_git_conflict_paths(fixture: &Fixture) -> Option<Vec<PathBuf>> {
     let (git, _) = find_program_with_source("git")?;
-    let merge = Command::new(&git)
-        .args(["-C"])
-        .arg(fixture.path())
+    let git_command = || {
+        let mut command = Command::new(&git);
+        command
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
+            .env_remove("GIT_OBJECT_DIRECTORY")
+            .args(["-C"])
+            .arg(fixture.path());
+        command
+    };
+    let merge = git_command()
         .args(["merge", "--no-commit", "--no-ff", "--no-verify", "incoming"])
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
@@ -202,9 +212,7 @@ fn canonical_git_conflict_paths(fixture: &Fixture) -> Option<Vec<PathBuf>> {
         "canonical git merge failed unexpectedly: {}",
         String::from_utf8_lossy(&merge.stderr)
     );
-    let output = Command::new(git)
-        .args(["-C"])
-        .arg(fixture.path())
+    let output = git_command()
         .args(["ls-files", "--unmerged", "-z"])
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()

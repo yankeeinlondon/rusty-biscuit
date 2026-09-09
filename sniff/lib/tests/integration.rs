@@ -2151,10 +2151,24 @@ fn create_merge_conflict_repo() -> (tempfile::TempDir, PathBuf) {
     use std::fs;
     use std::process::Command;
 
+    fn git_command(dir: &std::path::Path) -> Command {
+        let mut command = Command::new("git");
+        for key in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR",
+            "GIT_OBJECT_DIRECTORY",
+        ] {
+            command.env_remove(key);
+        }
+        command.current_dir(dir);
+        command
+    }
+
     fn run_git(dir: &std::path::Path, args: &[&str]) {
-        let status = Command::new("git")
+        let status = git_command(dir)
             .args(args)
-            .current_dir(dir)
             .env("GIT_CONFIG_COUNT", "1")
             .env("GIT_CONFIG_KEY_0", "commit.gpgsign")
             .env("GIT_CONFIG_VALUE_0", "false")
@@ -2164,11 +2178,7 @@ fn create_merge_conflict_repo() -> (tempfile::TempDir, PathBuf) {
     }
 
     fn run_git_expect_failure(dir: &std::path::Path, args: &[&str]) {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .status()
-            .unwrap();
+        let status = git_command(dir).args(args).status().unwrap();
         assert!(
             !status.success(),
             "git {:?} unexpectedly succeeded with {:?}",
@@ -2178,11 +2188,7 @@ fn create_merge_conflict_repo() -> (tempfile::TempDir, PathBuf) {
     }
 
     fn git_stdout(dir: &std::path::Path, args: &[&str]) -> String {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .output()
-            .unwrap();
+        let output = git_command(dir).args(args).output().unwrap();
         assert!(output.status.success(), "git {:?} failed", args);
         String::from_utf8(output.stdout).unwrap().trim().to_string()
     }

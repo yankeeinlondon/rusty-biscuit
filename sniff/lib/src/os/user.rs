@@ -291,15 +291,22 @@ mod tests {
 
     #[test]
     fn equality_is_by_variant_and_value() {
-        assert_eq!(StableUserId::UnixUid(501), StableUserId::UnixUid(501));
-        assert_ne!(StableUserId::UnixUid(501), StableUserId::UnixUid(502));
+        use std::collections::HashMap;
+
+        let identities = HashMap::from([
+            (StableUserId::UnixUid(501), "unix"),
+            (StableUserId::WindowsSid("S-1-5-18".to_string()), "windows"),
+        ]);
+
+        assert_eq!(identities.get(&StableUserId::UnixUid(501)), Some(&"unix"));
+        assert_eq!(identities.get(&StableUserId::UnixUid(502)), None);
         assert_eq!(
-            StableUserId::WindowsSid("S-1-5-18".to_string()),
-            StableUserId::WindowsSid("S-1-5-18".to_string())
+            identities.get(&StableUserId::WindowsSid("S-1-5-18".to_string())),
+            Some(&"windows")
         );
-        assert_ne!(
-            StableUserId::WindowsSid("S-1-5-18".to_string()),
-            StableUserId::WindowsSid("S-1-5-19".to_string())
+        assert_eq!(
+            identities.get(&StableUserId::WindowsSid("S-1-5-19".to_string())),
+            None
         );
     }
 
