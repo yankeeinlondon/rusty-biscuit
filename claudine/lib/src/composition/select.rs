@@ -452,13 +452,32 @@ pub fn resolve_model_with_hints(
     cli_model: Option<&str>,
     catalog: Option<&ModelCatalogService>,
 ) -> (Option<String>, ModelResolutionReason) {
-    resolve_model_with_env(
-        provider,
-        hints,
-        cli_model,
-        |var| std::env::var(var).ok(),
-        catalog,
-    )
+    resolve_model_with_hints_from(provider, hints, cli_model, catalog, ambient_env_lookup)
+}
+
+/// [`resolve_model_with_hints`] against a caller-supplied environment.
+///
+/// Steps 2 and 3 of the chain read the process environment, which a test
+/// process cannot scrub for itself: `std::env::set_var` is unsound while other
+/// tests share the process, and nextest gives a binary's tests one process
+/// between them. Callers that must be reproducible under whatever the
+/// developer's shell exports supply their own lookup instead.
+pub fn resolve_model_with_hints_from<E>(
+    provider: Provider,
+    hints: &EffectiveSelectionHints,
+    cli_model: Option<&str>,
+    catalog: Option<&ModelCatalogService>,
+    env_lookup: E,
+) -> (Option<String>, ModelResolutionReason)
+where
+    E: Fn(&str) -> Option<String>,
+{
+    resolve_model_with_env(provider, hints, cli_model, env_lookup, catalog)
+}
+
+/// The process environment, as the chain reads it outside a test.
+pub fn ambient_env_lookup(var: &str) -> Option<String> {
+    std::env::var(var).ok()
 }
 
 fn resolve_model_with_env<E>(

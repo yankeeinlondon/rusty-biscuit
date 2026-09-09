@@ -130,10 +130,11 @@ pub use schema::{
     prepare_direct_with_schema, prepare_direct_with_schema_and_prompt, prepare_inline_with_schema,
 };
 pub use select::{
-    build_candidate_set, build_installed_snapshot, build_picker_plan, build_picker_plan_with_hints,
-    classify_agent_resolution, detect_installed_providers, resolve_model,
-    resolve_model_with_catalog, resolve_model_with_hints, resolve_target_non_tty,
-    resolve_target_non_tty_with_catalog, resolve_target_non_tty_with_hints, select_provider,
+    ambient_env_lookup, build_candidate_set, build_installed_snapshot, build_picker_plan,
+    build_picker_plan_with_hints, classify_agent_resolution, detect_installed_providers,
+    resolve_model, resolve_model_with_catalog, resolve_model_with_hints,
+    resolve_model_with_hints_from, resolve_target_non_tty, resolve_target_non_tty_with_catalog,
+    resolve_target_non_tty_with_hints, select_provider,
 };
 pub use sequence::preflight::{
     DiscoveredCommand, GroupExecution, PreflightAction, PreflightGraph, PreflightGroup,
