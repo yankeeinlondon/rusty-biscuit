@@ -8,14 +8,14 @@
   "sites": [
     {
       "path": "cli/src/commands/config_tui/mod.rs",
-      "line": 579,
+      "line": 581,
       "function": "query_say_voices",
       "command_kind": "std",
       "governed_by": "contribute_child_environment"
     },
     {
       "path": "cli/src/commands/config_tui/mod.rs",
-      "line": 601,
+      "line": 603,
       "function": "query_espeak_voices",
       "command_kind": "std",
       "governed_by": "contribute_child_environment"
@@ -29,21 +29,21 @@
     },
     {
       "path": "cli/src/commands/providers.rs",
-      "line": 373,
+      "line": 370,
       "function": "gen_command",
       "command_kind": "std",
       "governed_by": "contribute_child_environment"
     },
     {
       "path": "cli/src/commands/providers.rs",
-      "line": 376,
+      "line": 373,
       "function": "gen_command",
       "command_kind": "std",
       "governed_by": "contribute_child_environment"
     },
     {
       "path": "cli/src/commands/sequence.rs",
-      "line": 188,
+      "line": 189,
       "function": "expand_shell_source",
       "command_kind": "std",
       "governed_by": "contribute_child_environment"
