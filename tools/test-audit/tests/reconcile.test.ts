@@ -3,7 +3,7 @@
  * source-runner diff, and exclusion validation.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -132,6 +132,30 @@ describe("Manifest and captures", () => {
     const universe = buildUniverse(dir, ["declared"]);
     expect(universe.violations.map((v) => v.kind)).toEqual(["malformed-capture"]);
     expect(universe.identities.has("q :: z")).toBe(false);
+    rmSync(dir, { recursive: true });
+  });
+
+  it("ignores a revision-named subdirectory of superseded listings", () => {
+    // Retaking captures preserves the old set under `<enumeration>/<rev>/`
+    // rather than overwriting the evidence the published numbers came from.
+    // That only works while a subdirectory is inert to the universe scan:
+    // its listings must not join the universe, and it must not read as an
+    // undeclared capture file the way a stray `.json` does.
+    const dir = tempDir();
+    writeFileSync(join(dir, "captures.json"), MANIFEST(["current"]));
+    writeFileSync(join(dir, "current.json"), listing(suite("p", "p", "lib", ["now"])));
+    mkdirSync(join(dir, "9fc5151a0"));
+    writeFileSync(join(dir, "9fc5151a0", "captures.json"), MANIFEST(["old"]));
+    writeFileSync(join(dir, "9fc5151a0", "old.json"), listing(suite("p", "p", "lib", ["then"])));
+
+    const universe = buildUniverse(dir, ["current"]);
+    expect(universe.violations).toEqual([]);
+    expect([...universe.identities.keys()]).toEqual(["p :: now"]);
+
+    // …and the preserved bundle still reconciles on its own terms.
+    const preserved = buildUniverse(join(dir, "9fc5151a0"), ["old"]);
+    expect(preserved.violations).toEqual([]);
+    expect([...preserved.identities.keys()]).toEqual(["p :: then"]);
     rmSync(dir, { recursive: true });
   });
 

@@ -19,11 +19,14 @@ import { loadConfig, type ResolvedConfig, type SelectionConfig } from "../config
 import { EXIT, UsageError } from "../errors.ts";
 import { TOOL_VERSION } from "../version.ts";
 
-const USAGE = `usage: test-audit capture --config <audit.config.json> [--only <label>[,<label>...]] [--dry-run]
+const USAGE = `usage: test-audit capture --config <audit.config.json> [--only <label>[,<label>...]] [--note <text>] [--dry-run]
 
 Runs \`cargo nextest list --message-format json\` from the repository root for
 every selection the configuration declares (or only the named labels) and
-writes <enumeration>/<label>.json, <label>.err, and captures.json.`;
+writes <enumeration>/<label>.json, <label>.err, and captures.json.
+
+--note records one line of provenance in captures.json — why this listing was
+taken where it was, which \`revision\` and \`dirty\` alone cannot say.`;
 
 export interface CaptureRecord {
   label: string;
@@ -41,6 +44,8 @@ export interface CapturesManifest {
   toolVersion: string;
   revision: string;
   dirty: string[];
+  /** Operator-supplied provenance for this listing; absent when none was given. */
+  note?: string;
   toolchain: string;
   nextest: string;
   platform: string;
@@ -77,7 +82,28 @@ export function countIdentities(listingJson: string): number {
   return count;
 }
 
-export function captureSelections(config: ResolvedConfig, labels: string[] | undefined, io: CommandIo, dryRun: boolean): number {
+/**
+ * A note describes the revision it was taken at, so a partial re-capture of
+ * that same revision inherits it rather than silently dropping the provenance.
+ * A different revision drops it: the reason no longer applies, and a stale
+ * explanation of a dirty tree is worse than none.
+ */
+export function noteFor(
+  note: string | undefined,
+  previous: Pick<CapturesManifest, "revision" | "note"> | undefined,
+  revision: string,
+): string | undefined {
+  if (note !== undefined) return note;
+  return previous?.revision === revision ? previous.note : undefined;
+}
+
+export function captureSelections(
+  config: ResolvedConfig,
+  labels: string[] | undefined,
+  io: CommandIo,
+  dryRun: boolean,
+  note?: string,
+): number {
   const selections = labels
     ? config.selections.filter((s) => labels.includes(s.label))
     : config.selections;
@@ -95,10 +121,12 @@ export function captureSelections(config: ResolvedConfig, labels: string[] | und
   const dirty = probe("git", ["status", "--porcelain"], config.repoRoot)
     .split("\n")
     .filter((line) => line.length > 0);
+  const carriedNote = noteFor(note, previous, revision);
   const manifest: CapturesManifest = {
     toolVersion: TOOL_VERSION,
     revision,
     dirty,
+    ...(carriedNote === undefined ? {} : { note: carriedNote }),
     toolchain: probe("rustc", ["--version"], config.repoRoot),
     nextest: probe("cargo", ["nextest", "--version"], config.repoRoot).split("\n")[0] ?? "<unavailable>",
     platform: `${process.arch}-${process.platform} (${probe("uname", ["-sr"], config.repoRoot)})`,
@@ -163,6 +191,12 @@ export const captureCommand: Command = {
     const parsed = parseArgv(argv, ["dry-run"]);
     const config = loadConfig(requireString(parsed, "config", USAGE));
     const only = optionalString(parsed, "only");
-    return captureSelections(config, only ? only.split(",").map((s) => s.trim()).filter(Boolean) : undefined, io, hasFlag(parsed, "dry-run"));
+    return captureSelections(
+      config,
+      only ? only.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
+      io,
+      hasFlag(parsed, "dry-run"),
+      optionalString(parsed, "note"),
+    );
   },
 };
