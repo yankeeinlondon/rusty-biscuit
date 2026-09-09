@@ -6,10 +6,13 @@
 |---|---|---|
 | Implemented | **Complete** | Phases 1–8 implemented the shared CLI process fixture, spawn guard, fixture migrations, request/work-count proofs, bounded process and terminal waits, and reconciled test inventory. Phase 9 completed the local pre-push tranche. |
 | Verified locally | **Complete** | The committed candidate passes `just sanity`, `just lint`, `just check`, `just doctest`, `just test`, required-tmux `just test-l2`, the Sniff-scoped root leak sweep, tier coverage, audit configuration validation, and inventory reconciliation. Every gate was re-run at the current tree in Phase 10's continuation rather than credited from the earlier ledger. |
-| Verified on CI | **Pending** | The candidate is now committed — Sniff sources at `66892d319`, fix documents at `3b112c4d5`, branch head `a05e3b747` — but the branch is 53 commits ahead of `origin/fix/cli-slow-tests` and unpushed. The newest branch CI run (`34159725015`) is against origin head `a9e88c069…`, which does not contain the candidate. Native Windows and three consecutive matched candidate runs per declared environment remain required; baseline run `34008778001` is not candidate evidence. |
+| Verified on CI | **Pending, no longer a readiness gate** | The branch is still unpushed, so no CI run contains the candidate. Ken's `DECISION` in [`review-1.md`](review-1.md) removed CI from the production-readiness determination and directed local cross-OS execution instead; that execution is complete and green on all three declared hosts (see [Review-1 implementation outcomes](#review-1-implementation-outcomes)). What CI is still owed is the matched per-family timing sample, not correctness evidence. |
+| Faster tests demonstrated | **No** | The clean, pinned, alternating comparison review-1 asked for was run and is **negative**: the full L1 cohort shows no demonstrated change in either direction, and `sanity` is consistently slower. See [Review-1 implementation outcomes](#review-1-implementation-outcomes). |
 
-The implementation is ready for review, but the fix is not ready to archive or
-claim fully verified until the Phase 9 CI handoff is completed. The active fix
+The implementation is ready for review and is now verified on macOS, Linux,
+WSL2, and native Windows. It is **not** ready to archive: the fix's headline
+outcome — a faster suite — is not demonstrated by the measurement, and that is
+a question for Ken rather than something this cycle can close. The active fix
 directory has intentionally not been moved to `_completed/`.
 
 ## Scope and coordination
@@ -168,27 +171,106 @@ exemptions. The only outstanding items are required CI evidence, not deferrals:
 |---|---|---|
 | CI run covering the candidate | The candidate is committed (Sniff sources `66892d319`, branch head `a05e3b747`), but the branch is 53 commits ahead of `origin/fix/cli-slow-tests` and unpushed; the newest branch run `34159725015` is against origin head `a9e88c069…`, which does not contain the candidate. Pushing is the human-gated Phase 9 step. | [Phase 9 handoff](plan.md#phase-9--ci-evidence-rb5-second-tranche-ac6-ac8) |
 | Three consecutive candidate runs for Ubuntu, macOS, native Windows, and WSL2 | Required for compatible matched-test and per-family budget comparison; baseline run `34008778001` supplies only one baseline sample. | [Inventory CI handoff](inventory.md#phase-9-ci-evidence-handoff) |
-| Native Windows compile/runtime proof | This area has no local MinGW recipe, and WSL follows Linux rather than native-Windows code paths. | [Platform exclusions](inventory.md#platform-and-feature-exclusions) |
+| ~~Native Windows compile/runtime proof~~ | **Resolved by review-1 cycle 1.** The area now has a local `just check-windows` mingw recipe, and the suite was executed natively on `build-win-native`: 2,597 run, 2,597 passed. | [Review-1 implementation outcomes](#review-1-implementation-outcomes) |
+| Matched per-family CI timing budgets | Ratifying per-family budgets needs three consecutive candidate runs per declared environment, which needs the push. The **local** alternating comparison review-1 required has been run and is recorded; only the CI-sample half is outstanding. | [Deferred performance measurement](deferred-performance-measurement.md) |
 
 The unrelated shared `check-tier-coverage` Bash 3.2 portability finding is
 owned by the repository-wide test tooling rather than deferred inside this
 Sniff fix; the successful Bash 5.3 invocation provides this phase's required
 tier census.
 
+## Review-1 implementation outcomes
+
+Cycle 1 of the review-to-implement loop closed all three findings in
+[`review-1.md`](review-1.md). The narrative record is in [`log.md`](log.md).
+
+### Fluent CWD escape (Medium)
+
+`assert_disposable_context` now requires an ambient-context directory to be
+inside the canonical system temporary root as well as outside the checkout, so
+fixture ownership of the launch directory is structural rather than
+conventional. Neither of the two fluent forms will accept a developer
+repository or a home subdirectory. The spawn guard gained a PATH-escape
+detector requiring a call-site justification comment on every
+`fake_only_path()` / `host_path()` site, and the four live sites carry one.
+Nine tests were added; each was proved non-vacuous by mutation.
+
+### Cross-OS execution (High)
+
+Ken's `DECISION` replaced the CI clause with local execution on the three
+declared build hosts. All runs used a marker-verified protocol — reset, detach,
+patch, run, and re-verify HEAD/dirty-count/candidate-marker inside a single ssh
+session — because the shared standing clones were concurrently reset by another
+session mid-work and the first results had to be discarded.
+
+| Host | Environment | Result | Elapsed |
+|---|---|---:|---:|
+| `build-linux` | Linux x86_64 | 2,605 run, **2,605 passed**, 15 skipped | 7.430 s |
+| `build-win` | WSL2 | 2,605 run, **2,605 passed**, 15 skipped | 13.443 s |
+| `build-win-native` | native Windows | 2,597 run, **2,597 passed**, 8 skipped | 68.349 s |
+| this host | arm64 macOS 27.0 | 2,618 run, **2,618 passed**, 24 skipped | 26.570 s |
+
+Native Windows found two real, previously unexercised defects in this fix's own
+process fixture: `parse_environment` keyed the recorded environment
+case-sensitively, but Windows variable names are case-insensitive and
+`cmd.exe /D /C set` reports the canonical `Path`, not `PATH`. Two tests panicked
+on `Option::unwrap`, and a third — the assert-vs-raw surface equality check —
+was silently **vacuous** on Windows, comparing `None` to `None`. All three are
+fixed. A matched control at the unpatched base on the same host in the same
+session failed 3 tests, so the candidate is strictly better there.
+
+Two `0xc0000409` stack-buffer-overrun aborts in the `sniff` library's native
+detectors reproduce at the **unpatched base** and vary between runs. They are a
+pre-existing, load-sensitive native-Windows defect unrelated to this fix and are
+recorded for separate follow-up rather than deferred here.
+
+### Faster-tests outcome (High) — negative
+
+The clean, pinned, alternating comparison was run: baseline `c2dee9217` in its
+preserved detached worktree against a freshly pinned candidate worktree at
+`fe83e7481` carrying only this fix's Sniff diff, five alternating warm rounds
+per cohort, all twenty measured runs compile-free. Full detail in
+[`measurement/review1-alternating/summary.md`](measurement/review1-alternating/summary.md).
+
+| Cohort | Baseline median (range) | Candidate median (range) | Δ | Drift bracket | Verdict |
+|---|---:|---:|---:|---:|---|
+| full L1 `test`, wall | 23.66 s (20.22–36.63) | 23.36 s (20.24–30.99) | −1.3% | 69.4% | inside drift — no demonstrated change |
+| `sanity`, wall | 11.10 s (10.14–15.29) | 12.01 s (11.26–17.77) | +8.2% | 46.4% | magnitude inside drift, but slower in **5 of 5** paired rounds |
+
+**The candidate is not measurably faster on either cohort**, so review-1's
+finding stands. The `sanity` cohort is a near-perfect control — it is
+`--lib --bins`, so it never builds the changed `cli/tests/` sources, and its
+test population is identical in both trees — and it still moved consistently
+slower. The attribution is that this fix committed ~9.4 MB across 395 files of
+its own measurement artifacts into the repository, and Sniff's repo-walking
+tests (`filesystem::docs::tests::integration::*`, `list_worktrees_*`,
+`blast_radius::*_in_real_repo`) traverse them. That is an artifact cost rather
+than a property of the test-speed work, but it is a cost this branch imposes on
+developers, and it means any future between-tree comparison in this area must
+control for tracked-content volume.
+
+The `sanity` budget is met at the median in both trees (11.10 s and 12.01 s
+against 15 s) but is **not robustly met under load in either**: baseline
+exceeded 15 s in 1 of 5 rounds and the candidate in 2 of 5, and the candidate
+has strictly less headroom on every measure.
+
 ## Acceptance review
 
 | Criterion | Status | Evidence |
 |---|---|---|
 | AC1 — every family evaluated and routed | **Verified** | Final reconciler: 83 families, 2,635 identities, 41 declared platform exclusions, zero violations; [`inventory.md`](inventory.md). |
-| AC2 — deterministic CLI/repository isolation | **Verified locally** | Fixture hostile-input and real-CLI probes, zero-generic-exemption spawn guard, and contaminated Git regressions pass. Windows adapter execution remains part of AC6's CI pending item. |
+| AC2 — deterministic CLI/repository isolation | **Verified** | Fixture hostile-input and real-CLI probes, zero-generic-exemption spawn guard, and contaminated Git regressions pass. Review-1 cycle 1 closed the two remaining gaps: launch-directory ownership is now structural on the fluent escapes, and the Windows command adapter is executed natively rather than assumed. |
 | AC3 — request/work-count contracts | **Verified** | Seeded acquisition/execution counters, zero descendant work, dependent output assertions, and thread/Rayon/walker propagation tests pass; compatible eight-signal drift bracket retained. |
 | AC4 — bounded effects and cleanup | **Verified locally** | Loopback request-count/error tests, real process termination/reaping tests, bounded PTY/final-frame polling, required-tmux execution proof, and leak sweep all pass. |
 | AC5 — generic exemptions eliminated | **Verified** | Spawn allowlist has zero generic migration entries; surviving technical tier exclusions have explicit ownership and guard coverage. |
-| AC6 — canonical gates and cross-platform evidence | **Pending CI** | All applicable local gates pass at the committed candidate: `just test` (2,609/0 failed), `just check`, `just lint`, `just doctest` (91 run) with `remote` preserved, required-tmux `just test-l2` (2/2), and `just sanity` at 12.13 s against the 15-second budget. The single outstanding clause is `windows-latest` evidence, which requires a push this phase is not authorized to make. |
+| AC6 — canonical gates and cross-platform evidence | **Verified** | All applicable local gates pass: `just test` (2,618/0 failed), `just check`, `just lint`, `just doctest` with `remote` preserved, required-tmux `just test-l2` (2/2), `just sanity` at 12.01 s median against the 15-second budget, and the new `just check-windows` mingw compile check. The cross-platform clause is satisfied by execution rather than by `windows-latest`: green runs on Linux, WSL2, and native Windows, per Ken's `DECISION` in `review-1.md`. |
 | AC7 — bespoke gates/placeholders resolved | **Verified** | `install_interactive_pty.rs` and `foo.rs` removed; source/listing reconciliation finds no silently unreachable replacement. |
-| AC8 — results and clean process evidence complete | **Pending CI** | Local results, coverage, work counts, budgets, skips/failures, no-weakened-gate check (`nextest.toml` diff carries no Sniff line), and the clean leak sweep are complete and refreshed at the committed candidate. Candidate CI results and matched per-family budget conclusions remain pending on the push. |
+| AC8 — results and clean process evidence complete | **Partially verified** | Local results, coverage, work counts, skips/failures, no-weakened-gate check (`nextest.toml` diff carries no Sniff line), and the clean leak sweep are complete. Review-1 cycle 1 added the clean, pinned, alternating before/after comparison the spec requires — and its result is **negative**, so the ratified timing budgets are not met by a demonstrated speedup. Matched per-family CI budgets stay pending on the push. |
 | AC9 — contract documentation drift | **Verified** | The Sniff skill already documents the fixture, L1/L2 feature split, final-frame polling, counters, and audit configuration. No additional area-doc or production-contract change was found in Phase 10. |
 
-Final closure is therefore **implemented and verified locally, but not verified
-on CI**. Review may proceed; archival must wait for AC6 and AC8 to become
-verified from a CI run that actually covers the committed candidate.
+Final closure is therefore **implemented and verified for correctness on all
+four target environments, but its headline performance claim is not
+demonstrated**. Archival must wait on a decision from Ken about the
+faster-tests outcome, not on further verification: the correctness evidence the
+spec asks for is now complete, and the only mechanical item left is the matched
+per-family CI timing sample, which needs the branch pushed.

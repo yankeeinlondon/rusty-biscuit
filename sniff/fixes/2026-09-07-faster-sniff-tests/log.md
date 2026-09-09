@@ -1,3 +1,8 @@
+---
+implementation_1: 2026-09-09T15:04:39-07:00
+deferred_perf_measurement: false
+---
+
 # Validation log
 
 ## Standing coordination rule
@@ -539,3 +544,200 @@ is unchanged and still owned by the shared tooling, not by this fix.
 No new failure, retry, timeout, slow mark, or leak appeared. AC6 and AC8 stay
 **pending on CI** with their reason updated from "uncommitted" to "committed but
 unpushed; no CI run covers the candidate tree".
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-09T13:37:52-07:00
+
+- this implementation is attempting to implement _all_ of the review findings
+  found in 'sniff/fixes/2026-09-07-faster-sniff-tests/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- **blocked before any finding could be started:** the named review file does
+  not exist and no implementation work was performed
+        - `sniff/fixes/2026-09-07-faster-sniff-tests/review-1.md` is absent
+          from the working tree; the fix directory contains `spec.md`,
+          `plan.md`, `inventory.md`, `results.md`, `log.md`, the audit
+          configuration, and the baseline/enumeration/measurement evidence
+          trees, but no review artifact
+        - `git log --all -- 'sniff/fixes/2026-09-07-faster-sniff-tests/review*'`
+          returns nothing, so the file was never committed and then deleted on
+          any reachable ref — the delta review that produces it has not been run
+          for this fix
+        - the only uncommitted change in this fix directory is `spec.md`
+          flipping `implemented: false` → `implemented: true` (plus one trailing
+          blank line removed), which is the trigger for the review-to-implement
+          cycle but is not itself a source of findings
+- no finding was fabricated, no source file was modified, and neither `just
+  test` nor `just lint` was run, because there was no change to verify
+
+### Blocked
+
+The implementation of review cycle 1 did not run. Iterating over review
+findings requires the review artifact for this fix, and
+`sniff/fixes/2026-09-07-faster-sniff-tests/review-1.md` has never existed in
+this repository. Zero findings were evaluated, zero were fixed, and zero were
+deferred — this is a missing-input blocker, not a deferral, so
+`deferred_perf_measurement` is not applicable and no deferred-measurement
+document was created.
+
+To unblock: run the delta review for this fix so that
+`review-1.md` is produced from the difference between
+`sniff/fixes/2026-09-07-faster-sniff-tests/spec.md` and the implemented Sniff
+and Sniff CLI test sources, then re-run this implementation cycle. No
+metadata was written to `review-1.md` (it does not exist), and the log
+frontmatter `implementation_1` was intentionally left unset because no
+implementation occurred.
+
+Note for the reviewer that runs next: the fix's own closure evidence already
+records two acceptance criteria as pending on CI — AC6 and AC8 — because the
+candidate tree is committed but unpushed and no CI run covers it. That is
+pre-existing state carried in from Phase 10, not a finding from this cycle.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-09T15:04:39-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/sniff/fixes/2026-09-07-faster-sniff-tests/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- the review artifact that the previous cycle reported as missing now exists (created 2026-09-09T13:38:56-07:00, amended 13:50 with Ken's `DECISION` block on the CI finding), so this cycle proceeds
+- the review carries three findings
+        - **High** — no candidate CI or native-Windows verification exists; Ken's inline `DECISION` reduces this to local cross-OS execution on the three declared build hosts rather than a production-readiness gate
+        - **High** — the recorded before/after comparison does not prove the faster-tests outcome
+        - **Medium** — the fluent CWD escape does not enforce fixture ownership or justification
+- host load at start was `load averages: 21.69 33.50 28.08` on the 10-core arm64 macOS host, which is already outside a legitimate measurement window for the second finding; this will be re-checked before that finding is attempted
+- ordering decision: the Medium code finding is implemented first, because the two High findings are execution/measurement evidence that must be gathered against the final candidate tree
+- starting the work on 'Medium — fluent CWD escape ownership and justification' at 15:07:41
+- discovery: `assert_disposable_context` (`sniff/cli/tests/common/mod.rs`) backed both fluent forms — `OwnedSniffCommand::ambient_context` and `impl DisposableAmbientContext for assert_cmd::Command` — and rejected only paths inside the checkout, so `/usr/bin`, a developer repository, or any `$HOME` subdirectory was accepted
+        - all 42 live `ambient_context` call sites are in `cli.rs` and every one of them derives its path from `tempfile::tempdir()` (verified by reading each producer: `create_test_repo`, `create_cli_monorepo`, `create_test_repo_with_worktree`, and the inline `tempfile::tempdir()` bindings), so tightening to the system temporary root cost no call-site churn
+        - the four live PATH escapes are `cli.rs:15`, `cli_process_fixture.rs:164`, `cli_process_fixture.rs:168`, `install_interview_cli.rs:14`; only two of the four had a comment on a line the guard could attach to
+- change 1 — ownership by construction: `assert_disposable_context` now also requires the canonicalized directory to sit under a canonicalized `std::env::temp_dir()`, with a second, distinctly worded panic naming the fixture-owns-its-inputs contract; both sides are canonicalized so macOS `/var/folders/...` matches `/private/var/folders/...`
+- change 2 — negative tests in `cli_process_fixture.rs`: four `#[should_panic(expected = ...)]` tests, one per (owned form, fluent trait form) x (inside the checkout, `common::minimal_system_path()` system directory), plus a positive `ambient_context_accepts_a_disposable_directory_the_test_built`
+- change 3 — `spawn_site_guard.rs` grew a PATH-escape detector reusing `source_scan::{sanitize, is_ident, line_at}`; it finds `.fake_only_path(` / `.host_path(` method calls only (receiver `.` required, trailing-ident and bang checks as in the spawn detector) and requires an attached `//` reason: the site's own trailing comment, else the contiguous whole-line comment block ending at the nearest preceding non-blank line
+        - a `//` sequence inside a string literal is not a reason: the sanitized line must be blank from the `//` to end of line, which `let banner = "// git is the tool";` fails on its trailing `;`
+        - `scan` was refactored to share a `scanned_sources` file walk with the new `scan_path_escapes`
+- change 4 — justification comments written at all four escape sites; `cli_process_fixture.rs:167`'s claim that "`git` is the real tool this escape intentionally exposes" was drifted (the test only inspects PATH entries, it never runs git) and was replaced with the escape-ordering reason the assertions actually prove
+- non-vacuity, proved by mutation rather than asserted
+        - deleting the new comment at `cli.rs` made `l1_path_escapes_carry_a_call_site_reason` fail with `cli.rs:15 fake_only_path`; restored
+        - short-circuiting the temporary-root assertion made both `*_rejects_a_non_disposable_directory` tests fail; restored
+        - unit tests mirror the existing pair: `escape_detector_finds_both_path_escapes_and_ignores_prose_and_strings`, `escape_justification_accepts_adjacent_comments_and_rejects_string_lookalikes`, and `restored_escape_detector_rejects_an_unjustified_site_that_a_neutered_detector_misses` (a detector with `host_path` switched off misses the site the restored one catches)
+        - the live scan also asserts it found a non-zero number of sites, so a detector that stops observing the suite fails instead of passing empty
+- drift: `.claude/skills/sniff/SKILL.md` said all three escapes need a call-site reason; updated to record that `ambient_context` is now structural and only the two PATH escapes carry comments
+- `just --justfile sniff/justfile test`: 2618 tests run, 2618 passed (13 slow), 24 skipped, summary 63.281s, 2m20s wall including the build
+- `just --justfile sniff/justfile lint`: clean, 1m07s wall (warm re-run; the first run was 1m36s)
+- also ran `cargo clippy -p sniff-cli --tests -- -D warnings` (clean) because the area `lint` recipe does not pass `--all-targets` and so does not lint test binaries; `cargo fmt -p sniff-cli --check` is clean and no formatting pass was run
+- work completed for 'Medium — fluent CWD escape ownership and justification' at 15:27:41
+- starting the work on 'High — cross-OS execution on the declared build hosts' at 15:29:33
+        - Ken's `DECISION` in the review supersedes the CI clause: candidate CI is no longer the production-readiness gate, and the finding is discharged by running the Sniff suites locally on `build-linux` (Linux), `build-win-native` (native Windows), and `build-win` (WSL2)
+        - all three hosts answered `ssh -o BatchMode=yes`; each already carries a standing clone (`~/ci-verification/rusty-biscuit` on the two Linux-side hosts, `W:\ci-verification\rusty-biscuit` on native Windows), and all three were left dirty by earlier runs
+        - the repo already has the right vehicle: root `just cross-check <package> [--host linux|windows|all]` resets/cleans the standing clone, detaches it at the newest fetchable base, applies the local tree as one patch, and runs the package suite there; it covers Linux and native Windows but has no WSL host, so WSL is driven by hand with the identical reset/clean/detach/apply/run sequence
+        - `origin/fix/cli-slow-tests` is not present in this worktree, so the script falls back to `origin/main`; the shipped patch is therefore the whole branch delta, 1,473 files and ~64 MB
+        - **contamination discovered and worked around:** the standing clones are shared, and another concurrent session reset all three of them to `2b5b50eb4` (a commit that is not an ancestor of this branch) in the middle of this work
+                - the first `just cross-check sniff-cli --host all` result (804 passed / 3 failed) and the first native-Windows re-run (2,573 passed / 4 failed, 3 of them `0xc0000409` stack-buffer-overrun aborts in the `sniff` native detectors) were both taken against a tree that was **not** the candidate, so neither is admissible evidence
+                - a second Linux attempt on the shared clone died with `output file ... libquote-...rmeta is not writeable`, i.e. another session's cargo owning the shared `target/`
+                - every subsequent run therefore does reset → detach → `git apply` → run inside **one** ssh session and prints a `PRE-RUN-MARKER`/`POST-RUN-MARKER` pair carrying the HEAD sha, the dirty-file count, and a candidate-only marker (`temp_dir` in `sniff/cli/tests/common/mod.rs`, which is absent before this cycle's change); a result is only admissible when both markers agree and show the candidate
+                - Linux and WSL additionally run in a private `git worktree` with a private `CARGO_TARGET_DIR`, which their free space allows (161 GB and 125 GB); native Windows keeps the shared clone and its warm target because `W:` has only 21 GB free and the host's storage policy forbids a scratch target there
+        - **Linux (`build-linux`), verified candidate:** `PRE/POST-RUN-MARKER: 0a2b4cf8b dirty=895 guard=1` on both sides, private worktree `~/rb-sniff-review1` with private `CARGO_TARGET_DIR` — `cargo nextest run -p sniff-cli -p sniff --no-fail-fast`: **2,605 run, 2,605 passed, 15 skipped, 0 failed** in 7.451 s
+        - **native Windows (`build-win-native`), verified candidate:** `PRE/POST-RUN-MARKER: 0a2b4cf8b dirty=895 guard=3` (the Windows marker count is 3 because `Select-String` is case-insensitive and also matches `TEMP_DIR_VARIABLE`) — **2,597 run, 2,593 passed, 8 skipped, 4 failed** in 66.960 s
+                - the four new fluent-escape negative tests from the Medium finding all **pass** on native Windows, including the `\\?\W:\...` checkout rejection and the `C:\WINDOWS\System32` non-disposable rejection, so the Windows command adapter, `SystemRoot`/`COMSPEC`/`PATHEXT` restoration, and `cmd.exe /D /C set` recorder are now exercised on the platform the review said had never run them
+                - two failures are **real, pre-existing, native-Windows-only defects in this fix's own process fixture**, both `called Option::unwrap() on a None value` on `environment.get("PATH")`: `inherited_git_sniff_and_rendering_inputs_are_scrubbed` (`cli_process_fixture.rs:136`) and `path_modes_are_bounded_and_keep_fixture_stubs_first` (`cli_process_fixture.rs:153`)
+                        - root cause: `parse_environment` keys the recorded environment case-sensitively, but Windows environment variables are case-insensitive and `cmd.exe /D /C set` reports the canonical `Path=`, not `PATH=`
+                        - the same defect makes `assert_and_raw_surfaces_produce_the_same_effective_environment`'s `PATH` equality assertion **vacuous on Windows**: it compares `None` to `None` and passes
+                        - this is exactly the class of gap the review predicted ("its Windows command adapter, case-insensitive environment behavior, `cmd.exe /D /C set` recorder ... cannot be exercised by macOS or WSL"), so the finding paid for itself
+                - two failures are `0xc0000409` stack-buffer-overrun **aborts in the `sniff` library's native detectors** (`tests::test_os_present_by_default`, `integration::test_detect_completes_in_reasonable_time`); a control run is being taken at the unpatched base to establish whether they pre-date this fix
+- fixed the native-Windows `PATH` lookup defect in `sniff/cli/tests/cli_process_fixture.rs` at 15:48:31
+        - `parse_environment` now upper-cases the recorded variable name on Windows only, so the recorded map models the platform it reads from: Windows names are case-insensitive and `cmd.exe /D /C set` reports each under its canonical casing (`Path=`, never the `PATH=` the builder exported), while Unix names stay case-sensitive because the Unix environment itself is
+        - normalizing at the point of *recording* rather than at each lookup keeps all five existing upper-case `get`/`contains_key` call sites unchanged, which is the surgical shape: no test body, no assertion, and no isolation-policy code moved
+        - `to_ascii_uppercase` rather than a Unicode upper-casing: the names under assertion are all ASCII, and two Windows variables differing only in ASCII case cannot coexist, so the normalization cannot collapse distinct entries
+        - the `=C:=C:\...` pseudo-variables `cmd.exe` emits are untouched by this: `split_once('=')` still yields an empty key for them, exactly as before
+        - the vacuous assertion is repaired: `assert_and_raw_surfaces_produce_the_same_effective_environment` previously compared `assert_environment.get("PATH")` with `raw_environment.get("PATH")`, and on Windows both sides were `None`, so the assertion held while proving nothing about the two command surfaces agreeing on `PATH` — the very thing it exists to prove. Both sides are now unwrapped through `expect`, so a missing `PATH` on either surface fails the test instead of satisfying it
+        - the two hard failures (`cli_process_fixture.rs:136` and `:153`) need no edit of their own: their `environment.get("PATH").unwrap()` calls were already non-optional and now resolve, because the key they look up is the key the map records
+- verification at 15:48:31
+        - `just --justfile sniff/justfile test` — **2,618 run, 2,618 passed, 24 skipped, 0 failed** in 26.570 s (macOS host); the `cli_process_fixture` binary alone re-run as `just test --test cli_process_fixture` — 13 passed, 1 skipped
+        - `just --justfile sniff/justfile lint` — clean
+        - **Windows compile evidence, not a behavioral run:** added a `check-windows` recipe to `sniff/justfile`, mirroring claudine's (mingw `x86_64-pc-windows-gnu`, `RUSTC_WRAPPER=""`, `CFLAGS/CXXFLAGS_x86_64_pc_windows_gnu=-Wa,-mbig-obj`, scratch `CARGO_TARGET_DIR=target/windows-check` so the main target dir is undisturbed). `just --justfile sniff/justfile check-windows` finishes clean in 1 m 04 s; the only warnings are pre-existing ones in `sniff/lib` (`executable_index.rs` unused bindings, `git_parity.rs` dead `stage_raw_path`), none in the changed file. The msvc target is deliberately not used — it dies in `aws-lc-sys` for want of the Windows SDK
+        - a cross-compile proves the `cfg(windows)` arm compiles; it does not execute it. The behavioral proof still owed is a native-Windows run of `sniff-cli::cli_process_fixture` on `build-win-native`, where the expected delta is the two `unwrap` panics turning into passes and the third test's `PATH` comparison becoming real rather than `None == None`
+        - the two native-Windows fixture failures were repaired (see the `parse_environment` bullets above), the patch was regenerated, and native Windows was re-run as a **matched control-then-candidate pair in one ssh session**, same host, same selection `-p sniff-cli -p sniff --no-fail-fast`, back to back
+                - control, unpatched base `0a2b4cf8b` with `dirty=0`: **2,577 run, 2,574 passed, 3 failed** in 80.075 s — `sniff tests::test_skip_os_returns_none` and `sniff tests::test_detect_returns_result` aborted with `0xc0000409`, and `sniff-cli::cli test_no_subcommand_with_json_outputs_json` failed
+                - candidate, base + patch with `dirty=896 v2guard=1`: **2,597 run, 2,597 passed, 8 skipped, 0 failed** in 68.349 s
+                - so the `0xc0000409` aborts are **pre-existing at the base and absent from the candidate**; the aborting test varies between runs (`test_os_present_by_default`, `test_non_loopback_has_mac_address`, `test_skip_os_returns_none`, `test_detect_returns_result` in different combinations), which marks them as a load-sensitive native-detector flake on this host rather than anything this fix introduced. They are recorded here as an unrelated pre-existing native-Windows defect, not a deferral of this fix
+                - an earlier single-package control (`-p sniff` alone, 1,517 passed) did **not** reproduce the aborts, which is why the matched two-package selection was re-run before drawing any conclusion
+        - a Linux re-run against the updated patch first died with `output file ... .rmeta is not writeable`; the artifacts are `-r--r--r--` with a link count of 2, i.e. read-only hardlinks from the shared build cache that an incremental rebuild cannot overwrite. Re-running into a fresh `CARGO_TARGET_DIR` is the workaround; this is a build-cache interaction on the host, not a Sniff defect
+        - **all three declared hosts are green on the verified candidate**, every run marker-matched before and after
+                | Host | Environment | Selection | Result | Elapsed |
+                |---|---|---|---:|---:|
+                | `build-linux` | Linux x86_64, Proxmox guest | `-p sniff-cli -p sniff --no-fail-fast` | 2,605 run, **2,605 passed**, 15 skipped | 7.430 s |
+                | `build-win` | WSL2 (`6.18.33.2-microsoft-standard-WSL2`) | `-p sniff-cli -p sniff --no-fail-fast` | 2,605 run, **2,605 passed**, 15 skipped | 13.443 s |
+                | `build-win-native` | native Windows, PowerShell | `-p sniff-cli -p sniff --no-fail-fast` | 2,597 run, **2,597 passed**, 8 skipped | 68.349 s |
+                | this host | native arm64 macOS 27.0 | `just --justfile sniff/justfile test` | 2,618 run, **2,618 passed**, 24 skipped | 26.570 s |
+        - remote scratch was cleaned up afterwards: both private worktrees removed and pruned, `~/rb-sniff-review1-target` (1.4 GB), `~/rb-sniff-r1t-v2` (1.1 GB) and `~/rb-sniff-r1t` (5.9 GB) deleted, patch files removed from all three hosts
+        - **operator note for Ken:** `W:` on `build-win-native` is down to **10.2 GB free** after this work (it was 21 GB at the start). The consumption is inside the shared standing clone's own warm `target/`, which other sessions depend on, so it was deliberately left in place rather than swept by this cycle
+- work completed for 'High — cross-OS execution on the declared build hosts' at 16:01:44
+- starting the work on 'High — the recorded comparison does not prove the faster-tests outcome' at 16:05:12
+        - the finding was **not** deferred on load, because the load average turned out to be misleading: `top -l 4 -s 5` reported a sustained **80–84 % idle CPU** across four samples while the 1-minute load average sat at 10–11 on 16 cores, i.e. the queue is I/O-bound (`identityservices` at ~90 % of one core), not CPU-bound. There is real headroom for a measurement
+        - the two trees the review asked for both exist and can be pinned clean
+                - baseline: the preserved detached worktree `target/sniff-phase1-baseline-c2dee9217` at `c2dee9217`, tracked-clean, with its warm build directory still on disk (6.9 GB `target/` plus 3.7 GB `target-sniff-phase1/`)
+                - candidate: a new detached worktree `/private/tmp/rb-sniff-cand-review1` at `fe83e7481` with only this cycle's 718-line Sniff diff applied, so it is pinned and carries none of the unrelated monorepo dirt the review objected to in `provenance.json:24`
+                - `c2dee9217` is an ancestor of `fe83e7481`, 28 commits back, and the Sniff delta between them is 21 files / 2,029 insertions / 962 deletions
+- the alternating local measurement the review asked for was run in full; artifacts in `measurement/review1-alternating/` (`summary.md`, `provenance.json`, `runs.jsonl`, 20 per-run logs, 3 warm-up logs, the `run.sh` driver)
+        - **protocol actually run.** invocation form `just --justfile <TREE>/sniff/justfile --working-directory <TREE>/sniff <cohort>`, verified working before measuring and used unchanged — the sniff justfile's `../just/*.just` imports resolve relative to the justfile, and the nested `just _test_local_all` / `just _sanity_all` calls re-resolve from the working directory, so every invocation stays inside its own tree with no `cd`
+        - both trees were warmed twice per cohort with all warm-up numbers discarded. the candidate had no `target/` at all (cold) and the baseline's pre-existing 6.9 GB `target/` also turned out **not** to be warm for this recipe's feature unification — both trees recompiled 787 crates on warm-up pass 1, fast only because `kache 0.19.0` is the `rustc-wrapper`. pass 2 confirmed both fully warm (`Finished test profile … in 0.26–0.37 s`, zero `Compiling`)
+        - 5 alternating rounds in the order baseline `test` → candidate `test` → baseline `sanity` → candidate `sanity`; 20 measured runs, **zero `Compiling` lines and exit 0 with every test passing in all 20**, so no run had to be discarded. each run recorded `/usr/bin/time -p` wall clock, the verbatim nextest `Summary` line(s), `uptime` load before and after, and a sustained `top -l 2 -s 3 -n 0` idle sample before
+        - **sample valid**: baseline stayed at `c2dee9217` with 1 untracked entry and the candidate at `fe83e7481` with 9 dirty files, identical before the first measured run and after the last
+        - **paired wall clock, `test` cohort (s)**: r1 20.37/20.24 (0.994) · r2 20.22/21.69 (1.073) · r3 24.41/30.99 (1.270) · r4 36.63/30.42 (0.830) · r5 23.66/23.36 (0.987) — baseline median **23.66** (range 20.22–36.63), candidate median **23.36** (range 20.24–30.99), median ratio **0.987 (−1.3 %)**
+        - **paired wall clock, `sanity` cohort (s)**: r1 10.14/11.38 (1.122) · r2 10.24/12.01 (1.173) · r3 15.29/17.77 (1.162) · r4 11.10/11.26 (1.014) · r5 13.08/15.27 (1.167) — baseline median **11.10** (range 10.14–15.29), candidate median **12.01** (range 11.26–17.77), median ratio **1.082 (+8.2 %)**, median paired ratio **1.162**
+        - nextest runner-elapsed medians agree: `test` 22.58 → 22.33 (−1.1 %), `sanity` 8.36 → 9.35 (+11.8 %, median paired ratio 1.189)
+        - **drift bracket.** using the spread of the baseline runs as the noise floor: `test` wall 16.41 s = **69.4 %** of the baseline median, `test` runner 72.6 %, `sanity` wall 5.15 s = **46.4 %**, `sanity` runner 57.3 %. **every observed difference is inside its bracket**, so no percentage above may be reported as a speedup or a slowdown magnitude
+        - the bracket does not absorb the *direction* of the sanity result: the candidate's paired sanity ratio is above 1 in **5 of 5 rounds** on both wall clock and runner elapsed (one-sided sign test p ≈ 0.03). directionally real, magnitude unresolved
+        - **load anomalies.** idle stayed in the 61–88 % band for 19 of 20 runs. two deviate — round 4 baseline `test` (61.4 % idle, load 100.69 after; 36.63 s, the slowest run in the sample and the sole reason the baseline range reaches 36.63) and round 5 candidate `sanity` (**10.4 % idle**, genuine external saturation). excluding them pairwise changes nothing: `test` becomes 22.02/22.53 = 1.023 (+2.3 %, sign flips, still deep inside the bracket — itself evidence the `test` number is noise), `sanity` becomes 10.67/11.70 = 1.096, and dropping rounds 3 and 5 together gives 10.24/11.38 = 1.111
+        - **15-second `sanity` budget, both trees.** on the wall clock a developer actually waits for, baseline is median 11.10 s / max 15.29 s and breaches 15 s in **1 of 5** rounds; candidate is median 12.01 s / max 17.77 s and breaches in **2 of 5**. on nextest runner elapsed neither breaches (baseline median 8.36 / max 12.58; candidate median 9.35 / max 14.96) but the candidate's round 3 left **45 ms** of headroom. verdict: the budget is met at the median in both trees and is **not robustly met under load in either**, and the candidate has strictly less headroom on every measure. the ~2.6–5 s gap between the two measures is fixed recipe cost — `_storage_preflight` plus two separate `cargo metadata` + `cargo nextest` invocations, one per package
+        - **test counts differ and are reported separately.** `test` cohort 2,599 (23 skipped) baseline vs 2,618 (24 skipped) candidate, **+19** — the candidate added coverage. per-test mean at the median runner elapsed is 8.688 ms → 8.531 ms (−1.8 %), recorded but **not** the headline: cohort elapsed is a parallel wall clock across 28 binaries, so dividing by a test count does not yield per-test cost, and the figure derives from a −1.1 % cohort difference 65× smaller than the drift bracket. the honest headline is the raw cohort wall clock, 23.66 s → 23.36 s, within drift. the `sanity` cohort's counts are **identical** (1,419 + 401 = 1,820 in both trees), so its per-test ratio equals its cohort ratio
+        - **the sanity regression is not the fix's doing, and the control proves it.** `sanity` is `--lib --bins`, which never builds `sniff/cli/tests/*` — where the entire 521-line working diff lives. across `c2dee9217..fe83e7481` the only `sniff/lib/src` or `sniff/cli/src` hunks are `os/user.rs` and `programs/types.rs`, both **entirely inside `#[cfg(test)] mod tests`** (assertion rewrites costing a two-entry `HashMap` and two `serde_json` parses). so the sanity cohort is a near-perfect control: identical test population, effectively identical code, and it still moved +9–19 %
+        - per-test attribution over the three quietest rounds (1,820 tests joined by name) shows the delta is concentrated, not diffuse — 956 tests slower, 790 faster, top 20 accounting for 11.69 s of the 20.30 s total. the top five are all `filesystem::docs::tests::integration::*` at +1.12 to +1.28 s each, followed by ten `filesystem::git::worktree::tests::list_worktrees_*`/`inside_*` and then `filesystem::blast_radius::tests::…::*_in_real_repo`. **every one of them walks the real surrounding repository**
+        - and the candidate's repository is bigger because this fix cycle committed its own measurement artifacts into it: tracked files 10,963 → 11,358 (**+395**), tracked `.md` 4,140 → 4,174 (**+34**), `sniff/fixes/` 4.6 M → 14 M (**+9.4 M**). the five `docs` tests enumerate and content-hash every Markdown document in the repo, so 34 more documents and 9.4 MB more to traverse is a direct and sufficient explanation for the largest deltas. the regression is a **self-inflicted, incidental cost of the branch's committed artifacts**, not a property of the test-speed work — but it is still a cost a developer running `just sanity` on this branch pays
+        - two consequences worth carrying forward: (a) any future between-tree comparison in this repo must place both trees in structurally comparable locations **and** account for tracked-content volume, because Sniff's own suite measures the repository it sits in — the `sniff` instance of the known "capture tests walk the monorepo" hazard; (b) the systematic offset the control exposes means the `test` cohort's −1.3 % was measured against a candidate carrying a handicap on the repo-walking tests it shares, which *could* mean its real change is more favourable — **this is deliberately not claimed**, since the cohorts have different populations and I/O profiles and subtracting the offset would manufacture a win the data does not support
+        - **conclusion: the candidate is not measurably faster on either cohort.** the full L1 `test` cohort shows no demonstrated change in either direction (−1.3 %, inside a 69 % bracket, paired ratios split 3 up / 2 down), and the `sanity` cohort is consistently *slower* (5 of 5 rounds) for reasons traceable to committed artifacts rather than to the test changes. **review-1's finding stands: this measurement does not demonstrate a faster-tests outcome.** what the candidate does show is that it runs 19 more tests in the same time without regressing the full suite — which is not a speedup
+        - the CI half of the finding (matched CI samples, per-family budget ratification) was **not** attempted here and remains blocked on the unpushed, human-gated branch
+- the 6.6 MB of raw per-run logs were archived into `raw-logs.tar.gz` (1.0 MB) rather than committed loose, because this measurement's own control finding is that committed artifact volume is what slowed the `sanity` cohort; `summary.md`, `provenance.json`, `runs.jsonl`, `run.sh`, and `driver.log` stay plain
+- closure documents updated: [`results.md`](results.md) gained a `## Review-1 implementation outcomes` section, AC2 and AC6 moved to **Verified**, AC8 moved to **Partially verified** with the negative timing result stated plainly, the native-Windows pending row is struck through as resolved, and the completion-claims table gained an explicit `Faster tests demonstrated | No` row; [`deferred-performance-measurement.md`](deferred-performance-measurement.md) records the one outstanding clause
+- the pinned candidate worktree `/private/tmp/rb-sniff-cand-review1` was removed after the measurement; the preserved baseline worktree and its build directories were left untouched
+- work completed for 'High — the recorded comparison does not prove the faster-tests outcome' at 16:54:10
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 1 hour and
+50 minutes. During this implementation all 3 review findings were evaluated to
+see if they could be fixed as a part of this implementation cycle: 3 were
+fixed, 0 were deferred — but one *clause* inside the second High finding is
+deferred, and one finding closed with a negative result that Ken needs to rule
+on:
+
+- **Deferred clause — "complete the matched CI samples and ratify the
+  per-family timing budgets"** (from *High — The recorded comparison does not
+  prove the faster-tests outcome*)
+        - per-family budgets are defined against CI runner cells and need three
+          consecutive candidate runs per declared environment, which needs the
+          branch pushed to `origin`
+        - pushing is human-gated and this session is non-interactive, so it
+          cannot obtain the credentials a push requires; no local substitute
+          exists, because a budget ratified on one macOS host is not a
+          compatible sample for the Ubuntu, native-Windows, and WSL2 cells
+        - the reason is **not** host CPU load — the local half of this same
+          finding was measured successfully, so `deferred_perf_measurement`
+          stays `false`; full detail and a close-out procedure are in
+          [`deferred-performance-measurement.md`](deferred-performance-measurement.md)
+
+- **Negative result requiring a ruling, not a deferral** — the alternating
+  measurement the review demanded was run to completion on clean, pinned trees,
+  and it does **not** demonstrate a faster suite. Review-1's finding stands.
+  This cycle can report the fact but cannot decide what follows from it: whether
+  the fix is accepted on its correctness and isolation merits, whether the
+  committed measurement artifacts should be pruned or moved out of the tracked
+  tree to recover the `sanity` cohort, or whether further optimization work is
+  wanted. That is Ken's call.
+
+The files changed by this cycle are `sniff/cli/tests/common/mod.rs`,
+`sniff/cli/tests/cli_process_fixture.rs`, `sniff/cli/tests/spawn_site_guard.rs`,
+`sniff/cli/tests/cli.rs`, `sniff/cli/tests/install_interview_cli.rs`,
+`sniff/justfile`, `.claude/skills/sniff/SKILL.md`, and this fix's
+`results.md`, `log.md`, `deferred-performance-measurement.md`, and
+`measurement/review1-alternating/`.

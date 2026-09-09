@@ -5,7 +5,8 @@ created: 2026-09-07
 reviewed: true
 reviewed_by: opencode/zai-coding-plan/glm-5.3
 reviewed_on: 2026-09-07
-implemented: false
+implemented: true
+review_iterations: 1
 coordinates_with:
     - sniff/fixes/2026-07-22-inefficient-calling/spec.md
 packages:
@@ -246,4 +247,3 @@ pending and cannot be satisfied by a feature-disabled run.
 - Which bespoke environment gates (for example `SNIFF_INTERACTIVE_PTY`) become
   tiered or recipe-routed tests, and which are removed?
 - What cost and concurrency budgets are justified for each native platform?
-

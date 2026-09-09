@@ -1,0 +1,135 @@
+{
+  "purpose": "Review-1 finding: 'The recorded comparison does not prove the faster-tests outcome.' Repeat the alternating local measurement from clean, pinned baseline and candidate trees under compatible load. The CI half of the finding is out of scope here (branch unpushed, human-gated).",
+  "measured_by": "rust-developer sub-agent, non-interactive session",
+  "window_utc": {
+    "first_measured_run_started": "2026-09-09T23:24:12Z",
+    "last_measured_run_ended": "2026-09-09T23:31:51Z",
+    "warmup_started": "2026-09-09T23:06:23Z"
+  },
+  "host": {
+    "machine": "Shazam.local",
+    "os": "macOS 27.0 (build 26A5425a)",
+    "kernel": "Darwin 27.0.0 arm64 (xnu-13432.1.9~3)",
+    "cpu": "Apple M4 Max",
+    "logical_cpus": 16,
+    "memory_bytes": 137438953472,
+    "note": "Shared workstation. Other user sessions may start compiles that cannot be controlled; per-run load and sustained CPU idle are recorded for every measured run. On this host the load average is inflated by I/O-bound processes and is NOT a saturation proxy; the top idle percentage is the meaningful one."
+  },
+  "toolchain": {
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "cargo_nextest": "cargo-nextest 0.9.136 (1d5bf1ec9 2026-05-16)",
+    "just": "just 1.56.0",
+    "rustc_wrapper": "kache 0.19.0 (set as build.rustc-wrapper in ~/.cargo/config.toml)",
+    "cargo_profile": "test (unoptimized + debuginfo)",
+    "nextest_profile": "default (NEXTEST_PROFILE unset; retries = 0)"
+  },
+  "trees": {
+    "baseline": {
+      "path": "/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/target/sniff-phase1-baseline-c2dee9217",
+      "kind": "git worktree (detached)",
+      "head_before": "c2dee9217f3e6be14d7a6adfeb2c90cd2cd31966",
+      "head_after": "c2dee9217f3e6be14d7a6adfeb2c90cd2cd31966",
+      "dirty_files_before": 1,
+      "dirty_files_after": 1,
+      "dirty_detail": "one untracked entry: target-sniff-phase1/ (a build directory, left alone)",
+      "tracked_files": 10963,
+      "tracked_md_files": 4140,
+      "sniff_fixes_dir_size": "4.6M",
+      "cargo_target_dir": "<tree>/target (default; ~6.9G before, warm)"
+    },
+    "candidate": {
+      "path": "/private/tmp/rb-sniff-cand-review1",
+      "kind": "git worktree (detached)",
+      "head_before": "fe83e74811df587c44a0bc7231c63d01fb2eeedb",
+      "head_after": "fe83e74811df587c44a0bc7231c63d01fb2eeedb",
+      "dirty_files_before": 9,
+      "dirty_files_after": 9,
+      "dirty_detail": [
+        ".claude/skills/sniff/SKILL.md",
+        "sniff/cli/tests/cli.rs",
+        "sniff/cli/tests/cli_process_fixture.rs",
+        "sniff/cli/tests/common/mod.rs",
+        "sniff/cli/tests/install_interview_cli.rs",
+        "sniff/cli/tests/spawn_site_guard.rs",
+        "sniff/fixes/2026-09-07-faster-sniff-tests/log.md",
+        "sniff/fixes/2026-09-07-faster-sniff-tests/spec.md",
+        "sniff/justfile"
+      ],
+      "tracked_files": 11358,
+      "tracked_md_files": 4174,
+      "sniff_fixes_dir_size": "14M",
+      "cargo_target_dir": "<tree>/target (default; built during warm-up, 5.7G)"
+    },
+    "sample_validity": "VALID. Both HEADs and both dirty-file counts were identical before the first measured run and after the last."
+  },
+  "delta_between_trees": {
+    "note": "The comparison is c2dee9217 versus fe83e7481-plus-working-diff, NOT the 718-line working diff alone. The committed range also contributes.",
+    "committed_range_c2dee9217_to_fe83e7481_within_sniff": {
+      "files_changed": 123,
+      "insertions": 88017,
+      "deletions": 2645,
+      "production_source_changes": "none - the only sniff/lib/src or sniff/cli/src hunks are sniff/lib/src/os/user.rs (+21/-13) and sniff/lib/src/programs/types.rs (+12/-12), both entirely inside #[cfg(test)] mod tests (assertion-quality rewrites)",
+      "bulk": "measurement artifacts committed under sniff/fixes/2026-09-07-faster-sniff-tests/measurement/ (log .gz captures, sources.json, work-count JSON), growing sniff/fixes from 4.6M to 14M and the tracked file count by 395 (+34 tracked .md)"
+    },
+    "working_diff": {
+      "files_changed": 9,
+      "insertions": 521,
+      "deletions": 19,
+      "scope": "sniff/cli/tests/* (integration test targets), sniff/justfile (adds a check-windows recipe only; test and sanity recipes are byte-identical between trees), plus docs"
+    },
+    "shared_infrastructure_parity": {
+      ".config/nextest.toml": "identical between trees",
+      "just/devops.just": "identical between trees"
+    }
+  },
+  "cohorts": {
+    "test": {
+      "recipe": "just --justfile <TREE>/sniff/justfile --working-directory <TREE>/sniff test",
+      "expands_to": "just _test_local_all \"sniff --features remote; sniff-cli\"",
+      "effective": "one cargo nextest invocation: -p sniff -F sniff/remote -p sniff-cli -E '<L1 tier filter>' --no-tests=pass",
+      "feature_selection": "sniff/remote (transitively enables network); sniff-cli default features (test-fixtures OFF, matching local L1 policy)",
+      "summary_lines_per_run": 1,
+      "tests_baseline": 2599,
+      "tests_candidate": 2618,
+      "skipped_baseline": 23,
+      "skipped_candidate": 24
+    },
+    "sanity": {
+      "recipe": "just --justfile <TREE>/sniff/justfile --working-directory <TREE>/sniff sanity",
+      "expands_to": "just _sanity_all \"sniff --features remote; sniff-cli --features test-fixtures\"",
+      "effective": "two sequential cargo nextest invocations (one per package), each --lib --bins with the !slow/!level2/!level3/!browser/!real tier filter",
+      "summary_lines_per_run": 2,
+      "tests_baseline": "1419 (sniff lib) + 401 (sniff-cli bins) = 1820",
+      "tests_candidate": "1419 (sniff lib) + 401 (sniff-cli bins) = 1820",
+      "note": "--lib --bins excludes sniff/cli/tests/*, which is where the entire working diff lives. The sanity cohort is therefore a near-control: identical test population, and the only code differences are two trivial #[cfg(test)] assertion rewrites."
+    }
+  },
+  "invocation_form": {
+    "used": "just --justfile <TREE>/sniff/justfile --working-directory <TREE>/sniff <cohort>",
+    "verified": "Confirmed working before measuring. The sniff justfile's imports (../just/devops.just etc.) are resolved relative to the justfile, and the nested `just _test_local_all` / `just _sanity_all` calls re-resolve from the working directory, so every invocation stays inside its own tree. No adjustment was needed. No `cd` between trees.",
+    "wrapper": "/usr/bin/time -p, plus uptime load averages before and after and a sustained /usr/bin/top -l 2 -s 3 -n 0 CPU-idle sample before each run"
+  },
+  "protocol": {
+    "warmup": "Two discarded warm-up passes per tree per cohort. The candidate tree had no target directory at all (cold); the baseline's pre-existing target/ also turned out not to be warm for this recipe's feature unification, so both trees recompiled 787 crates on pass 1 (fast because kache is the rustc wrapper). Pass 2 confirmed both trees fully warm: 'Finished test profile ... in 0.26-0.37s', zero Compiling lines.",
+    "rounds": 5,
+    "order_within_round": ["baseline test", "candidate test", "baseline sanity", "candidate sanity"],
+    "measured_runs": 20,
+    "compilation_inside_measured_runs": "zero Compiling lines in all 20 runs (verified per run)",
+    "exit_codes": "0 in all 20 runs; every run fully passed"
+  },
+  "ambient_environment": {
+    "MODEL": "opus (present in the parent environment for both trees identically; sniff's CLI test fixture pins child environment, and the sanity cohort does not spawn the CLI at all)",
+    "GIT_EDITOR": "true",
+    "CARGO_TARGET_DIR": "unset (each tree used its own <tree>/target)",
+    "NEXTEST_PROFILE": "unset",
+    "BISCUIT_*": "unset"
+  },
+  "artifacts": {
+    "per_run_logs": "run-NN-<tree>-<cohort>.log (20 files)",
+    "machine_readable": "runs.jsonl",
+    "driver": "run.sh, driver.log",
+    "warmup_logs": ["warmup-candidate.log", "warmup-baseline.log", "warmup2.log"],
+    "analysis": "summary.md"
+  }
+}
