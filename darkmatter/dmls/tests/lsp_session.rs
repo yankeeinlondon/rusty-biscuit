@@ -1,276 +1,18 @@
 //! Level-1 integration tests: full LSP conversations over an in-memory
-//! connection pair (`lsp_server::Connection::memory()`), the fixture shape
-//! ported from `iwes/tests/fixture.rs` (Apache-2.0, IWE project).
+//! connection pair (`lsp_server::Connection::memory()`), driven by the shared
+//! [`common::LspFixture`].
 //!
 //! These sessions are in-memory (no real terminal, PTY, or network resource),
 //! so they run in the standard `just test` gate with no terminal harness.
 
-use std::sync::mpsc;
+mod common;
+
 use std::time::Duration;
 
+use common::{LspFixture, LspWorkspace, TeardownEvent};
 use dmls::overlay::expressions;
-use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
+use lsp_server::{RequestId, Response};
 use serde_json::{Value, json};
-
-/// Client-side driver over the in-memory pair; joins the server thread on
-/// drop-free shutdown so protocol failures surface as test failures.
-struct ClientFixture {
-    client: Option<Connection>,
-    server_outcome: mpsc::Receiver<Result<(), String>>,
-    server_thread: Option<std::thread::JoinHandle<()>>,
-    next_id: i32,
-    /// Server → client notifications buffered while awaiting a response (the
-    /// server pushes `publishDiagnostics` out-of-band).
-    notifications: Vec<Notification>,
-    /// Server → client requests buffered while awaiting a response (the server
-    /// pushes `workspace/semanticTokens/refresh`, progress-create, and watcher
-    /// registrations fire-and-forget).
-    server_requests: Vec<Request>,
-}
-
-impl ClientFixture {
-    fn start() -> Self {
-        let (server_side, client_side) = Connection::memory();
-        let (outcome_tx, outcome_rx) = mpsc::channel();
-        let server_thread = std::thread::spawn(move || {
-            let result = dmls::run_server(server_side, dmls::RunOptions::default())
-                .map_err(|error| error.to_string());
-            let _ = outcome_tx.send(result);
-        });
-        Self {
-            client: Some(client_side),
-            server_outcome: outcome_rx,
-            server_thread: Some(server_thread),
-            next_id: 0,
-            notifications: Vec::new(),
-            server_requests: Vec::new(),
-        }
-    }
-
-    fn request(&mut self, method: &str, params: Value) -> Response {
-        self.next_id += 1;
-        let id = RequestId::from(self.next_id);
-        self.send_request_with_id(id.clone(), method, params);
-        self.expect_response(id)
-    }
-
-    fn send_request_with_id(&self, id: RequestId, method: &str, params: Value) {
-        self.client
-            .as_ref()
-            .expect("client connection closed")
-            .sender
-            .send(Message::Request(Request::new(
-                id,
-                method.to_string(),
-                params,
-            )))
-            .expect("send request");
-    }
-
-    fn notify(&self, method: &str, params: Value) {
-        self.client
-            .as_ref()
-            .expect("client connection closed")
-            .sender
-            .send(Message::Notification(Notification::new(
-                method.to_string(),
-                params,
-            )))
-            .expect("send notification");
-    }
-
-    fn expect_response(&mut self, id: RequestId) -> Response {
-        loop {
-            let message = self
-                .client
-                .as_ref()
-                .expect("client connection closed")
-                .receiver
-                .recv_timeout(Duration::from_secs(10))
-                .expect("response before timeout");
-            match message {
-                Message::Response(response) if response.id == id => return response,
-                Message::Notification(notification) => self.notifications.push(notification),
-                // Server-initiated requests (progress create, watcher
-                // registration, semantic-tokens refresh) are fire-and-forget;
-                // buffer them so tests can observe what the server pushed.
-                Message::Request(request) => self.server_requests.push(request),
-                other => panic!("unexpected message while waiting for response: {other:?}"),
-            }
-        }
-    }
-
-    /// Waits for the latest `publishDiagnostics` for `uri`, returning its
-    /// `diagnostics` array. Drains buffered notifications first.
-    fn wait_for_diagnostics(&mut self, uri: &str) -> Vec<Value> {
-        self.wait_for_diagnostics_params(uri)["diagnostics"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    fn wait_for_diagnostics_params(&mut self, uri: &str) -> Value {
-        loop {
-            if let Some(params) = self.take_buffered_diagnostics(uri) {
-                return params;
-            }
-            let message = self
-                .client
-                .as_ref()
-                .expect("client connection closed")
-                .receiver
-                .recv_timeout(Duration::from_secs(10))
-                .expect("diagnostics before timeout");
-            match message {
-                Message::Notification(notification) => self.notifications.push(notification),
-                Message::Request(request) => self.server_requests.push(request),
-                other => panic!("unexpected message while waiting for diagnostics: {other:?}"),
-            }
-        }
-    }
-
-    fn take_buffered_diagnostics(&mut self, uri: &str) -> Option<Value> {
-        let position = self.notifications.iter().rposition(|notification| {
-            notification.method == "textDocument/publishDiagnostics"
-                && notification.params["uri"] == json!(uri)
-        })?;
-        let notification = self.notifications.remove(position);
-        Some(notification.params)
-    }
-
-    /// Drains messages until the startup-index `workDoneProgress` `end` arrives,
-    /// guaranteeing the background disk walk has finished. Only usable when the
-    /// client advertised `window.workDoneProgress`.
-    fn wait_for_startup_complete(&mut self) {
-        let is_end = |notification: &Notification| {
-            notification.method == "$/progress"
-                && notification.params["token"] == json!("dmls/startup-index")
-                && notification.params["value"]["kind"] == json!("end")
-        };
-        loop {
-            if let Some(position) = self.notifications.iter().position(is_end) {
-                self.notifications.remove(position);
-                return;
-            }
-            let message = self
-                .client
-                .as_ref()
-                .expect("client connection closed")
-                .receiver
-                .recv_timeout(Duration::from_secs(10))
-                .expect("startup progress before timeout");
-            match message {
-                Message::Notification(notification) => self.notifications.push(notification),
-                Message::Request(request) => self.server_requests.push(request),
-                other => panic!("unexpected message while waiting for startup: {other:?}"),
-            }
-        }
-    }
-
-    fn initialize(&mut self, params: Value) -> Value {
-        let response = self.request("initialize", params);
-        assert!(
-            response.error.is_none(),
-            "initialize failed: {:?}",
-            response.error
-        );
-        self.notify("initialized", json!({}));
-        response.result.expect("initialize result")
-    }
-
-    fn flush_server(&mut self) {
-        let response = self.request("workspace/symbol", json!({ "query": "" }));
-        assert!(
-            response.error.is_none(),
-            "server flush request failed: {:?}",
-            response.error
-        );
-    }
-
-    /// Pumps messages until a buffered server-initiated request with `method`
-    /// is seen, removing and returning `true`; returns `false` if none arrives
-    /// within a short window (the in-memory pair delivers immediately, so a
-    /// miss reliably means the server never sent it).
-    fn wait_for_server_request(&mut self, method: &str) -> bool {
-        self.take_server_request(method).is_some()
-    }
-
-    /// Like [`wait_for_server_request`], but returns the matched `Request` so a
-    /// caller can inspect its `id` (e.g. proving two refreshes carry distinct
-    /// request ids); `None` on the same short-window miss.
-    fn take_server_request(&mut self, method: &str) -> Option<Request> {
-        loop {
-            if let Some(position) = self
-                .server_requests
-                .iter()
-                .position(|request| request.method == method)
-            {
-                return Some(self.server_requests.remove(position));
-            }
-            match self
-                .client
-                .as_ref()
-                .expect("client connection closed")
-                .receiver
-                .recv_timeout(Duration::from_secs(1))
-            {
-                Ok(Message::Request(request)) => self.server_requests.push(request),
-                Ok(Message::Notification(notification)) => self.notifications.push(notification),
-                Ok(Message::Response(_)) => {}
-                Err(_) => return None,
-            }
-        }
-    }
-
-    /// Sends a client → server response, e.g. answering a server-initiated
-    /// `workspace/semanticTokens/refresh` so it routes through the loop's
-    /// `Message::Response` arm and into the `RefreshLedger`.
-    fn respond(&self, response: Response) {
-        self.client
-            .as_ref()
-            .expect("client connection closed")
-            .sender
-            .send(Message::Response(response))
-            .expect("send response");
-    }
-
-    fn shutdown(mut self) {
-        let response = self.request("shutdown", Value::Null);
-        assert!(
-            response.error.is_none(),
-            "shutdown failed: {:?}",
-            response.error
-        );
-        self.notify("exit", Value::Null);
-        let outcome = self
-            .server_outcome
-            .recv_timeout(Duration::from_secs(10))
-            .expect("server thread finished");
-        assert_eq!(outcome, Ok(()), "server exited with error");
-        self.client.take();
-        self.server_thread
-            .take()
-            .expect("server thread already joined")
-            .join()
-            .expect("server thread panicked");
-    }
-}
-
-impl Drop for ClientFixture {
-    fn drop(&mut self) {
-        let Some(server_thread) = self.server_thread.take() else {
-            return;
-        };
-        if let Some(client) = self.client.as_ref() {
-            let _ = client.sender.send(Message::Notification(Notification::new(
-                "exit".to_string(),
-                Value::Null,
-            )));
-        }
-        self.client.take();
-        server_thread.join().expect("server thread panicked");
-    }
-}
 
 fn neovim_like_initialize_params(root: &std::path::Path) -> Value {
     let root_uri = url::Url::from_directory_path(root).unwrap();
@@ -298,14 +40,14 @@ fn watched_initialize_params(root: &std::path::Path) -> Value {
 
 #[test]
 fn initialize_open_change_shutdown() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(
         workspace.path().join(".dmls.toml"),
         "[diagnostics]\ndebounce_ms = 150\n",
     )
     .unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     let result = fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     // Negotiation: first client-offered encoding DMLS supports.
@@ -392,7 +134,8 @@ fn initialize_open_change_shutdown() {
 
 #[test]
 fn default_negotiation_is_utf16() {
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     let result = fixture.initialize(json!({
         "processId": null,
         "capabilities": {}
@@ -404,7 +147,7 @@ fn default_negotiation_is_utf16() {
 const DOC_A: &str = "---\ntitle: A\n---\n\n# Overview\n\nSee [top](#overview) and [b](b.md#target) and [missing](nope.md).\n\n## Details\n\n- one\n- two\n";
 const DOC_B: &str = "# Target\n";
 
-fn open(fixture: &ClientFixture, uri: &str, text: &str) {
+fn open(fixture: &LspFixture<'_>, uri: &str, text: &str) {
     fixture.notify(
         "textDocument/didOpen",
         json!({
@@ -420,7 +163,7 @@ fn open(fixture: &ClientFixture, uri: &str, text: &str) {
 
 #[test]
 fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let sidecar_path = workspace.path().join("schema.yaml");
     let document_path = workspace.path().join("doc.md");
     let bare_sidecar = "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n";
@@ -429,7 +172,7 @@ fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
     std::fs::write(&sidecar_path, bare_sidecar).unwrap();
     std::fs::write(&document_path, document).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let document_uri = url::Url::from_file_path(&document_path).unwrap();
     let sidecar_uri = url::Url::from_file_path(&sidecar_path).unwrap();
@@ -513,7 +256,7 @@ fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
 
 #[test]
 fn bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let bare_path = workspace.path().join("bare.yaml");
     let raw_path = workspace.path().join("raw.yaml");
     let union_path = workspace.path().join("union.md");
@@ -528,7 +271,7 @@ fn bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema() 
     std::fs::write(&union_path, union_document).unwrap();
     std::fs::write(&raw_document_path, raw_document).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let union_uri = url::Url::from_file_path(&union_path).unwrap();
     open(&fixture, union_uri.as_str(), union_document);
@@ -560,7 +303,7 @@ fn bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema() 
 /// Requests `textDocument/hover` at `(line, character)` and returns the rendered
 /// Markdown body (empty string on a null hover). Collapses the request +
 /// `contents.value` extraction that hover assertions would otherwise repeat.
-fn hover_markup(fixture: &mut ClientFixture, uri: &str, line: u32, character: u32) -> String {
+fn hover_markup(fixture: &mut LspFixture<'_>, uri: &str, line: u32, character: u32) -> String {
     let hover = fixture
         .request(
             "textDocument/hover",
@@ -579,11 +322,11 @@ fn hover_markup(fixture: &mut ClientFixture, uri: &str, line: u32, character: u3
 
 #[test]
 fn layer0_provider_round_trips() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("a.md"), DOC_A).unwrap();
     std::fs::write(workspace.path().join("b.md"), DOC_B).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let a_uri = url::Url::from_file_path(workspace.path().join("a.md")).unwrap();
@@ -706,8 +449,8 @@ fn layer0_provider_round_trips() {
 
 #[test]
 fn broken_link_diagnostic_updates_on_edit() {
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("notes.md")).unwrap();
@@ -750,7 +493,7 @@ fn server_rescan_fallback_tracks_unopened_files_on_save() {
     // client (Neovim-on-Linux shape — no reliable file watcher) must still see
     // an unopened file's create/delete. Its only trigger is a save, so a
     // `didSave` drives a workspace rescan that reconciles the graph.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let a_path = workspace.path().join("a.md");
     let b_path = workspace.path().join("b.md");
     let a_text = "# A\n\n[to b](b.md)\n";
@@ -764,7 +507,7 @@ fn server_rescan_fallback_tracks_unopened_files_on_save() {
     let mut init = neovim_like_initialize_params(workspace.path());
     init["capabilities"]["window"] = json!({ "workDoneProgress": true });
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(init);
     fixture.wait_for_startup_complete();
 
@@ -812,7 +555,7 @@ fn server_rescan_fallback_tracks_unopened_files_on_save() {
 
 #[test]
 fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let schemas = workspace.path().join("schemas");
     std::fs::create_dir(&schemas).unwrap();
     std::fs::write(
@@ -831,7 +574,7 @@ fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
     std::fs::write(&payload_path, payload).unwrap();
     std::fs::write(&document_path, document).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let envelope_uri = url::Url::from_file_path(&envelope_path).unwrap();
     let document_uri = url::Url::from_file_path(&document_path).unwrap();
@@ -893,7 +636,7 @@ fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
 }
 
 fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let schemas = workspace.path().join("schemas");
     std::fs::create_dir(&schemas).unwrap();
     std::fs::write(
@@ -912,7 +655,7 @@ fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
     std::fs::write(&payload_path, payload).unwrap();
     std::fs::write(&document_path, document).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     let init = if client_watched {
         watched_initialize_params(workspace.path())
     } else {
@@ -996,7 +739,7 @@ fn client_watcher_publishes_and_clears_unopened_trigger_envelope_diagnostic() {
 
 #[test]
 fn repairing_trigger_payload_clears_open_envelope_immediately() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let schemas = workspace.path().join("schemas");
     std::fs::create_dir(&schemas).unwrap();
     let envelope_path = schemas.join("prompt.trigger.yaml");
@@ -1008,7 +751,7 @@ fn repairing_trigger_payload_clears_open_envelope_immediately() {
     std::fs::write(&envelope_path, envelope).unwrap();
     std::fs::write(&document_path, document).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let envelope_uri = url::Url::from_file_path(&envelope_path).unwrap();
     let document_uri = url::Url::from_file_path(&document_path).unwrap();
@@ -1047,7 +790,7 @@ fn repairing_trigger_payload_clears_open_envelope_immediately() {
 }
 
 fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let schemas = workspace.path().join("schemas");
     std::fs::create_dir(&schemas).unwrap();
     let envelope_a_path = schemas.join("a.trigger.yaml");
@@ -1063,7 +806,7 @@ fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
     std::fs::write(&payload_b_path, "$schema:\n  beta: string\n").unwrap();
     std::fs::write(&document_path, document).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let envelope_a_uri = url::Url::from_file_path(&envelope_a_path).unwrap();
     let envelope_b_uri = url::Url::from_file_path(&envelope_b_path).unwrap();
@@ -1131,14 +874,14 @@ fn trigger_failure_transfer_republishes_open_envelope_for_either_open_order() {
 
 #[test]
 fn wiki_link_navigation_diagnostics_and_completion() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let notes = workspace.path().join("notes");
     std::fs::create_dir_all(&notes).unwrap();
     std::fs::write(notes.join("Target.md"), "# Target\n\n## Section\n").unwrap();
     let source = "# Source\n\n[[Target]] and [[Target#Section]] and [[No Such Note]]\n";
     std::fs::write(notes.join("Source.md"), source).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let source_uri = url::Url::from_file_path(notes.join("Source.md")).unwrap();
@@ -1219,7 +962,7 @@ fn config_reload_reindexes_wiki_roots() {
     // rebuild the wiki resolution universe and re-publish diagnostics without a
     // server restart: a link that resolves under the default roots becomes
     // unresolved once the root is narrowed.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let notes = workspace.path().join("notes");
     std::fs::create_dir_all(&notes).unwrap();
     std::fs::write(notes.join("Target.md"), "# Target\n").unwrap();
@@ -1228,7 +971,7 @@ fn config_reload_reindexes_wiki_roots() {
     let source = "# Source\n\n[[/notes/Target]]\n";
     std::fs::write(notes.join("Source.md"), source).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let source_uri = url::Url::from_file_path(notes.join("Source.md")).unwrap();
@@ -1272,10 +1015,10 @@ const SCHEMA_DOC: &str = "---\n$schema:\n  title: string(required)\n  status: en
 
 #[test]
 fn frontmatter_schema_intelligence() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), SCHEMA_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1356,12 +1099,12 @@ const NESTED_SCHEMA_DOC: &str = "---\n$schema:\n  settings:\n    mode: enum(dev,
 
 #[test]
 fn frontmatter_nested_schema_intelligence() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), NESTED_SCHEMA_DOC).unwrap();
     // A sibling document so the nested `file(...)` value completion has a target.
     std::fs::write(workspace.path().join("other.md"), "# Other\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1459,12 +1202,12 @@ const FILE_NAV_DOC: &str = "---\n$schema:\n  home: file\n  settings:\n    doc: f
 
 #[test]
 fn frontmatter_nested_file_navigation() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), FILE_NAV_DOC).unwrap();
     std::fs::write(workspace.path().join("top.md"), "# Top\n").unwrap();
     std::fs::write(workspace.path().join("nested.md"), "# Nested\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1549,12 +1292,12 @@ const EXTENSIONLESS_FILE_DOC: &str =
 
 #[test]
 fn frontmatter_extensionless_file_navigation() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), EXTENSIONLESS_FILE_DOC).unwrap();
     // The extensionless target must exist so resolution has something to reach.
     std::fs::write(workspace.path().join("LICENSE"), "All rights reserved.\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1618,12 +1361,12 @@ const UNION_VALUE_DOC: &str =
 
 #[test]
 fn frontmatter_union_value_completion() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), UNION_VALUE_DOC).unwrap();
     // A sibling document so the `file(...)` arm's value completion has a target.
     std::fs::write(workspace.path().join("other.md"), "# Other\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1661,11 +1404,11 @@ const UNION_FILE_NAV_DOC: &str =
 
 #[test]
 fn frontmatter_union_file_navigation() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), UNION_FILE_NAV_DOC).unwrap();
     std::fs::write(workspace.path().join("top.md"), "# Top\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1720,11 +1463,11 @@ const UNION_NESTED_DOC: &str = "---\n$schema:\n  settings:\n    - string\n    - 
 
 #[test]
 fn frontmatter_union_nested_schema_intelligence() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), UNION_NESTED_DOC).unwrap();
     std::fs::write(workspace.path().join("nested.md"), "# Nested\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1820,7 +1563,7 @@ fn frontmatter_union_nested_schema_intelligence() {
 fn claudine_extension_is_pure_config() {
     // Criterion 6: a Claudine prompt activates a schema baseline through
     // configuration alone — no Claudine-specific code path exists in DMLS.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(
         workspace.path().join(".dmls.toml"),
         "[schema.extensions.claudine]\npath = \"claudine.yaml\"\nglobs = [\".claude/**\"]\n",
@@ -1836,7 +1579,7 @@ fn claudine_extension_is_pure_config() {
     let prompt = "---\nprovider: bogus\n---\n\n# Prompt\n";
     std::fs::write(claude_dir.join("prompt.md"), prompt).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(claude_dir.join("prompt.md")).unwrap();
@@ -1878,7 +1621,8 @@ fn claudine_extension_is_pure_config() {
 
 #[test]
 fn cancelled_request_answers_request_cancelled() {
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(json!({ "processId": null, "capabilities": {} }));
 
     // A cancellation that beats its request: the router's ledger answers
@@ -1901,11 +1645,11 @@ const INTRO_DOC: &str = "# Intro\n\nWelcome.\n";
 
 #[test]
 fn dsl_overlay_navigation_hover_and_diagnostics() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("guide.md"), DSL_DOC).unwrap();
     std::fs::write(workspace.path().join("intro.md"), INTRO_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let guide_uri = url::Url::from_file_path(workspace.path().join("guide.md")).unwrap();
@@ -1993,11 +1737,11 @@ fn dsl_overlay_navigation_hover_and_diagnostics() {
 /// Compose-parity: a directive-name completion after `::` offers the catalog.
 #[test]
 fn dsl_directive_name_completion() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "# Doc\n\n::fi\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -2031,11 +1775,11 @@ const VALID_DSL_DOC: &str = "---\ntitle: Guide\n---\n\n# Guide\n\n::file ./intro
 
 #[test]
 fn dsl_valid_document_has_no_dsl_diagnostics() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("guide.md"), VALID_DSL_DOC).unwrap();
     std::fs::write(workspace.path().join("intro.md"), INTRO_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let guide_uri = url::Url::from_file_path(workspace.path().join("guide.md")).unwrap();
     let intro_uri = url::Url::from_file_path(workspace.path().join("intro.md")).unwrap();
@@ -2072,10 +1816,10 @@ const SCHEMA_PROPERTY_DOC: &str = "---\ntitle: Review\n$schema:\n  spec: file(re
 
 #[test]
 fn schema_declared_property_and_json5_mermaid_have_no_dsl_diagnostics() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("review.md"), SCHEMA_PROPERTY_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("review.md")).unwrap();
     open(&fixture, uri.as_str(), SCHEMA_PROPERTY_DOC);
@@ -2133,10 +1877,10 @@ const SHELL_BLOCK_DOC: &str = "---\ntitle: Shell\n---\n\n# Shell\n\n::shell-bloc
 
 #[test]
 fn dsl_shell_block_body_disallowed_command_is_diagnosed() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), SHELL_BLOCK_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), SHELL_BLOCK_DOC);
@@ -2164,10 +1908,10 @@ fn dsl_shell_block_body_disallowed_command_is_diagnosed() {
 
 #[test]
 fn dsl_shell_block_body_hover_shows_policy_verdict() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), SHELL_BLOCK_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), SHELL_BLOCK_DOC);
@@ -2204,10 +1948,10 @@ const BENIGN_SHELL_BLOCK_DOC: &str =
 
 #[test]
 fn dsl_shell_block_benign_body_has_no_security_diagnostic() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), BENIGN_SHELL_BLOCK_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), BENIGN_SHELL_BLOCK_DOC);
@@ -2233,10 +1977,10 @@ const QUOTED_SHELL_BLOCK_DOC: &str =
 
 #[test]
 fn dsl_quoted_shell_block_body_disallowed_command_is_diagnosed() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), QUOTED_SHELL_BLOCK_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), QUOTED_SHELL_BLOCK_DOC);
@@ -2330,8 +2074,8 @@ fn collect_edit_uris(edit: &Value) -> Vec<String> {
 
 #[test]
 fn formatting_is_byte_equivalent_to_library_cleanup() {
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
 
     let doc_uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -2362,10 +2106,10 @@ fn formatting_is_byte_equivalent_to_library_cleanup() {
 
 #[test]
 fn code_action_creates_missing_wiki_note() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("note.md"), "See [[NewNote]].\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
 
     let note_uri = url::Url::from_file_path(workspace.path().join("note.md")).unwrap();
@@ -2416,11 +2160,11 @@ const RENAME_DOC_B: &str = "See [[doc_a#Overview]].\n";
 
 #[test]
 fn heading_rename_rewrites_references() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc_a.md"), RENAME_DOC_A).unwrap();
     std::fs::write(workspace.path().join("doc_b.md"), RENAME_DOC_B).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
 
     let a_uri = url::Url::from_file_path(workspace.path().join("doc_a.md")).unwrap();
@@ -2469,11 +2213,11 @@ fn heading_rename_rewrites_references() {
 
 #[test]
 fn rename_refuses_ambiguous_heading() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let source = "# Same\n\ntext\n\n# Same\n";
     std::fs::write(workspace.path().join("dup.md"), source).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("dup.md")).unwrap();
@@ -2508,11 +2252,11 @@ fn rename_refuses_ambiguous_heading() {
 
 #[test]
 fn will_rename_files_updates_and_refuses() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("note1.md"), "See [[note2]].\n").unwrap();
     std::fs::write(workspace.path().join("note2.md"), "# Note Two\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
 
     let note1 = url::Url::from_file_path(workspace.path().join("note1.md")).unwrap();
@@ -2557,7 +2301,8 @@ fn will_rename_files_updates_and_refuses() {
 
 #[test]
 fn initialize_advertises_period_completion_trigger() {
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     let result = fixture.initialize(json!({ "processId": null, "capabilities": {} }));
 
     // D3: `.` joins the trigger set without dropping any existing trigger.
@@ -2581,10 +2326,10 @@ const CTX_HOVER_DOC: &str = "---\nctx:\n  packages: []\n---\n\n# Doc\n\nList: {{
 
 #[test]
 fn interpolation_ctx_hover_matches_frontmatter_block() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), CTX_HOVER_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), CTX_HOVER_DOC);
@@ -2660,10 +2405,10 @@ const INDEX_CTX_DOC: &str =
 
 #[test]
 fn interpolation_ctx_hover_surfaces_through_index_access() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), INDEX_CTX_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), INDEX_CTX_DOC);
@@ -2715,10 +2460,10 @@ const ASTRAL_CTX_COMPLETION_DOC: &str = "# Doc\n\n💡 {{ ctx.pa\n";
 
 #[test]
 fn ctx_completion_shape_under_utf16_astral_prefix() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), ASTRAL_CTX_COMPLETION_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     // VS Code-like client: offers UTF-16 only, so positions are UTF-16 columns.
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -2768,10 +2513,10 @@ const FUNCTION_COMPLETION_DOC: &str = "# Doc\n\nValue: {{ len\n";
 
 #[test]
 fn function_completion_shape() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), FUNCTION_COMPLETION_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), FUNCTION_COMPLETION_DOC);
@@ -2822,10 +2567,10 @@ const FUNCTION_HOVER_DOC: &str = "# Doc\n\nA: {{ as_csv(items) }} and {{ mystery
 
 #[test]
 fn function_call_hover_known_and_unknown() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), FUNCTION_HOVER_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), FUNCTION_HOVER_DOC);
@@ -2973,11 +2718,11 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
         function_positions.push((*function, hover_line, completion_line, completion_character));
     }
 
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("doc.md");
     std::fs::write(&path, &text).unwrap();
     let uri = url::Url::from_file_path(&path).unwrap();
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), &text);
 
@@ -3077,10 +2822,10 @@ const PROSE_PERIOD_DOC: &str = "# Doc\n\nplain prose ctx.\n";
 
 #[test]
 fn period_trigger_outside_interpolation_offers_nothing() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), PROSE_PERIOD_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), PROSE_PERIOD_DOC);
@@ -3197,7 +2942,7 @@ fn decode_tokens(result: &Value) -> Vec<Tok> {
     out
 }
 
-fn semantic_full(fixture: &mut ClientFixture, uri: &str) -> Vec<Tok> {
+fn semantic_full(fixture: &mut LspFixture<'_>, uri: &str) -> Vec<Tok> {
     let result = fixture
         .request(
             "textDocument/semanticTokens/full",
@@ -3209,7 +2954,7 @@ fn semantic_full(fixture: &mut ClientFixture, uri: &str) -> Vec<Tok> {
 }
 
 fn semantic_range(
-    fixture: &mut ClientFixture,
+    fixture: &mut LspFixture<'_>,
     uri: &str,
     start: (u32, u32),
     end: (u32, u32),
@@ -3253,9 +2998,9 @@ fn semantic_tokens_capability_is_gated_on_client_support() {
     // Criterion 6: only a client advertising `textDocument.semanticTokens` sees
     // the provider capability, and it publishes the frozen V1 legend with full +
     // range and no delta support.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
 
-    let mut capable = ClientFixture::start();
+    let mut capable = LspFixture::start(&workspace);
     let result = capable.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let provider = result["capabilities"]["semanticTokensProvider"].clone();
     assert_eq!(
@@ -3297,7 +3042,7 @@ fn semantic_tokens_capability_is_gated_on_client_support() {
 
     // An incapable client (default Neovim params carry no `semanticTokens`
     // capability) sees no provider entry at all.
-    let mut incapable = ClientFixture::start();
+    let mut incapable = LspFixture::start(&workspace);
     let result = incapable.initialize(neovim_like_initialize_params(workspace.path()));
     assert!(
         result["capabilities"]["semanticTokensProvider"].is_null(),
@@ -3310,11 +3055,11 @@ fn semantic_tokens_capability_is_gated_on_client_support() {
 fn semantic_tokens_full_interpolations_ordinary_inert_and_multiline() {
     // Criteria 1 and 4: an ordinary `{{ }}` interpolation, a `{{{ }}}` inert
     // literal, and a multi-line interpolation split into one token per line.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "{{ title }} and {{{ verbatim }}}\n{{ a\nb }}\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3338,11 +3083,11 @@ fn semantic_tokens_full_interpolations_ordinary_inert_and_multiline() {
 fn semantic_tokens_full_directive_token_classes() {
     // Criterion 2: keyword, structured target, option key, and option value, plus
     // the `closer` modifier on a structural closer.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "::file ./doc.md when=env.DEBUG\n::end-block\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3367,12 +3112,12 @@ fn semantic_tokens_full_directive_token_classes() {
 fn semantic_tokens_full_wiki_segments_identical_for_resolved_and_unresolved() {
     // Criterion 3: bracket/separator machinery is `macro.wiki`, inner segments are
     // `string.wiki`, and the token shape is identical whether the target resolves.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("Target.md"), "# Target\n").unwrap();
     let text = "[[doc#H|Alias]]\n\n[[Target]] and [[Missing]]\n";
     std::fs::write(workspace.path().join("Source.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("Source.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3429,12 +3174,12 @@ fn semantic_tokens_full_wiki_segments_identical_for_resolved_and_unresolved() {
 fn semantic_tokens_encoding_utf8_vs_utf16_on_non_ascii() {
     // Criterion 4: the same interpolation lands at a different column in UTF-8 vs
     // UTF-16 because the preceding `é` is two bytes but one UTF-16 unit.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "é {{ x }}\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
 
-    let mut utf8 = ClientFixture::start();
+    let mut utf8 = LspFixture::start(&workspace);
     utf8.initialize(semantic_capable_params(workspace.path(), "utf-8", false));
     open(&utf8, uri.as_str(), text);
     let utf8_tokens = semantic_full(&mut utf8, uri.as_str());
@@ -3442,7 +3187,7 @@ fn semantic_tokens_encoding_utf8_vs_utf16_on_non_ascii() {
     assert_eq!(utf8_tokens, vec![tok(0, 3, 7, TT_MACRO, TM_INTERPOLATION)]);
     utf8.shutdown();
 
-    let mut utf16 = ClientFixture::start();
+    let mut utf16 = LspFixture::start(&workspace);
     utf16.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     open(&utf16, uri.as_str(), text);
     let utf16_tokens = semantic_full(&mut utf16, uri.as_str());
@@ -3455,11 +3200,11 @@ fn semantic_tokens_encoding_utf8_vs_utf16_on_non_ascii() {
 fn semantic_tokens_crlf_multiline_splits_per_line() {
     // Criterion 4: a multi-line interpolation in a CRLF document splits per line,
     // excluding the line terminators.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "{{ a\r\nb }}\r\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3482,11 +3227,11 @@ fn semantic_tokens_range_is_full_intersected() {
     // Criterion 9: a range response is exactly the full response intersected and
     // clipped to the requested half-open range — including a boundary inside a
     // token and a range that crosses a line ending.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "{{aaa}} {{bbb}}\nzz {{ccc}}\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3531,11 +3276,11 @@ fn semantic_tokens_family_precedence_full_and_range() {
     // Criterion 10: an interpolation inside a directive option value proves F1
     // owns the `{{ }}` bytes and clips the F2 string around it, and the wiki
     // separators exercise structural-subtoken precedence — for both requests.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "::file ./z.md when=\"{{ e }}\"\nSee [[doc#H]] here.\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3579,11 +3324,11 @@ fn semantic_tokens_master_switch_toggles_and_requests_refresh() {
     // Criterion 7: a runtime `true -> false -> true` master-switch transition
     // suppresses and restores emission without a restart, requesting a refresh
     // each time the capable client honors one.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "Body {{ title }} here.\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", true));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3626,11 +3371,11 @@ fn semantic_tokens_two_configs_issue_distinct_refreshes_routed_through_loop() {
     // `workspace/semanticTokens/refresh` request ids, and routing a success and
     // an error `Message::Response` back into the `RefreshLedger` must neither
     // terminate nor disturb the session.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "Body {{ title }} here.\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", true));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3687,11 +3432,11 @@ fn semantic_tokens_two_configs_issue_distinct_refreshes_routed_through_loop() {
 fn semantic_tokens_config_applies_without_refresh_capability() {
     // Criterion 7: a client that does not honor refresh still sees the new config
     // on every later request, and the server sends no refresh it cannot use.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "Body {{ title }} here.\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3713,7 +3458,7 @@ fn semantic_tokens_config_applies_without_refresh_capability() {
     );
     assert!(
         !fixture
-            .server_requests
+            .buffered_server_requests()
             .iter()
             .any(|request| request.method == "workspace/semanticTokens/refresh"),
         "a refresh must not be sent to a client that does not support it"
@@ -3726,11 +3471,11 @@ fn semantic_tokens_config_applies_without_refresh_capability() {
 fn semantic_tokens_wiki_enable_suppresses_only_f4() {
     // Criterion 7: `wiki.enable = false` drops F4 wiki tokens while leaving F1
     // interpolation tokens untouched.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "{{ a }} [[doc]]\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3763,12 +3508,12 @@ fn semantic_tokens_wiki_enable_suppresses_only_f4() {
 
 #[test]
 fn meta_schema_phase1_schema_hover_uses_nominal_type() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "---\n$schema:\n  title: string\ntitle: Hello\n---\nBody\n";
     let path = workspace.path().join("doc.md");
     std::fs::write(&path, text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3790,7 +3535,7 @@ fn meta_schema_phase1_schema_hover_uses_nominal_type() {
 
 #[test]
 fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let valid = concat!(
         "---\n",
         "$schema:\n",
@@ -3819,7 +3564,7 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
     let invalid_path = workspace.path().join("invalid.md");
     std::fs::write(&invalid_path, invalid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let valid_uri = url::Url::from_file_path(valid_path).unwrap();
@@ -3892,7 +3637,7 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
 /// below offered completion but no hover.
 #[test]
 fn meta_schema_hover_covers_entries_nested_under_semantic_owners() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
 
     // (file, text, hover line, hover character, expected `Declares:` value)
     let cases = [
@@ -3926,7 +3671,7 @@ fn meta_schema_hover_covers_entries_nested_under_semantic_owners() {
         ),
     ];
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     for (name, text, line, character, declares) in cases {
         let path = workspace.path().join(name);
@@ -3956,7 +3701,7 @@ fn meta_schema_hover_covers_entries_nested_under_semantic_owners() {
 /// so `<string>` and friends parsed and had spans but never became hoverable.
 #[test]
 fn meta_schema_hover_covers_pattern_keys_inline_and_standalone() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
 
     const BODY: &str = concat!(
         "  \"<string>\": string(required)\n",
@@ -3975,7 +3720,7 @@ fn meta_schema_hover_covers_pattern_keys_inline_and_standalone() {
         ("tagged.yaml", format!("kind: schema\ntypes:\n{BODY}"), 2),
     ];
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let inline_path = workspace.path().join("inline.md");
@@ -4026,12 +3771,12 @@ fn meta_schema_hover_covers_pattern_keys_inline_and_standalone() {
 /// nothing but an autolink and must still hover as one.
 #[test]
 fn markdown_autolink_hover_survives_standalone_schema_arbitration() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "# Doc\n\n<starting::x-509>\n";
     let path = workspace.path().join("doc.md");
     std::fs::write(&path, text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -4045,7 +3790,7 @@ fn markdown_autolink_hover_survives_standalone_schema_arbitration() {
 
 #[test]
 fn meta_schema_phase7_standalone_pure_and_tagged_completion() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let cases = [
         (
             "pure.yaml",
@@ -4070,7 +3815,7 @@ fn meta_schema_phase7_standalone_pure_and_tagged_completion() {
         ),
     ];
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     for (name, text, line, character, expected) in cases {
         let path = workspace.path().join(name);
@@ -4115,8 +3860,8 @@ fn meta_schema_standalone_scalar_reference_completion() {
         ("complete.yaml", "$schema: ./schema.yaml\n", 22),
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     for (name, body, character) in cases {
         for crlf in [false, true] {
@@ -4170,13 +3915,13 @@ fn meta_schema_standalone_scalar_reference_completion() {
 /// form relies on.
 #[test]
 fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let valid = "$schema: ./schema.yaml\n";
     let malformed = "$schema: ./schema.yaml\n\tbad\n";
     let path = workspace.path().join("scalar-reference.yaml");
     std::fs::write(&path, valid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), valid);
@@ -4221,13 +3966,13 @@ fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() 
 
 #[test]
 fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnostic() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let valid = "$schema:\n  title: string\n";
     let malformed = "$schema:\n  title: str\n";
     let path = workspace.path().join("schema.yaml");
     std::fs::write(&path, valid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), valid);
@@ -4275,13 +4020,13 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
 
 #[test]
 fn meta_schema_explicit_mapping_pairs_retain_last_good_assistance() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let valid = "? kind\n: schema\n? types\n:\n  title: string\n";
     let malformed = "? kind\n: schema\n? types\n:\n  title: nope\n";
     let path = workspace.path().join("explicit-mapping.yaml");
     std::fs::write(&path, valid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), valid);
@@ -4329,7 +4074,7 @@ fn meta_schema_explicit_mapping_pairs_retain_last_good_assistance() {
 
 #[test]
 fn meta_schema_compact_explicit_pair_union_keeps_schema_assistance() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let source = concat!(
         "kind: schema\n",
         "types:\n",
@@ -4341,7 +4086,7 @@ fn meta_schema_compact_explicit_pair_union_keeps_schema_assistance() {
     let path = workspace.path().join("compact-explicit-mapping.yaml");
     std::fs::write(&path, source).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), source);
@@ -4382,13 +4127,13 @@ fn meta_schema_compact_explicit_pair_union_keeps_schema_assistance() {
 /// serving the last-good model.
 #[test]
 fn meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let valid = "types:\n  title: string\nkind: schema\n";
     let malformed = "types:\n  title: foo-\"bar\nkind: schema\n";
     let path = workspace.path().join("types-first.yaml");
     std::fs::write(&path, valid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), valid);
@@ -4455,7 +4200,7 @@ fn meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit
 /// same source positions.
 #[test]
 fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let malformed = "description: foo{ \"bar\nkind: schema\ntypes:\n  title: nope\n";
     let poison_line_len = malformed.lines().next().unwrap().len();
     let valid = format!(
@@ -4465,7 +4210,7 @@ fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
     let path = workspace.path().join("block-plain-flow-indicator.yaml");
     std::fs::write(&path, &valid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), &valid);
@@ -4514,13 +4259,13 @@ fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
 /// mid-token even though whitespace follows it, so the quote remains inert.
 #[test]
 fn meta_schema_standalone_flow_types_first_retains_last_good_across_plain_quote_edit() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let valid = "{types: {title: string}, kind: schema}\n";
     let malformed = "{types: {title: foo- \"bar}, kind: schema}\n";
     let path = workspace.path().join("flow-types-first.yaml");
     std::fs::write(&path, valid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), valid);
@@ -4590,8 +4335,8 @@ fn meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit(
         ),
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     for (name, valid, malformed, hover_character) in cases {
@@ -4691,8 +4436,8 @@ fn meta_schema_standalone_flow_completion_locates_the_cursor_structurally() {
         ),
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     for (name, valid, malformed, character, label) in cases {
@@ -4742,7 +4487,7 @@ fn meta_schema_standalone_flow_completion_locates_the_cursor_structurally() {
 
 #[test]
 fn meta_schema_phase7_shipped_schema_provider_path() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let shipped =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas/darkmatter.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
@@ -4759,7 +4504,7 @@ fn meta_schema_phase7_shipped_schema_provider_path() {
         .and_then(|line| line.find("$schema"))
         .expect("shipped $schema column") as u32;
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), &text);
@@ -4774,14 +4519,14 @@ fn meta_schema_phase7_shipped_schema_provider_path() {
 
 #[test]
 fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let shipped =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas/darkmatter.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
     let path = workspace.path().join("darkmatter.yaml");
     std::fs::write(&path, &text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), &text);
@@ -4876,8 +4621,8 @@ fn meta_schema_completion_reads_parser_state_for_partially_authored_values() {
         ("utf8.md", "definition: enum(café)[](mi\n", 3, 27, "min"),
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     for (name, body, line, character, expected) in cases {
@@ -4982,8 +4727,8 @@ fn mixed_semantic_union_gates_the_specialized_diagnostic_on_whole_union_failure(
         ),
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let mut counter = 0usize;
@@ -5014,8 +4759,8 @@ fn mixed_semantic_union_gates_the_specialized_diagnostic_on_whole_union_failure(
 fn single_arm_semantic_type_keeps_its_specialized_diagnostic() {
     // The common non-union path is unchanged: one specialized diagnostic, and
     // the generic custom-keyword problem it replaces stays suppressed.
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let text = "---\n$schema:\n  value: type-definition\nvalue: string(nope)\n---\n\nbody\n";
@@ -5045,8 +4790,8 @@ fn single_arm_semantic_type_keeps_its_specialized_diagnostic() {
 fn mixed_semantic_union_completion_merges_sibling_arm_candidates() {
     // `[type-definition, enum(foo, bar)]` activates semantic authoring on one
     // arm; the enum arm's members must still reach the merged union list.
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     for semantic_first in [true, false] {
@@ -5171,8 +4916,8 @@ fn standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged() {
         "dm.schema.invalid_type_definition",
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     for (file, text, expected_code, offending) in cases {
         let path = workspace.path().join(file);
@@ -5259,8 +5004,8 @@ fn standalone_reference_declarations_match_the_shared_declaration_parser() {
         "dm.schema.invalid_type_definition",
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     for (file, text, offending) in cases {
         let path = workspace.path().join(file);
@@ -5380,7 +5125,7 @@ fn github_slug(heading: &str) -> String {
 /// therefore hand back an absolute `file://` URI instead.
 #[test]
 fn vocabulary_link_resolves_from_a_document_outside_the_topic_directory() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     install_topic_doc(workspace.path());
 
     // Deliberately nested, and nowhere near `darkmatter/docs/topics/`.
@@ -5389,7 +5134,7 @@ fn vocabulary_link_resolves_from_a_document_outside_the_topic_directory() {
     let text = "# Notes\n\nRecent work: {{ pr_list(5) }}\n";
     std::fs::write(&document, text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(&document).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -5464,12 +5209,12 @@ fn vocabulary_link_resolves_from_a_document_outside_the_topic_directory() {
 /// embedded in hover, so dropping the link costs the reader nothing.
 #[test]
 fn an_unshipped_topic_doc_yields_no_dead_link_on_either_surface() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let document = workspace.path().join("page.md");
     let text = "# Notes\n\nRecent work: {{ cicd_list(5) }}\n";
     std::fs::write(&document, text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(&document).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -5518,7 +5263,7 @@ fn an_unshipped_topic_doc_yields_no_dead_link_on_either_surface() {
 
 /// Requests `textDocument/completion` and returns the item labels.
 fn completion_labels(
-    fixture: &mut ClientFixture,
+    fixture: &mut LspFixture<'_>,
     uri: &str,
     line: u32,
     character: u32,
@@ -5556,7 +5301,7 @@ fn completion_labels(
 /// colliding with a real path separator.
 #[test]
 fn structural_paths_survive_quoted_and_punctuated_frontmatter_keys() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = concat!(
         "---\n",
         "\"$schema\":\n",
@@ -5577,7 +5322,7 @@ fn structural_paths_survive_quoted_and_punctuated_frontmatter_keys() {
     let path = workspace.path().join("punctuated.md");
     std::fs::write(&path, text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -5616,8 +5361,8 @@ fn structural_paths_survive_quoted_and_punctuated_frontmatter_keys() {
 /// implementation is where line-ending handling goes wrong.
 #[test]
 fn meta_schema_completion_owner_and_ancestors_come_from_the_ast() {
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     // (file stem, source, completion line, completion character, why)
@@ -5668,7 +5413,7 @@ fn meta_schema_completion_owner_and_ancestors_come_from_the_ast() {
 /// structurally owned instead of surrendering every one of them at once.
 #[test]
 fn malformed_buffer_retains_structural_ownership_of_untouched_keys() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let good = concat!(
         "---\n",
         "\"$schema\":\n",
@@ -5679,7 +5424,7 @@ fn malformed_buffer_retains_structural_ownership_of_untouched_keys() {
     let path = workspace.path().join("last-good.md");
     std::fs::write(&path, good).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), good);
@@ -5723,8 +5468,8 @@ fn malformed_buffer_retains_structural_ownership_of_untouched_keys() {
 /// its scalar and `[]` sequence form, under LF and CRLF.
 #[test]
 fn meta_schema_completion_matches_complete_structural_pointers() {
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     // (file stem, source, line, character, expected label, why)
@@ -5826,8 +5571,8 @@ fn meta_schema_completion_matches_complete_structural_pointers() {
 /// leave them structurally owned rather than surrendering their activation.
 #[test]
 fn malformed_buffer_retains_nested_and_escaped_semantic_owners() {
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     // (file stem, source, line, character)
@@ -5914,8 +5659,8 @@ fn standalone_inner_definition_diagnostics_address_punctuated_keys() {
         ),
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     for (file, text, offending) in cases {
         let path = workspace.path().join(file);
@@ -5943,4 +5688,58 @@ fn standalone_inner_definition_diagnostics_address_punctuated_keys() {
     }
 
     fixture.shutdown();
+}
+
+// ── Session cleanup ownership (spec.md "Own network, process, and rendering
+// resources": bounded cleanup on success, failure, and cancellation) ──
+
+/// A failing assertion must not detach the server worker: teardown runs during
+/// the unwind, waits for the worker within `common::SERVER_EXIT_BOUND`, and only
+/// then is the workspace released.
+///
+/// The proof is ordering, not liveness. The worker records — from its own
+/// thread, as the last thing it does — whether the workspace root still exists
+/// at the instant its body returns, and `LspWorkspace`'s drop records the
+/// deletion. A teardown that detached the worker instead of waiting for it
+/// would let the delete land first, so the recorded sequence, not merely the
+/// absence of a hang, is what distinguishes the two.
+///
+/// The 300 ms worker epilogue is what makes that distinction deterministic: an
+/// undelayed worker finishes so soon after the connection closes that a
+/// detaching teardown would usually still win the race by accident.
+#[test]
+fn server_worker_finishes_before_workspace_release_during_unwind() {
+    let workspace = LspWorkspace::new();
+    let observations = workspace.observations();
+
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut fixture =
+            LspFixture::start_with_worker_epilogue_delay(&workspace, Duration::from_millis(300));
+        fixture.initialize(neovim_like_initialize_params(workspace.path()));
+        panic!("simulate a failing assertion mid-session");
+    }));
+    assert!(outcome.is_err(), "the failure path must unwind");
+
+    // Everything above has dropped the fixture; the workspace is still alive
+    // here because the fixture borrowed it.
+    assert_eq!(
+        observations.events(),
+        vec![TeardownEvent::WorkerFinished {
+            workspace_present: true
+        }],
+        "the unwinding fixture must reap its server worker, and must observe the \
+         workspace still present when it does"
+    );
+
+    drop(workspace);
+    assert_eq!(
+        observations.events(),
+        vec![
+            TeardownEvent::WorkerFinished {
+                workspace_present: true
+            },
+            TeardownEvent::WorkspaceReleased,
+        ],
+        "the workspace must be deleted strictly after the worker finished"
+    );
 }
