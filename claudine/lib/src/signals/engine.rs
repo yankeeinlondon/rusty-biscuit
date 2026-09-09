@@ -186,11 +186,17 @@ impl SignalEngine {
     pub fn observe_provider_version(&mut self, version: &str) {
         match version::parse(version) {
             Some(parsed) => {
-                debug!(version, "provider version observed; narrowing record selection");
+                debug!(
+                    version,
+                    "provider version observed; narrowing record selection"
+                );
                 self.observed_version = Some(parsed);
             }
             None => {
-                debug!(version, "provider version unparsable; staying in union mode");
+                debug!(
+                    version,
+                    "provider version unparsable; staying in union mode"
+                );
             }
         }
     }

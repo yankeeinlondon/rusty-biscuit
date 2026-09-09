@@ -80,7 +80,10 @@ fn composition_error_projects_diagnostic_facets_with_legacy_aliases() {
     // of the faceted contract: `kind` mirrors `category`, `variant` mirrors
     // `code` (spec success criteria), not the internal Rust type/arm names.
     assert_eq!(value.get("kind"), Some(&json!("composition")));
-    assert_eq!(value.get("variant"), Some(&json!("composition.schema_load")));
+    assert_eq!(
+        value.get("variant"),
+        Some(&json!("composition.schema_load"))
+    );
     assert!(value.get("msg").is_some());
     // New typed facets project alongside.
     assert_eq!(value.get("code"), Some(&json!("composition.schema_load")));
@@ -157,8 +160,14 @@ fn harness_error_projects_diagnostic_facets() {
     let value = info.to_value();
     // `kind`/`variant` are the deprecated aliases of `category`/`code`.
     assert_eq!(value.get("kind"), Some(&json!("composition")));
-    assert_eq!(value.get("variant"), Some(&json!("composition.shell_expansion")));
-    assert_eq!(value.get("code"), Some(&json!("composition.shell_expansion")));
+    assert_eq!(
+        value.get("variant"),
+        Some(&json!("composition.shell_expansion"))
+    );
+    assert_eq!(
+        value.get("code"),
+        Some(&json!("composition.shell_expansion"))
+    );
     assert_eq!(value.get("category"), Some(&json!("composition")));
     assert_eq!(value.get("disposition"), Some(&json!("correctable")));
     assert_eq!(value.get("origin"), Some(&json!("author")));
@@ -184,9 +193,10 @@ fn claudine_provider_error_projects_provider_facets() {
 #[test]
 fn claudine_io_error_projects_io_facets() {
     // A top-level Claudine io failure projects an `io.*` code.
-    let info = LifecycleErrorInfo::from_claudine_error(&ClaudineError::Io(
-        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
-    ));
+    let info = LifecycleErrorInfo::from_claudine_error(&ClaudineError::Io(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "denied",
+    )));
     let value = info.to_value();
     assert_eq!(value.get("code"), Some(&json!("io.permission_denied")));
     assert_eq!(value.get("category"), Some(&json!("io")));
@@ -268,9 +278,8 @@ fn action_failure_error_kind_projects_incomplete_subagent_facets() {
 fn severity_projects_for_classifiable_errors() {
     // Typed-Diagnostic path: a correctable composition error defaults to
     // `error` severity (catalog §1).
-    let value =
-        LifecycleErrorInfo::from_composition_error(&CompositionError::NoRunnableProviders)
-            .to_value();
+    let value = LifecycleErrorInfo::from_composition_error(&CompositionError::NoRunnableProviders)
+        .to_value();
     assert_eq!(value.get("severity"), Some(&json!("error")));
 
     // Label-only `from_code` path: a throttled cap defaults to `warning`.
@@ -309,9 +318,8 @@ fn transient_error_promotes_is_transient_only() {
 fn correctable_error_promotes_is_correctable_only() {
     // A composition error is `correctable`; its `detail` carries no cap
     // fields, so `reset_at`/`retry_after_ms` promote to `null`.
-    let value =
-        LifecycleErrorInfo::from_composition_error(&CompositionError::NoRunnableProviders)
-            .to_value();
+    let value = LifecycleErrorInfo::from_composition_error(&CompositionError::NoRunnableProviders)
+        .to_value();
     assert_eq!(value.get("disposition"), Some(&json!("correctable")));
     assert_eq!(value.get("is_correctable"), Some(&json!(true)));
     assert_eq!(value.get("is_transient"), Some(&json!(false)));
@@ -395,7 +403,10 @@ fn current_to_value_has_ctx_and_env() {
         env: json!({"HOME": "/tmp"}),
     };
     let value = current.to_value();
-    assert_eq!(value.get("ctx").unwrap().get("agent"), Some(&json!("claude")));
+    assert_eq!(
+        value.get("ctx").unwrap().get("agent"),
+        Some(&json!("claude"))
+    );
     assert_eq!(value.get("env").unwrap().get("HOME"), Some(&json!("/tmp")));
 }
 
@@ -410,7 +421,10 @@ fn state(fm: Value) -> darkmatter::markdown::compose::EffectiveState {
         .collect();
     EffectiveStateBuilder::new()
         .with_frontmatter(fm)
-        .with_context(ComposeContext::capture_for_content(std::path::Path::new("."), ""))
+        .with_context(ComposeContext::capture_for_content(
+            std::path::Path::new("."),
+            "",
+        ))
         .build()
         .unwrap()
 }
@@ -546,7 +560,10 @@ fn timing_from_instants_populates_document_ms_and_total_ms() {
     let total = timing.total_ms.expect("total_ms populated with run_start");
     assert!(doc >= 1, "document_ms is monotonic non-decreasing: {doc}");
     assert_eq!(doc, total, "document and run start coincide here");
-    assert!(timing.step_ms.is_none(), "step_ms stays None outside a sequence");
+    assert!(
+        timing.step_ms.is_none(),
+        "step_ms stays None outside a sequence"
+    );
 }
 
 #[test]
@@ -587,8 +604,7 @@ fn when_clause_reacts_to_env_changed_after_prepare() {
     let expr = parse(&format!("current.env.{key} == 'x'")).expect("parses");
 
     // Against the event-time snapshot, the guard fires (late binding).
-    let event_globals =
-        lifecycle_injected_globals(None, None, Some(&event_snapshot));
+    let event_globals = lifecycle_injected_globals(None, None, Some(&event_snapshot));
     let event_lookup = LayeredLookup::new(&base, &event_globals, None);
     let event_value = evaluate(&expr, &event_lookup).expect("evaluates");
     assert!(
@@ -598,8 +614,7 @@ fn when_clause_reacts_to_env_changed_after_prepare() {
 
     // Against the prepare-time snapshot, the same guard does NOT fire,
     // proving the reaction is to the late-bound value, not the prepare one.
-    let prepare_globals =
-        lifecycle_injected_globals(None, None, Some(&prepare_snapshot));
+    let prepare_globals = lifecycle_injected_globals(None, None, Some(&prepare_snapshot));
     let prepare_lookup = LayeredLookup::new(&base, &prepare_globals, None);
     let prepare_value = evaluate(&expr, &prepare_lookup).expect("evaluates");
     assert!(
@@ -625,8 +640,15 @@ fn err_msg_is_hygiened_for_a_hostile_action_failure() {
 
     assert!(!msg.is_empty());
     assert!(!msg.contains('\u{1b}'), "escape bytes survived: {msg:?}");
-    assert!(!msg.contains('\n') && !msg.contains('\r'), "not one line: {msg:?}");
-    assert!(msg.chars().count() <= 240, "over cap ({}): {msg:?}", msg.chars().count());
+    assert!(
+        !msg.contains('\n') && !msg.contains('\r'),
+        "not one line: {msg:?}"
+    );
+    assert!(
+        msg.chars().count() <= 240,
+        "over cap ({}): {msg:?}",
+        msg.chars().count()
+    );
     assert!(msg.contains("boom"), "headline lost: {msg:?}");
 }
 
@@ -638,9 +660,9 @@ fn every_err_msg_producer_is_single_line_escape_free_and_capped() {
     let cases: Vec<(&str, LifecycleErrorInfo)> = vec![
         (
             "claudine",
-            LifecycleErrorInfo::from_claudine_error(&ClaudineError::Io(
-                std::io::Error::other("disk full"),
-            )),
+            LifecycleErrorInfo::from_claudine_error(&ClaudineError::Io(std::io::Error::other(
+                "disk full",
+            ))),
         ),
         (
             "harness",
@@ -671,7 +693,11 @@ fn every_err_msg_producer_is_single_line_escape_free_and_capped() {
 
     for (name, info) in cases {
         assert!(!info.msg.is_empty(), "`{name}` produced an empty err.msg");
-        assert!(!info.msg.contains('\u{1b}'), "`{name}` leaked escapes: {:?}", info.msg);
+        assert!(
+            !info.msg.contains('\u{1b}'),
+            "`{name}` leaked escapes: {:?}",
+            info.msg
+        );
         assert!(
             !info.msg.contains('\n') && !info.msg.contains('\r'),
             "`{name}` is multi-line: {:?}",
@@ -709,7 +735,10 @@ fn provider_failure_message_precedence_survives_the_constructor() {
     assert_eq!(expected, "provider said no (attempt 3)");
 
     let info = LifecycleErrorInfo::from_action_failure("agent_failure", expected.clone());
-    assert_eq!(info.msg, expected, "the constructor perturbed the cascade's message");
+    assert_eq!(
+        info.msg, expected,
+        "the constructor perturbed the cascade's message"
+    );
 }
 
 /// A registered code must never project a *top-level* `null` detail, even on
@@ -750,7 +779,11 @@ fn err_cause_projects_one_level_of_registered_diagnostic() {
     // is the inner one and it has no registered cause below it.
     let value = LifecycleErrorInfo::from_composition_error(&wrapped).to_value();
     assert_eq!(value["code"], json!("composition.invalid_file_reference"));
-    assert_eq!(value["cause"], Value::Null, "a leaf must project a null cause");
+    assert_eq!(
+        value["cause"],
+        Value::Null,
+        "a leaf must project a null cause"
+    );
 
     // A semantic wrapper over a *registered* source projects that source.
     let err = CompositionError::InvalidFileReference {
@@ -802,12 +835,18 @@ fn from_error_or_action_prefers_facets_and_falls_back_to_the_verb() {
     let value = typed.to_value();
     assert_eq!(value["code"], json!("composition.invalid_file_reference"));
     // The deprecated aliases mirror the facets for a classifiable error.
-    assert_eq!(value["variant"], json!("composition.invalid_file_reference"));
+    assert_eq!(
+        value["variant"],
+        json!("composition.invalid_file_reference")
+    );
     assert_eq!(value["kind"], json!("composition"));
 
     let untyped =
         LifecycleErrorInfo::from_error_or_action("materialize", &std::io::Error::other("boom"));
-    assert!(untyped.snapshot.is_none(), "std::io::Error is not a Claudine diagnostic");
+    assert!(
+        untyped.snapshot.is_none(),
+        "std::io::Error is not a Claudine diagnostic"
+    );
     let value = untyped.to_value();
     assert_eq!(value["variant"], json!("materialize"));
     assert_eq!(value["kind"], json!("LifecycleAction"));

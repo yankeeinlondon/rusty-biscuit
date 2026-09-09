@@ -383,14 +383,10 @@ async fn protect_blocks_before_tool_even_without_binding() {
     meta.tool_input = Some(json!({"command": "rm -rf /"}));
     meta.env = EnvironmentContext::default();
 
-    let outcome = dispatch_canonical_with_runtime(
-        Provider::Claude,
-        AgenticEvent::BeforeTool,
-        meta,
-        &runtime,
-    )
-    .await
-    .unwrap();
+    let outcome =
+        dispatch_canonical_with_runtime(Provider::Claude, AgenticEvent::BeforeTool, meta, &runtime)
+            .await
+            .unwrap();
 
     assert!(
         outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
@@ -410,14 +406,10 @@ async fn dispatch_protect_before_tool_produces_deny_response() {
     meta.tool_input = Some(json!({"command": "rm -rf /"}));
     meta.env = EnvironmentContext::default();
 
-    let outcome = dispatch_canonical_with_runtime(
-        Provider::Claude,
-        AgenticEvent::BeforeTool,
-        meta,
-        &runtime,
-    )
-    .await
-    .unwrap();
+    let outcome =
+        dispatch_canonical_with_runtime(Provider::Claude, AgenticEvent::BeforeTool, meta, &runtime)
+            .await
+            .unwrap();
 
     assert!(
         outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
@@ -451,14 +443,10 @@ async fn dispatch_protect_after_tool_blocks_dangerous_mcp_response() {
     ));
     meta.env = EnvironmentContext::default();
 
-    let outcome = dispatch_canonical_with_runtime(
-        Provider::Claude,
-        AgenticEvent::AfterTool,
-        meta,
-        &runtime,
-    )
-    .await
-    .unwrap();
+    let outcome =
+        dispatch_canonical_with_runtime(Provider::Claude, AgenticEvent::AfterTool, meta, &runtime)
+            .await
+            .unwrap();
 
     assert!(
         outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
@@ -482,14 +470,10 @@ async fn dispatch_protect_unparsed_bash_shaped_tool_is_blocked() {
     meta.tool_input = Some(json!({ "args": ["rm", "-rf", "/"] }));
     meta.env = EnvironmentContext::default();
 
-    let outcome = dispatch_canonical_with_runtime(
-        Provider::Claude,
-        AgenticEvent::BeforeTool,
-        meta,
-        &runtime,
-    )
-    .await
-    .unwrap();
+    let outcome =
+        dispatch_canonical_with_runtime(Provider::Claude, AgenticEvent::BeforeTool, meta, &runtime)
+            .await
+            .unwrap();
 
     assert!(
         outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
@@ -682,14 +666,10 @@ async fn canonical_dispatch_protect_blocks_before_tool() {
     meta.tool_input = Some(json!({"command": "rm -rf /"}));
     meta.env = EnvironmentContext::default();
 
-    let outcome = dispatch_canonical_with_runtime(
-        Provider::Claude,
-        AgenticEvent::BeforeTool,
-        meta,
-        &runtime,
-    )
-    .await
-    .unwrap();
+    let outcome =
+        dispatch_canonical_with_runtime(Provider::Claude, AgenticEvent::BeforeTool, meta, &runtime)
+            .await
+            .unwrap();
 
     assert!(
         outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),

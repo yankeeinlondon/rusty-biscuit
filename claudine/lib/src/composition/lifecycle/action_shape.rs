@@ -32,15 +32,17 @@ fn classify_positional_value(
         serde_json::Value::Null => Ok(Vec::new()),
         serde_json::Value::String(_)
         | serde_json::Value::Number(_)
-        | serde_json::Value::Bool(_) => Ok(vec![action_value_to_expr(value).map_err(|source| {
-            CompositionError::LifecycleActionInvalidLongForm {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                action: verb.to_string(),
-                message: source.to_string(),
-                source: Some(source),
-            }
-        })?]),
+        | serde_json::Value::Bool(_) => {
+            Ok(vec![action_value_to_expr(value).map_err(|source| {
+                CompositionError::LifecycleActionInvalidLongForm {
+                    source_path: source_file.to_path_buf(),
+                    property: property_name.to_string(),
+                    action: verb.to_string(),
+                    message: source.to_string(),
+                    source: Some(source),
+                }
+            })?])
+        }
         serde_json::Value::Array(items) => {
             let mut args = Vec::with_capacity(items.len());
             for item in items {
@@ -128,7 +130,11 @@ pub(super) fn validate_positional_arity_and_build(
             // Not a control verb; fall through to communication / shell /
             // side-effect / expression-function dispatch.
             return build_non_control_positional_action(
-                signal, verb, args, source_file, property_name,
+                signal,
+                verb,
+                args,
+                source_file,
+                property_name,
             );
         }
     };
@@ -185,13 +191,14 @@ fn build_non_control_positional_action(
     }
 
     // Expression-function verbs.
-    let signature = super::actions::expression_function_signature(verb)
-        .unwrap_or_else(|| super::actions::Signature {
+    let signature = super::actions::expression_function_signature(verb).unwrap_or_else(|| {
+        super::actions::Signature {
             verb: verb.to_string(),
             params: Vec::new(),
             optional_tail: 0,
             variadic: true,
-        });
+        }
+    });
     check_positional_signature(verb, &args, &signature, source_file, property_name)?;
     Ok(LifecycleAction {
         kind: LifecycleActionKind::ExpressionFunction(ExpressionFunctionAction {
@@ -216,7 +223,10 @@ fn check_exact_positional_arity(
         } else if expected == 1 {
             format!("`{verb}` expects exactly 1 argument, got {}", args.len())
         } else {
-            format!("`{verb}` expects exactly {expected} arguments, got {}", args.len())
+            format!(
+                "`{verb}` expects exactly {expected} arguments, got {}",
+                args.len()
+            )
         };
         return Err(CompositionError::LifecycleWrongArity {
             source_path: source_file.to_path_buf(),
@@ -239,7 +249,10 @@ fn check_optional_positional_arity(
 ) -> Result<(), CompositionError> {
     if args.len() < min || args.len() > max {
         let message = if min == max {
-            format!("`{verb}` expects exactly {min} argument(s), got {}", args.len())
+            format!(
+                "`{verb}` expects exactly {min} argument(s), got {}",
+                args.len()
+            )
         } else {
             format!(
                 "`{verb}` expects {min} to {max} argument(s), got {}",
@@ -388,7 +401,9 @@ pub(super) fn build_action_from_params(
 
     // Params are consumed via `params_map.remove(...)` as each verb reads its
     // known keys; any leftovers are reported by `reject_extra_params`.
-    let mut params_map = params.into_iter().collect::<std::collections::HashMap<_, _>>();
+    let mut params_map = params
+        .into_iter()
+        .collect::<std::collections::HashMap<_, _>>();
 
     // Lifecycle control actions.
     if let Some(control) =
@@ -445,16 +460,17 @@ pub(super) fn build_action_from_params(
         });
     }
 
-
     // Expression-function actions with concrete named parameters. Variadic
     // functions (`and`, `or`) are positional-only and reject key/value form.
     if let Some(signature) = expression_function_signature(verb) {
         if signature.variadic {
-            return Err(CompositionError::LifecycleExpressionFunctionKeyValueUnsupported {
-                source_path: source_file.to_path_buf(),
-                property: property.to_string(),
-                verb: verb.to_string(),
-            });
+            return Err(
+                CompositionError::LifecycleExpressionFunctionKeyValueUnsupported {
+                    source_path: source_file.to_path_buf(),
+                    property: property.to_string(),
+                    verb: verb.to_string(),
+                },
+            );
         }
         let args =
             collect_named_signature_args(verb, &signature, &mut params_map, property, source_file)?;
@@ -524,9 +540,9 @@ fn parse_lifecycle_control_long(
             reason: params.remove("reason"),
         },
         "proxy" => A::Proxy {
-            target: params.remove("target").ok_or_else(|| {
-                invalid_args("`proxy` requires a `target` parameter".to_string())
-            })?,
+            target: params
+                .remove("target")
+                .ok_or_else(|| invalid_args("`proxy` requires a `target` parameter".to_string()))?,
             // An omitted `with:` and an authored `with: {}` are the same empty
             // overlay.
             with: proxy_with.unwrap_or_default(),
@@ -674,6 +690,7 @@ pub(super) fn event_stack_field_mut(
     }
 }
 
+use super::super::json_util::json_type_name;
 /// Validates that no rendered lifecycle string contains a surviving
 /// `{{ … }}` interpolation span.
 ///
@@ -700,4 +717,3 @@ pub(super) fn event_stack_field_mut(
 /// * `warnings` — compose report warnings, used best-effort to enrich the
 ///   leak reason.
 use super::*;
-use super::super::json_util::json_type_name;

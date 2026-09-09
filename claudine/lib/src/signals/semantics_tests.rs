@@ -51,8 +51,14 @@ fn claude_init_cofires_model_resolved_and_auth_kind() {
     let events = engine.observe(SignalSource::Stream, &line(CLAUDE_INIT, 0));
 
     let kinds: Vec<SignalKind> = events.iter().map(SignalEvent::kind).collect();
-    assert!(kinds.contains(&SignalKind::ModelResolved), "kinds: {kinds:?}");
-    assert!(kinds.contains(&SignalKind::AuthKindDetected), "kinds: {kinds:?}");
+    assert!(
+        kinds.contains(&SignalKind::ModelResolved),
+        "kinds: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&SignalKind::AuthKindDetected),
+        "kinds: {kinds:?}"
+    );
     assert!(events.contains(&SignalEvent::ModelResolved {
         requested: None,
         resolved: "claude-sonnet-4-20250514".to_string(),
@@ -136,7 +142,10 @@ fn unmapped_fields_ride_as_supplementary_context() {
         .find(|(event, _)| matches!(event, SignalEvent::RateLimited { .. }))
         .map(|(_, context)| context)
         .expect("rate_limited fires on the stderr-promoted 429 shape");
-    assert_eq!(context.get("provider"), Some(&"zai-coding-plan".to_string()));
+    assert_eq!(
+        context.get("provider"),
+        Some(&"zai-coding-plan".to_string())
+    );
     assert_eq!(context.get("model"), Some(&"glm-5.1".to_string()));
 }
 
@@ -165,7 +174,10 @@ fn coercion_matches_booleans_and_numbers() {
         "status_code 429 must satisfy regex ^429$: {kinds:?}"
     );
     // Different kind on the same payload co-fires (per-kind rule).
-    assert!(kinds.contains(&SignalKind::GenerationRetried), "kinds: {kinds:?}");
+    assert!(
+        kinds.contains(&SignalKind::GenerationRetried),
+        "kinds: {kinds:?}"
+    );
 }
 
 /// `exists` = present AND non-null; a present object DOES fire.
@@ -207,29 +219,44 @@ fn opencode_usage_cap_pair_narrows_on_observed_version() {
             .map(|r| r.id)
     };
 
-    assert_eq!(cap_record(&engine), Some("stderr_promoted-usage_capped-legacy"));
+    assert_eq!(
+        cap_record(&engine),
+        Some("stderr_promoted-usage_capped-legacy")
+    );
 
     engine.observe_provider_version("1.17.8");
-    assert_eq!(cap_record(&engine), Some("stderr_promoted-usage_capped-1178"));
+    assert_eq!(
+        cap_record(&engine),
+        Some("stderr_promoted-usage_capped-1178")
+    );
 
     engine.observe_provider_version("1.17.7");
-    assert_eq!(cap_record(&engine), Some("stderr_promoted-usage_capped-legacy"));
+    assert_eq!(
+        cap_record(&engine),
+        Some("stderr_promoted-usage_capped-legacy")
+    );
 
     // The built event carries the ISO reset time as lifts_at, the extracted
     // `model_id` as a specific cap scope, and the fired-cap remaining default.
     let events = engine.observe(SignalSource::StderrPromoted, &payload);
-    assert!(events.contains(&SignalEvent::UsageCapped {
-        model: CapScope::Specific("glm-5.1".into()),
-        timeframe: None,
-        remaining: Some(Quantity {
-            value: 0.0,
-            unit: Unit::Percent,
-        }),
-        lifts_at: Some(DateTime::parse_from_rfc3339("2026-04-16T04:18:56Z").unwrap().to_utc()),
-        message: Some(
-            "Usage limit reached. Your limit will reset at 2026-04-16 04:18:56".to_string()
-        ),
-    }));
+    assert!(
+        events.contains(&SignalEvent::UsageCapped {
+            model: CapScope::Specific("glm-5.1".into()),
+            timeframe: None,
+            remaining: Some(Quantity {
+                value: 0.0,
+                unit: Unit::Percent,
+            }),
+            lifts_at: Some(
+                DateTime::parse_from_rfc3339("2026-04-16T04:18:56Z")
+                    .unwrap()
+                    .to_utc()
+            ),
+            message: Some(
+                "Usage limit reached. Your limit will reset at 2026-04-16 04:18:56".to_string()
+            ),
+        })
+    );
 }
 
 /// Bracket-index walking against the synthetic-assistant billing fixture.
@@ -251,8 +278,14 @@ fn bespoke_records_are_skipped() {
     let engine = engine("claude");
     let fired = engine.fired_records(SignalSource::Stream, &line(CLAUDE_BILLING_SYNTHETIC, 1));
     let kinds: Vec<SignalKind> = fired.iter().map(|r| r.kind).collect();
-    assert!(!kinds.contains(&SignalKind::SessionTainted), "kinds: {kinds:?}");
-    assert!(kinds.contains(&SignalKind::TokensConsumed), "kinds: {kinds:?}");
+    assert!(
+        !kinds.contains(&SignalKind::SessionTainted),
+        "kinds: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&SignalKind::TokensConsumed),
+        "kinds: {kinds:?}"
+    );
 }
 
 /// Builder unit conversions: `retry_after_ms` → a millisecond quantity, and

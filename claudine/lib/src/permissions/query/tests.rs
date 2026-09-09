@@ -161,8 +161,7 @@ fn trust_unknown_warnings_make_query_results_unknown() {
     });
     canonical.warnings.push(PolicyWarning {
         code: "codex.trust_unknown".to_owned(),
-        message: "Repo-scoped Codex config is trust-gated and trust was not supplied."
-            .to_owned(),
+        message: "Repo-scoped Codex config is trust-gated and trust was not supplied.".to_owned(),
         source_id: None,
     });
 

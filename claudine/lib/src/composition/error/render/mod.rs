@@ -60,7 +60,7 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleInvalidArgs { .. }
             | CompositionError::LifecycleErrNotAvailable { .. }
             | CompositionError::InvalidFileReference { .. } => lifecycle::status_block(self),
-            | CompositionError::LifecycleProxyWithNotMapping { .. }
+            CompositionError::LifecycleProxyWithNotMapping { .. }
             | CompositionError::LifecycleProxyWithWholeMapping { .. }
             | CompositionError::LifecycleProxyWithDynamicKey { .. }
             | CompositionError::LifecycleProxyWithEvaluationFailed { .. }
@@ -280,7 +280,9 @@ fn caller_schema_file_reference_detail(md: &MarkdownError) -> Option<Value> {
     let MarkdownError::SchemaValidationFailed { problems, .. } = md else {
         return None;
     };
-    let problem = problems.iter().find(|problem| problem.caller_file.is_some())?;
+    let problem = problems
+        .iter()
+        .find(|problem| problem.caller_file.is_some())?;
     let caller = problem.caller_file.as_ref()?;
     let reference = match problem.file_reference.as_ref()? {
         darkmatter::markdown::schemas::FileReferenceDiagnostic::InvalidSyntax { raw }
@@ -294,15 +296,19 @@ fn caller_schema_file_reference_detail(md: &MarkdownError) -> Option<Value> {
         _ => "not_found",
     });
     detail["base_dir"] = json!(biscuit_file::to_portable_string(caller.origin.base_dir()));
-    detail["source_path"] = json!(caller
-        .origin
-        .source_path()
-        .map(biscuit_file::to_portable_string));
+    detail["source_path"] = json!(
+        caller
+            .origin
+            .source_path()
+            .map(biscuit_file::to_portable_string)
+    );
     detail["property"] = json!(problem.path.strip_prefix('/').unwrap_or(&problem.path));
-    detail["repository_root"] = json!(caller
-        .origin
-        .repository_root()
-        .map(biscuit_file::to_portable_string));
+    detail["repository_root"] = json!(
+        caller
+            .origin
+            .repository_root()
+            .map(biscuit_file::to_portable_string)
+    );
     detail["suggestions"] = json!([]);
     if let Some(candidate) = &caller.candidate {
         detail["candidates"] = json!([{
@@ -369,15 +375,15 @@ impl Diagnostic for CompositionError {
             CompositionError::InvalidReference { .. }
             | CompositionError::FileNotFound { .. }
             | CompositionError::FileReferenceNoMatch { .. }
-            | CompositionError::InvalidFileReference { .. } => {
-                "composition.invalid_file_reference"
-            }
+            | CompositionError::InvalidFileReference { .. } => "composition.invalid_file_reference",
             CompositionError::SchemaLoad { .. } => "composition.schema_load",
             CompositionError::SchemaParse { .. } => "composition.schema_parse",
             CompositionError::SchemaValidation { .. }
             | CompositionError::UnresolvedFileReference { .. } => "composition.schema_validation",
             CompositionError::MissingProperties { .. }
-            | CompositionError::SequenceMissingProperties { .. } => "composition.missing_properties",
+            | CompositionError::SequenceMissingProperties { .. } => {
+                "composition.missing_properties"
+            }
             CompositionError::FrontmatterParse(_) => "composition.frontmatter_parse",
             CompositionError::ShellExpansionFailed { .. } => "composition.shell_expansion",
             // The approval family: a user declining and the catalog refusing

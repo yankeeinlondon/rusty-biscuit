@@ -18,8 +18,15 @@ pub const EXECUTABLE_KEYS: &[&str] = &["prompt", "shell", "side_effect", "group"
 
 /// Optional task fields that live alongside an executable and are consumed as
 /// task configuration, never as authored state.
-pub const TASK_OPTION_KEYS: &[&str] =
-    &["name", "setup", "teardown", "params", "timeout", "operation", "flow"];
+pub const TASK_OPTION_KEYS: &[&str] = &[
+    "name",
+    "setup",
+    "teardown",
+    "params",
+    "timeout",
+    "operation",
+    "flow",
+];
 
 /// Fields generated onto every `step_state`. Authors may declare them in a
 /// `$schema` with `generated`, but may never provide or override a value.

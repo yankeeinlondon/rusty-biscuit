@@ -36,7 +36,7 @@ use crate::error::{ClaudineError, ConfigCause, Result};
 use crate::provider::Provider;
 use crate::runaway::patterns::ExitExpressionInput;
 use crate::runaway::{
-    patterns::PatternKind, MAX_CYCLE_LENGTH, MAX_REPETITION_ALLOWED, VOLUME_BYTES, VOLUME_LINES,
+    MAX_CYCLE_LENGTH, MAX_REPETITION_ALLOWED, VOLUME_BYTES, VOLUME_LINES, patterns::PatternKind,
 };
 
 // ============================================================================

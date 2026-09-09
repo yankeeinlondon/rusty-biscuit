@@ -384,8 +384,7 @@ fn opencode_shared_native_mappings_cover_core_hook_events() {
     );
 
     assert_eq!(
-        Provider::OpenCode
-            .event_from_shared_native_name("experimental.chat.messages.transform"),
+        Provider::OpenCode.event_from_shared_native_name("experimental.chat.messages.transform"),
         Some(BeforeModel)
     );
     assert_eq!(
@@ -459,9 +458,7 @@ fn detect_from_payload_recognizes_known_shapes() {
         Some(Provider::Claude)
     );
     assert_eq!(
-        Provider::detect_from_payload(
-            &serde_json::json!({"hook_event_name":"UserPromptSubmit"})
-        ),
+        Provider::detect_from_payload(&serde_json::json!({"hook_event_name":"UserPromptSubmit"})),
         Some(Provider::Claude)
     );
 

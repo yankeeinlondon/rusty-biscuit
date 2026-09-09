@@ -253,7 +253,10 @@ enum LinePick {
 /// branch, so provider text is never double-ellipsized.
 fn headline(text: &str, pick: LinePick) -> Option<String> {
     let stripped = strip_ansi_codes(text);
-    let mut lines = stripped.lines().map(str::trim).filter(|line| !line.is_empty());
+    let mut lines = stripped
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
     let line = match pick {
         LinePick::First => lines.next(),
         LinePick::Last => lines.next_back(),

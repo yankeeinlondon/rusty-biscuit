@@ -490,12 +490,15 @@ impl ModelCatalogService {
 /// accept unrelated ids like `ollamafoo`. Prefix comparison is
 /// case-insensitive, matching catalog membership.
 fn matches_offering_source(provider: Provider, model_id: &str) -> bool {
-    provider_info(provider).offering_sources.iter().any(|source| {
-        model_id
-            .get(..source.prefix.len())
-            .is_some_and(|head| head.eq_ignore_ascii_case(source.prefix))
-            && model_id[source.prefix.len()..].starts_with('/')
-    })
+    provider_info(provider)
+        .offering_sources
+        .iter()
+        .any(|source| {
+            model_id
+                .get(..source.prefix.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(source.prefix))
+                && model_id[source.prefix.len()..].starts_with('/')
+        })
 }
 
 #[cfg(test)]

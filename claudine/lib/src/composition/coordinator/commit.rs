@@ -19,13 +19,12 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::composition::error::CompositionError;
-use crate::composition::{resolve_proxy_target, resolve_proxy_target_in_context};
 use super::handoff::{EvaluatedProxyRequest, ProxyHandoff, ResolvedProxyTarget};
 use super::invocation::RunLedger;
+use crate::composition::error::CompositionError;
+use crate::composition::{resolve_proxy_target, resolve_proxy_target_in_context};
 
-const PROXY_TARGET_HINT: &str =
-    "A `proxy` target must name an existing Markdown document: an absolute path, \
+const PROXY_TARGET_HINT: &str = "A `proxy` target must name an existing Markdown document: an absolute path, \
      an explicit `./` or `../` path relative to the document that declares it, a \
      bare path (tried next to the document first, then at the repository root), \
      `@`-prefixed for a magic-root search, or `~`-prefixed for a home path.";
@@ -98,9 +97,8 @@ pub fn commit_proxy(
     let source_path = request.provenance().source_path().to_path_buf();
     let event = request.provenance().signal().property_name();
     let target = request.target().to_string();
-    let resolved = resolve_proxy_target(&target, &source_path, repo_root).map_err(|source| {
-        proxy_resolution_error(&target, &source_path, event, source)
-    })?;
+    let resolved = resolve_proxy_target(&target, &source_path, repo_root)
+        .map_err(|source| proxy_resolution_error(&target, &source_path, event, source))?;
     commit_resolved_proxy(ledger, request, source_path, resolved)
 }
 
@@ -117,12 +115,8 @@ pub fn commit_proxy_in_context(
     let source_path = request.provenance().source_path().to_path_buf();
     let event = request.provenance().signal().property_name();
     let target = request.target().to_string();
-    let resolved = resolve_proxy_target_in_context(
-        &target,
-        &source_path,
-        request_context,
-    )
-    .map_err(|source| proxy_resolution_error(&target, &source_path, event, source))?;
+    let resolved = resolve_proxy_target_in_context(&target, &source_path, request_context)
+        .map_err(|source| proxy_resolution_error(&target, &source_path, event, source))?;
     commit_resolved_proxy(ledger, request, source_path, resolved)
 }
 

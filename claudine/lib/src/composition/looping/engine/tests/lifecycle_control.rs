@@ -162,9 +162,16 @@ fn loop_initialize_skip_ends_run_with_zero_iterations() {
         &invocations,
     );
 
-    assert!(result.error.is_none(), "skip is a clean opt-out: {result:?}");
+    assert!(
+        result.error.is_none(),
+        "skip is a clean opt-out: {result:?}"
+    );
     assert_eq!(result.iteration_count, 0, "no iteration runs after skip");
-    assert_eq!(*invocations.borrow(), 0, "the executor must never be invoked");
+    assert_eq!(
+        *invocations.borrow(),
+        0,
+        "the executor must never be invoked"
+    );
     assert!(
         result.handoff.is_none(),
         "skip completes the run; it is not a proxy hand-off"
@@ -207,7 +214,11 @@ fn loop_initialize_error_routes_to_failure_and_finalize() {
         &invocations,
     );
 
-    assert_eq!(*invocations.borrow(), 0, "no iteration runs after an init error");
+    assert_eq!(
+        *invocations.borrow(),
+        0,
+        "no iteration runs after an init error"
+    );
     assert_eq!(result.iteration_count, 0);
     match &result.error {
         Some(CompositionError::LifecycleInitializeFailed { reason, .. }) => {
@@ -258,8 +269,14 @@ fn loop_initialize_stop_proceeds_into_iterations() {
     let (stop_result, stop_invocations) = run(json!("stop"));
     let (baseline_result, baseline_invocations) = run(json!({ "info": "init ran" }));
 
-    assert!(stop_result.error.is_none(), "stop is benign: {stop_result:?}");
-    assert!(stop_invocations > 0, "the loop must run after a benign stop");
+    assert!(
+        stop_result.error.is_none(),
+        "stop is benign: {stop_result:?}"
+    );
+    assert!(
+        stop_invocations > 0,
+        "the loop must run after a benign stop"
+    );
     assert_eq!(
         stop_result.iteration_count, baseline_result.iteration_count,
         "stop must not change how many iterations run"
@@ -301,7 +318,10 @@ fn loop_initialize_proxy_hands_off_without_iterating() {
     );
 
     assert!(result.error.is_none(), "clean proxy hand-off: {result:?}");
-    assert_eq!(result.iteration_count, 0, "no iteration runs on a proxy hand-off");
+    assert_eq!(
+        result.iteration_count, 0,
+        "no iteration runs on a proxy hand-off"
+    );
     assert_eq!(*invocations.borrow(), 0);
     let Some(SurfacedHandoff::Request(request)) = &result.handoff else {
         panic!(
@@ -363,7 +383,11 @@ fn loop_initialize_proxy_defers_resolution_to_the_coordinator() {
         &invocations,
     );
 
-    assert_eq!(*invocations.borrow(), 0, "no iteration runs on a proxy hand-off");
+    assert_eq!(
+        *invocations.borrow(),
+        0,
+        "no iteration runs on a proxy hand-off"
+    );
     assert!(
         result.error.is_none(),
         "the engine does not consult the filesystem, so it raises nothing here: {:?}",
@@ -572,7 +596,11 @@ fn loop_initialize_error_with_failure_raise_surfaces_failure_evaluation_error() 
         &invocations,
     );
 
-    assert_eq!(*invocations.borrow(), 0, "no iteration runs after init error");
+    assert_eq!(
+        *invocations.borrow(),
+        0,
+        "no iteration runs after init error"
+    );
     match &result.error {
         Some(CompositionError::LifecycleEvaluationError { event, .. }) => {
             assert_eq!(
@@ -580,9 +608,7 @@ fn loop_initialize_error_with_failure_raise_surfaces_failure_evaluation_error() 
                 "the surfaced error must name the failure event (its `when:` raised)"
             );
         }
-        other => panic!(
-            "expected LifecycleEvaluationError for failure, got {other:?}"
-        ),
+        other => panic!("expected LifecycleEvaluationError for failure, got {other:?}"),
     }
     let signals = emitter.signals();
     assert!(
@@ -841,8 +867,6 @@ fn loop_initialize_error_with_failure_and_finalize_raise_surfaces_finalize() {
                 "the surfaced error must name the finalize event (latest crash)"
             );
         }
-        other => panic!(
-            "expected LifecycleEvaluationError for finalize, got {other:?}"
-        ),
+        other => panic!("expected LifecycleEvaluationError for finalize, got {other:?}"),
     }
 }

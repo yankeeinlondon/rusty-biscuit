@@ -16,8 +16,10 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use crate::events::AgenticEvent;
-use crate::linking::capabilities::{ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter, SupportLevel};
-use crate::provider::{OutputFormatSelector, ProviderInfo};
+use crate::linking::capabilities::{
+    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
+    SkillFrontmatter, SupportLevel,
+};
 use crate::provider::acp::{AcpServerMode, AcpSupport};
 use crate::provider::billing_model::BillingModel;
 use crate::provider::cli_sensitivity::CliSensitiveAxes;
@@ -25,15 +27,22 @@ use crate::provider::display_policy::{DisplayPolicy, ToolResultSummary};
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
-use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
-use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
+use crate::provider::offering::{
+    ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource,
+};
+use crate::provider::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
+};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
 use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::ReasoningSupport;
 use crate::provider::resume_support::ResumeSupport;
-use crate::provider::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
+use crate::provider::system_prompt::{
+    SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
+};
 use crate::provider::yolo::YoloSupport;
+use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::stream::StreamProtocol;
 
 use super::behavior::CODEX_PROVIDER;
@@ -64,9 +73,9 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
     adapter: &CODEX_PROVIDER,
     configurator: &CODEX_PROVIDER,
     resource_support_fn: resource_support,
-    session_log_paths: &[
-        PathTemplate::Static("~/.codex/sessions/{YYYY}/{MM}/{DD}/rollout-{local_iso_ts}-{session_id}.jsonl"),
-    ],
+    session_log_paths: &[PathTemplate::Static(
+        "~/.codex/sessions/{YYYY}/{MM}/{DD}/rollout-{local_iso_ts}-{session_id}.jsonl",
+    )],
     config_paths: &[
         PathTemplate::Static("~/.codex/config.toml"),
         PathTemplate::Static(".codex/config.toml"),
@@ -86,9 +95,7 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
             native_name: "jsonl",
             cli_flag: Some("--json"),
             stdin_supported: true,
-            selector: OutputFormatSelector::Flag {
-                flag: "--json",
-            },
+            selector: OutputFormatSelector::Flag { flag: "--json" },
             companion_flags: &[],
         },
         OutputFormatSupport {
@@ -96,9 +103,7 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
             native_name: "jsonl",
             cli_flag: Some("--json"),
             stdin_supported: true,
-            selector: OutputFormatSelector::Flag {
-                flag: "--json",
-            },
+            selector: OutputFormatSelector::Flag { flag: "--json" },
             companion_flags: &[],
         },
         OutputFormatSupport {
@@ -438,7 +443,10 @@ fn build_resource_support() -> ProviderCapabilities {
             format: Some(ResourceFormat::Markdown),
             repo_path: Some(PathBuf::from(".codex/skills")),
             user_path: Some(PathBuf::from(".codex/skills")),
-            also_reads_from: vec![PathBuf::from(".claude/skills"), PathBuf::from(".agents/skills")],
+            also_reads_from: vec![
+                PathBuf::from(".claude/skills"),
+                PathBuf::from(".agents/skills"),
+            ],
             notes: None,
             properties: Some(ResourcePropertySchema::new(
                 &["name", "description"],

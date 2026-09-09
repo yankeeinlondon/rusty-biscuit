@@ -149,7 +149,10 @@ fn nested_strings_follow_the_same_interpolation_rule() {
         None,
     );
     let (_, overlay, _) = proxy_of(&outcome);
-    assert_eq!(overlay.get("files"), Some(&json!(["a.md", "b.md", "phase-2"])));
+    assert_eq!(
+        overlay.get("files"),
+        Some(&json!(["a.md", "b.md", "phase-2"]))
+    );
     assert_eq!(
         overlay.get("metadata"),
         Some(&json!({
@@ -309,7 +312,10 @@ fn a_raw_span_stored_in_frontmatter_never_reaches_the_overlay() {
         let info = outcome
             .evaluation_error
             .unwrap_or_else(|| panic!("{label}: expected an evaluation error"));
-        assert_eq!(info.variant, "LifecycleProxyWithEvaluationFailed", "{label}");
+        assert_eq!(
+            info.variant, "LifecycleProxyWithEvaluationFailed",
+            "{label}"
+        );
     }
 }
 
@@ -331,7 +337,8 @@ fn failure_names_the_exact_nested_path_without_echoing_other_values() {
     let info = outcome.evaluation_error.expect("unknown root raises");
     assert_eq!(info.variant, "LifecycleProxyWithEvaluationFailed");
     assert!(
-        info.msg.contains("failure.stack[0].action[0].with.metadata.area[1]"),
+        info.msg
+            .contains("failure.stack[0].action[0].with.metadata.area[1]"),
         "message roots at the exact nested path: {}",
         info.msg
     );
@@ -406,7 +413,10 @@ fn a_failing_target_never_evaluates_the_overlay() {
     );
     assert!(outcome.control.is_none());
     let info = outcome.evaluation_error.expect("target raise");
-    assert_eq!(info.variant, "proxy", "the target failure is attributed to the action");
+    assert_eq!(
+        info.variant, "proxy",
+        "the target failure is attributed to the action"
+    );
 }
 
 #[test]
@@ -428,7 +438,10 @@ fn no_error_does_not_suppress_an_overlay_failure() {
         json!({}),
         None,
     );
-    assert!(outcome.control.is_none(), "`no_error` must not smuggle a handoff through");
+    assert!(
+        outcome.control.is_none(),
+        "`no_error` must not smuggle a handoff through"
+    );
     assert!(
         outcome.action_error.is_none(),
         "an overlay raise is an evaluation error, not a suppressible dispatch error"
@@ -516,7 +529,10 @@ fn nested_ctx_refs_resolve_against_one_captured_snapshot() {
         .and_then(Value::as_str)
         .expect("ctx.agent resolves to a string");
     assert!(!host_os.is_empty(), "ctx.os must be populated: {overlay:?}");
-    assert!(!agent.is_empty(), "ctx.agent must be populated: {overlay:?}");
+    assert!(
+        !agent.is_empty(),
+        "ctx.agent must be populated: {overlay:?}"
+    );
 
     let capture_hints = take_proxy_with_fallback_capture_hints();
     assert_eq!(
@@ -526,7 +542,9 @@ fn nested_ctx_refs_resolve_against_one_captured_snapshot() {
     );
     let combined_hint = &capture_hints[0];
     assert!(
-        combined_hint.split_whitespace().any(|path| path == "ctx.os"),
+        combined_hint
+            .split_whitespace()
+            .any(|path| path == "ctx.os"),
         "the combined scan must include the top-level OS context group: {combined_hint:?}"
     );
     assert!(

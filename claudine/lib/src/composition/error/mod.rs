@@ -333,7 +333,9 @@ pub enum CompositionError {
     InvalidInlineResponse(String),
 
     /// The provider returned a delimited frontmatter block that is not valid YAML.
-    #[error("invalid inline composition response: response frontmatter is not valid YAML: {source}")]
+    #[error(
+        "invalid inline composition response: response frontmatter is not valid YAML: {source}"
+    )]
     InlineResponseFrontmatterYaml {
         /// YAML parser failure retained for diagnostic discovery.
         #[source]
@@ -1490,9 +1492,7 @@ pub enum CompositionError {
     },
 
     /// An operator was applied to an item that is not an object.
-    #[error(
-        "sequence operator `{operator}` requires object items, but item {index} is {found}"
-    )]
+    #[error("sequence operator `{operator}` requires object items, but item {index} is {found}")]
     SequenceOperatorItemNotObject {
         /// The operator name.
         operator: String,
@@ -1553,9 +1553,7 @@ pub enum CompositionError {
     },
 
     /// A step's normalized state failed the sequence document's `$schema`.
-    #[error(
-        "sequence step {index} (`{id}`) failed schema validation at `{property}`: {message}"
-    )]
+    #[error("sequence step {index} (`{id}`) failed schema validation at `{property}`: {message}")]
     SequenceStateSchemaViolation {
         /// Zero-based step index.
         index: usize,
@@ -1860,7 +1858,9 @@ pub enum CompositionError {
     /// are only enforceable against an owned tree (a Unix process group, a
     /// Windows Job Object), so a command that could only be given
     /// direct-child cleanup is refused rather than run degraded.
-    #[error("command `{command}` in {task} could not be isolated into an owned process tree: {source}")]
+    #[error(
+        "command `{command}` in {task} could not be isolated into an owned process tree: {source}"
+    )]
     SequenceTaskShellIsolation {
         /// A label locating the task.
         task: String,
@@ -2333,9 +2333,7 @@ pub enum CompositionError {
     },
 
     /// Too many files matched the autocomplete query; the user must narrow it.
-    #[error(
-        "more than {cap} files matched autocomplete query `{query}`; narrow your query"
-    )]
+    #[error("more than {cap} files matched autocomplete query `{query}`; narrow your query")]
     AutocompleteOverCap {
         /// The user's typed query token.
         query: String,
@@ -2916,9 +2914,7 @@ impl CompositionError {
     }
 
     /// Inspect the retained no-match evidence without coupling to rendering.
-    pub fn file_reference_no_match(
-        &self,
-    ) -> Option<(&str, &ResolutionDetail, &[String])> {
+    pub fn file_reference_no_match(&self) -> Option<(&str, &ResolutionDetail, &[String])> {
         match self {
             Self::FileReferenceNoMatch {
                 reference,
@@ -2959,7 +2955,10 @@ impl CompositionError {
     /// variant is wrapped unchanged (suppression is keyed on the wrapper, not
     /// the inner shape).
     pub fn already_emitted(self) -> Self {
-        if matches!(self, CompositionError::LifecycleEvaluationAlreadyEmitted { .. }) {
+        if matches!(
+            self,
+            CompositionError::LifecycleEvaluationAlreadyEmitted { .. }
+        ) {
             return self;
         }
         CompositionError::LifecycleEvaluationAlreadyEmitted {
@@ -2970,7 +2969,10 @@ impl CompositionError {
     /// Whether this error was already styled-emitted at its catch point, so the
     /// outer renderer must not re-render it.
     pub fn is_already_emitted(&self) -> bool {
-        matches!(self, CompositionError::LifecycleEvaluationAlreadyEmitted { .. })
+        matches!(
+            self,
+            CompositionError::LifecycleEvaluationAlreadyEmitted { .. }
+        )
     }
 
     /// Attach a captured frontmatter excerpt to a frontmatter-rooted error.

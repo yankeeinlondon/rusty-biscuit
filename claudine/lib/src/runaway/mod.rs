@@ -18,12 +18,12 @@ pub mod config;
 pub mod detector;
 pub mod patterns;
 
-pub use config::{extract_frontmatter_exit_expressions, parse_scope, ScopeSelector};
-pub use config::{resolve_exit_expressions, resolve_guard_settings, validate_exit_expressions};
 pub use config::{
     ExitExpressionEntry, ExitExpressionsLayer, ExitExpressionsValue, GuardSettings, LayerMode,
     RepetitionGuardSettings, VolumeGuardSettings,
 };
+pub use config::{ScopeSelector, extract_frontmatter_exit_expressions, parse_scope};
+pub use config::{resolve_exit_expressions, resolve_guard_settings, validate_exit_expressions};
 pub use detector::{CaptureVolumeCap, ContentDetector, DetectorConfig};
 pub use patterns::{CompiledExitExpressions, ExitExpressionInput, PatternKind};
 
@@ -127,14 +127,8 @@ mod tests {
             },
         );
         assert_eq!(
-            Trip::RunawayVolume {
-                lines: 1,
-                bytes: 2,
-            },
-            Trip::RunawayVolume {
-                lines: 1,
-                bytes: 2,
-            },
+            Trip::RunawayVolume { lines: 1, bytes: 2 },
+            Trip::RunawayVolume { lines: 1, bytes: 2 },
         );
         // Different variants are unequal even with overlapping field
         // names.

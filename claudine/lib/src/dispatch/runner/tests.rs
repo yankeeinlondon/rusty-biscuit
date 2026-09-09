@@ -231,11 +231,9 @@ async fn audio_actions_publish_in_order_and_return_before_worker_execution() {
     let mut permissions = fs::metadata(&espeak).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&espeak, permissions).unwrap();
-    let path = std::env::join_paths(
-        std::iter::once(bin.clone()).chain(std::env::split_paths(
-            &std::env::var_os("PATH").unwrap_or_default(),
-        )),
-    )
+    let path = std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
     .unwrap();
     let _path = test_toolkit::EnvGuard::set_safe("PATH", path);
     let _spool = test_toolkit::EnvGuard::set_safe("PLAYA_SPOOL_DIR", &spool);
@@ -253,16 +251,17 @@ async fn audio_actions_publish_in_order_and_return_before_worker_execution() {
         .unwrap();
     worker.lock_exclusive().unwrap();
 
-    let config = claudine_config_with_tts(TtsValue::Config(
-        crate::config::tts::TtsConfigSettings {
+    let config =
+        claudine_config_with_tts(TtsValue::Config(crate::config::tts::TtsConfigSettings {
             provider: "espeak".to_string(),
             voice: None,
             gender: crate::config::tts::Gender::Female,
-        },
-    ));
+        }));
     let actions = vec![
         HookAction::Speak {
-            message: "Phase 1 of the plan in the claudine package area, was implemented successfully".to_string(),
+            message:
+                "Phase 1 of the plan in the claudine package area, was implemented successfully"
+                    .to_string(),
             voice: None,
             gender: None,
             when: None,
@@ -345,11 +344,9 @@ async fn speak_action_warns_once_when_handoff_fails() {
     let mut permissions = fs::metadata(&espeak).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&espeak, permissions).unwrap();
-    let path = std::env::join_paths(
-        std::iter::once(bin).chain(std::env::split_paths(
-            &std::env::var_os("PATH").unwrap_or_default(),
-        )),
-    )
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
     .unwrap();
     let not_a_directory = temp.path().join("not-a-directory");
     fs::write(&not_a_directory, b"file").unwrap();
@@ -358,15 +355,15 @@ async fn speak_action_warns_once_when_handoff_fails() {
     let _dry_run = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
     assert_eq!(biscuit_speaks::run_if_worker().await, None);
 
-    let config = claudine_config_with_tts(TtsValue::Config(
-        crate::config::tts::TtsConfigSettings {
+    let config =
+        claudine_config_with_tts(TtsValue::Config(crate::config::tts::TtsConfigSettings {
             provider: "espeak".to_string(),
             voice: None,
             gender: crate::config::tts::Gender::Female,
-        },
-    ));
+        }));
     let actions = vec![HookAction::Speak {
-        message: "Phase 1 of the plan in the claudine package area, was implemented successfully".to_string(),
+        message: "Phase 1 of the plan in the claudine package area, was implemented successfully"
+            .to_string(),
         voice: None,
         gender: None,
         when: None,

@@ -92,8 +92,7 @@ fn summary_shows_file_source() {
         path: PathBuf::from("/tmp/prompt.md"),
         scope: crate::system_prompt::StandardPromptScope::Repo,
     };
-    let summary =
-        render_system_prompt_summary(&source, SystemPromptMode::Append, 50, None, &term);
+    let summary = render_system_prompt_summary(&source, SystemPromptMode::Append, 50, None, &term);
     assert!(summary.contains("prompt.md"));
 }
 
@@ -329,22 +328,14 @@ fn summary_declined_file_uri_falls_back_to_plain_text() {
 #[test]
 fn summary_format_returns_empty_body() {
     let term = test_terminal();
-    let body = render_system_prompt_body(
-        "some content",
-        ReportMode::Summary,
-        &term,
-    );
+    let body = render_system_prompt_body("some content", ReportMode::Summary, &term);
     assert!(body.is_empty());
 }
 
 #[test]
 fn full_format_renders_content() {
     let term = test_terminal();
-    let body = render_system_prompt_body(
-        "Hello world",
-        ReportMode::Full,
-        &term,
-    );
+    let body = render_system_prompt_body("Hello world", ReportMode::Full, &term);
     let plain = strip_ansi_codes(&body);
     assert!(plain.contains("Hello world"));
 }
@@ -432,8 +423,8 @@ fn report_full_renders_body() {
     let term = test_terminal();
     let prepared = test_prepared(SystemPromptMode::Replace, "Full prompt body.");
     let resolved = ResolvedSystemPrompt::Ready(prepared);
-    let report = SystemPrompt::from_mode(&resolved, ReportMode::Full, None)
-        .expect("should produce output");
+    let report =
+        SystemPrompt::from_mode(&resolved, ReportMode::Full, None).expect("should produce output");
     let plain = strip_ansi_codes(&report.render(&term));
     assert!(plain.contains("■"));
     assert!(plain.contains("replaced"));
@@ -461,7 +452,10 @@ fn report_partial_renders_truncated_body() {
     assert!(plain.contains("■"));
     assert!(plain.contains("Line 1"));
     assert!(plain.contains(" 50"), "should contain the last line number");
-    assert!(!plain.contains("Line 25"), "middle lines should be truncated");
+    assert!(
+        !plain.contains("Line 25"),
+        "middle lines should be truncated"
+    );
 }
 
 #[test]
@@ -474,8 +468,8 @@ fn report_none_in_summary_returns_none() {
 fn report_none_in_full_renders() {
     let term = test_terminal();
     let resolved = ResolvedSystemPrompt::None;
-    let report = SystemPrompt::from_mode(&resolved, ReportMode::Full, None)
-        .expect("should produce output");
+    let report =
+        SystemPrompt::from_mode(&resolved, ReportMode::Full, None).expect("should produce output");
     let plain = strip_ansi_codes(&report.render(&term));
     assert!(plain.contains("none"));
     assert!(plain.contains("not been modified"));
@@ -493,8 +487,8 @@ fn report_disabled_in_full_renders() {
     let term = test_terminal();
     let source = SystemPromptSource::BuiltInNonInteractive;
     let resolved = ResolvedSystemPrompt::Disabled { source };
-    let report = SystemPrompt::from_mode(&resolved, ReportMode::Full, None)
-        .expect("should produce output");
+    let report =
+        SystemPrompt::from_mode(&resolved, ReportMode::Full, None).expect("should produce output");
     let plain = strip_ansi_codes(&report.render(&term));
     assert!(plain.contains("disabled"));
     assert!(plain.contains("been disabled"));

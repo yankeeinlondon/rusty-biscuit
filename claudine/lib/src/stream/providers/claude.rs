@@ -626,7 +626,8 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
     fn handle_task_started(&mut self, evt: ClaudeTaskEvent, raw_kind: &str) {
         let name = evt.name.or(evt.task_name);
         let id = evt.task_id.or(evt.id);
-        self.task_ledger.record_start(id.as_deref(), name.as_deref());
+        self.task_ledger
+            .record_start(id.as_deref(), name.as_deref());
         self.sink.on_semantic_event(SemanticEvent::SubagentStart {
             name,
             id,

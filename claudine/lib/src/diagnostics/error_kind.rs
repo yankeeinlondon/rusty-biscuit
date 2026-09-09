@@ -97,12 +97,18 @@ mod tests {
     fn cap_kinds_map_to_cap_codes() {
         assert_eq!(code_for_error_kind("rate_limit"), Some("cap.rate_limit"));
         assert_eq!(code_for_error_kind("billing_error"), Some("cap.billing"));
-        assert_eq!(code_for_error_kind("quota_exceeded"), Some("cap.plan_limit"));
+        assert_eq!(
+            code_for_error_kind("quota_exceeded"),
+            Some("cap.plan_limit")
+        );
     }
 
     #[test]
     fn provider_kinds_map_to_provider_codes() {
-        assert_eq!(code_for_error_kind("agent_failure"), Some("provider.exited"));
+        assert_eq!(
+            code_for_error_kind("agent_failure"),
+            Some("provider.exited")
+        );
         assert_eq!(
             code_for_error_kind("repeated_stream_error"),
             Some("provider.stream_error")
@@ -154,8 +160,8 @@ mod tests {
             "unauthorized",
             "forbidden",
         ] {
-            let code = code_for_error_kind(kind)
-                .unwrap_or_else(|| panic!("`{kind}` should classify"));
+            let code =
+                code_for_error_kind(kind).unwrap_or_else(|| panic!("`{kind}` should classify"));
             assert!(
                 code_spec(code).is_some(),
                 "`{kind}` → `{code}` is not a locked catalog code"

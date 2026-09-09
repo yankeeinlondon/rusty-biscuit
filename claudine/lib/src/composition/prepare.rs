@@ -236,9 +236,9 @@ fn canonical_compose_options(
     // altering the delivered text and defeating line-count-based report
     // truncation. Preserve the source line breaks for prompt delivery.
     .with_incidental_newline_mode(darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve);
-    compose_opts = compose_opts.with_set_overrides(
-        super::runtime_state::with_initialized_outputs(options.set_overrides.clone()),
-    );
+    compose_opts = compose_opts.with_set_overrides(super::runtime_state::with_initialized_outputs(
+        options.set_overrides.clone(),
+    ));
     compose_opts = compose_opts.with_caller_input_records(options.caller_input_records.clone());
     if !options.name_coercion_keys.is_empty() {
         compose_opts = compose_opts.with_name_coercion_keys(options.name_coercion_keys.clone());
@@ -294,9 +294,7 @@ pub fn preflight_document_shell(
         None,
     ) {
         Ok(result) => Ok(result.approved_commands),
-        Err(CompositionError::PreFlightDiscoveryFailed(_)) => {
-            Ok(std::collections::HashSet::new())
-        }
+        Err(CompositionError::PreFlightDiscoveryFailed(_)) => Ok(std::collections::HashSet::new()),
         Err(e) => Err(e),
     }
 }
@@ -328,10 +326,12 @@ fn effective_source_repo_root(
 
 use super::error::CompositionError;
 use super::guardrails::load_or_create_guardrails;
+use super::hints::{
+    ParsedAgentHint, parse_agent_hint_full, parse_interactive_hint, parse_model_hint,
+};
 use super::lifecycle::{
     LIFECYCLE_EVENT_KEYS, parse_lifecycle_config, validate_no_err_in_no_error_events,
 };
-use super::hints::{ParsedAgentHint, parse_agent_hint_full, parse_interactive_hint, parse_model_hint};
 use super::types::{
     CompositionClosurePlan, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
     PreparedComposition, ResolvedCompositionSource,
@@ -359,9 +359,9 @@ pub(super) fn prepare_direct_with_prompt(
     prompt_source: PromptSource,
 ) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
-    if let Some((key, replacement)) =
-        super::lifecycle::scan_removed_validation_keys(&frontmatter_to_value(source.markdown.frontmatter()))
-    {
+    if let Some((key, replacement)) = super::lifecycle::scan_removed_validation_keys(
+        &frontmatter_to_value(source.markdown.frontmatter()),
+    ) {
         return Err(CompositionError::RemovedValidationKey {
             source_path: source.resolved_path.clone(),
             key,
@@ -447,8 +447,7 @@ pub(super) fn prepare_direct_with_prompt(
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     };
-    let mut lifecycle =
-        parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
+    let mut lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
     // Pre-flight shell resolution (C3): resolve each shell command in the
     // deferred lifecycle subtree via DM2 with an early-binding-only lookup
     // and stamp the resolved bytes back so the approved command equals the
@@ -595,8 +594,7 @@ pub fn prepare_inline(
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     };
-    let mut lifecycle =
-        parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
+    let mut lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
     // Pre-flight shell resolution (C3): see `prepare_direct`.
     super::preflight::resolve_lifecycle_shell_commands(
         &mut lifecycle,
@@ -631,10 +629,9 @@ pub fn prepare_inline(
     prompt.push_str(&guardrails);
 
     // Capture pre-execution hash for closure
-    let original_hash = source.markdown.compute_hash(
-        MdHashKind::Simple,
-        &super::closure::inline_hash_options(),
-    );
+    let original_hash = source
+        .markdown
+        .compute_hash(MdHashKind::Simple, &super::closure::inline_hash_options());
 
     Ok(PreparedComposition {
         mode: CompositionMode::InlineFrontmatterPrompt,

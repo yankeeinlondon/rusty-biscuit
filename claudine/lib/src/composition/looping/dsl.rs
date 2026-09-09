@@ -67,12 +67,16 @@ fn split_action_args(input: &str) -> Result<Vec<String>, CompositionError> {
     Ok(args)
 }
 
-pub(super) fn parse_actions(value: &serde_json::Value) -> Result<Vec<LoopAction>, CompositionError> {
+pub(super) fn parse_actions(
+    value: &serde_json::Value,
+) -> Result<Vec<LoopAction>, CompositionError> {
     match value {
         serde_json::Value::Array(items) => items
             .iter()
             .enumerate()
-            .map(|(index, item)| parse_action(item).map_err(|err| annotate_action_error(err, index)))
+            .map(|(index, item)| {
+                parse_action(item).map_err(|err| annotate_action_error(err, index))
+            })
             .collect(),
         serde_json::Value::String(_) | serde_json::Value::Object(_) => {
             parse_action(value).map(|action| vec![action])
@@ -126,7 +130,9 @@ fn parse_dsl_action(raw: &str) -> Result<LoopAction, CompositionError> {
         "decrement" => parse_unary_action(op, args, LoopAction::Decrement),
         "set" => parse_value_action(op, args, |prop, value| LoopAction::Set { prop, value }),
         "append" => parse_value_action(op, args, |prop, value| LoopAction::Append { prop, value }),
-        "prepend" => parse_value_action(op, args, |prop, value| LoopAction::Prepend { prop, value }),
+        "prepend" => {
+            parse_value_action(op, args, |prop, value| LoopAction::Prepend { prop, value })
+        }
         "merge" => parse_value_action(op, args, |prop, value| LoopAction::Merge { prop, value }),
         other => Err(CompositionError::LoopInvalid(format!(
             "unknown loop action op `{other}`"
@@ -149,11 +155,25 @@ fn parse_structured_action(
     match op.as_str() {
         "increment" => Ok(LoopAction::Increment(prop)),
         "decrement" => Ok(LoopAction::Decrement(prop)),
-        "set" => Ok(LoopAction::Set { prop, value: parse_structured_action_value(map)? }),
-        "append" => Ok(LoopAction::Append { prop, value: parse_structured_action_value(map)? }),
-        "prepend" => Ok(LoopAction::Prepend { prop, value: parse_structured_action_value(map)? }),
-        "merge" => Ok(LoopAction::Merge { prop, value: parse_structured_action_value(map)? }),
-        other => Err(CompositionError::LoopInvalid(format!("unknown loop action op `{other}`"))),
+        "set" => Ok(LoopAction::Set {
+            prop,
+            value: parse_structured_action_value(map)?,
+        }),
+        "append" => Ok(LoopAction::Append {
+            prop,
+            value: parse_structured_action_value(map)?,
+        }),
+        "prepend" => Ok(LoopAction::Prepend {
+            prop,
+            value: parse_structured_action_value(map)?,
+        }),
+        "merge" => Ok(LoopAction::Merge {
+            prop,
+            value: parse_structured_action_value(map)?,
+        }),
+        other => Err(CompositionError::LoopInvalid(format!(
+            "unknown loop action op `{other}`"
+        ))),
     }
 }
 
@@ -210,7 +230,9 @@ pub(super) fn parse_string(
 fn parse_property(field: &str, value: &serde_json::Value) -> Result<String, CompositionError> {
     let prop = parse_string(field, value)?;
     if prop.trim().is_empty() {
-        return Err(CompositionError::LoopInvalid(format!("`{field}` must not be empty")));
+        return Err(CompositionError::LoopInvalid(format!(
+            "`{field}` must not be empty"
+        )));
     }
     Ok(prop.trim().to_string())
 }
@@ -226,7 +248,9 @@ pub(super) fn parse_positive_usize(
         )));
     };
     if raw == 0 {
-        return Err(CompositionError::LoopInvalid(format!("`{field}` must be greater than zero")));
+        return Err(CompositionError::LoopInvalid(format!(
+            "`{field}` must be greater than zero"
+        )));
     }
     usize::try_from(raw).map_err(|_| {
         CompositionError::LoopInvalid(format!("`{field}` is too large for this platform"))
@@ -239,6 +263,8 @@ fn parse_dsl_value(raw: &str) -> serde_json::Value {
         return value;
     }
     serde_json::Value::String(
-        trimmed.trim_matches(|ch| ch == '\'' || ch == '"').to_string(),
+        trimmed
+            .trim_matches(|ch| ch == '\'' || ch == '"')
+            .to_string(),
     )
 }

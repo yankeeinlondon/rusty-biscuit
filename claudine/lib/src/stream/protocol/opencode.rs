@@ -295,13 +295,11 @@ pub struct OpenCodeErrorData {
 
 impl OpenCodeError {
     pub fn resolved_kind(&self) -> Option<String> {
-        self.error_type
-            .clone()
-            .or_else(|| {
-                self.error
-                    .as_ref()
-                    .and_then(|error| error.kind.clone().or_else(|| error.name.clone()))
-            })
+        self.error_type.clone().or_else(|| {
+            self.error
+                .as_ref()
+                .and_then(|error| error.kind.clone().or_else(|| error.name.clone()))
+        })
     }
 
     pub fn resolved_message(&self) -> Option<String> {
@@ -309,12 +307,10 @@ impl OpenCodeError {
             .clone()
             .or_else(|| {
                 self.error.as_ref().and_then(|error| {
-                    error.message.clone().or_else(|| {
-                        error
-                            .data
-                            .as_ref()
-                            .and_then(|data| data.message.clone())
-                    })
+                    error
+                        .message
+                        .clone()
+                        .or_else(|| error.data.as_ref().and_then(|data| data.message.clone()))
                 })
             })
             .or_else(|| self.message.clone())

@@ -80,15 +80,17 @@ fn resolve_explicit_file_with_context(
     mode: SystemPromptMode,
     resolution_context: &FileResolutionContext,
 ) -> Result<Option<(SystemPromptSource, String)>, crate::error::ClaudineError> {
-    let not_found =
-        || crate::error::ClaudineError::SystemPromptFileNotFound(file_ref.to_string());
+    let not_found = || crate::error::ClaudineError::SystemPromptFileNotFound(file_ref.to_string());
     let reference = FileReference::new(file_ref).map_err(|_| not_found())?;
     let path = reference
         .resolve_in_context(resolution_context)
         .map_err(|_| not_found())?
         .ok_or_else(not_found)?;
     let text = std::fs::read_to_string(&path)?;
-    Ok(Some((SystemPromptSource::ExplicitFile { path, mode }, text)))
+    Ok(Some((
+        SystemPromptSource::ExplicitFile { path, mode },
+        text,
+    )))
 }
 
 fn resolve_system_prompt_source_with_home(
@@ -207,8 +209,7 @@ fn resolve_non_interactive_candidates_with_home(
         }
     }
 
-    if let Some(home_path) =
-        home_dir.map(|h| h.join(".claudine").join(NON_INTERACTIVE_FILENAME))
+    if let Some(home_path) = home_dir.map(|h| h.join(".claudine").join(NON_INTERACTIVE_FILENAME))
         && home_path.is_file()
     {
         candidates.push((
@@ -280,8 +281,7 @@ fn resolve_file_ref(
     context: &LaunchContext,
     home_dir: Option<&std::path::Path>,
 ) -> Result<PathBuf, crate::error::ClaudineError> {
-    let not_found =
-        || crate::error::ClaudineError::SystemPromptFileNotFound(file_ref.to_string());
+    let not_found = || crate::error::ClaudineError::SystemPromptFileNotFound(file_ref.to_string());
 
     let reference = FileReference::new(file_ref).map_err(|_| not_found())?;
 

@@ -1,7 +1,7 @@
 pub mod antigravity;
 pub mod claude;
-mod common;
 pub mod codex;
+mod common;
 pub mod gemini;
 pub mod kimi;
 pub mod opencode;
@@ -48,31 +48,28 @@ pub fn for_provider(
         Provider::Codex => Box::new(codex::CodexSemanticStreamParser::new(sink, config.model)),
         Provider::Gemini => Box::new(gemini::GeminiSemanticStreamParser::new(sink)),
         Provider::KimiCode => Box::new(kimi::KimiSemanticStreamParser::new(sink)),
-        Provider::OpenCode => Box::new(opencode::OpenCodeSemanticStreamParser::new(
-            sink,
-            config.model,
-            Provider::OpenCode,
-        )
-        .expect("OpenCode parser accepts the OpenCode identity")),
+        Provider::OpenCode => Box::new(
+            opencode::OpenCodeSemanticStreamParser::new(sink, config.model, Provider::OpenCode)
+                .expect("OpenCode parser accepts the OpenCode identity"),
+        ),
         Provider::QwenCode => Box::new(qwen::QwenSemanticStreamParser::new(sink)),
         // Kilo Code is an OpenCode fork; its `--format json` stream is
         // OpenCode-shaped NDJSON, parsed by the OpenCode parser unchanged —
         // but stamped with Kilo identity so it selects Kilo's own error
         // vocabulary rather than OpenCode's.
-        Provider::Kilo => Box::new(opencode::OpenCodeSemanticStreamParser::new(
-            sink,
-            config.model,
-            Provider::Kilo,
-        )
-        .expect("OpenCode parser accepts the Kilo identity")),
+        Provider::Kilo => Box::new(
+            opencode::OpenCodeSemanticStreamParser::new(sink, config.model, Provider::Kilo)
+                .expect("OpenCode parser accepts the Kilo identity"),
+        ),
         // Pi is a bespoke provider with its own `--mode json` NDJSON format.
         Provider::Pi => Box::new(pi::PiSemanticStreamParser::new(sink, config.model)),
         // Antigravity's `--output-format json` print mode emits ONE buffered
         // JSON envelope (not a line stream); its bespoke parser accumulates and
         // parses that single object.
-        Provider::Antigravity => Box::new(
-            antigravity::AntigravitySemanticStreamParser::new(sink, config.model),
-        ),
+        Provider::Antigravity => Box::new(antigravity::AntigravitySemanticStreamParser::new(
+            sink,
+            config.model,
+        )),
         _ => Box::new(claude::ClaudeSemanticStreamParser::new(sink)),
     }
 }

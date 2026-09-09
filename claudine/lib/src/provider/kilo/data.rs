@@ -16,8 +16,10 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use crate::events::AgenticEvent;
-use crate::linking::capabilities::{ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter, SupportLevel};
-use crate::provider::{OutputFormatSelector, ProviderInfo};
+use crate::linking::capabilities::{
+    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
+    SkillFrontmatter, SupportLevel,
+};
 use crate::provider::acp::{AcpServerMode, AcpSupport};
 use crate::provider::billing_model::BillingModel;
 use crate::provider::cli_sensitivity::CliSensitiveAxes;
@@ -25,16 +27,23 @@ use crate::provider::display_policy::{DisplayPolicy, EventClass, ToolResultSumma
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
-use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
-use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
+use crate::provider::offering::{
+    ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource,
+};
+use crate::provider::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
+};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
 use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::ReasoningSupport;
 use crate::provider::resume_support::ResumeSupport;
-use crate::provider::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
+use crate::provider::system_prompt::{
+    SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
+};
 use crate::provider::unmapped_native_event::UnmappedNativeEvent;
 use crate::provider::yolo::YoloSupport;
+use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::stream::StreamProtocol;
 
 use super::behavior::KILO_PROVIDER;
@@ -67,7 +76,9 @@ pub(in crate::provider) static KILO_INFO: ProviderInfo = ProviderInfo {
     resource_support_fn: resource_support,
     session_log_paths: &[
         PathTemplate::Static("~/.local/share/kilo/kilo.db"),
-        PathTemplate::Static("~/Library/Application Support/Code/User/globalStorage/kilocode.kilo-code/tasks/{task_id}/{api_conversation_history.json,ui_messages.json}"),
+        PathTemplate::Static(
+            "~/Library/Application Support/Code/User/globalStorage/kilocode.kilo-code/tasks/{task_id}/{api_conversation_history.json,ui_messages.json}",
+        ),
     ],
     config_paths: &[
         PathTemplate::Static("~/.config/kilo/kilo.jsonc"),
@@ -77,25 +88,19 @@ pub(in crate::provider) static KILO_INFO: ProviderInfo = ProviderInfo {
         PathTemplate::Static("~/.local/share/kilo/kilo.db"),
     ],
     memory_files: KILO_MEMORY_FILES,
-    output_formats: &[
-        OutputFormatSupport {
-            format: OutputFormat::Json,
-            native_name: "json",
-            cli_flag: Some("--format"),
-            stdin_supported: true,
-            selector: OutputFormatSelector::FlagValue {
-                flag: "--format",
-            },
-            companion_flags: &[],
-        },
-    ],
-    entrypoints: &[
-        EntrypointSpec {
-            subcommand: Some("run"),
-            required_flags: &[],
-            mode: EntrypointMode::NonInteractive,
-        },
-    ],
+    output_formats: &[OutputFormatSupport {
+        format: OutputFormat::Json,
+        native_name: "json",
+        cli_flag: Some("--format"),
+        stdin_supported: true,
+        selector: OutputFormatSelector::FlagValue { flag: "--format" },
+        companion_flags: &[],
+    }],
+    entrypoints: &[EntrypointSpec {
+        subcommand: Some("run"),
+        required_flags: &[],
+        mode: EntrypointMode::NonInteractive,
+    }],
     system_prompt: &SystemPromptSpec {
         append: SystemPromptDeliveryByMode {
             interactive: SystemPromptDelivery::Unsupported,
@@ -333,13 +338,11 @@ pub(in crate::provider) static KILO_INFO: ProviderInfo = ProviderInfo {
     supports_interactive_inline_closure: false,
     model_required_in_non_tty: false,
     platform_kind: PlatformKind::AgentAggregator,
-    unmapped_native_events: &[
-        UnmappedNativeEvent {
-            native_event: "tool.definition",
-            description: "Mutates a tool's description and parameter schema before the tool list is sent to the model.",
-            remediation: "Author a Kilo plugin exporting a tool.definition hook; Claudine cannot dispatch this phase.",
-        },
-    ],
+    unmapped_native_events: &[UnmappedNativeEvent {
+        native_event: "tool.definition",
+        description: "Mutates a tool's description and parameter schema before the tool list is sent to the model.",
+        remediation: "Author a Kilo plugin exporting a tool.definition hook; Claudine cannot dispatch this phase.",
+    }],
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).
@@ -453,7 +456,11 @@ pub(in crate::provider) static KILO_EVENT_MAPPING: EventMappingTable = EventMapp
             support_level: EventSupportLevel::Hook {
                 native_name: "message.updated",
             },
-            parse_aliases: &["message.updated", "message.part.updated", "experimental.text.complete"],
+            parse_aliases: &[
+                "message.updated",
+                "message.part.updated",
+                "experimental.text.complete",
+            ],
             registration_target: true,
         },
         EventMapping {
@@ -495,7 +502,10 @@ fn build_resource_support() -> ProviderCapabilities {
             format: Some(ResourceFormat::Markdown),
             repo_path: Some(PathBuf::from(".kilo/skills")),
             user_path: Some(PathBuf::from(".config/kilo/skills")),
-            also_reads_from: vec![PathBuf::from(".claude/skills"), PathBuf::from(".agents/skills")],
+            also_reads_from: vec![
+                PathBuf::from(".claude/skills"),
+                PathBuf::from(".agents/skills"),
+            ],
             notes: None,
             properties: Some(ResourcePropertySchema::new(
                 &["name", "description"],

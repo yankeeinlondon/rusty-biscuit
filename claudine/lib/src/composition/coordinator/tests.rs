@@ -44,8 +44,11 @@ fn request(target: &str, overlay: &[(&str, serde_json::Value)]) -> EvaluatedProx
 
 /// The coordinator's normal happy path, used as the fixture for the handoff
 /// tests below.
-fn commit(ledger: &mut RunLedger, target: &str, overlay: &[(&str, serde_json::Value)])
--> ProxyHandoff {
+fn commit(
+    ledger: &mut RunLedger,
+    target: &str,
+    overlay: &[(&str, serde_json::Value)],
+) -> ProxyHandoff {
     let resolved = ResolvedProxyTarget::from_resolver(doc(target));
     let approval = ledger
         .access()
@@ -77,11 +80,17 @@ mod handoff_state {
         let handoff = commit(
             &mut ledger,
             "target",
-            &[("phase", serde_json::json!(2)), ("live", serde_json::json!(true))],
+            &[
+                ("phase", serde_json::json!(2)),
+                ("live", serde_json::json!(true)),
+            ],
         );
 
         assert_eq!(handoff.overlay().get("phase"), Some(&serde_json::json!(2)));
-        assert_eq!(handoff.overlay().get("live"), Some(&serde_json::json!(true)));
+        assert_eq!(
+            handoff.overlay().get("live"),
+            Some(&serde_json::json!(true))
+        );
         assert_eq!(handoff.provenance().source_path(), doc("router"));
         assert_eq!(handoff.provenance().signal(), LifecycleSignal::Initialize);
     }
@@ -186,7 +195,13 @@ mod run_ledger {
         // Command-wide timing and the approval cache are invocation state:
         // they outlive every document in the chain.
         assert_eq!(ledger.command_started(), anchor);
-        assert!(ledger.approval_cache().lock().unwrap().contains_key("ls -la"));
+        assert!(
+            ledger
+                .approval_cache()
+                .lock()
+                .unwrap()
+                .contains_key("ls -la")
+        );
     }
 
     #[test]
@@ -208,7 +223,10 @@ mod run_ledger {
             }
             other => panic!("expected a recorded proxy, got {other:?}"),
         }
-        assert_eq!(ledger.transitions()[1], TransitionRecord::Retry { attempt: 2 });
+        assert_eq!(
+            ledger.transitions()[1],
+            TransitionRecord::Retry { attempt: 2 }
+        );
     }
 
     #[test]
@@ -262,7 +280,10 @@ mod invocation_inputs {
 
         // The caller stays authoritative at every document: a handoff cannot
         // reach into invocation inputs at all.
-        assert_eq!(inputs.set_overrides, Some(serde_json::json!({ "phase": 2 })));
+        assert_eq!(
+            inputs.set_overrides,
+            Some(serde_json::json!({ "phase": 2 }))
+        );
     }
 }
 
@@ -282,7 +303,10 @@ mod active_document_state {
     #[test]
     fn retry_replaces_the_attempt_slice_and_drops_the_session() {
         let mut state = ActiveDocumentState::initial();
-        state.iteration_mut().attempt_mut().adopt_session("s-1".into());
+        state
+            .iteration_mut()
+            .attempt_mut()
+            .adopt_session("s-1".into());
         state
             .iteration_mut()
             .attempt_mut()
@@ -301,7 +325,10 @@ mod active_document_state {
     #[test]
     fn resume_replaces_the_attempt_slice_but_retains_the_live_session() {
         let mut state = ActiveDocumentState::initial();
-        state.iteration_mut().attempt_mut().adopt_session("s-1".into());
+        state
+            .iteration_mut()
+            .attempt_mut()
+            .adopt_session("s-1".into());
 
         state
             .iteration_mut()
@@ -309,7 +336,10 @@ mod active_document_state {
 
         assert_eq!(state.iteration().attempt().number(), 2);
         assert_eq!(state.iteration().attempt().session_id(), Some("s-1"));
-        assert_eq!(state.iteration().attempt().resume_followup(), Some("keep going"));
+        assert_eq!(
+            state.iteration().attempt().resume_followup(),
+            Some("keep going")
+        );
     }
 
     fn a_key(provider: &str) -> SessionCompatibilityKey {
@@ -322,7 +352,10 @@ mod active_document_state {
     #[test]
     fn resume_carries_the_session_compatibility_key_forward_with_the_session() {
         let mut state = ActiveDocumentState::initial();
-        state.iteration_mut().attempt_mut().adopt_session("s-1".into());
+        state
+            .iteration_mut()
+            .attempt_mut()
+            .adopt_session("s-1".into());
         let key = a_key("claude");
         state
             .iteration_mut()
@@ -361,9 +394,15 @@ mod active_document_state {
         state.iteration_mut().retry_attempt();
         // Firing again at attempt 2 must reuse the established ceiling, not
         // recompute 2 + 2 = 4 and drift out of reach forever.
-        assert_eq!(state.iteration_mut().retry_budget_mut().ceiling_for(2, 2), 3);
+        assert_eq!(
+            state.iteration_mut().retry_budget_mut().ceiling_for(2, 2),
+            3
+        );
         state.iteration_mut().retry_attempt();
-        assert_eq!(state.iteration_mut().retry_budget_mut().ceiling_for(3, 2), 3);
+        assert_eq!(
+            state.iteration_mut().retry_budget_mut().ceiling_for(3, 2),
+            3
+        );
 
         // Budget exhausted at the ceiling.
         assert!(state.iteration().retry_budget().permits(2));
@@ -410,7 +449,10 @@ mod active_document_state {
     fn proxy_discards_active_document_execution_state() {
         let mut source = ActiveDocumentState::initial();
         source.iteration_mut().retry_budget_mut().ceiling_for(1, 2);
-        source.iteration_mut().attempt_mut().adopt_session("s-1".into());
+        source
+            .iteration_mut()
+            .attempt_mut()
+            .adopt_session("s-1".into());
         source.iteration_mut().retry_attempt();
         source.advance_iteration();
 
@@ -460,13 +502,25 @@ mod session_compatibility_key {
         let cases: &[(&str, Mutate)] = &[
             ("provider", |k| k.provider = "codex".to_string()),
             ("model", |k| k.model = Some("gpt-5".to_string())),
-            ("profile/binary", |k| k.binary = "codex@/usr/bin/codex".to_string()),
-            ("resume protocol", |k| k.resume_protocol = "claude:false".to_string()),
+            ("profile/binary", |k| {
+                k.binary = "codex@/usr/bin/codex".to_string()
+            }),
+            ("resume protocol", |k| {
+                k.resume_protocol = "claude:false".to_string()
+            }),
             ("workspace CWD", |k| k.workspace_cwd = "/other".to_string()),
-            ("permission mode", |k| k.permission_mode = "bypass".to_string()),
-            ("interactivity", |k| k.interactivity = "interactive".to_string()),
-            ("structured-output mode", |k| k.structured_output = "false:false".to_string()),
-            ("system prompt", |k| k.system_prompt = "digest-2".to_string()),
+            ("permission mode", |k| {
+                k.permission_mode = "bypass".to_string()
+            }),
+            ("interactivity", |k| {
+                k.interactivity = "interactive".to_string()
+            }),
+            ("structured-output mode", |k| {
+                k.structured_output = "false:false".to_string()
+            }),
+            ("system prompt", |k| {
+                k.system_prompt = "digest-2".to_string()
+            }),
             ("MCP server set", |k| k.mcp_servers = vec!["fs".to_string()]),
         ];
         for (facet, mutate) in cases {
@@ -628,7 +682,10 @@ mod transitions {
         }
 
         let retry: DocumentTransition<u8> = DocumentTransition::Retry;
-        assert_eq!(retry.map_abort(|_| String::new()), DocumentTransition::Retry);
+        assert_eq!(
+            retry.map_abort(|_| String::new()),
+            DocumentTransition::Retry
+        );
     }
 }
 
@@ -656,7 +713,10 @@ fn prepared_composition() -> crate::composition::types::PreparedComposition {
         deferred_lifecycle_keys: Vec::new(),
         input_layers: Default::default(),
         entry: crate::composition::DocumentEntryReason::Direct,
-        compose_context: darkmatter::markdown::compose::ComposeContext::capture_for_content(std::path::Path::new("."), ""),
+        compose_context: darkmatter::markdown::compose::ComposeContext::capture_for_content(
+            std::path::Path::new("."),
+            "",
+        ),
         document_epoch: None,
     }
 }

@@ -27,7 +27,7 @@ use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
 use serde_json::Value;
 
-use crate::provider::{DisplayPolicy, EventClass, ToolResultSummary, Provider, provider_info};
+use crate::provider::{DisplayPolicy, EventClass, Provider, ToolResultSummary, provider_info};
 use crate::stream::semantic::SemanticEvent;
 use crate::stream::stderr::Verbosity;
 use crate::stream::tool_display::{ToolCallDisplay, ToolStatus};

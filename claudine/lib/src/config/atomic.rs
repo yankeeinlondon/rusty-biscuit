@@ -276,9 +276,9 @@ mod tests {
             );
         }
 
-        assert!(!is_transient_windows_persist_error(
-            &std::io::Error::other("not an OS error")
-        ));
+        assert!(!is_transient_windows_persist_error(&std::io::Error::other(
+            "not an OS error"
+        )));
     }
 
     #[cfg(windows)]

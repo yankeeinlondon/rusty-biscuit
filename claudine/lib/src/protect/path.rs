@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use crate::path_semantics::{is_absolute_spelling, is_exact_or_descendant, normalize, segments};
 #[cfg(windows)]
 use crate::path_semantics::is_windows_absolute_spelling;
+use crate::path_semantics::{is_absolute_spelling, is_exact_or_descendant, normalize, segments};
 
 /// Prefixes for absolute sensitive paths.
 ///
@@ -364,10 +364,7 @@ mod tests {
         let allow = vec!["node_modules".to_string()];
         assert!(all_targets_allowed(&["./node_modules".to_string()], &allow));
         assert!(
-            !all_targets_allowed(
-                &["packages/foo/node_modules".to_string()],
-                &allow
-            ),
+            !all_targets_allowed(&["packages/foo/node_modules".to_string()], &allow),
             "relative allow entries must match as an anchored prefix"
         );
     }

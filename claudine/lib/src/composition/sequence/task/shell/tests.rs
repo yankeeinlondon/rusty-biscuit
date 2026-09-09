@@ -72,7 +72,11 @@ fn a_three_byte_code_point_survives_either_split() {
     for split in 1..3 {
         let bytes = "日".as_bytes();
         let mut stream = Utf8Stream::default();
-        let decoded = format!("{}{}", stream.push(&bytes[..split]), stream.push(&bytes[split..]));
+        let decoded = format!(
+            "{}{}",
+            stream.push(&bytes[..split]),
+            stream.push(&bytes[split..])
+        );
         assert_eq!(decoded, "日", "split after {split} byte(s)");
     }
 }
@@ -118,7 +122,10 @@ fn ownership_survives_a_child_that_exited_before_verification() {
     use super::{ProcessTree, isolate_process_tree};
 
     let mut builder = std::process::Command::new("sh");
-    builder.arg("-c").arg("true").stdin(std::process::Stdio::null());
+    builder
+        .arg("-c")
+        .arg("true")
+        .stdin(std::process::Stdio::null());
     isolate_process_tree(&mut builder);
     let mut child = builder.spawn().expect("spawn sh");
     // Let it exit without reaping it (no `wait`/`try_wait`), so it is a zombie.

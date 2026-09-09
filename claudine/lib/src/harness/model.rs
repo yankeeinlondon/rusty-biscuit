@@ -225,9 +225,7 @@ pub struct ResumeLaunchSpec {
 /// Where an audited command originates.
 #[derive(Debug, Clone)]
 pub enum AuditedCommandSource {
-    ComposeSourceLine {
-        line: usize,
-    },
+    ComposeSourceLine { line: usize },
 }
 
 /// A command discovered during shell audit.

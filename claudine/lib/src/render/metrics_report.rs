@@ -182,8 +182,7 @@ impl BrowserRenderable for MetricsReport {
     fn render_html_fragment(&self) -> BrowserFragment<Ready> {
         let summary = &self.summary;
         let base = "claudine-metrics-report";
-        let mut section =
-            BrowserFragment::new().define_as_block_tag(BlockTag::Section, base);
+        let mut section = BrowserFragment::new().define_as_block_tag(BlockTag::Section, base);
 
         section = section.add_component(block_text(
             BlockTag::H2,
@@ -219,14 +218,20 @@ impl BrowserRenderable for MetricsReport {
         section = section.add_component(block_text(
             BlockTag::P,
             format!("{base}__providers"),
-            format!("Provider split: {}", provider_split_plain(&summary.providers)),
+            format!(
+                "Provider split: {}",
+                provider_split_plain(&summary.providers)
+            ),
         ));
 
         if !summary.permission_modes.is_empty() {
             section = section.add_component(block_text(
                 BlockTag::P,
                 format!("{base}__permission-modes"),
-                format!("Permission modes: {}", labeled_counts(&summary.permission_modes)),
+                format!(
+                    "Permission modes: {}",
+                    labeled_counts(&summary.permission_modes)
+                ),
             ));
         }
         if !summary.models.is_empty() {
@@ -237,18 +242,12 @@ impl BrowserRenderable for MetricsReport {
             ));
         }
         if let Some(usage) = usage_line(&summary.usage) {
-            section = section.add_component(block_text(
-                BlockTag::P,
-                format!("{base}__usage"),
-                usage,
-            ));
+            section =
+                section.add_component(block_text(BlockTag::P, format!("{base}__usage"), usage));
         }
         if let Some(metrics) = metrics_line(&summary.metrics) {
-            section = section.add_component(block_text(
-                BlockTag::P,
-                format!("{base}__metrics"),
-                metrics,
-            ));
+            section =
+                section.add_component(block_text(BlockTag::P, format!("{base}__metrics"), metrics));
         }
 
         if !summary.top_tools.is_empty() {
@@ -589,8 +588,8 @@ mod tests {
 
     #[test]
     fn render_browser_fragment_carries_same_figures() {
-        let html = BrowserRenderable::render_html_fragment(&MetricsReport::new(sample_summary()))
-            .render();
+        let html =
+            BrowserRenderable::render_html_fragment(&MetricsReport::new(sample_summary())).render();
         assert!(html.contains("Claudine Logs"));
         assert!(html.contains("<section"));
         assert!(html.contains("Events 120"));
@@ -603,8 +602,8 @@ mod tests {
 
     #[test]
     fn render_browser_fragment_empty_day_omits_optional_sections() {
-        let html = BrowserRenderable::render_html_fragment(&MetricsReport::new(empty_summary()))
-            .render();
+        let html =
+            BrowserRenderable::render_html_fragment(&MetricsReport::new(empty_summary())).render();
         assert!(html.contains("Events 0"));
         assert!(!html.contains("Usage:"));
         assert!(!html.contains("Top Tools"));

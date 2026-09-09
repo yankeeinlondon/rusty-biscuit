@@ -476,9 +476,7 @@ fn find_undefined_top_level_variable<'a>(
         Expr::Variable(path) => undefined_bare_variable(path, defined),
         // Ternary conditions are evaluated, but the branches intentionally
         // tolerate undefined operands by design.
-        Expr::Ternary { condition, .. } => {
-            find_undefined_top_level_variable(condition, defined)
-        }
+        Expr::Ternary { condition, .. } => find_undefined_top_level_variable(condition, defined),
         Expr::Fallback { .. } => None,
         Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => None,
         Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
@@ -488,10 +486,8 @@ fn find_undefined_top_level_variable<'a>(
             find_undefined_top_level_variable(left, defined)
                 .or_else(|| find_undefined_top_level_variable(right, defined))
         }
-        Expr::Index { base, index } => {
-            find_undefined_top_level_variable(base, defined)
-                .or_else(|| find_undefined_top_level_variable(index, defined))
-        }
+        Expr::Index { base, index } => find_undefined_top_level_variable(base, defined)
+            .or_else(|| find_undefined_top_level_variable(index, defined)),
         Expr::MemberAccess { base, .. } => find_undefined_top_level_variable(base, defined),
         Expr::FunctionCall { args, .. } => args
             .iter()
@@ -532,10 +528,8 @@ fn find_undefined_stack_variable<'a>(
             find_undefined_stack_variable(left, defined)
                 .or_else(|| find_undefined_stack_variable(right, defined))
         }
-        Expr::Index { base, index } => {
-            find_undefined_stack_variable(base, defined)
-                .or_else(|| find_undefined_stack_variable(index, defined))
-        }
+        Expr::Index { base, index } => find_undefined_stack_variable(base, defined)
+            .or_else(|| find_undefined_stack_variable(index, defined)),
         Expr::MemberAccess { base, .. } => find_undefined_stack_variable(base, defined),
         // `or`/`and` are the condition-parse-mode (`parse_condition`) lowering of
         // `||`/`&&`. Like an interpolation-mode `Expr::Fallback`, they exist to
@@ -712,11 +706,13 @@ fn surface_references_err(expr: &Expr) -> bool {
 /// Whether any `{{ … }}` span inside a literal communication/action string
 /// references the bare lifecycle `err` global.
 fn literal_spans_reference_err(literal: &str) -> bool {
-    ExpressionFinder::find_all_plain(literal).iter().any(|span| {
-        parse(&span.expression)
-            .map(|expr| references_bare_err(&expr))
-            .unwrap_or(false)
-    })
+    ExpressionFinder::find_all_plain(literal)
+        .iter()
+        .any(|span| {
+            parse(&span.expression)
+                .map(|expr| references_bare_err(&expr))
+                .unwrap_or(false)
+        })
 }
 
 /// Returns `true` when the expression tree references the lifecycle `err`
@@ -755,9 +751,7 @@ fn references_bare_err(expr: &Expr) -> bool {
         // Object keys are authored text; a `{{ err … }}` span hiding in a key
         // is caught by the literal-span scan in `surface_references_err`.
         Expr::ArrayLiteral(elements) => elements.iter().any(references_bare_err),
-        Expr::ObjectLiteral(entries) => {
-            entries.iter().any(|(_, value)| references_bare_err(value))
-        }
+        Expr::ObjectLiteral(entries) => entries.iter().any(|(_, value)| references_bare_err(value)),
         Expr::Fallback { primary, fallback } => {
             references_bare_err(primary) || references_bare_err(fallback)
         }
@@ -788,9 +782,7 @@ fn references_bare_err(expr: &Expr) -> bool {
 /// `on_error` commands are also collected because they execute on
 /// non-zero exit. Each entry's property path names the source location
 /// (e.g. `start.stack[1].action.command`).
-pub fn collect_lifecycle_shell_commands(
-    lifecycle: &LifecycleConfig,
-) -> Vec<(String, String)> {
+pub fn collect_lifecycle_shell_commands(lifecycle: &LifecycleConfig) -> Vec<(String, String)> {
     let mut commands = Vec::new();
     for surface in iter_stack_expression_surfaces(lifecycle) {
         if let Some(literal) = expr_as_string_literal(surface.expr) {
@@ -838,6 +830,6 @@ fn expr_as_string_literal(expr: &Expr) -> Option<String> {
     }
 }
 
+use super::actions::ProxyWithValue;
 /// Normalizes empty or whitespace-only strings to `None`.
 use super::*;
-use super::actions::ProxyWithValue;

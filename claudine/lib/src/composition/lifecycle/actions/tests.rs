@@ -24,7 +24,14 @@ fn control_action_validity_matrix() {
 
     // Skip is valid only in Initialize.
     assert!(A::Skip.is_valid_for(S::Initialize));
-    for event in [S::Start, S::Success, S::Blocked, S::Failure, S::Finalize, S::Loop] {
+    for event in [
+        S::Start,
+        S::Success,
+        S::Blocked,
+        S::Failure,
+        S::Finalize,
+        S::Loop,
+    ] {
         assert!(!A::Skip.is_valid_for(event), "Skip in {event:?}");
     }
 

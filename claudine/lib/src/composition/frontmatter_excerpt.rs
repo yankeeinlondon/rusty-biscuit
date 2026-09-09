@@ -128,7 +128,9 @@ impl FrontmatterExcerpt {
         if let Some(line) = self.highlight_line {
             meta.highlight.add_line(line);
         }
-        let rendered = CodeBlock::yaml(self.block.clone()).with_meta(meta).render(term);
+        let rendered = CodeBlock::yaml(self.block.clone())
+            .with_meta(meta)
+            .render(term);
         let body = if matches!(term.color_depth, ColorDepth::None) {
             strip_escape_codes(&rendered)
         } else {
@@ -464,8 +466,7 @@ mod tests {
     fn schema_span_falls_back_to_schema_parent_without_property() {
         // A structural failure with no real property name falls back to the
         // `$schema:` parent line (line 2).
-        let excerpt =
-            FrontmatterExcerpt::capture_schema_span(SCHEMA_DOC, None, 0, true).unwrap();
+        let excerpt = FrontmatterExcerpt::capture_schema_span(SCHEMA_DOC, None, 0, true).unwrap();
         assert_eq!(excerpt.highlight_line, Some(2));
     }
 
@@ -501,14 +502,21 @@ mod tests {
         assert_eq!(excerpt.render_appendix(&term), "");
     }
 
-    const NEAR_MISS_DOC: &str = "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n";
+    const NEAR_MISS_DOC: &str =
+        "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n";
 
     #[test]
     fn capture_line_recognizes_four_dash_fence() {
         let excerpt = FrontmatterExcerpt::capture_line(NEAR_MISS_DOC, 1, true).unwrap();
         assert_eq!(excerpt.highlight_line, Some(1));
-        assert!(excerpt.block.starts_with("----\n"), "block must include opening fence");
-        assert!(excerpt.block.ends_with("\n----"), "block must include closing fence");
+        assert!(
+            excerpt.block.starts_with("----\n"),
+            "block must include opening fence"
+        );
+        assert!(
+            excerpt.block.ends_with("\n----"),
+            "block must include closing fence"
+        );
     }
 
     #[test]

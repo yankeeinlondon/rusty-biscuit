@@ -115,10 +115,9 @@ pub fn resolve_alias_at(
         .expected_offerings
         .iter()
         .find_map(|offering| {
-            (offering.resolves == Some(ResolvesVia::FamilyLatest)
-                && offering.alias == Some(alias))
-            .then_some(offering.catalog_id)
-            .flatten()
+            (offering.resolves == Some(ResolvesVia::FamilyLatest) && offering.alias == Some(alias))
+                .then_some(offering.catalog_id)
+                .flatten()
         })
         .and_then(|catalog_id| family_latest_at(family_key(catalog_id), now))
 }
@@ -210,7 +209,11 @@ mod tests {
     /// The generated index must uphold the binary-search precondition.
     #[test]
     fn family_index_is_sorted_by_key() {
-        assert!(FAMILY_INDEX.windows(2).all(|pair| pair[0].key < pair[1].key));
+        assert!(
+            FAMILY_INDEX
+                .windows(2)
+                .all(|pair| pair[0].key < pair[1].key)
+        );
     }
 
     #[test]
@@ -279,7 +282,10 @@ mod tests {
         assert_eq!(stamp.identity_key, hit.identity_key);
         assert_eq!(stamp.family_key, hit.family.key);
         assert_eq!(stamp.artifact_generated_at, ARTIFACT_GENERATED_AT);
-        assert_eq!(stamp.stale, matches!(hit.staleness, Staleness::Stale { .. }));
+        assert_eq!(
+            stamp.stale,
+            matches!(hit.staleness, Staleness::Stale { .. })
+        );
     }
 
     #[test]

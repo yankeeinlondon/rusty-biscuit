@@ -2,9 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::hook_adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::error::Result;
+use crate::hook_adapters::ProviderAdapter;
 use crate::mcp::export::ExportServer;
 use crate::mcp::inject::{McpInjector, OpenCodeInjector};
 use crate::mcp::state::Scope;

@@ -6,10 +6,9 @@ use super::*;
 
 #[test]
 fn protect_boolean_true_deserializes() {
-    let config: ClaudineConfig = serde_json::from_value(
-        serde_json::json!({ "preferred_agent": "claude", "protect": true }),
-    )
-    .unwrap();
+    let config: ClaudineConfig =
+        serde_json::from_value(serde_json::json!({ "preferred_agent": "claude", "protect": true }))
+            .unwrap();
     assert!(config.protect.enabled);
 }
 
@@ -164,8 +163,7 @@ fn preferred_agent_round_trip_when_none_skips_field() {
 
 #[test]
 fn canonical_provider_deserializes() {
-    let json =
-        serde_json::json!({ "preferred_agent": "claude", "canonical_provider": "goose" });
+    let json = serde_json::json!({ "preferred_agent": "claude", "canonical_provider": "goose" });
     let config: ClaudineConfig = serde_json::from_value(json).unwrap();
     assert_eq!(config.canonical_provider, Some(Provider::Goose));
 }

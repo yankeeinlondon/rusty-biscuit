@@ -141,7 +141,10 @@ fn recognizes_native_windows_executable_hook_command() {
     });
 
     assert!(is_claudine_hook_group(&entry));
-    assert_eq!(extract_claudine_event(&entry).as_deref(), Some("before_tool"));
+    assert_eq!(
+        extract_claudine_event(&entry).as_deref(),
+        Some("before_tool")
+    );
 
     for command in [
         "my-claudine.exe handle before_tool --provider claude",

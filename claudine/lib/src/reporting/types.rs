@@ -476,8 +476,14 @@ mod tests {
     fn session_info_emits_null_pids_not_omitted() {
         let json = serde_json::to_value(sample_session()).unwrap();
         assert!(json.get("agent_pid").is_some(), "agent_pid key must exist");
-        assert!(json["agent_pid"].is_null(), "agent_pid must be null when absent");
-        assert!(json["claudine_pid"].is_null(), "claudine_pid must be null when absent");
+        assert!(
+            json["agent_pid"].is_null(),
+            "agent_pid must be null when absent"
+        );
+        assert!(
+            json["claudine_pid"].is_null(),
+            "claudine_pid must be null when absent"
+        );
     }
 
     /// D9 round-trip: every facet, the structured detail, and the one-level
@@ -597,7 +603,10 @@ mod tests {
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["claudine_pid"], 42);
         assert!(json.get("agent_pid").is_some(), "agent_pid key must exist");
-        assert!(json["agent_pid"].is_null(), "agent_pid must be null when absent");
+        assert!(
+            json["agent_pid"].is_null(),
+            "agent_pid must be null when absent"
+        );
     }
 }
 

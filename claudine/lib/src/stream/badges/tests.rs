@@ -46,8 +46,7 @@ fn summary_with_kind(provider: Provider, kind: &str, message: &str) -> StreamExe
 
 #[test]
 fn auth_kind_yields_auth_badge_with_dashboard_url() {
-    let summary =
-        summary_with_kind(Provider::Claude, "authentication_error", "Invalid API key");
+    let summary = summary_with_kind(Provider::Claude, "authentication_error", "Invalid API key");
     let badges = derive_badges(&summary, Provider::Claude);
     assert_eq!(badges.len(), 1);
     let badge = &badges[0];

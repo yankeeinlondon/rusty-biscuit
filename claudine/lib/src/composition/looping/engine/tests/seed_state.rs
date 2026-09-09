@@ -1,7 +1,7 @@
 //! seed state loop-engine tests.
 
-use super::*;
 use super::super::super::seed::build_loop_seed_with_lifecycle;
+use super::*;
 use crate::composition::prepare::prepare_direct;
 
 #[test]
@@ -9,10 +9,7 @@ fn build_loop_seed_resolves_control_variables_and_omits_derived() {
     let source = make_source(&[
         ("phase", json!("{{ initial_phase || 1 }}")),
         ("total_phases", json!("{{ 6 }}")),
-        (
-            "pass_icon",
-            json!("{{ _loop_is_last ? '✅' : '🧑‍💻' }}"),
-        ),
+        ("pass_icon", json!("{{ _loop_is_last ? '✅' : '🧑‍💻' }}")),
         (
             "loop",
             json!({"until": "phase > total_phases", "action": "increment(phase)"}),
@@ -29,7 +26,10 @@ fn build_loop_seed_resolves_control_variables_and_omits_derived() {
 
     assert_eq!(seed.get("phase"), Some(&json!(1)));
     assert_eq!(seed.get("total_phases"), Some(&json!(6)));
-    assert!(!seed.contains_key("pass_icon"), "derived keys must not be lifted into the seed");
+    assert!(
+        !seed.contains_key("pass_icon"),
+        "derived keys must not be lifted into the seed"
+    );
     assert_eq!(seed.get("initial_phase"), Some(&json!(1)));
 }
 
@@ -51,9 +51,18 @@ fn build_loop_seed_with_lifecycle_carries_event_blocks_dropped_from_seed() {
                 "stack": [{"action": {"append_line": ["events.log", "gate"]}}],
             }),
         ),
-        ("initialize", json!({"stack": [{"action": {"append_line": ["events.log", "initialize"]}}]})),
-        ("start", json!({"stack": [{"action": {"append_line": ["events.log", "start"]}}]})),
-        ("finalize", json!({"stack": [{"action": {"append_line": ["events.log", "finalize"]}}]})),
+        (
+            "initialize",
+            json!({"stack": [{"action": {"append_line": ["events.log", "initialize"]}}]}),
+        ),
+        (
+            "start",
+            json!({"stack": [{"action": {"append_line": ["events.log", "start"]}}]}),
+        ),
+        (
+            "finalize",
+            json!({"stack": [{"action": {"append_line": ["events.log", "finalize"]}}]}),
+        ),
     ]);
     let config = resolve_loop_config(&source).unwrap().unwrap();
 
@@ -130,10 +139,7 @@ fn seeded_loop_repro_runs_to_completion_with_live_derived_variable() {
         &[
             ("phase", json!("{{ start_phase || 1 }}")),
             ("total_phases", json!(6)),
-            (
-                "pass_icon",
-                json!("{{ _loop_is_last ? '✅' : '🧑‍💻' }}"),
-            ),
+            ("pass_icon", json!("{{ _loop_is_last ? '✅' : '🧑‍💻' }}")),
             (
                 "loop",
                 json!({"until": "phase > total_phases", "action": "increment(phase)"}),
@@ -311,7 +317,6 @@ fn seeded_loop_doc_namespace_condition_retains_readonly_control_value() {
         assert_eq!(body.trim(), format!("Step {} of 2", n - 1));
     }
 }
-
 
 /// R4 reaches the loop route through the seed compose.
 ///

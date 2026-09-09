@@ -337,10 +337,7 @@ fn build_notification_message(title: &str, body: Option<&str>) -> Message {
 
 /// Build a transient messenger, register the desktop provider, and dispatch
 /// a notification to the current host OS.
-async fn send_desktop_notification(
-    title: &str,
-    body: Option<&str>,
-) -> Result<(), MessagingError> {
+async fn send_desktop_notification(title: &str, body: Option<&str>) -> Result<(), MessagingError> {
     let mut messenger = Messenger::new();
     let provider = DesktopNotificationProvider::new(DesktopConfig::default());
     messenger.register(Box::new(provider));
@@ -613,11 +610,12 @@ async fn send_payload(
             bot_token_env,
             ..
         } => {
-            let token = resolve_secret(bot_token.as_deref(), bot_token_env)
-                .map_err(|e| MessagingError::SecretUnavailable {
+            let token = resolve_secret(bot_token.as_deref(), bot_token_env).map_err(|e| {
+                MessagingError::SecretUnavailable {
                     context: "Discord",
                     message: e,
-                })?;
+                }
+            })?;
             let provider = DiscordProvider::new(DiscordConfig {
                 bot_token: SecretString::from(token),
             });
@@ -628,11 +626,12 @@ async fn send_payload(
             bot_token_env,
             ..
         } => {
-            let token = resolve_secret(bot_token.as_deref(), bot_token_env)
-                .map_err(|e| MessagingError::SecretUnavailable {
+            let token = resolve_secret(bot_token.as_deref(), bot_token_env).map_err(|e| {
+                MessagingError::SecretUnavailable {
                     context: "Slack",
                     message: e,
-                })?;
+                }
+            })?;
             let provider = SlackProvider::new(SlackConfig {
                 bot_token: SecretString::from(token),
                 api_base_url: None,
@@ -646,15 +645,19 @@ async fn send_payload(
             account_env,
             ..
         } => {
-            let resolved_rpc_url = resolve_secret(rpc_url.as_deref(), rpc_url_env)
-                .map_err(|e| MessagingError::SecretUnavailable {
-                    context: "Signal RPC URL",
-                    message: e,
+            let resolved_rpc_url =
+                resolve_secret(rpc_url.as_deref(), rpc_url_env).map_err(|e| {
+                    MessagingError::SecretUnavailable {
+                        context: "Signal RPC URL",
+                        message: e,
+                    }
                 })?;
-            let resolved_account = resolve_secret(account.as_deref(), account_env)
-                .map_err(|e| MessagingError::SecretUnavailable {
-                    context: "Signal account",
-                    message: e,
+            let resolved_account =
+                resolve_secret(account.as_deref(), account_env).map_err(|e| {
+                    MessagingError::SecretUnavailable {
+                        context: "Signal account",
+                        message: e,
+                    }
                 })?;
             let provider = SignalProvider::new(SignalConfig {
                 rpc_url: resolved_rpc_url,
@@ -669,11 +672,12 @@ async fn send_payload(
             phone_number_id_env,
             ..
         } => {
-            let token = resolve_secret(access_token.as_deref(), access_token_env)
-                .map_err(|e| MessagingError::SecretUnavailable {
+            let token = resolve_secret(access_token.as_deref(), access_token_env).map_err(|e| {
+                MessagingError::SecretUnavailable {
                     context: "WhatsApp access token",
                     message: e,
-                })?;
+                }
+            })?;
             let phone_id = resolve_secret(phone_number_id.as_deref(), phone_number_id_env)
                 .map_err(|e| MessagingError::SecretUnavailable {
                     context: "WhatsApp phone number ID",

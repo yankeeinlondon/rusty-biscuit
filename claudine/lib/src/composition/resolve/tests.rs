@@ -1,13 +1,13 @@
 use super::*;
+use crate::diagnostics::Diagnostic;
+use biscuit_terminal::errors::BlockError;
+use biscuit_terminal::prelude::TerminalRenderable;
+use biscuit_terminal::terminal::Terminal;
 use std::collections::HashMap;
 use std::error::Error as _;
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::PathBuf;
-use biscuit_terminal::errors::BlockError;
-use biscuit_terminal::prelude::TerminalRenderable;
-use biscuit_terminal::terminal::Terminal;
-use crate::diagnostics::Diagnostic;
 use tempfile::TempDir;
 
 #[test]
@@ -108,7 +108,10 @@ fn prompt_magic_candidates_interleave_conventions_and_intrinsic_scopes_once() {
         home_intrinsic,
     ] {
         assert_eq!(
-            candidates.iter().filter(|candidate| **candidate == intrinsic).count(),
+            candidates
+                .iter()
+                .filter(|candidate| **candidate == intrinsic)
+                .count(),
             1,
             "intrinsic root must occur exactly once: {intrinsic:?}"
         );
@@ -133,17 +136,19 @@ fn skill_reference_prefers_repository_then_falls_back_to_home() {
         biscuit_file::PackageAreaFallback::None,
     )
     .unwrap();
-    let context = FileResolutionContext::from_snapshot(
-        &repo,
-        Some(home.clone()),
-        HashMap::new(),
-    )
-    .with_repository_scope_catalog(catalog);
+    let context = FileResolutionContext::from_snapshot(&repo, Some(home.clone()), HashMap::new())
+        .with_repository_scope_catalog(catalog);
     let reference = FileReference::new("@.claude/skills/name/SKILL.md").unwrap();
 
-    assert_eq!(reference.resolve_in_context(&context).unwrap(), Some(repo_skill.clone()));
+    assert_eq!(
+        reference.resolve_in_context(&context).unwrap(),
+        Some(repo_skill.clone())
+    );
     fs::remove_file(repo_skill).unwrap();
-    assert_eq!(reference.resolve_in_context(&context).unwrap(), Some(home_skill));
+    assert_eq!(
+        reference.resolve_in_context(&context).unwrap(),
+        Some(home_skill)
+    );
 }
 
 #[test]
@@ -221,10 +226,7 @@ fn resolve_rejects_non_markdown() {
 #[test]
 fn resolve_missing_file() {
     let err = resolve_composition_source("/nonexistent/path/test.md").unwrap_err();
-    assert!(matches!(
-        err,
-        CompositionError::FileReferenceNoMatch { .. }
-    ));
+    assert!(matches!(err, CompositionError::FileReferenceNoMatch { .. }));
 }
 
 #[test]
@@ -245,7 +247,10 @@ fn detailed_no_match_preserves_probe_order_and_diagnostic_shape() {
     let detail = err.detail();
     assert_eq!(detail["reference"], serde_json::json!("missing.md"));
     assert_eq!(detail["kind"], serde_json::json!("implicit_relative"));
-    assert_eq!(detail["effective_kind"], serde_json::json!("implicit_relative"));
+    assert_eq!(
+        detail["effective_kind"],
+        serde_json::json!("implicit_relative")
+    );
     assert_eq!(
         detail["base_dir"],
         serde_json::json!(biscuit_file::to_portable_string(&launch))
@@ -355,8 +360,7 @@ fn resolve_four_dash_fence_maps_to_frontmatter_parse() {
     assert!(
         !matches!(
             err,
-            CompositionError::FileNotFound(_)
-                | CompositionError::FileReferenceNoMatch { .. }
+            CompositionError::FileNotFound(_) | CompositionError::FileReferenceNoMatch { .. }
         ),
         "must not report file not found: {err:?}"
     );

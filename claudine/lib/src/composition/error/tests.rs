@@ -31,7 +31,10 @@ fn file_link_uses_encoded_url_and_portable_label() {
     let path = temp.path().join("a b#%.md");
     let link = super::render::render_file_link(&path);
 
-    assert!(link.contains("a%20b%23%25.md"), "expected encoded URL: {link}");
+    assert!(
+        link.contains("a%20b%23%25.md"),
+        "expected encoded URL: {link}"
+    );
     assert!(
         link.contains(&biscuit_file::to_portable_string(&path)),
         "expected portable label: {link}"
@@ -42,8 +45,14 @@ fn file_link_uses_encoded_url_and_portable_label() {
 fn file_link_absolutizes_a_missing_relative_path() {
     let link = super::render::render_file_link(Path::new("missing-relative-prompt.md"));
 
-    assert!(link.contains("<a href=\"file://"), "expected file URL: {link}");
-    assert!(link.contains("missing-relative-prompt.md"), "expected label: {link}");
+    assert!(
+        link.contains("<a href=\"file://"),
+        "expected file URL: {link}"
+    );
+    assert!(
+        link.contains("missing-relative-prompt.md"),
+        "expected label: {link}"
+    );
 }
 
 #[test]
@@ -62,7 +71,10 @@ fn enrich_wraps_lifecycle_leak_with_excerpt() {
     assert!(matches!(err, CompositionError::WithFrontmatter { .. }));
     assert!(err.frontmatter_excerpt().is_some());
     // Display still delegates to the inner leak diagnostic.
-    assert!(err.to_string().contains("interpolation leaked"), "got: {err}");
+    assert!(
+        err.to_string().contains("interpolation leaked"),
+        "got: {err}"
+    );
 }
 
 #[test]
@@ -115,9 +127,8 @@ fn enrich_is_idempotent() {
 
 #[test]
 fn enrich_frontmatter_fence_mismatch_attaches_excerpt() {
-    let source = source_from(
-        "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n",
-    );
+    let source =
+        source_from("----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n");
     let ctx = biscuit_terminal::errors::SourceContext::new(
         PathBuf::from("review.md"),
         PathBuf::from("review.md"),
@@ -134,14 +145,16 @@ fn enrich_frontmatter_fence_mismatch_attaches_excerpt() {
         matches!(err, CompositionError::WithFrontmatter { .. }),
         "expected WithFrontmatter wrapper, got: {err:?}"
     );
-    assert!(err.frontmatter_excerpt().is_some(), "expected excerpt attached");
+    assert!(
+        err.frontmatter_excerpt().is_some(),
+        "expected excerpt attached"
+    );
 }
 
 #[test]
 fn enrich_frontmatter_fence_mismatch_highlights_line_one() {
-    let source = source_from(
-        "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n",
-    );
+    let source =
+        source_from("----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n");
     let ctx = biscuit_terminal::errors::SourceContext::new(
         PathBuf::from("review.md"),
         PathBuf::from("review.md"),
@@ -184,7 +197,10 @@ fn enrich_frontmatter_parse_regular_error_gets_block_only_excerpt() {
         matches!(err, CompositionError::WithFrontmatter { .. }),
         "expected WithFrontmatter wrapper, got: {err:?}"
     );
-    assert!(err.frontmatter_excerpt().is_some(), "expected excerpt attached");
+    assert!(
+        err.frontmatter_excerpt().is_some(),
+        "expected excerpt attached"
+    );
 }
 
 #[test]
@@ -516,8 +532,7 @@ fn missing_properties_status_block_includes_remediation_hint() {
     let block = err.status_block(&Terminal::default());
     let rendered = block.render(&Terminal::default());
     assert!(
-        rendered.contains("Pass key=value")
-            || rendered.contains("prompt_for_missing"),
+        rendered.contains("Pass key=value") || rendered.contains("prompt_for_missing"),
         "expected remediation hint in rendered output: {rendered}"
     );
 }
@@ -619,7 +634,10 @@ fn no_tty_list_multiple_body_matches_canonical_breakdown() {
         body.contains("choose interactively between suggested Agents"),
         "got: {body}"
     );
-    assert!(!body.contains("the interactive picker would ask"), "got: {body}");
+    assert!(
+        !body.contains("the interactive picker would ask"),
+        "got: {body}"
+    );
 }
 
 #[test]
@@ -641,8 +659,14 @@ fn no_tty_single_invalid_body_is_imperative_message_plus_installed_list() {
         hint: "nope".into(),
     };
     let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
-    assert!(body.starts_with(&invalid_agent_message("nope", FILE_LINK)), "got: {body}");
-    assert!(body.contains(&format!("- {}", Provider::Claude)), "got: {body}");
+    assert!(
+        body.starts_with(&invalid_agent_message("nope", FILE_LINK)),
+        "got: {body}"
+    );
+    assert!(
+        body.contains(&format!("- {}", Provider::Claude)),
+        "got: {body}"
+    );
 }
 
 #[test]
@@ -691,7 +715,10 @@ fn mismatch_render_includes_diagnostic() {
     // block is appended separately by the CLI walker (tested there).
     let err = mismatch_err();
     let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
-    assert!(rendered.contains("greeting.md"), "document name: {rendered}");
+    assert!(
+        rendered.contains("greeting.md"),
+        "document name: {rendered}"
+    );
     assert!(rendered.contains("prompt"), "names prompt: {rendered}");
     assert!(rendered.contains("sequence"), "names sequence: {rendered}");
     assert!(
@@ -972,9 +999,7 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
     let executable = biscuit_file::to_portable_string(&executable);
     let command = format!("\"{executable}\" --definitely-invalid-libtest-option");
     let approved_command = format!("{executable} --definitely-invalid-libtest-option");
-    let content = format!(
-        "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell {command}\n\nPost.\n"
-    );
+    let content = format!("---\ntitle: Shell demo\n---\n\nPre.\n\n::shell {command}\n\nPost.\n");
     std::fs::write(&file_path, content).unwrap();
 
     let source = resolve_composition_source(file_path.to_str().unwrap()).unwrap();
@@ -991,10 +1016,7 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
         source_repo_root: None,
         shell_working_directory: None,
         prepared_context: Some(
-            darkmatter::markdown::compose::ComposeContext::capture_for_content(
-                temp_dir.path(),
-                "",
-            ),
+            darkmatter::markdown::compose::ComposeContext::capture_for_content(temp_dir.path(), ""),
         ),
         file_ref_fallback_dir: None,
         file_resolution_context: None,
@@ -1080,7 +1102,10 @@ fn lifecycle_short_form_removed_display_includes_rewrite() {
         rewrite: "success: \"x\"".to_string(),
     };
     let rendered = err.to_string();
-    assert!(rendered.contains("short-form lifecycle action"), "got: {rendered}");
+    assert!(
+        rendered.contains("short-form lifecycle action"),
+        "got: {rendered}"
+    );
     assert!(rendered.contains("success(\"x\")"), "got: {rendered}");
     assert!(rendered.contains("success: \"x\""), "got: {rendered}");
     assert!(rendered.contains("prompts/plan.md"), "got: {rendered}");
@@ -1105,7 +1130,10 @@ fn lifecycle_short_form_removed_status_block_is_escape_free_at_none() {
         !rendered.contains('\x1b'),
         "expected no escape codes at ColorDepth::None: {rendered}"
     );
-    assert!(rendered.contains("short-form action removed"), "got: {rendered}");
+    assert!(
+        rendered.contains("short-form action removed"),
+        "got: {rendered}"
+    );
     assert!(
         rendered.contains("Rewrite to positional form:"),
         "got: {rendered}"
@@ -1160,9 +1188,15 @@ fn lifecycle_unknown_verb_display_includes_rewrite() {
         rewrite: "did you mean `success`?".to_string(),
     };
     let rendered = err.to_string();
-    assert!(rendered.contains("unknown lifecycle action"), "got: {rendered}");
+    assert!(
+        rendered.contains("unknown lifecycle action"),
+        "got: {rendered}"
+    );
     assert!(rendered.contains("sucess"), "got: {rendered}");
-    assert!(rendered.contains("did you mean `success`?"), "got: {rendered}");
+    assert!(
+        rendered.contains("did you mean `success`?"),
+        "got: {rendered}"
+    );
 }
 
 #[test]
@@ -1258,15 +1292,16 @@ fn lifecycle_stack_ambiguous_display_includes_message() {
         message: "did you mean `success: ...` or `{ action: success, ... }`?".to_string(),
     };
     let rendered = err.to_string();
-    assert!(rendered.contains("ambiguous lifecycle stack item"), "got: {rendered}");
+    assert!(
+        rendered.contains("ambiguous lifecycle stack item"),
+        "got: {rendered}"
+    );
     assert!(rendered.contains("did you mean"), "got: {rendered}");
 }
 
 #[test]
 fn new_lifecycle_errors_get_frontmatter_excerpt() {
-    let source = source_from(
-        "---\nsuccess:\n    sucess: \"x\"\n---\nbody\n",
-    );
+    let source = source_from("---\nsuccess:\n    sucess: \"x\"\n---\nbody\n");
     let err = CompositionError::LifecycleUnknownVerb {
         source_path: PathBuf::from("review.md"),
         property: "success".to_string(),
@@ -1309,10 +1344,7 @@ fn autocomplete_over_cap_display_includes_query_and_cap() {
 fn autocomplete_not_interactive_display_is_actionable() {
     let err = CompositionError::AutocompleteNotInteractive;
     let rendered = err.to_string();
-    assert!(
-        rendered.contains("interactive terminal"),
-        "got: {rendered}"
-    );
+    assert!(rendered.contains("interactive terminal"), "got: {rendered}");
 }
 
 #[test]
@@ -1337,7 +1369,9 @@ fn autocomplete_over_cap_status_block_names_query() {
         query: "plan".to_string(),
         cap: 500,
     };
-    let rendered = err.status_block(&Terminal::default()).render(&Terminal::default());
+    let rendered = err
+        .status_block(&Terminal::default())
+        .render(&Terminal::default());
     assert!(rendered.contains("plan"), "got: {rendered}");
     assert!(rendered.contains("500"), "got: {rendered}");
     assert!(rendered.contains("narrow"), "got: {rendered}");
@@ -1400,11 +1434,9 @@ fn file_ref_compose_error(diagnostic: FileReferenceDiagnostic) -> CompositionErr
 
 #[test]
 fn caller_file_classification_drift_keeps_schema_diagnostic_identity() {
-    let err = CompositionError::ComposeFailed(
-        MarkdownError::CallerFileClassificationChanged {
-            property: "spec".to_string(),
-        },
-    );
+    let err = CompositionError::ComposeFailed(MarkdownError::CallerFileClassificationChanged {
+        property: "spec".to_string(),
+    });
 
     assert_eq!(err.code(), "composition.schema_validation");
     assert_eq!(err.detail()["problems"], json!(["/spec"]));
@@ -1586,12 +1618,10 @@ fn file_reference_detail_does_not_invent_a_miss_for_a_read_io_failure() {
         kind: FileRefFailure::NotFound,
         base_dir: PathBuf::from("/repo/claudine"),
         fallback_dir: Some(PathBuf::from("/repo/claudine")),
-        source: Some(std::sync::Arc::new(
-            biscuit_file::FileReferenceError::Io {
-                path: candidate.clone(),
-                source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
-            },
-        )),
+        source: Some(std::sync::Arc::new(biscuit_file::FileReferenceError::Io {
+            path: candidate.clone(),
+            source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        })),
         caller: Some(std::sync::Arc::new(
             darkmatter::markdown::compose::expression::CallerFileDiagnosticProvenance {
                 property: "spec".to_string(),
@@ -1835,7 +1865,10 @@ fn invalid_file_reference_detail_declares_every_catalog_field() {
             "declared field `{field}` absent from the wrapper's projection"
         );
     }
-    assert!(!detail.is_null(), "a registered code must not project top-level null");
+    assert!(
+        !detail.is_null(),
+        "a registered code must not project top-level null"
+    );
 }
 
 #[test]
@@ -2523,7 +2556,10 @@ fn proxy_with_not_mapping_renders_and_locates_the_with_line() {
     );
 
     let rendered = render(&err);
-    assert!(rendered.contains("array"), "names the authored type: {rendered}");
+    assert!(
+        rendered.contains("array"),
+        "names the authored type: {rendered}"
+    );
     assert!(
         rendered.contains("initialize.stack[0].action[0].with"),
         "names the full property path: {rendered}"
@@ -2552,7 +2588,10 @@ fn proxy_with_whole_mapping_renders_named_follow_up_and_explicit_key_hint() {
     );
 
     let rendered = render(&err);
-    assert!(rendered.contains("payload"), "echoes the authored span: {rendered}");
+    assert!(
+        rendered.contains("payload"),
+        "echoes the authored span: {rendered}"
+    );
     assert!(
         rendered.contains("not supported in this version"),
         "must say this is a named follow-up, not a permanent rule: {rendered}"
@@ -2583,7 +2622,10 @@ fn proxy_with_dynamic_key_renders_without_inventing_a_dotted_path() {
     );
 
     let rendered = render(&err);
-    assert!(rendered.contains("dynamic"), "names the offending key: {rendered}");
+    assert!(
+        rendered.contains("dynamic"),
+        "names the offending key: {rendered}"
+    );
     assert!(
         rendered.contains("never interpolated"),
         "must explain that only values resolve: {rendered}"
@@ -2611,8 +2653,14 @@ fn proxy_only_parameter_renders_verb_and_key_value_rewrite() {
     );
 
     let rendered = render(&err);
-    assert!(rendered.contains("retry"), "names the receiving verb: {rendered}");
-    assert!(rendered.contains("proxy"), "names the owning verb: {rendered}");
+    assert!(
+        rendered.contains("retry"),
+        "names the receiving verb: {rendered}"
+    );
+    assert!(
+        rendered.contains("proxy"),
+        "names the owning verb: {rendered}"
+    );
     assert!(
         rendered.contains("action: proxy"),
         "the hint must show the key/value rewrite: {rendered}"

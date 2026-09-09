@@ -61,7 +61,10 @@ fn set_is_visible_to_a_later_action_in_the_same_stack() {
 
     assert_eq!(outcome, LifecycleEventOutcome::default());
     assert_eq!(events, vec![Emitted::Message("phase=build".to_string())]);
-    assert_eq!(runtime.snapshot().mutations.get("phase"), Some(&json!("build")));
+    assert_eq!(
+        runtime.snapshot().mutations.get("phase"),
+        Some(&json!("build"))
+    );
 }
 
 /// The key/value action form is equivalent to the positional form.
@@ -87,7 +90,10 @@ fn the_key_value_form_writes_the_same_runtime_layer() {
 
     assert_eq!(outcome, LifecycleEventOutcome::default());
     assert_eq!(events, vec![Emitted::Message("phase=ship".to_string())]);
-    assert_eq!(runtime.snapshot().mutations.get("phase"), Some(&json!("ship")));
+    assert_eq!(
+        runtime.snapshot().mutations.get("phase"),
+        Some(&json!("ship"))
+    );
 }
 
 /// A whole-value `{{ }}` span keeps its typed value through `set`, so the
@@ -151,7 +157,10 @@ fn a_mutation_in_start_is_visible_to_a_later_event() {
     );
 
     assert_eq!(events, vec![Emitted::Message("phase=running".to_string())]);
-    assert_eq!(runtime.snapshot().mutations.get("phase"), Some(&json!("running")));
+    assert_eq!(
+        runtime.snapshot().mutations.get("phase"),
+        Some(&json!("running"))
+    );
 }
 
 /// `set` never touches the filesystem — that is the whole distinction from
@@ -182,7 +191,10 @@ fn set_writes_no_file() {
         "---\nphase: plan\n---\nbody\n",
         "the document on disk is untouched"
     );
-    assert_eq!(runtime.snapshot().mutations.get("phase"), Some(&json!("build")));
+    assert_eq!(
+        runtime.snapshot().mutations.get("phase"),
+        Some(&json!("build"))
+    );
 }
 
 /// Every reserved root key is refused as a dispatch failure naming `set`, and
@@ -216,7 +228,10 @@ fn set_refuses_every_reserved_root_key() {
             error.msg
         );
         assert!(runtime.snapshot().mutations.is_empty());
-        assert!(live.lock().unwrap().get(key).is_none(), "{key} must not leak into live state");
+        assert!(
+            live.lock().unwrap().get(key).is_none(),
+            "{key} must not leak into live state"
+        );
     }
 }
 
@@ -240,7 +255,10 @@ fn set_refuses_a_dotted_key() {
         &engine,
     );
 
-    assert!(outcome.action_error.is_some(), "a dotted key must fail the event");
+    assert!(
+        outcome.action_error.is_some(),
+        "a dotted key must fail the event"
+    );
     assert!(runtime.snapshot().mutations.is_empty());
 }
 
@@ -269,7 +287,10 @@ fn without_a_runtime_cell_set_still_applies_and_still_refuses_reserved_keys() {
         &harness,
         Path::new("t.md"),
     );
-    assert_eq!(context.execute_event(&applied), LifecycleEventOutcome::default());
+    assert_eq!(
+        context.execute_event(&applied),
+        LifecycleEventOutcome::default()
+    );
     assert_eq!(
         recorder.events(),
         vec![Emitted::Message("phase=build".to_string())]
@@ -316,5 +337,8 @@ fn last_outputs_reads_the_committed_accumulator() {
         &runtime,
         &engine,
     );
-    assert_eq!(events, vec![Emitted::Message("prev=second run".to_string())]);
+    assert_eq!(
+        events,
+        vec![Emitted::Message("prev=second run".to_string())]
+    );
 }

@@ -1,4 +1,3 @@
-
 use tempfile::TempDir;
 
 use super::*;
@@ -306,9 +305,7 @@ fn no_diagnostic_when_skills_dir_exists() {
     let gemini_missing: Vec<_> = report
         .exceptions
         .iter()
-        .filter(|e| {
-            e.provider == Provider::Gemini && e.exception_type == ExceptionType::Missing
-        })
+        .filter(|e| e.provider == Provider::Gemini && e.exception_type == ExceptionType::Missing)
         .collect();
     // Only user scope: user-only skills are NOT expected in repo scope
     assert_eq!(gemini_missing.len(), 1);
@@ -335,9 +332,7 @@ fn missing_exceptions_scope_aware_both_scopes() {
     let gemini_missing: Vec<_> = report
         .exceptions
         .iter()
-        .filter(|e| {
-            e.provider == Provider::Gemini && e.exception_type == ExceptionType::Missing
-        })
+        .filter(|e| e.provider == Provider::Gemini && e.exception_type == ExceptionType::Missing)
         .collect();
     // 1 from user scope (user-tool) + 1 from repo scope (repo-tool)
     assert_eq!(gemini_missing.len(), 2);

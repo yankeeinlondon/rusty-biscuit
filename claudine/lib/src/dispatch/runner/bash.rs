@@ -94,7 +94,9 @@ pub(super) async fn execute_bash(command: &str, params: &str, meta: &EventMeta) 
             bash_executor::ValidatedCommand::Direct(executable) => {
                 let mut command = Command::new(executable);
                 command.args(&param_args);
-                if let Err(error) = crate::child_environment::contribute_child_environment(&mut command) {
+                if let Err(error) =
+                    crate::child_environment::contribute_child_environment(&mut command)
+                {
                     return Err(std::io::Error::other(error));
                 }
                 command.output().await
@@ -108,7 +110,8 @@ pub(super) async fn execute_bash(command: &str, params: &str, meta: &EventMeta) 
                 cmd.args(interpreter_args);
                 cmd.arg(script);
                 cmd.args(&param_args);
-                if let Err(error) = crate::child_environment::contribute_child_environment(&mut cmd) {
+                if let Err(error) = crate::child_environment::contribute_child_environment(&mut cmd)
+                {
                     return Err(std::io::Error::other(error));
                 }
                 cmd.output().await
@@ -245,7 +248,11 @@ mod tests {
         #[cfg(windows)]
         let output = run_command_blocking(
             "cmd.exe",
-            Some(&["/D".to_string(), "/C".to_string(), "echo %AGENT_CWD%".to_string()]),
+            Some(&[
+                "/D".to_string(),
+                "/C".to_string(),
+                "echo %AGENT_CWD%".to_string(),
+            ]),
         )
         .await
         .unwrap();

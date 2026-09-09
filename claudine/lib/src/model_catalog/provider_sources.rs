@@ -139,18 +139,16 @@ pub(super) async fn fetch_shell_command_models(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     crate::child_environment::contribute_child_environment(&mut command)?;
-    let child = command
-        .spawn()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                CatalogFetchError::CliNotFound(program.into())
-            } else {
-                CatalogFetchError::CliFailed {
-                    exit_code: None,
-                    stderr: e.to_string(),
-                }
+    let child = command.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            CatalogFetchError::CliNotFound(program.into())
+        } else {
+            CatalogFetchError::CliFailed {
+                exit_code: None,
+                stderr: e.to_string(),
             }
-        })?;
+        }
+    })?;
 
     let output = tokio::select! {
         result = child.wait_with_output() => {

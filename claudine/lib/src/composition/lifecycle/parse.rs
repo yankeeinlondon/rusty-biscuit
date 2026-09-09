@@ -136,8 +136,7 @@ pub fn parse_lifecycle_config(
             continue;
         }
 
-        let (notification, stack) =
-            parse_event_block(signal, value, source_file, property_name)?;
+        let (notification, stack) = parse_event_block(signal, value, source_file, property_name)?;
 
         *event_notification_field_mut(signal, &mut config) = Some(notification);
         *event_stack_field_mut(signal, &mut config) = stack.filter(|s| !s.is_empty());
@@ -218,8 +217,8 @@ fn parse_event_block(
     source_file: &Path,
     property_name: &str,
 ) -> Result<(LifecycleNotification, Option<Vec<LifecycleStackItem>>), CompositionError> {
-    let mut notification: LifecycleNotification = serde_json::from_value(value.clone()).map_err(
-        |e| {
+    let mut notification: LifecycleNotification =
+        serde_json::from_value(value.clone()).map_err(|e| {
             let (unknown_field, expected_fields) = parse_serde_unknown_field(&e);
             CompositionError::LifecycleInvalid {
                 property: property_name.to_string(),
@@ -228,8 +227,7 @@ fn parse_event_block(
                 unknown_field,
                 expected_fields,
             }
-        },
-    )?;
+        })?;
 
     // Normalize empty strings to None for every string field.
     normalize_empty_string(&mut notification.say);
@@ -267,11 +265,9 @@ fn parse_event_block(
     // Parse the raw stack into typed form, enforcing cardinality + "Where
     // valid" matrix for this event.
     let typed_stack = match notification.stack.take() {
-        Some(raw_stack) if !raw_stack.is_empty() => Some(parse_lifecycle_stack(
-            signal,
-            &raw_stack,
-            source_file,
-        )?),
+        Some(raw_stack) if !raw_stack.is_empty() => {
+            Some(parse_lifecycle_stack(signal, &raw_stack, source_file)?)
+        }
         _ => None,
     };
 
@@ -507,16 +503,16 @@ fn parse_lifecycle_stack_item(
 ) -> Result<LifecycleStackItem, CompositionError> {
     let property_name = signal.property_name();
 
-    let obj = raw_item.as_object().ok_or_else(|| {
-        CompositionError::LifecycleStackInvalidShape {
+    let obj = raw_item
+        .as_object()
+        .ok_or_else(|| CompositionError::LifecycleStackInvalidShape {
             source_path: source_file.to_path_buf(),
             property: property_name.to_string(),
             message: format!(
                 "stack item must be an object, got {}",
                 json_type_name(raw_item)
             ),
-        }
-    })?;
+        })?;
 
     // Parse `when:` as a Darkmatter condition expression.
     //
@@ -545,13 +541,13 @@ fn parse_lifecycle_stack_item(
         None => None,
     };
 
-    let raw_action = obj.get("action").ok_or_else(|| {
-        CompositionError::LifecycleStackInvalidShape {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            message: "stack item must have an `action` key".to_string(),
-        }
-    })?;
+    let raw_action =
+        obj.get("action")
+            .ok_or_else(|| CompositionError::LifecycleStackInvalidShape {
+                source_path: source_file.to_path_buf(),
+                property: property_name.to_string(),
+                message: "stack item must have an `action` key".to_string(),
+            })?;
 
     // Collect the universal `no_error` flag. Sibling parameter keys are no
     // longer accepted at the stack-item level: a scalar `action: <verb>` must
@@ -618,9 +614,10 @@ fn parse_lifecycle_stack_item(
                 return Err(CompositionError::LifecycleStackInvalidShape {
                     source_path: source_file.to_path_buf(),
                     property: property_name.to_string(),
-                    message: "stack item with an array `action` cannot carry a sibling `no_error`; \
+                    message:
+                        "stack item with an array `action` cannot carry a sibling `no_error`; \
                         move `no_error` into each array element"
-                        .to_string(),
+                            .to_string(),
                 });
             }
             let mut actions = Vec::with_capacity(items.len());
@@ -637,15 +634,13 @@ fn parse_lifecycle_stack_item(
                         }
                         parse_bare_verb_string(signal, s, false, source_file, property_name)?
                     }
-                    serde_json::Value::Object(inner) => {
-                        parse_stack_item_action_object(
-                            signal,
-                            inner,
-                            source_file,
-                            property_name,
-                            action_index,
-                        )?
-                    }
+                    serde_json::Value::Object(inner) => parse_stack_item_action_object(
+                        signal,
+                        inner,
+                        source_file,
+                        property_name,
+                        action_index,
+                    )?,
                     other => {
                         return Err(CompositionError::LifecycleStackInvalidShape {
                             source_path: source_file.to_path_buf(),
@@ -852,8 +847,13 @@ fn parse_bare_verb_string(
         });
     }
 
-    let mut action =
-        validate_positional_arity_and_build(signal, trimmed, Vec::new(), source_file, property_name)?;
+    let mut action = validate_positional_arity_and_build(
+        signal,
+        trimmed,
+        Vec::new(),
+        source_file,
+        property_name,
+    )?;
     action.no_error = no_error;
     Ok(action)
 }
@@ -874,15 +874,15 @@ fn parse_long_form_action_object(
     property_name: &str,
     action_index: usize,
 ) -> Result<LifecycleAction, CompositionError> {
-    let verb_value = obj.get("action").ok_or_else(|| {
-        CompositionError::LifecycleActionInvalidLongForm {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            action: "<missing>".to_string(),
-            message: "long-form action object must have an `action` key".to_string(),
-            source: None,
-        }
-    })?;
+    let verb_value =
+        obj.get("action")
+            .ok_or_else(|| CompositionError::LifecycleActionInvalidLongForm {
+                source_path: source_file.to_path_buf(),
+                property: property_name.to_string(),
+                action: "<missing>".to_string(),
+                message: "long-form action object must have an `action` key".to_string(),
+                source: None,
+            })?;
     let verb = match verb_value {
         serde_json::Value::String(s) => s.clone(),
         other => {
@@ -890,10 +890,7 @@ fn parse_long_form_action_object(
                 source_path: source_file.to_path_buf(),
                 property: property_name.to_string(),
                 action: "<invalid>".to_string(),
-                message: format!(
-                    "`action` must be a string, got {}",
-                    json_type_name(other)
-                ),
+                message: format!("`action` must be a string, got {}", json_type_name(other)),
                 source: None,
             });
         }
@@ -959,12 +956,14 @@ fn parse_long_form_action_object(
         // Direct YAML object literals are not accepted as parameter values;
         // object data must be passed through a whole-value `{{ ... }}` span.
         if let serde_json::Value::Object(_) = value {
-            return Err(CompositionError::LifecycleObjectDataThroughInterpolationParameter {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                verb: verb.clone(),
-                param: key.clone(),
-            });
+            return Err(
+                CompositionError::LifecycleObjectDataThroughInterpolationParameter {
+                    source_path: source_file.to_path_buf(),
+                    property: property_name.to_string(),
+                    verb: verb.clone(),
+                    param: key.clone(),
+                },
+            );
         }
         let expr = action_value_to_expr(value).map_err(|source| {
             CompositionError::LifecycleActionInvalidLongForm {
@@ -1020,10 +1019,8 @@ fn parse_proxy_with(
         });
     };
 
-    let authored: IndexMap<String, serde_json::Value> = map
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
+    let authored: IndexMap<String, serde_json::Value> =
+        map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 
     ProxyWith::new(authored).map_err(|err| match err {
         ProxyWithError::DynamicKey(key) => CompositionError::LifecycleProxyWithDynamicKey {
@@ -1168,5 +1165,5 @@ fn collect_backtick_values(s: &str) -> Vec<String> {
 /// Build a `TtsConfig` from global settings.
 use indexmap::IndexMap;
 
-use super::*;
 use super::super::json_util::json_type_name;
+use super::*;

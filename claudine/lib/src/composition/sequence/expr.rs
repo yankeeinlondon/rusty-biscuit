@@ -199,14 +199,11 @@ mod tests {
             "CLAUDINE_SEQUENCE_ROOT".to_string(),
             request.path().display().to_string(),
         );
-        let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
-            request.path(),
-            Some(home),
-            env,
-        )
-        .with_repository_root(request.path())
-        .with_package_area(package)
-        .add_magic_path(magic, biscuit_file::PathPosition::Start);
+        let snapshot =
+            biscuit_file::FileResolutionContext::from_snapshot(request.path(), Some(home), env)
+                .with_repository_root(request.path())
+                .with_package_area(package)
+                .add_magic_path(magic, biscuit_file::PathPosition::Start);
         let frontmatter = Map::new();
         let lookup = SourceExpressionLookup::new(&frontmatter, request.path())
             .with_file_resolution_context(Some(&snapshot), &source_path);
@@ -217,7 +214,10 @@ mod tests {
             "file_exists('@magic.flag')",
             "file_exists('^package.flag')",
         ] {
-            assert_eq!(evaluate_whole(expression, &lookup).unwrap(), Value::Bool(true));
+            assert_eq!(
+                evaluate_whole(expression, &lookup).unwrap(),
+                Value::Bool(true)
+            );
         }
     }
 }

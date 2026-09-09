@@ -263,10 +263,7 @@ fn record_event_emission_tracks_state_and_prevents_double_emission() {
         launch_area: None,
         context: None,
     };
-    let mut guard = LifecycleRunGuard::new(&config,
-        &ctx,
-        &emitter,
-    );
+    let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
 
     assert!(guard.record_event_emission(LifecycleSignal::Initialize));
     assert!(!guard.record_event_emission(LifecycleSignal::Initialize));
@@ -297,10 +294,7 @@ fn finalize_cannot_emit_without_terminal() {
         launch_area: None,
         context: None,
     };
-    let mut guard = LifecycleRunGuard::new(&config,
-        &ctx,
-        &emitter,
-    );
+    let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
     assert!(!guard.record_event_emission(LifecycleSignal::Finalize));
 }
 
@@ -433,10 +427,7 @@ fn run_event_stack_emits_top_level_and_stack() {
         launch_area: None,
         context: None,
     };
-    let mut guard = LifecycleRunGuard::new(&config,
-        &ctx,
-        &emitter,
-    );
+    let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
 
     assert!(guard.record_event_emission(LifecycleSignal::Start));
 
@@ -469,11 +460,11 @@ fn run_event_stack_emits_top_level_and_stack() {
     assert!(outcome.control.is_none());
     assert!(outcome.action_error.is_none());
 
-    let stderr_signals: Vec<LifecycleSignal> = emitter
-        .signals()
-        .into_iter()
-        .collect();
-    assert_eq!(stderr_signals, vec![LifecycleSignal::Start, LifecycleSignal::Start]);
+    let stderr_signals: Vec<LifecycleSignal> = emitter.signals().into_iter().collect();
+    assert_eq!(
+        stderr_signals,
+        vec![LifecycleSignal::Start, LifecycleSignal::Start]
+    );
     let texts: Vec<String> = emitter
         .actions
         .lock()
@@ -501,11 +492,7 @@ fn execute_event_still_runs_full_event() {
         launch_area: None,
         context: None,
     };
-    let mut guard = LifecycleRunGuard::new(
-        &config,
-        &ctx,
-        &emitter,
-    );
+    let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
 
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
         signal: LifecycleSignal::Start,

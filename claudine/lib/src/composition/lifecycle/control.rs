@@ -182,11 +182,7 @@ pub fn control_budget_for(attempt: u32, max_attempts: u32) -> u32 {
 /// Under [`RetryBackoff::Exponential`] the delay doubles per retry; under
 /// [`RetryBackoff::Fixed`] it is constant. Doubling saturates at
 /// [`Duration::MAX`] rather than overflowing.
-pub fn compute_backoff_delay(
-    base: Duration,
-    backoff: RetryBackoff,
-    retry_index: u32,
-) -> Duration {
+pub fn compute_backoff_delay(base: Duration, backoff: RetryBackoff, retry_index: u32) -> Duration {
     match backoff {
         RetryBackoff::Fixed => base,
         RetryBackoff::Exponential => {
@@ -251,9 +247,7 @@ pub fn proxy_handoff_allowed(chain: &[std::path::PathBuf], target: &std::path::P
         return false;
     }
     let target = proxy_path_identity(target);
-    !chain
-        .iter()
-        .any(|path| proxy_path_identity(path) == target)
+    !chain.iter().any(|path| proxy_path_identity(path) == target)
 }
 
 /// Resolve a `Proxy` target reference to an existing prompt file.

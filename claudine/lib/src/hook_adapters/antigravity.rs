@@ -126,7 +126,9 @@ fn infer_event(raw: &Value) -> Result<AgenticEvent, AdapterError> {
     if raw.get("stepIdx").is_some() {
         return Ok(AgenticEvent::AfterTool);
     }
-    Err(AdapterError::MissingField("toolCall|invocationNum|stepIdx|fullyIdle"))
+    Err(AdapterError::MissingField(
+        "toolCall|invocationNum|stepIdx|fullyIdle",
+    ))
 }
 
 #[cfg(test)]
@@ -179,7 +181,11 @@ mod tests {
     #[test]
     fn unrecognized_payload_errors() {
         let adapter = AntigravityAdapter;
-        assert!(adapter.parse_event(&json!({ "conversationId": "x" })).is_err());
+        assert!(
+            adapter
+                .parse_event(&json!({ "conversationId": "x" }))
+                .is_err()
+        );
     }
 
     #[test]

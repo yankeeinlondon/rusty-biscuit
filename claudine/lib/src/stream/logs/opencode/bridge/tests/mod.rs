@@ -1,7 +1,7 @@
 //! Tests for OpenCode reasoning-log analysis.
 
-use super::*;
 use super::stall_guard::MAX_GENERATIONS_WITHOUT_PROGRESS;
+use super::*;
 use crate::stream::logs::opencode::state::merge_stderr_state_into_summary;
 use crate::stream::summary::StderrDiagnostics;
 
@@ -55,7 +55,6 @@ fn assert_string(extra: &Value, key: &str, expected: &str) {
         .unwrap_or_else(|| panic!("missing {key} in extra: {extra}"));
     assert_eq!(actual, expected, "extra.{key} mismatch: {extra}");
 }
-
 
 mod ingest_classification;
 mod session_lifecycle;

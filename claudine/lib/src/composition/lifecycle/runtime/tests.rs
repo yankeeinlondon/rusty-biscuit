@@ -1,6 +1,6 @@
 use super::*;
-use crate::composition::lifecycle::actions::RetryBackoff;
 use crate::composition::LifecycleErrorInfo;
+use crate::composition::lifecycle::actions::RetryBackoff;
 use std::time::Duration;
 
 fn raised(message: &str) -> LifecycleEventOutcome {
@@ -170,7 +170,10 @@ fn catch_protocol_owns_blocked_failure_finalize_order_and_error_threading() {
             terminal_slot: Some(LifecycleSignal::Blocked),
             finalize_emitted: false,
         },
-        Some(LifecycleErrorInfo::from_action_failure("preflight", "original")),
+        Some(LifecycleErrorInfo::from_action_failure(
+            "preflight",
+            "original",
+        )),
         blocked,
     );
     let failure = protocol.next_step().expect("failure requested");
@@ -179,7 +182,10 @@ fn catch_protocol_owns_blocked_failure_finalize_order_and_error_threading() {
         failure.execution,
         LifecycleCatchExecution::RedesignateBlockedAsFailure
     );
-    assert_eq!(failure.error.as_ref().map(|error| error.msg.as_str()), Some("blocked"));
+    assert_eq!(
+        failure.error.as_ref().map(|error| error.msg.as_str()),
+        Some("blocked")
+    );
 
     assert!(protocol.record(LifecycleSignal::Failure, raised("failure")));
     let finalize = protocol.next_step().expect("finalize requested");
@@ -192,9 +198,15 @@ fn catch_protocol_owns_blocked_failure_finalize_order_and_error_threading() {
 
     assert!(protocol.record(LifecycleSignal::Finalize, raised("finalize")));
     let result = protocol.finish().expect("protocol complete");
-    assert_eq!(result.evaluation_error_signal, Some(LifecycleSignal::Finalize));
     assert_eq!(
-        result.evaluation_error.as_ref().map(|error| error.msg.as_str()),
+        result.evaluation_error_signal,
+        Some(LifecycleSignal::Finalize)
+    );
+    assert_eq!(
+        result
+            .evaluation_error
+            .as_ref()
+            .map(|error| error.msg.as_str()),
         Some("finalize")
     );
     assert_eq!(
@@ -217,14 +229,8 @@ fn catch_protocol_returns_the_setup_error_that_selected_failure() {
             ..LifecycleEventOutcome::default()
         },
     );
-    assert!(protocol.record(
-        LifecycleSignal::Failure,
-        LifecycleEventOutcome::default(),
-    ));
-    assert!(protocol.record(
-        LifecycleSignal::Finalize,
-        LifecycleEventOutcome::default(),
-    ));
+    assert!(protocol.record(LifecycleSignal::Failure, LifecycleEventOutcome::default(),));
+    assert!(protocol.record(LifecycleSignal::Finalize, LifecycleEventOutcome::default(),));
     let result = protocol.finish().expect("protocol complete");
     assert_eq!(
         result.setup_error.as_ref().map(|error| error.msg.as_str()),
@@ -242,7 +248,10 @@ fn catch_protocol_finalizes_clean_blocked_without_failure() {
             terminal_slot: Some(LifecycleSignal::Blocked),
             finalize_emitted: false,
         },
-        Some(LifecycleErrorInfo::from_action_failure("preflight", "original")),
+        Some(LifecycleErrorInfo::from_action_failure(
+            "preflight",
+            "original",
+        )),
         LifecycleEventOutcome {
             control: Some(control.clone()),
             ..LifecycleEventOutcome::default()
@@ -547,9 +556,7 @@ fn transition_control_matrix_covers_preflight_and_harness_controls() {
             0,
             0,
             false,
-            LifecycleTransitionDecision::Abort(
-                LifecycleTransitionAbort::ResumeWithoutSession,
-            ),
+            LifecycleTransitionDecision::Abort(LifecycleTransitionAbort::ResumeWithoutSession),
         ),
         (
             "proxy handoff",
@@ -581,9 +588,7 @@ fn transition_control_matrix_covers_preflight_and_harness_controls() {
             0,
             MAX_PROXY_HOPS,
             false,
-            LifecycleTransitionDecision::Abort(
-                LifecycleTransitionAbort::ProxyBudgetExhausted,
-            ),
+            LifecycleTransitionDecision::Abort(LifecycleTransitionAbort::ProxyBudgetExhausted),
         ),
         (
             "stop falls through",
@@ -640,17 +645,8 @@ fn transition_control_matrix_covers_preflight_and_harness_controls() {
         ),
     ];
 
-    for (
-        name,
-        control,
-        launched,
-        session,
-        attempt,
-        budget,
-        proxy_hops,
-        target_seen,
-        expected,
-    ) in cases
+    for (name, control, launched, session, attempt, budget, proxy_hops, target_seen, expected) in
+        cases
     {
         let outcome = LifecycleEventOutcome {
             control: Some(control),

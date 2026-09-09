@@ -21,7 +21,10 @@ fn new_parser() -> (
     };
     (
         events,
-        Box::new(PiSemanticStreamParser::new(sink, Some("claude-opus-4-8".into()))),
+        Box::new(PiSemanticStreamParser::new(
+            sink,
+            Some("claude-opus-4-8".into()),
+        )),
     )
 }
 
@@ -32,8 +35,7 @@ fn kinds(events: &[SemanticEvent]) -> Vec<&'static str> {
 #[test]
 fn session_header_emits_session_start_with_cwd() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"session","version":3,"id":"s-1","cwd":"/work"}"#);
+    parser.feed_line(r#"{"type":"session","version":3,"id":"s-1","cwd":"/work"}"#);
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::SessionStart {
@@ -115,11 +117,16 @@ fn tool_execution_lifecycle_emits_call_then_result() {
     let collected = events.lock().unwrap().clone();
     assert_eq!(kinds(&collected), vec!["tool_call", "tool_result"]);
     match &collected[0] {
-        SemanticEvent::ToolCall { name, id, input, .. } => {
+        SemanticEvent::ToolCall {
+            name, id, input, ..
+        } => {
             assert_eq!(name.as_deref(), Some("bash"));
             assert_eq!(id.as_deref(), Some("t1"));
             assert_eq!(
-                input.as_ref().and_then(|v| v.get("command")).and_then(Value::as_str),
+                input
+                    .as_ref()
+                    .and_then(|v| v.get("command"))
+                    .and_then(Value::as_str),
                 Some("ls")
             );
         }
@@ -197,7 +204,10 @@ fn message_end_error_stop_reason_emits_error() {
             message,
             ..
         } => {
-            assert!(!terminal, "an assistant-message error is not the terminal record");
+            assert!(
+                !terminal,
+                "an assistant-message error is not the terminal record"
+            );
             assert_eq!(*kind, SemanticErrorKind::ApiRemote);
             assert!(message.contains("503"));
         }
@@ -215,8 +225,7 @@ fn agent_end_emits_terminal_turn_complete() {
         .feed_line(
             r#"{"type":"message_end","message":{"stopReason":"stop","usage":{"input":10,"output":5,"totalTokens":15}}}"#,
         );
-    parser
-        .feed_line(r#"{"type":"agent_end","willRetry":false}"#);
+    parser.feed_line(r#"{"type":"agent_end","willRetry":false}"#);
     let collected = events.lock().unwrap().clone();
     assert_eq!(kinds(&collected), vec!["turn_complete"]);
     match &collected[0] {
@@ -257,8 +266,7 @@ fn auto_retry_start_emits_info_and_end_failure_emits_error() {
 #[test]
 fn successful_auto_retry_end_is_silent() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"auto_retry_end","success":true,"attempt":2}"#);
+    parser.feed_line(r#"{"type":"auto_retry_end","success":true,"attempt":2}"#);
     assert!(events.lock().unwrap().is_empty());
 }
 
@@ -301,8 +309,7 @@ fn silent_lifecycle_events_emit_nothing() {
 #[test]
 fn unknown_event_becomes_provider_extension() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"some_future_event","x":1}"#);
+    parser.feed_line(r#"{"type":"some_future_event","x":1}"#);
     match &events.lock().unwrap()[0] {
         SemanticEvent::ProviderExtension { provider, kind, .. } => {
             assert_eq!(*provider, Provider::Pi);
@@ -358,8 +365,20 @@ fn round_trip_serialization_fidelity() {
 
 #[test]
 fn classify_error_covers_categories() {
-    assert_eq!(classify_error("rate limit exceeded"), SemanticErrorKind::ApiRemote);
-    assert_eq!(classify_error("no API key found for anthropic"), SemanticErrorKind::Configuration);
-    assert_eq!(classify_error("run aborted by user"), SemanticErrorKind::Interrupted);
-    assert_eq!(classify_error("something odd"), SemanticErrorKind::AgentNative);
+    assert_eq!(
+        classify_error("rate limit exceeded"),
+        SemanticErrorKind::ApiRemote
+    );
+    assert_eq!(
+        classify_error("no API key found for anthropic"),
+        SemanticErrorKind::Configuration
+    );
+    assert_eq!(
+        classify_error("run aborted by user"),
+        SemanticErrorKind::Interrupted
+    );
+    assert_eq!(
+        classify_error("something odd"),
+        SemanticErrorKind::AgentNative
+    );
 }

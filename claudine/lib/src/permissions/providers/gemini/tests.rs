@@ -62,8 +62,7 @@ priority = 100
     let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
     let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
     let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
-    let snapshot =
-        ConfiguredPolicySnapshot::from_parts(Provider::Gemini, native, canonical, &ctx);
+    let snapshot = ConfiguredPolicySnapshot::from_parts(Provider::Gemini, native, canonical, &ctx);
 
     assert!(
         snapshot
@@ -140,8 +139,7 @@ async fn gemini_unknown_trust_skips_repo_sources_and_queries_are_unknown() {
     let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
     let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
     let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
-    let snapshot =
-        ConfiguredPolicySnapshot::from_parts(Provider::Gemini, native, canonical, &ctx);
+    let snapshot = ConfiguredPolicySnapshot::from_parts(Provider::Gemini, native, canonical, &ctx);
     let result = snapshot.can_write("src/main.rs");
 
     assert!(result.is_unknown());
@@ -185,8 +183,7 @@ async fn gemini_round_trip_mutation_changes_query_result() {
     let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
     let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
     let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
-    let snapshot =
-        ConfiguredPolicySnapshot::from_parts(Provider::Gemini, native, canonical, &ctx);
+    let snapshot = ConfiguredPolicySnapshot::from_parts(Provider::Gemini, native, canonical, &ctx);
 
     assert!(
         snapshot

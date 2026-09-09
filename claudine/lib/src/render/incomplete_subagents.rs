@@ -48,7 +48,11 @@ impl IncompleteSubagents {
 
     /// The sentence that follows the count, chosen by how the run ended.
     fn verdict(&self, count: usize) -> String {
-        let these = if count == 1 { "this task" } else { "these tasks" };
+        let these = if count == 1 {
+            "this task"
+        } else {
+            "these tasks"
+        };
         match self.exit {
             Some((ProcessTermination::Completed, 0)) => {
                 "The provider exited normally, so this run is a failure despite its exit code."
@@ -160,7 +164,10 @@ mod tests {
         let term = Terminal::default();
         let outcomes: Vec<_> = (0..9).map(|i| stopped(&format!("agent-{i}"))).collect();
         let rendered = IncompleteSubagents::new(&outcomes).render(&term);
-        assert!(rendered.contains("9 sub-agent tasks did not complete"), "{rendered}");
+        assert!(
+            rendered.contains("9 sub-agent tasks did not complete"),
+            "{rendered}"
+        );
         for index in 0..9 {
             assert!(
                 rendered.contains(&format!("agent-{index}")),
@@ -174,7 +181,10 @@ mod tests {
         let term = Terminal::default();
         let outcomes = vec![stopped("lonely")];
         let rendered = IncompleteSubagents::new(&outcomes).render(&term);
-        assert!(rendered.contains("1 sub-agent task did not complete"), "{rendered}");
+        assert!(
+            rendered.contains("1 sub-agent task did not complete"),
+            "{rendered}"
+        );
     }
 
     /// The heading is two sentences and overruns any realistic pane, so it is
@@ -265,9 +275,17 @@ mod tests {
             rendered.contains("This run ended with these tasks still unfinished."),
             "{rendered}"
         );
-        for claim in ["exited normally", "exited with code", "timed out", "aborted", "interrupted"]
-        {
-            assert!(!rendered.contains(claim), "neutral wording may not say {claim:?}: {rendered}");
+        for claim in [
+            "exited normally",
+            "exited with code",
+            "timed out",
+            "aborted",
+            "interrupted",
+        ] {
+            assert!(
+                !rendered.contains(claim),
+                "neutral wording may not say {claim:?}: {rendered}"
+            );
         }
     }
 
@@ -278,7 +296,8 @@ mod tests {
             .with_exit(ProcessTermination::Completed, 2)
             .render(&term);
         assert!(
-            rendered.contains("The provider exited with code 2, and these tasks also never finished."),
+            rendered
+                .contains("The provider exited with code 2, and these tasks also never finished."),
             "{rendered}"
         );
         assert!(!rendered.contains("exited normally"), "{rendered}");
@@ -309,8 +328,14 @@ mod tests {
                 .with_exit(termination, 1)
                 .render(&term);
             assert!(rendered.contains(expected), "{termination}: {rendered}");
-            assert!(!rendered.contains("exited normally"), "{termination}: {rendered}");
-            assert!(!rendered.contains("exited with code"), "{termination}: {rendered}");
+            assert!(
+                !rendered.contains("exited normally"),
+                "{termination}: {rendered}"
+            );
+            assert!(
+                !rendered.contains("exited with code"),
+                "{termination}: {rendered}"
+            );
         }
     }
 
@@ -329,7 +354,10 @@ mod tests {
         let rendered = IncompleteSubagents::new(&[stopped("alpha")])
             .with_exit(ProcessTermination::LaunchFailed, 1)
             .render(&term);
-        assert!(rendered.contains("This run ended with this task still unfinished."), "{rendered}");
+        assert!(
+            rendered.contains("This run ended with this task still unfinished."),
+            "{rendered}"
+        );
         assert!(!rendered.contains("exited"), "{rendered}");
     }
 }

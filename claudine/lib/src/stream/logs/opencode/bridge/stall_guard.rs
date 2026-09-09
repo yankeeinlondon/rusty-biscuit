@@ -15,9 +15,7 @@ use crate::stream::logs::opencode::events::OpenCodeLogRecord;
 use crate::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 
 use super::format::{base_extra, duration_as_millis_u64};
-use super::{
-    EarlyTermination, OpenCodeLogBridge, StalledGenerationContext, StderrIngestOutcome,
-};
+use super::{EarlyTermination, OpenCodeLogBridge, StalledGenerationContext, StderrIngestOutcome};
 
 /// Generation attempts (`llm_call_start`) tolerated since the last
 /// progress-class event before the stalled-generation backstop may trip.

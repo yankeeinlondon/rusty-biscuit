@@ -7,12 +7,14 @@ use tracing::info;
 
 use super::super::coordinator::{EvaluatedProxyRequest, ProxyProvenance, SurfacedHandoff};
 use super::super::error::CompositionError;
-use super::super::lifecycle::{LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
-use super::super::lifecycle_context::LifecycleErrorInfo;
-use super::super::lifecycle_executor::{ShellRunner, StackControl, StackExecutionContext};
 use super::super::lifecycle::runtime::{
     LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchResult, LifecycleCatchState,
 };
+use super::super::lifecycle::{
+    LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal,
+};
+use super::super::lifecycle_context::LifecycleErrorInfo;
+use super::super::lifecycle_executor::{ShellRunner, StackControl, StackExecutionContext};
 use super::super::prepare::PrepareOptions;
 use super::super::types::{CompositionMode, LoopConfig, OnRateLimit, ResolvedCompositionSource};
 use super::actions::ActionStaging;
@@ -458,13 +460,10 @@ where
                         vec![prompt_path.to_path_buf()],
                     ),
                 );
-                return Ok(LoopExecutionResult::success(
-                    initial_frontmatter,
-                    0,
-                    String::new(),
-                    0,
-                )
-                .with_handoff(SurfacedHandoff::Request(request)));
+                return Ok(
+                    LoopExecutionResult::success(initial_frontmatter, 0, String::new(), 0)
+                        .with_handoff(SurfacedHandoff::Request(request)),
+                );
             }
             StackControl::Resume { .. } => {
                 // Pre-launch: no provider session to resume.
@@ -598,13 +597,13 @@ where
         let iteration_model = output.model_id.clone();
         let exit_reason = output.exit_reason.clone();
 
-        let terminal_signal = output
-            .terminal_signal
-            .or_else(|| if output.error.is_some() || output.exit_code != 0 {
+        let terminal_signal = output.terminal_signal.or_else(|| {
+            if output.error.is_some() || output.exit_code != 0 {
                 Some(LifecycleSignal::Failure)
             } else {
                 Some(LifecycleSignal::Success)
-            });
+            }
+        });
         let terminal_failed = matches!(
             terminal_signal,
             Some(LifecycleSignal::Blocked) | Some(LifecycleSignal::Failure)
@@ -665,20 +664,20 @@ where
             last_output.clone(),
             last_exit_code,
         );
-    match run_loop_gate(
-        config,
-        prompt_path,
-        &frontmatter,
-        &gate_ambient,
-        base_dir,
-        &mut guard,
-        lifecycle_ctx,
-        effect_engine,
-        shell_runner,
-        emitter,
-        loop_start,
-        file_resolution_context,
-    )? {
+        match run_loop_gate(
+            config,
+            prompt_path,
+            &frontmatter,
+            &gate_ambient,
+            base_dir,
+            &mut guard,
+            lifecycle_ctx,
+            effect_engine,
+            shell_runner,
+            emitter,
+            loop_start,
+            file_resolution_context,
+        )? {
             LoopGateOutcome::Exit => {
                 return Ok(LoopExecutionResult::success(
                     frontmatter,

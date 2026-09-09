@@ -1,7 +1,5 @@
 use super::*;
-use crate::composition::types::{
-    AgentHint, CompositionMode, EffectiveSelectionHints, ModelHint,
-};
+use crate::composition::types::{AgentHint, CompositionMode, EffectiveSelectionHints, ModelHint};
 use serde_json::json;
 use std::path::PathBuf;
 
@@ -33,7 +31,10 @@ fn make_prepared_composition(
         deferred_lifecycle_keys: Vec::new(),
         input_layers: Default::default(),
         entry: crate::composition::DocumentEntryReason::Direct,
-        compose_context: darkmatter::markdown::compose::ComposeContext::capture_for_content(std::path::Path::new("."), ""),
+        compose_context: darkmatter::markdown::compose::ComposeContext::capture_for_content(
+            std::path::Path::new("."),
+            "",
+        ),
         document_epoch: None,
     }
 }
@@ -61,8 +62,7 @@ fn explicit_provider_selected() {
     let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
 
     let target =
-        resolve_target_non_tty(Some(Provider::Claude), &prepared, &snapshot, None, None)
-            .unwrap();
+        resolve_target_non_tty(Some(Provider::Claude), &prepared, &snapshot, None, None).unwrap();
     assert_eq!(target.provider, Provider::Claude);
     assert!(matches!(
         target.provider_reason,
@@ -89,8 +89,7 @@ fn explicit_provider_ignores_exclusion() {
     );
 
     let target =
-        resolve_target_non_tty(Some(Provider::Claude), &prepared, &snapshot, None, None)
-            .unwrap();
+        resolve_target_non_tty(Some(Provider::Claude), &prepared, &snapshot, None, None).unwrap();
     assert_eq!(target.provider, Provider::Claude);
 }
 
@@ -144,8 +143,7 @@ fn favorite_agent_resolves_when_no_frontmatter() {
     );
 
     let target =
-        resolve_target_non_tty(None, &prepared, &snapshot, Some(Provider::Gemini), None)
-            .unwrap();
+        resolve_target_non_tty(None, &prepared, &snapshot, Some(Provider::Gemini), None).unwrap();
     assert_eq!(target.provider, Provider::Gemini);
     assert!(matches!(
         target.provider_reason,
@@ -191,8 +189,7 @@ fn hint_matches_known_but_uninstalled_provider_falls_through_to_favorite() {
     let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
 
     let target =
-        resolve_target_non_tty(None, &prepared, &snapshot, Some(Provider::Claude), None)
-            .unwrap();
+        resolve_target_non_tty(None, &prepared, &snapshot, Some(Provider::Claude), None).unwrap();
     assert_eq!(target.provider, Provider::Claude);
     assert!(matches!(
         target.provider_reason,
@@ -277,23 +274,28 @@ fn model_frontmatter_list_used() {
 
 // -- Catalog-aware model resolution tests ----------------------------------
 
+/// The 2026-09-08 regression input: an OpenCode model the user configured in
+/// `opencode.jsonc`, which can never be in the compiled baseline. The catalog
+/// must not demote it to the provider default.
 #[test]
-fn model_catalog_rejects_invalid_single_hint() {
-    let prepared = make_prepared_composition(None, Some(ModelHint::Single("not-real".into())));
-    let cache = tempfile::TempDir::new().unwrap();
-    let catalog = crate::model_catalog::ModelCatalogService::with_cache_dir(
-        cache.path().to_path_buf(),
+fn model_catalog_forwards_unrecognized_single_hint() {
+    let prepared = make_prepared_composition(
+        None,
+        Some(ModelHint::Single("minimax/MiniMax-M3".into())),
     );
+    let cache = tempfile::TempDir::new().unwrap();
+    let catalog =
+        crate::model_catalog::ModelCatalogService::with_cache_dir(cache.path().to_path_buf());
+    assert!(!catalog.is_valid(Provider::OpenCode, "minimax/MiniMax-M3"));
     let (model, reason) = resolve_model_with_env(
-        Provider::Codex,
+        Provider::OpenCode,
         &prepared.selection_hints,
         None,
         |_| None,
         Some(&catalog),
     );
-    // Invalid single hint falls through to provider default
-    assert_eq!(model, None);
-    assert!(matches!(reason, ModelResolutionReason::ProviderDefault));
+    assert_eq!(model, Some("minimax/MiniMax-M3".to_string()));
+    assert!(matches!(reason, ModelResolutionReason::FrontmatterSingle));
 }
 
 #[test]
@@ -303,9 +305,8 @@ fn model_catalog_skips_invalid_list_entries() {
         Some(ModelHint::List(vec!["not-real".into(), "gpt-5.5".into()])),
     );
     let cache = tempfile::TempDir::new().unwrap();
-    let catalog = crate::model_catalog::ModelCatalogService::with_cache_dir(
-        cache.path().to_path_buf(),
-    );
+    let catalog =
+        crate::model_catalog::ModelCatalogService::with_cache_dir(cache.path().to_path_buf());
     let (model, reason) = resolve_model_with_env(
         Provider::Codex,
         &prepared.selection_hints,
@@ -318,15 +319,14 @@ fn model_catalog_skips_invalid_list_entries() {
 }
 
 #[test]
-fn model_catalog_all_list_entries_invalid_falls_through() {
+fn model_catalog_all_list_entries_unrecognized_forwards_first() {
     let prepared = make_prepared_composition(
         None,
         Some(ModelHint::List(vec!["not-real".into(), "also-fake".into()])),
     );
     let cache = tempfile::TempDir::new().unwrap();
-    let catalog = crate::model_catalog::ModelCatalogService::with_cache_dir(
-        cache.path().to_path_buf(),
-    );
+    let catalog =
+        crate::model_catalog::ModelCatalogService::with_cache_dir(cache.path().to_path_buf());
     let (model, reason) = resolve_model_with_env(
         Provider::Codex,
         &prepared.selection_hints,
@@ -334,17 +334,16 @@ fn model_catalog_all_list_entries_invalid_falls_through() {
         |_| None,
         Some(&catalog),
     );
-    assert_eq!(model, None);
-    assert!(matches!(reason, ModelResolutionReason::ProviderDefault));
+    assert_eq!(model, Some("not-real".to_string()));
+    assert!(matches!(reason, ModelResolutionReason::FrontmatterList));
 }
 
 #[test]
 fn model_catalog_valid_single_hint_accepted() {
     let prepared = make_prepared_composition(None, Some(ModelHint::Single("gpt-5.5".into())));
     let cache = tempfile::TempDir::new().unwrap();
-    let catalog = crate::model_catalog::ModelCatalogService::with_cache_dir(
-        cache.path().to_path_buf(),
-    );
+    let catalog =
+        crate::model_catalog::ModelCatalogService::with_cache_dir(cache.path().to_path_buf());
     let (model, reason) = resolve_model_with_env(
         Provider::Codex,
         &prepared.selection_hints,
@@ -455,10 +454,7 @@ fn picker_plan_uninstalled_frontmatter_ignored() {
 
 // -- Agent-resolution classification tests -------------------------------
 
-fn hints_from_agent(
-    agent: Option<AgentHint>,
-    invalid: Vec<String>,
-) -> EffectiveSelectionHints {
+fn hints_from_agent(agent: Option<AgentHint>, invalid: Vec<String>) -> EffectiveSelectionHints {
     let was_list = matches!(agent, Some(AgentHint::List(_)));
     hints_from_agent_with_list(agent, invalid, was_list)
 }
@@ -531,7 +527,10 @@ fn classify_single_not_installed() {
 
 #[test]
 fn classify_list_multiple_installed() {
-    let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex, Provider::Gemini], BTreeSet::new());
+    let snapshot = make_snapshot(
+        vec![Provider::Claude, Provider::Codex, Provider::Gemini],
+        BTreeSet::new(),
+    );
     let state = classify_agent_resolution(
         &hints_from_agent(
             Some(AgentHint::List(vec![Provider::Codex, Provider::Gemini])),

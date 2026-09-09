@@ -333,7 +333,10 @@ impl ProxyWith {
 
 /// Recurse the shared action-value rule through arrays and objects, tagging
 /// each failure with its path below `with`.
-fn type_with_value(value: &serde_json::Value, path: &str) -> Result<ProxyWithValue, ProxyWithError> {
+fn type_with_value(
+    value: &serde_json::Value,
+    path: &str,
+) -> Result<ProxyWithValue, ProxyWithError> {
     match value {
         serde_json::Value::Null => Ok(ProxyWithValue::Null),
         serde_json::Value::Array(items) => items
@@ -494,7 +497,6 @@ pub struct ExpressionFunctionAction {
     /// Positional expression arguments.
     pub args: Vec<Expr>,
 }
-
 
 /// Produce a did-you-mean rewrite from a removed short-form action to its
 /// positional form.

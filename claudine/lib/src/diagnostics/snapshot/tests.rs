@@ -41,7 +41,9 @@ fn snapshot_category_is_always_the_codes_prefix() {
     for err in typed_errors() {
         let snapshot = DiagnosticSnapshot::from_diagnostic(err.as_ref());
         assert!(
-            snapshot.code.starts_with(&format!("{}.", snapshot.category)),
+            snapshot
+                .code
+                .starts_with(&format!("{}.", snapshot.category)),
             "code `{}` is not prefixed by category `{}`",
             snapshot.code,
             snapshot.category
@@ -121,7 +123,8 @@ fn a_cause_is_projected_only_one_level_deep() {
 
 #[test]
 fn an_absent_cause_is_omitted_rather_than_null() {
-    let value = serde_json::to_value(DiagnosticSnapshot::from_diagnostic(&file_not_found())).unwrap();
+    let value =
+        serde_json::to_value(DiagnosticSnapshot::from_diagnostic(&file_not_found())).unwrap();
     assert!(
         value.get("cause").is_none(),
         "an absent cause must not serialize as a key: {value}"
@@ -174,7 +177,10 @@ fn an_unknown_code_survives_a_read_write_cycle() {
     let decoded: DiagnosticSnapshot = serde_json::from_value(wire.clone()).unwrap();
 
     assert_eq!(decoded.code, "composition.not_a_code_we_know");
-    assert!(code_spec(&decoded.code).is_none(), "test premise: the code is unknown");
+    assert!(
+        code_spec(&decoded.code).is_none(),
+        "test premise: the code is unknown"
+    );
     assert_eq!(serde_json::to_value(&decoded).unwrap(), wire);
 }
 
@@ -229,7 +235,10 @@ fn unknown_detail_fields_survive_a_read_write_cycle() {
 
     let decoded: DiagnosticSnapshot = serde_json::from_value(wire.clone()).unwrap();
 
-    assert_eq!(decoded.detail["a_field_from_the_future"]["nested"], json!([1, 2, 3]));
+    assert_eq!(
+        decoded.detail["a_field_from_the_future"]["nested"],
+        json!([1, 2, 3])
+    );
     assert_eq!(
         decoded.cause.as_ref().unwrap().detail["another_future_field"],
         json!(true)
@@ -252,7 +261,10 @@ fn from_code_projects_a_catalog_shaped_snapshot() {
     assert_eq!(snapshot.category, "cap");
     assert_eq!(snapshot.disposition, "throttled");
     assert_eq!(snapshot.message, "slow down");
-    assert!(snapshot.detail.is_object(), "detail stays catalog-shaped, not null");
+    assert!(
+        snapshot.detail.is_object(),
+        "detail stays catalog-shaped, not null"
+    );
     assert!(snapshot.cause.is_none(), "a label carries no typed cause");
 
     assert!(DiagnosticSnapshot::from_code("no.such_code", String::new()).is_none());
@@ -308,8 +320,14 @@ fn an_unknown_code_and_detail_survive_the_err_star_projection() {
     assert_eq!(value["code"], json!("composition.not_a_code_we_know"));
     assert_eq!(value["variant"], json!("composition.not_a_code_we_know"));
     // The unknown detail keys survive into `err.detail.*` and `err.cause.detail.*`.
-    assert_eq!(value["detail"]["a_field_from_the_future"]["nested"], json!([1, 2, 3]));
-    assert_eq!(value["cause"]["detail"]["another_future_field"], json!(true));
+    assert_eq!(
+        value["detail"]["a_field_from_the_future"]["nested"],
+        json!([1, 2, 3])
+    );
+    assert_eq!(
+        value["cause"]["detail"]["another_future_field"],
+        json!(true)
+    );
 }
 
 // -- catalog parity --------------------------------------------------------

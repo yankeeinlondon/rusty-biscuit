@@ -151,12 +151,7 @@ pub fn resolve_harness_path_in_context(
             resolved: primary,
             resolution: Some(Box::new(resolution)),
         }),
-        Err(error) => Err(unresolvable(
-            trimmed,
-            source_path,
-            error,
-            Some(resolution),
-        )),
+        Err(error) => Err(unresolvable(trimmed, source_path, error, Some(resolution))),
     }
 }
 
@@ -180,8 +175,7 @@ fn build_resolution_context(
             resolution: None,
         })?;
 
-    let mut resolution_ctx =
-        FileResolutionContext::new(base_dir).with_source_path(ctx.source_path);
+    let mut resolution_ctx = FileResolutionContext::new(base_dir).with_source_path(ctx.source_path);
     if let Some(root) = ctx.repo_root.filter(|root| base_dir.starts_with(root)) {
         resolution_ctx = resolution_ctx.with_repository_root(root);
     }

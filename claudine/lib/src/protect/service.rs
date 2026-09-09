@@ -15,12 +15,16 @@ use super::path::{
 /// Evaluation request for the protect service.
 #[derive(Debug)]
 pub enum ProtectRequest<'a> {
-    BashCommand { command: Cow<'a, str> },
+    BashCommand {
+        command: Cow<'a, str>,
+    },
     WritePath {
         paths: Vec<&'a str>,
         cwd: Option<&'a str>,
     },
-    McpResponse { payloads: Vec<Cow<'a, str>> },
+    McpResponse {
+        payloads: Vec<Cow<'a, str>>,
+    },
 }
 
 /// Standalone deny-catalog matcher service.

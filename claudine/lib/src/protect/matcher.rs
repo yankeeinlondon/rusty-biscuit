@@ -194,14 +194,18 @@ impl CompiledCatalog {
                 .iter()
                 .filter(|p| p.surface == ScanSurface::McpResponse)
                 .collect();
-        if !bash_patterns.is_empty() {
-            custom_command_group =
-                Some(CompiledGroup::compile_custom(bash_patterns.as_slice(), ScanSurface::BashCommand)?);
-        }
-        if !mcp_patterns.is_empty() {
-            custom_mcp_group =
-                Some(CompiledGroup::compile_custom(mcp_patterns.as_slice(), ScanSurface::McpResponse)?);
-        }
+            if !bash_patterns.is_empty() {
+                custom_command_group = Some(CompiledGroup::compile_custom(
+                    bash_patterns.as_slice(),
+                    ScanSurface::BashCommand,
+                )?);
+            }
+            if !mcp_patterns.is_empty() {
+                custom_mcp_group = Some(CompiledGroup::compile_custom(
+                    mcp_patterns.as_slice(),
+                    ScanSurface::McpResponse,
+                )?);
+            }
         }
 
         Ok(Self {

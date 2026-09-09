@@ -310,9 +310,10 @@ pub enum ModelResolutionReason {
     ProviderEnv(&'static str),
     /// Generic `MODEL` environment variable.
     GenericEnv,
-    /// Single frontmatter `model` value validated against catalog.
+    /// Single frontmatter `model` value, forwarded as declared.
     FrontmatterSingle,
-    /// Frontmatter `model` list resolved to first valid match.
+    /// Frontmatter `model` list resolved to its first catalog-recognized
+    /// entry, else its first entry.
     FrontmatterList,
     /// Provider's built-in default (no explicit model chosen).
     ProviderDefault,

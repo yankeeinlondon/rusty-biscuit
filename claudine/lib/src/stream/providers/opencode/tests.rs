@@ -24,12 +24,10 @@ fn new_parser() -> (
     };
     (
         events,
-        Box::new(OpenCodeSemanticStreamParser::new(
-            sink,
-            Some("gpt-4o".into()),
-            Provider::OpenCode,
-        )
-        .unwrap()),
+        Box::new(
+            OpenCodeSemanticStreamParser::new(sink, Some("gpt-4o".into()), Provider::OpenCode)
+                .unwrap(),
+        ),
     )
 }
 
@@ -40,10 +38,8 @@ fn kinds(events: &[SemanticEvent]) -> Vec<&'static str> {
 #[test]
 fn step_start_emits_session_start_once_and_info() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
-    parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
+    parser.feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
+    parser.feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
     let ks = kinds(&events.lock().unwrap());
     // first step_start: session_start + info; second: just info
     assert_eq!(ks, vec!["session_start", "info", "info"]);
@@ -52,8 +48,7 @@ fn step_start_emits_session_start_once_and_info() {
 #[test]
 fn text_emits_output_text() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"text","text":"hello"}"#);
+    parser.feed_line(r#"{"type":"text","text":"hello"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -64,14 +59,12 @@ fn text_emits_output_text() {
 #[test]
 fn tool_use_and_result_emit_typed_events() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(
-            r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"cmd":"ls"}}}"#,
-        );
-    parser
-        .feed_line(
-            r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
-        );
+    parser.feed_line(
+        r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"cmd":"ls"}}}"#,
+    );
+    parser.feed_line(
+        r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
+    );
     let ks = kinds(&events.lock().unwrap());
     assert_eq!(ks, vec!["tool_call", "tool_result"]);
 }
@@ -120,8 +113,7 @@ fn step_complete_emits_turn_complete_and_sums() {
 #[test]
 fn error_event_emits_error() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"error","error_message":"API timeout"}"#);
+    parser.feed_line(r#"{"type":"error","error_message":"API timeout"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -163,8 +155,7 @@ fn current_opencode_error_shape_preserves_provider_message() {
 #[test]
 fn unknown_event_becomes_provider_extension() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"some_future_event","x":1}"#);
+    parser.feed_line(r#"{"type":"some_future_event","x":1}"#);
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],
@@ -185,8 +176,7 @@ fn malformed_json_emits_warning() {
 #[test]
 fn tool_input_string_fallback_parses_without_panic() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"tool_start","part":{"tool_name":"bash","input":"ls -la"}}"#);
+    parser.feed_line(r#"{"type":"tool_start","part":{"tool_name":"bash","input":"ls -la"}}"#);
     let collected = events.lock().unwrap().clone();
     assert_eq!(kinds(&collected), vec!["tool_call"]);
     match &collected[0] {
@@ -273,14 +263,12 @@ fn opencode_tool_use_emits_tool_result_only() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let sink = Capture(events.clone());
     let mut parser =
-        OpenCodeSemanticStreamParser::new(sink, Some("gpt-4o".into()), Provider::OpenCode)
-            .unwrap();
+        OpenCodeSemanticStreamParser::new(sink, Some("gpt-4o".into()), Provider::OpenCode).unwrap();
 
-    parser
-        .feed_line(
-            r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
+    parser.feed_line(
+        r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
              "state":{"status":"completed","input":{"command":"ls -la"},"output":"file.txt"}}}"#,
-        );
+    );
 
     let captured = events.lock().unwrap().clone();
     let kinds: Vec<&str> = captured.iter().map(|e| e.kind_str()).collect();
@@ -336,8 +324,7 @@ fn assistant_text_in_part_text_shape_emits_output_text() {
 #[test]
 fn tool_use_event_emits_only_tool_result_not_synthesized_call() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
+    parser.feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
     parser
         .feed_line(r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file.txt"}}}"#);
     let kinds: Vec<&'static str> = events
@@ -361,12 +348,9 @@ fn orphan_think_close_delimiter_in_text_is_dropped() {
     // `text` channel after the reasoning prose was already routed to
     // `reasoning` events. The lone delimiter must not surface as output.
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"text","text":"</think>"}"#);
-    parser
-        .feed_line(r#"{"type":"text","text":"\n</think>\n"}"#);
-    parser
-        .feed_line(r#"{"type":"text","text":"<think>"}"#);
+    parser.feed_line(r#"{"type":"text","text":"</think>"}"#);
+    parser.feed_line(r#"{"type":"text","text":"\n</think>\n"}"#);
+    parser.feed_line(r#"{"type":"text","text":"<think>"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(
         collected.is_empty(),
@@ -382,8 +366,7 @@ fn orphan_think_close_delimiter_in_text_is_dropped() {
 #[test]
 fn think_delimiter_packed_with_content_strips_only_the_delimiter_line() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"text","text":"</think>\n\nNow I'll commit."}"#);
+    parser.feed_line(r#"{"type":"text","text":"</think>\n\nNow I'll commit."}"#);
     let collected = events.lock().unwrap().clone();
     let texts: Vec<&str> = collected
         .iter()
@@ -405,10 +388,7 @@ fn inline_think_mention_in_text_is_preserved() {
     // Prose that legitimately references the tag (e.g. when the agent is
     // editing this very codebase) must pass through untouched.
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(
-            r#"{"type":"text","text":"The </think> token closes a reasoning block."}"#,
-        );
+    parser.feed_line(r#"{"type":"text","text":"The </think> token closes a reasoning block."}"#);
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::OutputText { text, .. } => {
@@ -421,8 +401,7 @@ fn inline_think_mention_in_text_is_preserved() {
 #[test]
 fn reasoning_event_emits_semantic_reasoning() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"reasoning","text":"weighing options"}"#);
+    parser.feed_line(r#"{"type":"reasoning","text":"weighing options"}"#);
     let collected = events.lock().unwrap().clone();
     let kinds: Vec<&'static str> = collected.iter().map(|e| e.kind_str()).collect();
     assert_eq!(
@@ -440,10 +419,8 @@ fn reasoning_event_emits_semantic_reasoning() {
 #[test]
 fn reasoning_with_empty_text_emits_nothing() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"reasoning","text":""}"#);
-    parser
-        .feed_line(r#"{"type":"reasoning","part":{"text":""}}"#);
+    parser.feed_line(r#"{"type":"reasoning","text":""}"#);
+    parser.feed_line(r#"{"type":"reasoning","part":{"text":""}}"#);
     parser.feed_line(r#"{"type":"reasoning"}"#);
     let collected = events.lock().unwrap().clone();
     assert!(
@@ -463,10 +440,9 @@ fn tool_start_tool_end_pair_preserves_cached_input_on_result() {
         .feed_line(
             r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls -la"}}}"#,
         );
-    parser
-        .feed_line(
-            r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
-        );
+    parser.feed_line(
+        r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
+    );
     let collected = events.lock().unwrap().clone();
     let result = collected
         .iter()
@@ -487,10 +463,9 @@ fn tool_end_wire_input_wins_over_cached_input() {
     // but permitted), the parser must prefer it over the cached
     // request-side input so we never overwrite fresher data.
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(
-            r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls"}}}"#,
-        );
+    parser.feed_line(
+        r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls"}}}"#,
+    );
     parser
         .feed_line(
             r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok","input":{"command":"pwd"}}}"#,
@@ -518,8 +493,7 @@ fn tool_use_event_still_increments_tool_calls_counter() {
     // Ensure the trailer count matches the rendered-line count by keeping
     // `tool_calls += 1` even though no ToolCall event is emitted.
     let (_events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
+    parser.feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
     parser
         .feed_line(r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file.txt"}}}"#);
     parser
@@ -531,8 +505,7 @@ fn tool_use_event_still_increments_tool_calls_counter() {
 #[test]
 fn task_started_becomes_subagent_start() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"task_started","task_id":"sa1","name":"researcher"}"#);
+    parser.feed_line(r#"{"type":"task_started","task_id":"sa1","name":"researcher"}"#);
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::SubagentStart { id, name, .. } => {
@@ -546,10 +519,9 @@ fn task_started_becomes_subagent_start() {
 #[test]
 fn task_completed_becomes_subagent_stop() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(
-            r#"{"type":"task_completed","task_id":"sa1","name":"researcher","status":"success"}"#,
-        );
+    parser.feed_line(
+        r#"{"type":"task_completed","task_id":"sa1","name":"researcher","status":"success"}"#,
+    );
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::SubagentStop {
@@ -566,8 +538,7 @@ fn task_completed_becomes_subagent_stop() {
 #[test]
 fn task_progress_becomes_info() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"task_progress","message":"working"}"#);
+    parser.feed_line(r#"{"type":"task_progress","message":"working"}"#);
     let collected = events.lock().unwrap().clone();
     match &collected[0] {
         SemanticEvent::Info { message, .. } => assert_eq!(message, "working"),
@@ -584,17 +555,15 @@ fn opencode_task_completion_no_longer_synthesizes_subagent_lifecycle() {
     // `service=session ... parentID=...` and the matching `exiting loop`
     // record on stderr.
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
-    parser
-        .feed_line(
-            r#"{"type":"tool_use","part":{"id":"t1","tool":"task",
+    parser.feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
+    parser.feed_line(
+        r#"{"type":"tool_use","part":{"id":"t1","tool":"task",
              "state":{"status":"completed",
                       "input":{"description":"Commit wrap CLI refactor","subagent_type":"coder"},
                       "metadata":{"sessionId":"child-ses-1"},
                       "time":{"start":1715340000000},
                       "output":"ok"}}}"#,
-        );
+    );
 
     let collected = events.lock().unwrap().clone();
     let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
@@ -629,17 +598,15 @@ fn opencode_task_error_completion_no_longer_synthesizes_subagent_lifecycle() {
     // is synthesized from stdout. The matching subagent stop comes from
     // the stderr `exiting loop` record for the child session.
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
-    parser
-        .feed_line(
-            r#"{"type":"tool_use","part":{"id":"t-err","tool":"task",
+    parser.feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
+    parser.feed_line(
+        r#"{"type":"tool_use","part":{"id":"t-err","tool":"task",
              "state":{"status":"error",
                       "input":{"description":"Failed subagent","subagent_type":"coder"},
                       "metadata":{"sessionId":"child-ses-err"},
                       "error":"agent crashed",
                       "output":""}}}"#,
-        );
+    );
 
     let collected = events.lock().unwrap().clone();
     let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
@@ -671,13 +638,11 @@ fn opencode_task_error_completion_no_longer_synthesizes_subagent_lifecycle() {
 #[test]
 fn opencode_non_task_tool_does_not_synthesize_subagent_lifecycle() {
     let (events, mut parser) = new_parser();
-    parser
-        .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
-    parser
-        .feed_line(
-            r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
+    parser.feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
+    parser.feed_line(
+        r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
              "state":{"status":"completed","input":{"command":"ls -la"},"output":"file.txt"}}}"#,
-        );
+    );
 
     let collected = events.lock().unwrap().clone();
     let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
@@ -737,11 +702,7 @@ fn classify_error_line(
     provider: Provider,
     line: &str,
 ) -> Result<(SemanticErrorKind, String), InvalidOpenCodeParserProvider> {
-    classify_error_line_with_vocabulary(
-        provider,
-        line,
-        super::super::vocabulary::error_keywords,
-    )
+    classify_error_line_with_vocabulary(provider, line, super::super::vocabulary::error_keywords)
 }
 
 #[test]
@@ -761,10 +722,8 @@ fn kilo_identity_stamps_kilo_and_classifies_via_kilo_vocabulary() {
     let sink = Recording {
         events: events.clone(),
     };
-    let mut parser =
-        OpenCodeSemanticStreamParser::new(sink, None, Provider::Kilo).unwrap();
-    parser
-        .feed_line(r#"{"type":"error","error_message":"rate limit exceeded"}"#);
+    let mut parser = OpenCodeSemanticStreamParser::new(sink, None, Provider::Kilo).unwrap();
+    parser.feed_line(r#"{"type":"error","error_message":"rate limit exceeded"}"#);
     let summary = Box::new(parser).finish(1);
     assert_eq!(summary.provider, Provider::Kilo);
 }
@@ -783,9 +742,7 @@ fn shared_parser_selects_vocabulary_by_runtime_identity() {
             msg_buckets: &[(SemanticErrorKind::Interrupted, &["identity seam"])],
             code_buckets: &[],
         };
-    fn vocabulary_for(
-        provider: Provider,
-    ) -> &'static super::super::common::ErrorKeywords {
+    fn vocabulary_for(provider: Provider) -> &'static super::super::common::ErrorKeywords {
         match provider {
             Provider::OpenCode => &OPENCODE_TEST_VOCABULARY,
             Provider::Kilo => &KILO_TEST_VOCABULARY,

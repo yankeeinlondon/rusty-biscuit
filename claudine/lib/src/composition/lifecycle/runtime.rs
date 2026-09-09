@@ -1,8 +1,8 @@
 //! Provider-neutral lifecycle runtime routing.
 
+use super::LifecycleSignal;
 use super::control::{ControlDispatch, MAX_PROXY_HOPS, decide_control};
 use super::executor::{LifecycleEventOutcome, StackControl};
-use super::LifecycleSignal;
 use crate::stream::summary::{RateLimitInfo, StreamExecutionSummary};
 
 /// Provider-neutral state needed to decide the next lifecycle transition.
@@ -196,9 +196,7 @@ impl LifecycleCatchProtocol {
         if setup_error.is_some() {
             return Some(LifecycleCatchStep {
                 signal: LifecycleSignal::Failure,
-                error: setup_error
-                    .cloned()
-                    .or_else(|| prior_error.cloned()),
+                error: setup_error.cloned().or_else(|| prior_error.cloned()),
                 execution: if origin == LifecycleSignal::Blocked
                     && state.terminal_slot == Some(LifecycleSignal::Blocked)
                 {
@@ -233,9 +231,9 @@ impl LifecycleCatchProtocol {
                 };
                 Some(super::context::LifecycleErrorInfo::from_action_failure(
                     "error",
-                    reason.clone().unwrap_or_else(|| {
-                        format!("lifecycle {} error", origin.property_name())
-                    }),
+                    reason
+                        .clone()
+                        .unwrap_or_else(|| format!("lifecycle {} error", origin.property_name())),
                 ))
             }
             LifecycleTransitionError::Prior => {
@@ -253,11 +251,7 @@ impl LifecycleCatchProtocol {
     ///
     /// Returns `false` when no step was pending or the supplied signal did not
     /// match the request, allowing adapters to fail closed on protocol misuse.
-    pub fn record(
-        &mut self,
-        signal: LifecycleSignal,
-        outcome: LifecycleEventOutcome,
-    ) -> bool {
+    pub fn record(&mut self, signal: LifecycleSignal, outcome: LifecycleEventOutcome) -> bool {
         let Some(step) = self.pending.take() else {
             return false;
         };
@@ -380,9 +374,9 @@ pub fn decide_lifecycle_transition(
             ControlDispatch::Retry { .. } | ControlDispatch::Resume { .. } => {
                 LifecycleTransitionDecision::Reenter(dispatch)
             }
-            ControlDispatch::ResumeWithoutSession => LifecycleTransitionDecision::Abort(
-                LifecycleTransitionAbort::ResumeWithoutSession,
-            ),
+            ControlDispatch::ResumeWithoutSession => {
+                LifecycleTransitionDecision::Abort(LifecycleTransitionAbort::ResumeWithoutSession)
+            }
             ControlDispatch::Proxy { target } => {
                 if input.proxy_target_seen || input.proxy_hops_used >= MAX_PROXY_HOPS {
                     LifecycleTransitionDecision::Abort(
@@ -442,8 +436,11 @@ fn terminal_or_finalize(
         | LifecycleSignal::Finalize => {
             let terminal = input.terminal_slot.unwrap_or(input.event);
             let error = error.or_else(|| {
-                matches!(terminal, LifecycleSignal::Blocked | LifecycleSignal::Failure)
-                    .then_some(LifecycleTransitionError::Prior)
+                matches!(
+                    terminal,
+                    LifecycleSignal::Blocked | LifecycleSignal::Failure
+                )
+                .then_some(LifecycleTransitionError::Prior)
             });
             if let Some(error) = error {
                 LifecycleTransitionDecision::TerminalFailure { error }

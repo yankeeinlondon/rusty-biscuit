@@ -47,8 +47,7 @@ network_access = false
     let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
     let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
     let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
-    let snapshot =
-        ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
+    let snapshot = ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
 
     assert!(
         snapshot
@@ -60,7 +59,11 @@ network_access = false
             .can_write(writable_root.join("file.txt"))
             .is_allowed()
     );
-    assert!(snapshot.can_write(_dir.path().join("outside/hosts")).is_ask());
+    assert!(
+        snapshot
+            .can_write(_dir.path().join("outside/hosts"))
+            .is_ask()
+    );
     assert!(
         snapshot
             .can_execute(&CommandQuery::from_raw("git status"))
@@ -109,8 +112,7 @@ async fn codex_full_auto_cli_override_is_effective() {
         .compose_native_policy(&ctx, &layers, Some(&cli))
         .unwrap();
     let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
-    let snapshot =
-        ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
+    let snapshot = ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
 
     assert_eq!(
         snapshot.canonical.axes.runtime.sandbox_mode,
@@ -162,8 +164,7 @@ approval_policy = "on-request"
     let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
     let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
     let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
-    let snapshot =
-        ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
+    let snapshot = ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
     let result = snapshot.can_write("src/main.rs");
 
     assert!(result.is_unknown());
@@ -201,8 +202,7 @@ enabled_tools = ["navigate"]
     let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
     let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
     let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
-    let snapshot =
-        ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
+    let snapshot = ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
 
     assert!(snapshot.can_use_mcp_server("filesystem").is_allowed());
     assert!(
@@ -292,8 +292,7 @@ async fn codex_mcp_round_trip_mutation_changes_query_result() {
     let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
     let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
     let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
-    let snapshot =
-        ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
+    let snapshot = ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
 
     assert!(snapshot.can_use_mcp_server("github").is_denied());
     assert!(

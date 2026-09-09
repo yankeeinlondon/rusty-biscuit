@@ -572,7 +572,10 @@ fn messaging_error_display_matches_the_pre_migration_strings() {
         .to_string(),
         format!("Discord webhook: {}", rate_limited())
     );
-    assert_eq!(MessagingError::NotAWebhookRoute.to_string(), "Not a webhook route");
+    assert_eq!(
+        MessagingError::NotAWebhookRoute.to_string(),
+        "Not a webhook route"
+    );
     assert_eq!(
         MessagingError::DesktopNotification {
             source: rate_limited()
@@ -639,7 +642,10 @@ fn webhook_carrying_variants_redact_in_display() {
     };
 
     let rendered = error.to_string();
-    assert!(!rendered.contains("abc_secret"), "leaked webhook URL: {rendered}");
+    assert!(
+        !rendered.contains("abc_secret"),
+        "leaked webhook URL: {rendered}"
+    );
     assert!(rendered.contains("<redacted-webhook-url>"));
 
     // The typed cause deliberately still holds the unredacted text: redaction is
@@ -685,8 +691,7 @@ fn redact_webhook_urls_in_error_strings() {
     // Deterministic test: verify the redactor strips URLs from known
     // reqwest-style error strings without relying on network timing.
     let url = "https://discord.com/api/webhooks/123/abc_secret";
-    let error =
-        format!("reqwest error: error sending request for url ({url}): connection failed");
+    let error = format!("reqwest error: error sending request for url ({url}): connection failed");
     let redacted = redact_webhook_urls(&error);
     assert!(
         !redacted.contains(url),

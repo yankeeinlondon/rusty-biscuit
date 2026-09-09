@@ -50,20 +50,23 @@ pub enum ChildEnvironmentError {
 pub fn initialize_process_launch_directory(
     mode: LaunchDirectoryMode,
 ) -> Result<&'static Path, ChildEnvironmentError> {
-    process_launch_directory_with(mode, || {
-        std::env::current_dir().map_err(|source| ChildEnvironmentError::CurrentDirectory {
-            source: Arc::new(source),
-        })
-    }, std::env::var_os(AGENT_CWD_ENV))
+    process_launch_directory_with(
+        mode,
+        || {
+            std::env::current_dir().map_err(|source| ChildEnvironmentError::CurrentDirectory {
+                source: Arc::new(source),
+            })
+        },
+        std::env::var_os(AGENT_CWD_ENV),
+    )
 }
 
 impl PartialEq for ChildEnvironmentError {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (
-                Self::CurrentDirectory { source: left },
-                Self::CurrentDirectory { source: right },
-            ) => left.kind() == right.kind() && left.raw_os_error() == right.raw_os_error(),
+            (Self::CurrentDirectory { source: left }, Self::CurrentDirectory { source: right }) => {
+                left.kind() == right.kind() && left.raw_os_error() == right.raw_os_error()
+            }
             (
                 Self::NonAbsoluteHookValue { value: left },
                 Self::NonAbsoluteHookValue { value: right },
@@ -88,9 +91,7 @@ fn process_launch_directory_with(
         let entry_cwd = current_dir()?;
         capture_launch_directory(mode, entry_cwd, inherited.as_deref())
     });
-    result
-        .as_deref()
-        .map_err(Clone::clone)
+    result.as_deref().map_err(Clone::clone)
 }
 
 /// Resolve one launch directory from explicit process-entry inputs.
@@ -153,7 +154,10 @@ impl ChildEnvironmentTarget for HashMap<OsString, OsString> {
     fn set_agent_cwd(&mut self, launch_cwd: &Path) {
         #[cfg(windows)]
         self.retain(|key, _| !key.to_string_lossy().eq_ignore_ascii_case(AGENT_CWD_ENV));
-        self.insert(OsString::from(AGENT_CWD_ENV), launch_cwd.as_os_str().to_owned());
+        self.insert(
+            OsString::from(AGENT_CWD_ENV),
+            launch_cwd.as_os_str().to_owned(),
+        );
     }
 }
 
@@ -177,7 +181,12 @@ mod tests {
         let entry = absolute_fixture("ordinary-entry");
         let stale = absolute_fixture("stale-parent");
         assert_eq!(
-            capture_launch_directory(LaunchDirectoryMode::Ordinary, entry.clone(), Some(stale.as_os_str())).unwrap(),
+            capture_launch_directory(
+                LaunchDirectoryMode::Ordinary,
+                entry.clone(),
+                Some(stale.as_os_str())
+            )
+            .unwrap(),
             entry
         );
     }
@@ -187,7 +196,12 @@ mod tests {
         let entry = absolute_fixture("hook-entry");
         let inherited = absolute_fixture("wrapper-launch");
         assert_eq!(
-            capture_launch_directory(LaunchDirectoryMode::ProviderHook, entry, Some(inherited.as_os_str())).unwrap(),
+            capture_launch_directory(
+                LaunchDirectoryMode::ProviderHook,
+                entry,
+                Some(inherited.as_os_str())
+            )
+            .unwrap(),
             inherited
         );
     }
@@ -196,7 +210,8 @@ mod tests {
     fn provider_hook_falls_back_to_entry_when_value_is_missing() {
         let entry = absolute_fixture("hook-fallback");
         assert_eq!(
-            capture_launch_directory(LaunchDirectoryMode::ProviderHook, entry.clone(), None).unwrap(),
+            capture_launch_directory(LaunchDirectoryMode::ProviderHook, entry.clone(), None)
+                .unwrap(),
             entry
         );
     }
@@ -220,12 +235,13 @@ mod tests {
     #[test]
     fn environment_map_overwrites_a_stale_value() {
         let launch = absolute_fixture("map-launch");
-        let mut env = HashMap::from([(
-            OsString::from(AGENT_CWD_ENV),
-            OsString::from("stale/value"),
-        )]);
+        let mut env =
+            HashMap::from([(OsString::from(AGENT_CWD_ENV), OsString::from("stale/value"))]);
         env.set_agent_cwd(&launch);
-        assert_eq!(env.get(OsStr::new(AGENT_CWD_ENV)), Some(&launch.into_os_string()));
+        assert_eq!(
+            env.get(OsStr::new(AGENT_CWD_ENV)),
+            Some(&launch.into_os_string())
+        );
     }
 
     #[test]
@@ -235,10 +251,7 @@ mod tests {
             .as_os_str()
             .to_owned();
         for stale in ["retry", "resume", "loop", "sequence"] {
-            let mut env = HashMap::from([(
-                OsString::from(AGENT_CWD_ENV),
-                OsString::from(stale),
-            )]);
+            let mut env = HashMap::from([(OsString::from(AGENT_CWD_ENV), OsString::from(stale))]);
             contribute_child_environment(&mut env).unwrap();
             assert_eq!(env.get(OsStr::new(AGENT_CWD_ENV)), Some(&expected));
         }

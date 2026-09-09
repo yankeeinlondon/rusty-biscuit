@@ -40,8 +40,7 @@ fn skill_name_is_derived_and_written_in_place() {
     )
     .unwrap();
 
-    let candidate =
-        build_candidate("build-pipeline", skill_dir.clone(), Provider::Claude, false);
+    let candidate = build_candidate("build-pipeline", skill_dir.clone(), Provider::Claude, false);
     let classified =
         classify_canonical_candidate(LinkableResource::Skill, &candidate, ResourceScope::User)
             .unwrap();
@@ -101,8 +100,9 @@ fn alias_duplication_adds_equivalent_keys() {
             .unwrap();
 
     let definition = match classified {
-        ResourceReference::Source(definition)
-        | ResourceReference::PartialSource(definition, _) => definition,
+        ResourceReference::Source(definition) | ResourceReference::PartialSource(definition, _) => {
+            definition
+        }
         other => panic!("expected Source/PartialSource, got {other:?}"),
     };
 
@@ -123,12 +123,9 @@ fn markdown_command_body_satisfies_prompt_requirement() {
     std::fs::write(&command_file, "Run unit tests with coverage.").unwrap();
 
     let candidate = build_candidate("run-tests", command_file, Provider::Claude, false);
-    let classified = classify_canonical_candidate(
-        LinkableResource::Command,
-        &candidate,
-        ResourceScope::User,
-    )
-    .unwrap();
+    let classified =
+        classify_canonical_candidate(LinkableResource::Command, &candidate, ResourceScope::User)
+            .unwrap();
 
     assert!(matches!(classified, ResourceReference::Source(_)));
 }

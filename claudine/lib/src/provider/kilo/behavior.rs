@@ -10,8 +10,8 @@
 //! OpenCode-style bridge plugin using Kilo's `@kilocode/plugin` package.
 //! Native MCP is not wired yet; see the M-Kilo graduation report.
 
-use crate::hook_adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
+use crate::hook_adapters::ProviderAdapter;
 use crate::provider::behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
 };

@@ -305,10 +305,19 @@ impl LifecycleErrorInfo {
         obj.insert("msg".to_string(), Value::from(self.msg.clone()));
         if let Some(snapshot) = &self.snapshot {
             obj.insert("code".to_string(), Value::from(snapshot.code.clone()));
-            obj.insert("category".to_string(), Value::from(snapshot.category.clone()));
-            obj.insert("disposition".to_string(), Value::from(snapshot.disposition.clone()));
+            obj.insert(
+                "category".to_string(),
+                Value::from(snapshot.category.clone()),
+            );
+            obj.insert(
+                "disposition".to_string(),
+                Value::from(snapshot.disposition.clone()),
+            );
             obj.insert("origin".to_string(), Value::from(snapshot.origin.clone()));
-            obj.insert("severity".to_string(), Value::from(snapshot.severity.clone()));
+            obj.insert(
+                "severity".to_string(),
+                Value::from(snapshot.severity.clone()),
+            );
             obj.insert("detail".to_string(), snapshot.detail.clone());
 
             // Promoted handleability conveniences (error-catalog §2.6): sugar
@@ -326,7 +335,10 @@ impl LifecycleErrorInfo {
                 "is_correctable".to_string(),
                 Value::from(snapshot.disposition == "correctable"),
             );
-            obj.insert("reset_at".to_string(), promoted_detail_field(&snapshot.detail, "reset_at"));
+            obj.insert(
+                "reset_at".to_string(),
+                promoted_detail_field(&snapshot.detail, "reset_at"),
+            );
             obj.insert(
                 "retry_after_ms".to_string(),
                 promoted_detail_field(&snapshot.detail, "retry_after_ms"),
@@ -368,9 +380,7 @@ fn promoted_detail_field(detail: &Value, field: &str) -> Value {
 /// whitespace to recover that name.
 fn variant_name_from_debug<T: std::fmt::Debug>(err: &T) -> String {
     let rendered = format!("{err:?}");
-    let end = rendered
-        .find(['(', ' ', '{'])
-        .unwrap_or(rendered.len());
+    let end = rendered.find(['(', ' ', '{']).unwrap_or(rendered.len());
     rendered[..end].to_string()
 }
 

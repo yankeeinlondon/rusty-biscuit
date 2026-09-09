@@ -187,7 +187,13 @@ fn prepare_with_schema(
     // the same typed error / drop-and-retry rules so values that became
     // invalid (or now satisfy the schema) after `$(...)` expansion are
     // judged on their final form.
-    post_shell_validate(source, prepared, dropped, &mode, file_ref_fallback_dir.as_deref())
+    post_shell_validate(
+        source,
+        prepared,
+        dropped,
+        &mode,
+        file_ref_fallback_dir.as_deref(),
+    )
 }
 
 fn run_prepare(
@@ -254,7 +260,8 @@ fn post_shell_validate(
     }
 
     if !categorized.invalid_optional.is_empty() {
-        let droppable = filter_droppable_invalid_optionals(&categorized.invalid_optional, Some(&effective));
+        let droppable =
+            filter_droppable_invalid_optionals(&categorized.invalid_optional, Some(&effective));
         if droppable.len() != categorized.invalid_optional.len() {
             let hard: Vec<_> = categorized
                 .invalid_optional
@@ -439,8 +446,11 @@ pub fn pre_validate_schema(
 
     // First pass: drop non-template invalid optionals so the prepare-time
     // pipeline (and the preflight Darkmatter pass) sees a clean slate.
-    let (source, set_overrides, dropped_optionals) =
-        drop_invalid_optionals(source.clone(), set_overrides.cloned(), file_ref_fallback_dir);
+    let (source, set_overrides, dropped_optionals) = drop_invalid_optionals(
+        source.clone(),
+        set_overrides.cloned(),
+        file_ref_fallback_dir,
+    );
 
     let effective = match load_effective_schema(&source, file_ref_fallback_dir) {
         Ok(Some(e)) => e,
@@ -470,7 +480,11 @@ pub fn pre_validate_schema(
     }
 
     let caller_resolved_eager_files: std::collections::HashSet<_> = file_ref_fallback_dir
-        .zip(set_overrides.as_ref().and_then(serde_json::Value::as_object))
+        .zip(
+            set_overrides
+                .as_ref()
+                .and_then(serde_json::Value::as_object),
+        )
         .map(|(fallback, overrides)| {
             report
                 .problems
@@ -480,9 +494,9 @@ pub fn pre_validate_schema(
                 })
                 .filter_map(|problem| top_level_pointer_segment(&problem.path))
                 .filter(|property| {
-                    overrides.get(property).is_some_and(|value| {
-                        file_override_resolves_from(value, fallback)
-                    })
+                    overrides
+                        .get(property)
+                        .is_some_and(|value| file_override_resolves_from(value, fallback))
                 })
                 .collect()
         })
@@ -625,11 +639,13 @@ fn normalize_file_array_values(
     let Some(shape) = shape else {
         return;
     };
-    for (name, _atom) in shape.properties.iter().filter_map(|(n, def)| {
-        match def {
-            PropertyDef::Single(a) if a.is_array && matches!(a.ty, TypeExpr::Primitive(SimplifiedType::File)) => Some((n, a)),
-            _ => None,
+    for (name, _atom) in shape.properties.iter().filter_map(|(n, def)| match def {
+        PropertyDef::Single(a)
+            if a.is_array && matches!(a.ty, TypeExpr::Primitive(SimplifiedType::File)) =>
+        {
+            Some((n, a))
         }
+        _ => None,
     }) {
         let Some(value) = map.get_mut(name) else {
             continue;
@@ -784,7 +800,10 @@ fn file_override_resolves_from(value: &serde_json::Value, base: &std::path::Path
             .and_then(|reference| reference.resolve_from(base))
             .is_ok_and(|resolved| resolved.is_some()),
         serde_json::Value::Array(values) => {
-            !values.is_empty() && values.iter().all(|value| file_override_resolves_from(value, base))
+            !values.is_empty()
+                && values
+                    .iter()
+                    .all(|value| file_override_resolves_from(value, base))
         }
         _ => false,
     }
@@ -813,7 +832,6 @@ fn top_level_pointer_segment(pointer: &str) -> Option<String> {
     }
     Some(first.replace("~1", "/").replace("~0", "~"))
 }
-
 
 #[cfg(test)]
 mod tests;

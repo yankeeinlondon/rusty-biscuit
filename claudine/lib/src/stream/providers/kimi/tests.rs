@@ -94,7 +94,10 @@ fn initialize_response_unknown_version_emits_terminal_configuration_error() {
         .expect("terminal error");
     assert!(err.2, "unsupported version must be terminal");
     assert_eq!(err.1, SemanticErrorKind::Configuration);
-    assert!(err.0.contains("2.0"), "message names the negotiated version");
+    assert!(
+        err.0.contains("2.0"),
+        "message names the negotiated version"
+    );
     assert!(err.0.contains("1.9") && err.0.contains("1.10"));
     assert!(
         err.0.contains("Upgrade Claudine") && err.0.contains("kimi --version"),
@@ -186,10 +189,9 @@ fn content_part_think_emits_reasoning() {
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"think","think":"pondering"}}}"#,
         );
     // Thinking tokens are accumulated; a turn boundary triggers the flush.
-    parser
-        .feed_line(
-            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
-        );
+    parser.feed_line(
+        r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
+    );
     assert!(events.lock().unwrap().iter().any(|e| matches!(e,
             SemanticEvent::Reasoning { text, .. } if text == "pondering")));
 }
@@ -241,11 +243,9 @@ fn pending_thinking_flushes_on_finish() {
         );
     let _ = parser.finish(0);
     assert!(
-        events
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|e| matches!(e, SemanticEvent::Reasoning { text, .. } if text == "trailing thoughts")),
+        events.lock().unwrap().iter().any(
+            |e| matches!(e, SemanticEvent::Reasoning { text, .. } if text == "trailing thoughts")
+        ),
         "finish must flush any pending thinking accumulator"
     );
 }
@@ -323,10 +323,9 @@ fn step_retry_emits_warning_with_retry_observability() {
 fn step_retry_with_empty_payload_still_emits_warning() {
     let (events, mut parser) = new_parser();
     feed_initialize(&mut parser);
-    parser
-        .feed_line(
-            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StepRetry","payload":{}}}"#,
-        );
+    parser.feed_line(
+        r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StepRetry","payload":{}}}"#,
+    );
     assert!(events.lock().unwrap().iter().any(|e| matches!(e,
             SemanticEvent::Warning { message, .. } if message == "Step retry")));
 }
@@ -464,10 +463,9 @@ fn malformed_tool_arguments_pass_through_as_string() {
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ToolCall","payload":{"id":"t1","function":{"name":"Shell","arguments":"{not json"}}}}"#,
         );
-    parser
-        .feed_line(
-            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
-        );
+    parser.feed_line(
+        r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
+    );
     let collected = events.lock().unwrap().clone();
     let input = collected
         .iter()
@@ -516,11 +514,9 @@ fn unexpected_question_legacy_flat_shape_emits_warning() {
             r#"{"jsonrpc":"2.0","method":"request","id":"q-1","params":{"type":"QuestionRequest","payload":{"id":"q-1","question":"What now?"}}}"#,
         );
     let collected = events.lock().unwrap().clone();
-    assert!(
-        collected.iter().any(|e| matches!(e,
+    assert!(collected.iter().any(|e| matches!(e,
             SemanticEvent::Warning { message, .. }
-                if message.contains("Unexpected question from agent: What now?")))
-    );
+                if message.contains("Unexpected question from agent: What now?"))));
 }
 
 #[test]
@@ -592,8 +588,7 @@ fn hook_request_emits_info() {
 fn prompt_finished_response_sets_status() {
     let (events, mut parser) = new_parser();
     feed_initialize(&mut parser);
-    parser
-        .feed_line(r#"{"jsonrpc":"2.0","id":"prompt-2","result":{"status":"finished"}}"#);
+    parser.feed_line(r#"{"jsonrpc":"2.0","id":"prompt-2","result":{"status":"finished"}}"#);
     let collected = events.lock().unwrap().clone();
     assert!(collected.iter().any(|e| matches!(e,
             SemanticEvent::Info { extra, .. } if extra.get("kind").and_then(Value::as_str) == Some("prompt_status"))));
@@ -630,15 +625,17 @@ fn prompt_max_steps_response_surfaces_steps() {
     );
     assert_eq!(info.get("steps").and_then(Value::as_u64), Some(100));
     let summary = parser.finish(0);
-    assert_eq!(summary.provider_status.as_deref(), Some("max_steps_reached"));
+    assert_eq!(
+        summary.provider_status.as_deref(),
+        Some("max_steps_reached")
+    );
 }
 
 #[test]
 fn prompt_cancelled_response_emits_terminal_error() {
     let (events, mut parser) = new_parser();
     feed_initialize(&mut parser);
-    parser
-        .feed_line(r#"{"jsonrpc":"2.0","id":"prompt-2","result":{"status":"cancelled"}}"#);
+    parser.feed_line(r#"{"jsonrpc":"2.0","id":"prompt-2","result":{"status":"cancelled"}}"#);
     let collected = events.lock().unwrap().clone();
     let err = collected
         .iter()
@@ -910,10 +907,9 @@ fn malformed_json_emits_warning() {
 fn turn_end_increments_num_turns_and_emits_turn_complete() {
     let (events, mut parser) = new_parser();
     feed_initialize(&mut parser);
-    parser
-        .feed_line(
-            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
-        );
+    parser.feed_line(
+        r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
+    );
     let collected = events.lock().unwrap().clone();
     assert!(
         collected

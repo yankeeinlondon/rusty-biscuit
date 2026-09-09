@@ -359,7 +359,8 @@ fn subagent_outcomes_survive_sqlite_ingestion_and_query_projection() {
         "synthetic_kind".to_string(),
         serde_json::json!("stream_wrapper_summary"),
     );
-    meta.extra.insert("exit_code".to_string(), serde_json::json!(0));
+    meta.extra
+        .insert("exit_code".to_string(), serde_json::json!(0));
     meta.extra.insert(
         "exit_reason".to_string(),
         serde_json::json!("incomplete_subagents"),
@@ -382,7 +383,9 @@ fn subagent_outcomes_survive_sqlite_ingestion_and_query_projection() {
     sync(&mut conn, &logs_dir, crate::reporting::SyncRequest::All).unwrap();
 
     let extra_json: String = conn
-        .query_row("SELECT extra_json FROM events LIMIT 1", [], |row| row.get(0))
+        .query_row("SELECT extra_json FROM events LIMIT 1", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     let stored: serde_json::Value = serde_json::from_str(&extra_json).unwrap();
     let facts = stored["subagent_outcomes"].as_array().unwrap();

@@ -6,25 +6,21 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use biscuit_file::{FileResolutionContext, PathPosition, home_dir};
-use sniff::filesystem::{FilesystemObservation, GitRepositoryIdentity};
+use sniff::filesystem::LanguageBreakdown;
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{FileChange, GitInfo};
 use sniff::filesystem::repo::RepoInfo;
-use sniff::filesystem::LanguageBreakdown;
+use sniff::filesystem::{FilesystemObservation, GitRepositoryIdentity};
 use sniff::hardware::{GpuInfo, HardwareInfo};
 use sniff::os::OsInfo;
 use sniff::request::{
     DetectionPlan, FilesystemRequest, GitRequest, HardwareRequest, OsRequest, RepoRequest,
 };
 
-use crate::composition::{
-    LaunchWorkspaceContext, prompt_magic_roots,
-};
+use crate::composition::{LaunchWorkspaceContext, prompt_magic_roots};
 use crate::diagnostics::DiagnosticSnapshot;
 use crate::error::ClaudineError;
-use crate::events::{
-    EnvironmentContext, environment_context_from_sniff_result_and_env,
-};
+use crate::events::{EnvironmentContext, environment_context_from_sniff_result_and_env};
 use crate::system_prompt::LaunchContext;
 
 /// Failure to establish immutable invocation inputs.
@@ -137,9 +133,7 @@ struct DocumentEpochRecorder {
 impl DocumentEpochRecorder {
     fn snapshot(&self) -> DocumentEpochWork {
         DocumentEpochWork {
-            launch_context_constructions: self
-                .launch_context_constructions
-                .load(Ordering::Relaxed),
+            launch_context_constructions: self.launch_context_constructions.load(Ordering::Relaxed),
             launch_context_extensions: self.launch_context_extensions.load(Ordering::Relaxed),
             ambient_fallbacks: self.ambient_fallbacks.load(Ordering::Relaxed),
             prepared_context_consumers: self
@@ -168,10 +162,7 @@ impl InvocationWorkSnapshot {
                 self.launch_context_extensions,
                 before.launch_context_extensions,
             ),
-            ambient_fallbacks: monotonic_delta(
-                self.ambient_fallbacks,
-                before.ambient_fallbacks,
-            ),
+            ambient_fallbacks: monotonic_delta(self.ambient_fallbacks, before.ambient_fallbacks),
             prepared_context_consumers: map_delta(
                 &self.prepared_context_consumers,
                 &before.prepared_context_consumers,
@@ -234,14 +225,10 @@ impl InvocationWork {
             topology_reuses: self.topology_reuses.load(Ordering::Relaxed),
             system_prompt_lookups: self.system_prompt_lookups.load(Ordering::Relaxed),
             compose_operations: self.compose_operations.load(Ordering::Relaxed),
-            harness_eligibility_parses: self
-                .harness_eligibility_parses
-                .load(Ordering::Relaxed),
+            harness_eligibility_parses: self.harness_eligibility_parses.load(Ordering::Relaxed),
             harness_materializations: self.harness_materializations.load(Ordering::Relaxed),
             ambient_fallbacks: self.ambient_fallbacks.load(Ordering::Relaxed),
-            launch_context_constructions: self
-                .launch_context_constructions
-                .load(Ordering::Relaxed),
+            launch_context_constructions: self.launch_context_constructions.load(Ordering::Relaxed),
             launch_context_extensions: self.launch_context_extensions.load(Ordering::Relaxed),
             prepared_context_consumers: self
                 .prepared_context_consumers
@@ -399,9 +386,8 @@ impl RepositoryEntry {
             return Some(diagnostic);
         }
         let failure = self.failure_arc()?;
-        let diagnostic = DiagnosticSnapshot::from_diagnostic(
-            &ClaudineError::LaunchContextDetection(failure),
-        );
+        let diagnostic =
+            DiagnosticSnapshot::from_diagnostic(&ClaudineError::LaunchContextDetection(failure));
         let _ = self.diagnostic.set(diagnostic);
         self.diagnostic.get()
     }
@@ -553,10 +539,7 @@ impl DocumentEpoch {
         context: &mut darkmatter::markdown::compose::ComposeContext,
         requirements: &darkmatter::markdown::compose::ContextRequirements,
     ) {
-        if self
-            .invocation
-            .extend_launch_context(context, requirements)
-        {
+        if self.invocation.extend_launch_context(context, requirements) {
             self.work
                 .launch_context_extensions
                 .fetch_add(1, Ordering::Relaxed);
@@ -657,13 +640,8 @@ impl InvocationContext {
         let work = InvocationWork::default();
         work.git_root_discoveries.fetch_add(1, Ordering::Relaxed);
 
-        let (launch_repository, launch_result) = observe_repository(
-            &cwd,
-            observation,
-            git_request,
-            include_topology,
-            &work,
-        );
+        let (launch_repository, launch_result) =
+            observe_repository(&cwd, observation, git_request, include_topology, &work);
 
         let launch_repository_root = launch_repository.repo_root();
         let launch_file_resolution = build_file_resolution_context(
@@ -804,9 +782,7 @@ impl InvocationContext {
         Ok(SourceContext {
             source_path,
             base_dir,
-            repository: RepositoryObservation {
-                inner: entry,
-            },
+            repository: RepositoryObservation { inner: entry },
             repository_root,
             package_area_root,
             package_root,
@@ -999,9 +975,7 @@ impl InvocationContext {
                         })
                         .as_ref()
                     {
-                        evidence = evidence.with_file_changes(
-                            changes.clone().unwrap_or_default(),
-                        );
+                        evidence = evidence.with_file_changes(changes.clone().unwrap_or_default());
                     }
                 }
                 ContextGroup::Languages => {
@@ -1066,8 +1040,10 @@ impl InvocationContext {
                         .hardware
                         .get_or_init(|| {
                             captured = true;
-                            sniff::hardware::detect_hardware_with_request(&HardwareRequest::summary())
-                                .map_err(Arc::new)
+                            sniff::hardware::detect_hardware_with_request(
+                                &HardwareRequest::summary(),
+                            )
+                            .map_err(Arc::new)
                         })
                         .as_ref()
                     {
@@ -1417,11 +1393,9 @@ fn build_file_resolution_context(
         context = context.with_source_path(source_path);
     }
     if let (Some(repository_root), Some(repo_info)) = (repository_root, repo_info) {
-        let catalog = darkmatter::markdown::compose::repository_scope_catalog(
-            repo_info,
-            repository_root,
-        )
-        .expect("retained repository topology must project to valid absolute scopes");
+        let catalog =
+            darkmatter::markdown::compose::repository_scope_catalog(repo_info, repository_root)
+                .expect("retained repository topology must project to valid absolute scopes");
         context = context.with_repository_scope_catalog(catalog);
     } else if let Some(repository_root) = repository_root {
         context = context.with_repository_root(repository_root);

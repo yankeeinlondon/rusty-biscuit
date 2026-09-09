@@ -185,7 +185,10 @@ pub(super) static FAMILY_INDEX: &[FamilyRow] = &[
             "openrouter/google/gemini-3.1-pro-preview",
             "zenmux/google/gemini-3.1-pro-preview",
         ],
-        rolling_aliases: &["gemini/gemini-pro-latest", "openrouter/google/gemini-pro-latest"],
+        rolling_aliases: &[
+            "gemini/gemini-pro-latest",
+            "openrouter/google/gemini-pro-latest",
+        ],
     },
     FamilyRow {
         key: "google/gemma",
@@ -257,19 +260,28 @@ pub(super) static FAMILY_INDEX: &[FamilyRow] = &[
     FamilyRow {
         key: "moonshotai/moonshot-v-128k",
         latest: Some("moonshotai/moonshot-v-128k@1+preview+vision"),
-        members: &["moonshotai/moonshot-v1-128k", "moonshotai/moonshot-v1-128k-vision-preview"],
+        members: &[
+            "moonshotai/moonshot-v1-128k",
+            "moonshotai/moonshot-v1-128k-vision-preview",
+        ],
         rolling_aliases: &[],
     },
     FamilyRow {
         key: "moonshotai/moonshot-v-32k",
         latest: Some("moonshotai/moonshot-v-32k@1+preview+vision"),
-        members: &["moonshotai/moonshot-v1-32k", "moonshotai/moonshot-v1-32k-vision-preview"],
+        members: &[
+            "moonshotai/moonshot-v1-32k",
+            "moonshotai/moonshot-v1-32k-vision-preview",
+        ],
         rolling_aliases: &[],
     },
     FamilyRow {
         key: "moonshotai/moonshot-v-8k",
         latest: Some("moonshotai/moonshot-v-8k@1+preview+vision"),
-        members: &["moonshotai/moonshot-v1-8k", "moonshotai/moonshot-v1-8k-vision-preview"],
+        members: &[
+            "moonshotai/moonshot-v1-8k",
+            "moonshotai/moonshot-v1-8k-vision-preview",
+        ],
         rolling_aliases: &[],
     },
     FamilyRow {

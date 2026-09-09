@@ -448,13 +448,8 @@ mod tests {
         fs::create_dir_all(source.parent().unwrap()).unwrap();
         fs::write(&source, "# Plan").unwrap();
 
-        let result = create_resource_link(
-            &source,
-            &source_root,
-            &dest_root,
-            ResourceScope::User,
-        )
-        .unwrap();
+        let result =
+            create_resource_link(&source, &source_root, &dest_root, ResourceScope::User).unwrap();
         let LinkResult::Linked { dest, .. } = result else {
             panic!("expected a linked file, got {result:?}");
         };
@@ -475,13 +470,8 @@ mod tests {
         fs::write(&source, "# Source").unwrap();
         fs::write(&dest, "# Existing").unwrap();
 
-        let result = create_resource_link(
-            &source,
-            &source_root,
-            &dest_root,
-            ResourceScope::User,
-        )
-        .unwrap();
+        let result =
+            create_resource_link(&source, &source_root, &dest_root, ResourceScope::User).unwrap();
         let LinkResult::Skipped { reason } = result else {
             panic!("expected a collision skip, got {result:?}");
         };
@@ -499,20 +489,9 @@ mod tests {
         fs::create_dir_all(source.parent().unwrap()).unwrap();
         fs::write(&source, "# Plan").unwrap();
 
-        create_resource_link(
-            &source,
-            &source_root,
-            &dest_root,
-            ResourceScope::User,
-        )
-        .unwrap();
-        let result = create_resource_link(
-            &source,
-            &source_root,
-            &dest_root,
-            ResourceScope::User,
-        )
-        .unwrap();
+        create_resource_link(&source, &source_root, &dest_root, ResourceScope::User).unwrap();
+        let result =
+            create_resource_link(&source, &source_root, &dest_root, ResourceScope::User).unwrap();
 
         assert!(matches!(result, LinkResult::AlreadyLinked));
     }

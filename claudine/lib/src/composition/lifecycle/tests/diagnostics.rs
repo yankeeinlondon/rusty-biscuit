@@ -13,8 +13,7 @@ fn lifecycle_invalid_error_renders_as_block_error() {
         }
     });
 
-    let err =
-        parse_lifecycle_config(&frontmatter, Path::new("prompts/sentrux.md")).unwrap_err();
+    let err = parse_lifecycle_config(&frontmatter, Path::new("prompts/sentrux.md")).unwrap_err();
     let CompositionError::LifecycleInvalid {
         property,
         unknown_field,
@@ -175,7 +174,9 @@ fn err_in_start_stack_when_clause_is_rejected() {
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
     match err {
-        CompositionError::LifecycleErrNotAvailable { event, property, .. } => {
+        CompositionError::LifecycleErrNotAvailable {
+            event, property, ..
+        } => {
             assert_eq!(event, "start");
             assert!(property.contains("when"), "got: {property}");
         }
@@ -306,7 +307,9 @@ fn err_interpolation_span_in_top_level_field_rejected_in_no_error_event() {
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
     match err {
-        CompositionError::LifecycleErrNotAvailable { event, property, .. } => {
+        CompositionError::LifecycleErrNotAvailable {
+            event, property, ..
+        } => {
             assert_eq!(event, "start");
             assert_eq!(property, "start.message");
         }
@@ -324,7 +327,9 @@ fn err_interpolation_span_in_stack_message_rejected_in_no_error_event() {
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
     match err {
-        CompositionError::LifecycleErrNotAvailable { event, property, .. } => {
+        CompositionError::LifecycleErrNotAvailable {
+            event, property, ..
+        } => {
             assert_eq!(event, "start");
             assert!(property.starts_with("start.stack"), "got: {property}");
         }
@@ -482,7 +487,9 @@ fn stack_undefined_variable_in_when_clause_is_rejected() {
     let err = validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path())
         .unwrap_err();
     match err {
-        CompositionError::LifecycleUndefinedVariable { property, variable, .. } => {
+        CompositionError::LifecycleUndefinedVariable {
+            property, variable, ..
+        } => {
             assert!(property.contains("when"), "got: {property}");
             assert_eq!(variable, "missing_var");
         }
@@ -503,8 +510,13 @@ fn stack_err_global_is_not_undefined_in_failure() {
     let raw = fm_from_json(fm.clone());
     let effective = json!({});
     let lifecycle = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let result = validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path());
-    assert!(result.is_ok(), "err should not be undefined, got: {:?}", result.err());
+    let result =
+        validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path());
+    assert!(
+        result.is_ok(),
+        "err should not be undefined, got: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -520,7 +532,8 @@ fn stack_timing_and_current_globals_are_not_undefined() {
     let raw = fm_from_json(fm.clone());
     let effective = json!({});
     let lifecycle = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let result = validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path());
+    let result =
+        validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path());
     assert!(result.is_ok(), "got: {:?}", result.err());
 }
 
@@ -565,7 +578,10 @@ fn late_binding_global_in_top_level_field_is_a_known_root() {
             &LifecycleConfig::default(),
             dummy_path(),
         );
-        assert!(result.is_ok(), "`{global}` is a known root; got: {result:?}");
+        assert!(
+            result.is_ok(),
+            "`{global}` is a known root; got: {result:?}"
+        );
     }
 }
 
@@ -586,4 +602,3 @@ fn bare_err_in_top_level_field_passes_when_frontmatter_defines_it() {
     );
     assert!(result.is_ok(), "got: {:?}", result.err());
 }
-

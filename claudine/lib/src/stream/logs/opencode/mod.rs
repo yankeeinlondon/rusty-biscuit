@@ -21,12 +21,12 @@ pub mod events;
 pub mod state;
 
 // Re-export the original public API surface so existing callers don't break.
-pub use classify::{classify, classify_raw, merge_rate_limit};
-pub use events::{
-    AssetType, LogClassification, LogLevel, OpenCodeLogRecord, ParsedOpenCodeStderrLine, parse_line,
-};
 pub use bridge::{
     EarlyTermination, OpenCodeLogBridge, StalledGenerationContext, StalledGenerationProgress,
     StderrIngestOutcome, StuckSubagentInfo,
+};
+pub use classify::{classify, classify_raw, merge_rate_limit};
+pub use events::{
+    AssetType, LogClassification, LogLevel, OpenCodeLogRecord, ParsedOpenCodeStderrLine, parse_line,
 };
 pub use state::{SharedStderrState, merge_stderr_state_into_summary};

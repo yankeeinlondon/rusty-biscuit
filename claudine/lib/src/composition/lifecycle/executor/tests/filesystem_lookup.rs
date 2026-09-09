@@ -40,14 +40,11 @@ fn lifecycle_file_functions_reuse_all_request_resolution_inputs() {
         "CLAUDINE_SNAPSHOT_ROOT".to_string(),
         request.path().display().to_string(),
     );
-    let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
-        request.path(),
-        Some(home.clone()),
-        env,
-    )
-    .with_repository_root(request.path())
-    .with_package_area(&package)
-    .add_magic_path(&magic, biscuit_file::PathPosition::Start);
+    let snapshot =
+        biscuit_file::FileResolutionContext::from_snapshot(request.path(), Some(home.clone()), env)
+            .with_repository_root(request.path())
+            .with_package_area(&package)
+            .add_magic_path(&magic, biscuit_file::PathPosition::Start);
 
     let prior_root = std::env::var_os("CLAUDINE_SNAPSHOT_ROOT");
     let ambient = tempfile::tempdir().unwrap();
@@ -213,10 +210,8 @@ fn lifecycle_reuses_prepared_snapshot_for_prompt_outside_launch_area() {
 
     // The single composition-start snapshot, captured ONCE against the
     // launch area (mirrors what the CLI does in `compose/prep.rs`).
-    let prepared = ComposeContext::capture_for_content(
-        launch_root.as_path(),
-        "{{ ctx.repo_root }}",
-    );
+    let prepared =
+        ComposeContext::capture_for_content(launch_root.as_path(), "{{ ctx.repo_root }}");
 
     let (_engine_dir, engine) = temp_engine();
     let shell = MockShell::new(0);

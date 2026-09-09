@@ -91,7 +91,10 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
                 // primary SessionStart would be a redundant duplicate.
                 // First arrival wins, the stderr session_created is
                 // recorded but not re-emitted.
-                if self.stdout_event_seen.load(std::sync::atomic::Ordering::SeqCst) {
+                if self
+                    .stdout_event_seen
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                {
                     debug!(
                         session_id = %id,
                         "opencode stdout already emitted a semantic event; skipping stderr primary SessionStart",
@@ -123,8 +126,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         if self.last_step_per_session.get(&session_id) == Some(&step) {
             return StderrIngestOutcome::Consumed;
         }
-        self.last_step_per_session
-            .insert(session_id.clone(), step);
+        self.last_step_per_session.insert(session_id.clone(), step);
 
         // A genuine step transition is forward progress: clear the
         // stream-error backstop counter so transient retries that eventually

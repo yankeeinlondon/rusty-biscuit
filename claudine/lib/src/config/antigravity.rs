@@ -249,7 +249,8 @@ mod tests {
     #[test]
     fn register_preserves_other_named_hooks() {
         let tmp = TempDir::new().unwrap();
-        let initial = json!({ "user-thing": { "Stop": [ { "type": "command", "command": "echo hi" } ] } });
+        let initial =
+            json!({ "user-thing": { "Stop": [ { "type": "command", "command": "echo hi" } ] } });
         fs::write(
             tmp.path().join("hooks.json"),
             serde_json::to_string_pretty(&initial).unwrap(),

@@ -6,9 +6,9 @@
 //! The dispatcher in [`super`] routes this family here, including its `_` arm.
 
 use super::super::*;
+use crate::composition::types::CompositionMode;
 use biscuit_file::RootProvenance;
 use biscuit_terminal::components::list::UnorderedList;
-use crate::composition::types::CompositionMode;
 
 /// Render the [`StatusBlock`] for a provider/execution/file-reference-family
 /// [`CompositionError`], or the generic block for any remaining variant.

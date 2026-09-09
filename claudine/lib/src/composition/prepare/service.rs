@@ -14,10 +14,12 @@
 #[cfg(test)]
 mod tests;
 
-use super::entry::DocumentEntryReason;
 use super::PrepareOptions;
+use super::entry::DocumentEntryReason;
 use crate::composition::error::CompositionError;
-use crate::composition::schema::{prepare_direct_with_schema_and_prompt, prepare_inline_with_schema};
+use crate::composition::schema::{
+    prepare_direct_with_schema_and_prompt, prepare_inline_with_schema,
+};
 use crate::composition::types::{CompositionMode, PreparedComposition, ResolvedCompositionSource};
 
 /// Where the delivered prompt text comes from.

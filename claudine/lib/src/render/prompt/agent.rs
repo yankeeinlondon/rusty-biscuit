@@ -25,11 +25,7 @@ fn render_user_prompt_header(term: &Terminal) -> String {
 /// Leading whitespace is stripped from `text` before rendering. `Summary`
 /// returns the empty string; `Partial` truncates per the embedded
 /// `TruncationMode`; `Full` renders the complete body.
-fn render_user_prompt_body(
-    text: &str,
-    mode: ReportMode,
-    term: &Terminal,
-) -> String {
+fn render_user_prompt_body(text: &str, mode: ReportMode, term: &Terminal) -> String {
     let stripped = strip_leading_whitespace(text);
 
     match mode {
@@ -41,8 +37,7 @@ fn render_user_prompt_body(
             // an indented code block — the spurious "text" fences. Rendering
             // first guarantees the parser always sees a syntactically complete
             // document; truncation then only drops already-rendered rows.
-            let rendered =
-                render_markdown_for_terminal(&stripped, term, prompt_body_width(term));
+            let rendered = render_markdown_for_terminal(&stripped, term, prompt_body_width(term));
             let truncated = match truncation {
                 TruncationMode::FrontBack => truncate_front_back(&rendered, 20, 10),
                 TruncationMode::Truncate => truncate_head(&rendered, 20),
@@ -155,22 +150,14 @@ mod tests {
     #[test]
     fn summary_format_returns_empty_body() {
         let term = test_terminal();
-        let body = render_user_prompt_body(
-            "some content",
-            ReportMode::Summary,
-            &term,
-        );
+        let body = render_user_prompt_body("some content", ReportMode::Summary, &term);
         assert!(body.is_empty());
     }
 
     #[test]
     fn full_format_renders_content() {
         let term = test_terminal();
-        let body = render_user_prompt_body(
-            "Hello world",
-            ReportMode::Full,
-            &term,
-        );
+        let body = render_user_prompt_body("Hello world", ReportMode::Full, &term);
         let plain = strip_ansi_codes(&body);
         assert!(plain.contains("Hello world"));
     }
@@ -178,11 +165,7 @@ mod tests {
     #[test]
     fn full_format_strips_leading_whitespace() {
         let term = test_terminal();
-        let body = render_user_prompt_body(
-            "  Hello\n    World",
-            ReportMode::Full,
-            &term,
-        );
+        let body = render_user_prompt_body("  Hello\n    World", ReportMode::Full, &term);
         let plain = strip_ansi_codes(&body);
         assert!(plain.contains("Hello"));
         assert!(plain.contains("World"));
@@ -322,7 +305,10 @@ mod tests {
         assert!(plain.contains("Agent Prompt"));
         assert!(plain.contains("Line 1"));
         assert!(plain.contains(" 50"), "should contain the last line number");
-        assert!(!plain.contains("Line 25"), "middle lines should be truncated");
+        assert!(
+            !plain.contains("Line 25"),
+            "middle lines should be truncated"
+        );
     }
 
     #[test]
@@ -346,8 +332,7 @@ mod tests {
     fn short_prompt_renders_full_body() {
         let text = "Line 1\nLine 2\nLine 3";
         let term = test_terminal();
-        let report =
-            AgentPrompt::from_mode(text, ReportMode::Full).expect("should produce output");
+        let report = AgentPrompt::from_mode(text, ReportMode::Full).expect("should produce output");
         let plain = strip_ansi_codes(&report.render(&term));
         assert!(plain.contains("Line 1"));
         assert!(plain.contains("Line 2"));
@@ -385,8 +370,7 @@ mod tests {
     fn strips_leading_whitespace_in_report() {
         let text = "    Line 1\n      Line 2\n        Line 3";
         let term = test_terminal();
-        let report =
-            AgentPrompt::from_mode(text, ReportMode::Full).expect("should produce output");
+        let report = AgentPrompt::from_mode(text, ReportMode::Full).expect("should produce output");
         let plain = strip_ansi_codes(&report.render(&term));
         assert!(plain.contains("Line 1"));
         assert!(plain.contains("Line 2"));

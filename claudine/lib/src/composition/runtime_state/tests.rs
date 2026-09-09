@@ -16,13 +16,28 @@ fn set_returns_document_prior_then_mutation_prior() {
     let mut document = base();
     document.insert("phase".into(), json!("plan"));
 
-    let first = state.set(&engine, "phase", json!("build"), &document).unwrap();
-    assert_eq!(first, json!("plan"), "first write reports the document's value");
+    let first = state
+        .set(&engine, "phase", json!("build"), &document)
+        .unwrap();
+    assert_eq!(
+        first,
+        json!("plan"),
+        "first write reports the document's value"
+    );
 
-    let second = state.set(&engine, "phase", json!("ship"), &document).unwrap();
-    assert_eq!(second, json!("build"), "later writes report the prior mutation");
+    let second = state
+        .set(&engine, "phase", json!("ship"), &document)
+        .unwrap();
+    assert_eq!(
+        second,
+        json!("build"),
+        "later writes report the prior mutation"
+    );
 
-    assert_eq!(state.snapshot().mutations.get("phase"), Some(&json!("ship")));
+    assert_eq!(
+        state.snapshot().mutations.get("phase"),
+        Some(&json!("ship"))
+    );
 }
 
 #[test]
@@ -44,7 +59,11 @@ fn set_preserves_whole_value_types() {
         ("nil", json!(null)),
     ] {
         state.set(&engine, key, value.clone(), &base()).unwrap();
-        assert_eq!(state.snapshot().mutations.get(key), Some(&value), "{key} kept its type");
+        assert_eq!(
+            state.snapshot().mutations.get(key),
+            Some(&value),
+            "{key} kept its type"
+        );
     }
 }
 
@@ -61,7 +80,10 @@ fn set_rejects_every_reserved_root_key() {
             "{key} produced {error:?}"
         );
     }
-    assert!(state.snapshot().mutations.is_empty(), "a refused write leaves no trace");
+    assert!(
+        state.snapshot().mutations.is_empty(),
+        "a refused write leaves no trace"
+    );
 }
 
 /// A *generated step-state* key is reserved inside a step's `state` object, not
@@ -100,7 +122,10 @@ fn outputs_accumulate_in_commit_order() {
     state.append_output("second");
     state.append_output_entry(json!(["a", "b"]));
 
-    assert_eq!(state.outputs_value(), json!(["first", "second", ["a", "b"]]));
+    assert_eq!(
+        state.outputs_value(),
+        json!(["first", "second", ["a", "b"]])
+    );
     assert_eq!(state.output_count(), 3);
 }
 
@@ -126,7 +151,9 @@ fn appended_output_uses_the_transport_newline_policy() {
 fn layer_precedence_is_setters_then_mutations_then_overlay() {
     let state = RuntimeState::new();
     let engine = engine();
-    state.set(&engine, "shared", json!("mutation"), &base()).unwrap();
+    state
+        .set(&engine, "shared", json!("mutation"), &base())
+        .unwrap();
     state.append_output("prior");
 
     let overrides = layered_set_overrides(
@@ -135,9 +162,17 @@ fn layer_precedence_is_setters_then_mutations_then_overlay() {
         Some(&json!({"state": {"name": "blue"}})),
     );
 
-    assert_eq!(overrides["shared"], json!("mutation"), "mutations outrank user setters");
+    assert_eq!(
+        overrides["shared"],
+        json!("mutation"),
+        "mutations outrank user setters"
+    );
     assert_eq!(overrides["only_setter"], json!(1));
-    assert_eq!(overrides["state"], json!({"name": "blue"}), "the overlay is layered last");
+    assert_eq!(
+        overrides["state"],
+        json!({"name": "blue"}),
+        "the overlay is layered last"
+    );
     assert_eq!(overrides[OUTPUTS_KEY], json!(["prior"]));
 }
 
@@ -149,7 +184,11 @@ fn a_reserved_overlay_key_cannot_be_displaced_by_a_setter() {
         Some(&json!({"state": {"name": "blue"}})),
     );
     assert_eq!(overrides["state"], json!({"name": "blue"}));
-    assert_eq!(overrides[OUTPUTS_KEY], json!([]), "the accumulator wins over a setter");
+    assert_eq!(
+        overrides[OUTPUTS_KEY],
+        json!([]),
+        "the accumulator wins over a setter"
+    );
 }
 
 #[test]

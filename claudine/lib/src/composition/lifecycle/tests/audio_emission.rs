@@ -89,11 +89,9 @@ async fn default_emitter_publishes_audio_in_phase_order_without_waiting_for_play
     let spool = temp.path().join("spool");
     let bin = install_fixture_program(temp.path(), "espeak");
 
-    let path = std::env::join_paths(
-        std::iter::once(bin.clone()).chain(std::env::split_paths(
-            &std::env::var_os("PATH").unwrap_or_default(),
-        )),
-    )
+    let path = std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
     .unwrap();
     let _path = test_toolkit::EnvGuard::set_safe("PATH", path);
     let _spool = test_toolkit::EnvGuard::set_safe("PLAYA_SPOOL_DIR", &spool);
@@ -206,11 +204,9 @@ async fn default_emitter_warns_once_when_speech_handoff_fails() {
 
     let temp = tempfile::tempdir().unwrap();
     let bin = install_fixture_program(temp.path(), "espeak");
-    let path = std::env::join_paths(
-        std::iter::once(bin).chain(std::env::split_paths(
-            &std::env::var_os("PATH").unwrap_or_default(),
-        )),
-    )
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
     .unwrap();
     let not_a_directory = temp.path().join("not-a-directory");
     fs::write(&not_a_directory, b"file").unwrap();

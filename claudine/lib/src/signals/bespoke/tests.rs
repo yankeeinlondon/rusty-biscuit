@@ -9,9 +9,8 @@ const CLAUDE_BILLING: &str = include_str!(
 const GOOSE_ERROR_THEN_COMPLETE: &str = include_str!(
     "../../../../docs/research/signals/fixtures/goose/stream-error-then-complete.jsonl"
 );
-const PI_RETRY_EXHAUSTED: &str = include_str!(
-    "../../../../docs/research/signals/fixtures/pi/stream-auto-retry-exhausted.jsonl"
-);
+const PI_RETRY_EXHAUSTED: &str =
+    include_str!("../../../../docs/research/signals/fixtures/pi/stream-auto-retry-exhausted.jsonl");
 const QWEN_LOOP: &str =
     include_str!("../../../../docs/research/signals/fixtures/qwen/result-loop-detected.jsonl");
 
@@ -72,7 +71,10 @@ fn goose_taint_fires_on_error_then_complete_with_error_cause() {
     assert_eq!(events.len(), 1);
     match &events[0] {
         SignalEvent::SessionTainted { cause } => {
-            assert!(cause.starts_with("Context length exceeded"), "cause: {cause}");
+            assert!(
+                cause.starts_with("Context length exceeded"),
+                "cause: {cause}"
+            );
         }
         other => panic!("expected SessionTainted, got {other:?}"),
     }
@@ -214,13 +216,25 @@ fn exit_source_payload_carries_code_and_last_lines_tail() {
     assert_eq!(payload["exit_code"], 53);
 
     let stdout_tail = payload["stdout_tail"].as_str().unwrap();
-    assert!(stdout_tail.starts_with("out 6"), "stdout_tail: {stdout_tail}");
-    assert!(stdout_tail.ends_with("out 15"), "stdout_tail: {stdout_tail}");
+    assert!(
+        stdout_tail.starts_with("out 6"),
+        "stdout_tail: {stdout_tail}"
+    );
+    assert!(
+        stdout_tail.ends_with("out 15"),
+        "stdout_tail: {stdout_tail}"
+    );
     assert_eq!(stdout_tail.lines().count(), EXIT_STDOUT_TAIL_LINES);
 
     let stderr_tail = payload["stderr_tail"].as_str().unwrap();
-    assert!(stderr_tail.starts_with("err 6"), "stderr_tail: {stderr_tail}");
-    assert!(stderr_tail.ends_with("err 15"), "stderr_tail: {stderr_tail}");
+    assert!(
+        stderr_tail.starts_with("err 6"),
+        "stderr_tail: {stderr_tail}"
+    );
+    assert!(
+        stderr_tail.ends_with("err 15"),
+        "stderr_tail: {stderr_tail}"
+    );
     assert_eq!(stderr_tail.lines().count(), EXIT_STDERR_TAIL_LINES);
 
     // Short streams pass through whole, each on its own field.
@@ -300,13 +314,22 @@ fn every_bespoke_record_has_a_registered_replayer() {
 fn every_bespoke_record_with_evidence_has_a_replayer_that_fires() {
     let cases = [
         ("stream-session_tainted-result-error", CLAUDE_BILLING),
-        ("stream-session_tainted-error-then-complete", GOOSE_ERROR_THEN_COMPLETE),
-        ("stream-retries_exhausted-auto_retry_end", PI_RETRY_EXHAUSTED),
+        (
+            "stream-session_tainted-error-then-complete",
+            GOOSE_ERROR_THEN_COMPLETE,
+        ),
+        (
+            "stream-retries_exhausted-auto_retry_end",
+            PI_RETRY_EXHAUSTED,
+        ),
         ("stream-runaway_repetition-result-loop", QWEN_LOOP),
     ];
     for (record_id, fixture) in cases {
         let replay = bespoke_replayer(record_id).expect(record_id);
-        assert!(replay(&payloads(fixture)), "{record_id} must fire on its evidence");
+        assert!(
+            replay(&payloads(fixture)),
+            "{record_id} must fire on its evidence"
+        );
     }
     assert!(bespoke_replayer("no-such-record").is_none());
 }
@@ -323,6 +346,12 @@ fn hub_observe_json_runs_bespoke_chain_alongside_declarative_engine() {
     }
     let signals = hub.drain();
     let kinds: Vec<SignalKind> = signals.iter().map(|s| s.event.kind()).collect();
-    assert!(kinds.contains(&SignalKind::SessionTainted), "kinds: {kinds:?}");
-    assert!(kinds.contains(&SignalKind::TokensConsumed), "kinds: {kinds:?}");
+    assert!(
+        kinds.contains(&SignalKind::SessionTainted),
+        "kinds: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&SignalKind::TokensConsumed),
+        "kinds: {kinds:?}"
+    );
 }

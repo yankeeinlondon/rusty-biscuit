@@ -16,7 +16,9 @@ use crate::system_prompt::{
     PreparedSystemPrompt, ResolvedSystemPrompt, SystemPromptMode, SystemPromptSource,
 };
 
-use super::formatting::{prompt_body_width, render_markdown_for_terminal, system_prompt_blockquote_styled};
+use super::formatting::{
+    prompt_body_width, render_markdown_for_terminal, system_prompt_blockquote_styled,
+};
 use super::tokens::estimate_system_prompt_tokens;
 use super::truncation::{truncate_front_back, truncate_head};
 use super::{ReportMode, TruncationMode};
@@ -41,11 +43,7 @@ fn render_system_prompt_header(action: &str, term: &Terminal) -> String {
 /// [`NERD_FONT_REPO_GLYPH`] joined to the relative path; non-Nerd-Font
 /// terminals with an in-base path get a `./`-prefixed relative path;
 /// otherwise the absolute path is rendered with portable separators.
-fn resolve_display_label(
-    absolute: &Path,
-    base: Option<&Path>,
-    term: &Terminal,
-) -> String {
+fn resolve_display_label(absolute: &Path, base: Option<&Path>, term: &Terminal) -> String {
     let rel = base.and_then(|b| absolute.strip_prefix(b).ok());
     match (rel, term.is_nerd_font) {
         (Some(rel), Some(true)) => {
@@ -112,11 +110,7 @@ fn render_system_prompt_summary(
 ///
 /// `Summary` returns the empty string; `Partial` truncates per the
 /// embedded `TruncationMode`; `Full` renders the full text.
-fn render_system_prompt_body(
-    text: &str,
-    mode: ReportMode,
-    term: &Terminal,
-) -> String {
+fn render_system_prompt_body(text: &str, mode: ReportMode, term: &Terminal) -> String {
     let width = prompt_body_width(term);
     match mode {
         ReportMode::Summary => String::new(),
@@ -161,8 +155,7 @@ impl SystemPrompt {
         if matches!(mode, ReportMode::Silent) {
             return None;
         }
-        if !matches!(resolved, ResolvedSystemPrompt::Ready(_))
-            && !matches!(mode, ReportMode::Full)
+        if !matches!(resolved, ResolvedSystemPrompt::Ready(_)) && !matches!(mode, ReportMode::Full)
         {
             return None;
         }
@@ -175,8 +168,7 @@ impl SystemPrompt {
         })
     }
 
-    fn render_ready(&self, prepared: &PreparedSystemPrompt, term: &Terminal,
-    ) -> String {
+    fn render_ready(&self, prepared: &PreparedSystemPrompt, term: &Terminal) -> String {
         let action = match prepared.mode {
             SystemPromptMode::Append => "appended",
             SystemPromptMode::Replace => "replaced",
@@ -206,11 +198,7 @@ impl SystemPrompt {
         ));
 
         if !matches!(self.mode, ReportMode::Summary) {
-            let body = render_system_prompt_body(
-                &prepared.composed_markdown,
-                self.mode,
-                term,
-            );
+            let body = render_system_prompt_body(&prepared.composed_markdown, self.mode, term);
             if !body.is_empty() {
                 body_parts.push(body);
             }
@@ -227,12 +215,7 @@ impl SystemPrompt {
 
     /// Render the `None`/`Disabled` placeholder report. Only reachable in
     /// `Full` mode — `from_mode` suppresses these variants below `Full`.
-    fn render_empty(
-        &self,
-        action: &str,
-        body_text: &str,
-        term: &Terminal,
-    ) -> String {
+    fn render_empty(&self, action: &str, body_text: &str, term: &Terminal) -> String {
         let header = render_system_prompt_header(action, term);
         let body = render_markdown_for_terminal(body_text, term, prompt_body_width(term));
         let quote = system_prompt_blockquote_styled(&body).render(term);

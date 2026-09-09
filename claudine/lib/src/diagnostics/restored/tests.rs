@@ -95,7 +95,10 @@ fn context_prefixes_the_message_but_not_the_facets() {
         DiagnosticSnapshot::from_diagnostic(&CompositionError::FileNotFound("gone.md".into()));
     let restored = RestoredDiagnostic::new(snapshot.clone()).with_context("cannot continue");
 
-    assert_eq!(restored.to_string(), format!("cannot continue: {}", snapshot.message));
+    assert_eq!(
+        restored.to_string(),
+        format!("cannot continue: {}", snapshot.message)
+    );
     assert_eq!(restored.code(), snapshot.code);
     assert_eq!(restored.detail(), snapshot.detail);
 }
@@ -114,7 +117,10 @@ fn a_restored_diagnostic_is_discoverable_and_selectable() {
     );
 
     let selected = select_effective_diagnostic(erase(&restored)).expect("a diagnostic is selected");
-    assert_eq!(selected.diagnostic().map(|d| d.code()), Some(snapshot.code.as_str()));
+    assert_eq!(
+        selected.diagnostic().map(|d| d.code()),
+        Some(snapshot.code.as_str())
+    );
     assert!(
         selected
             .block_error()

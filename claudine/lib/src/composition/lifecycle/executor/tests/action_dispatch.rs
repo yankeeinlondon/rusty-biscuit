@@ -221,7 +221,10 @@ fn shell_nonzero_at_setup_routes_to_failure() {
     assert!(outcome.action_error.is_some());
     assert!(outcome.routes_to_failure(LifecycleSignal::Start));
     // on_error was surfaced as a warning.
-    assert_eq!(recorder.events(), vec![Emitted::Warn("build failed".to_string())]);
+    assert_eq!(
+        recorder.events(),
+        vec![Emitted::Warn("build failed".to_string())]
+    );
 }
 
 #[test]
@@ -282,7 +285,10 @@ fn no_error_suppresses_propagation_and_continues() {
     );
     let outcome = context.execute_event(&config);
     assert_eq!(outcome, LifecycleEventOutcome::default());
-    assert_eq!(recorder.events(), vec![Emitted::Info("reached".to_string())]);
+    assert_eq!(
+        recorder.events(),
+        vec![Emitted::Info("reached".to_string())]
+    );
 }
 
 /// `no_error` is scoped to side-effect dispatch failures: an action whose
@@ -323,7 +329,10 @@ fn no_error_does_not_suppress_evaluation_raise() {
         "an evaluation raise halts despite no_error"
     );
     assert!(outcome.action_error.is_none());
-    assert!(recorder.events().is_empty(), "the stack stopped at the raise");
+    assert!(
+        recorder.events().is_empty(),
+        "the stack stopped at the raise"
+    );
 }
 
 #[test]
@@ -750,7 +759,9 @@ fn shell_spawn_failure_projects_the_typed_runner_error() {
         Path::new("t.md"),
     );
     let outcome = context.execute_event(&config);
-    let info = outcome.action_error.expect("a spawn failure is a dispatch error");
+    let info = outcome
+        .action_error
+        .expect("a spawn failure is a dispatch error");
 
     // The facet-less action-failure aliases are unmoved: `ShellRunError` is not
     // a registered diagnostic, so selection finds nothing and `err.kind` /

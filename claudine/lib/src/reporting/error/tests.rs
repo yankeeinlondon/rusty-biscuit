@@ -50,8 +50,7 @@ fn the_ingest_wrapper_is_the_selected_diagnostic_and_its_cause_is_reachable() {
     let diagnostic = selected.diagnostic().expect("a Claudine diagnostic");
 
     assert_eq!(
-        diagnostic as *const dyn Diagnostic as *const (),
-        &error as *const IngestError as *const (),
+        diagnostic as *const dyn Diagnostic as *const (), &error as *const IngestError as *const (),
         "selection returned something other than the wrapper itself"
     );
     assert!(next_registered_cause(diagnostic).is_some());

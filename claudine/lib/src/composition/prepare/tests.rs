@@ -1,5 +1,5 @@
-use super::*;
 use super::super::types::{AgentHint, ModelHint};
+use super::*;
 use crate::provider::Provider;
 use darkmatter::markdown::Frontmatter;
 use serde_json::json;
@@ -106,11 +106,7 @@ fn canonical_preparation_records_each_compose_on_the_request_owner() {
 #[test]
 fn canonical_preparation_observes_populated_snapshot_consumers() {
     let dir = TempDir::new().unwrap();
-    let source = make_source(
-        &dir,
-        &[("prepared", json!("{{ ctx.os }}"))],
-        "{{ ctx.os }}",
-    );
+    let source = make_source(&dir, &[("prepared", json!("{{ ctx.os }}"))], "{{ ctx.os }}");
     let invocation = crate::invocation_context::InvocationContext::capture_at(dir.path());
     let requirements =
         darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
@@ -246,12 +242,16 @@ fn direct_composition_preserves_tight_nested_list() {
 
     let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
     assert!(
-        prepared.prompt.contains("properties on \"review.md\":\n    - based on"),
+        prepared
+            .prompt
+            .contains("properties on \"review.md\":\n    - based on"),
         "parent item must be immediately followed by its first child; got:\n{}",
         prepared.prompt
     );
     assert!(
-        !prepared.prompt.contains("properties on \"review.md\":\n\n    - "),
+        !prepared
+            .prompt
+            .contains("properties on \"review.md\":\n\n    - "),
         "tight nested list must not gain a blank line between parent and child; got:\n{}",
         prepared.prompt
     );
@@ -302,7 +302,10 @@ fn lifecycle_malformed_span_is_deferred_raw_through_prepare() {
         &dir,
         &[
             ("title", json!("Test")),
-            ("start", json!({"message": "leak {{ parent_dir(review)) }}"})),
+            (
+                "start",
+                json!({"message": "leak {{ parent_dir(review)) }}"}),
+            ),
         ],
         "Content",
     );
@@ -430,7 +433,10 @@ fn multiple_lifecycle_spans_all_deferred_raw() {
         &dir,
         &[
             ("title", json!("Test")),
-            ("start", json!({"message": "leak {{ parent_dir(review)) }}"})),
+            (
+                "start",
+                json!({"message": "leak {{ parent_dir(review)) }}"}),
+            ),
             ("failure", json!({"say": "leak {{ broken( }}"})),
         ],
         "Content",
@@ -438,7 +444,13 @@ fn multiple_lifecycle_spans_all_deferred_raw() {
 
     let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
     assert_eq!(
-        prepared.lifecycle.start.as_ref().unwrap().message.as_deref(),
+        prepared
+            .lifecycle
+            .start
+            .as_ref()
+            .unwrap()
+            .message
+            .as_deref(),
         Some("leak {{ parent_dir(review)) }}")
     );
     assert_eq!(
@@ -544,7 +556,10 @@ fn direct_lifecycle_ctx_message_is_deferred_raw() {
 
     let prepared = prepare_direct(&source, options).unwrap();
     let start = prepared.lifecycle.start.as_ref().unwrap();
-    assert_eq!(start.message.as_deref(), Some("{{ctx.agent}}/{{ctx.model}}"));
+    assert_eq!(
+        start.message.as_deref(),
+        Some("{{ctx.agent}}/{{ctx.model}}")
+    );
 }
 
 #[test]
@@ -782,8 +797,7 @@ fn direct_composition_empty_body_returns_composed_body_empty() {
         } => {
             assert_eq!(source_path, source.resolved_path);
             assert_eq!(mode, CompositionMode::ChainedDocument);
-            let keys: std::collections::HashSet<String> =
-                provided_overrides.into_iter().collect();
+            let keys: std::collections::HashSet<String> = provided_overrides.into_iter().collect();
             assert_eq!(
                 keys,
                 ["spec", "phase"].iter().map(|s| s.to_string()).collect()
@@ -927,7 +941,10 @@ fn inline_composition_parses_interactive_hint() {
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
-        &[("prompt", json!("Write something")), ("interactive", json!(false))],
+        &[
+            ("prompt", json!("Write something")),
+            ("interactive", json!(false)),
+        ],
         "Old content",
     );
 
@@ -1161,7 +1178,11 @@ fn prior_outputs_are_visible_to_the_composed_body() {
         prepared.prompt
     );
     assert_eq!(
-        prepared.effective_frontmatter.as_object().unwrap().get("outputs"),
+        prepared
+            .effective_frontmatter
+            .as_object()
+            .unwrap()
+            .get("outputs"),
         Some(&json!(["step one output"]))
     );
 }
@@ -1186,7 +1207,11 @@ fn a_user_setter_cannot_replace_outputs() {
     .unwrap();
 
     assert_eq!(
-        prepared.effective_frontmatter.as_object().unwrap().get("outputs"),
+        prepared
+            .effective_frontmatter
+            .as_object()
+            .unwrap()
+            .get("outputs"),
         Some(&json!([]))
     );
 }
@@ -1204,7 +1229,11 @@ fn authored_outputs_frontmatter_is_overridden_by_the_accumulator() {
 
     let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
     assert_eq!(
-        prepared.effective_frontmatter.as_object().unwrap().get("outputs"),
+        prepared
+            .effective_frontmatter
+            .as_object()
+            .unwrap()
+            .get("outputs"),
         Some(&json!([]))
     );
 }

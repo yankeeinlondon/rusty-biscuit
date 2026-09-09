@@ -21,12 +21,12 @@ pub mod project;
 mod sink;
 mod version;
 
+pub use bespoke::{
+    EXIT_STDERR_TAIL_LINES, EXIT_STDOUT_TAIL_LINES, bespoke_replayer, exit_source_payload,
+};
 pub use claudine_catalog_types::{
     CapScope, DetectionMode, DetectionRecord, DriftObservation, ExtractStrategy, ExtractionSpec,
     ProviderSignalTable, Quantity, SignalEvent, SignalKind, SignalSource,
-};
-pub use bespoke::{
-    EXIT_STDERR_TAIL_LINES, EXIT_STDOUT_TAIL_LINES, bespoke_replayer, exit_source_payload,
 };
 pub use engine::{ReplayObservation, SignalEngine};
 pub use hub::SignalHub;
@@ -86,8 +86,7 @@ mod tests {
         // (including any researched-but-unwired ones, should they exist), and an
         // unknown slug returns None.
         for table in all_detection_tables() {
-            let looked_up =
-                detection_table(table.slug).expect("compiled table reachable by slug");
+            let looked_up = detection_table(table.slug).expect("compiled table reachable by slug");
             assert_eq!(looked_up.slug, table.slug);
             assert!(!looked_up.records.is_empty());
         }

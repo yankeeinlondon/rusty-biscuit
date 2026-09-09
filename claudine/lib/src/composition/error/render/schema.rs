@@ -122,11 +122,20 @@ fn render_missing_properties_block(
 ) -> StatusBlock {
     let file_link = render_file_link(source_path);
 
-    let mut body = format!("Required {plural} missing in {file_link}.",
-        plural = if missing.len() == 1 { "property is" } else { "properties are" });
+    let mut body = format!(
+        "Required {plural} missing in {file_link}.",
+        plural = if missing.len() == 1 {
+            "property is"
+        } else {
+            "properties are"
+        }
+    );
 
     if let Some(desc) = frontmatter_description.filter(|d| !d.trim().is_empty()) {
-        body.push_str(&format!("\n\n<i><dim>{}</dim></i>", escape_prose_path(desc)));
+        body.push_str(&format!(
+            "\n\n<i><dim>{}</dim></i>",
+            escape_prose_path(desc)
+        ));
     }
 
     if !missing.is_empty() {

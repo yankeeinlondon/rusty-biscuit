@@ -147,7 +147,10 @@ fn agent_cwd_match_command(expected: &str) -> String {
 
 #[cfg(not(windows))]
 fn agent_cwd_match_command(expected: &str) -> String {
-    format!("test \"$AGENT_CWD\" = '{}'", expected.replace('\'', "'\\''"))
+    format!(
+        "test \"$AGENT_CWD\" = '{}'",
+        expected.replace('\'', "'\\''")
+    )
 }
 
 fn temp_engine() -> (tempfile::TempDir, EffectEngine) {
@@ -235,7 +238,16 @@ fn ctx_with_runtime<'a>(
 ) -> StackExecutionContext<'a> {
     StackExecutionContext {
         runtime_state: Some(runtime),
-        ..ctx_with_live(signal, base, live, engine, shell, recorder, harness, source_path)
+        ..ctx_with_live(
+            signal,
+            base,
+            live,
+            engine,
+            shell,
+            recorder,
+            harness,
+            source_path,
+        )
     }
 }
 
@@ -278,11 +290,10 @@ fn ctx_with_live<'a>(
     }
 }
 
-
 mod action_dispatch;
 mod conditions_control;
 mod event_time_interpolation;
 mod filesystem_lookup;
 mod mutation_visibility;
-mod runtime_set;
 mod proxy_with_evaluation;
+mod runtime_set;

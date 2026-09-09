@@ -115,7 +115,9 @@ mod source_chain_tests {
              unboxed, drop this assertion and assert reachability instead"
         );
         assert!(
-            published.downcast_ref::<Box<ShellExpansionError>>().is_some(),
+            published
+                .downcast_ref::<Box<ShellExpansionError>>()
+                .is_some(),
             "the chain publishes neither `ShellExpansionError` nor its box"
         );
     }
@@ -134,7 +136,10 @@ mod source_chain_tests {
             "shell command execution failed: failed to spawn 'ls': denied"
         );
         assert_eq!(err.code(), "composition.shell_expansion");
-        assert_eq!(err.detail()["command"], json!("failed to spawn 'ls': denied"));
+        assert_eq!(
+            err.detail()["command"],
+            json!("failed to spawn 'ls': denied")
+        );
     }
 }
 
@@ -319,7 +324,9 @@ mod classification_tests {
             .source()
             .expect("a source is published");
         assert!(
-            published.downcast_ref::<Box<FileReferenceError>>().is_some(),
+            published
+                .downcast_ref::<Box<FileReferenceError>>()
+                .is_some(),
             "the boxed typed cause must be reachable on the chain"
         );
     }

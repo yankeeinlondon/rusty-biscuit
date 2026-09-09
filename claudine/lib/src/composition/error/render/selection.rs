@@ -20,28 +20,36 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let file_link = super::render_file_link(source_path);
             let body = render_agent_resolution_failed_body(state, installed, &file_link);
             StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("CompositionError", "agent resolution failed"))
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "agent resolution failed",
+                ))
                 .body(body)
                 .hint(
                     "Specify an installed provider with --claude, --codex, etc., run in an \
-                     interactive terminal, or correct the `agent` frontmatter property."
+                     interactive terminal, or correct the `agent` frontmatter property.",
                 )
         }
         CompositionError::AutocompleteNoMatches { query } => StatusBlock::new(StatusState::Error)
-            .error_header(ErrorHeader::new("CompositionError", "no autocomplete matches"))
+            .error_header(ErrorHeader::new(
+                "CompositionError",
+                "no autocomplete matches",
+            ))
             .body(format!(
                 "No files matched autocomplete query <cyan>`{}`</cyan>.",
                 escape_prose_path(query)
             ))
             .hint("Check the query token or run without a query to see all candidates."),
-        CompositionError::AutocompleteOverCap { query, cap } => StatusBlock::new(StatusState::Error)
-            .error_header(ErrorHeader::new("CompositionError", "too many matches"))
-            .body(format!(
-                "More than <cyan>{cap}</cyan> files matched autocomplete query \
+        CompositionError::AutocompleteOverCap { query, cap } => {
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "too many matches"))
+                .body(format!(
+                    "More than <cyan>{cap}</cyan> files matched autocomplete query \
                  <cyan>`{}`</cyan>.",
-                escape_prose_path(query)
-            ))
-            .hint("Type more characters to narrow the query."),
+                    escape_prose_path(query)
+                ))
+                .hint("Type more characters to narrow the query.")
+        }
         CompositionError::AutocompleteNotInteractive => StatusBlock::new(StatusState::Error)
             .error_header(ErrorHeader::new(
                 "CompositionError",

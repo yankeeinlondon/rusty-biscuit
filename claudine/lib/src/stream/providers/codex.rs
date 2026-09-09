@@ -587,8 +587,10 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
                 token_usage: self.token_usage,
                 cost_usd: self.cost_usd,
                 tool_calls: (self.tool_calls > 0).then_some(self.tool_calls),
-                permission_prompts: (self.permission_prompts > 0).then_some(self.permission_prompts),
-                user_input_prompts: (self.user_input_prompts > 0).then_some(self.user_input_prompts),
+                permission_prompts: (self.permission_prompts > 0)
+                    .then_some(self.permission_prompts),
+                user_input_prompts: (self.user_input_prompts > 0)
+                    .then_some(self.user_input_prompts),
                 raw_summary: self.raw_summary,
                 ..Default::default()
             },

@@ -131,7 +131,8 @@ mod geometry {
 
     #[test]
     fn a_narrow_terminal_still_renders_a_barred_line() {
-        let rendered = TaskStreamFrame::new(TaskBar::for_index(0), "abcdefghij").render(&color_term(8));
+        let rendered =
+            TaskStreamFrame::new(TaskBar::for_index(0), "abcdefghij").render(&color_term(8));
         for line in rendered.lines() {
             let visible = strip_ansi(line);
             assert!(visible.starts_with("│ "), "got {visible:?}");
@@ -141,8 +142,8 @@ mod geometry {
 
     #[test]
     fn wide_unicode_content_survives_framing() {
-        let rendered =
-            TaskStreamFrame::new(TaskBar::for_index(2), "日本語のタスク — ✅ 完了").render(&color_term(40));
+        let rendered = TaskStreamFrame::new(TaskBar::for_index(2), "日本語のタスク — ✅ 完了")
+            .render(&color_term(40));
         let visible = strip_ansi(&rendered);
         assert!(visible.contains("日本語のタスク"), "got {visible:?}");
         assert!(visible.contains('✅'), "got {visible:?}");

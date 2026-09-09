@@ -19,14 +19,14 @@
 
 use std::collections::HashMap;
 
+use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::subtree::{SubtreeCompose, SubtreeStrictness};
 use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
-use darkmatter::markdown::MarkdownError;
 use serde_json::{Map, Value, json};
 
-use super::looping::{ActionStaging, LoopAmbient, LoopExpressionLookup};
 use super::CompositionError;
 use super::LoopAction;
+use super::looping::{ActionStaging, LoopAmbient, LoopExpressionLookup};
 
 /// Render `value` through the loop action engine's public `set` path against
 /// `frontmatter`, returning the stored value.
@@ -59,10 +59,7 @@ fn dm2_render(
         .compose()
 }
 
-fn effective_state(
-    frontmatter: &Map<String, Value>,
-    context: &ComposeContext,
-) -> EffectiveState {
+fn effective_state(frontmatter: &Map<String, Value>, context: &ComposeContext) -> EffectiveState {
     let fm: HashMap<String, Value> = frontmatter
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
@@ -228,21 +225,15 @@ fn divergence_mixed_string_json_reparse() {
         "loop re-parses the concatenated `12` as a JSON number"
     );
 
-    let dm2_strict = dm2_render(
-        &input,
-        &frontmatter,
-        SubtreeStrictness::Strict,
-        &context,
-    )
-    .expect("DM2 renders");
+    let dm2_strict =
+        dm2_render(&input, &frontmatter, SubtreeStrictness::Strict, &context).expect("DM2 renders");
     assert_eq!(
         dm2_strict,
         json!("12"),
         "DM2 keeps the mixed string as a string"
     );
-    let dm2_lenient =
-        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient, &context)
-            .expect("DM2 renders");
+    let dm2_lenient = dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient, &context)
+        .expect("DM2 renders");
     assert_eq!(dm2_lenient, json!("12"), "DM2 mode does not change typing");
 }
 
@@ -257,15 +248,14 @@ fn divergence_unknown_root_strictness() {
     let context = prepared_context();
 
     let loop_result = loop_render(&input, &frontmatter).expect("loop tolerates unknown root");
-    assert_eq!(loop_result, json!("x="), "loop resolves the unknown root empty");
+    assert_eq!(
+        loop_result,
+        json!("x="),
+        "loop resolves the unknown root empty"
+    );
 
     // Lifecycle strict fails closed on the unknown root.
-    let dm2_strict = dm2_render(
-        &input,
-        &frontmatter,
-        SubtreeStrictness::Strict,
-        &context,
-    );
+    let dm2_strict = dm2_render(&input, &frontmatter, SubtreeStrictness::Strict, &context);
     let error = dm2_strict.expect_err("DM2 strict rejects the unknown root");
     assert!(
         error.to_string().contains("unknown root") && error.to_string().contains("typo"),
@@ -273,10 +263,13 @@ fn divergence_unknown_root_strictness() {
     );
 
     // DM2 lenient matches the loop's tolerant behavior.
-    let dm2_lenient =
-        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient, &context)
-            .expect("DM2 lenient renders");
-    assert_eq!(dm2_lenient, json!("x="), "DM2 lenient matches the loop engine");
+    let dm2_lenient = dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient, &context)
+        .expect("DM2 lenient renders");
+    assert_eq!(
+        dm2_lenient,
+        json!("x="),
+        "DM2 lenient matches the loop engine"
+    );
 }
 
 /// Both engines fail closed on a malformed expression — the shared invariant —
@@ -298,12 +291,7 @@ fn divergence_malformed_expression_both_fail_closed() {
         "loop surfaces a contextual LoopActionExpressionInvalid: {loop_error}"
     );
 
-    let dm2_error = dm2_render(
-        &input,
-        &frontmatter,
-        SubtreeStrictness::Strict,
-        &context,
-    )
+    let dm2_error = dm2_render(&input, &frontmatter, SubtreeStrictness::Strict, &context)
         .expect_err("DM2 strict fails closed");
     assert!(
         matches!(dm2_error, MarkdownError::Transform(_)),

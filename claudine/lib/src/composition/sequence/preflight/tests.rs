@@ -24,7 +24,10 @@ use crate::composition::sequence::resolve_sequence_plan;
 fn write_source(dir: &Path, name: &str, frontmatter: &[(&str, Value)], body: &str) -> String {
     let mut text = String::from("---\n");
     for (key, value) in frontmatter {
-        text.push_str(&format!("{key}: {}\n", serde_json::to_string(value).unwrap()));
+        text.push_str(&format!(
+            "{key}: {}\n",
+            serde_json::to_string(value).unwrap()
+        ));
     }
     text.push_str("---\n\n");
     text.push_str(body);
@@ -34,11 +37,7 @@ fn write_source(dir: &Path, name: &str, frontmatter: &[(&str, Value)], body: &st
 }
 
 fn write_yaml(dir: &Path, name: &str, value: &Value) {
-    fs::write(
-        dir.join(name),
-        serde_json::to_string_pretty(value).unwrap(),
-    )
-    .unwrap();
+    fs::write(dir.join(name), serde_json::to_string_pretty(value).unwrap()).unwrap();
 }
 
 /// Resolve a written Markdown source and build its preflight graph.
@@ -92,7 +91,10 @@ mod loading {
         let source_path = write_source(
             &launch_repo,
             "sequence.md",
-            &[("sequence", json!([{ "name": "external", "task": task_ref }]))],
+            &[(
+                "sequence",
+                json!([{ "name": "external", "task": task_ref }]),
+            )],
             "Sequence body.\n",
         );
         let source = crate::composition::resolve_composition_source(&source_path).unwrap();
@@ -212,10 +214,8 @@ mod loading {
 
         let ambient = TempDir::new().unwrap();
         let _home = test_toolkit::EnvGuard::set_safe("HOME", ambient.path());
-        let _env = test_toolkit::EnvGuard::set_safe(
-            "CLAUDINE_SEQUENCE_SNAPSHOT_ROOT",
-            ambient.path(),
-        );
+        let _env =
+            test_toolkit::EnvGuard::set_safe("CLAUDINE_SEQUENCE_SNAPSHOT_ROOT", ambient.path());
         let graph = build_preflight_graph_with_context_and_resolution(
             &plan,
             &resolved,
@@ -227,7 +227,14 @@ mod loading {
         let mut prompts: Vec<_> = graph
             .prompt_documents
             .iter()
-            .map(|document| document.path.file_name().unwrap().to_string_lossy().into_owned())
+            .map(|document| {
+                document
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect();
         prompts.sort();
         assert_eq!(prompts, ["env.md", "home.md", "magic.md", "package.md"]);
@@ -240,7 +247,8 @@ mod loading {
             graph
                 .prompt_documents
                 .iter()
-                .any(|document| document.path == dunce::canonicalize(nested.join("magic.md")).unwrap()),
+                .any(|document| document.path
+                    == dunce::canonicalize(nested.join("magic.md")).unwrap()),
             "the nested task's prompt must resolve from the external group/task authoring base",
         );
     }
@@ -252,8 +260,18 @@ mod loading {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
 
-        write_source(root, "leaf.md", &[("title", json!("Leaf"))], "Do the thing.\n");
-        write_source(root, "review.md", &[("title", json!("Review"))], "Review.\n");
+        write_source(
+            root,
+            "leaf.md",
+            &[("title", json!("Leaf"))],
+            "Do the thing.\n",
+        );
+        write_source(
+            root,
+            "review.md",
+            &[("title", json!("Review"))],
+            "Review.\n",
+        );
         write_yaml(
             root,
             "outer.yaml",
@@ -271,7 +289,10 @@ mod loading {
         let source = write_source(
             root,
             "seq.md",
-            &[("sequence", json!([{ "name": "one", "group": "group.yaml" }]))],
+            &[(
+                "sequence",
+                json!([{ "name": "one", "group": "group.yaml" }]),
+            )],
             "Body.\n",
         );
 
@@ -312,7 +333,12 @@ mod loading {
         // Two prompts named `target.md`: one beside the sequence, one beside the
         // task file. The task file must reach its own sibling.
         write_source(root, "target.md", &[("title", json!("Wrong"))], "wrong\n");
-        write_source(&nested, "target.md", &[("title", json!("Right"))], "right\n");
+        write_source(
+            &nested,
+            "target.md",
+            &[("title", json!("Right"))],
+            "right\n",
+        );
         write_yaml(
             &nested,
             "task.yaml",
@@ -331,7 +357,9 @@ mod loading {
         let graph = graph_for(&source).unwrap();
         let document = &graph.prompt_documents[0];
         assert!(
-            document.path.starts_with(dunce::canonicalize(&nested).unwrap()),
+            document
+                .path
+                .starts_with(dunce::canonicalize(&nested).unwrap()),
             "the task file's sibling must win, got {}",
             document.path.display(),
         );
@@ -855,7 +883,12 @@ mod write_back {
     use super::*;
 
     fn inline_prompt(root: &Path, name: &str) {
-        write_source(root, name, &[("prompt", json!("Write something."))], "old\n");
+        write_source(
+            root,
+            name,
+            &[("prompt", json!("Write something."))],
+            "old\n",
+        );
     }
 
     #[test]
@@ -1111,10 +1144,7 @@ mod shell {
             let source = write_source(
                 dir.path(),
                 "seq.md",
-                &[(
-                    "sequence",
-                    json!([{ "name": "one", "shell": command }]),
-                )],
+                &[("sequence", json!([{ "name": "one", "shell": command }]))],
                 "Body.\n",
             );
             let error = err_for(&source);
@@ -1140,10 +1170,7 @@ mod shell {
             let source = write_source(
                 dir.path(),
                 "seq.md",
-                &[(
-                    "sequence",
-                    json!([{ "name": "one", "shell": command }]),
-                )],
+                &[("sequence", json!([{ "name": "one", "shell": command }]))],
                 "Body.\n",
             );
             let error = err_for(&source);
@@ -1222,10 +1249,7 @@ mod shell {
             let source = write_source(
                 dir.path(),
                 "seq.md",
-                &[(
-                    "sequence",
-                    json!([{ "name": "one", "shell": command }]),
-                )],
+                &[("sequence", json!([{ "name": "one", "shell": command }]))],
                 "Body.\n",
             );
 
@@ -1418,7 +1442,11 @@ mod steps {
 
         let graph = graph_for(&source).unwrap();
         assert_eq!(
-            graph.steps.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            graph
+                .steps
+                .iter()
+                .map(|s| s.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["alpha", "run-tests", "review"],
         );
         assert!(graph.steps[0].task.is_none());

@@ -156,9 +156,7 @@ pub(super) fn parse_model_hint(
 ///
 /// Accepts `true`, `false`, or `null` (treated as absent). Anything else
 /// is a typed error naming the offending JSON type.
-pub fn parse_interactive_hint(
-    value: &serde_json::Value,
-) -> Result<Option<bool>, CompositionError> {
+pub fn parse_interactive_hint(value: &serde_json::Value) -> Result<Option<bool>, CompositionError> {
     match value {
         serde_json::Value::Bool(b) => Ok(Some(*b)),
         serde_json::Value::Null => Ok(None),

@@ -265,8 +265,7 @@ fn resolve_proxy_target_resolves_repo_relative() {
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::write(&target, "---\n---\n").unwrap();
 
-    let resolved =
-        resolve_proxy_target("@prompts/next.md", &source, Some(dir.path())).unwrap();
+    let resolved = resolve_proxy_target("@prompts/next.md", &source, Some(dir.path())).unwrap();
     assert_eq!(resolved, target);
 }
 
@@ -326,7 +325,10 @@ fn resolve_proxy_target_missing_file_errors() {
 
     let err = resolve_proxy_target("nope.md", &source, None).unwrap_err();
     assert!(
-        matches!(err, crate::harness::HarnessError::PathResolutionFailed { .. }),
+        matches!(
+            err,
+            crate::harness::HarnessError::PathResolutionFailed { .. }
+        ),
         "unexpected variant: {err:?}"
     );
     assert!(

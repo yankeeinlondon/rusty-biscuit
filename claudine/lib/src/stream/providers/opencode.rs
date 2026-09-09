@@ -39,8 +39,7 @@ use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::provider_id::Provider;
 
-const GENERIC_SERVER_ERROR: &str =
-    "Unexpected server error. Check server logs for details.";
+const GENERIC_SERVER_ERROR: &str = "Unexpected server error. Check server logs for details.";
 
 /// An unsupported runtime identity was supplied to the shared OpenCode parser.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -80,12 +79,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         model: Option<String>,
         provider: Provider,
     ) -> Result<Self, InvalidOpenCodeParserProvider> {
-        Self::new_with_vocabulary_resolver(
-            sink,
-            model,
-            provider,
-            super::vocabulary::error_keywords,
-        )
+        Self::new_with_vocabulary_resolver(sink, model, provider, super::vocabulary::error_keywords)
     }
 
     fn new_with_vocabulary_resolver(
@@ -336,11 +330,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
     fn handle_tool_use(&mut self, tool: OpenCodeTool, raw_kind: &str) {
         self.tool_calls += 1;
         let resolved = tool.resolve();
-        super::trace_tool_event(
-            self.provider,
-            self.tool_calls,
-            resolved.name.as_deref(),
-        );
+        super::trace_tool_event(self.provider, self.tool_calls, resolved.name.as_deref());
 
         let mut extra = self.base_extra(raw_kind);
         if let Some(id) = &resolved.id {
@@ -383,11 +373,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
     fn handle_tool_use_completed(&mut self, tool: OpenCodeTool, raw_kind: &str) {
         self.tool_calls += 1;
         let resolved = tool.resolve();
-        super::trace_tool_event(
-            self.provider,
-            self.tool_calls,
-            resolved.name.as_deref(),
-        );
+        super::trace_tool_event(self.provider, self.tool_calls, resolved.name.as_deref());
 
         let mut result_extra = self.base_extra(raw_kind);
         if let Some(id) = &resolved.id {
@@ -529,11 +515,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
                 let raw: Map<String, Value> = match serde_json::from_str(line) {
                     Ok(v) => v,
                     Err(e) => {
-                        super::trace_malformed_line(
-                            self.provider,
-                            self.line_num,
-                            &e.to_string(),
-                        );
+                        super::trace_malformed_line(self.provider, self.line_num, &e.to_string());
                         self.emit_malformed_warning(&e.to_string());
                         return;
                     }
@@ -620,9 +602,7 @@ fn strip_orphan_think_delimiters(text: &str) -> Cow<'_, str> {
 
 /// Validate that the shared parser's runtime identity belongs to its wire
 /// protocol family.
-fn opencode_parser_identity(
-    provider: Provider,
-) -> Result<Provider, InvalidOpenCodeParserProvider> {
+fn opencode_parser_identity(provider: Provider) -> Result<Provider, InvalidOpenCodeParserProvider> {
     match provider {
         Provider::OpenCode | Provider::Kilo => Ok(provider),
         provider => Err(InvalidOpenCodeParserProvider { provider }),
@@ -636,12 +616,7 @@ fn classify_error(
     error_kind: Option<&str>,
     message: Option<&str>,
 ) -> SemanticErrorKind {
-    super::common::classify_error_by_keywords(
-        vocabulary,
-        None,
-        error_kind,
-        message,
-    )
+    super::common::classify_error_by_keywords(vocabulary, None, error_kind, message)
 }
 
 #[cfg(test)]

@@ -104,10 +104,7 @@ fn extracts_bash_command_from_input_key() {
 
 #[test]
 fn extracts_bash_command_from_string_array() {
-    let meta = meta_with_bash_tool(
-        "Bash",
-        json!(["rm", "-rf", "/"]),
-    );
+    let meta = meta_with_bash_tool("Bash", json!(["rm", "-rf", "/"]));
     let obs = extract_protect_request(&AgenticEvent::BeforeTool, &meta);
     assert!(matches!(
         obs,

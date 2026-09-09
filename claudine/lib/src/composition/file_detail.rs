@@ -148,7 +148,9 @@ fn string_from_map(map: &IndexMap<String, Value>, key: &str) -> Option<String> {
 }
 
 fn schema_lines_from_map(map: &IndexMap<String, Value>) -> Vec<String> {
-    map.get("$schema").map(yaml_lines_from_json).unwrap_or_default()
+    map.get("$schema")
+        .map(yaml_lines_from_json)
+        .unwrap_or_default()
 }
 
 /// Extract `$schema` YAML lines from a Markdown document, preserving the
@@ -165,17 +167,15 @@ fn schema_lines_from_markdown(markdown: &Markdown) -> Vec<String> {
     else {
         return schema_lines_from_map(markdown.frontmatter().as_map());
     };
-    let Some(schema) = yaml.get(biscuit_file::serde_yaml_ng::Value::String("$schema".to_string()))
-    else {
+    let Some(schema) = yaml.get(biscuit_file::serde_yaml_ng::Value::String(
+        "$schema".to_string(),
+    )) else {
         return schema_lines_from_map(markdown.frontmatter().as_map());
     };
     yaml_lines(schema)
 }
 
-fn string_from_yaml_map(
-    map: &biscuit_file::serde_yaml_ng::Mapping,
-    key: &str,
-) -> Option<String> {
+fn string_from_yaml_map(map: &biscuit_file::serde_yaml_ng::Mapping, key: &str) -> Option<String> {
     map.get(biscuit_file::serde_yaml_ng::Value::String(key.to_string()))
         .and_then(|v| {
             if let biscuit_file::serde_yaml_ng::Value::String(s) = v {
@@ -187,20 +187,19 @@ fn string_from_yaml_map(
         .filter(|s| !s.trim().is_empty())
 }
 
-fn schema_lines_from_yaml_map(
-    map: &biscuit_file::serde_yaml_ng::Mapping,
-) -> Vec<String> {
-    map.get(biscuit_file::serde_yaml_ng::Value::String("$schema".to_string()))
-        .map(yaml_lines)
-        .unwrap_or_default()
+fn schema_lines_from_yaml_map(map: &biscuit_file::serde_yaml_ng::Mapping) -> Vec<String> {
+    map.get(biscuit_file::serde_yaml_ng::Value::String(
+        "$schema".to_string(),
+    ))
+    .map(yaml_lines)
+    .unwrap_or_default()
 }
 
 fn yaml_lines_from_json(value: &Value) -> Vec<String> {
     // Round-trip through serde_yaml_ng so JSON values render as YAML lines.
-    match serde_json::to_string(value)
-        .ok()
-        .and_then(|json| biscuit_file::serde_yaml_ng::from_str::<biscuit_file::serde_yaml_ng::Value>(&json).ok())
-    {
+    match serde_json::to_string(value).ok().and_then(|json| {
+        biscuit_file::serde_yaml_ng::from_str::<biscuit_file::serde_yaml_ng::Value>(&json).ok()
+    }) {
         Some(yaml) => yaml_lines(&yaml),
         None => Vec::new(),
     }
