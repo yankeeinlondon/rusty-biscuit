@@ -50,23 +50,38 @@
 //! `.current_dir(repository_root())` or `.env("PATH", host_path)` on the
 //! returned command and reinstate both leaks the migration removed, while the
 //! spawn gate above stays perfectly happy. The second gate scans for those
-//! post-`build()` escapes — `.current_dir(…)`, `.env("PATH", …)`,
-//! `.env_remove("PATH")`, and `.env_clear()` — and reconciles them against
-//! [`ISOLATION_ALLOWLIST`] on the same mechanics. (The claudine reference has
-//! a fifth form, a reach for its `augmented_path` helper; the darkmatter
-//! builder has no equivalent — `PATH` composition is internal to
-//! `MdCommandBuilder` — so four forms carry this contract.)
+//! post-`build()` escapes and reconciles them against [`ISOLATION_ALLOWLIST`]
+//! on the same mechanics.
 //!
-//! Every legitimate need is already a named builder method
-//! (`ambient_context`, `host_path`, `fake_only_path`, `inherit_no_env`), which
-//! is why the allow-list carries exactly one entry: `md_process_fixture.rs`,
-//! whose `.current_dir` sites pin **parent-side `git()` helper commands**
+//! `PATH` and the launch directory carry their own four forms —
+//! `.current_dir(…)`, `.env("PATH", …)`, `.env_remove("PATH")`, and
+//! `.env_clear()`. (The claudine reference has a fifth, a reach for its
+//! `augmented_path` helper; the darkmatter builder has no equivalent, because
+//! `PATH` composition is internal to `MdCommandBuilder`.) Every *other*
+//! variable the contract pins is classified by `common/protected_env.rs` —
+//! the same table the builder validates a declaration against — and a
+//! post-`build()` `.env`/`.env_remove` naming one reports under its class:
+//! home/config/cache/temp containment, Git plumbing containment, a rendering
+//! input, or a darkmatter application input. Without that widening a plain
+//! `.env("HOME", host_home)` or `.env("GIT_DIR", checkout)` restored exactly
+//! the contamination the fixture exists to prevent with both gates green.
+//!
+//! The two classes are not the same defect and the failure message says so.
+//! Containment has no legitimate post-`build()` form at all. A behavior input
+//! usually does have a legitimate reason behind it — the test's subject *is*
+//! that input — and the fix is to declare it on the builder
+//! (`rendering_input`, `application_input`, `plain_terminal`) so the claim is
+//! visible at construction beside `ambient_context`, `host_path`,
+//! `fake_only_path`, and `inherit_no_env`.
+//!
+//! The allow-list carries exactly one entry: `md_process_fixture.rs`, whose
+//! `.current_dir` sites pin **parent-side `git()` helper commands**
 //! (hostile-state construction and config readback), not builder-built `md`
 //! commands. The escapes are spelled on the builder, not on the command.
 //!
 //! The scan is textual, so it reads a raw `std::process::Command` from
 //! `build_std()` exactly as it reads an `assert_cmd::Command` from `build()`:
-//! the same four forms, the same allow-list. What the raw surface adds —
+//! the same forms, the same allow-list. What the raw surface adds —
 //! `.spawn()`, `.stdout(…)`, a `Child` held across a deadline — is not an
 //! escape and is not flagged, because keeping the child is the reason that
 //! surface exists.
@@ -141,7 +156,12 @@
 // helpers) that a text scanner has no use for.
 #[path = "common/source_scan.rs"]
 mod source_scan;
+// The classification the fixture builder validates declarations against, so
+// the two cannot disagree about what "protected" means.
+#[path = "common/protected_env.rs"]
+mod protected_env;
 
+use protected_env::{ProtectedClass, protected_class};
 use source_scan::{is_ident, line_at, sanitize};
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -172,6 +192,28 @@ const FORM_PATH_ENV: &str = r#".env("PATH", …)"#;
 const FORM_PATH_ENV_REMOVE: &str = r#".env_remove("PATH")"#;
 /// `.env_clear()` on a built command, which drops the defaults `build()` set.
 const FORM_ENV_CLEAR: &str = ".env_clear()";
+
+/// `.env`/`.env_remove` naming a home, config, cache, or temp anchor — the
+/// accident that hands the child the developer's own directories back.
+const FORM_HOME_CONTAINMENT: &str = ".env/.env_remove of a home/config/cache/temp anchor";
+/// `.env`/`.env_remove` naming Git plumbing, which overrides cwd-based
+/// repository discovery and so defeats the pinned launch directory.
+const FORM_GIT_CONTAINMENT: &str = ".env/.env_remove of a Git plumbing variable";
+/// `.env`/`.env_remove` of a rendering input that was never declared on the
+/// builder — the claim is real, but it belongs at construction.
+const FORM_RENDERING_INPUT: &str = ".env/.env_remove of an undeclared rendering input";
+/// `.env`/`.env_remove` of an undeclared darkmatter application input.
+const FORM_APPLICATION_INPUT: &str = ".env/.env_remove of an undeclared application input";
+
+/// The form a protected key's post-`build()` override reports as.
+fn form_for(class: ProtectedClass) -> &'static str {
+    match class {
+        ProtectedClass::HomeContainment => FORM_HOME_CONTAINMENT,
+        ProtectedClass::GitContainment => FORM_GIT_CONTAINMENT,
+        ProtectedClass::RenderingInput => FORM_RENDERING_INPUT,
+        ProtectedClass::ApplicationInput => FORM_APPLICATION_INPUT,
+    }
+}
 
 /// File-name prefixes whose spawn contract is deliberately not hermetic — the
 /// same prefixes the area's `_tier_filter` drops from the L1 population.
@@ -260,6 +302,33 @@ fn names_md(source: &[u8], after_name: usize) -> bool {
     names_literal(source, after_name, "md")
 }
 
+/// The first argument of the call opening at `after_name`, when it is a plain
+/// string literal.
+///
+/// Read from the *original* source for the same reason [`names_literal`] is:
+/// [`sanitize`] blanks the literal, so only the original says which variable a
+/// site names. A literal carrying an escape is rejected rather than decoded —
+/// no environment variable this contract owns is spelled with one, and a
+/// half-decoded key would classify wrongly.
+fn first_string_argument(source: &[u8], after_name: usize) -> Option<String> {
+    let cursor = skip_whitespace(source, after_name);
+    if source.get(cursor) != Some(&b'(') {
+        return None;
+    }
+    let start = skip_whitespace(source, cursor + 1) + 1;
+    if source.get(start - 1) != Some(&b'"') {
+        return None;
+    }
+    let end = start + source[start..].iter().position(|&byte| byte == b'"')?;
+    let literal = std::str::from_utf8(&source[start..end]).ok()?;
+    (!literal.contains('\\')).then(|| literal.to_string())
+}
+
+/// The protected key a `.env`/`.env_remove` call names, if it names one.
+fn protected_argument(source: &[u8], after_name: usize) -> Option<ProtectedClass> {
+    protected_class(&first_string_argument(source, after_name)?)
+}
+
 fn opens_a_call(code: &[u8], after_name: usize) -> bool {
     code.get(skip_whitespace(code, after_name)) == Some(&b'(')
 }
@@ -318,7 +387,9 @@ fn spawn_sites(source: &str) -> Vec<(usize, &'static str)> {
 
 /// Every post-`build()` isolation escape in `source`, as `(line, form)` pairs.
 ///
-/// The four command forms are recognized in method position only.
+/// Every form is recognized in method position only. `PATH` keeps its two
+/// dedicated forms; every other protected key reports under its class, so a
+/// failure says which contract the site broke.
 fn isolation_sites(source: &str) -> Vec<(usize, &'static str)> {
     let code = sanitize(source);
     let bytes = source.as_bytes();
@@ -339,6 +410,11 @@ fn isolation_sites(source: &str) -> Vec<(usize, &'static str)> {
             }
             b"env_remove" if method && names_literal(bytes, end, "PATH") => {
                 sites.push((line_at(source, index), FORM_PATH_ENV_REMOVE));
+            }
+            b"env" | b"env_remove" if method => {
+                if let Some(class) = protected_argument(bytes, end) {
+                    sites.push((line_at(source, index), form_for(class)));
+                }
             }
             b"env_clear" if method && opens_a_call(&code, end) => {
                 sites.push((line_at(source, index), FORM_ENV_CLEAR));
@@ -774,11 +850,14 @@ fn migrated_l1_tests_keep_the_isolation_the_builder_gave_them() {
     assert!(
         result.unlisted.is_empty(),
         "Post-`build()` escapes from the L1 isolation contract. `build()` returns a bare \
-         `assert_cmd::Command`, so these silently reinstate the launch context or the host \
-         PATH the fixture removed. Use the named builder escape instead — \
-         `ambient_context(dir)` for the launch CWD, `host_path()` or `fake_only_path()` for \
-         PATH, `inherit_no_env()` for a cleared environment — or, if the site targets a \
-         command the fixture did not build, give the file an ISOLATION_ALLOWLIST entry in \
+         `assert_cmd::Command`, so these silently reinstate host state the fixture removed. \
+         Say it on the builder instead — `ambient_context(dir)` for the launch CWD, \
+         `host_path()` or `fake_only_path()` for PATH, `inherit_no_env()` for a cleared \
+         environment, `rendering_input(…)`/`plain_terminal(…)` for a rendering claim, \
+         `application_input(…)` for a darkmatter one. A home/config/cache/temp anchor or a \
+         Git plumbing variable has no declared form at all: it is containment, and handing \
+         it back re-contaminates the child. Or, if the site targets a command the fixture \
+         did not build, give the file an ISOLATION_ALLOWLIST entry in \
          cli/tests/spawn_site_guard.rs saying which command it targets.\nEscapes:\n{}",
         result.unlisted.join("\n")
     );
@@ -962,6 +1041,134 @@ fn isolation_detector_finds_every_escape_as_executable_code() {
     );
 }
 
+/// The first containment namespace: home, config, cache, and temp. Handing
+/// any of these back points the child at the developer's own directories.
+#[test]
+fn isolation_detector_flags_a_home_config_cache_anchor_taken_back_after_build() {
+    // The accident the review named: the fixture home replaced by the host's.
+    assert_eq!(
+        isolation_sites("command.env(\"HOME\", host_home);\n"),
+        [(1, FORM_HOME_CONTAINMENT)]
+    );
+    for source in [
+        "command.env(\"USERPROFILE\", host_home);\n",
+        "command.env(\"APPDATA\", roaming);\n",
+        "command.env(\"LOCALAPPDATA\", local);\n",
+        "command.env(\"XDG_CONFIG_HOME\", host_config);\n",
+        "command.env(\"XDG_CACHE_HOME\", host_cache);\n",
+        "command.env(\"TMPDIR\", host_tmp);\n",
+        "command.env(\"TEMP\", host_tmp);\n",
+        "command.env(\"TMP\", host_tmp);\n",
+        // Removal is the same defect: the child falls back to the platform's
+        // own answer, which is the host's.
+        "command.env_remove(\"HOME\");\n",
+        "command.env_remove(\"HOMEDRIVE\");\n",
+        "command.env_remove(\"HOMEPATH\");\n",
+    ] {
+        assert_eq!(
+            isolation_sites(source),
+            [(1, FORM_HOME_CONTAINMENT)],
+            "{source:?} must be flagged as home containment"
+        );
+    }
+}
+
+/// The second containment namespace: Git plumbing overrides cwd-based
+/// repository discovery, so it defeats the pinned launch directory outright.
+#[test]
+fn isolation_detector_flags_git_plumbing_taken_back_after_build() {
+    // The second accident the review named.
+    assert_eq!(
+        isolation_sites("command.env(\"GIT_DIR\", checkout);\n"),
+        [(1, FORM_GIT_CONTAINMENT)]
+    );
+    for source in [
+        "command.env(\"GIT_WORK_TREE\", checkout);\n",
+        "command.env(\"GIT_INDEX_FILE\", index);\n",
+        "command.env(\"GIT_COMMON_DIR\", common);\n",
+        "command.env(\"GIT_OBJECT_DIRECTORY\", objects);\n",
+        "command.env(\"GIT_CONFIG_GLOBAL\", host_gitconfig);\n",
+        "command.env(\"GIT_CONFIG_COUNT\", \"1\");\n",
+        "command.env_remove(\"GIT_CONFIG_NOSYSTEM\");\n",
+    ] {
+        assert_eq!(
+            isolation_sites(source),
+            [(1, FORM_GIT_CONTAINMENT)],
+            "{source:?} must be flagged as Git plumbing containment"
+        );
+    }
+}
+
+/// The rendering namespace is a behavior input, so the claim is legitimate and
+/// the defect is only that it was never declared.
+#[test]
+fn isolation_detector_flags_an_undeclared_rendering_input() {
+    assert_eq!(
+        isolation_sites("command.env(\"COLUMNS\", \"44\");\n"),
+        [(1, FORM_RENDERING_INPUT)]
+    );
+    for source in [
+        "command.env(\"LINES\", \"24\");\n",
+        "command.env(\"TERM\", \"dumb\");\n",
+        "command.env(\"COLORTERM\", \"truecolor\");\n",
+        "command.env(\"FORCE_COLOR\", \"1\");\n",
+        "command.env(\"THEME\", theme);\n",
+        "command.env(\"CODE_THEME\", theme);\n",
+        "command.env_remove(\"NO_COLOR\");\n",
+        "command.env_remove(\"COLORTERM\");\n",
+        "command.env_remove(\"DARK_MODE\");\n",
+    ] {
+        assert_eq!(
+            isolation_sites(source),
+            [(1, FORM_RENDERING_INPUT)],
+            "{source:?} must be flagged as an undeclared rendering input"
+        );
+    }
+}
+
+/// The darkmatter application namespace, by prefix and by the names `md`
+/// reads directly.
+#[test]
+fn isolation_detector_flags_an_undeclared_darkmatter_application_input() {
+    assert_eq!(
+        isolation_sites("command.env(\"DARKMATTER_NO_BASELINE_SCHEMA\", \"1\");\n"),
+        [(1, FORM_APPLICATION_INPUT)]
+    );
+    for source in [
+        "command.env(\"DM_TEST_VAR\", value);\n",
+        "command.env(\"MD_DRY_RUN\", \"1\");\n",
+        "command.env(\"HASH_PROPERTY\", \"fingerprint\");\n",
+        "command.env(\"HASH_IGNORE_PROPERTIES\", \"draft\");\n",
+        "command.env(\"BASELINE_SCHEMA\", &baseline);\n",
+        "command.env(\"RUST_LOG\", \"biscuit_terminal=debug\");\n",
+        "command.env(\"AGENT\", \"claude\");\n",
+        "command.env(\"MODEL\", \"opus\");\n",
+        "command.env_remove(\"DARKMATTER_NO_BASELINE_SCHEMA\");\n",
+    ] {
+        assert_eq!(
+            isolation_sites(source),
+            [(1, FORM_APPLICATION_INPUT)],
+            "{source:?} must be flagged as an undeclared application input"
+        );
+    }
+}
+
+/// A declaration is not an escape: it happens before `build()`, on the
+/// builder, where the guard's method-call detector has nothing to find.
+#[test]
+fn a_declared_input_is_not_an_isolation_escape() {
+    assert!(
+        isolation_sites(
+            "let command = fixture\n    .command_builder()\n    \
+             .rendering_input(\"COLUMNS\", \"80\")\n    \
+             .rendering_input_removed(\"NO_COLOR\")\n    \
+             .application_input(\"MD_DRY_RUN\", \"1\")\n    \
+             .plain_terminal(80, 24)\n    .build();\n"
+        )
+        .is_empty()
+    );
+}
+
 #[test]
 fn isolation_detector_ignores_prose_neighbors_and_path_qualified_lookalikes() {
     // This guard's own docs, and `md_process_fixture.rs`'s, name every form.
@@ -981,11 +1188,13 @@ fn isolation_detector_ignores_prose_neighbors_and_path_qualified_lookalikes() {
     assert!(isolation_sites("std::env::set_var(\"PATH\", poisoned);\n").is_empty());
     // An index, not a call.
     assert!(isolation_sites("let value = &recorded[\"PATH\"];\n").is_empty());
-    // `.env` naming some other variable is the ordinary, supported form — a
-    // rendering-policy test pinning its own COLUMNS after `build()`.
-    assert!(isolation_sites("command.env(\"HOME\", home);\n").is_empty());
-    assert!(isolation_sites("command.env(\"COLUMNS\", \"44\");\n").is_empty());
-    assert!(isolation_sites("command.env_remove(\"HOMEDRIVE\");\n").is_empty());
+    // `.env` naming a variable the spawn contract does not pin is the ordinary
+    // supported form: there is no default for it to undo.
+    assert!(isolation_sites("command.env(\"PROJECT_ROOT\", &abs_root);\n").is_empty());
+    assert!(isolation_sites("command.env(\"FIXTURE_PROBE_CAPTURE\", capture);\n").is_empty());
+    // A computed key cannot be classified, so it is not reported; the guard
+    // reads literals only, and every protected key in this suite is one.
+    assert!(isolation_sites("command.env(key, value);\n").is_empty());
 
     // Identifier boundaries hold on both sides.
     assert!(isolation_sites("command.set_current_dir(root);\n").is_empty());

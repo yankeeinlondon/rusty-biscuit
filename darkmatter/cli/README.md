@@ -31,9 +31,22 @@ rendering inputs, and PATH through process completion.
 
 Use `host_path()`, `fake_only_path()`, `ambient_context()`, or
 `inherit_no_env()` only when the behavior under test requires that named
-policy, with a call-site comment stating the reason. Do not modify CWD, PATH,
-or environment clearing after `build()`; the L1 spawn/isolation guard rejects
-raw spawns, such overrides, and stale exemptions.
+policy, with a call-site comment stating the reason.
+
+The fixture also pins deterministic rendering and darkmatter application
+inputs. A test whose subject is one of them declares it on the builder rather
+than setting it on the built command: `rendering_input(key, value)`,
+`rendering_input_removed(key)`, `application_input(key, value)`,
+`application_input_removed(key)`, or `plain_terminal(columns, lines)` for the
+whole fixed-size, `TERM=dumb`, no-color frame. The home, config, cache, temp,
+and Git plumbing variables are a different class — they exist to keep host
+state out of the child, so they have no declared override; use
+`ambient_context()` when the launch context itself is the subject.
+`tests/common/protected_env.rs` holds the classification.
+
+Do not modify CWD, PATH, or environment clearing after `build()`, and do not
+`.env`/`.env_remove` a protected key there; the L1 spawn/isolation guard
+rejects raw spawns, all of those overrides, and stale exemptions.
 
 ## Installation
 

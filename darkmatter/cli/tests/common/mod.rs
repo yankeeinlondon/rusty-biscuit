@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod fixture;
+pub mod protected_env;
 
 // Re-exported so a call site keeps saying `common::CliProcessFixture`; the
 // definitions live in their own file so this shared module stays near its
@@ -12,6 +13,8 @@ pub use fixture::{
     MdCommandBuilder, checkout_containment_error, copy_tree, git, helper_command,
     minimal_system_path, write, write_executable,
 };
+#[allow(unused_imports)]
+pub use protected_env::{ProtectedClass, protected_class};
 
 use std::collections::VecDeque;
 use std::io::{Read, Write};

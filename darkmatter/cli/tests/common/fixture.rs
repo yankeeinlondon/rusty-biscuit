@@ -23,7 +23,7 @@
 //! | temp | `TMPDIR` (Unix) / `TEMP`+`TMP` (Windows) → fixture `tmp` |
 //! | darkmatter namespace | inherited `DARKMATTER_*`, `DM_*`, `MD_*`, `THEME`, `CODE_THEME`, `PREFER_ITALICS`, `TERMINAL_IMAGES`, `HASH_PROPERTY`, `HASH_IGNORE_PROPERTIES`, `BASELINE_SCHEMA`, `AGENT`, `MODEL`, `RUST_LOG` removed by prefix or name |
 //! | Git plumbing | `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`/`GIT_COMMON_DIR`/`GIT_OBJECT_DIRECTORY` and the `GIT_CONFIG_*` family removed; `GIT_CONFIG_NOSYSTEM=1` set so the host's system gitconfig never applies |
-//! | rendering | `COLUMNS`, `LINES`, `TERM`, `COLORTERM`, `COLORFGBG`, `CLICOLOR_FORCE`, `FORCE_COLOR`, inherited `NO_COLOR` removed; `NO_COLOR=1` set. A test whose subject *is* rendering policy pins its own values after `build()` |
+//! | rendering | `COLUMNS`, `LINES`, `TERM`, `COLORTERM`, `COLORFGBG`, `CLICOLOR_FORCE`, `FORCE_COLOR`, inherited `NO_COLOR` removed; `NO_COLOR=1` set. A test whose subject *is* rendering policy declares its own values with [`MdCommandBuilder::rendering_input`] |
 //! | PATH | fixture `bin` + [`minimal_system_path`] |
 //!
 //! The darkmatter cache root has no environment form — persistent remote
@@ -32,8 +32,9 @@
 //! `dirs::cache_dir()` fallback, so the builder points it at the fixture;
 //! cache tests pass `--cache-root <fixture-owned dir>` explicitly.
 //!
-//! Removal is per key at build time and scrubs only what was *inherited*: a
-//! call site that sets any of these on the returned command still wins.
+//! Removal is per key at build time and scrubs only what was *inherited*, so
+//! a value the call site chooses still reaches the child. Which call sites may
+//! choose one is the subject of "Declared inputs" below.
 //!
 //! ## The default `PATH` rule
 //!
@@ -73,6 +74,29 @@
 //!   the child starts from an empty block plus the Windows console plumbing
 //!   and the fixture defaults.
 //!
+//! ## Declared inputs
+//!
+//! `common/protected_env.rs` splits the pinned variables in two, because they
+//! are not the same kind of thing. *Containment* — the home/config/cache/temp
+//! anchors and the Git plumbing — exists to keep the developer's machine out
+//! of the child, so it has no override at any spelling. *Behavior inputs* —
+//! the rendering namespace and the darkmatter application namespace — are
+//! pinned to deterministic defaults, and a test that wants a different value
+//! is making a real claim about behavior, which it states before `build()`:
+//!
+//! - [`MdCommandBuilder::rendering_input`] /
+//!   [`MdCommandBuilder::rendering_input_removed`]
+//! - [`MdCommandBuilder::application_input`] /
+//!   [`MdCommandBuilder::application_input_removed`]
+//! - [`MdCommandBuilder::plain_terminal`] — the whole fixed-size, no-color,
+//!   `TERM=dumb` frame in one claim.
+//!
+//! Declarations are applied after the fixture defaults, so a declared value
+//! out-ranks both the inherited one and the default. A key the contract does
+//! *not* pin needs no declaration and is set on the command `build()` returns.
+//! `spawn_site_guard.rs` is what keeps the two apart: a post-`build()` `.env`
+//! or `.env_remove` naming a protected key fails the isolation gate.
+//!
 //! ## Two command surfaces, one policy
 //!
 //! [`MdCommandBuilder::build`] returns an `assert_cmd::Command` (run to
@@ -91,6 +115,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{self, Command};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use super::protected_env::{PATH_VARIABLE, ProtectedClass, protected_class};
 
 /// The `GIT_*` plumbing variables that override cwd-based repository
 /// discovery, defeating the pinned `current_dir` entirely.
@@ -278,6 +304,7 @@ impl CliProcessFixture {
             path_policy: PathPolicy::Minimal,
             current_dir: self.cwd.clone(),
             inherit_env: true,
+            declared: Vec::new(),
         }
     }
 
@@ -434,6 +461,9 @@ pub struct MdCommandBuilder<'fixture> {
     path_policy: PathPolicy,
     current_dir: PathBuf,
     inherit_env: bool,
+    /// Protected-key overrides the call site declared, applied after the
+    /// fixture defaults so a declaration out-ranks the value it replaces.
+    declared: Vec<EnvironmentOp>,
 }
 
 impl MdCommandBuilder<'_> {
@@ -508,6 +538,71 @@ impl MdCommandBuilder<'_> {
         self
     }
 
+    /// Declare the rendering input this test's subject depends on.
+    ///
+    /// ## Panics
+    ///
+    /// When `key` is not a rendering input the spawn contract pins.
+    pub fn rendering_input(self, key: &str, value: impl AsRef<OsStr>) -> Self {
+        let op = EnvironmentOp::Set(key.into(), value.as_ref().to_os_string());
+        self.declare(key, ProtectedClass::RenderingInput, op)
+    }
+
+    /// Declare that this test's subject requires a pinned rendering input to
+    /// be *absent* — `NO_COLOR` for a test whose assertion is colored output,
+    /// for example.
+    ///
+    /// ## Panics
+    ///
+    /// When `key` is not a rendering input the spawn contract pins.
+    pub fn rendering_input_removed(self, key: &str) -> Self {
+        let op = EnvironmentOp::Remove(key.into());
+        self.declare(key, ProtectedClass::RenderingInput, op)
+    }
+
+    /// Declare the darkmatter application input this test's subject depends
+    /// on — a `DARKMATTER_*`/`DM_*`/`MD_*` switch, or a name `md` reads
+    /// directly such as `HASH_PROPERTY`.
+    ///
+    /// ## Panics
+    ///
+    /// When `key` is not an application input the spawn contract pins.
+    pub fn application_input(self, key: &str, value: impl AsRef<OsStr>) -> Self {
+        let op = EnvironmentOp::Set(key.into(), value.as_ref().to_os_string());
+        self.declare(key, ProtectedClass::ApplicationInput, op)
+    }
+
+    /// Declare that this test's subject requires a pinned application input to
+    /// be absent.
+    ///
+    /// ## Panics
+    ///
+    /// When `key` is not an application input the spawn contract pins.
+    pub fn application_input_removed(self, key: &str) -> Self {
+        let op = EnvironmentOp::Remove(key.into());
+        self.declare(key, ProtectedClass::ApplicationInput, op)
+    }
+
+    /// Pin a deterministic, non-capable terminal of a fixed size.
+    ///
+    /// The complete rendering frame rather than only the size: `TERM=dumb` and
+    /// color off are restated here so a layout assertion cannot silently
+    /// change meaning if the fixture's own color default ever does.
+    pub fn plain_terminal(self, columns: u16, lines: u16) -> Self {
+        self.rendering_input("COLUMNS", columns.to_string())
+            .rendering_input("LINES", lines.to_string())
+            .rendering_input("TERM", "dumb")
+            .rendering_input_removed("COLORTERM")
+            .rendering_input("NO_COLOR", "1")
+            .rendering_input_removed("FORCE_COLOR")
+    }
+
+    fn declare(mut self, key: &str, expected: ProtectedClass, op: EnvironmentOp) -> Self {
+        assert_declarable(key, expected);
+        self.declared.push(op);
+        self
+    }
+
     /// Materialize the command with the contract described in the module
     /// docs, as an `assert_cmd::Command` run to completion.
     pub fn build(self) -> assert_cmd::Command {
@@ -528,9 +623,10 @@ impl MdCommandBuilder<'_> {
 
     /// The policy both surfaces apply, computed once. Ordered: clear (and the
     /// Windows console restore) first, then the inherited scrub, then the
-    /// fixture defaults — so a default inside a scrubbed namespace survives
-    /// its own sweep, and a per-key `.env` after `build()` still wins.
-    fn child_environment(&self) -> ChildEnvironment {
+    /// fixture defaults, then the call site's declarations — so a default
+    /// inside a scrubbed namespace survives its own sweep, and a declared
+    /// input out-ranks the default it replaces.
+    pub fn child_environment(&self) -> ChildEnvironment {
         let mut ops = Vec::new();
         if !self.inherit_env {
             for (key, value) in windows_console_variables() {
@@ -567,6 +663,7 @@ impl MdCommandBuilder<'_> {
         } else {
             ops.push(EnvironmentOp::Set("TMPDIR".into(), temp));
         }
+        ops.extend(self.declared.iter().cloned());
         ChildEnvironment {
             clear: !self.inherit_env,
             ops,
@@ -596,6 +693,48 @@ impl MdCommandBuilder<'_> {
     }
 }
 
+/// Reject a declaration the spawn contract cannot honor.
+///
+/// The containment arm is the one that matters: a home, cache, temp, or Git
+/// plumbing value handed back to the child is exactly the contamination the
+/// fixture exists to prevent, so it has no declared form at any spelling.
+///
+/// ## Panics
+///
+/// When `key` is not a behavior input of class `expected`.
+fn assert_declarable(key: &str, expected: ProtectedClass) {
+    let expected_method = expected
+        .declaring_method()
+        .expect("only declarable classes reach this validator");
+    match protected_class(key) {
+        Some(class) if class == expected => {}
+        Some(class) if class.is_containment() => panic!(
+            "`{key}` is a {} the spawn contract owns, not a {}. Undoing it hands the child \
+             host state the fixture removed, so there is no declared override; if the launch \
+             context itself is the subject, use `ambient_context`.",
+            class.description(),
+            expected.description(),
+        ),
+        Some(class) => panic!(
+            "`{key}` is a {}, not a {}: declare it with `{}`.",
+            class.description(),
+            expected.description(),
+            class
+                .declaring_method()
+                .expect("a non-containment class declares"),
+        ),
+        None if key == PATH_VARIABLE => panic!(
+            "`PATH` is composed by the builder: use `host_path()` or `fake_only_path()` \
+             rather than `{expected_method}`."
+        ),
+        None => panic!(
+            "`{key}` is not a {} the spawn contract pins, so it needs no declaration: set it \
+             on the command `build()` returns.",
+            expected.description(),
+        ),
+    }
+}
+
 /// The inherited environment families the spawn contract removes.
 ///
 /// The darkmatter namespaces go by prefix (`DARKMATTER_*` grows without this
@@ -603,7 +742,7 @@ impl MdCommandBuilder<'_> {
 /// inherited value silently flips every write test into dry-run). Only names
 /// the *parent* actually carries are listed — a prefix rule can only be
 /// expressed as a key list by enumerating the parent.
-fn inherited_scrub_keys() -> Vec<OsString> {
+pub fn inherited_scrub_keys() -> Vec<OsString> {
     const NAMES: &[&str] = &[
         // Git plumbing: overrides cwd-based repository discovery.
         "GIT_DIR",
@@ -672,6 +811,17 @@ pub struct ChildEnvironment {
 }
 
 impl ChildEnvironment {
+    /// Every key the policy *sets* on the child, in application order.
+    pub fn set_keys(&self) -> Vec<OsString> {
+        self.ops
+            .iter()
+            .filter_map(|op| match op {
+                EnvironmentOp::Set(key, _) => Some(key.clone()),
+                EnvironmentOp::Remove(_) => None,
+            })
+            .collect()
+    }
+
     /// Apply the policy to `command`.
     pub fn apply<C: ConfigurableCommand>(&self, command: &mut C) {
         if self.clear {
