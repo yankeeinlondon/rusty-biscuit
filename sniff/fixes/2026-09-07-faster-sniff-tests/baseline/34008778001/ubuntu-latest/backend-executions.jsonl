@@ -1,2 +1,0 @@
-{"backend":"tmux","test":"level2_cicd_styling::level2_cicd_status_cells_render_styled_in_tmux","decision":"run"}
-{"backend":"tmux","test":"level2_git_status_styling::level2_git_status_headers_and_links_render_styled_in_tmux","decision":"run"}

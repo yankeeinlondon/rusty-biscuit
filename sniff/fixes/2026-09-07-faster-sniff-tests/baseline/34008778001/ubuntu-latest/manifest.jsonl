@@ -1,3 +1,0 @@
-{"tier":"L1","package":"sniff","xml":"L1/sniff.xml","exit_code":0,"environment":"ubuntu-latest","duration_s":182,"report_present":true}
-{"tier":"L1","package":"sniff-cli","xml":"L1/sniff-cli.xml","exit_code":0,"environment":"ubuntu-latest","duration_s":249,"report_present":true}
-{"tier":"L2","package":"sniff-cli","xml":"L2/sniff-cli.xml","exit_code":0,"environment":"ubuntu-latest","duration_s":135,"report_present":true}

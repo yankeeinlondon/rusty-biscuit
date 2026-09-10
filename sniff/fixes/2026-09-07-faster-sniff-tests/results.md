@@ -274,3 +274,8 @@ demonstrated**. Archival must wait on a decision from Ken about the
 faster-tests outcome, not on further verification: the correctness evidence the
 spec asks for is now complete, and the only mechanical item left is the matched
 per-family CI timing sample, which needs the branch pushed.
+
+Evidence location: the raw runs under `baseline/`, `measurement/`, and
+`enumeration/`, plus `sources.json`, are kept out of the tree at
+`~/.rusty-biscuit/ci-evidence/2026-09-07-faster-sniff-tests/`; the CI
+evidence there came from runs 34008778001, 34159725015, and 34173378609.

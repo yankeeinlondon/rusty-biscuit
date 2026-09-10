@@ -489,3 +489,8 @@ All operator actions; none can be taken from this session.
    (which carries the real `runsPerLeg`), and let `deriveBudgets` produce the
    table beside the baseline in `inventory.md` § Budgets. Then compare, and
    report every miss with its cause.
+
+Evidence location: the raw runs under `baseline/`, `candidate/`, `measurement/`,
+and `enumeration/` are kept out of the tree at
+`~/.rusty-biscuit/ci-evidence/2026-09-07-faster-claudine-tests/`; the CI
+evidence there came from runs 34159725015, 34173378609, and 34232285291.

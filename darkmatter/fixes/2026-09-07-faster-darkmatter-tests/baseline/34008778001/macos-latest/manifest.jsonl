@@ -1,6 +1,0 @@
-{"tier":"L1","package":"darkmatter","xml":"L1/darkmatter.xml","exit_code":0,"environment":"macos-latest","duration_s":583,"report_present":true}
-{"tier":"L1","package":"darkmatter-cli","xml":"L1/darkmatter-cli.xml","exit_code":0,"environment":"macos-latest","duration_s":436,"report_present":true}
-{"tier":"L1","package":"dmls","xml":"L1/dmls.xml","exit_code":0,"environment":"macos-latest","duration_s":396,"report_present":true}
-{"tier":"L1","package":"zed-dmls-cli","xml":"L1/zed-dmls-cli.xml","exit_code":0,"environment":"macos-latest","duration_s":288,"report_present":true}
-{"tier":"L2","package":"darkmatter-cli","xml":"L2/darkmatter-cli.xml","exit_code":0,"environment":"macos-latest","duration_s":335,"report_present":true}
-{"tier":"L2","package":"dmls","xml":"L2/dmls.xml","exit_code":0,"environment":"macos-latest","duration_s":320,"report_present":true}

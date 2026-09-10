@@ -1,2 +1,0 @@
-{"tier":"sanity","package":"sniff","xml":"sanity/sniff.xml","exit_code":0,"environment":"","duration_s":69,"report_present":true}
-{"tier":"sanity","package":"sniff-cli","xml":"sanity/sniff-cli.xml","exit_code":0,"environment":"","duration_s":63,"report_present":true}

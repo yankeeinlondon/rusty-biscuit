@@ -434,3 +434,9 @@ artifacts, and non-interactive handoff are recorded in
 
 The fix is ready for review and operator-owned CI sampling. It is not ready to
 claim final CI performance verification or archival completion.
+
+Evidence location: the raw runs under `baseline/`, `measurement/`, and
+`enumeration/`, plus `sources.json`, are kept out of the tree at
+`~/.rusty-biscuit/ci-evidence/2026-09-07-faster-darkmatter-tests/`; the CI
+evidence there came from run 34008778001 (baseline), with 34159725015 and
+34173378609 referenced by the measurement plan.

@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuites name="nextest-run" tests="2" skipped="0" failures="0" errors="0" uuid="af4532c4-1fbf-4f04-8fea-01f9ee0cf577" timestamp="2026-09-06T05:07:21.096+00:00" time="1.313">
-    <testsuite name="sniff-cli::level2_cicd_styling" tests="1" skipped="0" errors="0" failures="0">
-        <testcase name="level2_cicd_status_cells_render_styled_in_tmux" classname="sniff-cli::level2_cicd_styling" timestamp="2026-09-06T05:07:21.099+00:00" time="0.655"/>
-    </testsuite>
-    <testsuite name="sniff-cli::level2_git_status_styling" tests="1" skipped="0" errors="0" failures="0">
-        <testcase name="level2_git_status_headers_and_links_render_styled_in_tmux" classname="sniff-cli::level2_git_status_styling" timestamp="2026-09-06T05:07:21.754+00:00" time="0.655"/>
-    </testsuite>
-</testsuites>

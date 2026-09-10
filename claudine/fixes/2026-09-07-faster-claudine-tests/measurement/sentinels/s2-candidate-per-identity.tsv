@@ -1,9 +1,0 @@
-identity	run_scan_hits	exit	entry_locations
-a_failing_scan_backed_guard_is_reported_under_its_own_name	0	0	source_scan.rs:278 = 0
-every_allowlist_entry_names_a_known_shape_tag_and_reason	0	0	source_scan.rs:278 = 0
-every_boxed_allowlist_entry_names_a_known_site_tag_and_reason	0	0	source_scan.rs:278 = 0
-every_diagnostic_in_the_corpus_projects_its_catalog_key_set	0	0	source_scan.rs:278 = 0
-from_code_projects_a_catalog_shaped_detail_for_every_registered_code	0	0	source_scan.rs:278 = 0
-production_sources_pass_every_scan_backed_guard	1	0	source_scan.rs:278 = 1
-the_boxed_scan_still_sees_a_source_field_box	0	0	source_scan.rs:278 = 0
-the_scan_still_sees_a_snapshot_facet_re_erasure	0	0	source_scan.rs:278 = 0

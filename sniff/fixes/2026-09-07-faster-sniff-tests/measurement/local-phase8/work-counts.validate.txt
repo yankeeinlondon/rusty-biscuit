@@ -1,2 +1,0 @@
-../../sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/work-counts.json: valid (8 readings)
-GATE EXIT=0

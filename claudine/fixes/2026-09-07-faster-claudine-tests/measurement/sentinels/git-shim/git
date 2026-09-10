@@ -1,4 +1,0 @@
-#!/bin/bash
-# Phase 8 sentinel: log every parent-side git invocation, then run the real one.
-printf '%s\t%s\t%s\n' "$$" "$PWD" "$*" >> "${RB_GIT_SHIM_LOG:?}"
-exec /usr/bin/git "$@"

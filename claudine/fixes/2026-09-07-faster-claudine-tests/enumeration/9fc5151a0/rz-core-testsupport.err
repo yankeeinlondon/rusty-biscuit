@@ -1,5 +1,0 @@
-   Compiling rendezvous-core v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/claudine/rendezvous/core)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.34s
-real 2.84
-user 2.99
-sys 1.09

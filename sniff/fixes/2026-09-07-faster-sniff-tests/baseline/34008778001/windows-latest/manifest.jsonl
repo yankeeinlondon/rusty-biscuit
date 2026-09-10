@@ -1,2 +1,0 @@
-{"tier":"L1","package":"sniff","xml":"L1/sniff.xml","exit_code":0,"environment":"windows-latest","duration_s":606,"report_present":true}
-{"tier":"L1","package":"sniff-cli","xml":"L1/sniff-cli.xml","exit_code":0,"environment":"windows-latest","duration_s":665,"report_present":true}

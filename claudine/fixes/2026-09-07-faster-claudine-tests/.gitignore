@@ -1,0 +1,11 @@
+# Raw measurement evidence lives in ~/.rusty-biscuit/ci-evidence/2026-09-07-faster-claudine-tests/
+baseline/*
+!baseline/README.md
+!baseline/expectations.json
+candidate/*
+!candidate/README.md
+!candidate/expectations.json
+measurement/
+enumeration/
+sources.json
+report.json

@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuites name="nextest-run" tests="3" skipped="0" failures="0" errors="0" uuid="c2f46ac1-30da-4652-801d-db1e83d43d1c" timestamp="2026-09-06T05:04:47.904+00:00" time="1.668">
-    <testsuite name="dmls::level2_editor_neovim" tests="3" skipped="0" errors="0" failures="0">
-        <testcase name="level2_neovim_decodes_semantic_token_families_and_positions" classname="dmls::level2_editor_neovim" timestamp="2026-09-06T05:04:47.907+00:00" time="0.094"/>
-        <testcase name="level2_neovim_semantic_tokens_config_toggle_repaints_live" classname="dmls::level2_editor_neovim" timestamp="2026-09-06T05:04:48.001+00:00" time="0.104"/>
-        <testcase name="level2_neovim_tmux_renders_recipe_colors_and_repaints" classname="dmls::level2_editor_neovim" timestamp="2026-09-06T05:04:48.104+00:00" time="1.467"/>
-    </testsuite>
-</testsuites>

@@ -1,3 +1,0 @@
-pnpm --dir "/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/tools/test-audit" exec tsx src/cli.ts measure parse ../../sniff/fixes/2026-09-07-faster-sniff-tests/baseline/local-c2dee9217/just-sanity.log
-../../sniff/fixes/2026-09-07-faster-sniff-tests/baseline/local-c2dee9217/just-sanity.log	elapsed=7.703	summed=102.04	run=1419	passed=1419	failed=0	skipped=23	non_passing_lines=0	slow=0
-../../sniff/fixes/2026-09-07-faster-sniff-tests/baseline/local-c2dee9217/just-sanity.log	elapsed=0.642	summed=10.15	run=401	passed=401	failed=0	skipped=0	non_passing_lines=0	slow=0

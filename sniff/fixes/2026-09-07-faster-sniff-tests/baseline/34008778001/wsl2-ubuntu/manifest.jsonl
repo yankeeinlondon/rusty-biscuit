@@ -1,2 +1,0 @@
-{"tier":"L1","package":"sniff","xml":"L1/sniff.xml","exit_code":0,"environment":"wsl2-ubuntu","duration_s":89,"report_present":true}
-{"tier":"L1","package":"sniff-cli","xml":"L1/sniff-cli.xml","exit_code":0,"environment":"wsl2-ubuntu","duration_s":43,"report_present":true}
