@@ -171,19 +171,18 @@ fn parse_reference(input: &str) -> Result<SequenceReference, CompositionError> {
 fn parse_operator(full: &str, tail: &str) -> Result<SourceOperator, CompositionError> {
     let tail = tail.trim();
 
-    let open = tail
-        .find('(')
-        .ok_or_else(|| CompositionError::SequenceSourceSyntax {
-            authored: full.to_string(),
-            problem: "an operator must be written `name(args)`".to_string(),
-        })?;
+    let open = tail.find('(').ok_or_else(|| CompositionError::SequenceSourceSyntax {
+        authored: full.to_string(),
+        problem: "an operator must be written `name(args)`".to_string(),
+    })?;
     let verb = tail[..open].trim().to_string();
 
-    let close =
-        matching_paren(tail, open).ok_or_else(|| CompositionError::SequenceSourceSyntax {
+    let close = matching_paren(tail, open).ok_or_else(|| {
+        CompositionError::SequenceSourceSyntax {
             authored: full.to_string(),
             problem: format!("operator `{verb}` is missing its closing `)`"),
-        })?;
+        }
+    })?;
 
     let trailing = tail[close + 1..].trim();
     if !trailing.is_empty() {

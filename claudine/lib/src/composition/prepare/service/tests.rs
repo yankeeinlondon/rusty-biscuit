@@ -101,7 +101,9 @@ fn caller_input_layers_round_trip_raw_values_and_origins() {
         assert_eq!(record.origin(), &origin);
     }
 
-    let round_trip = CallerInputLayers::from_options(&layers.apply_to(PrepareOptions::default()));
+    let round_trip = CallerInputLayers::from_options(
+        &layers.apply_to(PrepareOptions::default()),
+    );
     assert_eq!(round_trip.set_overrides, layers.set_overrides);
     assert_eq!(round_trip.caller_input_records, layers.caller_input_records);
 }
@@ -148,11 +150,7 @@ fn the_prepared_document_stores_the_context_it_composed_against() {
 
     assert_eq!(prepared.prompt.trim(), "codex");
     assert_eq!(
-        prepared
-            .compose_context
-            .env()
-            .get("AGENT")
-            .map(String::as_str),
+        prepared.compose_context.env().get("AGENT").map(String::as_str),
         Some("codex"),
         "the stored snapshot is the one the body composed against, env layer \
          included — not a fresh capture"
@@ -283,14 +281,8 @@ fn caller_input_layers_round_trip_through_the_assembly_point() {
 
     let recovered = CallerInputLayers::from_options(&options);
     assert_eq!(recovered.set_overrides, layers.set_overrides);
-    assert_eq!(
-        recovered.file_ref_fallback_dir,
-        layers.file_ref_fallback_dir
-    );
-    assert_eq!(
-        recovered.pre_approved_commands,
-        layers.pre_approved_commands
-    );
+    assert_eq!(recovered.file_ref_fallback_dir, layers.file_ref_fallback_dir);
+    assert_eq!(recovered.pre_approved_commands, layers.pre_approved_commands);
     assert_eq!(recovered.env_overrides, layers.env_overrides);
 }
 
@@ -469,9 +461,10 @@ fn every_entry_keeps_launch_values_separate_from_source_files_and_schema() {
         ),
     )
     .unwrap();
-    let source =
-        crate::composition::resolve_composition_source(source_path.to_string_lossy().as_ref())
-            .unwrap();
+    let source = crate::composition::resolve_composition_source(
+        source_path.to_string_lossy().as_ref(),
+    )
+    .unwrap();
 
     let invocation = crate::invocation_context::InvocationContext::capture_at(&launch_dir);
     let source_context = invocation.derive_source(&source.resolved_path).unwrap();
@@ -499,9 +492,7 @@ fn every_entry_keeps_launch_values_separate_from_source_files_and_schema() {
         );
 
         assert!(
-            prepared
-                .prompt
-                .contains("AREA=alpha AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true"),
+            prepared.prompt.contains("AREA=alpha AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true"),
             "entry {entry:?} did not use the launch snapshot and target overrides: {}",
             prepared.prompt
         );
@@ -598,7 +589,7 @@ fn a_schema_failure_has_one_typed_identity_across_every_entry() {
             mode: CompositionMode::ChainedDocument,
             source: &source,
             prompt_source: PromptSource::ComposedBody,
-            schema: SchemaStage::Validate,
+        schema: SchemaStage::Validate,
             options: options_in(dir.path()),
         })
         .expect_err("an invalid required value fails on every entry");

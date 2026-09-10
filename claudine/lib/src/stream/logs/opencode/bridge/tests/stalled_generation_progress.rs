@@ -101,7 +101,8 @@ fn progress_reset_restarts_the_generation_count() {
 fn disabled_guard_never_trips_even_with_churn_past_budget() {
     // `None` stall_timeout disables the guard. Encodes Design Decision 3's
     // anti-correlation lock at the unit level: churn alone never terminates.
-    let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
+    let mut bridge =
+        OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
     let base = Instant::now();
     bridge.reset_stalled_generation_progress(base);
     let past = base + STALL_BUDGET + Duration::from_secs(1);
@@ -136,21 +137,14 @@ fn genuine_step_advance_via_ingest_resets_generation_count() {
     let mut bridge = armed_bridge();
     // Two streamed generations accumulate churn; the generous budget keeps
     // the guard from tripping while we observe the counter.
-    assert_eq!(
-        bridge.ingest(STREAMED_LLM_CALL),
-        StderrIngestOutcome::Consumed
-    );
-    assert_eq!(
-        bridge.ingest(STREAMED_LLM_CALL),
-        StderrIngestOutcome::Consumed
-    );
+    assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+    assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
     assert_eq!(bridge.generation_count_since_progress(), 2);
 
     let step = "INFO  2026-05-12T20:00:13 +0ms service=session.prompt session.id=ses_a step=5 logSpan.http.span.4=55ms loop";
     assert_eq!(bridge.ingest(step), StderrIngestOutcome::Consumed);
     assert_eq!(
-        bridge.generation_count_since_progress(),
-        0,
+        bridge.generation_count_since_progress(), 0,
         "a genuine step advance must reset the churn count",
     );
 }
@@ -164,22 +158,15 @@ fn deduped_step_loop_does_not_reset_but_genuine_advance_does() {
 
     // Establish step=0 (resets), then churn two generations.
     assert_eq!(bridge.ingest(step0), StderrIngestOutcome::Consumed);
-    assert_eq!(
-        bridge.ingest(STREAMED_LLM_CALL),
-        StderrIngestOutcome::Consumed
-    );
-    assert_eq!(
-        bridge.ingest(STREAMED_LLM_CALL),
-        StderrIngestOutcome::Consumed
-    );
+    assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+    assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
     assert_eq!(bridge.generation_count_since_progress(), 2);
 
     // A deduped repeat of the same (session, step) returns early and must
     // NOT reset the churn count.
     assert_eq!(bridge.ingest(step0_again), StderrIngestOutcome::Consumed);
     assert_eq!(
-        bridge.generation_count_since_progress(),
-        2,
+        bridge.generation_count_since_progress(), 2,
         "a deduped step-loop repeat must not reset the churn count",
     );
 
@@ -191,14 +178,8 @@ fn deduped_step_loop_does_not_reset_but_genuine_advance_does() {
 #[test]
 fn liveness_only_events_do_not_reset_stalled_generation_state() {
     let mut bridge = armed_bridge();
-    assert_eq!(
-        bridge.ingest(STREAMED_LLM_CALL),
-        StderrIngestOutcome::Consumed
-    );
-    assert_eq!(
-        bridge.ingest(STREAMED_LLM_CALL),
-        StderrIngestOutcome::Consumed
-    );
+    assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+    assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
     assert_eq!(bridge.generation_count_since_progress(), 2);
     let progress_at_before = bridge.last_progress_at();
 
@@ -211,19 +192,14 @@ fn liveness_only_events_do_not_reset_stalled_generation_state() {
     assert_eq!(bridge.ingest(permission), StderrIngestOutcome::Consumed);
     assert_eq!(bridge.ingest(bus), StderrIngestOutcome::Consumed);
     // Raw, unstructured stderr bytes likewise leave the state untouched.
-    assert_eq!(
-        bridge.ingest("just some chatter"),
-        StderrIngestOutcome::NotConsumed
-    );
+    assert_eq!(bridge.ingest("just some chatter"), StderrIngestOutcome::NotConsumed);
 
     assert_eq!(
-        bridge.generation_count_since_progress(),
-        2,
+        bridge.generation_count_since_progress(), 2,
         "liveness-only events and raw bytes must not reset the churn count",
     );
     assert_eq!(
-        bridge.last_progress_at(),
-        progress_at_before,
+        bridge.last_progress_at(), progress_at_before,
         "liveness-only events and raw bytes must not advance the silence clock",
     );
 }
@@ -244,8 +220,7 @@ fn long_tool_shape_never_trips_even_past_budget() {
     }
 
     assert_eq!(
-        bridge.generation_count_since_progress(),
-        0,
+        bridge.generation_count_since_progress(), 0,
         "no llm_call_start means the churn count never accumulates",
     );
     assert!(
@@ -270,15 +245,9 @@ fn stalled_generation_emits_agent_native_terminal_event_with_safe_context() {
     // The count condition is still mandatory: only the fourth streamed
     // generation crosses MAX_GENERATIONS_WITHOUT_PROGRESS.
     for _ in 0..(MAX_GENERATIONS_WITHOUT_PROGRESS - 1) {
-        assert_eq!(
-            bridge.ingest(STREAMED_LLM_CALL),
-            StderrIngestOutcome::Consumed
-        );
+        assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
     }
-    assert_eq!(
-        bridge.ingest(STREAMED_LLM_CALL),
-        StderrIngestOutcome::Consumed
-    );
+    assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
 
     let error = bridge
         .sink
@@ -309,10 +278,7 @@ fn stalled_generation_emits_agent_native_terminal_event_with_safe_context() {
         Some(&json!(MAX_GENERATIONS_WITHOUT_PROGRESS)),
     );
     assert!(
-        extra
-            .get("stall_duration_ms")
-            .and_then(Value::as_u64)
-            .is_some(),
+        extra.get("stall_duration_ms").and_then(Value::as_u64).is_some(),
         "stall_duration_ms must be a number: {extra}",
     );
     // Safe context only — identity, never payloads.
@@ -322,14 +288,7 @@ fn stalled_generation_emits_agent_native_terminal_event_with_safe_context() {
     assert_string(extra, "model_id", "k2p6");
     assert_string(extra, "mode", "primary");
     let extra_obj = extra.as_object().expect("extra is an object");
-    for forbidden in [
-        "prompt",
-        "prompt_text",
-        "tool",
-        "tool_input",
-        "tool_output",
-        "input",
-    ] {
+    for forbidden in ["prompt", "prompt_text", "tool", "tool_input", "tool_output", "input"] {
         assert!(
             !extra_obj.contains_key(forbidden),
             "extra must not leak `{forbidden}`: {extra}",
@@ -377,10 +336,7 @@ fn repeated_stream_error_is_independent_of_llm_call_churn() {
         "interleaved generations must not let the backstop fire early",
     );
     let churn_before_error = bridge.generation_count_since_progress();
-    assert!(
-        churn_before_error > 0,
-        "generations should have accumulated"
-    );
+    assert!(churn_before_error > 0, "generations should have accumulated");
 
     // The threshold-crossing stream error trips RepeatedStreamError; it
     // must not have been reset by the interleaved generations.
@@ -392,8 +348,7 @@ fn repeated_stream_error_is_independent_of_llm_call_churn() {
         other => panic!("expected RepeatedStreamError, got {other:?}"),
     }
     assert_eq!(
-        bridge.generation_count_since_progress(),
-        churn_before_error,
+        bridge.generation_count_since_progress(), churn_before_error,
         "a stream error must not clear the stalled-generation churn count",
     );
 }

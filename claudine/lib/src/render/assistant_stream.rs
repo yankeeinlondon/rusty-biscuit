@@ -410,9 +410,9 @@ mod tests {
     fn markdown_streamed_list_items_do_not_gain_blank_lines() {
         let mut renderer = markdown_renderer();
 
-        let flushed = biscuit_terminal::prelude::strip_escape_codes(frames(
-            renderer.append("- Hash: `f525870d`\n- Package: `claudine`\n- Operation: `feat`\n"),
-        ));
+        let flushed = biscuit_terminal::prelude::strip_escape_codes(frames(renderer.append(
+            "- Hash: `f525870d`\n- Package: `claudine`\n- Operation: `feat`\n",
+        )));
 
         assert!(
             !flushed.contains("\n\n"),
@@ -528,10 +528,7 @@ mod tests {
         let mut renderer = test_renderer();
 
         let flushed = frames(renderer.append("OK.\n"));
-        assert!(
-            flushed.is_empty(),
-            "short line should not trigger sentence flush"
-        );
+        assert!(flushed.is_empty(), "short line should not trigger sentence flush");
         assert!(!renderer.block_buffer.is_empty());
     }
 
@@ -568,10 +565,7 @@ mod tests {
         assert!(long_no_terminator.len() > SENTENCE_FLUSH_MIN_BYTES);
 
         let flushed = frames(renderer.append(long_no_terminator));
-        assert!(
-            flushed.is_empty(),
-            "non-terminated line must not sentence-flush"
-        );
+        assert!(flushed.is_empty(), "non-terminated line must not sentence-flush");
         assert!(!renderer.block_buffer.is_empty());
     }
 

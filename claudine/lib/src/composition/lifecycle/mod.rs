@@ -17,18 +17,20 @@ use biscuit_speaks::{SpeedLevel, TtsConfig, TtsFailoverStrategy};
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
 use biscuit_terminal::prelude::{Prose, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
-use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, parse, parse_condition};
+use darkmatter::markdown::compose::expression::{
+    Expr, ExpressionFinder, parse, parse_condition,
+};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use self::actions::{
-    CommunicationAction, CommunicationChannel, ExpressionFunctionAction, LifecycleAction,
-    LifecycleActionKind, LifecycleControlAction, LifecycleStackItem, ProxyWith, ProxyWithError,
-    RetryBackoff, ShellAction, SideEffectAction, all_lifecycle_verbs,
-    expression_function_signature, is_known_lifecycle_verb, rewrite_to_positional,
-    side_effect_signature,
-};
 use super::error::{ActionExprError, CompositionError};
+use self::actions::{
+    all_lifecycle_verbs, CommunicationAction, CommunicationChannel, ExpressionFunctionAction,
+    expression_function_signature, is_known_lifecycle_verb, LifecycleAction, LifecycleActionKind,
+    LifecycleControlAction, LifecycleStackItem, ProxyWith, ProxyWithError,
+    RetryBackoff, rewrite_to_positional, ShellAction,
+    SideEffectAction, side_effect_signature,
+};
 use crate::events::{GlobalSettings, TtsSettings};
 use crate::messaging::RuntimeMessagingSettings;
 
@@ -38,8 +40,8 @@ mod audio;
 pub mod context;
 pub mod control;
 pub mod executor;
-mod parse;
 pub mod runtime;
+mod parse;
 mod validate;
 
 use action_shape::*;
@@ -48,14 +50,14 @@ pub use parse::{
     parse_lifecycle_config, parse_single_action, parse_task_action_stack,
     scan_removed_validation_keys,
 };
+pub use validate::{
+    collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
+    validate_no_err_in_no_error_events,
+    validate_no_interpolation_leaks, validate_no_undefined_lifecycle_variables,
+};
 pub(crate) use validate::first_undefined_stack_variable;
 #[cfg(test)]
 use validate::undefined_bare_variable;
-pub use validate::{
-    collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
-    validate_no_err_in_no_error_events, validate_no_interpolation_leaks,
-    validate_no_undefined_lifecycle_variables,
-};
 
 /// The canonical communication-field names for [`LifecycleNotification`],
 /// in the deterministic iteration order used by every validator that walks
@@ -82,7 +84,9 @@ const LIFECYCLE_COMM_FIELDS: &[&str] = &[
 /// Shared by the lifecycle string guards that walk top-level communication
 /// surfaces (the leak scan and the `err`-availability scan) so they agree on
 /// the field set and iteration order.
-fn notification_comm_fields(n: &LifecycleNotification) -> [(&'static str, Option<&String>); 9] {
+fn notification_comm_fields(
+    n: &LifecycleNotification,
+) -> [(&'static str, Option<&String>); 9] {
     [
         ("say", n.say.as_ref()),
         ("say_first", n.say_first.as_ref()),
@@ -596,7 +600,9 @@ impl<'a> LifecycleRunGuard<'a> {
                 }
                 self.start_emitted = true;
             }
-            LifecycleSignal::Success | LifecycleSignal::Blocked | LifecycleSignal::Failure => {
+            LifecycleSignal::Success
+            | LifecycleSignal::Blocked
+            | LifecycleSignal::Failure => {
                 if self.terminal_emitted {
                     return false;
                 }
@@ -670,6 +676,7 @@ impl<'a> LifecycleRunGuard<'a> {
         }
         self.run_event_stack(signal, stack_ctx)
     }
+
 
     /// Emit the `Finalize` signal once, after a terminal signal has fired.
     ///
@@ -760,7 +767,11 @@ impl<'a> LifecycleRunGuard<'a> {
         if let Some(context) = self.proxy_prepared_context.as_ref() {
             return Some(context);
         }
-        if self.proxied { None } else { self.ctx.context }
+        if self.proxied {
+            None
+        } else {
+            self.ctx.context
+        }
     }
 
     /// Suppress the Drop emission without emitting any signal.
@@ -970,7 +981,10 @@ impl LifecycleConfig {
     /// Used by the pre-flight shell resolution pass (C3) to stamp resolved
     /// command bytes back into `ShellAction::command` / `on_error` so the
     /// approved command equals the executed command.
-    pub fn stack_mut(&mut self, signal: LifecycleSignal) -> Option<&mut Vec<LifecycleStackItem>> {
+    pub fn stack_mut(
+        &mut self,
+        signal: LifecycleSignal,
+    ) -> Option<&mut Vec<LifecycleStackItem>> {
         let stack = match signal {
             LifecycleSignal::Initialize => &mut self.stacks.initialize,
             LifecycleSignal::Start => &mut self.stacks.start,

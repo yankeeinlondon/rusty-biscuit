@@ -538,13 +538,7 @@ mod tests {
     fn invalid_file_reference_projects_file_reference_diagnostic_fields() {
         let spec = code_spec("composition.invalid_file_reference").unwrap();
         assert_eq!(spec.origin, Origin::Author);
-        for field in [
-            "reference",
-            "kind",
-            "base_dir",
-            "suggestions",
-            "fallback_dir",
-        ] {
+        for field in ["reference", "kind", "base_dir", "suggestions", "fallback_dir"] {
             assert!(
                 spec.detail.contains(&field),
                 "missing FileReferenceDiagnostic detail field `{field}`"
@@ -581,13 +575,7 @@ mod tests {
         let spec = code_spec("composition.invalid_file_reference").unwrap();
         assert_eq!(
             &spec.detail[..5],
-            &[
-                "reference",
-                "kind",
-                "base_dir",
-                "suggestions",
-                "fallback_dir"
-            ]
+            &["reference", "kind", "base_dir", "suggestions", "fallback_dir"]
         );
     }
 
@@ -642,10 +630,7 @@ mod tests {
     #[test]
     fn interrupted_origin_is_caller() {
         // error-catalog §7.7: the human pressed Ctrl-C — the caller.
-        assert_eq!(
-            code_spec("provider.interrupted").unwrap().origin,
-            Origin::Caller
-        );
+        assert_eq!(code_spec("provider.interrupted").unwrap().origin, Origin::Caller);
     }
 
     #[test]

@@ -234,7 +234,10 @@ fn load_alias_resolutions(
             alias,
             identity_key,
             family_key: text("family_key"),
-            stale: stamp.get("stale").and_then(Value::as_bool).unwrap_or(false),
+            stale: stamp
+                .get("stale")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             age_days: stamp.get("age_days").and_then(Value::as_u64),
         });
     }

@@ -33,8 +33,9 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                     Some(field) => format!("{property}.{field}"),
                     None => property.clone(),
                 };
-                let mut body =
-                    format!("Unknown property <cyan>`{dotted_property}`</cyan> in {file_link}");
+                let mut body = format!(
+                    "Unknown property <cyan>`{dotted_property}`</cyan> in {file_link}"
+                );
                 if !expected_fields.is_empty() {
                     body.push_str("\n\n<b>Expected one of:</b>");
                     for field in expected_fields {
@@ -43,7 +44,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 }
                 (
                     body,
-                    "Check the lifecycle frontmatter section in your prompt file.".to_string(),
+                    "Check the lifecycle frontmatter section in your prompt file."
+                        .to_string(),
                 )
             } else {
                 let body = format!(
@@ -59,7 +61,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      (each item begins with `-`)."
                         .to_string()
                 } else {
-                    "Check the lifecycle frontmatter section in your prompt file.".to_string()
+                    "Check the lifecycle frontmatter section in your prompt file."
+                        .to_string()
                 };
                 (body, hint)
             };
@@ -329,7 +332,9 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                     "object value not allowed here",
                 ))
                 .body(body)
-                .hint("Pass object data through a whole-value `{{ ... }}` interpolation.")
+                .hint(
+                    "Pass object data through a whole-value `{{ ... }}` interpolation.",
+                )
         }
         CompositionError::LifecycleProxyWithNotMapping {
             source_path,
@@ -344,10 +349,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                  frontmatter properties."
             );
             StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "CompositionError",
-                    "`with` must be a mapping",
-                ))
+                .error_header(ErrorHeader::new("CompositionError", "`with` must be a mapping"))
                 .body(body)
                 .hint(
                     "Author `with:` as a mapping of static keys, or omit it. `with: {}` is \
@@ -375,7 +377,9 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                     "whole-mapping `with` is not supported",
                 ))
                 .body(body)
-                .hint("Write `with:` with explicit keys, e.g. `with: { spec: \"{{ spec }}\" }`.")
+                .hint(
+                    "Write `with:` with explicit keys, e.g. `with: { spec: \"{{ spec }}\" }`.",
+                )
         }
         CompositionError::LifecycleProxyWithDynamicKey {
             source_path,
@@ -599,7 +603,10 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                  {file_link} has the wrong number of arguments.\n\n{message}"
             );
             StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("CompositionError", "wrong action arity"))
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "wrong action arity",
+                ))
                 .body(body)
         }
         CompositionError::LifecycleShortFormRemoved {
@@ -650,9 +657,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 )
         }
         CompositionError::LifecycleMultipleLifecycleActions {
-            source_path,
-            property,
-            ..
+            source_path, property, ..
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
@@ -672,9 +677,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 )
         }
         CompositionError::LifecycleActionOrder {
-            source_path,
-            property,
-            ..
+            source_path, property, ..
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(

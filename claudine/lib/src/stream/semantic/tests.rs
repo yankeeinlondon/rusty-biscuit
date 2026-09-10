@@ -166,7 +166,8 @@ fn is_activity_includes_work_events() {
 fn round_trip_serde_preserves_value_for_every_variant() {
     for event in all_variants() {
         let value = serde_json::to_value(&event).expect("serialize");
-        let decoded: SemanticEvent = serde_json::from_value(value.clone()).expect("deserialize");
+        let decoded: SemanticEvent =
+            serde_json::from_value(value.clone()).expect("deserialize");
         let value2 = serde_json::to_value(&decoded).expect("re-serialize");
         assert_eq!(
             value,

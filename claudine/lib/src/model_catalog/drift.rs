@@ -270,10 +270,7 @@ mod tests {
             resolved_model_drift(Provider::Claude, "claude-opus-4-8", &service),
             None
         );
-        assert_eq!(
-            resolved_model_drift(Provider::Claude, "opus", &service),
-            None
-        );
+        assert_eq!(resolved_model_drift(Provider::Claude, "opus", &service), None);
     }
 
     /// Ruling: a dated fuller id than the catalog carries is matched via

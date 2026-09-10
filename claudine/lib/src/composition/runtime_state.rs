@@ -125,9 +125,7 @@ impl RuntimeState {
         prior_base: &Map<String, Value>,
     ) -> Result<Value, RuntimeMutationError> {
         if ROOT_OVERLAY_KEYS.contains(&key) {
-            return Err(RuntimeMutationError::ReservedKey {
-                key: key.to_string(),
-            });
+            return Err(RuntimeMutationError::ReservedKey { key: key.to_string() });
         }
         let mut inner = self.inner.lock().expect(POISONED);
         // Darkmatter owns the mutation primitive (and the key-shape rule); this

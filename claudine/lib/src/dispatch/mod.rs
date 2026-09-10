@@ -1,11 +1,11 @@
 pub(crate) mod deps;
 pub mod expression;
 pub mod loader;
-mod logging;
 pub mod matcher;
-mod protect_bridge;
 pub mod runner;
 pub mod template;
+mod logging;
+mod protect_bridge;
 mod wrapper_flags;
 
 use std::sync::Arc;
@@ -14,11 +14,11 @@ use serde_json::Value;
 use tracing::{debug, info, info_span};
 
 use crate::actions::HookResponse;
+use crate::hook_adapters::{self, AdapterError};
 use crate::error::Result;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, ResolvedHook};
-use crate::hook_adapters::{self, AdapterError};
 use crate::protect::decision::ProtectDecision;
-use crate::protect::observe::{ProtectObservation, extract_protect_request};
+use crate::protect::observe::{extract_protect_request, ProtectObservation};
 use crate::provider::Provider;
 
 pub use logging::{log_dispatch_event, write_dispatch_event_to};

@@ -141,9 +141,12 @@ pub fn resolve_sequence_plan_with(
                 fail_fast,
             )?
         }
-        SequenceSourceSpec::Inline(items) => {
-            normalize::normalize_plan(&items, Source::Inline, &source.resolved_path, fail_fast)?
-        }
+        SequenceSourceSpec::Inline(items) => normalize::normalize_plan(
+            &items,
+            Source::Inline,
+            &source.resolved_path,
+            fail_fast,
+        )?,
         SequenceSourceSpec::Expression(expression) => resolve_expression_source(
             &expression,
             &frontmatter,
@@ -161,9 +164,10 @@ pub fn resolve_sequence_plan_with(
                     &source.resolved_path,
                     context,
                 )?,
-                None => {
-                    source::resolve_sequence_reference(&reference.reference, &source.resolved_path)?
-                }
+                None => source::resolve_sequence_reference(
+                    &reference.reference,
+                    &source.resolved_path,
+                )?,
             };
             source::load_referenced_sequence(
                 &reference,

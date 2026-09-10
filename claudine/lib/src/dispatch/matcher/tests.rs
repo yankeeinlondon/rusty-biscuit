@@ -154,7 +154,8 @@ fn matches_with_pattern_function() {
 
 #[test]
 fn expression_matches_tool_and_branch() {
-    let meta = tool_meta_with_branch(AgenticEvent::BeforeTool, Some("Bash"), Some("main"), false);
+    let meta =
+        tool_meta_with_branch(AgenticEvent::BeforeTool, Some("Bash"), Some("main"), false);
 
     assert!(matches_with_pattern(
         Some("tool_name == 'Bash' && git.branch == 'main'"),
@@ -164,7 +165,8 @@ fn expression_matches_tool_and_branch() {
 
 #[test]
 fn expression_provider_and_not_dirty() {
-    let meta = tool_meta_with_branch(AgenticEvent::BeforeTool, Some("Bash"), Some("main"), false);
+    let meta =
+        tool_meta_with_branch(AgenticEvent::BeforeTool, Some("Bash"), Some("main"), false);
 
     assert!(matches_with_pattern(
         Some("provider == 'claude' && !git.is_dirty"),
@@ -200,8 +202,9 @@ fn expression_compiles_with_helper_function() {
     let mut meta = tool_meta(AgenticEvent::BeforeTool, Some("Bash"));
     meta.tool_input = Some(serde_json::json!({"command": "echo hi"}));
 
-    let matcher = RuntimeMatcher::compile("tool_name == 'Bash' && length(tool_input.command) > 0")
-        .expect("compile should succeed");
+    let matcher =
+        RuntimeMatcher::compile("tool_name == 'Bash' && length(tool_input.command) > 0")
+            .expect("compile should succeed");
     assert!(matches!(matcher, RuntimeMatcher::Expression { .. }));
     assert!(matches(Some(&matcher), &meta));
 }
@@ -210,7 +213,8 @@ fn expression_compiles_with_helper_function() {
 fn compile_prefers_regex_for_bare_word() {
     // `Bash` parses as a bare variable; we prefer regex semantics so
     // legacy `tool_name`-style matchers keep working.
-    let matcher = RuntimeMatcher::compile("Bash|Edit").expect("compile should succeed for regex");
+    let matcher =
+        RuntimeMatcher::compile("Bash|Edit").expect("compile should succeed for regex");
     assert!(matches!(matcher, RuntimeMatcher::Regex(_)));
 }
 
@@ -273,7 +277,11 @@ fn compile_many_emits_no_warning_for_valid_matchers() {
             .iter()
             .filter(|l| l.contains("listed bindings will fire unconditionally"))
             .collect();
-        assert!(matching.is_empty(), "expected no warnings, got: {:?}", logs);
+        assert!(
+            matching.is_empty(),
+            "expected no warnings, got: {:?}",
+            logs
+        );
         Ok(())
     });
 }

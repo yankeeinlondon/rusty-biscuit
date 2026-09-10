@@ -393,12 +393,10 @@ pub async fn execute_approved_command(
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|error| HarnessError::ShellCommandExecutionFailed {
-            detail: format!("failed to spawn '{}': {error}", command.executable),
-            source: ShellExecCause::Spawn(error),
-        })?;
+    let mut child = cmd.spawn().map_err(|error| HarnessError::ShellCommandExecutionFailed {
+        detail: format!("failed to spawn '{}': {error}", command.executable),
+        source: ShellExecCause::Spawn(error),
+    })?;
 
     let stdout_pipe = child.stdout.take();
     let stderr_pipe = child.stderr.take();
@@ -635,10 +633,13 @@ mod tests {
         .to_string_lossy()
         .into_owned();
         let cmd = agent_cwd_command();
-        let (exit_code, stdout, _) =
-            execute_approved_command(&cmd, None, std::time::Duration::from_secs(5))
-                .await
-                .unwrap();
+        let (exit_code, stdout, _) = execute_approved_command(
+            &cmd,
+            None,
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
         assert_eq!(exit_code, 0);
         assert_eq!(stdout.trim(), expected);
     }
@@ -648,11 +649,7 @@ mod tests {
         ApprovedRuntimeCommand {
             raw: "echo %AGENT_CWD%".to_string(),
             executable: "cmd.exe".to_string(),
-            args: vec![
-                "/D".to_string(),
-                "/C".to_string(),
-                "echo %AGENT_CWD%".to_string(),
-            ],
+            args: vec!["/D".to_string(), "/C".to_string(), "echo %AGENT_CWD%".to_string()],
         }
     }
 

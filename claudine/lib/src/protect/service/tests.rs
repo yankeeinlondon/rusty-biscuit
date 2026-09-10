@@ -1,7 +1,7 @@
 use super::*;
+use std::path::PathBuf;
 use crate::protect::catalog::RuleGroup;
 use crate::protect::config::{CustomPattern, RuleGroupConfig, RuleGroupDetailedConfig};
-use std::path::PathBuf;
 
 fn default_service() -> ProtectService {
     ProtectService::new(ProtectConfig::default(), ProtectPlatform::current()).unwrap()

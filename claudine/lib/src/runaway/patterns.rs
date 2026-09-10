@@ -153,8 +153,12 @@ impl CompiledExitExpressions {
             };
             if matched {
                 let (pattern, scope) = match entry {
-                    CompiledEntry::Literal { pattern, scope, .. } => (pattern.as_str(), scope),
-                    CompiledEntry::Regex { pattern, scope, .. } => (pattern.as_str(), scope),
+                    CompiledEntry::Literal {
+                        pattern, scope, ..
+                    } => (pattern.as_str(), scope),
+                    CompiledEntry::Regex {
+                        pattern, scope, ..
+                    } => (pattern.as_str(), scope),
                 };
                 return Some((pattern, scope));
             }
@@ -230,9 +234,7 @@ mod tests {
             lit("late", None, false),
         ])
         .unwrap();
-        let (pattern, scope) = set
-            .matches_line("STOP.")
-            .expect("second entry should match");
+        let (pattern, scope) = set.matches_line("STOP.").expect("second entry should match");
         assert_eq!(pattern, "STOP.");
         assert_eq!(scope.as_deref(), Some("opencode/kimi-for-coding/k2p7"));
     }

@@ -113,9 +113,7 @@ const SHELL_UNAVAILABLE_ROOTS: &[&str] = &["outputs", "err", "timing", "current"
 ///
 /// Returns [`CompositionError::SequenceUnsupportedConstruct`] when the source's
 /// `kind:` is `group`, `group-catalog`, or `task`.
-pub fn reject_non_sequence_kind(
-    source: &ResolvedCompositionSource,
-) -> Result<(), CompositionError> {
+pub fn reject_non_sequence_kind(source: &ResolvedCompositionSource) -> Result<(), CompositionError> {
     let Some(Value::String(kind)) = source.markdown.frontmatter().as_map().get("kind") else {
         return Ok(());
     };
@@ -143,10 +141,7 @@ pub fn build_preflight_graph(
     plan: &SequencePlan,
     source: &ResolvedCompositionSource,
 ) -> Result<PreflightGraph, CompositionError> {
-    let anchor = source
-        .resolved_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let anchor = source.resolved_path.parent().unwrap_or_else(|| Path::new("."));
     let context = ComposeContext::capture_for_document(anchor, &source.markdown);
     build_preflight_graph_with_context(plan, source, context)
 }
@@ -196,8 +191,12 @@ pub fn build_preflight_graph_with_invocation(
     invocation: &InvocationContext,
     source_context: &SourceContext,
 ) -> Result<PreflightGraph, CompositionError> {
-    let mut loader =
-        Loader::new_with_invocation(source, context, invocation, source_context.clone());
+    let mut loader = Loader::new_with_invocation(
+        source,
+        context,
+        invocation,
+        source_context.clone(),
+    );
     loader.walk_plan(plan)?;
     Ok(loader.graph)
 }
@@ -273,9 +272,13 @@ impl<'a> Loader<'a> {
             let state = self.step_state(plan, index)?;
 
             let task = match &step.executable {
-                Some(executable) => {
-                    Some(self.load_step_task(executable, &source_path, &label, &state, None)?)
-                }
+                Some(executable) => Some(self.load_step_task(
+                    executable,
+                    &source_path,
+                    &label,
+                    &state,
+                    None,
+                )?),
                 None => None,
             };
 
@@ -398,16 +401,10 @@ impl<'a> Loader<'a> {
         // catalog already rejects an explicit one — so a group default is
         // simply not propagated to non-prompt siblings rather than erroring.
         let prompt_task = matches!(action, PreflightAction::Prompt { .. });
-        let operation = option_string(options, "operation").or_else(|| {
-            prompt_task
-                .then(|| group_defaults.and_then(|d| d.operation.clone()))
-                .flatten()
-        });
-        let flow = option_string(options, "flow").or_else(|| {
-            prompt_task
-                .then(|| group_defaults.and_then(|d| d.flow.clone()))
-                .flatten()
-        });
+        let operation = option_string(options, "operation")
+            .or_else(|| prompt_task.then(|| group_defaults.and_then(|d| d.operation.clone())).flatten());
+        let flow = option_string(options, "flow")
+            .or_else(|| prompt_task.then(|| group_defaults.and_then(|d| d.flow.clone())).flatten());
 
         let mut task = PreflightTask {
             name: option_string(options, "name"),
@@ -577,9 +574,7 @@ impl<'a> Loader<'a> {
         let raw_tasks = match map.get("tasks") {
             Some(Value::Array(items)) if !items.is_empty() => items.clone(),
             Some(Value::Array(_)) | None => {
-                return Err(invalid(
-                    "`tasks` must declare at least one task".to_string(),
-                ));
+                return Err(invalid("`tasks` must declare at least one task".to_string()));
             }
             Some(other) => {
                 return Err(invalid(format!(
@@ -631,7 +626,10 @@ impl<'a> Loader<'a> {
     /// The sequence source document counts as an occupied target: an
     /// inline-compose sequence rewrites its own body between steps, so a
     /// concurrent task pointed at it would race the orchestrator itself.
-    fn check_write_back_collisions(&self, group: &PreflightGroup) -> Result<(), CompositionError> {
+    fn check_write_back_collisions(
+        &self,
+        group: &PreflightGroup,
+    ) -> Result<(), CompositionError> {
         let mut claimed: HashMap<PathBuf, String> = HashMap::new();
         if self.source_inline_compose() {
             claimed.insert(self.source_path.clone(), "the sequence source".to_string());
@@ -683,11 +681,12 @@ impl<'a> Loader<'a> {
         // The referenced document is loaded through the ordinary Markdown load
         // error so a malformed prompt reports the same typed parse failure it
         // would when composed directly, rather than a preflight-shaped string.
-        let markdown =
-            Markdown::try_from(path.as_path()).map_err(|e| CompositionError::MarkdownLoad {
+        let markdown = Markdown::try_from(path.as_path()).map_err(|e| {
+            CompositionError::MarkdownLoad {
                 path: path.clone(),
                 source: super::super::error::MarkdownLoadCause::Parse(Box::new(e)),
-            })?;
+            }
+        })?;
 
         let frontmatter = markdown.frontmatter();
         if frontmatter.as_map().contains_key("sequence") {
@@ -769,10 +768,7 @@ impl<'a> Loader<'a> {
         label: &str,
         state: &EffectiveState,
     ) -> Result<(), CompositionError> {
-        for (stage, stack) in [
-            ("setup", task.setup.clone()),
-            ("teardown", task.teardown.clone()),
-        ] {
+        for (stage, stack) in [("setup", task.setup.clone()), ("teardown", task.teardown.clone())] {
             let Some(stack) = stack else { continue };
             for command in shape::collect_stack_shell_commands(&stack) {
                 let stage_label = format!("{label} `{stage}`");
@@ -836,7 +832,8 @@ impl<'a> Loader<'a> {
             .cloned()
             .or_else(|| self.file_resolution_context.clone());
         if let Some(invocation) = self.invocation {
-            let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(raw);
+            let requirements =
+                darkmatter::markdown::compose::ContextRequirements::for_content(raw);
             invocation.extend_launch_context(&mut self.context, &requirements);
         }
         let runtime_context = self.context.clone();
@@ -876,9 +873,11 @@ impl<'a> Loader<'a> {
             .map(SourceContext::file_resolution_context)
             .or(self.file_resolution_context.as_ref());
         match file_resolution_context {
-            Some(context) => {
-                source_resolution::resolve_sequence_reference_in_context(reference, origin, context)
-            }
+            Some(context) => source_resolution::resolve_sequence_reference_in_context(
+                reference,
+                origin,
+                context,
+            ),
             None => source_resolution::resolve_sequence_reference(reference, origin),
         }
         .map(|p| canonical(&p))

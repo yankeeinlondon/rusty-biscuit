@@ -185,7 +185,8 @@ mod tests {
 
     #[test]
     fn default_is_summary() {
-        let mode = resolve_system_prompt_report_mode(false, false, false, None, 50, None, false);
+        let mode =
+            resolve_system_prompt_report_mode(false, false, false, None, 50, None, false);
         assert_eq!(mode, ReportMode::Summary);
     }
 
@@ -231,7 +232,8 @@ mod tests {
 
     #[test]
     fn long_prompt_with_no_hints_defaults_to_summary() {
-        let mode = resolve_system_prompt_report_mode(false, false, false, None, 100, None, false);
+        let mode =
+            resolve_system_prompt_report_mode(false, false, false, None, 100, None, false);
         assert_eq!(mode, ReportMode::Summary);
     }
 

@@ -1,7 +1,7 @@
 //! Behavior-trait implementations for the Pi provider.
 
-use crate::config::AgentConfigurator;
 use crate::hook_adapters::ProviderAdapter;
+use crate::config::AgentConfigurator;
 use crate::provider::behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
 };

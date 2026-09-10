@@ -57,18 +57,18 @@ use serde_json::{Map, Value};
 use tracing::warn;
 
 use super::super::error::CompositionError;
-use super::actions::{
-    CommunicationChannel, LifecycleAction, LifecycleActionKind, LifecycleControlAction, ProxyWith,
-    ProxyWithValue, RetryBackoff, is_known_side_effect,
-};
-use super::context::{
-    LifecycleCurrent, LifecycleErrorInfo, LifecycleTiming, lifecycle_injected_globals,
-};
 use super::{
     LifecycleConfig, LifecycleEmitter, LifecycleNotification, LifecycleSignal, audio_phases,
     first_undefined_stack_variable, tts_config_from_settings,
 };
+use super::actions::{
+    CommunicationChannel, LifecycleAction, LifecycleActionKind, LifecycleControlAction, ProxyWith,
+    ProxyWithValue, RetryBackoff, is_known_side_effect,
+};
 use crate::composition::coordinator::ActionLocation;
+use super::context::{
+    LifecycleCurrent, LifecycleErrorInfo, LifecycleTiming, lifecycle_injected_globals,
+};
 use crate::events::GlobalSettings;
 use crate::messaging::RuntimeMessagingSettings;
 
@@ -618,7 +618,10 @@ impl StackExecutionContext<'_> {
     /// Used when routing an unintentional action error into the `failure`
     /// event so `err.kind`/`err.variant`/`err.msg` are available to the
     /// failure stack.
-    pub fn with_error<'a>(&'a self, err: &'a LifecycleErrorInfo) -> StackExecutionContext<'a> {
+    pub fn with_error<'a>(
+        &'a self,
+        err: &'a LifecycleErrorInfo,
+    ) -> StackExecutionContext<'a> {
         StackExecutionContext {
             signal: self.signal,
             frontmatter: self.frontmatter,
@@ -1209,12 +1212,8 @@ impl StackExecutionContext<'_> {
             }
             CommunicationChannel::Effect => self.emitter.emit_effect(message),
             CommunicationChannel::Message => {
-                self.emitter.emit_message(
-                    message,
-                    self.source_path,
-                    self.repo_root,
-                    self.messaging,
-                );
+                self.emitter
+                    .emit_message(message, self.source_path, self.repo_root, self.messaging);
             }
             CommunicationChannel::Notify => self.emitter.emit_notification(message),
             CommunicationChannel::Stderr => {
@@ -1247,12 +1246,10 @@ impl StackExecutionContext<'_> {
                         self.emitter.emit_warn(&text, self.term);
                     }
                 }
-                Err(ActionFailure::Dispatch(
-                    LifecycleErrorInfo::from_action_failure(
-                        "shell",
-                        format!("command `{command}` exited with code {code}"),
-                    ),
-                ))
+                Err(ActionFailure::Dispatch(LifecycleErrorInfo::from_action_failure(
+                    "shell",
+                    format!("command `{command}` exited with code {code}"),
+                )))
             }
             // `ShellRunError` owns the "command `…` failed to run: …" prose, so
             // the snapshot projects it rather than the executor rebuilding it
@@ -1296,9 +1293,8 @@ impl StackExecutionContext<'_> {
             })?;
         // From here on, an error is a side-effect dispatch failure (a missing
         // argument, an unknown verb, or an effect-engine error).
-        let dispatch_err = |msg: String| {
-            ActionFailure::Dispatch(LifecycleErrorInfo::from_action_failure(verb, msg))
-        };
+        let dispatch_err =
+            |msg: String| ActionFailure::Dispatch(LifecycleErrorInfo::from_action_failure(verb, msg));
         let engine = self.effect_engine;
         let s = |idx: usize| -> Result<String, ActionFailure> {
             values
@@ -1339,9 +1335,7 @@ impl StackExecutionContext<'_> {
             "prepend_frontmatter" => engine.prepend_frontmatter(&s(0)?, &s(1)?, v(2)?),
             "ensure_file" => {
                 if values.len() >= 2 {
-                    engine
-                        .ensure_file_with_content(&s(0)?, &s(1)?)
-                        .map(Value::String)
+                    engine.ensure_file_with_content(&s(0)?, &s(1)?).map(Value::String)
                 } else {
                     engine.ensure_file(&s(0)?).map(Value::String)
                 }
@@ -1422,20 +1416,14 @@ impl StackExecutionContext<'_> {
             }
             "increment_frontmatter" | "decrement_frontmatter" => {
                 if let Some(p) = prop() {
-                    let delta = if verb == "increment_frontmatter" {
-                        1
-                    } else {
-                        -1
-                    };
+                    let delta = if verb == "increment_frontmatter" { 1 } else { -1 };
                     let next = working.get(p).and_then(Value::as_i64).unwrap_or(0) + delta;
                     working.insert(p.to_string(), Value::from(next));
                 }
             }
             "append_frontmatter" | "prepend_frontmatter" => {
                 if let (Some(p), Some(val)) = (prop(), values.get(2)) {
-                    let entry = working
-                        .entry(p.to_string())
-                        .or_insert_with(|| Value::Array(Vec::new()));
+                    let entry = working.entry(p.to_string()).or_insert_with(|| Value::Array(Vec::new()));
                     if let Value::Array(arr) = entry {
                         if verb == "append_frontmatter" {
                             arr.push(val.clone());
@@ -1502,15 +1490,14 @@ impl StackExecutionContext<'_> {
     ) -> Result<StackControl, LifecycleErrorInfo> {
         use LifecycleControlAction as C;
         let verb = control.verb();
-        let classify =
-            |error: LifecycleExprError| LifecycleErrorInfo::from_error_or_action(verb, &error);
+        let classify = |error: LifecycleExprError| {
+            LifecycleErrorInfo::from_error_or_action(verb, &error)
+        };
         Ok(match control {
             C::Stop => StackControl::Stop,
             C::Skip => StackControl::Skip,
             C::Error { reason } => StackControl::Error {
-                reason: self
-                    .eval_opt_string(reason.as_ref(), fm)
-                    .map_err(classify)?,
+                reason: self.eval_opt_string(reason.as_ref(), fm).map_err(classify)?,
             },
             C::Proxy { target, with } => {
                 // Atomicity: the target and the *complete* overlay resolve
@@ -1552,9 +1539,7 @@ impl StackExecutionContext<'_> {
             },
             C::Defer { delay, reason } => StackControl::Defer {
                 delay: self.render_message(delay, fm).map_err(classify)?,
-                reason: self
-                    .eval_opt_string(reason.as_ref(), fm)
-                    .map_err(classify)?,
+                reason: self.eval_opt_string(reason.as_ref(), fm).map_err(classify)?,
             },
         })
     }
@@ -1609,11 +1594,7 @@ impl StackExecutionContext<'_> {
                 .map_err(|(suffix, error)| {
                     let err = CompositionError::LifecycleProxyWithEvaluationFailed {
                         source_path: self.source_path.to_path_buf(),
-                        property: format!(
-                            "{}.stack[{}]",
-                            location.signal().property_name(),
-                            location.stack_index()
-                        ),
+                        property: format!("{}.stack[{}]", location.signal().property_name(), location.stack_index()),
                         path: format!("action[{}].with.{key}{suffix}", location.action_index()),
                         target: target.to_string(),
                         message: error.to_string(),
@@ -1911,6 +1892,7 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     }
     out
 }
+
 
 #[cfg(test)]
 mod tests;

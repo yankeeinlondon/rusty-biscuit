@@ -21,7 +21,9 @@
 use std::collections::VecDeque;
 
 use super::patterns::CompiledExitExpressions;
-use super::{MAX_CYCLE_LENGTH, MAX_REPETITION_ALLOWED, Trip, VOLUME_BYTES, VOLUME_LINES};
+use super::{
+    MAX_CYCLE_LENGTH, MAX_REPETITION_ALLOWED, Trip, VOLUME_BYTES, VOLUME_LINES,
+};
 
 /// Knobs that parameterize a [`ContentDetector`]. Built by the caller
 /// (CLI wiring layer) from the resolved `GuardSettings` config; the
@@ -192,7 +194,11 @@ impl ContentDetector {
     /// `with_implicit_newline` controls whether the byte counter gets
     /// the trailing `\n` byte added (true for `feed`'s completed lines,
     /// false for `flush`'s trailing partial line).
-    fn process_line(&mut self, line: &str, with_implicit_newline: bool) -> Option<Trip> {
+    fn process_line(
+        &mut self,
+        line: &str,
+        with_implicit_newline: bool,
+    ) -> Option<Trip> {
         // Volume accounting (F2). Performed before normalization so the
         // counter matches the bytes the model actually emitted (including
         // trailing whitespace that normalization trims). "Exceeds" the
@@ -238,7 +244,10 @@ impl ContentDetector {
             }
             self.ring.push_back(normalized);
             if let Some((cycle_len, repeats)) = self.detect_cycle() {
-                return Some(Trip::RunawayRepetition { cycle_len, repeats });
+                return Some(Trip::RunawayRepetition {
+                    cycle_len,
+                    repeats,
+                });
             }
         }
 
@@ -268,8 +277,8 @@ impl ContentDetector {
         // at the tail. Skip L values where the ring doesn't yet hold
         // 2L entries.
         let max_l = self.cfg.max_cycle_length.min(n / 2);
-        let detected_l =
-            (1..=max_l).find(|&candidate| self.tail_is_two_identical_halves(candidate));
+        let detected_l = (1..=max_l)
+            .find(|&candidate| self.tail_is_two_identical_halves(candidate));
 
         match detected_l {
             Some(cycle_len) => {

@@ -208,7 +208,10 @@ impl LogClassification {
     /// from live promoted stderr — this method IS that shim's core.
     pub fn to_signal_payload(&self) -> serde_json::Value {
         use serde_json::{Map, Value, json};
-        fn payload(classification: &str, fields: Vec<(&str, Option<Value>)>) -> Value {
+        fn payload(
+            classification: &str,
+            fields: Vec<(&str, Option<Value>)>,
+        ) -> Value {
             let mut map = Map::new();
             map.insert("classification".into(), json!(classification));
             for (key, value) in fields {
@@ -233,7 +236,9 @@ impl LogClassification {
                     ("status_code", status_code.map(|code| json!(code))),
                     (
                         "reset_at",
-                        reset_at.map(|at| json!(at.to_rfc3339_opts(SecondsFormat::Secs, true))),
+                        reset_at.map(|at| {
+                            json!(at.to_rfc3339_opts(SecondsFormat::Secs, true))
+                        }),
                     ),
                     ("provider_id", provider_id.as_ref().map(|id| json!(id))),
                     ("model_id", model_id.as_ref().map(|id| json!(id))),
@@ -306,9 +311,10 @@ impl LogClassification {
                     ("step", Some(json!(step))),
                 ],
             ),
-            Self::StepExit { session_id } => {
-                payload("StepExit", vec![("session_id", Some(json!(session_id)))])
-            }
+            Self::StepExit { session_id } => payload(
+                "StepExit",
+                vec![("session_id", Some(json!(session_id)))],
+            ),
             Self::PermissionEvaluated {
                 permission,
                 pattern,
@@ -396,7 +402,11 @@ pub fn parse_line(line: &str) -> ParsedOpenCodeStderrLine {
     ParsedOpenCodeStderrLine::RawText(line.to_string())
 }
 
-fn parse_captures(line: &str, caps: &Captures<'_>, delta_ms: u64) -> ParsedOpenCodeStderrLine {
+fn parse_captures(
+    line: &str,
+    caps: &Captures<'_>,
+    delta_ms: u64,
+) -> ParsedOpenCodeStderrLine {
     let Some(level) = caps
         .name("level")
         .and_then(|m| LogLevel::from_str(m.as_str()))

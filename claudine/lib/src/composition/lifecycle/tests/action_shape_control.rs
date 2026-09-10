@@ -1,7 +1,7 @@
 //! action shape control lifecycle tests.
 
-use super::actions::ProxyWithValue;
 use super::*;
+use super::actions::ProxyWithValue;
 use darkmatter::markdown::compose::expression::{EvaluationLookup, evaluate};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -200,7 +200,9 @@ fn rejects_skip_outside_initialize() {
     });
     let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
     match err {
-        CompositionError::LifecycleActionPlacement { action, event, .. } => {
+        CompositionError::LifecycleActionPlacement {
+            action, event, ..
+        } => {
             assert_eq!(action, "skip");
             assert_eq!(event, "start");
         }
@@ -281,7 +283,10 @@ fn rejects_lifecycle_action_not_last() {
         }
     });
     let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
-    assert!(matches!(err, CompositionError::LifecycleActionOrder { .. }));
+    assert!(matches!(
+        err,
+        CompositionError::LifecycleActionOrder { .. }
+    ));
 }
 
 #[test]
@@ -371,7 +376,7 @@ fn positional_scalar_value_is_literal_text() {
     // Positional scalar values are literal text by default — `using codex`
     // is the text, not an expression. Commas and colons inside are part of
     // the message.
-    let cases: [(&str, serde_json::Value, &str); 4] = [
+    let cases: [( &str, serde_json::Value, &str); 4] = [
         ("say", json!({"say": "using codex"}), "using codex"),
         (
             "warn",
@@ -393,9 +398,7 @@ fn positional_scalar_value_is_literal_text() {
         let fm = json!({ "blocked": { "stack": [{"action": action}] } });
         let config = parse_lifecycle_config(&fm, dummy_path())
             .unwrap_or_else(|e| panic!("`{verb}` positional scalar should parse, got: {e:?}"));
-        let stack = config
-            .stack(LifecycleSignal::Blocked)
-            .expect("blocked stack");
+        let stack = config.stack(LifecycleSignal::Blocked).expect("blocked stack");
         let message = match &stack[0].actions[0].kind {
             LifecycleActionKind::Communication(c) => &c.message,
             LifecycleActionKind::LifecycleControl(LifecycleControlAction::Error {
@@ -403,11 +406,7 @@ fn positional_scalar_value_is_literal_text() {
             }) => r,
             other => panic!("unexpected action kind for `{verb}`: {other:?}"),
         };
-        assert_eq!(
-            message,
-            &Expr::StringLiteral(expected.to_string()),
-            "{verb}"
-        );
+        assert_eq!(message, &Expr::StringLiteral(expected.to_string()), "{verb}");
     }
 }
 
@@ -433,7 +432,10 @@ fn rejects_retry_with_too_many_args() {
         }
     });
     let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
-    assert!(matches!(err, CompositionError::LifecycleWrongArity { .. }));
+    assert!(matches!(
+        err,
+        CompositionError::LifecycleWrongArity { .. }
+    ));
 }
 
 #[test]
@@ -446,7 +448,10 @@ fn rejects_proxy_missing_target() {
         }
     });
     let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
-    assert!(matches!(err, CompositionError::LifecycleWrongArity { .. }));
+    assert!(matches!(
+        err,
+        CompositionError::LifecycleWrongArity { .. }
+    ));
 }
 
 #[test]
@@ -508,15 +513,10 @@ fn parses_positional_communication_scalar() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let stack = config
-        .stack(LifecycleSignal::Success)
-        .expect("success stack");
+    let stack = config.stack(LifecycleSignal::Success).expect("success stack");
     assert_eq!(stack.len(), 4);
     for item in stack {
-        assert!(matches!(
-            item.actions[0].kind,
-            LifecycleActionKind::Communication(_)
-        ));
+        assert!(matches!(item.actions[0].kind, LifecycleActionKind::Communication(_)));
     }
 }
 
@@ -529,10 +529,7 @@ fn parses_positional_shell_scalar() {
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     let stack = config.stack(LifecycleSignal::Start).expect("start stack");
-    assert!(matches!(
-        stack[0].actions[0].kind,
-        LifecycleActionKind::Shell(_)
-    ));
+    assert!(matches!(stack[0].actions[0].kind, LifecycleActionKind::Shell(_)));
 }
 
 #[test]
@@ -587,9 +584,7 @@ fn parses_positional_control_verbs() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let stack = config
-        .stack(LifecycleSignal::Initialize)
-        .expect("init stack");
+    let stack = config.stack(LifecycleSignal::Initialize).expect("init stack");
     assert_eq!(stack.len(), 5);
     for item in stack {
         assert!(item.actions[0].is_lifecycle_control());
@@ -737,9 +732,7 @@ fn parses_positional_action_object_value() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let stack = config
-        .stack(LifecycleSignal::Success)
-        .expect("success stack");
+    let stack = config.stack(LifecycleSignal::Success).expect("success stack");
     assert_eq!(stack[0].actions.len(), 1);
     assert!(matches!(
         stack[0].actions[0].kind,
@@ -857,9 +850,7 @@ fn positional_and_key_value_action_object_coexist_in_array() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let stack = config
-        .stack(LifecycleSignal::Success)
-        .expect("success stack");
+    let stack = config.stack(LifecycleSignal::Success).expect("success stack");
     assert_eq!(stack[0].actions.len(), 3);
     assert!(matches!(
         stack[0].actions[0].kind,
@@ -869,10 +860,7 @@ fn positional_and_key_value_action_object_coexist_in_array() {
         stack[0].actions[1].kind,
         LifecycleActionKind::SideEffect(_)
     ));
-    assert!(matches!(
-        stack[0].actions[2].kind,
-        LifecycleActionKind::Shell(_)
-    ));
+    assert!(matches!(stack[0].actions[2].kind, LifecycleActionKind::Shell(_)));
 }
 
 #[test]
@@ -962,15 +950,12 @@ fn short_form_rejection_rewrites_to_positional() {
         ),
     ];
     for (verb, action, expected_rewrite) in cases {
-        let short_form = format!(
-            "{verb}({})",
-            match verb {
-                "success" => "\"x\"".to_string(),
-                "shell" => "git push".to_string(),
-                "set_frontmatter" => "'a','b','c'".to_string(),
-                _ => unreachable!(),
-            }
-        );
+        let short_form = format!("{verb}({})", match verb {
+            "success" => "\"x\"".to_string(),
+            "shell" => "git push".to_string(),
+            "set_frontmatter" => "'a','b','c'".to_string(),
+            _ => unreachable!(),
+        });
         let fm = json!({
             "start": {
                 "stack": [{"action": short_form.clone()}]
@@ -1381,11 +1366,7 @@ fn no_error_flag_is_accepted_on_every_action_category() {
     let stack = config.stack(LifecycleSignal::Start).expect("start stack");
     assert_eq!(stack[0].actions.len(), 4);
     for action in &stack[0].actions {
-        assert!(
-            action.no_error,
-            "no_error should be true for {:?}",
-            action.kind
-        );
+        assert!(action.no_error, "no_error should be true for {:?}", action.kind);
     }
 }
 
@@ -1498,9 +1479,7 @@ fn action_value_to_expr_yaml_scalar_typing() {
 
 #[test]
 fn action_value_to_expr_rejects_direct_object() {
-    let err = action_value_to_expr(&json!({ "a": 1 }))
-        .unwrap_err()
-        .to_string();
+    let err = action_value_to_expr(&json!({ "a": 1 })).unwrap_err().to_string();
     assert!(
         err.contains("object values are not supported"),
         "unexpected error: {err}"
@@ -1624,16 +1603,11 @@ fn proxy_with_types_authored_scalar_and_nested_values() {
         ]))
     );
     let Some(ProxyWithValue::Object(metadata)) = with.get("metadata") else {
-        panic!(
-            "nested mapping types as an object: {:?}",
-            with.get("metadata")
-        );
+        panic!("nested mapping types as an object: {:?}", with.get("metadata"));
     };
     assert_eq!(
         metadata.get("source"),
-        Some(&ProxyWithValue::Scalar(Expr::StringLiteral(
-            "router".into()
-        )))
+        Some(&ProxyWithValue::Scalar(Expr::StringLiteral("router".into())))
     );
     assert_eq!(
         metadata.get("area"),
@@ -1850,9 +1824,7 @@ fn proxy_with_exception_does_not_widen_the_object_parameter_rule() {
     });
     let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
     match err {
-        CompositionError::LifecycleObjectDataThroughInterpolationParameter {
-            param, verb, ..
-        } => {
+        CompositionError::LifecycleObjectDataThroughInterpolationParameter { param, verb, .. } => {
             assert_eq!(param, "target");
             assert_eq!(verb, "proxy");
         }
@@ -1933,9 +1905,7 @@ fn proxy_with_authored_yaml_preserves_native_and_quoted_scalar_types() {
     )
     .expect("authored YAML parses");
 
-    let stack = config
-        .stack(LifecycleSignal::Failure)
-        .expect("failure stack");
+    let stack = config.stack(LifecycleSignal::Failure).expect("failure stack");
     let LifecycleActionKind::LifecycleControl(LifecycleControlAction::Proxy { with, .. }) =
         &stack[0].actions[0].kind
     else {
@@ -1960,10 +1930,7 @@ fn proxy_with_authored_yaml_preserves_native_and_quoted_scalar_types() {
         Expr::StringLiteral("phase-{{ iteration }}".into())
     );
     let Some(ProxyWithValue::Object(nested)) = with.get("nested") else {
-        panic!(
-            "`nested` should type as an object: {:?}",
-            with.get("nested")
-        );
+        panic!("`nested` should type as an object: {:?}", with.get("nested"));
     };
     assert_eq!(
         nested.get("area"),
@@ -2059,11 +2026,10 @@ fn proxy_with_authored_yaml_empty_mapping_is_accepted() {
     assert!(with.is_empty());
 }
 
+
 #[test]
 fn action_value_to_expr_rejects_direct_array() {
-    let err = action_value_to_expr(&json!([1, 2, 3]))
-        .unwrap_err()
-        .to_string();
+    let err = action_value_to_expr(&json!([1, 2, 3])).unwrap_err().to_string();
     assert!(
         err.contains("array values are not supported"),
         "unexpected error: {err}"

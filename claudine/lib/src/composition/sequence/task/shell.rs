@@ -413,10 +413,7 @@ impl TaskShellRunner for SystemTaskShell {
         let wait_outcome = loop {
             #[cfg(test)]
             if self.fail_wait
-                && captured
-                    .lock()
-                    .map(|buffer| !buffer.is_empty())
-                    .unwrap_or(true)
+                && captured.lock().map(|buffer| !buffer.is_empty()).unwrap_or(true)
             {
                 // Modeling `try_wait` failing while everything still runs and
                 // output is already in the pipes — the shape the epilogue's
@@ -784,15 +781,14 @@ impl ProcessTree {
             }
             return Err(std::io::Error::other(error));
         }
-        Ok(Self {
-            job: job.0 as isize,
-        })
+        Ok(Self { job: job.0 as isize })
     }
 
     /// Terminate every process in the tree, not merely the direct child.
     fn terminate(&self, _child: &mut Child) {
         unsafe {
-            let _ = windows::Win32::System::JobObjects::TerminateJobObject(as_handle(self.job), 1);
+            let _ =
+                windows::Win32::System::JobObjects::TerminateJobObject(as_handle(self.job), 1);
         }
     }
 }
@@ -802,7 +798,8 @@ impl Drop for ProcessTree {
     /// Reap every remaining member of the Job. See the Unix twin.
     fn drop(&mut self) {
         unsafe {
-            let _ = windows::Win32::System::JobObjects::TerminateJobObject(as_handle(self.job), 1);
+            let _ =
+                windows::Win32::System::JobObjects::TerminateJobObject(as_handle(self.job), 1);
             // Kill-on-close makes the close a backstop for the terminate.
             let _ = windows::Win32::Foundation::CloseHandle(as_handle(self.job));
         }

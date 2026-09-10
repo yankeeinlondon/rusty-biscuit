@@ -33,14 +33,12 @@ use super::normalize::normalize_plan;
 /// reference is authored inside the composition source, so the source
 /// document's directory is the base and the launch directory is never a
 /// fallback here.
-pub fn resolve_sequence_reference(
-    raw: &str,
-    source_path: &Path,
-) -> Result<PathBuf, CompositionError> {
-    let file_ref = FileReference::new(raw).map_err(|e| CompositionError::SequenceExternalLoad {
-        context: format!("`{raw}`"),
-        source: e.into(),
-    })?;
+pub fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathBuf, CompositionError> {
+    let file_ref =
+        FileReference::new(raw).map_err(|e| CompositionError::SequenceExternalLoad {
+            context: format!("`{raw}`"),
+            source: e.into(),
+        })?;
 
     let base_dir = source_path.parent().unwrap_or_else(|| Path::new("."));
     let ctx = build_sequence_resolution_context(&file_ref, base_dir, source_path);
@@ -63,9 +61,11 @@ pub fn resolve_sequence_reference_in_context(
     source_path: &Path,
     request_context: &FileResolutionContext,
 ) -> Result<PathBuf, CompositionError> {
-    let file_ref = FileReference::new(raw).map_err(|e| CompositionError::SequenceExternalLoad {
-        context: format!("`{raw}`"),
-        source: e.into(),
+    let file_ref = FileReference::new(raw).map_err(|e| {
+        CompositionError::SequenceExternalLoad {
+            context: format!("`{raw}`"),
+            source: e.into(),
+        }
     })?;
     file_ref
         .resolve_in_context(&request_context.for_source(source_path))

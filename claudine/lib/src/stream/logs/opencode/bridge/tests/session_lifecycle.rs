@@ -273,10 +273,7 @@ fn step_loop_dedup_resets_after_step_exit() {
         .iter()
         .filter(|e| matches!(e, SemanticEvent::Info { message, .. } if message.starts_with("step_loop ")))
         .count();
-    assert_eq!(
-        step_loops, 2,
-        "exit should reset dedup so the next step=0 emits again"
-    );
+    assert_eq!(step_loops, 2, "exit should reset dedup so the next step=0 emits again");
 }
 
 #[test]
@@ -513,3 +510,4 @@ fn subagent_start_is_not_dedup_gated_by_stdout_event_seen() {
         SemanticEvent::SubagentStart { .. }
     ));
 }
+

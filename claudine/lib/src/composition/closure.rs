@@ -160,7 +160,8 @@ pub fn apply_inline_closure(
         ));
     }
 
-    let original_md: darkmatter::markdown::Markdown = plan.original_document_text.clone().into();
+    let original_md: darkmatter::markdown::Markdown =
+        plan.original_document_text.clone().into();
     let original_fm = original_md.frontmatter().as_map();
     let mut harvested = IndexMap::new();
     let mut ignored_properties = Vec::new();
@@ -172,10 +173,7 @@ pub fn apply_inline_closure(
                     line: property.line,
                 });
             } else if !CLOSURE_OWNED_PROPERTIES.contains(&key.as_str()) {
-                harvested.insert(
-                    key.clone(),
-                    serialize_frontmatter_property(key, &property.value)?,
-                );
+                harvested.insert(key.clone(), serialize_frontmatter_property(key, &property.value)?);
             }
         }
     }
@@ -184,34 +182,40 @@ pub fn apply_inline_closure(
         .cloned()
         .partition(|key| original_fm.contains_key(key));
 
-    let doc_string =
-        rewrite_inline_document(&plan.original_document_text, replacement_body, &harvested)
-            .map_err(CompositionError::InlineRewriteFailed)?;
+    let doc_string = rewrite_inline_document(
+        &plan.original_document_text,
+        replacement_body,
+        &harvested,
+    )
+    .map_err(CompositionError::InlineRewriteFailed)?;
 
     let md: darkmatter::markdown::Markdown = doc_string.clone().into();
 
     let opts = inline_hash_options();
-    let stored =
-        parse_inline_stored_hash(&md, &opts).map_err(CompositionError::InlineHashMalformed)?;
+    let stored = parse_inline_stored_hash(&md, &opts)
+        .map_err(CompositionError::InlineHashMalformed)?;
     let mut decision = md
         .plan_hash_save(stored.as_ref(), &opts)
         .map_err(CompositionError::InlineHashMalformed)?;
     // Hash-save treats a missing stored hash as baseline creation, but every
     // successful inline closure is a known body mutation and must date it.
     decision.bump_last_updated = true;
-    let final_text =
-        darkmatter::markdown::hash::apply_hash_save_text(&doc_string, &decision, &opts, today)
-            .map_err(CompositionError::InlineHashMalformed)?
-            .unwrap_or(doc_string);
+    let final_text = darkmatter::markdown::hash::apply_hash_save_text(
+        &doc_string,
+        &decision,
+        &opts,
+        today,
+    )
+    .map_err(CompositionError::InlineHashMalformed)?
+    .unwrap_or(doc_string);
 
     let source_drift = detect_source_drift(&plan.original_document_text, target_path);
 
-    crate::config::atomic::atomic_write(target_path, final_text.as_bytes()).map_err(|e| {
-        CompositionError::AtomicWriteFailed {
+    crate::config::atomic::atomic_write(target_path, final_text.as_bytes())
+        .map_err(|e| CompositionError::AtomicWriteFailed {
             path: target_path.to_path_buf(),
             source: e,
-        }
-    })?;
+        })?;
 
     // Compute the post-write fm-segment-change signal for tooling that wants
     // to distinguish frontmatter drift from body drift. The `hash` and
@@ -376,9 +380,13 @@ fn rewrite_harvested_frontmatter(
     let mut edits = nodes
         .iter()
         .filter_map(|node| {
-            harvested
-                .get(&node.key)
-                .map(|fragment| (node.start, node.end, with_newline_style(fragment, newline)))
+            harvested.get(&node.key).map(|fragment| {
+                (
+                    node.start,
+                    node.end,
+                    with_newline_style(fragment, newline),
+                )
+            })
         })
         .collect::<Vec<_>>();
 
@@ -472,7 +480,9 @@ fn semantic_top_level_key(line: &str) -> Option<String> {
     parsed.as_object()?.keys().next().cloned()
 }
 
-fn top_level_key_locations(yaml: &str) -> Result<IndexMap<String, usize>, CompositionError> {
+fn top_level_key_locations(
+    yaml: &str,
+) -> Result<IndexMap<String, usize>, CompositionError> {
     let mut locations = IndexMap::new();
     for (index, line) in yaml.lines().enumerate() {
         let Some(key) = semantic_top_level_key(line) else {
@@ -539,10 +549,7 @@ fn detect_source_drift(original: &str, target_path: &Path) -> SourceDrift {
             unclassified_frontmatter_drift_restored: source_frontmatter_region(
                 original,
                 original_body,
-            ) != source_frontmatter_region(
-                &current,
-                current_body,
-            ),
+            ) != source_frontmatter_region(&current, current_body),
             body_drift_restored,
             ..SourceDrift::default()
         };
@@ -599,12 +606,10 @@ fn serialize_frontmatter_property(
     let mut map = serde_json::Map::new();
     map.insert(key.to_string(), value.clone());
     let serialized = biscuit_file::serde_yaml_ng::to_string(&serde_json::Value::Object(map))
-        .map_err(
-            |source| CompositionError::InlineResponseFrontmatterSerialize {
-                key: key.to_string(),
-                source,
-            },
-        )?;
+        .map_err(|source| CompositionError::InlineResponseFrontmatterSerialize {
+            key: key.to_string(),
+            source,
+        })?;
     let mut lines = serialized.lines();
     let Some(first) = lines.next() else {
         return Err(CompositionError::InvalidInlineResponse(format!(

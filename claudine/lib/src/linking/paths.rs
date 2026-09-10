@@ -403,10 +403,7 @@ mod tests {
             paths.repo_root.display(),
             cwd.display()
         );
-        assert_eq!(
-            paths.for_scope(ResourceScope::User).len(),
-            ALL_PROVIDERS.len()
-        );
+        assert_eq!(paths.for_scope(ResourceScope::User).len(), ALL_PROVIDERS.len());
     }
 
     #[test]

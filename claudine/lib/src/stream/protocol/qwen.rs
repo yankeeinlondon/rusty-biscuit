@@ -78,10 +78,7 @@ pub struct QwenSystem {
 
 impl QwenSystem {
     pub fn is_session_start(&self) -> bool {
-        matches!(
-            self.subtype.as_deref(),
-            Some("session_start") | Some("init")
-        )
+        matches!(self.subtype.as_deref(), Some("session_start") | Some("init"))
     }
 
     pub fn into_init(self) -> QwenInit {

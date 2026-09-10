@@ -214,14 +214,18 @@ fn invalid_action_syntax_fails() {
 fn max_must_be_positive() {
     let source = make_source(&[("loop", json!({"while": "true", "max": 0}))]);
     let err = resolve_loop_config(&source).unwrap_err();
-    assert!(matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("greater than zero")));
+    assert!(
+        matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("greater than zero"))
+    );
 }
 
 #[test]
 fn fail_fast_must_be_boolean() {
     let source = make_source(&[("loop", json!({"while": "true", "fail_fast": "false"}))]);
     let err = resolve_loop_config(&source).unwrap_err();
-    assert!(matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("loop.fail_fast")));
+    assert!(
+        matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("loop.fail_fast"))
+    );
 }
 
 #[test]
@@ -265,7 +269,9 @@ fn on_rate_limit_unknown_value_is_rejected() {
 fn on_rate_limit_non_string_is_rejected() {
     let source = make_source(&[("loop", json!({"while": "true", "on_rate_limit": true}))]);
     let err = resolve_loop_config(&source).unwrap_err();
-    assert!(matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("must be a string")));
+    assert!(
+        matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("must be a string"))
+    );
 }
 
 #[test]
@@ -292,7 +298,9 @@ fn action_object_value_is_required_for_value_ops() {
         json!({"while": "true", "actions": {"op": "set", "prop": "done"}}),
     )]);
     let err = resolve_loop_config(&source).unwrap_err();
-    assert!(matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("missing `value`")));
+    assert!(
+        matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("missing `value`"))
+    );
 }
 
 #[test]
@@ -363,7 +371,9 @@ fn structured_action_missing_prop() {
         json!({"while": "true", "actions": {"op": "increment"}}),
     )]);
     let err = resolve_loop_config(&source).unwrap_err();
-    assert!(matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("missing `prop`")));
+    assert!(
+        matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("missing `prop`"))
+    );
 }
 
 #[test]

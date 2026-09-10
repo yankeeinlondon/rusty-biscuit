@@ -21,14 +21,8 @@ fn stdout_progress_event_resets_stalled_generation_state() {
     let mut stdout = stdout_progress_observer(&bridge);
 
     // Accumulate retry churn on the stderr side.
-    assert_eq!(
-        bridge.ingest(STREAMED_LLM_CALL),
-        StderrIngestOutcome::Consumed
-    );
-    assert_eq!(
-        bridge.ingest(STREAMED_LLM_CALL),
-        StderrIngestOutcome::Consumed
-    );
+    assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+    assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
     assert_eq!(bridge.generation_count_since_progress(), 2);
     let progress_before = bridge.last_progress_at();
 
@@ -215,12 +209,10 @@ fn stdout_progress_keeps_a_progressing_run_from_tripping_the_guard() {
     // and now trips, proving the guard is still armed after the reset.
     bridge.ingest(STREAMED_LLM_CALL);
     assert!(
-        matches!(
-            rx.try_recv(),
-            Ok(EarlyTermination::StalledGeneration { .. })
-        ),
+        matches!(rx.try_recv(), Ok(EarlyTermination::StalledGeneration { .. })),
         "the guard must still trip once churn resumes past the threshold",
     );
 }
 
 // ── E5 glue-mode signal shim ────────────────────────────────────────
+

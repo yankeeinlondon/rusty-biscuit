@@ -233,10 +233,7 @@ fn refresh_provider_blocking_none_source_writes_empty_listing() {
     assert_eq!(service.shell_command_fetch_attempts(), 0);
 
     let listing = service.cached_listing(Provider::QwenCode).unwrap();
-    assert!(
-        listing.is_empty(),
-        "expected empty listing, got {listing:?}"
-    );
+    assert!(listing.is_empty(), "expected empty listing, got {listing:?}");
     assert!(service.is_valid(Provider::QwenCode, "qwen3-coder-plus"));
 }
 
@@ -363,8 +360,10 @@ async fn concurrent_opencode_refreshes_run_fetcher_once() {
 
     let s1 = service.clone();
     let s2 = service.clone();
-    let first_handle = tokio::spawn(async move { s1.refresh_provider(Provider::OpenCode).await });
-    let second_handle = tokio::spawn(async move { s2.refresh_provider(Provider::OpenCode).await });
+    let first_handle =
+        tokio::spawn(async move { s1.refresh_provider(Provider::OpenCode).await });
+    let second_handle =
+        tokio::spawn(async move { s2.refresh_provider(Provider::OpenCode).await });
 
     // Wait until the first (and only) fetcher invocation has begun
     // and is parked on `release.notified()`. Then give the second

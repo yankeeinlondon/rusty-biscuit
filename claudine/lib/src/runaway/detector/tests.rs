@@ -31,20 +31,16 @@ fn vc_2_1_captured_six_line_cycle_trips_at_threshold() {
     let mut det = detector();
     // One-time preamble: must not contribute to the cycle.
     det.feed("This is the final listening.\n");
-    let cycle = [
-        "Done.\n",
-        "No more.\n",
-        "End.\n",
-        "STOP.\n",
-        "OK.\n",
-        "Bye.\n",
-    ];
+    let cycle = ["Done.\n", "No more.\n", "End.\n", "STOP.\n", "OK.\n", "Bye.\n"];
     // 29 cycles (well under threshold) must NOT trip.
     assert!(feed_cycle(&mut det, &cycle, 29).is_none());
     // The 30th cycle pushes the trip.
     let trip = feed_cycle(&mut det, &cycle, 1).expect("30 cycles should trip");
     match trip {
-        Trip::RunawayRepetition { cycle_len, repeats } => {
+        Trip::RunawayRepetition {
+            cycle_len,
+            repeats,
+        } => {
             assert_eq!(cycle_len, 6);
             assert!(
                 repeats >= MAX_REPETITION_ALLOWED,
@@ -68,7 +64,10 @@ fn vc_2_2_single_line_spam_trips_at_l1() {
     // 30 cycles: trips at L=1, repeats=30.
     let trip = feed_cycle(&mut det, &["STOP.\n"], 1).expect("30 cycles should trip");
     match trip {
-        Trip::RunawayRepetition { cycle_len, repeats } => {
+        Trip::RunawayRepetition {
+            cycle_len,
+            repeats,
+        } => {
             assert_eq!(cycle_len, 1);
             assert_eq!(repeats, 30);
         }
@@ -86,7 +85,10 @@ fn vc_2_3_blank_line_flood_trips() {
     // Blanks are kept as `""` (B3), so a blank flood is an L=1 cycle.
     let trip = feed_cycle(&mut det, &["\n"], MAX_REPETITION_ALLOWED);
     match trip.expect("blank flood should trip") {
-        Trip::RunawayRepetition { cycle_len, repeats } => {
+        Trip::RunawayRepetition {
+            cycle_len,
+            repeats,
+        } => {
             assert_eq!(cycle_len, 1);
             assert!(repeats >= MAX_REPETITION_ALLOWED);
         }
@@ -103,14 +105,7 @@ fn vc_2_4_realistic_repetitive_output_does_not_trip() {
     let mut det = detector();
 
     // A 6-line cycle repeated only 10× (well under the threshold).
-    let cycle = [
-        "Done.\n",
-        "No more.\n",
-        "End.\n",
-        "STOP.\n",
-        "OK.\n",
-        "Bye.\n",
-    ];
+    let cycle = ["Done.\n", "No more.\n", "End.\n", "STOP.\n", "OK.\n", "Bye.\n"];
     assert!(feed_cycle(&mut det, &cycle, 10).is_none());
 
     // A numbered list 1..100: monotonically increasing, never
@@ -184,9 +179,7 @@ fn vc_2_6_literal_ignore_case_and_regex_inline_flags() {
     }])
     .unwrap();
     let mut det = ContentDetector::new(DetectorConfig::default(), re_inline);
-    let trip = det
-        .feed("ok STOP.\n")
-        .expect("(?i) inline flag should match");
+    let trip = det.feed("ok STOP.\n").expect("(?i) inline flag should match");
     assert!(matches!(trip, Trip::ExitExpression { .. }));
 
     // Literal default (case-sensitive) does NOT match "StopS" against
@@ -258,10 +251,7 @@ fn vc_2_8_ring_buffer_stays_bounded() {
     for i in 0..100_000u64 {
         joined.push_str(&format!("line {i}\n"));
     }
-    assert!(
-        det.feed(&joined).is_none(),
-        "distinct lines should not trip"
-    );
+    assert!(det.feed(&joined).is_none(), "distinct lines should not trip");
     assert!(
         det.ring.len() <= 2 * MAX_CYCLE_LENGTH,
         "ring should be bounded at 2 * MAX_CYCLE_LENGTH ({}), got {}",
@@ -402,7 +392,10 @@ fn trailing_whitespace_is_normalized_for_cycle_match() {
     }
     let trip = det.feed(&joined).expect("normalized cycle should trip");
     match trip {
-        Trip::RunawayRepetition { cycle_len, repeats } => {
+        Trip::RunawayRepetition {
+            cycle_len,
+            repeats,
+        } => {
             assert_eq!(cycle_len, 1, "trailing whitespace must be normalized");
             assert!(repeats >= MAX_REPETITION_ALLOWED);
         }

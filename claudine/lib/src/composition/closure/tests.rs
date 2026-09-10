@@ -62,10 +62,11 @@ fn immutable_prompt_warning_reports_its_line_after_blank_lines() {
     let file = dir.path().join("doc.md");
     let original = "---\nprompt: test\n---\nOld body\n";
     std::fs::write(&file, original).unwrap();
-    let replacement =
-        extract_replacement_parts("---\n\n\nprompt: rewritten\n---\nNew body\n").unwrap();
+    let replacement = extract_replacement_parts("---\n\n\nprompt: rewritten\n---\nNew body\n")
+        .unwrap();
 
-    let result = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01").unwrap();
+    let result = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01")
+        .unwrap();
 
     assert_eq!(
         result.ignored_properties,
@@ -85,11 +86,13 @@ fn immutable_prompt_warning_line_counts_every_response_protocol_line() {
     let file = dir.path().join("doc.md");
     let original = "---\nprompt: test\n---\nOld body\n";
     std::fs::write(&file, original).unwrap();
-    let replacement =
-        extract_replacement_parts("---\n\n# provider note\n\nprompt: rewritten\n---\nNew body\n")
-            .unwrap();
+    let replacement = extract_replacement_parts(
+        "---\n\n# provider note\n\nprompt: rewritten\n---\nNew body\n",
+    )
+    .unwrap();
 
-    let result = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01").unwrap();
+    let result = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01")
+        .unwrap();
 
     assert_eq!(
         result.ignored_properties,
@@ -111,8 +114,10 @@ fn replacement_parts_rejects_invalid_frontmatter_shapes() {
         assert!(
             matches!(
                 extract_replacement_parts(response),
-                Err(CompositionError::InvalidInlineResponse(_)
-                    | CompositionError::InlineResponseFrontmatterYaml { .. })
+                Err(
+                    CompositionError::InvalidInlineResponse(_)
+                        | CompositionError::InlineResponseFrontmatterYaml { .. }
+                )
             ),
             "response should be invalid: {response:?}"
         );
@@ -186,7 +191,8 @@ fn apply_closure_applies_every_response_property_except_closure_owned() {
         "New body\n",
     ))
     .unwrap();
-    let result = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01").unwrap();
+    let result = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01")
+        .unwrap();
     assert_eq!(result.inserted_properties, ["generated_by", "title"]);
     assert_eq!(result.refreshed_properties, ["access_points"]);
     assert_eq!(
@@ -211,24 +217,21 @@ fn apply_closure_refreshes_generated_value_on_later_run() {
     let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
     std::fs::write(&file, original).unwrap();
 
-    let first_replacement =
-        extract_replacement_parts("---\ngenerated_by: first-run\n---\nFirst generated body\n")
-            .unwrap();
-    let first =
-        apply_inline_closure(&plan(original), &first_replacement, &file, "2026-09-01").unwrap();
+    let first_replacement = extract_replacement_parts(
+        "---\ngenerated_by: first-run\n---\nFirst generated body\n",
+    )
+    .unwrap();
+    let first = apply_inline_closure(&plan(original), &first_replacement, &file, "2026-09-01")
+        .unwrap();
     assert_eq!(first.inserted_properties, ["generated_by"]);
 
     let after_first = std::fs::read_to_string(&file).unwrap();
-    let second_replacement =
-        extract_replacement_parts("---\ngenerated_by: second-run\n---\nSecond generated body\n")
-            .unwrap();
-    let second = apply_inline_closure(
-        &plan(&after_first),
-        &second_replacement,
-        &file,
-        "2026-09-02",
+    let second_replacement = extract_replacement_parts(
+        "---\ngenerated_by: second-run\n---\nSecond generated body\n",
     )
     .unwrap();
+    let second = apply_inline_closure(&plan(&after_first), &second_replacement, &file, "2026-09-02")
+        .unwrap();
     assert_eq!(second.refreshed_properties, ["generated_by"]);
     assert!(second.inserted_properties.is_empty());
 
@@ -292,7 +295,13 @@ fn apply_closure_reports_value_drift_but_silences_reformat_only_drift() {
     )
     .unwrap();
     let replacement = extract_replacement_parts("New body\n").unwrap();
-    let result = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01").unwrap();
+    let result = apply_inline_closure(
+        &plan(original),
+        &replacement,
+        &file,
+        "2026-09-01",
+    )
+    .unwrap();
     assert_eq!(result.restored_frontmatter_properties, ["title"]);
     assert!(!result.unclassified_frontmatter_drift_restored);
     assert!(result.body_drift_restored);
@@ -321,9 +330,18 @@ fn apply_closure_reports_added_and_removed_frontmatter_properties() {
     .unwrap();
 
     let replacement = extract_replacement_parts("New body\n").unwrap();
-    let result = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01").unwrap();
+    let result = apply_inline_closure(
+        &plan(original),
+        &replacement,
+        &file,
+        "2026-09-01",
+    )
+    .unwrap();
 
-    assert_eq!(result.restored_frontmatter_properties, ["owner", "added"]);
+    assert_eq!(
+        result.restored_frontmatter_properties,
+        ["owner", "added"]
+    );
     assert!(!result.unclassified_frontmatter_drift_restored);
     assert!(!result.body_drift_restored);
 }
@@ -342,8 +360,13 @@ fn apply_closure_reports_unclassified_frontmatter_drift_without_body_drift() {
         std::fs::write(&file, current).unwrap();
 
         let replacement = extract_replacement_parts("New body\n").unwrap();
-        let result =
-            apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01").unwrap();
+        let result = apply_inline_closure(
+            &plan(original),
+            &replacement,
+            &file,
+            "2026-09-01",
+        )
+        .unwrap();
 
         assert!(
             result.unclassified_frontmatter_drift_restored,
@@ -363,10 +386,12 @@ fn apply_closure_rejects_unchanged_body_even_with_response_metadata() {
     let file = dir.path().join("doc.md");
     let original = "---\nprompt: test\n---\nOriginal body\n";
     std::fs::write(&file, original).unwrap();
-    let replacement =
-        extract_replacement_parts("---\ngenerated_by: inventory\n---\nOriginal body\n").unwrap();
-    let error =
-        apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01").unwrap_err();
+    let replacement = extract_replacement_parts(
+        "---\ngenerated_by: inventory\n---\nOriginal body\n",
+    )
+    .unwrap();
+    let error = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01")
+        .unwrap_err();
     assert!(matches!(error, CompositionError::InvalidInlineResponse(_)));
     assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
 }
@@ -441,17 +466,23 @@ fn apply_closure_cleans_body_and_hashes_the_cleaned_text() {
     let file = dir.path().join("doc.md");
     let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
     std::fs::write(&file, original).unwrap();
-    let replacement =
-        extract_replacement_parts("# Generated Title\nParagraph without blank line\n").unwrap();
-    let result = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01").unwrap();
+    let replacement = extract_replacement_parts(
+        "# Generated Title\nParagraph without blank line\n",
+    )
+    .unwrap();
+    let result = apply_inline_closure(
+        &plan(original),
+        &replacement,
+        &file,
+        "2026-09-01",
+    )
+    .unwrap();
     assert!(result.body_cleaned);
     let written = std::fs::read_to_string(file).unwrap();
     assert!(written.contains("# Generated Title\n\nParagraph without blank line"));
     let markdown: darkmatter::markdown::Markdown = written.into();
     let options = inline_hash_options();
-    let stored = parse_inline_stored_hash(&markdown, &options)
-        .unwrap()
-        .unwrap();
+    let stored = parse_inline_stored_hash(&markdown, &options).unwrap().unwrap();
     let comparison = markdown.compare_hash(&stored, &options).unwrap();
     assert!(!comparison.frontmatter_changed && !comparison.body_changed);
 }
@@ -465,11 +496,18 @@ fn apply_closure_preserves_quoted_last_updated_style() {
         let dir = TempDir::new().unwrap();
         // A quote character is not a legal file name on Windows.
         let file = dir.path().join(format!("quoted-{label}.md"));
-        let original =
-            format!("---\nprompt: test\nlast_updated: {quote}2026-01-01{quote}\n---\nOld body\n");
+        let original = format!(
+            "---\nprompt: test\nlast_updated: {quote}2026-01-01{quote}\n---\nOld body\n"
+        );
         std::fs::write(&file, &original).unwrap();
         let replacement = extract_replacement_parts("New body\n").unwrap();
-        apply_inline_closure(&plan(&original), &replacement, &file, "2026-09-01").unwrap();
+        apply_inline_closure(
+            &plan(&original),
+            &replacement,
+            &file,
+            "2026-09-01",
+        )
+        .unwrap();
         assert!(std::fs::read_to_string(file).unwrap().contains(expected));
     }
 }
@@ -494,8 +532,13 @@ fn apply_closure_rejects_malformed_hash_without_mutation() {
     let original = "---\nprompt: test\nhash: not-a-hash\nlast_updated: 2026-01-01\n---\nOld body\n";
     std::fs::write(&file, original).unwrap();
     let replacement = extract_replacement_parts("New body\n").unwrap();
-    let error =
-        apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01").unwrap_err();
+    let error = apply_inline_closure(
+        &plan(original),
+        &replacement,
+        &file,
+        "2026-09-01",
+    )
+    .unwrap_err();
     assert!(matches!(error, CompositionError::InlineHashMalformed(_)));
     assert_eq!(std::fs::read_to_string(file).unwrap(), original);
 }
@@ -508,7 +551,13 @@ fn apply_closure_is_deterministic_for_fixed_inputs() {
     let replacement = extract_replacement_parts("New body\n").unwrap();
     let run = || {
         std::fs::write(&file, original).unwrap();
-        apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01").unwrap();
+        apply_inline_closure(
+            &plan(original),
+            &replacement,
+            &file,
+            "2026-09-01",
+        )
+        .unwrap();
         std::fs::read_to_string(&file).unwrap()
     };
     assert_eq!(run(), run());
@@ -528,7 +577,13 @@ fn apply_closure_second_identical_run_is_byte_idempotent() {
     )
     .unwrap();
     let first = std::fs::read_to_string(&file).unwrap();
-    let error = apply_inline_closure(&plan(&first), &replacement, &file, "2026-09-01").unwrap_err();
+    let error = apply_inline_closure(
+        &plan(&first),
+        &replacement,
+        &file,
+        "2026-09-01",
+    )
+    .unwrap_err();
     assert!(matches!(error, CompositionError::InvalidInlineResponse(_)));
     assert_eq!(std::fs::read_to_string(file).unwrap(), first);
 }
@@ -540,14 +595,27 @@ fn frontmatter_changed_reports_generated_nodes_but_not_body_only_changes() {
     let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
     std::fs::write(&body_only_file, original).unwrap();
     let body = extract_replacement_parts("New body\n").unwrap();
-    let body_result =
-        apply_inline_closure(&plan(original), &body, &body_only_file, "2026-09-01").unwrap();
+    let body_result = apply_inline_closure(
+        &plan(original),
+        &body,
+        &body_only_file,
+        "2026-09-01",
+    )
+    .unwrap();
     assert!(!body_result.frontmatter_changed);
 
     let generated_file = dir.path().join("generated.md");
     std::fs::write(&generated_file, original).unwrap();
-    let generated = extract_replacement_parts("---\ngenerated_by: stub\n---\nNew body\n").unwrap();
-    let generated_result =
-        apply_inline_closure(&plan(original), &generated, &generated_file, "2026-09-01").unwrap();
+    let generated = extract_replacement_parts(
+        "---\ngenerated_by: stub\n---\nNew body\n",
+    )
+    .unwrap();
+    let generated_result = apply_inline_closure(
+        &plan(original),
+        &generated,
+        &generated_file,
+        "2026-09-01",
+    )
+    .unwrap();
     assert!(generated_result.frontmatter_changed);
 }

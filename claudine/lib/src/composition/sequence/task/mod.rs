@@ -522,9 +522,10 @@ impl TaskExecution<'_> {
                     code: run.exit_code,
                 },
             )),
-            Err(error) => {
-                PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error))
-            }
+            Err(error) => PrimaryOutcome::failed(TaskDiagnostic::from_composition(
+                TaskStage::Primary,
+                &error,
+            )),
         }
     }
 
@@ -607,7 +608,7 @@ impl TaskExecution<'_> {
                 return PrimaryOutcome::failed_with(
                     collected.join("\n"),
                     TaskDiagnostic::from_composition(
-                        TaskStage::Primary,
+                    TaskStage::Primary,
                         &CompositionError::SequenceTaskShellRunaway {
                             task: self.label(),
                             command: command.clone(),
@@ -620,7 +621,7 @@ impl TaskExecution<'_> {
                 return PrimaryOutcome::failed_with(
                     collected.join("\n"),
                     TaskDiagnostic::from_composition(
-                        TaskStage::Primary,
+                    TaskStage::Primary,
                         &CompositionError::SequenceTaskShellTimeout {
                             task: self.label(),
                             command: command.clone(),
@@ -633,7 +634,7 @@ impl TaskExecution<'_> {
                 return PrimaryOutcome::failed_with(
                     collected.join("\n"),
                     TaskDiagnostic::from_composition(
-                        TaskStage::Primary,
+                    TaskStage::Primary,
                         &CompositionError::SequenceTaskShellExit {
                             task: self.label(),
                             command: command.clone(),
@@ -700,8 +701,10 @@ impl TaskExecution<'_> {
     fn parse_stacks(&self) -> Result<ParsedStacks, CompositionError> {
         let parse = |raw: Option<&Value>, signal, property| match raw {
             None | Some(Value::Null) => Ok(None),
-            Some(value) => parse_task_action_stack(signal, value, &self.task.origin_path, property)
-                .map(|items| (!items.is_empty()).then_some(items)),
+            Some(value) => {
+                parse_task_action_stack(signal, value, &self.task.origin_path, property)
+                    .map(|items| (!items.is_empty()).then_some(items))
+            }
         };
         Ok(ParsedStacks {
             setup: parse(self.task.setup.as_ref(), LifecycleSignal::Start, "setup")?,
@@ -726,10 +729,7 @@ impl TaskExecution<'_> {
                     key: key.clone(),
                 });
             }
-            evaluated.insert(
-                key.clone(),
-                self.resolve_value(value, &format!("params.{key}"))?,
-            );
+            evaluated.insert(key.clone(), self.resolve_value(value, &format!("params.{key}"))?);
         }
         Ok(evaluated)
     }
@@ -747,7 +747,11 @@ impl TaskExecution<'_> {
             }
         }
         let snapshot = self.runtime.map(|runtime| runtime.snapshot());
-        layered_set_overrides(Some(&Value::Object(base)), snapshot.as_ref(), self.overlay)
+        layered_set_overrides(
+            Some(&Value::Object(base)),
+            snapshot.as_ref(),
+            self.overlay,
+        )
     }
 
     /// The per-command budget: the authored `timeout:`, else 30 seconds.
@@ -786,14 +790,12 @@ impl TaskExecution<'_> {
             .with_resolution_context(resolution)
             .strict()
             .compose()
-            .map_err(
-                |error: MarkdownError| CompositionError::SequenceTaskValueResolution {
-                    task: self.label(),
-                    field: field.to_string(),
-                    message: error.to_string(),
-                    source: Box::new(error),
-                },
-            )
+            .map_err(|error: MarkdownError| CompositionError::SequenceTaskValueResolution {
+                task: self.label(),
+                field: field.to_string(),
+                message: error.to_string(),
+                source: Box::new(error),
+            })
     }
 
     /// The runtime mutation map as it stands right now.

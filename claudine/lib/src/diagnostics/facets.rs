@@ -266,10 +266,7 @@ mod tests {
     fn disposition_default_severity_follows_catalog() {
         assert_eq!(Disposition::Transient.default_severity(), Severity::Warning);
         assert_eq!(Disposition::Throttled.default_severity(), Severity::Warning);
-        assert_eq!(
-            Disposition::NeedsInput.default_severity(),
-            Severity::Warning
-        );
+        assert_eq!(Disposition::NeedsInput.default_severity(), Severity::Warning);
         assert_eq!(Disposition::Correctable.default_severity(), Severity::Error);
         assert_eq!(
             Disposition::Unrecoverable.default_severity(),

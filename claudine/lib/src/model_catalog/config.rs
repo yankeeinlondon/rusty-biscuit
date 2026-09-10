@@ -30,7 +30,9 @@ pub fn merge_overrides(
                 }
                 set.into_iter().collect()
             }
-            ModelOverrideMode::Replace => entry.values().into_iter().map(str::to_string).collect(),
+            ModelOverrideMode::Replace => {
+                entry.values().into_iter().map(str::to_string).collect()
+            }
         },
     }
 }

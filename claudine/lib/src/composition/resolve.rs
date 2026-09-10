@@ -21,9 +21,8 @@ use super::types::ResolvedCompositionSource;
 /// [`MarkdownLoadCause`].
 fn map_load_error(path: &Path, err: MarkdownError) -> CompositionError {
     match err {
-        MarkdownError::FrontmatterParse { .. } | MarkdownError::FrontmatterFenceMismatch { .. } => {
-            CompositionError::FrontmatterParse(err)
-        }
+        MarkdownError::FrontmatterParse { .. }
+        | MarkdownError::FrontmatterFenceMismatch { .. } => CompositionError::FrontmatterParse(err),
         other => CompositionError::MarkdownLoad {
             path: path.to_path_buf(),
             source: MarkdownLoadCause::Parse(Box::new(other)),
@@ -68,11 +67,9 @@ pub fn capture_file_resolution_context() -> Result<FileResolutionContext, Compos
         .ok()
         .flatten()
         .map(|repo| repo.repo_root().to_path_buf());
-    let repo_info = git_root.as_deref().and_then(|root| {
-        sniff::filesystem::repo::detect_repo_structure(root)
-            .ok()
-            .flatten()
-    });
+    let repo_info = git_root
+        .as_deref()
+        .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
     let mut context = FileResolutionContext::new(&cwd);
     if let (Some(root), Some(repo)) = (git_root.as_ref(), repo_info.as_ref()) {
         let catalog = darkmatter::markdown::compose::repository_scope_catalog(repo, root)
@@ -127,25 +124,21 @@ pub fn derive_request_context_for_source(
     // existing file, so `parent()` succeeds in every reachable case. The
     // `InvalidReference` propagation keeps the API honest if a future caller
     // violates that invariant.
-    let base_dir = source_path
-        .parent()
-        .ok_or_else(|| CompositionError::InvalidReference {
-            reference: biscuit_file::to_portable_string(source_path),
-            source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                "resolved source path has no parent directory: {}",
-                biscuit_file::to_portable_string(source_path)
-            )),
-        })?;
+    let base_dir = source_path.parent().ok_or_else(|| CompositionError::InvalidReference {
+        reference: biscuit_file::to_portable_string(source_path),
+        source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
+            "resolved source path has no parent directory: {}",
+            biscuit_file::to_portable_string(source_path)
+        )),
+    })?;
 
     let git_root = sniff::filesystem::git::GitRepo::discover(base_dir)
         .ok()
         .flatten()
         .map(|repo| repo.repo_root().to_path_buf());
-    let repo_info = git_root.as_deref().and_then(|root| {
-        sniff::filesystem::repo::detect_repo_structure(root)
-            .ok()
-            .flatten()
-    });
+    let repo_info = git_root
+        .as_deref()
+        .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
     let mut context = FileResolutionContext::from_snapshot(
         base_dir,
         provisional_context.home_dir().map(Path::to_path_buf),
@@ -182,11 +175,12 @@ pub fn resolve_composition_source_in_context(
     // resolution phase so trace inspection / `--perf` reporting can see
     // when the `biscuit-file` resolver dominates compose prep cost.
     let _span = tracing::info_span!("compose_prep.file_reference", file = %file_ref).entered();
-    let reference =
-        FileReference::new(file_ref).map_err(|source| CompositionError::InvalidReference {
+    let reference = FileReference::new(file_ref).map_err(|source| {
+        CompositionError::InvalidReference {
             reference: file_ref.to_string(),
             source,
-        })?;
+        }
+    })?;
 
     let detailed = reference.resolve_detailed(context);
     let resolved_path = match detailed.outcome() {
@@ -219,11 +213,12 @@ pub fn resolve_composition_source_in_context(
         ));
     }
 
-    let original_text =
-        fs::read_to_string(&resolved_path).map_err(|e| CompositionError::MarkdownLoad {
+    let original_text = fs::read_to_string(&resolved_path).map_err(|e| {
+        CompositionError::MarkdownLoad {
             path: resolved_path.clone(),
             source: MarkdownLoadCause::Read(e),
-        })?;
+        }
+    })?;
 
     // Parse fallibly so malformed frontmatter surfaces as a real error. The
     // infallible `From<String>` drops a `FrontmatterParse` error and returns an
@@ -425,13 +420,7 @@ pub fn prompt_magic_roots(
         push_unique_root(&mut roots, root.join(".claudine").join("prompts"));
         push_unique_root(&mut roots, root.join("docs"));
         for peer in [
-            ".claude",
-            ".codex",
-            ".gemini",
-            ".opencode",
-            ".goose",
-            ".qwen",
-            ".kimi",
+            ".claude", ".codex", ".gemini", ".opencode", ".goose", ".qwen", ".kimi",
         ] {
             push_unique_root(&mut roots, root.join(peer).join("skills"));
         }
@@ -501,10 +490,7 @@ fn read_source_text_for_enrichment_in_context(
 ) -> Option<String> {
     let reference = FileReference::new(file_ref).ok()?;
     let resolved_path = reference.resolve_in_context(context).ok()??;
-    let ext = resolved_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = resolved_path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if !matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown") {
         return None;
     }

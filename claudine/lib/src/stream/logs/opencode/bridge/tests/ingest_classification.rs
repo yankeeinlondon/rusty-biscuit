@@ -345,7 +345,8 @@ fn snapshot_warn_line_with_absorbed_trailing_still_carries_context() {
     match &bridge.sink.events[0] {
         SemanticEvent::Warning { message, extra } => {
             assert!(
-                message.contains("/repo/.env") && message.contains("failed to add snapshot files"),
+                message.contains("/repo/.env")
+                    && message.contains("failed to add snapshot files"),
                 "expected file path and diagnostic in message, got {message:?}",
             );
             assert_string(extra, "level", "WARN");
@@ -392,8 +393,7 @@ fn boot_banner_is_parsed_and_consumed_without_emitting_event() {
     // proxied to the user's terminal — return `Consumed` so the raw
     // stderr passthrough does not echo it as debug output.
     let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
-    let line =
-        "INFO  2026-05-12T20:00:11 +97ms service=default version=1.14.48 args=[\"run\"] opencode";
+    let line = "INFO  2026-05-12T20:00:11 +97ms service=default version=1.14.48 args=[\"run\"] opencode";
     assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
     assert_eq!(bridge.sink.events.len(), 0);
     let state = bridge.state.lock().unwrap();
@@ -403,3 +403,4 @@ fn boot_banner_is_parsed_and_consumed_without_emitting_event() {
 // ------------------------------------------------------------------
 // Phase-4 cross-stream dedup and summary enrichment
 // ------------------------------------------------------------------
+

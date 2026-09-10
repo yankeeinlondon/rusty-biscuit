@@ -25,8 +25,9 @@ use crate::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSin
 use crate::stream::summary::RateLimitInfo;
 
 use crate::stream::logs::opencode::classify::{
-    asset_type_as_str, classify, classify_raw, get_http_status_description, max_reset_at,
-    merge_rate_limit, render_malformed_asset_message, render_rate_limit_message, strip_ansi,
+    asset_type_as_str, classify, classify_raw, get_http_status_description,
+    max_reset_at, merge_rate_limit, render_malformed_asset_message, render_rate_limit_message,
+    strip_ansi,
 };
 use crate::stream::logs::opencode::events::{
     AssetType, LogClassification, LogLevel, OpenCodeLogRecord, ParsedOpenCodeStderrLine,
@@ -34,11 +35,8 @@ use crate::stream::logs::opencode::events::{
 };
 use crate::stream::logs::opencode::state::SharedStderrState;
 
-use errors::{MAX_CONSECUTIVE_STREAM_ERRORS, is_stream_error, stream_error_fingerprint};
-use format::{
-    base_extra, format_http_response_message, format_llm_call_message, format_permission_message,
-    format_snapshot_message, non_empty, summarize_snapshot_tags,
-};
+use errors::{is_stream_error, stream_error_fingerprint, MAX_CONSECUTIVE_STREAM_ERRORS};
+use format::{base_extra, format_llm_call_message, format_http_response_message, format_permission_message, format_snapshot_message, non_empty, summarize_snapshot_tags};
 use session::ChildSessionInfo;
 
 /// Whether the bridge took ownership of an incoming stderr log line and
@@ -561,7 +559,8 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         if is_stream_error(&record) {
             let fingerprint = stream_error_fingerprint(&record);
             if self.last_stream_error_fingerprint.as_ref() == Some(&fingerprint) {
-                self.consecutive_stream_errors = self.consecutive_stream_errors.saturating_add(1);
+                self.consecutive_stream_errors =
+                    self.consecutive_stream_errors.saturating_add(1);
             } else {
                 // New (or first) fingerprint: this error is the first of a new
                 // run rather than a continuation of the previous one.
@@ -1113,6 +1112,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         StderrIngestOutcome::Consumed
     }
 }
+
 
 #[cfg(test)]
 mod tests;

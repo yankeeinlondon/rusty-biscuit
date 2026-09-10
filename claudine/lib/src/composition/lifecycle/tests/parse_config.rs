@@ -213,10 +213,8 @@ fn all_seven_signals_have_canonical_property_names() {
 
 #[test]
 fn signal_all_iterates_in_canonical_order() {
-    let names: Vec<&'static str> = LifecycleSignal::ALL
-        .iter()
-        .map(|s| s.property_name())
-        .collect();
+    let names: Vec<&'static str> =
+        LifecycleSignal::ALL.iter().map(|s| s.property_name()).collect();
     assert_eq!(
         names,
         vec![
@@ -352,10 +350,7 @@ fn empty_frontmatter_yields_empty_seven_event_config() {
     assert!(config.is_empty());
     for s in LifecycleSignal::ALL {
         assert!(config.get(s).is_none(), "expected {s:?} to be None");
-        assert!(
-            config.stack(s).is_none(),
-            "expected stack for {s:?} to be None"
-        );
+        assert!(config.stack(s).is_none(), "expected stack for {s:?} to be None");
     }
 }
 
@@ -420,3 +415,4 @@ fn stop_is_valid_in_every_event() {
         );
     }
 }
+

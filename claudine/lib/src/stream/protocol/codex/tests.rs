@@ -46,8 +46,9 @@ fn codex_turn_completed_with_usage() {
 
 #[test]
 fn codex_error_flat_fields() {
-    let event =
-        parse(r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#);
+    let event = parse(
+        r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
+    );
     let CodexEvent::Error(err) = event else {
         panic!("expected Error");
     };
@@ -57,8 +58,9 @@ fn codex_error_flat_fields() {
 
 #[test]
 fn codex_error_nested_object() {
-    let event =
-        parse(r#"{"type":"stream.error","error":{"type":"network","message":"socket closed"}}"#);
+    let event = parse(
+        r#"{"type":"stream.error","error":{"type":"network","message":"socket closed"}}"#,
+    );
     let CodexEvent::StreamError(err) = event else {
         panic!("expected StreamError");
     };
@@ -139,7 +141,8 @@ fn codex_item_permission_request_typed() {
 
 #[test]
 fn codex_item_unknown_kind_falls_back() {
-    let event = parse(r#"{"type":"item.started","item":{"id":"x","type":"some_brand_new_kind"}}"#);
+    let event =
+        parse(r#"{"type":"item.started","item":{"id":"x","type":"some_brand_new_kind"}}"#);
     let CodexEvent::ItemStarted(env) = event else {
         panic!("expected ItemStarted");
     };

@@ -569,10 +569,7 @@ fn increment_error_includes_resolved_non_numeric_excerpt() {
     };
     assert_eq!(property, "area");
     assert_eq!(found, "string");
-    assert!(
-        excerpt.contains("claudine-cli"),
-        "excerpt should quote the value: {excerpt}"
-    );
+    assert!(excerpt.contains("claudine-cli"), "excerpt should quote the value: {excerpt}");
 }
 
 #[test]
@@ -616,10 +613,7 @@ fn decrement_error_includes_resolved_non_numeric_excerpt() {
     };
     assert_eq!(property, "area");
     assert_eq!(found, "string");
-    assert!(
-        excerpt.contains("claudine-cli"),
-        "excerpt should quote the value: {excerpt}"
-    );
+    assert!(excerpt.contains("claudine-cli"), "excerpt should quote the value: {excerpt}");
 }
 
 #[test]

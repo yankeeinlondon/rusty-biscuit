@@ -18,7 +18,10 @@ fn source_path(source: &SystemPromptSource) -> Option<&std::path::Path> {
 fn invocation_context_error(
     error: crate::invocation_context::InvocationContextError,
 ) -> crate::error::ClaudineError {
-    crate::error::ClaudineError::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, error))
+    crate::error::ClaudineError::Io(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        error,
+    ))
 }
 
 struct ResolvedPromptInput {
@@ -34,11 +37,7 @@ impl ResolvedPromptInput {
     ) -> Result<Self, crate::error::ClaudineError> {
         let (source, raw_text) = resolved;
         let source_context = source_path(&source)
-            .map(|path| {
-                invocation
-                    .derive_source(path)
-                    .map_err(invocation_context_error)
-            })
+            .map(|path| invocation.derive_source(path).map_err(invocation_context_error))
             .transpose()?;
         Ok(Self {
             source,
@@ -163,8 +162,9 @@ fn compose_prompt_markdown(
         );
     }
     if let Some(source_context) = source_context {
-        options =
-            options.with_file_resolution_context(source_context.file_resolution_context().clone());
+        options = options.with_file_resolution_context(
+            source_context.file_resolution_context().clone(),
+        );
     } else if shared_ctx.is_none()
         && shell_cwd.is_none()
         && let Some(path) = source_path(source)
@@ -380,14 +380,16 @@ pub fn resolve_and_prepare_for_session_with_context(
     // cost twice (system prompt + appendix); a single pre-capture pays
     // it once.
     let lookup_started = std::time::Instant::now();
-    let primary_result =
-        crate::system_prompt::resolve::resolve_system_prompt_source_with_invocation(
-            args, context, invocation,
-        );
+    let primary_result = crate::system_prompt::resolve::resolve_system_prompt_source_with_invocation(
+        args,
+        context,
+        invocation,
+    );
     let appendix_candidates_result = if non_interactive {
         Some(
             crate::system_prompt::resolve::resolve_non_interactive_candidates_with_invocation(
-                context, invocation,
+                context,
+                invocation,
             ),
         )
     } else {
@@ -414,7 +416,10 @@ pub fn resolve_and_prepare_for_session_with_context(
         context,
         invocation,
     );
-    invocation.record_system_prompt_timing("runtime capture", runtime_capture_started.elapsed());
+    invocation.record_system_prompt_timing(
+        "runtime capture",
+        runtime_capture_started.elapsed(),
+    );
     let shared_ctx = shared_ctx_result?;
 
     // Pin `::shell` execution to the agent's launch workspace so directives
@@ -431,7 +436,10 @@ pub fn resolve_and_prepare_for_session_with_context(
         Some(input) => prepare_system_prompt_with_ctx(input, Some(&shared_ctx), shell_cwd),
         None => Ok(ResolvedSystemPrompt::None),
     };
-    invocation.record_system_prompt_timing("primary compose", primary_compose_started.elapsed());
+    invocation.record_system_prompt_timing(
+        "primary compose",
+        primary_compose_started.elapsed(),
+    );
     let effective = effective_result?;
 
     if !non_interactive {
@@ -444,7 +452,10 @@ pub fn resolve_and_prepare_for_session_with_context(
         Some(&shared_ctx),
         shell_cwd,
     );
-    invocation.record_system_prompt_timing("appendix compose", appendix_compose_started.elapsed());
+    invocation.record_system_prompt_timing(
+        "appendix compose",
+        appendix_compose_started.elapsed(),
+    );
     let appendix = appendix_result?;
 
     Ok(match effective {

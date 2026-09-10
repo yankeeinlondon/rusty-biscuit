@@ -316,11 +316,7 @@ fn io_failure_projects_full_ordered_candidate_detail() {
     let candidates = detail["candidates"]
         .as_array()
         .expect("candidates must be an array");
-    assert_eq!(
-        candidates.len(),
-        1,
-        "the terminal I/O probe must survive: {detail}"
-    );
+    assert_eq!(candidates.len(), 1, "the terminal I/O probe must survive: {detail}");
 
     let source_candidate = repo.path().join("prompts/blocker/target.md");
     assert_eq!(
@@ -397,10 +393,7 @@ fn snapshot_resolver_ignores_later_cwd_and_environment_changes() {
     std::fs::write(repo.path().join("env.md"), "env").unwrap();
 
     let mut env = std::collections::HashMap::new();
-    env.insert(
-        "SNAPSHOT_ROOT".to_string(),
-        repo.path().display().to_string(),
-    );
+    env.insert("SNAPSHOT_ROOT".to_string(), repo.path().display().to_string());
     let snapshot = FileResolutionContext::new(&docs)
         .with_repository_root(repo.path())
         .with_home_dir(&home)
@@ -415,8 +408,12 @@ fn snapshot_resolver_ignores_later_cwd_and_environment_changes() {
     let source = nested.join("target.md");
     let child = resolve_harness_path_in_context("./child.md", &source, &snapshot).unwrap();
     let home_file = resolve_harness_path_in_context("~/home.md", &source, &snapshot).unwrap();
-    let env_file =
-        resolve_harness_path_in_context("{{SNAPSHOT_ROOT}}/env.md", &source, &snapshot).unwrap();
+    let env_file = resolve_harness_path_in_context(
+        "{{SNAPSHOT_ROOT}}/env.md",
+        &source,
+        &snapshot,
+    )
+    .unwrap();
 
     std::env::set_current_dir(prior_cwd).unwrap();
     match prior_root {

@@ -111,14 +111,15 @@ fn load_line_delimited(path: &Path) -> Result<Value, CompositionError> {
         if line.is_empty() {
             continue;
         }
-        let value: Value =
-            serde_json::from_str(line).map_err(|e| CompositionError::SequenceExternalLoad {
+        let value: Value = serde_json::from_str(line).map_err(|e| {
+            CompositionError::SequenceExternalLoad {
                 context: biscuit_file::to_portable_string(path),
                 source: SequenceLoadCause::JsonLine {
                     line: offset + 1,
                     source: e,
                 },
-            })?;
+            }
+        })?;
         items.push(value);
     }
     Ok(Value::Array(items))
@@ -141,13 +142,13 @@ pub fn apply_offset<'a>(root: &'a Value, path: &str) -> Result<&'a Value, Compos
         }
         walked.push_str(segment);
 
-        current = current
-            .get(segment)
-            .ok_or_else(|| CompositionError::SequenceOffsetMissing {
+        current = current.get(segment).ok_or_else(|| {
+            CompositionError::SequenceOffsetMissing {
                 path: path.to_string(),
                 failed_at: walked.clone(),
                 found: json_type_name(current).to_string(),
-            })?;
+            }
+        })?;
     }
     Ok(current)
 }

@@ -1,12 +1,12 @@
+use super::*;
 use super::expr::{SourceExpressionLookup, render_interpolated};
 use super::grammar::{SequenceSourceSpec, SourceOperator, classify_source};
 use super::source::{resolve_sequence_reference, resolve_sequence_reference_in_context};
-use super::*;
-use crate::composition::error::SequenceLoadCause;
 use biscuit_file::{FileReference, FileReferenceError, FileResolutionContext};
+use serde_json::Value;
+use crate::composition::error::SequenceLoadCause;
 use darkmatter::markdown::compose::{ComposeOptions, TransclusionError};
 use darkmatter::markdown::{Frontmatter, Markdown, MarkdownError};
-use serde_json::Value;
 use serde_json::json;
 use serial_test::serial;
 use std::fs;
@@ -591,7 +591,10 @@ fn external_sequence_reuses_request_snapshot_after_environment_mutation() {
     let snapshot = biscuit_file::FileResolutionContext::new(dir.path()).with_env(env);
     let source = make_source(
         &dir,
-        &[("sequence", json!("{{SEQ_SNAPSHOT_ROOT}}/steps.yaml"))],
+        &[(
+            "sequence",
+            json!("{{SEQ_SNAPSHOT_ROOT}}/steps.yaml"),
+        )],
         "Prompt",
     );
 
@@ -630,8 +633,8 @@ fn tilde_reference_expands_against_home_directory() {
     fs::create_dir_all(source_path.parent().unwrap()).unwrap();
     fs::write(&source_path, "---\n---\nbody\n").unwrap();
 
-    let request_context =
-        FileResolutionContext::new(source_path.parent().unwrap()).with_home_dir(&home_dir);
+    let request_context = FileResolutionContext::new(source_path.parent().unwrap())
+        .with_home_dir(&home_dir);
     let resolved =
         resolve_sequence_reference_in_context("~/steps.yaml", &source_path, &request_context)
             .unwrap();
@@ -779,7 +782,8 @@ fn missing_environment_variable_surface_is_preserved() {
     unsafe {
         std::env::remove_var("SEQ_ROOT");
     }
-    let error = resolve_sequence_reference("{{SEQ_ROOT}}/steps.yaml", &source_path).unwrap_err();
+    let error =
+        resolve_sequence_reference("{{SEQ_ROOT}}/steps.yaml", &source_path).unwrap_err();
 
     assert!(
         matches!(
@@ -884,7 +888,8 @@ fn external_missing_file_reference_yields_not_found() {
 
     // A magic reference that resolves to nothing under the source's git
     // scope surfaces the NotFound synthetic.
-    let err = resolve_sequence_reference("@no-such-dir/missing.yaml", &source_path).unwrap_err();
+    let err =
+        resolve_sequence_reference("@no-such-dir/missing.yaml", &source_path).unwrap_err();
     assert!(
         matches!(
             err,
@@ -913,13 +918,8 @@ fn sequence_load_cause_home_dir_display() {
 /// Normalize a list of scalar names into a plan for overlay assertions.
 fn scalar_plan(names: &[&str]) -> SequencePlan {
     let items: Vec<serde_json::Value> = names.iter().map(|n| json!(n)).collect();
-    normalize::normalize_plan(
-        &items,
-        SequenceSource::Inline,
-        Path::new("/seq/doc.md"),
-        true,
-    )
-    .expect("scalar plan normalizes")
+    normalize::normalize_plan(&items, SequenceSource::Inline, Path::new("/seq/doc.md"), true)
+        .expect("scalar plan normalizes")
 }
 
 #[test]
@@ -1025,10 +1025,7 @@ fn overlay_as_set_overrides_emits_new_root_keys_and_reserves_them() {
     assert!(map["sequence_id"].is_string());
     // `outputs` is NOT an overlay key: the runtime layer below owns the
     // accumulator, and an overlay copy would reset it at every step boundary.
-    assert!(
-        !map.contains_key("outputs"),
-        "overlay must not emit `outputs`"
-    );
+    assert!(!map.contains_key("outputs"), "overlay must not emit `outputs`");
     // First step: previous is null, next is the second state object.
     assert!(map["previous"].is_null());
     assert_eq!(map["next"]["name"], json!("b"));
@@ -1045,7 +1042,10 @@ fn object_step_extracts_state_and_rejects_reserved_state_key() {
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
-        &[("sequence", json!([{"name": "alpha", "id": "hand-picked"}]))],
+        &[(
+            "sequence",
+            json!([{"name": "alpha", "id": "hand-picked"}]),
+        )],
         "Prompt",
     );
     let err = resolve_sequence_plan(&source).unwrap_err();
@@ -1071,10 +1071,7 @@ fn object_step_rejects_two_executables() {
     );
     let err = resolve_sequence_plan(&source).unwrap_err();
     assert!(
-        matches!(
-            err,
-            CompositionError::SequenceExclusiveExecutable { index: 0, .. }
-        ),
+        matches!(err, CompositionError::SequenceExclusiveExecutable { index: 0, .. }),
         "two executable fields must be rejected, got: {err:?}"
     );
 }
@@ -1116,10 +1113,7 @@ fn single_executable_step_extracts_executable_and_options() {
     let step = &plan.steps[0];
     let executable = step.executable.as_ref().expect("executable extracted");
     assert_eq!(executable.field, ExecutableField::Prompt);
-    assert_eq!(
-        executable.options.get("params"),
-        Some(&json!({"topic": "x"}))
-    );
+    assert_eq!(executable.options.get("params"), Some(&json!({"topic": "x"})));
     // Arbitrary state stays in the generated state; task keys never leak into it.
     assert_eq!(step.state.extra.get("color"), Some(&json!("blue")));
     assert!(!step.state.extra.contains_key("prompt"));
@@ -1466,10 +1460,7 @@ mod grammar_tests {
     #[test]
     fn non_list_non_string_values_are_rejected() {
         let error = classify_source(&json!(42)).unwrap_err();
-        assert!(
-            matches!(error, CompositionError::SequenceInvalid(_)),
-            "got: {error}"
-        );
+        assert!(matches!(error, CompositionError::SequenceInvalid(_)), "got: {error}");
     }
 
     // -- negative suffix syntax --------------------------------------------
@@ -1559,11 +1550,7 @@ mod source_resolution {
 
     /// Resolve a plan from a data file written into a temp dir, referenced by
     /// the given `sequence:` source string.
-    fn plan_from(
-        file: &str,
-        contents: &str,
-        sequence: &str,
-    ) -> Result<SequencePlan, CompositionError> {
+    fn plan_from(file: &str, contents: &str, sequence: &str) -> Result<SequencePlan, CompositionError> {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(file), contents).unwrap();
         let source = make_source(&dir, &[("sequence", json!(sequence))], "Prompt");
@@ -1662,12 +1649,8 @@ mod source_resolution {
 
     #[test]
     fn a_missing_offset_path_reports_where_it_failed() {
-        let error = plan_from(
-            "t.yaml",
-            "colors:\n  data: [1]\n",
-            "t.yaml -> colors.missing",
-        )
-        .unwrap_err();
+        let error = plan_from("t.yaml", "colors:\n  data: [1]\n", "t.yaml -> colors.missing")
+            .unwrap_err();
         assert!(
             matches!(
                 error,
@@ -1680,12 +1663,8 @@ mod source_resolution {
 
     #[test]
     fn an_offset_to_a_non_list_reports_the_observed_type() {
-        let error = plan_from(
-            "t.yaml",
-            "colors:\n  data: hello\n",
-            "t.yaml -> colors.data",
-        )
-        .unwrap_err();
+        let error =
+            plan_from("t.yaml", "colors:\n  data: hello\n", "t.yaml -> colors.data").unwrap_err();
         assert!(
             matches!(
                 error,
@@ -1776,10 +1755,7 @@ mod source_resolution {
         )
         .unwrap_err();
         assert!(
-            matches!(
-                error,
-                CompositionError::SequenceOperatorEmptyName { index: 0, .. }
-            ),
+            matches!(error, CompositionError::SequenceOperatorEmptyName { index: 0, .. }),
             "got: {error}"
         );
     }
@@ -1808,10 +1784,7 @@ mod source_resolution {
     fn formal_documents_stay_strict() {
         let error = plan_from("s.yaml", "sequence:\n  - color: red\n", "s.yaml").unwrap_err();
         assert!(
-            matches!(
-                error,
-                CompositionError::SequenceStepNameMissing { index: 0 }
-            ),
+            matches!(error, CompositionError::SequenceStepNameMissing { index: 0 }),
             "got: {error}"
         );
     }
@@ -1846,10 +1819,7 @@ mod source_resolution {
     fn generated_ordinal_names_still_produce_ids() {
         let plan = plan_from("d.json", "[{\"a\": 1}, {\"a\": 2}]", "d.json").unwrap();
         assert_eq!(
-            plan.steps
-                .iter()
-                .map(|s| s.state.id.clone())
-                .collect::<Vec<_>>(),
+            plan.steps.iter().map(|s| s.state.id.clone()).collect::<Vec<_>>(),
             vec!["1", "2"]
         );
     }
@@ -1911,9 +1881,11 @@ mod dynamic_sources {
             ("markdown unordered", "- a\n- b\n- c"),
             ("markdown ordered", "1. a\n2. b\n3. c"),
         ] {
-            let plan =
-                plan_from_frontmatter(&[("raw", json!(text)), ("sequence", json!("{{ raw }}"))])
-                    .unwrap();
+            let plan = plan_from_frontmatter(&[
+                ("raw", json!(text)),
+                ("sequence", json!("{{ raw }}")),
+            ])
+            .unwrap();
             assert_eq!(names(&plan), vec!["a", "b", "c"], "for {label}");
         }
     }
@@ -1941,9 +1913,11 @@ mod dynamic_sources {
     /// Expression sources are foreign data, so numeric entries coerce.
     #[test]
     fn expression_sources_normalize_leniently() {
-        let plan =
-            plan_from_frontmatter(&[("items", json!([1, 2])), ("sequence", json!("{{ items }}"))])
-                .unwrap();
+        let plan = plan_from_frontmatter(&[
+            ("items", json!([1, 2])),
+            ("sequence", json!("{{ items }}")),
+        ])
+        .unwrap();
         assert_eq!(names(&plan), vec!["1", "2"]);
     }
 
@@ -2015,10 +1989,7 @@ mod dynamic_sources {
         fs::write(dir.path().join("s.yaml"), "sequence: []\n").unwrap();
         let source = make_source(&dir, &[("sequence", json!("s.yaml"))], "Prompt");
         let error = resolve_sequence_plan(&source).unwrap_err();
-        assert!(
-            matches!(error, CompositionError::SequenceEmpty),
-            "got: {error}"
-        );
+        assert!(matches!(error, CompositionError::SequenceEmpty), "got: {error}");
     }
 
     // -- shell sources ----------------------------------------------------

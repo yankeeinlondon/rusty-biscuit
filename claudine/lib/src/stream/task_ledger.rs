@@ -420,9 +420,7 @@ fn compose_message(incomplete: &[SubagentOutcome], prior: Option<&str>) -> Strin
         .collect::<Vec<_>>()
         .join(", ");
     match prior {
-        Some(clause) => {
-            format!("{count} sub-agent {noun} did not complete; {clause}; incomplete: {listed}")
-        }
+        Some(clause) => format!("{count} sub-agent {noun} did not complete; {clause}; incomplete: {listed}"),
         None => format!("{count} sub-agent {noun} did not complete: {listed}"),
     }
 }

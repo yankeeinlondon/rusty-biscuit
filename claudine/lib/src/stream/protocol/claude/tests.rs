@@ -120,8 +120,9 @@ fn claude_error_event_deserializes() {
 
 #[test]
 fn claude_assistant_error_event_deserializes() {
-    let event =
-        parse(r#"{"type":"assistant.error","error":{"type":"rate_limit","message":"slow down"}}"#);
+    let event = parse(
+        r#"{"type":"assistant.error","error":{"type":"rate_limit","message":"slow down"}}"#,
+    );
     let ClaudeEvent::AssistantError(err) = event else {
         panic!("expected AssistantError");
     };
@@ -168,7 +169,8 @@ fn claude_result_round_trips_through_json() {
 
 #[test]
 fn claude_result_total_cost_usd_preferred() {
-    let event = parse(r#"{"type":"result","duration_ms":0,"total_cost_usd":0.185,"cost_usd":0.5}"#);
+    let event =
+        parse(r#"{"type":"result","duration_ms":0,"total_cost_usd":0.185,"cost_usd":0.5}"#);
     let ClaudeEvent::Result(result) = event else {
         panic!("expected Result");
     };
@@ -214,7 +216,8 @@ fn claude_rate_limit_nested_metadata_deserializes() {
 
 #[test]
 fn claude_tool_use_deserializes() {
-    let event = parse(r#"{"type":"tool_use","id":"tu-1","name":"bash","input":{"command":"ls"}}"#);
+    let event =
+        parse(r#"{"type":"tool_use","id":"tu-1","name":"bash","input":{"command":"ls"}}"#);
     let ClaudeEvent::ToolUse(tu) = event else {
         panic!("expected ToolUse");
     };
@@ -231,7 +234,8 @@ fn claude_tool_use_deserializes() {
 
 #[test]
 fn claude_tool_result_deserializes() {
-    let event = parse(r#"{"type":"tool_result","tool_use_id":"tu-1","content":"file contents"}"#);
+    let event =
+        parse(r#"{"type":"tool_result","tool_use_id":"tu-1","content":"file contents"}"#);
     let ClaudeEvent::ToolResult(tr) = event else {
         panic!("expected ToolResult");
     };
@@ -270,8 +274,9 @@ fn claude_init_tolerates_unknown_fields() {
 
 #[test]
 fn claude_unknown_event_type_fails_typed_deserialization() {
-    let err =
-        serde_json::from_str::<ClaudeEvent>(r#"{"type":"some_unknown_event","text":"ignored"}"#);
+    let err = serde_json::from_str::<ClaudeEvent>(
+        r#"{"type":"some_unknown_event","text":"ignored"}"#,
+    );
     assert!(err.is_err());
 }
 

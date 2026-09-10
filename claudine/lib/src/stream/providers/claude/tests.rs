@@ -48,7 +48,10 @@ fn new_parser() -> (
 #[test]
 fn init_emits_session_start() {
     let (sink, mut parser) = new_parser();
-    parser.feed_line(r#"{"type":"init","session_id":"s1","model":"claude","apiKeySource":"none"}"#);
+    parser
+        .feed_line(
+            r#"{"type":"init","session_id":"s1","model":"claude","apiKeySource":"none"}"#,
+        );
     let events = sink.snapshot();
     assert_eq!(events.len(), 1);
     match &events[0] {
@@ -71,8 +74,10 @@ fn init_emits_session_start() {
 #[test]
 fn assistant_text_emits_output_text_and_accumulates() {
     let (sink, mut parser) = new_parser();
-    parser.feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Hello"}]}"#);
-    parser.feed_line(r#"{"type":"assistant","content":[{"type":"text","text":", world"}]}"#);
+    parser
+        .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Hello"}]}"#);
+    parser
+        .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":", world"}]}"#);
     let kinds = sink.kinds();
     assert_eq!(kinds, vec!["output_text", "output_text"]);
     let summary = parser.finish(0);
@@ -99,7 +104,10 @@ fn thinking_delta_emits_reasoning() {
 #[test]
 fn text_delta_emits_output_text() {
     let (sink, mut parser) = new_parser();
-    parser.feed_line(r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}"#);
+    parser
+        .feed_line(
+            r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}"#,
+        );
     let events = sink.snapshot();
     assert!(matches!(
         events[0],
@@ -110,8 +118,10 @@ fn text_delta_emits_output_text() {
 #[test]
 fn tool_use_and_result_emit_typed_events() {
     let (sink, mut parser) = new_parser();
-    parser.feed_line(r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}"#);
-    parser.feed_line(r#"{"type":"tool_result","tool_use_id":"t1","content":"ok"}"#);
+    parser
+        .feed_line(r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}"#);
+    parser
+        .feed_line(r#"{"type":"tool_result","tool_use_id":"t1","content":"ok"}"#);
 
     let events = sink.snapshot();
     assert_eq!(events.len(), 2);
@@ -313,7 +323,8 @@ fn allowed_warning_status_renders_soft_notice_with_correct_window() {
 #[test]
 fn non_throttled_rate_limit_without_message_or_status_emits_no_warning() {
     let (sink, mut parser) = new_parser();
-    parser.feed_line(r#"{"type":"rate_limit_event","is_throttled":false}"#);
+    parser
+        .feed_line(r#"{"type":"rate_limit_event","is_throttled":false}"#);
     assert!(sink.snapshot().is_empty());
     let summary = parser.finish(0);
     assert_eq!(summary.rate_limit.and_then(|rl| rl.message), None);
@@ -322,9 +333,10 @@ fn non_throttled_rate_limit_without_message_or_status_emits_no_warning() {
 #[test]
 fn error_event_emits_terminal_error() {
     let (sink, mut parser) = new_parser();
-    parser.feed_line(
-        r#"{"type":"error","error":{"type":"billing_error","message":"Insufficient credits"}}"#,
-    );
+    parser
+        .feed_line(
+            r#"{"type":"error","error":{"type":"billing_error","message":"Insufficient credits"}}"#,
+        );
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::Error {
@@ -411,7 +423,8 @@ fn malformed_json_emits_warning() {
 #[test]
 fn unknown_event_becomes_provider_extension() {
     let (sink, mut parser) = new_parser();
-    parser.feed_line(r#"{"type":"some_future_event","foo":"bar"}"#);
+    parser
+        .feed_line(r#"{"type":"some_future_event","foo":"bar"}"#);
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::ProviderExtension {
@@ -430,7 +443,8 @@ fn unknown_event_becomes_provider_extension() {
 #[test]
 fn task_started_becomes_subagent_start() {
     let (sink, mut parser) = new_parser();
-    parser.feed_line(r#"{"type":"task_started","task_id":"sa_1","name":"researcher"}"#);
+    parser
+        .feed_line(r#"{"type":"task_started","task_id":"sa_1","name":"researcher"}"#);
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::SubagentStart { name, id, .. } => {
@@ -444,9 +458,10 @@ fn task_started_becomes_subagent_start() {
 #[test]
 fn task_completed_becomes_subagent_stop() {
     let (sink, mut parser) = new_parser();
-    parser.feed_line(
-        r#"{"type":"task_completed","task_id":"sa_1","name":"researcher","status":"success"}"#,
-    );
+    parser
+        .feed_line(
+            r#"{"type":"task_completed","task_id":"sa_1","name":"researcher","status":"success"}"#,
+        );
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::SubagentStop {
@@ -463,7 +478,8 @@ fn task_completed_becomes_subagent_stop() {
 #[test]
 fn task_progress_becomes_info() {
     let (sink, mut parser) = new_parser();
-    parser.feed_line(r#"{"type":"task_progress","message":"working on it"}"#);
+    parser
+        .feed_line(r#"{"type":"task_progress","message":"working on it"}"#);
     let events = sink.snapshot();
     match &events[0] {
         SemanticEvent::Info { message, .. } => {
@@ -485,8 +501,10 @@ fn empty_and_whitespace_lines_emit_nothing() {
 #[test]
 fn multi_turn_concatenation() {
     let (sink, mut parser) = new_parser();
-    parser.feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"First. "}]}"#);
-    parser.feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Second."}]}"#);
+    parser
+        .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"First. "}]}"#);
+    parser
+        .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Second."}]}"#);
     assert_eq!(sink.kinds(), vec!["output_text", "output_text"]);
     let summary = parser.finish(0);
     assert_eq!(summary.assistant_text, "First. Second.");
@@ -495,7 +513,8 @@ fn multi_turn_concatenation() {
 #[test]
 fn large_init_arrays_not_stored_in_raw_summary() {
     let (_, mut parser) = new_parser();
-    parser.feed_line(r#"{"type":"init","session_id":"s","model":"m","tools":[{"name":"a"}]}"#);
+    parser
+        .feed_line(r#"{"type":"init","session_id":"s","model":"m","tools":[{"name":"a"}]}"#);
     parser
         .feed_line(r#"{"type":"result","duration_ms":1,"tools":["a"],"skills":["s"],"agents":["x"],"mcp_servers":["m"]}"#);
     let summary = parser.finish(0);
@@ -510,10 +529,12 @@ fn large_init_arrays_not_stored_in_raw_summary() {
 #[test]
 fn badges_derived_on_billing_error() {
     let (_, mut parser) = new_parser();
-    parser.feed_line(r#"{"type":"init","session_id":"s","model":"m"}"#);
-    parser.feed_line(
-        r#"{"type":"error","error":{"type":"billing_error","message":"Insufficient credits"}}"#,
-    );
+    parser
+        .feed_line(r#"{"type":"init","session_id":"s","model":"m"}"#);
+    parser
+        .feed_line(
+            r#"{"type":"error","error":{"type":"billing_error","message":"Insufficient credits"}}"#,
+        );
     let summary = parser.finish(1);
     assert_eq!(summary.badges.len(), 1);
     assert_eq!(
@@ -618,7 +639,8 @@ fn hook_events_emitted_after_session_start() {
         .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"SessionStart:startup","session_id":"s1"}"#);
     parser
         .feed_line(r#"{"type":"system","subtype":"hook_response","hook_id":"x","output":"ok","exit_code":0,"session_id":"s1"}"#);
-    parser.feed_line(r#"{"type":"init","session_id":"s1","model":"claude-opus-4-6"}"#);
+    parser
+        .feed_line(r#"{"type":"init","session_id":"s1","model":"claude-opus-4-6"}"#);
     let kinds: Vec<&'static str> = sink.kinds();
     let session_idx = kinds
         .iter()
@@ -643,10 +665,10 @@ fn hook_events_after_session_start_emit_inline() {
     // Hooks that arrive AFTER SessionStart must NOT be buffered — they
     // pass through inline to preserve live streaming semantics.
     let (sink, mut parser) = new_parser();
-    parser.feed_line(r#"{"type":"init","session_id":"s1","model":"claude-opus-4-6"}"#);
-    parser.feed_line(
-        r#"{"type":"system","subtype":"hook_started","hook_name":"PreToolUse","session_id":"s1"}"#,
-    );
+    parser
+        .feed_line(r#"{"type":"init","session_id":"s1","model":"claude-opus-4-6"}"#);
+    parser
+        .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"PreToolUse","session_id":"s1"}"#);
     let kinds: Vec<&'static str> = sink.kinds();
     // Order: session_start, then immediately provider_extension.
     assert_eq!(kinds.first(), Some(&"session_start"));
@@ -659,9 +681,8 @@ fn pre_init_hook_buffer_flushes_when_oversized() {
     // flush early so streaming wins over cosmetic ordering.
     let (sink, mut parser) = new_parser();
     for _ in 0..40 {
-        parser.feed_line(
-            r#"{"type":"system","subtype":"hook_started","hook_name":"X","session_id":"s1"}"#,
-        );
+        parser
+            .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"X","session_id":"s1"}"#);
     }
     let kinds: Vec<&'static str> = sink.kinds();
     let provider_ext_count = kinds.iter().filter(|k| **k == "provider_extension").count();
@@ -1054,10 +1075,7 @@ fn a_message_only_result_failure_survives_incomplete_subagent_finalization() {
     assert!(summary.is_error);
     assert_eq!(summary.error_kind.as_deref(), Some("incomplete_subagents"));
     let message = summary.error_message.as_deref().unwrap();
-    assert!(
-        message.contains("Provider rejected the request"),
-        "{message}"
-    );
+    assert!(message.contains("Provider rejected the request"), "{message}");
     assert!(message.contains("alpha"), "{message}");
     assert_eq!(summary.subagent_outcomes.len(), 1);
 }
@@ -1103,9 +1121,6 @@ fn a_padded_terminal_status_reaches_the_summary_byte_for_byte() {
         .collect();
     assert_eq!(
         live_statuses,
-        vec![
-            Some("  Evaporated  ".to_string()),
-            Some("  stopped ".to_string())
-        ]
+        vec![Some("  Evaporated  ".to_string()), Some("  stopped ".to_string())]
     );
 }

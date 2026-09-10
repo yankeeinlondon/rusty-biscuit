@@ -209,7 +209,10 @@ mod tests {
 
     #[test]
     fn allow_zero_seconds() {
-        assert_eq!(parse_timeout_allow_zero("0s", p()).unwrap(), Duration::ZERO);
+        assert_eq!(
+            parse_timeout_allow_zero("0s", p()).unwrap(),
+            Duration::ZERO
+        );
     }
 
     #[test]
@@ -222,7 +225,10 @@ mod tests {
 
     #[test]
     fn allow_zero_minutes() {
-        assert_eq!(parse_timeout_allow_zero("0m", p()).unwrap(), Duration::ZERO);
+        assert_eq!(
+            parse_timeout_allow_zero("0m", p()).unwrap(),
+            Duration::ZERO
+        );
     }
 
     #[test]

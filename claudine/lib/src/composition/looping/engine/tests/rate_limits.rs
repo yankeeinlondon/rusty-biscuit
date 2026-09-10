@@ -177,7 +177,9 @@ fn rate_limit_default_policy_is_pause() {
         &config,
         object(json!({"counter": 0})),
         LoopExecutionOptions::default(),
-        |_ctx| Ok(LoopIterationOutput::success("ok").with_rate_limit(Some(throttled(None, None)))),
+        |_ctx| {
+            Ok(LoopIterationOutput::success("ok").with_rate_limit(Some(throttled(None, None))))
+        },
     )
     .unwrap();
 
@@ -291,3 +293,5 @@ fn rate_limit_pause_is_interrupt_aware() {
 }
 
 // ── Seeded-loop integration tests ────────────────────────────────────
+
+

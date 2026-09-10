@@ -81,7 +81,11 @@ fn segment_text(segment: &Segment) -> String {
 ///
 /// An unparsable bound does not restrict (fail-open, mirroring union mode
 /// for unparsable observed versions).
-pub(crate) fn admits(observed: &ParsedVersion, since: Option<&str>, until: Option<&str>) -> bool {
+pub(crate) fn admits(
+    observed: &ParsedVersion,
+    since: Option<&str>,
+    until: Option<&str>,
+) -> bool {
     if let Some(bound) = since.and_then(parse)
         && *observed < bound
     {

@@ -10,11 +10,11 @@ use crate::stream::logs::opencode::events::{
 };
 
 use super::asset::{extract_provider_message, summarize_error_json};
-use super::error_context;
 use super::session::{
     classify_llm_call, classify_permission, classify_session, classify_session_prompt,
 };
 use super::text_util::{contains_any_ci, extract_reset_at, extract_status_code};
+use super::error_context;
 
 pub(super) fn classify_llm_failure(
     record: &OpenCodeLogRecord,
@@ -228,7 +228,8 @@ pub(super) fn infer_service_from_message(record: &OpenCodeLogRecord) -> &'static
 
     match msg {
         "loop" | "exiting loop"
-            if record.tags.contains_key("session.id") && record.tags.contains_key("step") =>
+            if record.tags.contains_key("session.id")
+                && record.tags.contains_key("step") =>
         {
             "session.prompt"
         }
@@ -238,7 +239,8 @@ pub(super) fn infer_service_from_message(record: &OpenCodeLogRecord) -> &'static
         // Both route to `llm` so the failure reaches `classify_llm_failure`; the
         // call start is still distinguished downstream by `classify_llm_call`.
         "stream" | "stream error"
-            if record.tags.contains_key("providerID") && record.tags.contains_key("modelID") =>
+            if record.tags.contains_key("providerID")
+                && record.tags.contains_key("modelID") =>
         {
             "llm"
         }

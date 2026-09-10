@@ -222,9 +222,7 @@ fn target_identity_path_in_expr(expr: &Expr) -> Option<String> {
     }
 
     match expr {
-        Expr::Variable(_)
-        | Expr::StringLiteral(_)
-        | Expr::NumberLiteral(_)
+        Expr::Variable(_) | Expr::StringLiteral(_) | Expr::NumberLiteral(_)
         | Expr::BoolLiteral(_) => None,
         Expr::MemberAccess { base, .. } => target_identity_path_in_expr(base),
         Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
@@ -233,17 +231,17 @@ fn target_identity_path_in_expr(expr: &Expr) -> Option<String> {
         Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
             target_identity_path_in_expr(left).or_else(|| target_identity_path_in_expr(right))
         }
-        Expr::Index { base, index } => {
-            target_identity_path_in_expr(base).or_else(|| target_identity_path_in_expr(index))
+        Expr::Index { base, index } => target_identity_path_in_expr(base)
+            .or_else(|| target_identity_path_in_expr(index)),
+        Expr::FunctionCall { args, .. } => {
+            args.iter().find_map(target_identity_path_in_expr)
         }
-        Expr::FunctionCall { args, .. } => args.iter().find_map(target_identity_path_in_expr),
         Expr::ArrayLiteral(items) => items.iter().find_map(target_identity_path_in_expr),
         Expr::ObjectLiteral(entries) => entries
             .iter()
             .find_map(|(_, value)| target_identity_path_in_expr(value)),
-        Expr::Fallback { primary, fallback } => {
-            target_identity_path_in_expr(primary).or_else(|| target_identity_path_in_expr(fallback))
-        }
+        Expr::Fallback { primary, fallback } => target_identity_path_in_expr(primary)
+            .or_else(|| target_identity_path_in_expr(fallback)),
         Expr::Ternary {
             condition,
             then_branch,

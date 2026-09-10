@@ -7,11 +7,12 @@
 //! referenced document are all decided before execution and must survive it
 //! unchanged.
 
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicBool;
 // Every `Instant` reader in this file is a Unix-only reap or interrupt test;
 // the `cmd` twins state their budgets as literals.
 #[cfg(unix)]
@@ -72,6 +73,7 @@ fn marker_path(tag: &str) -> PathBuf {
 }
 
 // -- backgrounded-descendant observation ------------------------------------
+
 
 /// A backgrounded descendant that publishes its own pid before it waits, so
 /// the reap that kills it is observable rather than inferred.
@@ -194,10 +196,7 @@ enum Channel {
 fn write_source(dir: &Path, name: &str, frontmatter: &[(&str, Value)], body: &str) -> String {
     let mut text = String::from("---\n");
     for (key, value) in frontmatter {
-        text.push_str(&format!(
-            "{key}: {}\n",
-            serde_json::to_string(value).unwrap()
-        ));
+        text.push_str(&format!("{key}: {}\n", serde_json::to_string(value).unwrap()));
     }
     text.push_str("---\n\n");
     text.push_str(body);
@@ -1425,12 +1424,7 @@ mod shell_tasks {
     #[test]
     fn the_system_shell_captures_a_pipeline() {
         let output = SystemTaskShell::default()
-            .run(
-                "echo hello | tr a-z A-Z",
-                Duration::from_secs(30),
-                None,
-                None,
-            )
+            .run("echo hello | tr a-z A-Z", Duration::from_secs(30), None, None)
             .unwrap();
 
         assert_eq!(output.exit_code, 0);
@@ -1445,12 +1439,7 @@ mod shell_tasks {
     #[test]
     fn the_system_shell_captures_a_pipeline() {
         let output = SystemTaskShell::default()
-            .run(
-                "echo hello | findstr hello",
-                Duration::from_secs(30),
-                None,
-                None,
-            )
+            .run("echo hello | findstr hello", Duration::from_secs(30), None, None)
             .unwrap();
 
         assert_eq!(output.exit_code, 0);
@@ -1466,12 +1455,7 @@ mod shell_tasks {
     fn the_system_shell_times_out_a_nested_tree() {
         let start = std::time::Instant::now();
         let output = SystemTaskShell::default()
-            .run(
-                "sh -c 'sh -c \"sleep 300\"'",
-                Duration::from_secs(2),
-                None,
-                None,
-            )
+            .run("sh -c 'sh -c \"sleep 300\"'", Duration::from_secs(2), None, None)
             .unwrap();
 
         assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
@@ -1552,8 +1536,9 @@ mod shell_tasks {
     #[cfg(unix)]
     #[test]
     fn the_system_shell_aborts_a_command_that_floods_stdout() {
-        let shell =
-            SystemTaskShell::with_volume_cap(crate::runaway::CaptureVolumeCap::new(true, 16, 1024));
+        let shell = SystemTaskShell::with_volume_cap(crate::runaway::CaptureVolumeCap::new(
+            true, 16, 1024,
+        ));
 
         let start = std::time::Instant::now();
         let output = shell
@@ -1561,9 +1546,7 @@ mod shell_tasks {
             .unwrap();
 
         assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
-        let trip = output
-            .runaway
-            .expect("the volume cap must stop the command");
+        let trip = output.runaway.expect("the volume cap must stop the command");
         // Any read large enough to breach the byte cap already carries far more
         // than 16 seventeen-byte lines, so when both limits are crossed the
         // documented tie-break reports the line limit.
@@ -1647,8 +1630,7 @@ mod shell_tasks {
             .run(
                 &format!(
                     "{} echo done",
-                    descendant
-                        .background(&format!("sleep 1; echo late > \"{}\"", marker.display())),
+                    descendant.background(&format!("sleep 1; echo late > \"{}\"", marker.display())),
                 ),
                 Duration::from_secs(30),
                 None,
@@ -2526,11 +2508,7 @@ mod prompt_tasks {
     fn inline_compose_mode_comes_from_the_referenced_document() {
         for (name, frontmatter, expected) in [
             ("plain.md", vec![("title", json!("Plain"))], false),
-            (
-                "inline.md",
-                vec![("prompt", json!("Write the body."))],
-                true,
-            ),
+            ("inline.md", vec![("prompt", json!("Write the body."))], true),
         ] {
             let dir = TempDir::new().unwrap();
             write_source(dir.path(), name, &frontmatter, "Body.\n");
@@ -2681,12 +2659,7 @@ mod prompt_tasks {
         let dir = TempDir::new().unwrap();
         let nested = dir.path().join("nested");
         fs::create_dir_all(&nested).unwrap();
-        write_source(
-            &nested,
-            "review.md",
-            &[("title", json!("Nested"))],
-            "Deep.\n",
-        );
+        write_source(&nested, "review.md", &[("title", json!("Nested"))], "Deep.\n");
         write_source(
             dir.path(),
             "review.md",
@@ -2853,10 +2826,7 @@ mod outcome_contract {
             ));
         }
 
-        assert_eq!(
-            results[0], results[1],
-            "an externalized task is the same task"
-        );
+        assert_eq!(results[0], results[1], "an externalized task is the same task");
         assert_eq!(results[0].0, TaskStatus::Succeeded);
         assert_eq!(results[0].3, vec![Duration::from_secs(45); 2]);
     }
@@ -2880,10 +2850,7 @@ mod outcome_contract {
                 "tasks": [{ "task": "task.yaml", "name": "patched-name" }],
             }),
         );
-        let source = one_step_source(
-            dir.path(),
-            json!({ "name": "alpha", "group": "group.yaml" }),
-        );
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "group": "group.yaml" }));
 
         let error = Fixture::build(dir, &source)
             .err()
@@ -2894,6 +2861,7 @@ mod outcome_contract {
             "got: {error}",
         );
     }
+
 }
 
 // -- serial groups (phase 9) ------------------------------------------------
@@ -3024,11 +2992,7 @@ mod serial_groups {
     #[test]
     fn a_later_task_sees_the_earlier_task_mutation_and_output() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("target.md"),
-            "---\ntitle: t\n---\n\nBody.\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("target.md"), "---\ntitle: t\n---\n\nBody.\n").unwrap();
         let source = one_step_source(
             dir.path(),
             json!({
@@ -3078,11 +3042,7 @@ mod serial_groups {
     #[test]
     fn group_variables_are_in_scope_for_members() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("target.md"),
-            "---\ntitle: t\n---\n\nBody.\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("target.md"), "---\ntitle: t\n---\n\nBody.\n").unwrap();
         let source = one_step_source(
             dir.path(),
             json!({
@@ -3122,11 +3082,7 @@ mod serial_groups {
     #[test]
     fn group_variables_do_not_leak_to_a_later_step() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("target.md"),
-            "---\ntitle: t\n---\n\nBody.\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("target.md"), "---\ntitle: t\n---\n\nBody.\n").unwrap();
         let source = write_source(
             dir.path(),
             "seq.md",
@@ -3435,10 +3391,7 @@ mod parallel_groups {
     #[test]
     fn the_nested_entry_is_declaration_ordered_under_inverted_completion() {
         let dir = TempDir::new().unwrap();
-        let source = one_step_source(
-            dir.path(),
-            parallel_step(&["first", "second", "third"], None),
-        );
+        let source = one_step_source(dir.path(), parallel_step(&["first", "second", "third"], None));
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
         // Declaration order is first→third; completion order is third→first.
@@ -3515,20 +3468,17 @@ mod parallel_groups {
             "seq.md",
             &[
                 ("marker", json!("initial")),
-                (
-                    "sequence",
-                    json!([{
-                        "name": "alpha",
-                        "group": {
-                            "name": "bundle",
-                            "execution": "parallel",
-                            "tasks": [
-                                { "name": "writer", "shell": "write", "setup": [{ "action": [{ "set": ["marker", "written"] }] }] },
-                                { "name": "reader", "shell": "read", "teardown": [{ "action": [{ "set": ["observed", "{{ marker }}"] }] }] },
-                            ],
-                        },
-                    }]),
-                ),
+                ("sequence", json!([{
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "execution": "parallel",
+                    "tasks": [
+                        { "name": "writer", "shell": "write", "setup": [{ "action": [{ "set": ["marker", "written"] }] }] },
+                        { "name": "reader", "shell": "read", "teardown": [{ "action": [{ "set": ["observed", "{{ marker }}"] }] }] },
+                    ],
+                },
+            }])),
             ],
             "Document body.\n",
         );
@@ -3616,11 +3566,7 @@ mod parallel_groups {
 
         let outcome = fixture.execute(&wiring);
 
-        assert_eq!(
-            outcome.status,
-            TaskStatus::Failed,
-            "any failure fails the group"
-        );
+        assert_eq!(outcome.status, TaskStatus::Failed, "any failure fails the group");
         assert_eq!(
             outcome
                 .group_tasks
@@ -3673,10 +3619,7 @@ mod parallel_groups {
         assert_eq!(mutations.get("left_key"), Some(&json!("L")));
         assert_eq!(mutations.get("right_key"), Some(&json!("R")));
         assert!(
-            !recorder
-                .events()
-                .iter()
-                .any(|event| event.starts_with("warn:")),
+            !recorder.events().iter().any(|event| event.starts_with("warn:")),
             "disjoint writes are the expected case: {:?}",
             recorder.events(),
         );
@@ -4014,8 +3957,7 @@ mod group_framing {
                 shell.stdout_for(command, command)
             });
         let runtime = Arc::new(RuntimeState::new());
-        let mut wiring =
-            Wiring::new(&recorder, &shell).with_stream(Arc::clone(sink) as Arc<dyn TaskStreamSink>);
+        let mut wiring = Wiring::new(&recorder, &shell).with_stream(Arc::clone(sink) as Arc<dyn TaskStreamSink>);
         wiring.runtime = Some(&runtime);
         fixture.execute(&wiring)
     }
@@ -4028,10 +3970,7 @@ mod group_framing {
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
         let lines = sink.visible_lines();
         for name in ["alpha", "bravo", "charlie"] {
-            let headers = lines
-                .iter()
-                .filter(|l| l.contains(&format!("▶ {name}")))
-                .count();
+            let headers = lines.iter().filter(|l| l.contains(&format!("▶ {name}"))).count();
             let footers = lines
                 .iter()
                 .filter(|l| l.contains(name) && l.contains("succeeded"))
@@ -4084,9 +4023,7 @@ mod group_framing {
         // the one that must survive its loss (spec → *Reporting Concurrency*).
         for name in ["alpha", "bravo", "charlie"] {
             assert!(
-                lines
-                    .iter()
-                    .any(|l| l.contains(name) && l.contains("succeeded")),
+                lines.iter().any(|l| l.contains(name) && l.contains("succeeded")),
                 "task `{name}` lost its footer attribution: {lines:?}"
             );
         }
@@ -4123,10 +4060,7 @@ mod group_framing {
     #[test]
     fn a_failed_task_reports_its_own_outcome_in_its_footer() {
         let dir = TempDir::new().unwrap();
-        let source = one_step_source(
-            dir.path(),
-            group_step(&["fine-task", "bad-task"], "parallel"),
-        );
+        let source = one_step_source(dir.path(), group_step(&["fine-task", "bad-task"], "parallel"));
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
         let shell = FakeTaskShell::default()
@@ -4135,8 +4069,7 @@ mod group_framing {
             .failing("bad-task");
         let runtime = Arc::new(RuntimeState::new());
         let sink = Arc::new(FrameSink::default());
-        let mut wiring = Wiring::new(&recorder, &shell)
-            .with_stream(Arc::clone(&sink) as Arc<dyn TaskStreamSink>);
+        let mut wiring = Wiring::new(&recorder, &shell).with_stream(Arc::clone(&sink) as Arc<dyn TaskStreamSink>);
         wiring.runtime = Some(&runtime);
 
         let outcome = fixture.execute(&wiring);
@@ -4144,15 +4077,11 @@ mod group_framing {
         assert_eq!(outcome.status, TaskStatus::Failed);
         let lines = sink.visible_lines();
         assert!(
-            lines
-                .iter()
-                .any(|l| l.contains("bad-task") && l.contains("failed")),
+            lines.iter().any(|l| l.contains("bad-task") && l.contains("failed")),
             "no failure footer in {lines:?}"
         );
         assert!(
-            lines
-                .iter()
-                .any(|l| l.contains("fine-task") && l.contains("succeeded")),
+            lines.iter().any(|l| l.contains("fine-task") && l.contains("succeeded")),
             "a sibling's success footer was lost in {lines:?}"
         );
     }
@@ -4167,18 +4096,16 @@ mod group_framing {
         let recorder = Recorder::default();
         // Inverted delays: completion order is the reverse of declaration order,
         // so a frame group interleaving with a sibling would be visible.
-        let shell =
-            names
-                .iter()
-                .enumerate()
-                .fold(FakeTaskShell::default(), |shell, (index, command)| {
-                    shell
-                        .stdout_for(command, command)
-                        .delay(command, (names.len() - index) as u64 * 10)
-                });
+        let shell = names.iter().enumerate().fold(
+            FakeTaskShell::default(),
+            |shell, (index, command)| {
+                shell
+                    .stdout_for(command, command)
+                    .delay(command, (names.len() - index) as u64 * 10)
+            },
+        );
         let runtime = Arc::new(RuntimeState::new());
-        let mut wiring = Wiring::new(&recorder, &shell)
-            .with_stream(Arc::clone(&sink) as Arc<dyn TaskStreamSink>);
+        let mut wiring = Wiring::new(&recorder, &shell).with_stream(Arc::clone(&sink) as Arc<dyn TaskStreamSink>);
         wiring.runtime = Some(&runtime);
 
         fixture.execute(&wiring);
@@ -4280,8 +4207,7 @@ mod group_framing {
 
         // The bar prefix each body line carries must be the same prefix that
         // task's header carried — that is the whole attribution contract.
-        let prefix =
-            |line: &String| line[..line.find('│').map_or(0, |i| i + '│'.len_utf8())].to_string();
+        let prefix = |line: &String| line[..line.find('│').map_or(0, |i| i + '│'.len_utf8())].to_string();
         for (channel, frames) in sink.writes() {
             if channel != Channel::Data {
                 continue;
@@ -4332,8 +4258,7 @@ mod group_framing {
             .failing("bad-task");
         let runtime = Arc::new(RuntimeState::new());
         let sink = Arc::new(FrameSink::default());
-        let mut wiring = Wiring::new(&recorder, &shell)
-            .with_stream(Arc::clone(&sink) as Arc<dyn TaskStreamSink>);
+        let mut wiring = Wiring::new(&recorder, &shell).with_stream(Arc::clone(&sink) as Arc<dyn TaskStreamSink>);
         wiring.runtime = Some(&runtime);
 
         let outcome = fixture.execute(&wiring);
@@ -4359,11 +4284,7 @@ mod group_framing {
             !sink.visible_channel_lines(Channel::Data).is_empty(),
             "nothing was framed, so this proves nothing"
         );
-        assert!(
-            sink_free(&outcome),
-            "framing leaked into {:?}",
-            outcome.stdout
-        );
+        assert!(sink_free(&outcome), "framing leaked into {:?}", outcome.stdout);
     }
 }
 

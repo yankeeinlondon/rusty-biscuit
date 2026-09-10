@@ -117,9 +117,7 @@ impl TaskExecution<'_> {
         let scope_stack = self.stack.with_group(&variables);
 
         match group.execution {
-            GroupExecution::Serial => {
-                self.run_serial(group, &variables, &scope_overlay, &scope_stack)
-            }
+            GroupExecution::Serial => self.run_serial(group, &variables, &scope_overlay, &scope_stack),
             GroupExecution::Parallel => {
                 self.run_parallel(group, &variables, &scope_overlay, &scope_stack)
             }
@@ -278,8 +276,8 @@ impl TaskExecution<'_> {
                         // The stack's cells must be the member's too: a lifecycle
                         // `set` inside the task accumulates through the stack,
                         // not through `TaskExecution::runtime`.
-                        let member_stack =
-                            scope_stack.with_private_cells(&buffers[index], live_cells.get(index));
+                        let member_stack = scope_stack
+                            .with_private_cells(&buffers[index], live_cells.get(index));
                         let member = TaskExecution {
                             task,
                             state: &member_state,

@@ -106,7 +106,9 @@ impl McpInjector for OpenCodeInjector {
         // This injector's env map is `String`-valued, so any existing value is
         // already valid UTF-8; wrap it as an `OsStr` for the shared helper, which
         // owns the UTF-8 validity decision for the raw-`OsStr` env call sites.
-        let existing = env.get("OPENCODE_CONFIG_CONTENT").map(std::ffi::OsStr::new);
+        let existing = env
+            .get("OPENCODE_CONFIG_CONTENT")
+            .map(std::ffi::OsStr::new);
         let config_str = crate::opencode_config::merge_overlay(existing, overlay)?;
         env.insert("OPENCODE_CONFIG_CONTENT".into(), config_str);
 

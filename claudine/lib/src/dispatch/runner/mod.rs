@@ -44,16 +44,14 @@ impl DispatchConfig<'_> {
         meta: &EventMeta,
     ) {
         match self {
-            Self::Canonical(config) => {
-                execute_speak_from_claudine(
-                    message_template,
-                    voice_override,
-                    gender_override,
-                    meta,
-                    config,
-                )
-                .await
-            }
+            Self::Canonical(config) => execute_speak_from_claudine(
+                message_template,
+                voice_override,
+                gender_override,
+                meta,
+                config,
+            )
+            .await,
         }
     }
 }

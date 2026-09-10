@@ -457,7 +457,9 @@ fn late_binding_root_in_expr(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Variable(path) => {
             let root = path.split('.').next().unwrap_or(path);
-            LATE_BINDING_ROOTS.contains(&root).then(|| root.to_string())
+            LATE_BINDING_ROOTS
+                .contains(&root)
+                .then(|| root.to_string())
         }
         Expr::MemberAccess { base, .. } => {
             if let Expr::Variable(base_path) = base.as_ref() {

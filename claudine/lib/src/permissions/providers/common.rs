@@ -77,7 +77,10 @@ mod tests {
 
     #[test]
     fn one_shot_plan_has_empty_env() {
-        let plan = one_shot_plan(vec!["--yolo".to_owned()], MappingFidelity::Approximate);
+        let plan = one_shot_plan(
+            vec!["--yolo".to_owned()],
+            MappingFidelity::Approximate,
+        );
         assert_eq!(plan.argv, vec!["--yolo".to_owned()]);
         assert!(plan.env.is_empty());
         assert_eq!(plan.fidelity, MappingFidelity::Approximate);

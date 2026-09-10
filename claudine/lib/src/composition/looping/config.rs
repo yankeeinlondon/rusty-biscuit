@@ -7,9 +7,7 @@ use serde_json::Value;
 
 use super::super::error::CompositionError;
 use super::super::json_util::json_type_name;
-use super::super::types::{
-    LoopAction, LoopCondition, LoopConfig, OnRateLimit, ResolvedCompositionSource,
-};
+use super::super::types::{LoopAction, LoopCondition, LoopConfig, OnRateLimit, ResolvedCompositionSource};
 
 use super::dsl::{parse_actions, parse_positive_usize, parse_string};
 
@@ -248,7 +246,8 @@ fn collect_identifiers(expr: &Expr, names: &mut BTreeSet<String>) {
 }
 
 fn is_reserved_identifier(name: &str) -> bool {
-    super::super::reserved::EXPRESSION_RESERVED_ROOTS.contains(&name) || name.starts_with("_loop_")
+    super::super::reserved::EXPRESSION_RESERVED_ROOTS.contains(&name)
+        || name.starts_with("_loop_")
 }
 
 /// Recognized iteration-control keys under the `loop:` frontmatter object.

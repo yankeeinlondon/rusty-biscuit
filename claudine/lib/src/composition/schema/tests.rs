@@ -352,7 +352,10 @@ fn schema_parse_error_for_invalid_schema_shape() {
 
     let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
     assert!(
-        matches!(err, CompositionError::SchemaParse { property: None, .. }),
+        matches!(
+            err,
+            CompositionError::SchemaParse { property: None, .. }
+        ),
         "got: {err:?}"
     );
 }
@@ -484,7 +487,8 @@ fn inline_compose_with_schema_validates_after_prompt_check() {
     assert!(
         matches!(
             err,
-            CompositionError::PromptPropertyMissing | CompositionError::MissingProperties { .. }
+            CompositionError::PromptPropertyMissing
+                | CompositionError::MissingProperties { .. }
         ),
         "got: {err:?}"
     );
@@ -642,10 +646,7 @@ fn missing_boolean_property_maps_to_boolean_shape() {
     let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
     match err {
         CompositionError::MissingProperties { missing, .. } => {
-            assert_eq!(
-                missing[0].interactive_shape,
-                Some(InteractiveShape::Boolean)
-            );
+            assert_eq!(missing[0].interactive_shape, Some(InteractiveShape::Boolean));
         }
         other => panic!("expected MissingProperties, got {other:?}"),
     }
@@ -660,16 +661,16 @@ fn missing_enum_property_maps_to_enum_one_shape() {
     );
     let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
     match err {
-        CompositionError::MissingProperties { missing, .. } => {
-            match &missing[0].interactive_shape {
-                Some(InteractiveShape::EnumOne { members }) => {
-                    assert_eq!(members.len(), 3);
-                    assert!(members.iter().any(|m| m == "small"));
-                    assert!(members.iter().any(|m| m == "large"));
-                }
-                other => panic!("expected EnumOne shape, got {other:?}"),
+        CompositionError::MissingProperties { missing, .. } => match &missing[0]
+            .interactive_shape
+        {
+            Some(InteractiveShape::EnumOne { members }) => {
+                assert_eq!(members.len(), 3);
+                assert!(members.iter().any(|m| m == "small"));
+                assert!(members.iter().any(|m| m == "large"));
             }
-        }
+            other => panic!("expected EnumOne shape, got {other:?}"),
+        },
         other => panic!("expected MissingProperties, got {other:?}"),
     }
 }
@@ -746,15 +747,15 @@ fn missing_file_property_preserves_match_patterns() {
     );
     let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
     match err {
-        CompositionError::MissingProperties { missing, .. } => {
-            match &missing[0].interactive_shape {
-                Some(InteractiveShape::File { patterns, is_array }) => {
-                    assert!(!is_array);
-                    assert_eq!(patterns, &["*.png", "*.jpg"]);
-                }
-                other => panic!("expected File shape, got {other:?}"),
+        CompositionError::MissingProperties { missing, .. } => match &missing[0]
+            .interactive_shape
+        {
+            Some(InteractiveShape::File { patterns, is_array }) => {
+                assert!(!is_array);
+                assert_eq!(patterns, &["*.png", "*.jpg"]);
             }
-        }
+            other => panic!("expected File shape, got {other:?}"),
+        },
         other => panic!("expected MissingProperties, got {other:?}"),
     }
 }
@@ -792,9 +793,7 @@ fn status_report_categorizes_required_and_optional() {
         &dir,
         "---\n$schema:\n  title: 'string(required)'\n  description: 'string'\ntitle: Plan\n---\nbody\n",
     );
-    let report = build_schema_status_report(&source, None, None)
-        .unwrap()
-        .unwrap();
+    let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
     assert_eq!(report.required.len(), 1);
     assert_eq!(report.required[0].name, "title");
     assert_eq!(report.required[0].state, PropertyState::Valid);
@@ -810,9 +809,7 @@ fn status_report_marks_missing_required_correctly() {
         &dir,
         "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
     );
-    let report = build_schema_status_report(&source, None, None)
-        .unwrap()
-        .unwrap();
+    let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
     assert_eq!(report.required[0].state, PropertyState::Missing);
 }
 
@@ -823,9 +820,7 @@ fn status_report_marks_invalid_required_correctly() {
         &dir,
         "---\n$schema:\n  count: 'number(required)'\ncount: not-a-number\n---\nbody\n",
     );
-    let report = build_schema_status_report(&source, None, None)
-        .unwrap()
-        .unwrap();
+    let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
     assert_eq!(report.required[0].state, PropertyState::Invalid);
 }
 
@@ -850,9 +845,7 @@ fn status_report_flags_invalid_optional() {
         &dir,
         "---\n$schema:\n  title: 'string(required)'\n  count: 'number'\ntitle: Plan\ncount: nope\n---\nbody\n",
     );
-    let report = build_schema_status_report(&source, None, None)
-        .unwrap()
-        .unwrap();
+    let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
     assert!(report.has_invalid_optional);
 }
 
@@ -877,9 +870,7 @@ fn status_report_does_not_mark_templated_required_as_invalid() {
             "---\nbody\n",
         ),
     );
-    let report = build_schema_status_report(&source, None, None)
-        .unwrap()
-        .unwrap();
+    let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
     let runtime = report
         .required
         .iter()
@@ -919,9 +910,7 @@ fn status_report_does_not_mark_templated_optional_as_invalid() {
             "---\nbody\n",
         ),
     );
-    let report = build_schema_status_report(&source, None, None)
-        .unwrap()
-        .unwrap();
+    let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
     assert!(
         !report.has_invalid_optional,
         "templated optional must not be flagged invalid: {:?}",
@@ -1136,14 +1125,8 @@ fn pre_validate_schema_reports_optional_eager_file_failures() {
 #[test]
 fn scratch_dump_file_array_problems() {
     for (label, override_val) in [
-        (
-            "scalar-string",
-            serde_json::json!({ "attachments": "everywhere" }),
-        ),
-        (
-            "array-of-one",
-            serde_json::json!({ "attachments": ["everywhere"] }),
-        ),
+        ("scalar-string", serde_json::json!({ "attachments": "everywhere" })),
+        ("array-of-one", serde_json::json!({ "attachments": ["everywhere"] })),
         (
             "array-of-two",
             serde_json::json!({ "attachments": ["everywhere", "here"] }),
@@ -1185,9 +1168,8 @@ fn provided_file_match_partial_reports_unresolved_file_reference() {
     );
     let overrides = serde_json::json!({ "spec": "everywhere" });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None).expect_err(
-        "a provided file(match) partial with no literal match should surface a typed error",
-    );
+    let err = pre_validate_schema(&source, Some(&overrides), None)
+        .expect_err("a provided file(match) partial with no literal match should surface a typed error");
     match err {
         CompositionError::UnresolvedFileReference {
             property,
@@ -1222,9 +1204,8 @@ fn provided_file_array_match_partial_reports_unresolved_file_reference() {
     );
     let overrides = serde_json::json!({ "attachments": ["everywhere"] });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None).expect_err(
-        "a provided file[](match) partial with no literal match should surface a typed error",
-    );
+    let err = pre_validate_schema(&source, Some(&overrides), None)
+        .expect_err("a provided file[](match) partial with no literal match should surface a typed error");
     match err {
         CompositionError::UnresolvedFileReference {
             property,
@@ -1270,10 +1251,7 @@ fn provided_file_scalar_for_array_property_match_partial_reports_unresolved_file
         } => {
             assert_eq!(property, "attachments");
             assert_eq!(provided, "everywhere");
-            assert!(
-                is_array,
-                "scalar provided to file[] property must still report is_array: true"
-            );
+            assert!(is_array, "scalar provided to file[] property must still report is_array: true");
         }
         other => panic!("expected UnresolvedFileReference, got {other:?}"),
     }
@@ -1742,7 +1720,10 @@ fn pre_validate_schema_keeps_unresolved_caller_file_partials_interactive() {
             true,
         ),
     ] {
-        let source = make_source(&dir, &format!("---\n$schema:\n  {schema}\n---\nbody\n"));
+        let source = make_source(
+            &dir,
+            &format!("---\n$schema:\n  {schema}\n---\nbody\n"),
+        );
 
         let err = pre_validate_schema(&source, Some(&overrides), Some(dir.path()))
             .expect_err("the exact `everywhere` partial must remain interactive");

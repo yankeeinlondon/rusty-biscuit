@@ -214,12 +214,7 @@ impl<S: SemanticEventSink> QwenSemanticStreamParser<S> {
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
-        super::common::emit_malformed_warning(
-            &mut self.sink,
-            Provider::QwenCode,
-            self.line_num,
-            err,
-        );
+        super::common::emit_malformed_warning(&mut self.sink, Provider::QwenCode, self.line_num, err);
     }
 }
 
@@ -369,7 +364,8 @@ mod tests {
     #[test]
     fn init_emits_session_start() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(r#"{"type":"init","session_id":"q1","model":"qwen-coder"}"#);
+        parser
+            .feed_line(r#"{"type":"init","session_id":"q1","model":"qwen-coder"}"#);
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::SessionStart { .. }
@@ -379,9 +375,10 @@ mod tests {
     #[test]
     fn assistant_message_emits_output_text() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(
-            r#"{"type":"message","role":"assistant","content":[{"text":"Hello from Qwen"}]}"#,
-        );
+        parser
+            .feed_line(
+                r#"{"type":"message","role":"assistant","content":[{"text":"Hello from Qwen"}]}"#,
+            );
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::OutputText { ref text, .. } if text == "Hello from Qwen\n"
@@ -391,12 +388,14 @@ mod tests {
     #[test]
     fn qwen_tool_call_and_response_emit_typed_events() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(
-            r#"{"type":"tool_call","id":"q1","name":"bash","input":{"command":"git status"}}"#,
-        );
-        parser.feed_line(
-            r#"{"type":"tool_response","tool_use_id":"q1","status":"success","content":"clean"}"#,
-        );
+        parser
+            .feed_line(
+                r#"{"type":"tool_call","id":"q1","name":"bash","input":{"command":"git status"}}"#,
+            );
+        parser
+            .feed_line(
+                r#"{"type":"tool_response","tool_use_id":"q1","status":"success","content":"clean"}"#,
+            );
         assert_eq!(
             kinds(&events.lock().unwrap()),
             vec!["tool_call", "tool_result"]
@@ -459,7 +458,8 @@ mod tests {
     #[test]
     fn system_unknown_subtype_stays_provider_extension() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(r#"{"type":"system","subtype":"telemetry","session_id":"qx"}"#);
+        parser
+            .feed_line(r#"{"type":"system","subtype":"telemetry","session_id":"qx"}"#);
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::ProviderExtension { .. }
@@ -469,7 +469,8 @@ mod tests {
     #[test]
     fn error_event_emits_terminal_error() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#);
+        parser
+            .feed_line(r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#);
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::Error { terminal: true, .. }
@@ -499,7 +500,8 @@ mod tests {
     #[test]
     fn tool_input_string_fallback_parses_without_panic() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(r#"{"type":"tool_call","id":"t","name":"b","input":"ls -la"}"#);
+        parser
+            .feed_line(r#"{"type":"tool_call","id":"t","name":"b","input":"ls -la"}"#);
         let collected = events.lock().unwrap().clone();
         assert_eq!(kinds(&collected), vec!["tool_call"]);
         match &collected[0] {

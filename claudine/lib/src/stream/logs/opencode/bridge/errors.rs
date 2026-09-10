@@ -58,15 +58,14 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         record: &OpenCodeLogRecord,
     ) -> StderrIngestOutcome {
         let count = self.consecutive_stream_errors;
-        let message = format!("provider stream failed {count} times with no progress; aborting");
+        let message = format!(
+            "provider stream failed {count} times with no progress; aborting"
+        );
 
         let mut extra_map = base_extra(record, "repeated_stream_error");
         extra_map.insert("count".into(), json!(count));
         if let Some(provider_error) = error_context(record) {
-            extra_map.insert(
-                "provider_error".into(),
-                serde_json::Value::String(provider_error),
-            );
+            extra_map.insert("provider_error".into(), serde_json::Value::String(provider_error));
         }
 
         self.sink.on_semantic_event(SemanticEvent::Error {

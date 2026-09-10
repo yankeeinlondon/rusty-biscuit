@@ -143,7 +143,9 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
         }
 
         if let Some(name) = path.strip_prefix("ctx.")
-            && let Some(value) = self.prepared_context.and_then(|context| context.get(name))
+            && let Some(value) = self
+                .prepared_context
+                .and_then(|context| context.get(name))
         {
             return Some(value.clone());
         }
@@ -206,18 +208,20 @@ pub fn evaluate_condition(
         LoopCondition::Until(source) => ("until", source),
     };
 
-    let parsed =
-        parse_condition(source).map_err(|error| CompositionError::LoopExpressionInvalid {
+    let parsed = parse_condition(source).map_err(|error| {
+        CompositionError::LoopExpressionInvalid {
             kind: kind.to_string(),
             condition: source.clone(),
             source: LoopExpressionCause::Parse(error),
-        })?;
-    let value =
-        evaluate(&parsed, lookup).map_err(|error| CompositionError::LoopExpressionInvalid {
+        }
+    })?;
+    let value = evaluate(&parsed, lookup).map_err(|error| {
+        CompositionError::LoopExpressionInvalid {
             kind: kind.to_string(),
             condition: source.clone(),
             source: LoopExpressionCause::Evaluate(Box::new(error)),
-        })?;
+        }
+    })?;
     let truthy = is_truthy(&value);
 
     Ok(match condition {

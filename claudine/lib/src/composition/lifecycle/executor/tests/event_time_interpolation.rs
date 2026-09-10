@@ -25,10 +25,7 @@ fn message_interpolates_frontmatter_in_literal() {
         Path::new("t.md"),
     );
     context.execute_event(&config);
-    assert_eq!(
-        recorder.events(),
-        vec![Emitted::Info("done alpha".to_string())]
-    );
+    assert_eq!(recorder.events(), vec![Emitted::Info("done alpha".to_string())]);
 }
 
 fn io_err(msg: &str) -> LifecycleErrorInfo {
@@ -165,10 +162,7 @@ fn message_reflects_current_frontmatter_per_event() {
             Path::new("t.md"),
         );
         context.execute_event(&config);
-        assert_eq!(
-            recorder.events(),
-            vec![Emitted::Message(expected.to_string())]
-        );
+        assert_eq!(recorder.events(), vec![Emitted::Message(expected.to_string())]);
     }
 }
 
@@ -210,9 +204,14 @@ fn event_time_rendering_matches_compose() {
 
     // Direct DM2 subtree compose for the same string + data.
     let state = EffectiveStateBuilder::new()
-        .with_frontmatter([("phase".to_string(), json!(6))].into_iter().collect())
+        .with_frontmatter(
+            [("phase".to_string(), json!(6))].into_iter().collect(),
+        )
         .with_context(
-            darkmatter::markdown::compose::ComposeContext::capture_for_content(Path::new("."), ""),
+            darkmatter::markdown::compose::ComposeContext::capture_for_content(
+                Path::new("."),
+                "",
+            ),
         )
         .build()
         .unwrap();
@@ -297,10 +296,7 @@ fn known_but_empty_reference_renders_empty() {
     );
     let outcome = context.execute_event(&config);
     assert_eq!(outcome, LifecycleEventOutcome::default());
-    assert_eq!(
-        recorder.events(),
-        vec![Emitted::Message("spec=".to_string())]
-    );
+    assert_eq!(recorder.events(), vec![Emitted::Message("spec=".to_string())]);
 }
 
 /// A typo (an unknown root) fails closed: the action errors and nothing is
@@ -404,6 +400,7 @@ fn post_dm2_surviving_span_fails_before_dispatch() {
     assert!(outcome.action_error.is_none());
     assert!(recorder.events().is_empty(), "no side effect dispatched");
 }
+
 
 // ── the expression layer's typed transport (spec §D1/§D4/§D10) ──────────────
 

@@ -61,7 +61,9 @@ impl ShellApprovalHandler for MockApprovalHandler {
 
 /// Creates a temp dir with a whitelist file that allows commands prefixed
 /// with the given executables.
-fn approval_options_with_whitelist(prefixes: &[&str]) -> (tempfile::TempDir, ShellApprovalOptions) {
+fn approval_options_with_whitelist(
+    prefixes: &[&str],
+) -> (tempfile::TempDir, ShellApprovalOptions) {
     let dir = tempfile::TempDir::new().unwrap();
     let whitelist_content: String = prefixes.iter().map(|p| format!("prefix {p}\n")).collect();
     std::fs::write(
@@ -150,16 +152,11 @@ fn dry_run_no_handler_emits_cannot_dry_run_message() {
         .unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains(
-            "Cannot dry-run: shell command 'curl https://example.com' requires \
-                      interactive approval."
-        ),
+        msg.contains("Cannot dry-run: shell command 'curl https://example.com' requires \
+                      interactive approval."),
         "expected dry-run gate message naming the command; got: {msg}"
     );
-    assert!(
-        msg.contains("--yolo"),
-        "message should mention --yolo; got: {msg}"
-    );
+    assert!(msg.contains("--yolo"), "message should mention --yolo; got: {msg}");
 }
 
 #[test]
@@ -189,14 +186,9 @@ fn discovers_commands_from_template() {
     let compose_options = ComposeOptions::new();
     let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
 
-    let result = resolve_shell_approvals(
-        Some(&md),
-        Some(&compose_options),
-        &approval_options,
-        None,
-        None,
-    )
-    .unwrap();
+    let result =
+        resolve_shell_approvals(Some(&md), Some(&compose_options), &approval_options, None, None)
+            .unwrap();
 
     assert_eq!(result.total_discovered, 1);
     assert!(result.approved_commands.contains("echo hello"));
@@ -208,13 +200,8 @@ fn blacklisted_command_returns_error() {
     let compose_options = ComposeOptions::new();
     let (_dir, approval_options) = approval_options_with_whitelist(&["rm"]);
 
-    let result = resolve_shell_approvals(
-        Some(&md),
-        Some(&compose_options),
-        &approval_options,
-        None,
-        None,
-    );
+    let result =
+        resolve_shell_approvals(Some(&md), Some(&compose_options), &approval_options, None, None);
 
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -592,15 +579,13 @@ fn shared_cache_across_distinct_options_prevents_reprompt() {
 
     // Step 1: fresh options, cache wired in.
     let step1 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
-    let r1 =
-        resolve_shell_approvals(Some(&md), Some(&compose_options), &step1, None, None).unwrap();
+    let r1 = resolve_shell_approvals(Some(&md), Some(&compose_options), &step1, None, None).unwrap();
     assert_eq!(r1.user_approved, 1);
     assert_eq!(handler.calls(), 1, "step 1 must prompt once");
 
     // Step 2: BRAND NEW options, same Arc-cloned cache. Cache hit.
     let step2 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
-    let r2 =
-        resolve_shell_approvals(Some(&md), Some(&compose_options), &step2, None, None).unwrap();
+    let r2 = resolve_shell_approvals(Some(&md), Some(&compose_options), &step2, None, None).unwrap();
     assert_eq!(r2.total_discovered, 1);
     assert_eq!(
         handler.calls(),
@@ -630,8 +615,11 @@ fn caller_file_origins_do_not_partition_the_exact_command_approval_cache() {
     let policy = tempfile::TempDir::new().unwrap();
     let handler = Arc::new(MockApprovalHandler::new(ShellApprovalDecision::AllowOnce));
     let shared_cache = Arc::new(Mutex::new(std::collections::HashMap::new()));
-    let approval_options =
-        shared_cache_options(&policy, handler.clone(), Arc::clone(&shared_cache));
+    let approval_options = shared_cache_options(
+        &policy,
+        handler.clone(),
+        Arc::clone(&shared_cache),
+    );
 
     for origin in [first_origin.path(), second_origin.path()] {
         let compose_options = ComposeOptions::new().with_caller_input_records(records(origin));
@@ -716,10 +704,8 @@ impl Drop for CwdGuard {
 
 /// Returns a lifecycle shell fixture whose command interpolates
 /// `file_exists(spec)`.
-fn lifecycle_with_file_exists_shell() -> (
-    crate::composition::lifecycle::LifecycleConfig,
-    serde_json::Value,
-) {
+fn lifecycle_with_file_exists_shell()
+-> (crate::composition::lifecycle::LifecycleConfig, serde_json::Value) {
     let frontmatter = serde_json::json!({ "spec": "spec.md" });
     let fm_with_event = serde_json::json!({
         "spec": "spec.md",
@@ -727,14 +713,18 @@ fn lifecycle_with_file_exists_shell() -> (
             "stack": [{"action": {"shell": "echo {{ file_exists(spec) }}"}}]
         }
     });
-    let config =
-        crate::composition::lifecycle::parse_lifecycle_config(&fm_with_event, Path::new("<test>"))
-            .expect("lifecycle config parses");
+    let config = crate::composition::lifecycle::parse_lifecycle_config(
+        &fm_with_event,
+        Path::new("<test>"),
+    )
+    .expect("lifecycle config parses");
     (config, frontmatter)
 }
 
 /// Returns the resolved command from the first `start` action.
-fn resolved_start_shell_command(config: &crate::composition::lifecycle::LifecycleConfig) -> String {
+fn resolved_start_shell_command(
+    config: &crate::composition::lifecycle::LifecycleConfig,
+) -> String {
     let stack = config
         .stack(LifecycleSignal::Start)
         .expect("start stack present");
@@ -855,9 +845,11 @@ fn lifecycle_shell_read_side_reuses_all_request_resolution_inputs() {
             )}}]
         }
     });
-    let mut lifecycle =
-        crate::composition::lifecycle::parse_lifecycle_config(&fm_with_event, Path::new("<test>"))
-            .unwrap();
+    let mut lifecycle = crate::composition::lifecycle::parse_lifecycle_config(
+        &fm_with_event,
+        Path::new("<test>"),
+    )
+    .unwrap();
     let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
         request.path(),
         Some(home),
@@ -872,7 +864,10 @@ fn lifecycle_shell_read_side_reuses_all_request_resolution_inputs() {
 
     let ambient = tempfile::TempDir::new().unwrap();
     let _home = test_toolkit::EnvGuard::set_safe("HOME", ambient.path());
-    let _env = test_toolkit::EnvGuard::set_safe("CLAUDINE_PREFLIGHT_SNAPSHOT_ROOT", ambient.path());
+    let _env = test_toolkit::EnvGuard::set_safe(
+        "CLAUDINE_PREFLIGHT_SNAPSHOT_ROOT",
+        ambient.path(),
+    );
     resolve_lifecycle_shell_commands(
         &mut lifecycle,
         &frontmatter,

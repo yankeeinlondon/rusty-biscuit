@@ -31,8 +31,8 @@ pub use service::{ProtectRequest, ProtectService};
 
 #[cfg(test)]
 mod regression_tests {
-    use super::*;
     use std::borrow::Cow;
+    use super::*;
 
     /// The concept of posture (Advisory/Balanced/Strict) no longer exists.
     ///
@@ -141,7 +141,9 @@ mod regression_tests {
         let service =
             ProtectService::new(ProtectConfig::default(), ProtectPlatform::current()).unwrap();
 
-        let cases: &[(&str, bool, &str)] = &[
+        let cases: &[(&str,
+            bool,
+            &str)] = &[
             ("rm -rf /", true, "canonical rm -rf /"),
             ("rm -fr /", true, "reordered rm flags"),
             ("\\rm -rf /", true, "backslash-escaped rm"),
@@ -161,7 +163,11 @@ mod regression_tests {
                 false,
                 "chained command is a known non-boundary case",
             ),
-            ("git push origin main --force", true, "canonical force push"),
+            (
+                "git push origin main --force",
+                true,
+                "canonical force push",
+            ),
             ("git push origin main -f", true, "short force push flag"),
             (
                 "git push origin +main",
@@ -214,8 +220,8 @@ mod regression_tests {
     /// Custom MCP patterns apply to MCP response payloads.
     #[test]
     fn custom_mcp_surface_blocks_mcp_payload() {
-        use crate::protect::config::CustomPattern;
         use std::borrow::Cow;
+        use crate::protect::config::CustomPattern;
 
         let config = ProtectConfig {
             custom_patterns: vec![CustomPattern {

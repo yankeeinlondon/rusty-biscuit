@@ -94,9 +94,13 @@ fn shared_context_uses_request_owned_repo_and_os_evidence() {
     )
     .unwrap();
 
-    let shared =
-        build_shared_compose_context_with_invocation(Some(&input), None, &context, &invocation)
-            .unwrap();
+    let shared = build_shared_compose_context_with_invocation(
+        Some(&input),
+        None,
+        &context,
+        &invocation,
+    )
+    .unwrap();
     assert!(shared.runtime.get("repo").is_some());
     assert!(shared.runtime.get("os").is_some());
 
@@ -159,11 +163,7 @@ fn relocated_primary_and_appendix_share_launch_context_but_keep_source_files() {
         )
         .unwrap();
         std::fs::write(dir.join("spec.md"), format!("{label}-SOURCE-SPEC\n")).unwrap();
-        std::fs::write(
-            dir.join("fragment.md"),
-            format!("{label}-SOURCE-FRAGMENT\n"),
-        )
-        .unwrap();
+        std::fs::write(dir.join("fragment.md"), format!("{label}-SOURCE-FRAGMENT\n")).unwrap();
     }
     let primary_path = primary_dir.join("primary.md");
     let appendix_path = appendix_dir.join("appendix.md");
@@ -225,41 +225,28 @@ fn relocated_primary_and_appendix_share_launch_context_but_keep_source_files() {
     else {
         panic!("expected a prepared primary system prompt");
     };
-    let appendix =
-        prepare_non_interactive_appendix_from(vec![appendix], Some(&shared), Some(&launch_dir))
-            .unwrap();
+    let appendix = prepare_non_interactive_appendix_from(
+        vec![appendix],
+        Some(&shared),
+        Some(&launch_dir),
+    )
+    .unwrap();
     let launch_repo_text = biscuit_file::to_portable_string(&launch_repo);
 
-    assert!(
-        primary
-            .composed_markdown
-            .contains("PRIMARY-SOURCE-BODY AREA=alpha")
-    );
+    assert!(primary.composed_markdown.contains("PRIMARY-SOURCE-BODY AREA=alpha"));
     assert!(primary.composed_markdown.contains(&format!(
         "CWD={}",
         biscuit_file::to_portable_string(&launch_dir)
     )));
-    assert!(
-        primary
-            .composed_markdown
-            .contains(launch_repo_text.as_str())
-    );
+    assert!(primary.composed_markdown.contains(launch_repo_text.as_str()));
     assert!(primary.composed_markdown.contains("FILE=true"));
     assert!(!primary.composed_markdown.contains("LAUNCH-FRAGMENT"));
-    assert!(
-        appendix
-            .composed_markdown
-            .contains("APPENDIX-SOURCE-BODY AREA=alpha")
-    );
+    assert!(appendix.composed_markdown.contains("APPENDIX-SOURCE-BODY AREA=alpha"));
     assert!(appendix.composed_markdown.contains(&format!(
         "CWD={}",
         biscuit_file::to_portable_string(&launch_dir)
     )));
-    assert!(
-        appendix
-            .composed_markdown
-            .contains(launch_repo_text.as_str())
-    );
+    assert!(appendix.composed_markdown.contains(launch_repo_text.as_str()));
     assert!(appendix.composed_markdown.contains("FILE=true"));
     assert!(!appendix.composed_markdown.contains("LAUNCH-FRAGMENT"));
     assert_eq!(invocation.work_snapshot().launch_context_constructions, 1);
@@ -621,7 +608,9 @@ fn discovered_invalid_string_mode_rejected_at_compose() {
                 "expected a problem at `/mode`, got: {problems:?}"
             );
         }
-        other => panic!("expected SystemPromptComposition(SchemaValidationFailed), got {other:?}"),
+        other => panic!(
+            "expected SystemPromptComposition(SchemaValidationFailed), got {other:?}"
+        ),
     }
 }
 
@@ -643,7 +632,9 @@ fn discovered_non_string_mode_rejected_at_compose() {
         Err(crate::error::ClaudineError::SystemPromptComposition(
             darkmatter::markdown::MarkdownError::SchemaValidationFailed { .. },
         )) => {}
-        other => panic!("expected SystemPromptComposition(SchemaValidationFailed), got {other:?}"),
+        other => panic!(
+            "expected SystemPromptComposition(SchemaValidationFailed), got {other:?}"
+        ),
     }
 }
 
@@ -784,8 +775,13 @@ fn non_interactive_session_preserves_discovered_replace_mode() {
     let invocation = crate::invocation_context::InvocationContext::capture_at(&repo);
     let context = invocation.launch_context();
 
-    let result =
-        resolve_and_prepare_for_session_with_context(&args, &context, true, &invocation).unwrap();
+    let result = resolve_and_prepare_for_session_with_context(
+        &args,
+        &context,
+        true,
+        &invocation,
+    )
+    .unwrap();
     let work = invocation.work_snapshot();
     assert_eq!(work.git_root_discoveries, 1);
     assert_eq!(work.topology_probes, 1);
@@ -837,8 +833,13 @@ fn session_reuses_resolved_external_source_context() {
         ..Default::default()
     };
 
-    let result =
-        resolve_and_prepare_for_session_with_context(&args, &context, false, &invocation).unwrap();
+    let result = resolve_and_prepare_for_session_with_context(
+        &args,
+        &context,
+        false,
+        &invocation,
+    )
+    .unwrap();
     assert!(matches!(result, ResolvedSystemPrompt::Ready(_)));
 
     let work = invocation.work_snapshot();
@@ -895,8 +896,13 @@ fn non_repository_session_runs_shell_in_launch_cwd() {
         ..Default::default()
     };
 
-    let result =
-        resolve_and_prepare_for_session_with_context(&args, &context, false, &invocation).unwrap();
+    let result = resolve_and_prepare_for_session_with_context(
+        &args,
+        &context,
+        false,
+        &invocation,
+    )
+    .unwrap();
     let ResolvedSystemPrompt::Ready(prepared) = result else {
         panic!("expected a prepared system prompt");
     };

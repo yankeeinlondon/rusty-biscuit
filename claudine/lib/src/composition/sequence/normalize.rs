@@ -164,7 +164,9 @@ fn parse_object_step(
         Some(Value::String(s)) => s.clone(),
         // Foreign data may carry a non-string `name` (a numeric id, say); a
         // list authored for sequences may not.
-        Some(other) if strictness == Strictness::Lenient && !other.is_null() => scalar_name(other),
+        Some(other) if strictness == Strictness::Lenient && !other.is_null() => {
+            scalar_name(other)
+        }
         Some(other) => {
             return Err(CompositionError::SequenceStepNameWrongType {
                 index,

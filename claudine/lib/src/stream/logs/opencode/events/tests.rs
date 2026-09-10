@@ -50,8 +50,7 @@ fn header_rejects_unknown_level() {
 
 #[test]
 fn parses_simple_key_value_tags() {
-    let line =
-        "INFO 2026-04-15T21:28:30 +0ms service=default providerID=zai-coding-plan modelID=glm-5.1";
+    let line = "INFO 2026-04-15T21:28:30 +0ms service=default providerID=zai-coding-plan modelID=glm-5.1";
     let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
         panic!("expected Structured");
     };
@@ -168,18 +167,14 @@ fn parses_tags_with_dots_and_hyphens() {
 
 #[test]
 fn new_format_parses_info_level() {
-    let line =
-        "timestamp=2026-06-10T16:11:27.352Z level=INFO service=default run=abc message=tracking";
+    let line = "timestamp=2026-06-10T16:11:27.352Z level=INFO service=default run=abc message=tracking";
     let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
         panic!("expected Structured");
     };
 
     assert_eq!(record.level, LogLevel::Info);
     assert_eq!(
-        record
-            .timestamp
-            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-            .to_string(),
+        record.timestamp.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
         "2026-06-10T16:11:27.352Z",
     );
     assert_eq!(record.delta_ms, 0);
@@ -202,7 +197,9 @@ fn new_format_parses_all_levels() {
         ("WARN", LogLevel::Warn),
         ("ERROR", LogLevel::Error),
     ] {
-        let line = format!("timestamp=2026-06-10T16:11:27.352Z level={level_str} service=default");
+        let line = format!(
+            "timestamp=2026-06-10T16:11:27.352Z level={level_str} service=default"
+        );
         let ParsedOpenCodeStderrLine::Structured(record) = parse_line(&line) else {
             panic!("expected Structured for {level_str}");
         };

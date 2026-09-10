@@ -46,10 +46,7 @@ mod tests {
     #[test]
     fn walks_bracket_indices() {
         let payload = json!({"message": {"content": [{"text": "hello"}]}});
-        assert_eq!(
-            walk(&payload, "message.content[0].text"),
-            Some(&json!("hello"))
-        );
+        assert_eq!(walk(&payload, "message.content[0].text"), Some(&json!("hello")));
         assert_eq!(walk(&payload, "message.content[1].text"), None);
     }
 

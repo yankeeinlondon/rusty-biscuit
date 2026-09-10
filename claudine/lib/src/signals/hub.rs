@@ -343,10 +343,7 @@ mod tests {
 
         assert!(!hub.drain().is_empty(), "fixture line fires a record");
         let batch = hub.take_harvest().expect("harvest enabled");
-        assert!(
-            batch.entries.is_empty(),
-            "matched payloads are not candidates"
-        );
+        assert!(batch.entries.is_empty(), "matched payloads are not candidates");
     }
 
     #[test]

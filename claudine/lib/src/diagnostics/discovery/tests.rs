@@ -77,14 +77,8 @@ fn semantic_diagnostic_wins_over_its_lower_layer_cause() {
         selected.diagnostic().map(|d| d.code()),
         Some("composition.invalid_file_reference")
     );
-    assert_eq!(
-        selected.diagnostic().map(|d| d.category()),
-        Some(Category::Composition)
-    );
-    assert_eq!(
-        selected.diagnostic().map(|d| d.origin()),
-        Some(Origin::Author)
-    );
+    assert_eq!(selected.diagnostic().map(|d| d.category()), Some(Category::Composition));
+    assert_eq!(selected.diagnostic().map(|d| d.origin()), Some(Origin::Author));
 }
 
 #[test]
@@ -124,9 +118,7 @@ fn selection_renders_and_classifies_the_same_value() {
     };
     let selected = select_effective_diagnostic(erase(&wrapped)).expect("a diagnostic is selected");
 
-    let rendered = selected
-        .block_error()
-        .report_block_error_optimistic(Some(120));
+    let rendered = selected.block_error().report_block_error_optimistic(Some(120));
     assert!(rendered.contains("missing.md"), "rendered: {rendered}");
     assert_eq!(
         selected.diagnostic().map(|d| d.code()),
@@ -141,10 +133,7 @@ fn lower_layer_cause_is_selected_when_no_claudine_diagnostic_is_present() {
     let err = MarkdownError::Transform("bare darkmatter error".to_string());
     let selected = select_effective_diagnostic(erase(&err)).expect("a block error is selected");
 
-    assert!(
-        selected.diagnostic().is_none(),
-        "darkmatter carries no facets"
-    );
+    assert!(selected.diagnostic().is_none(), "darkmatter carries no facets");
     assert!(
         selected
             .block_error()
@@ -163,11 +152,7 @@ fn nothing_is_selected_from_an_unstructured_chain() {
 #[test]
 fn deepest_transparent_diagnostic_wins_when_none_is_semantic() {
     let deepest = Probe::new("deepest", DiagnosticRole::Transparent, None);
-    let middle = Probe::new(
-        "middle",
-        DiagnosticRole::Transparent,
-        Some(Box::new(deepest)),
-    );
+    let middle = Probe::new("middle", DiagnosticRole::Transparent, Some(Box::new(deepest)));
     let outer = Probe::new("outer", DiagnosticRole::Transparent, Some(Box::new(middle)));
 
     let selected = select_with(erase(&outer), probe_registry).expect("a diagnostic is selected");
@@ -213,8 +198,11 @@ fn a_cyclic_chain_with_no_candidate_terminates_empty() {
 fn an_over_depth_chain_terminates_and_keeps_the_best_candidate() {
     // `beyond` is deeper than `candidate`, so deepest-transparent would pick it
     // — but it sits past the cap. The walk stops and keeps what it had.
-    let mut chain: Box<dyn StdError + Send + Sync + 'static> =
-        Box::new(Probe::new("beyond", DiagnosticRole::Transparent, None));
+    let mut chain: Box<dyn StdError + Send + Sync + 'static> = Box::new(Probe::new(
+        "beyond",
+        DiagnosticRole::Transparent,
+        None,
+    ));
     for i in 0..(MAX_SELECTION_DEPTH * 3) {
         chain = Box::new(Link::new(&format!("link {i}"), Some(chain)));
     }
@@ -250,10 +238,7 @@ fn a_chain_ending_in_an_unregistered_error_has_no_registered_cause() {
     };
     let primary = as_diagnostic(erase(&err)).unwrap();
 
-    assert!(
-        StdError::source(&err).is_some(),
-        "test premise: a source exists"
-    );
+    assert!(StdError::source(&err).is_some(), "test premise: a source exists");
     assert!(next_registered_cause(primary).is_none());
 }
 
@@ -272,7 +257,11 @@ fn the_cause_walk_passes_through_unregistered_links() {
 
 #[test]
 fn the_cause_walk_terminates_on_a_cyclic_chain() {
-    let outer = Probe::new("outer", DiagnosticRole::Semantic, Some(Box::new(SelfCycle)));
+    let outer = Probe::new(
+        "outer",
+        DiagnosticRole::Semantic,
+        Some(Box::new(SelfCycle)),
+    );
     assert!(next_registered_cause_with(&outer, probe_registry).is_none());
 }
 
@@ -316,9 +305,7 @@ impl fmt::Display for Link {
 
 impl StdError for Link {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        self.source
-            .as_ref()
-            .map(|s| s.as_ref() as &(dyn StdError + 'static))
+        self.source.as_ref().map(|s| s.as_ref() as &(dyn StdError + 'static))
     }
 }
 
@@ -369,9 +356,7 @@ impl fmt::Display for Probe {
 
 impl StdError for Probe {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        self.source
-            .as_ref()
-            .map(|s| s.as_ref() as &(dyn StdError + 'static))
+        self.source.as_ref().map(|s| s.as_ref() as &(dyn StdError + 'static))
     }
 }
 

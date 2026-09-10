@@ -10,7 +10,11 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-fn parse_and_evaluate<L: EvaluationLookup>(expression: &str, mode: ParseMode, lookup: &L) -> Value {
+fn parse_and_evaluate<L: EvaluationLookup>(
+    expression: &str,
+    mode: ParseMode,
+    lookup: &L,
+) -> Value {
     let mut parser = Parser::with_mode(expression, mode).expect("parser should construct");
     let parsed = parser.parse().expect("expression should parse");
     evaluate(&parsed, lookup).expect("expression should evaluate")
@@ -586,10 +590,7 @@ fn doc_dotted_path_matches_bare_doc_traversal() {
     let lookup = EventMetaExpressionLookup::new(&meta);
 
     let doc = lookup.get("doc").expect("bare doc resolves");
-    assert_eq!(
-        lookup.get("doc.git.branch"),
-        nested_pointer(&doc, "git.branch")
-    );
+    assert_eq!(lookup.get("doc.git.branch"), nested_pointer(&doc, "git.branch"));
     assert_eq!(lookup.get("doc.os.type"), nested_pointer(&doc, "os.type"));
 }
 

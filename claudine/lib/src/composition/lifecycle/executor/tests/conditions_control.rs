@@ -34,10 +34,7 @@ fn when_false_skips_item_when_true_runs() {
     );
 
     context.execute_event(&config);
-    assert_eq!(
-        recorder.events(),
-        vec![Emitted::Speech("matched".to_string())]
-    );
+    assert_eq!(recorder.events(), vec![Emitted::Speech("matched".to_string())]);
 }
 
 #[test]
@@ -216,7 +213,10 @@ fn when_known_key_runs_when_truthy_skips_when_falsy() {
     );
     let outcome = context.execute_event(&config);
     assert_eq!(outcome, LifecycleEventOutcome::default());
-    assert_eq!(recorder.events(), vec![Emitted::Message("ran".to_string())]);
+    assert_eq!(
+        recorder.events(),
+        vec![Emitted::Message("ran".to_string())]
+    );
 }
 
 #[test]
@@ -333,3 +333,5 @@ fn err_global_visible_in_failure_stack_when() {
         vec![Emitted::Stderr("saw io error".to_string())]
     );
 }
+
+

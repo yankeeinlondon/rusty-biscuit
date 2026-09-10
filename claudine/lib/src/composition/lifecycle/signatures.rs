@@ -306,7 +306,9 @@ pub fn all_lifecycle_verbs() -> Vec<&'static str> {
         verbs.push(channel.verb());
     }
     verbs.push("shell");
-    verbs.extend(["stop", "skip", "error", "proxy", "retry", "resume", "defer"]);
+    verbs.extend([
+        "stop", "skip", "error", "proxy", "retry", "resume", "defer",
+    ]);
     for desc in EFFECT_DESCRIPTORS {
         if let Some(verb) = parsed_verb_of(desc.signature) {
             verbs.push(verb);

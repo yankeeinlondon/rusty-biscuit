@@ -86,9 +86,7 @@ impl RuntimeMatcher {
 /// Invalid matchers compile to `None` so the binding fires
 /// unconditionally. A single aggregated warning names every binding
 /// whose matcher failed, replacing the previous per-binding warnings.
-pub fn compile_many(
-    bindings: &[(AgenticEvent, &str)],
-) -> Vec<(AgenticEvent, Option<RuntimeMatcher>)> {
+pub fn compile_many(bindings: &[(AgenticEvent, &str)]) -> Vec<(AgenticEvent, Option<RuntimeMatcher>)> {
     let mut results = Vec::with_capacity(bindings.len());
     let mut failed = Vec::new();
 
@@ -127,9 +125,9 @@ fn expression_uses_known_features(expr: &Expr) -> bool {
         Expr::Variable(_) => false,
         Expr::Paren(inner) => expression_uses_known_features(inner),
         Expr::ArrayLiteral(elements) => elements.iter().any(expression_uses_known_features),
-        Expr::ObjectLiteral(entries) => entries
-            .iter()
-            .any(|(_, value)| expression_uses_known_features(value)),
+        Expr::ObjectLiteral(entries) => {
+            entries.iter().any(|(_, value)| expression_uses_known_features(value))
+        }
         Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => true,
         Expr::UnaryNot(_)
         | Expr::UnaryMinus(_)

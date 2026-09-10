@@ -102,10 +102,7 @@ pub fn report_shell_audit_header(count: usize, term: &Terminal) {
 }
 
 /// Emit individual shell audit outcomes.
-pub fn report_shell_audit_outcomes(
-    report: &crate::harness::model::ShellAuditReport,
-    term: &Terminal,
-) {
+pub fn report_shell_audit_outcomes(report: &crate::harness::model::ShellAuditReport, term: &Terminal) {
     for outcome in &report.outcomes {
         let state = if outcome.passed {
             StatusState::Success

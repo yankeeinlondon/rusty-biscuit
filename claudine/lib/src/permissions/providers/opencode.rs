@@ -766,9 +766,10 @@ mod tests {
                 cli: OpenCodeCliOverrides::default(),
             },
         );
-        let change = PolicyChange::one_shot(vec![PolicyChangeOp::SetApprovalMode(
-            CanonicalApprovalMode::AutoApprove,
-        )]);
+        let change =
+            PolicyChange::one_shot(vec![PolicyChangeOp::SetApprovalMode(
+                CanonicalApprovalMode::AutoApprove,
+            )]);
 
         let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
         let one_shot = plan.one_shot_plan.unwrap();

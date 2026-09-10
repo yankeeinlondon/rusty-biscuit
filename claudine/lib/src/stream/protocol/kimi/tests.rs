@@ -358,7 +358,10 @@ fn notification_decodes_1_10_payload() {
         notification.notification_type.as_deref(),
         Some("task.completed")
     );
-    assert_eq!(notification.source_kind.as_deref(), Some("background_task"));
+    assert_eq!(
+        notification.source_kind.as_deref(),
+        Some("background_task")
+    );
     assert_eq!(notification.body.as_deref(), Some("Task `lint` completed"));
     assert_eq!(notification.severity.as_deref(), Some("info"));
     assert_eq!(notification.created_at, Some(1751700000.25));

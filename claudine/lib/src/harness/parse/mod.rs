@@ -229,14 +229,12 @@ mod tests {
             "step_timeout_warn": "10s",
         });
 
-        let plan = parse_harness_plan(&frontmatter_value, &source).expect("timeouts should parse");
+        let plan = parse_harness_plan(&frontmatter_value, &source)
+            .expect("timeouts should parse");
         assert_eq!(plan.timeout, Some(std::time::Duration::from_secs(300)));
         assert_eq!(plan.step_timeout, Some(std::time::Duration::from_secs(30)));
         assert_eq!(plan.timeout_warn, Some(std::time::Duration::from_secs(60)));
-        assert_eq!(
-            plan.step_timeout_warn,
-            Some(std::time::Duration::from_secs(10))
-        );
+        assert_eq!(plan.step_timeout_warn, Some(std::time::Duration::from_secs(10)));
     }
 
     #[test]

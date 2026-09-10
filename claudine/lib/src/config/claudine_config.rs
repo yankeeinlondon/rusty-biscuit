@@ -13,7 +13,7 @@ use crate::error::{ClaudineError, Result};
 use crate::events::AgenticEvent;
 use crate::protect::config::ProtectConfig;
 use crate::provider::Provider;
-use crate::runaway::{ExitExpressionsValue, GuardSettings, validate_exit_expressions};
+use crate::runaway::{validate_exit_expressions, ExitExpressionsValue, GuardSettings};
 
 // Re-exports for backward compatibility
 pub use crate::config::messaging_block::{ClaudineMessengerConfig, MessengerProviderConfig};
@@ -167,7 +167,9 @@ impl ProviderModelOverride {
     /// Return the user-supplied model identifiers.
     pub fn values(&self) -> Vec<&str> {
         match self {
-            ProviderModelOverride::AddList(values) => values.iter().map(String::as_str).collect(),
+            ProviderModelOverride::AddList(values) => {
+                values.iter().map(String::as_str).collect()
+            }
             ProviderModelOverride::Detailed(detailed) => {
                 detailed.values.iter().map(ModelOverrideValue::id).collect()
             }
@@ -255,10 +257,7 @@ pub struct ClaudineConfig {
     /// `MissingProperties` error instead.
     ///
     /// User-scope only; repo configs may not declare this field.
-    #[serde(
-        default = "default_prompt_for_missing",
-        skip_serializing_if = "is_true"
-    )]
+    #[serde(default = "default_prompt_for_missing", skip_serializing_if = "is_true")]
     pub prompt_for_missing: bool,
 
     /// Opt-in harvest of unmatched error/warning-class signal payloads.

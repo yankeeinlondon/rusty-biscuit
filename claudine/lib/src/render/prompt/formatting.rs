@@ -7,7 +7,7 @@ use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
-use biscuit_terminal::utils::layout::{Edges, Length};
+use biscuit_terminal::utils::layout::{Length, Edges};
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 
 pub(crate) const PROMPT_BORDER: &str = "┃ ";

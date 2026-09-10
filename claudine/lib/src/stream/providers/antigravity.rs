@@ -307,10 +307,7 @@ mod tests {
         ));
         assert!(!summary.is_error);
         assert_eq!(summary.assistant_text, "OK\n");
-        assert_eq!(
-            summary.session_id.as_deref(),
-            Some("46be74f2-14d5-4f30-8ff4-94aca94420d4")
-        );
+        assert_eq!(summary.session_id.as_deref(), Some("46be74f2-14d5-4f30-8ff4-94aca94420d4"));
         assert_eq!(summary.duration_ms, Some(1785));
         let usage = summary.token_usage.unwrap();
         assert_eq!(usage.input, Some(23791));
@@ -321,23 +318,14 @@ mod tests {
     #[test]
     fn pretty_printed_envelope_parses_across_lines() {
         let (events, mut parser) = new_parser();
-        for line in [
-            "{",
-            "  \"status\": \"SUCCESS\",",
-            "  \"response\": \"hi\"",
-            "}",
-        ] {
+        for line in ["{", "  \"status\": \"SUCCESS\",", "  \"response\": \"hi\"", "}"] {
             parser.feed_line(line);
         }
         let summary = parser.finish(0);
         assert!(!summary.is_error);
         assert_eq!(summary.assistant_text, "hi");
         let events = events.lock().unwrap();
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, SemanticEvent::OutputText { .. }))
-        );
+        assert!(events.iter().any(|e| matches!(e, SemanticEvent::OutputText { .. })));
     }
 
     #[test]
@@ -346,7 +334,8 @@ mod tests {
         // inside the response string — strict JSON, and thus serde, rejects it.
         // The lenient reparse recovers the text instead of surfacing an error.
         let (_events, mut parser) = new_parser();
-        parser.feed_line("{\"status\":\"SUCCESS\",\"response\":\"line one\nline two\"}");
+        parser
+            .feed_line("{\"status\":\"SUCCESS\",\"response\":\"line one\nline two\"}");
         let summary = parser.finish(0);
         assert!(!summary.is_error, "raw control char should be tolerated");
         assert_eq!(summary.assistant_text, "line one\nline two");
@@ -355,25 +344,23 @@ mod tests {
     #[test]
     fn error_status_records_terminal_error() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(r#"{"status":"ERROR","error":"quota exhausted for this model"}"#);
+        parser
+            .feed_line(r#"{"status":"ERROR","error":"quota exhausted for this model"}"#);
         let summary = parser.finish(1);
         assert!(summary.is_error);
         assert_eq!(summary.error_kind.as_deref(), Some("api_remote"));
         let events = events.lock().unwrap();
         assert!(events.iter().any(|e| matches!(
             e,
-            SemanticEvent::Error {
-                terminal: true,
-                kind: SemanticErrorKind::ApiRemote,
-                ..
-            }
+            SemanticEvent::Error { terminal: true, kind: SemanticErrorKind::ApiRemote, .. }
         )));
     }
 
     #[test]
     fn non_json_stdout_is_classified_on_finish() {
         let (_events, mut parser) = new_parser();
-        parser.feed_line("Error: authentication failed or timed out");
+        parser
+            .feed_line("Error: authentication failed or timed out");
         let summary = parser.finish(1);
         assert!(summary.is_error);
         // Auth failures classify as Configuration (keyring/OAuth, not remote).

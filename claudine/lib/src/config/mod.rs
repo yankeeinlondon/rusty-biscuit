@@ -1,5 +1,5 @@
-pub(crate) mod antigravity;
 pub mod atomic;
+pub(crate) mod antigravity;
 pub(crate) mod backup;
 pub(crate) mod claude;
 pub mod claudine_config;
@@ -205,7 +205,11 @@ mod tests {
     #[test]
     fn handle_command_quotes_unix_executable_path() {
         assert_eq!(
-            format_claudine_handle_command("/opt/Claudine Tools/claudine", "before_tool", "claude",),
+            format_claudine_handle_command(
+                "/opt/Claudine Tools/claudine",
+                "before_tool",
+                "claude",
+            ),
             "'/opt/Claudine Tools/claudine' handle before_tool --provider claude"
         );
     }

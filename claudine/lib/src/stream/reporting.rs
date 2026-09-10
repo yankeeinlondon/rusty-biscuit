@@ -187,14 +187,14 @@ pub fn summary_to_event_meta_with_context(
     // fields remain authoritative for JSONL and SQL ingest; these
     // mirrors exist only for template/expression bridging.
     if let Some(pid) = env.claudine_pid {
-        extra
-            .entry("claudine_pid".to_string())
-            .or_insert(Value::Number(serde_json::Number::from(pid)));
+        extra.entry("claudine_pid".to_string()).or_insert(Value::Number(
+            serde_json::Number::from(pid),
+        ));
     }
     if let Some(pid) = agent_pid {
-        extra
-            .entry("agent_pid".to_string())
-            .or_insert(Value::Number(serde_json::Number::from(pid)));
+        extra.entry("agent_pid".to_string()).or_insert(Value::Number(
+            serde_json::Number::from(pid),
+        ));
     }
 
     EventMeta {
@@ -431,7 +431,8 @@ fn destructure_semantic(event: &SemanticEvent) -> EventMetaSlots {
 /// This function is for synthetic summary events only — it must NOT
 /// trigger user-configured hooks.
 pub fn write_summary_event(meta: &EventMeta) -> Result<(), std::io::Error> {
-    let path = paths::resolve_file_log_path(None, true).map_err(std::io::Error::other)?;
+    let path = paths::resolve_file_log_path(None, true)
+        .map_err(std::io::Error::other)?;
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;

@@ -15,7 +15,11 @@ fn stack_action_sees_prior_set_frontmatter() {
     .unwrap();
     let fm = map(json!({"status": "pending"}));
     let (dir, engine) = temp_engine();
-    std::fs::write(dir.path().join("t.md"), "---\nstatus: pending\n---\nbody\n").unwrap();
+    std::fs::write(
+        dir.path().join("t.md"),
+        "---\nstatus: pending\n---\nbody\n",
+    )
+    .unwrap();
     let shell = MockShell::new(0);
     let recorder = Recorder::default();
     let harness = Harness::default();
@@ -33,10 +37,7 @@ fn stack_action_sees_prior_set_frontmatter() {
     );
     let outcome = context.execute_event(&config);
     assert_eq!(outcome, LifecycleEventOutcome::default());
-    assert_eq!(
-        recorder.events(),
-        vec![Emitted::Message("done".to_string())]
-    );
+    assert_eq!(recorder.events(), vec![Emitted::Message("done".to_string())]);
 }
 
 /// Cross-event visibility (review-2 High finding): a `start.stack`
@@ -187,3 +188,4 @@ fn without_live_cell_later_event_resolves_against_its_own_base() {
         vec![Emitted::Message("status=pending".to_string())]
     );
 }
+

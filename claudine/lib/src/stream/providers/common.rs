@@ -55,7 +55,10 @@ pub(crate) fn classify_error_by_keywords(
             }
         }
     }
-    for (input, buckets) in [(error_kind, kw.kind_buckets), (message, kw.msg_buckets)] {
+    for (input, buckets) in [
+        (error_kind, kw.kind_buckets),
+        (message, kw.msg_buckets),
+    ] {
         if let Some(text) = input {
             let lower = text.to_ascii_lowercase();
             for (result, needles) in buckets {

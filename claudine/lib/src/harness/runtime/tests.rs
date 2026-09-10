@@ -242,7 +242,8 @@ fn oversized_message_with_suffix_respects_cap_and_keeps_suffix() {
 #[test]
 fn synthesized_error_message_outranks_guard_context() {
     let mut o = outcome(ProcessTermination::Aborted);
-    o.error_message = Some("exit expression matched: STOPWIRE; terminated to stop the loop".into());
+    o.error_message =
+        Some("exit expression matched: STOPWIRE; terminated to stop the loop".into());
     o.guard_context = Some(GuardContext {
         pattern: Some("STOPWIRE".into()),
         ..GuardContext::default()
@@ -332,7 +333,10 @@ fn a_non_task_semantic_error_with_native_exit_zero_is_an_agent_failure() {
     let mut attempt = completed(0, true);
     attempt.error_kind = Some("repeated_stream_error".into());
     attempt.error_message = Some("provider stream errored 5 times".into());
-    assert_eq!(classify_failure(&attempt), Some(FailureEvent::AgentFailure));
+    assert_eq!(
+        classify_failure(&attempt),
+        Some(FailureEvent::AgentFailure)
+    );
 }
 
 #[test]
@@ -340,7 +344,10 @@ fn incomplete_subagents_with_native_exit_zero_is_an_agent_failure_not_a_timeout(
     let mut attempt = completed(0, true);
     attempt.error_kind = Some("incomplete_subagents".into());
     // Fail-fast, not the retryable timeout path.
-    assert_eq!(classify_failure(&attempt), Some(FailureEvent::AgentFailure));
+    assert_eq!(
+        classify_failure(&attempt),
+        Some(FailureEvent::AgentFailure)
+    );
 }
 
 #[test]
@@ -431,10 +438,7 @@ fn the_incomplete_headline_is_clamped_while_the_facts_stay_complete() {
         "headline was {} chars: {headline}",
         headline.chars().count()
     );
-    assert!(
-        headline.starts_with("40 sub-agent tasks did not complete"),
-        "{headline}"
-    );
+    assert!(headline.starts_with("40 sub-agent tasks did not complete"), "{headline}");
     // … and the truncation it forces never reaches the machine record.
     assert_eq!(summary.subagent_outcomes.len(), 40);
     assert!(

@@ -220,11 +220,7 @@ impl KiloConfigurator {
         let expected: HashSet<String> = plan
             .events
             .iter()
-            .filter(|event| {
-                Provider::Kilo
-                    .registration_native_event_name(event)
-                    .is_some()
-            })
+            .filter(|event| Provider::Kilo.registration_native_event_name(event).is_some())
             .map(|event| event.to_string())
             .collect();
 

@@ -280,10 +280,14 @@ mod tests {
             let mut parser =
                 create_semantic_parser(Provider::Claude, sink, ParserConfig::default());
 
-            parser.feed_line(r#"{"type":"init","session_id":"s1","model":"claude"}"#);
-            parser.feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Hello"}]}"#);
-            parser.feed_line(r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}"#);
-            parser.feed_line(r#"{"type":"tool_result","tool_use_id":"t1","content":"ok"}"#);
+            parser
+                .feed_line(r#"{"type":"init","session_id":"s1","model":"claude"}"#);
+            parser
+                .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Hello"}]}"#);
+            parser
+                .feed_line(r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}"#);
+            parser
+                .feed_line(r#"{"type":"tool_result","tool_use_id":"t1","content":"ok"}"#);
 
             let collected = events.lock().unwrap().clone();
             let kinds = kinds_of(&collected);

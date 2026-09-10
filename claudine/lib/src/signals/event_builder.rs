@@ -122,7 +122,8 @@ impl ResolvedFields {
                 return None;
             }
         };
-        (value.fract() == 0.0 && value >= 0.0 && value <= u64::MAX as f64).then_some(value as u64)
+        (value.fract() == 0.0 && value >= 0.0 && value <= u64::MAX as f64)
+            .then_some(value as u64)
     }
 
     fn take_u16(&mut self, name: &str) -> Option<u16> {
@@ -192,11 +193,7 @@ pub(crate) fn resolve_extractions(record: &DetectionRecord, payload: &Value) -> 
             continue;
         };
         if raw.is_null() {
-            debug!(
-                record = record.id,
-                field = spec.field,
-                "extraction value is null"
-            );
+            debug!(record = record.id, field = spec.field, "extraction value is null");
             continue;
         }
         match convert(&raw, spec) {
@@ -241,9 +238,7 @@ fn convert(raw: &Value, spec: &ExtractionSpec) -> Option<ResolvedValue> {
         Some(Unit::UnixSeconds) => epoch_to_datetime(raw, 1.0),
         Some(Unit::UnixMillis) => epoch_to_datetime(raw, 1e3),
         Some(Unit::UnixNanos) => epoch_to_datetime(raw, 1e9),
-        Some(Unit::Iso8601) => {
-            parse_iso8601(raw.as_str()?, spec.zone).map(ResolvedValue::Timestamp)
-        }
+        Some(Unit::Iso8601) => parse_iso8601(raw.as_str()?, spec.zone).map(ResolvedValue::Timestamp),
         Some(
             unit @ (Unit::DurationSecs
             | Unit::DurationMillis
@@ -417,14 +412,8 @@ fn build_from_fields(kind: SignalKind, f: &mut ResolvedFields) -> Option<SignalE
         // records exist, so this arm only keeps the match exhaustive. A
         // single extraction path carries at most one id per list.
         SignalKind::ModelCatalogDrift => SignalEvent::ModelCatalogDrift {
-            unexpected: f
-                .take_string("unexpected")
-                .map(|id| vec![id])
-                .unwrap_or_default(),
-            missing: f
-                .take_string("missing")
-                .map(|id| vec![id])
-                .unwrap_or_default(),
+            unexpected: f.take_string("unexpected").map(|id| vec![id]).unwrap_or_default(),
+            missing: f.take_string("missing").map(|id| vec![id]).unwrap_or_default(),
             observed_via: match f.take_string("observed_via").as_deref() {
                 Some("resolved_model") => DriftObservation::ResolvedModel,
                 _ => DriftObservation::Listing,
@@ -536,10 +525,7 @@ mod strategy_tests {
     #[test]
     fn strategies_over_a_missing_or_non_string_path_yield_none() {
         let payload = json!({ "n": 7 });
-        let re = ExtractStrategy::Regex {
-            path: "n",
-            pattern: r"(\d+)",
-        };
+        let re = ExtractStrategy::Regex { path: "n", pattern: r"(\d+)" };
         assert_eq!(resolve_source(&payload, &re), None);
         let missing = ExtractStrategy::Path("absent");
         assert_eq!(resolve_source(&payload, &missing), None);

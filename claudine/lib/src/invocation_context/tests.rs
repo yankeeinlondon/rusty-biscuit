@@ -68,15 +68,9 @@ fn one_launch_observation_projects_every_existing_context() {
     // dedup compares one form — in the legacy (dunce-simplified) spelling,
     // never verbatim; the authored roots below are unaffected.
     let canonical_fixture = biscuit_file::canonicalize_simplified(fixture.path()).unwrap();
-    assert_eq!(
-        launch.repo_root.as_deref(),
-        Some(canonical_fixture.as_path())
-    );
+    assert_eq!(launch.repo_root.as_deref(), Some(canonical_fixture.as_path()));
     assert_eq!(workspace.repo_root.as_deref(), Some(fixture.path()));
-    assert_eq!(
-        environment.git.as_ref().map(|git| git.repo_root.as_path()),
-        Some(fixture.path())
-    );
+    assert_eq!(environment.git.as_ref().map(|git| git.repo_root.as_path()), Some(fixture.path()));
     assert_eq!(after.git_root_discoveries, before.git_root_discoveries);
     assert_eq!(after.topology_probes, before.topology_probes);
 }
@@ -109,10 +103,7 @@ fn captured_process_state_is_immutable_for_later_projections() {
     assert_eq!(derived.source_path(), source);
     assert_eq!(invocation.home_dir(), captured_home.as_deref());
     assert_eq!(
-        invocation
-            .environment()
-            .get("CLAUDINE_INVOCATION_CONTEXT_TEST")
-            .map(String::as_str),
+        invocation.environment().get("CLAUDINE_INVOCATION_CONTEXT_TEST").map(String::as_str),
         Some("captured")
     );
     assert_eq!(
@@ -143,15 +134,9 @@ fn launch_and_same_repository_source_share_one_topology_probe() {
 
     assert_eq!(source_context.repository_root(), Some(fixture.path()));
     let expected_area = fixture.path().join("area");
-    assert_eq!(
-        source_context.package_area_root(),
-        Some(expected_area.as_path())
-    );
+    assert_eq!(source_context.package_area_root(), Some(expected_area.as_path()));
     let expected_package = fixture.path().join("area/pkg");
-    assert_eq!(
-        source_context.package_root(),
-        Some(expected_package.as_path())
-    );
+    assert_eq!(source_context.package_root(), Some(expected_package.as_path()));
     assert_eq!(
         source_context.file_resolution_context().package_area(),
         Some(expected_area.as_path())
@@ -191,14 +176,8 @@ fn standalone_darkmatter_and_claudine_file_plans_have_scope_parity() {
             .map(|candidate| (candidate.path().to_path_buf(), candidate.provenance()))
             .collect::<Vec<_>>()
     };
-    assert_eq!(
-        paths("^shared.md", &standalone),
-        paths("^shared.md", claudine)
-    );
-    assert_eq!(
-        paths("shared.md", &standalone),
-        paths("shared.md", claudine)
-    );
+    assert_eq!(paths("^shared.md", &standalone), paths("^shared.md", claudine));
+    assert_eq!(paths("shared.md", &standalone), paths("shared.md", claudine));
 
     let standalone_intrinsic = paths("@shared.md", &standalone);
     let claudine_plan = paths("@shared.md", claudine);
@@ -245,12 +224,8 @@ fn nested_sources_rebuild_their_own_prompt_convention_roots() {
 
     let alpha_context = invocation.derive_source(&alpha).unwrap();
     let beta_context = invocation.derive_source(&beta).unwrap();
-    let alpha_roots = alpha_context
-        .file_resolution_context()
-        .prepended_magic_paths();
-    let beta_roots = beta_context
-        .file_resolution_context()
-        .prepended_magic_paths();
+    let alpha_roots = alpha_context.file_resolution_context().prepended_magic_paths();
+    let beta_roots = beta_context.file_resolution_context().prepended_magic_paths();
 
     assert!(alpha_roots.contains(&fixture.path().join("alpha/lib/prompts")));
     assert!(!alpha_roots.contains(&fixture.path().join("beta/lib/prompts")));
@@ -355,7 +330,8 @@ fn document_epoch_tokens_isolate_overlapping_work() {
         let left_barrier = std::sync::Arc::clone(&barrier);
         let left = left.clone();
         scope.spawn(move || {
-            let requirements = darkmatter::markdown::compose::ContextRequirements::for_content("");
+            let requirements =
+                darkmatter::markdown::compose::ContextRequirements::for_content("");
             let _context = left.capture_launch_context(&requirements);
             left.record_prepared_context_consumer(PreparedContextConsumer::Body);
             left_barrier.wait();
@@ -365,11 +341,14 @@ fn document_epoch_tokens_isolate_overlapping_work() {
         let right_barrier = std::sync::Arc::clone(&barrier);
         let right = right.clone();
         scope.spawn(move || {
-            let requirements = darkmatter::markdown::compose::ContextRequirements::for_content("");
+            let requirements =
+                darkmatter::markdown::compose::ContextRequirements::for_content("");
             let _context = right.capture_launch_context(&requirements);
             right.record_prepared_context_consumer(PreparedContextConsumer::Preflight);
             right_barrier.wait();
-            right.record_prepared_context_consumer(PreparedContextConsumer::EffectiveFrontmatter);
+            right.record_prepared_context_consumer(
+                PreparedContextConsumer::EffectiveFrontmatter,
+            );
         });
     });
 
@@ -654,14 +633,7 @@ fn linked_worktrees_keep_distinct_repository_keys() {
         .unwrap();
     assert!(commit.success());
     let worktree = Command::new("git")
-        .args([
-            "worktree",
-            "add",
-            "-q",
-            "-b",
-            "linked",
-            linked.to_str().unwrap(),
-        ])
+        .args(["worktree", "add", "-q", "-b", "linked", linked.to_str().unwrap()])
         .current_dir(&main)
         .status()
         .unwrap();
@@ -991,8 +963,9 @@ fn launch_extension_projects_missing_groups_without_reanchoring() {
     let launch_dir = fixture.path().join("area/pkg");
 
     let invocation = InvocationContext::capture_at(&launch_dir);
-    let base_requirements =
-        darkmatter::markdown::compose::ContextRequirements::for_content("{{ ctx.repo_root }}");
+    let base_requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.repo_root }}",
+    );
     let mut context = invocation.capture_launch_context(&base_requirements);
     assert!(
         !context

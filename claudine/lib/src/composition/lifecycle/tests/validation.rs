@@ -10,10 +10,7 @@ fn scan_rejects_pre_checks_removed_key() {
     });
     let (key, replacement) = scan_removed_validation_keys(&frontmatter).unwrap();
     assert_eq!(key, "pre_checks");
-    assert!(
-        replacement.contains("initialize"),
-        "replacement: {replacement}"
-    );
+    assert!(replacement.contains("initialize"), "replacement: {replacement}");
 }
 
 #[test]
@@ -24,10 +21,7 @@ fn scan_rejects_post_checks_removed_key() {
     });
     let (key, replacement) = scan_removed_validation_keys(&frontmatter).unwrap();
     assert_eq!(key, "post_checks");
-    assert!(
-        replacement.contains("success"),
-        "replacement: {replacement}"
-    );
+    assert!(replacement.contains("success"), "replacement: {replacement}");
 }
 
 #[test]
@@ -60,10 +54,7 @@ fn scan_rejects_handle_timeout_removed_key() {
     });
     let (key, replacement) = scan_removed_validation_keys(&frontmatter).unwrap();
     assert_eq!(key, "handle_timeout");
-    assert!(
-        replacement.contains("blocked"),
-        "replacement: {replacement}"
-    );
+    assert!(replacement.contains("blocked"), "replacement: {replacement}");
 }
 
 #[test]
@@ -74,10 +65,7 @@ fn scan_rejects_handle_inline_body_unchanged_removed_key() {
     });
     let (key, replacement) = scan_removed_validation_keys(&frontmatter).unwrap();
     assert_eq!(key, "handle_inline_body_unchanged");
-    assert!(
-        replacement.contains("failure"),
-        "replacement: {replacement}"
-    );
+    assert!(replacement.contains("failure"), "replacement: {replacement}");
 }
 
 #[test]
@@ -168,13 +156,8 @@ fn undefined_lifecycle_variable_is_rejected() {
     }));
     let effective = json!({ "start": { "message": "before  after" } });
 
-    let err = validate_no_undefined_lifecycle_variables(
-        &raw,
-        &effective,
-        &LifecycleConfig::default(),
-        dummy_path(),
-    )
-    .unwrap_err();
+    let err =
+        validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).unwrap_err();
     match err {
         CompositionError::LifecycleUndefinedVariable {
             property, variable, ..
@@ -194,15 +177,7 @@ fn defined_and_namespaced_lifecycle_variables_pass() {
     }));
     let effective = json!({ "area": "claudine" });
 
-    assert!(
-        validate_no_undefined_lifecycle_variables(
-            &raw,
-            &effective,
-            &LifecycleConfig::default(),
-            dummy_path()
-        )
-        .is_ok()
-    );
+    assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).is_ok());
 }
 
 #[test]
@@ -215,13 +190,8 @@ fn undefined_variable_inside_function_call_is_rejected() {
     }));
     let effective = json!({ "area": "claudine" });
 
-    let err = validate_no_undefined_lifecycle_variables(
-        &raw,
-        &effective,
-        &LifecycleConfig::default(),
-        dummy_path(),
-    )
-    .unwrap_err();
+    let err =
+        validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).unwrap_err();
     match err {
         CompositionError::LifecycleUndefinedVariable {
             property, variable, ..
@@ -242,15 +212,7 @@ fn undefined_variable_inside_fallback_argument_passes() {
     }));
     let effective = json!({ "area": "claudine" });
 
-    assert!(
-        validate_no_undefined_lifecycle_variables(
-            &raw,
-            &effective,
-            &LifecycleConfig::default(),
-            dummy_path()
-        )
-        .is_ok()
-    );
+    assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).is_ok());
 }
 
 #[test]
@@ -260,13 +222,8 @@ fn undefined_variable_in_ternary_condition_is_rejected() {
     }));
     let effective = json!({});
 
-    let err = validate_no_undefined_lifecycle_variables(
-        &raw,
-        &effective,
-        &LifecycleConfig::default(),
-        dummy_path(),
-    )
-    .unwrap_err();
+    let err =
+        validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).unwrap_err();
     match err {
         CompositionError::LifecycleUndefinedVariable {
             property, variable, ..
@@ -285,13 +242,8 @@ fn undefined_variable_in_ternary_truthy_condition_is_rejected() {
     }));
     let effective = json!({});
 
-    let err = validate_no_undefined_lifecycle_variables(
-        &raw,
-        &effective,
-        &LifecycleConfig::default(),
-        dummy_path(),
-    )
-    .unwrap_err();
+    let err =
+        validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).unwrap_err();
     match err {
         CompositionError::LifecycleUndefinedVariable {
             property, variable, ..
@@ -312,15 +264,7 @@ fn defined_condition_with_undefined_branch_operands_passes() {
     }));
     let effective = json!({ "defined": true });
 
-    assert!(
-        validate_no_undefined_lifecycle_variables(
-            &raw,
-            &effective,
-            &LifecycleConfig::default(),
-            dummy_path()
-        )
-        .is_ok()
-    );
+    assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).is_ok());
 }
 
 #[test]
@@ -330,13 +274,8 @@ fn undefined_variable_in_index_is_rejected() {
     }));
     let effective = json!({});
 
-    let err = validate_no_undefined_lifecycle_variables(
-        &raw,
-        &effective,
-        &LifecycleConfig::default(),
-        dummy_path(),
-    )
-    .unwrap_err();
+    let err =
+        validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).unwrap_err();
     match err {
         CompositionError::LifecycleUndefinedVariable { variable, .. } => {
             assert_eq!(variable, "missing");
@@ -352,13 +291,8 @@ fn undefined_variable_in_member_access_is_rejected() {
     }));
     let effective = json!({});
 
-    let err = validate_no_undefined_lifecycle_variables(
-        &raw,
-        &effective,
-        &LifecycleConfig::default(),
-        dummy_path(),
-    )
-    .unwrap_err();
+    let err =
+        validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).unwrap_err();
     match err {
         CompositionError::LifecycleUndefinedVariable { variable, .. } => {
             assert_eq!(variable, "missing");
@@ -374,15 +308,7 @@ fn defined_variable_inside_function_call_passes() {
     }));
     let effective = json!({ "area": "/repo/claudine" });
 
-    assert!(
-        validate_no_undefined_lifecycle_variables(
-            &raw,
-            &effective,
-            &LifecycleConfig::default(),
-            dummy_path()
-        )
-        .is_ok()
-    );
+    assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, &LifecycleConfig::default(), dummy_path()).is_ok());
 }
 
 #[test]
@@ -451,7 +377,10 @@ fn doc_err_inside_container_literal_is_still_allowed() {
 
 #[test]
 fn stack_undefined_variable_inside_container_literal_is_rejected() {
-    for when in ["length([missing_var]) > 0", "{ reason: missing_var }"] {
+    for when in [
+        "length([missing_var]) > 0",
+        "{ reason: missing_var }",
+    ] {
         let fm = json!({
             "start": { "stack": [{"when": when, "action": {"say": "hi"}}] }
         });
@@ -482,10 +411,7 @@ fn stack_container_literal_key_is_not_an_undefined_variable() {
     let lifecycle = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     let result =
         validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path());
-    assert!(
-        result.is_ok(),
-        "an object key is not a reference: {result:?}"
-    );
+    assert!(result.is_ok(), "an object key is not a reference: {result:?}");
 }
 
 #[test]

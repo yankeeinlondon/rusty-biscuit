@@ -173,7 +173,10 @@ mod tests {
     }
 
     fn thinking_block_count(rendered: &str) -> usize {
-        rendered.lines().filter(|l| l.contains('\u{258c}')).count()
+        rendered
+            .lines()
+            .filter(|l| l.contains('\u{258c}'))
+            .count()
     }
 
     #[test]
@@ -212,10 +215,7 @@ mod tests {
         );
         // The held partial drains on close.
         let rest = frames(r.close());
-        assert!(
-            rest.contains("second partial"),
-            "close must drain tail: {rest:?}"
-        );
+        assert!(rest.contains("second partial"), "close must drain tail: {rest:?}");
     }
 
     #[test]
@@ -242,20 +242,14 @@ mod tests {
             flushed.contains("uninterrupted thought"),
             "long sentence-terminated thought should flush early: {flushed:?}"
         );
-        assert!(
-            r.buffer.is_empty(),
-            "buffer should drain after progress flush"
-        );
+        assert!(r.buffer.is_empty(), "buffer should drain after progress flush");
     }
 
     #[test]
     fn short_thought_does_not_early_flush() {
         let mut r = renderer();
         let flushed = frames(r.append("Hmm."));
-        assert!(
-            flushed.is_empty(),
-            "short thought must stay buffered: {flushed:?}"
-        );
+        assert!(flushed.is_empty(), "short thought must stay buffered: {flushed:?}");
         assert!(!r.buffer.is_empty());
     }
 
@@ -267,10 +261,7 @@ mod tests {
         assert!(r.flush_idle(Duration::from_secs(60)).is_empty());
         std::thread::sleep(Duration::from_millis(20));
         let flushed = frames(r.flush_idle(Duration::from_millis(5)));
-        assert!(
-            flushed.contains("dangling thought"),
-            "idle flush should fire: {flushed:?}"
-        );
+        assert!(flushed.contains("dangling thought"), "idle flush should fire: {flushed:?}");
         assert!(r.buffer.is_empty());
     }
 

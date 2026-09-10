@@ -55,10 +55,7 @@ impl StepState {
         let mut map = Map::new();
         map.insert("name".into(), Value::String(self.name.clone()));
         map.insert("id".into(), Value::String(self.id.clone()));
-        map.insert(
-            "sequence_id".into(),
-            Value::String(self.sequence_id.clone()),
-        );
+        map.insert("sequence_id".into(), Value::String(self.sequence_id.clone()));
         map.insert("is_first".into(), Value::Bool(self.is_first));
         map.insert("is_last".into(), Value::Bool(self.is_last));
         map.insert("index".into(), Value::Number(self.index.into()));
@@ -312,18 +309,13 @@ impl SequenceStepOverlay {
         map.insert("state".into(), self.state.to_value());
         map.insert(
             "previous".into(),
-            self.previous
-                .as_ref()
-                .map_or(Value::Null, StepState::to_value),
+            self.previous.as_ref().map_or(Value::Null, StepState::to_value),
         );
         map.insert(
             "next".into(),
             self.next.as_ref().map_or(Value::Null, StepState::to_value),
         );
-        map.insert(
-            "sequence_id".into(),
-            Value::String(self.sequence_id.clone()),
-        );
+        map.insert("sequence_id".into(), Value::String(self.sequence_id.clone()));
         // `outputs` is deliberately absent: it lives in the runtime layer,
         // which sits *below* this overlay. Emitting the (always-empty) overlay
         // copy would clobber the accumulator every step, so a later step would

@@ -6,13 +6,7 @@ fn labels(outcomes: &[SubagentOutcome]) -> Vec<String> {
 
 #[test]
 fn success_allowlist_recognizes_the_three_documented_spellings() {
-    for status in [
-        "completed",
-        "success",
-        "succeeded",
-        "SUCCEEDED",
-        "  success ",
-    ] {
+    for status in ["completed", "success", "succeeded", "SUCCEEDED", "  success "] {
         assert_eq!(
             route_notification_status(Some(status)),
             NotificationRouting::Terminal(TaskOutcome::Succeeded),
@@ -261,10 +255,7 @@ fn applying_an_incomplete_ledger_poisons_success_without_touching_the_exit_code(
     assert_eq!(summary.exit_code, 0);
     assert_eq!(summary.subagent_outcomes.len(), 2);
     let message = summary.error_message.unwrap();
-    assert!(
-        message.contains("2 sub-agent tasks did not complete"),
-        "{message}"
-    );
+    assert!(message.contains("2 sub-agent tasks did not complete"), "{message}");
     assert!(message.contains("commit-a"), "{message}");
     assert!(message.contains("commit-b"), "{message}");
 }
@@ -380,10 +371,7 @@ fn the_headline_names_tasks_while_the_machine_list_stays_complete() {
     }
     let incomplete = ledger.incomplete_outcomes();
     let message = incomplete_message(&incomplete);
-    assert!(
-        message.starts_with("40 sub-agent tasks did not complete:"),
-        "{message}"
-    );
+    assert!(message.starts_with("40 sub-agent tasks did not complete:"), "{message}");
 
     let mut summary = StreamExecutionSummary::default();
     ledger.apply_to_summary(&mut summary);
@@ -510,9 +498,7 @@ fn a_long_message_only_failure_keeps_its_reservation_and_the_task_list_gives_way
         "{message}"
     );
     let clause_start = message.find("after provider failure").unwrap();
-    let clause_end = message
-        .find("; incomplete:")
-        .expect("task list follows the clause");
+    let clause_end = message.find("; incomplete:").expect("task list follows the clause");
     let clause_chars = message[clause_start..clause_end].chars().count();
     assert!(
         clause_chars <= PRIOR_FAILURE_CLAUSE_MAX_CHARS,

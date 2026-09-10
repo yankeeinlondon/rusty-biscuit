@@ -5,8 +5,7 @@ use super::*;
 #[test]
 fn usage_cap_after_stdout_emits_terminal_error_and_early_terminate() {
     let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
-    let mut bridge =
-        OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx), None);
+    let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx), None);
     let line = r#"ERROR 2026-04-15T19:26:02 +3054ms service=llm providerID=zai-coding-plan modelID=glm-5.1 error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached. Your limit will reset at 2026-04-16 04:18:56\"}}"}]}}"#;
     assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
     assert_eq!(bridge.sink.events.len(), 1);
@@ -112,21 +111,12 @@ fn repeated_stream_errors_trip_backstop_and_terminate() {
 
     // First MAX-1 errors are non-fatal warnings; the channel stays quiet.
     for _ in 0..(MAX_CONSECUTIVE_STREAM_ERRORS - 1) {
-        assert_eq!(
-            bridge.ingest(GENERIC_STREAM_ERROR),
-            StderrIngestOutcome::Consumed
-        );
+        assert_eq!(bridge.ingest(GENERIC_STREAM_ERROR), StderrIngestOutcome::Consumed);
     }
-    assert!(
-        rx.try_recv().is_err(),
-        "backstop must not fire below threshold"
-    );
+    assert!(rx.try_recv().is_err(), "backstop must not fire below threshold");
 
     // The threshold-crossing error trips the terminal abort.
-    assert_eq!(
-        bridge.ingest(GENERIC_STREAM_ERROR),
-        StderrIngestOutcome::Consumed
-    );
+    assert_eq!(bridge.ingest(GENERIC_STREAM_ERROR), StderrIngestOutcome::Consumed);
     match bridge.sink.events.last().expect("expected an event") {
         SemanticEvent::Error { terminal, kind, .. } => {
             assert!(*terminal);
@@ -438,3 +428,4 @@ fn cap_wins_over_retries_exhausted_in_bridge() {
 // The three new content-guard variants must clone/compare cleanly and
 // carry their fields verbatim. The summary-mapping behavior (error_kind
 // routing through the CLI termination layer) is proven in Phase 4.
+

@@ -68,10 +68,7 @@ pub(super) fn categorize_problems(
     }
 }
 
-pub(super) fn atom_for_property<'s>(
-    shape: &'s SchemaShape,
-    name: &str,
-) -> Option<&'s PropertyAtom> {
+pub(super) fn atom_for_property<'s>(shape: &'s SchemaShape, name: &str) -> Option<&'s PropertyAtom> {
     let def = shape.properties.get(name)?;
     match def {
         PropertyDef::Single(atom) => Some(atom),
@@ -135,10 +132,7 @@ pub(super) fn classify_unresolved_file_reference(
         // Only Darkmatter's `NoMatch` ("no existing file matched reference")
         // is a resolvable partial — a parse/resolution error is a genuinely
         // bad value that a glob walk cannot rescue.
-        if !problem
-            .message
-            .contains("no existing file matched reference")
-        {
+        if !problem.message.contains("no existing file matched reference") {
             continue;
         }
         let Some(name) = top_level_pointer_segment(&problem.path) else {
@@ -189,22 +183,18 @@ pub(super) fn classify_unresolved_file_reference(
 pub(super) fn provided_partial_value(value: Option<&serde_json::Value>) -> Option<String> {
     match value? {
         serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
-        serde_json::Value::Array(arr) => arr.iter().find_map(|v| match v {
-            serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
-            _ => None,
-        }),
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .find_map(|v| match v {
+                serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
+                _ => None,
+            }),
         _ => None,
     }
 }
 
-pub(super) fn is_eager_file_problem(
-    shape: Option<&SchemaShape>,
-    problem: &ValidationProblem,
-) -> bool {
-    if !matches!(
-        problem.kind,
-        ValidationProblemKind::Invalid | ValidationProblemKind::Type
-    ) {
+pub(super) fn is_eager_file_problem(shape: Option<&SchemaShape>, problem: &ValidationProblem) -> bool {
+    if !matches!(problem.kind, ValidationProblemKind::Invalid | ValidationProblemKind::Type) {
         return false;
     }
     let Some(name) = top_level_pointer_segment(&problem.path) else {
@@ -498,8 +488,10 @@ pub fn build_schema_status_report(
     // composition. Flagging `runtime_agent: '{{ env.AGENT }}'` as Invalid
     // here would contradict the (correct) successful execution that
     // follows. See `features/2026-05-15-schemas/review-4.md`.
-    let mut missing_by_name: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    let mut invalid_by_name: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut missing_by_name: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    let mut invalid_by_name: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
     for problem in &report.problems {
         match problem.kind {
             ValidationProblemKind::Missing => {
@@ -554,7 +546,10 @@ pub fn build_schema_status_report(
 
         let (type_label, description) = match def {
             PropertyDef::Single(atom) => (type_label_for_atom(atom), atom.description.clone()),
-            PropertyDef::Union(_) => ("<union>".to_string(), None),
+            PropertyDef::Union(_) => (
+                "<union>".to_string(),
+                None,
+            ),
         };
 
         let entry = PropertyStatus {

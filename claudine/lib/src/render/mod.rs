@@ -24,13 +24,13 @@ pub use event_renderer::{
 pub use final_message::FinalMessage;
 pub use incomplete_subagents::IncompleteSubagents;
 pub use metrics_report::MetricsReport;
-pub use prompt::{
-    AgentPrompt, ReportMode, SystemPrompt, TruncationMode, parse_frontmatter_verbosity,
-    resolve_agent_prompt_report_mode, resolve_system_prompt_report_mode,
-};
 pub use stream::StreamRenderable;
 pub use task_stream::{
     TASK_PALETTE, TaskBar, TaskFrameWriter, TaskLiveOutput, TaskStream, TaskStreamFrame,
     TaskStreamOutcome, TaskStreamSink,
 };
 pub use thinking_stream::ThinkingStream;
+pub use prompt::{
+    AgentPrompt, ReportMode, SystemPrompt, TruncationMode, parse_frontmatter_verbosity,
+    resolve_agent_prompt_report_mode, resolve_system_prompt_report_mode,
+};

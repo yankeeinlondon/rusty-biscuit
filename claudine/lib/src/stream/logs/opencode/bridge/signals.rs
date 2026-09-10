@@ -26,7 +26,10 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         // termination fires. The CLI's post-wait synthesis emits the same
         // event; the sink's correlation window folds the double-fire.
         if let Some(hub) = &self.signal_hub {
-            hub.emit_bespoke(termination.to_signal_event(), SignalSource::StderrPromoted);
+            hub.emit_bespoke(
+                termination.to_signal_event(),
+                SignalSource::StderrPromoted,
+            );
         }
         let Some(sender) = self.early_terminate.as_ref() else {
             return;

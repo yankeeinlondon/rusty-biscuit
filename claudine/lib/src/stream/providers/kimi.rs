@@ -958,12 +958,7 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
-        super::common::emit_malformed_warning(
-            &mut self.sink,
-            Provider::KimiCode,
-            self.line_num,
-            err,
-        );
+        super::common::emit_malformed_warning(&mut self.sink, Provider::KimiCode, self.line_num, err);
     }
 }
 

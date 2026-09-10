@@ -27,7 +27,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let title = exit_reason
                 .clone()
                 .unwrap_or_else(|| "iteration failed".to_string());
-            let body = format!("Iteration {iteration} exited with code {exit_code}.\n\n{reason}");
+            let body =
+                format!("Iteration {iteration} exited with code {exit_code}.\n\n{reason}");
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", &title))
                 .body(body)
@@ -80,9 +81,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
 fn render_inline_sequence_mismatch_block(source_path: &std::path::Path) -> StatusBlock {
     let file_link = render_file_link(source_path);
 
-    let opening = Prose::new(
-        "You tried to run an inline-compose operation on a document configured as a sequence.",
-    );
+    let opening =
+        Prose::new("You tried to run an inline-compose operation on a document configured as a sequence.");
 
     let explanation = Prose::new(format!(
         "The document {file_link} defines both <cyan>`prompt`</cyan> and <cyan>`sequence`</cyan>. \
@@ -126,10 +126,7 @@ fn render_sequence_missing_properties_block(
             .as_deref()
             .filter(|d| !d.trim().is_empty())
         {
-            body.push_str(&format!(
-                "\n  <i><dim>{}</dim></i>",
-                escape_prose_path(desc)
-            ));
+            body.push_str(&format!("\n  <i><dim>{}</dim></i>", escape_prose_path(desc)));
         }
         if !failure.missing.is_empty() {
             for prop in &failure.missing {

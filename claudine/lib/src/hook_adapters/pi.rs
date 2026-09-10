@@ -39,10 +39,7 @@ impl ProviderAdapter for PiAdapter {
         // Pi normalizes provider failures into the assistant message envelope,
         // so surface the free-text errorMessage from either location.
         meta.error = str_field(raw, "errorMessage")
-            .or_else(|| {
-                raw.get("message")
-                    .and_then(|m| str_field(m, "errorMessage"))
-            })
+            .or_else(|| raw.get("message").and_then(|m| str_field(m, "errorMessage")))
             .or_else(|| str_field(raw, "finalError"));
 
         capture_pi_usage(&mut meta.extra, raw);
@@ -143,8 +140,7 @@ mod tests {
     #[test]
     fn tool_execution_start_maps_before_tool() {
         let adapter = PiAdapter;
-        let raw =
-            json!({"type": "tool_execution_start", "toolName": "bash", "args": {"command": "ls"}});
+        let raw = json!({"type": "tool_execution_start", "toolName": "bash", "args": {"command": "ls"}});
         let (event, meta) = adapter.parse_event(&raw).unwrap();
         assert_eq!(event, AgenticEvent::BeforeTool);
         assert_eq!(meta.tool_name.as_deref(), Some("bash"));

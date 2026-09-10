@@ -28,16 +28,12 @@ pub enum ProtectObservation<'a> {
 /// Returns [`ProtectObservation::NoOpinion`] for events that don't map to any
 /// scan surface, and [`ProtectObservation::Unparsed`] for command- or write-
 /// shaped tools whose payload could not be extracted.
-pub fn extract_protect_request<'a>(
-    event: &AgenticEvent,
-    meta: &'a EventMeta,
-) -> ProtectObservation<'a> {
+pub fn extract_protect_request<'a>(event: &AgenticEvent, meta: &'a EventMeta) -> ProtectObservation<'a> {
     match event {
-        AgenticEvent::BeforeTool | AgenticEvent::PermissionRequest => {
-            extract_before_tool_request(meta)
+        AgenticEvent::BeforeTool | AgenticEvent::PermissionRequest => extract_before_tool_request(meta),
+        AgenticEvent::AfterTool | AgenticEvent::AfterModel => {
+            extract_mcp_response_request(meta).map_or(ProtectObservation::NoOpinion, ProtectObservation::Request)
         }
-        AgenticEvent::AfterTool | AgenticEvent::AfterModel => extract_mcp_response_request(meta)
-            .map_or(ProtectObservation::NoOpinion, ProtectObservation::Request),
         _ => ProtectObservation::NoOpinion,
     }
 }
@@ -258,20 +254,13 @@ fn extract_path_strings(input: &Value) -> Vec<&str> {
     match input {
         Value::String(s) => vec![s.as_str()],
         Value::Object(map) => {
-            for key in [
-                "path",
-                "file_path",
-                "file",
-                "target",
-                "filename",
-                "dest",
-                "paths",
-            ] {
+            for key in ["path", "file_path", "file", "target", "filename", "dest", "paths"] {
                 if let Some(value) = map.get(key) {
                     match value {
                         Value::String(s) => return vec![s.as_str()],
                         Value::Array(arr) if key == "paths" => {
-                            let paths: Vec<&str> = arr.iter().filter_map(Value::as_str).collect();
+                            let paths: Vec<&str> =
+                                arr.iter().filter_map(Value::as_str).collect();
                             if !paths.is_empty() {
                                 return paths;
                             }
