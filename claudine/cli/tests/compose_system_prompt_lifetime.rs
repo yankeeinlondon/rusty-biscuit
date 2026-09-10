@@ -21,10 +21,8 @@
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
-use tempfile::tempdir;
 mod common;
-use common::wrap::seed_minimal_config;
-use common::{init_git_repo, write_executable};
+use common::{CliProcessFixture, write, write_executable};
 
 /// The sentinel the fake provider has to read back out of the delivered file.
 const SENTINEL: &str = "SYSPROMPT-SURVIVED-TO-SPAWN";
@@ -90,31 +88,28 @@ fn direct_compose_keeps_its_file_backed_system_prompt_readable_at_spawn() {
             write_codex_reader as fn(&Path, &Path),
         ),
     ] {
-        let workspace = tempdir().unwrap();
-        let bin_dir = workspace.path().join("bin");
-        fs::create_dir_all(&bin_dir).unwrap();
-        seed_minimal_config(workspace.path());
+        let fixture = CliProcessFixture::named("compose-system-prompt-lifetime");
+        fixture.seed_user_config();
         // The scoped temp directory the delivery writes into is derived from the
         // launch workspace, so the run has to happen inside its own repo — both
         // to keep the artifacts out of the developer's checkout and so the path
         // the child is handed is the one this row staged.
-        assert!(init_git_repo(workspace.path()), "git init failed");
+        fixture.initialize_repository();
 
-        let log = workspace.path().join("events.log");
-        write_reader(&bin_dir, &log);
+        let log = fixture.cwd().join("events.log");
+        write_reader(fixture.bin_dir(), &log);
 
-        let md_file = workspace.path().join("doc.md");
-        fs::write(&md_file, "---\ntitle: sysprompt lifetime\n---\nBody\n").unwrap();
-        let sysprompt = workspace.path().join("sysprompt.md");
-        fs::write(&sysprompt, format!("{SENTINEL}\n")).unwrap();
+        let md_file = fixture.cwd().join("doc.md");
+        write(&md_file, "---\ntitle: sysprompt lifetime\n---\nBody\n");
+        let sysprompt = fixture.cwd().join("sysprompt.md");
+        write(&sysprompt, &format!("{SENTINEL}\n"));
 
-        assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .current_dir(workspace.path())
-            .env("NO_COLOR", "1")
-            .env("HOME", workspace.path())
+        fixture
+            .command_builder()
             // Keep host-program discovery out of this process regression. The
             // fake providers use only `/bin/sh` built-ins after launch.
-            .env("PATH", &bin_dir)
+            .fake_only_path()
+            .build()
             .args([
                 "compose",
                 provider_flag,

@@ -18,6 +18,29 @@ belong here.
   when the working tree is a clean superset of the staged snapshot.
   Otherwise use the temp-index plumbing fallback (`update-index --index-info`
   → `write-tree` → `commit-tree -S -F -` → `git update-ref HEAD <new> <old>`).
+- **Temp-index capture order.** Setting `GIT_INDEX_FILE=$TMPIDX` *before*
+  `git ls-files -s` reads from the temp index (which is empty) and yields an
+  empty commit. Capture the staged blob lines first (they are in the real
+  index), then `export GIT_INDEX_FILE=$TMPIDX`, then pipe the saved lines
+  into `git update-index --index-info`. An empty commit is recoverable via
+  `git update-ref HEAD <previous-tip> <empty-hash>` (no `git reset`,
+  no index/worktree churn).
+- **Temp-index fallback is a *replacement*, not an additive, tree.** Populating
+  a fresh temp index with only the captured `ls-files -s` lines and then
+  `git write-tree` produces a tree containing **only** those paths — not
+  `HEAD + those paths`. The resulting commit's diff against the parent shows
+  every other file in the tree as deleted (10k+ deletions in this monorepo),
+  which is not a recovery case the orchestrator can detect after the fact. The
+  fallback is only correct when the captured set is intended to fully
+  replace HEAD's tree at those paths (e.g. one sibling's slice of a multi-agent
+  batch where another agent owns the rest). When the assigned set is purely
+  additive (no `D ` entries in `git diff --cached --name-only`, and the real
+  index already has exactly that additive set on top of HEAD — i.e. no
+  *other* sibling staged paths need excluding), skip the temp index entirely
+  and run `git write-tree` against the real index, then `commit-tree -S -F - -p
+  HEAD`. The staged snapshot of any `AM`/`MM` paths you want to commit at their
+  pre-supersede content is already in the real index; you only need the temp
+  index when sibling staged paths must be excluded from the tree.
 - `--only` on a clean-superset `MM` path still captures working-tree-only
   content (e.g. a manifest `[[test]]` block whose source file is currently
   untracked). The pre-flight `git show :<path>` only sees the staged blob;
@@ -72,6 +95,12 @@ belong here.
   in the brief, confirm with `git diff --cached -- <old> <new>` that the old
   side is a deletion of the expected blob, and check `git status --short`
   afterwards for leftover `D` entries.
+- A staged rename is read at the NEW path. Once `git add` has registered the
+  rename, only the new path is in the index; `git show :<old-path>` fails with
+  "path does not exist (neither on disk nor in the index)". Read the staged
+  blob at `git show :<new-path>` (or `git cat-file -p :<new-path>` under zsh).
+  For a rename-only commit the OLD path's content is whatever `git show
+  HEAD:<old-path>` prints; if the rename is R100 the two blobs match.
 
 ## Signing
 

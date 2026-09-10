@@ -115,12 +115,152 @@ fn evaluate_timeout_tick_silence_breach_without_subagents() {
 }
 
 #[test]
-fn evaluate_timeout_tick_does_not_fire_silence_without_first_event() {
-    // Spec: silence rule requires at least one observed activity event
-    // (matches `last_event_at: Option<Instant>` first-event grace).
+fn evaluate_timeout_tick_fires_from_spawn_when_no_activity_ever_arrives() {
+    // The incident shape: the child spawned successfully and then produced
+    // neither a semantic event nor a non-whitespace byte. With no wall-clock
+    // `timeout` configured, `step_timeout` is the only rule that can end it,
+    // so the spawn instant has to be the silence reference.
     let config = TimeoutConfig {
         timeout: None,
         step_timeout: Some(Duration::from_secs(1)),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let started_at = Instant::now() - Duration::from_secs(60);
+
+    {
+        let m = metrics.lock().unwrap();
+        assert!(
+            m.last_activity_at().is_none(),
+            "fixture must have no activity clock, else it proves nothing"
+        );
+    }
+
+    let result = evaluate_timeout_tick(
+        &config,
+        Instant::now(),
+        started_at,
+        &state,
+        &metrics,
+        &fired,
+    );
+    match result {
+        WatchdogTickResult::Breach(ref w) => {
+            assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+            assert!(
+                w.message
+                    .contains("no output since the wrapped process launched"),
+                "startup breach needs startup-specific wording; got: {}",
+                w.message
+            );
+        }
+        other => panic!("expected a spawn-anchored StepTimeout breach, got: {other:?}"),
+    }
+    assert!(fired.load(Ordering::SeqCst));
+}
+
+/// Counter-case for the spawn fallback: a child that has only just started
+/// is inside its budget and must be left alone.
+#[test]
+fn evaluate_timeout_tick_does_not_fire_before_the_spawn_budget_elapses() {
+    let config = TimeoutConfig {
+        timeout: None,
+        step_timeout: Some(Duration::from_secs(60)),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let started_at = Instant::now() - Duration::from_secs(1);
+
+    let result = evaluate_timeout_tick(
+        &config,
+        Instant::now(),
+        started_at,
+        &state,
+        &metrics,
+        &fired,
+    );
+    assert_eq!(result, WatchdogTickResult::Ok);
+    assert!(!fired.load(Ordering::SeqCst));
+}
+
+/// Byte-heartbeat polarity through the real recorder: non-whitespace output
+/// moves the spawn-anchored deadline.
+#[test]
+fn evaluate_timeout_tick_startup_bytes_refresh_the_spawn_clock() {
+    let config = TimeoutConfig {
+        timeout: None,
+        step_timeout: Some(Duration::from_secs(5)),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let now_t = Instant::now();
+    let started_at = now_t - Duration::from_secs(60);
+
+    {
+        let mut m = metrics.lock().unwrap();
+        m.record_byte_activity("bootstrapping plugins", now_t);
+        assert!(m.last_event_at.is_none(), "no semantic event has parsed yet");
+    }
+
+    let result = evaluate_timeout_tick(&config, now_t, started_at, &state, &metrics, &fired);
+    assert_eq!(
+        result,
+        WatchdogTickResult::Ok,
+        "non-whitespace startup bytes must push the deadline out; got: {result:?}"
+    );
+    assert!(!fired.load(Ordering::SeqCst));
+}
+
+/// …and the other polarity: a child that only flushes blank lines has not
+/// made progress, so the spawn-anchored budget keeps advancing.
+#[test]
+fn evaluate_timeout_tick_whitespace_startup_bytes_do_not_refresh_the_spawn_clock() {
+    let config = TimeoutConfig {
+        timeout: None,
+        step_timeout: Some(Duration::from_secs(5)),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let now_t = Instant::now();
+    let started_at = now_t - Duration::from_secs(60);
+
+    {
+        let mut m = metrics.lock().unwrap();
+        m.record_byte_activity("", now_t);
+        m.record_byte_activity("   \t ", now_t);
+        m.record_byte_activity("\n", now_t);
+        assert!(
+            m.last_byte_at.is_none(),
+            "whitespace must not have refreshed the byte clock"
+        );
+    }
+
+    let result = evaluate_timeout_tick(&config, now_t, started_at, &state, &metrics, &fired);
+    assert!(
+        matches!(
+            result,
+            WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::StepTimeout
+        ),
+        "whitespace-only output must not hold the startup budget open; got: {result:?}"
+    );
+    assert!(fired.load(Ordering::SeqCst));
+}
+
+/// Rule ordering survives the spawn fallback: with no activity at all both
+/// budgets breach on this tick, and the wall-clock rule still wins.
+#[test]
+fn evaluate_timeout_tick_wall_clock_wins_over_a_startup_breach() {
+    let config = TimeoutConfig {
+        timeout: Some(Duration::from_secs(5)),
+        step_timeout: Some(Duration::from_secs(5)),
         ..Default::default()
     };
     let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
@@ -136,7 +276,93 @@ fn evaluate_timeout_tick_does_not_fire_silence_without_first_event() {
         &metrics,
         &fired,
     );
-    assert_eq!(result, WatchdogTickResult::Ok);
+    assert!(
+        matches!(result, WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::Timeout),
+        "wall-clock must win over the spawn-anchored silence rule; got: {result:?}"
+    );
+}
+
+/// The one-shot guard covers the startup breach too: a second tick after a
+/// breach must not send a second termination request.
+#[test]
+fn evaluate_timeout_tick_startup_breach_fires_once() {
+    let config = TimeoutConfig {
+        timeout: None,
+        step_timeout: Some(Duration::from_secs(1)),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let started_at = Instant::now() - Duration::from_secs(60);
+
+    let first = evaluate_timeout_tick(
+        &config,
+        Instant::now(),
+        started_at,
+        &state,
+        &metrics,
+        &fired,
+    );
+    assert!(matches!(first, WatchdogTickResult::Breach(_)));
+
+    let second = evaluate_timeout_tick(
+        &config,
+        Instant::now(),
+        started_at,
+        &state,
+        &metrics,
+        &fired,
+    );
+    assert_eq!(
+        second,
+        WatchdogTickResult::Ok,
+        "the startup breach must not re-fire on the next tick; got: {second:?}"
+    );
+}
+
+/// The in-flight suppression gate is unchanged after activity begins: an
+/// active tool still protects a run whose spawn instant is long past.
+#[test]
+fn evaluate_timeout_tick_active_work_still_suppresses_after_spawn_budget() {
+    let config = TimeoutConfig {
+        timeout: None,
+        step_timeout: Some(Duration::from_secs(5)),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let started_at = Instant::now() - Duration::from_secs(600);
+    let stale = Instant::now() - Duration::from_secs(30);
+    let fresh = Instant::now();
+
+    {
+        let mut m = metrics.lock().unwrap();
+        m.last_event_at = Some(stale);
+        m.in_flight.insert(
+            "tool-1".into(),
+            claudine::stream::progress::InFlightTool {
+                name: Some("Task".into()),
+                started_at: stale,
+                last_progress_at: fresh,
+            },
+        );
+    }
+
+    let result = evaluate_timeout_tick(
+        &config,
+        Instant::now(),
+        started_at,
+        &state,
+        &metrics,
+        &fired,
+    );
+    assert_eq!(
+        result,
+        WatchdogTickResult::Ok,
+        "active in-flight work must still suppress the silence rule; got: {result:?}"
+    );
     assert!(!fired.load(Ordering::SeqCst));
 }
 
@@ -574,9 +800,9 @@ fn evaluate_timeout_tick_silence_fires_when_neither_clock_recent() {
 #[test]
 fn evaluate_timeout_tick_silence_suppressed_when_only_byte_clock_set() {
     // Defensive case: no structured events ever fired, but bytes are
-    // flowing (a provider that emits only raw text on stdout). The
-    // first-event grace on `last_event_at` is satisfied transitively
-    // by `last_byte_at` via `last_activity_at()`.
+    // flowing (a provider that emits only raw text on stdout). The byte
+    // clock alone is the newest of the three references, so it — not the
+    // spawn instant — is what the budget is measured from.
     let config = TimeoutConfig {
         timeout: None,
         step_timeout: Some(Duration::from_secs(5)),

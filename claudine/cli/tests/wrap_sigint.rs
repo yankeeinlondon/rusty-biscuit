@@ -5,20 +5,23 @@
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
 
-use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::wrap::*;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write, write_executable};
 
+// Was `slow_compose_sigint_during_prep_exits_130_with_notice`. The `slow_`
+// prefix is a tier marker, and `_tier_filter L1` excludes it from `just test`,
+// `just test-cli` and every CI leg — inclusion needs `l1-include-slow`, which
+// only darkmatter's packages declare. So the SIGINT-during-prep contract ran in
+// no recipe at all. Nothing about the test is slow: the *fake provider* sleeps
+// for 10 s, which is the floor the 4 s latency assertion is measured against,
+// and the test itself completes in 0.18 s because interrupting that sleep is
+// the whole point.
 #[cfg(unix)]
 #[test]
 #[serial_test::serial]
-fn slow_compose_sigint_during_prep_exits_130_with_notice() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+fn compose_sigint_during_prep_exits_130_with_notice() {
+    let fixture = CliProcessFixture::named("wrap-sigint");
+    fixture.seed_user_config();
 
     // Frontmatter `model` hint is required so the catalog refresh gate
     // (`refresh_for_model_validation`) actually invokes the dynamic source
@@ -32,12 +35,11 @@ fn slow_compose_sigint_during_prep_exits_130_with_notice() {
     // OpenCode's non-TTY model requirement with exit 1 before the interrupt
     // path is reached. `llamacpp/…` matches via `offering_sources` prefix,
     // so validity is structural and immune to baseline offering churn.
-    let md_file = workspace.path().join("slow.md");
-    fs::write(
+    let md_file = fixture.cwd().join("slow.md");
+    write(
         &md_file,
         "---\ntitle: test\nmodel: llamacpp/test-model\n---\nPrompt body\n",
-    )
-    .unwrap();
+    );
 
     // Fake `opencode models` touches a readiness marker, then sleeps for
     // 10s so prep is slow enough to interrupt, and so a regression to the
@@ -48,9 +50,9 @@ fn slow_compose_sigint_during_prep_exits_130_with_notice() {
     // `opencode models` subprocess, which happens *after* the SIGINT handler
     // is installed at the top of `compose`. The `opencode` provider binary
     // itself never runs.
-    let ready_marker = workspace.path().join("opencode-models-started");
+    let ready_marker = fixture.cwd().join("opencode-models-started");
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   : > "$CLAUDINE_READY_MARKER"
@@ -67,14 +69,14 @@ exit 0
     // detached, so prep would race ahead of the `opencode models`
     // subprocess and this test's interrupt window would not exist; the
     // blocking path is the one whose SIGINT cancellability is under test.
-    let bin = common::claudine_bin();
-    let child = std::process::Command::new(bin)
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    //
+    // The child has to stay alive to receive the signal, so this is the
+    // builder's raw-command surface; the call site keeps only its subject —
+    // signal delivery, output draining, and reaping.
+    let child = fixture
+        .command_std()
         .env("CLAUDINE_READY_MARKER", &ready_marker)
         .env("CLAUDINE_BACKGROUND_REFRESH", "0")
-        .current_dir(workspace.path())
         .args([
             "compose",
             "--opencode",

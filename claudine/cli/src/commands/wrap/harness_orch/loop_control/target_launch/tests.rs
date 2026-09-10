@@ -149,6 +149,19 @@ fn installed_without(absent: &[Provider]) -> InstalledProviderSnapshot {
     snapshot
 }
 
+/// An environment carrying none of the variables model precedence consults.
+///
+/// Every fixture below uses it, because these tests run in the binary's shared
+/// test process and the precedence chain's steps 2 and 3 read the *process*
+/// environment. A Claudine-wrapped agent session exports `MODEL` into every
+/// command it launches, so a suite run from inside one saw an ambient `opus`
+/// out-rank each fixture's frontmatter — and the process environment cannot be
+/// scrubbed from here, since `std::env::set_var` is unsound while sibling
+/// tests share the process.
+fn no_ambient_env(_key: &str) -> Option<String> {
+    None
+}
+
 /// The invocation intent an unchanged run resolves against: Goose,
 /// non-interactive, nothing explicit, MCP in play so a body tag counts.
 fn intent() -> LaunchRebuildIntent {
@@ -164,6 +177,7 @@ fn intent() -> LaunchRebuildIntent {
         fallback_provider_reason: ProviderResolutionReason::FavoriteAgent,
         dispatch_context: invocation_dispatch_context(),
         launch_plan_inputs: plan_inputs(),
+        env_lookup: no_ambient_env,
     }
 }
 
@@ -302,6 +316,50 @@ fn rebuild_keeps_explicit_cli_model_authoritative() {
         value_of(&rebuild.env_overrides, "MODEL"),
         Some("llamacpp/cli-pinned"),
         "explicit --model must win over the target frontmatter model",
+    );
+}
+
+/// The rebuild's environment seam feeds the *real* precedence chain, both of
+/// its environment steps.
+///
+/// Without this, [`no_ambient_env`] would be indistinguishable from a seam that
+/// dropped environment precedence altogether: every other fixture here supplies
+/// an empty environment, so all of them would still pass while a production run
+/// silently stopped honoring `MODEL` and `GOOSE_MODEL`.
+#[test]
+fn the_supplied_environment_outranks_the_targets_frontmatter_model() {
+    let target = target_with_model(Some("llamacpp/frontmatter"));
+
+    let mut generic = intent();
+    generic.env_lookup = |key| (key == "MODEL").then(|| "llamacpp/from-generic-env".to_string());
+    let rebuild = rebuild_target_launch(&generic, None, None, Path::new("."), &target).unwrap();
+    assert_eq!(
+        value_of(&rebuild.env_overrides, "MODEL"),
+        Some("llamacpp/from-generic-env"),
+        "a `MODEL` in the supplied environment must reach the shared chain's step 3",
+    );
+
+    // Goose is the fixture provider, so `GOOSE_MODEL` is its step-2 variable.
+    let mut provider_specific = intent();
+    provider_specific.env_lookup = |key| match key {
+        "GOOSE_MODEL" => Some("llamacpp/from-provider-env".to_string()),
+        "MODEL" => Some("llamacpp/from-generic-env".to_string()),
+        _ => None,
+    };
+    let rebuild =
+        rebuild_target_launch(&provider_specific, None, None, Path::new("."), &target).unwrap();
+    assert_eq!(
+        value_of(&rebuild.env_overrides, "MODEL"),
+        Some("llamacpp/from-provider-env"),
+        "the provider's own model variable must reach step 2, ahead of the generic `MODEL`",
+    );
+
+    // The control: with the same document and an empty environment, the
+    // frontmatter wins — so the two assertions above discriminate.
+    let rebuild = rebuild_target_launch(&intent(), None, None, Path::new("."), &target).unwrap();
+    assert_eq!(
+        value_of(&rebuild.env_overrides, "MODEL"),
+        Some("llamacpp/frontmatter"),
     );
 }
 

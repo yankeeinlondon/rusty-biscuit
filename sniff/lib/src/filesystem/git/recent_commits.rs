@@ -399,8 +399,7 @@ fn attribute_commit_files(
     let mut packages = BTreeSet::new();
     let mut package_areas = BTreeSet::new();
     for (path, _) in files {
-        if let Some(package) =
-            repo_info.package_for_relative_path_with_index(ownership_index, path)
+        if let Some(package) = repo_info.package_for_relative_path_with_index(ownership_index, path)
         {
             packages.insert(package.name.clone());
             package_areas.insert(package.package_area.clone());
@@ -656,11 +655,11 @@ fn collect_commits_by_count(
 impl CommitDescSet {
     /// Attribute an already-observed history set through a detected package catalog.
     pub(crate) fn attribute_from_repo(&mut self, repo_info: Option<&RepoInfo>) {
-        let ownership_index = repo_info
-            .filter(|info| info.is_monorepo)
-            .and_then(|info| info.packages.as_deref().map(|packages| {
-                PackageOwnershipIndex::from_packages(&info.root, packages)
-            }));
+        let ownership_index = repo_info.filter(|info| info.is_monorepo).and_then(|info| {
+            info.packages
+                .as_deref()
+                .map(|packages| PackageOwnershipIndex::from_packages(&info.root, packages))
+        });
 
         for commit in &mut self.commits {
             let files = commit
@@ -1062,10 +1061,8 @@ mod tests {
             ),
         ];
 
-        let ownership_index = PackageOwnershipIndex::from_packages(
-            &repo.root,
-            repo.packages.as_deref().unwrap(),
-        );
+        let ownership_index =
+            PackageOwnershipIndex::from_packages(&repo.root, repo.packages.as_deref().unwrap());
         let ((packages, areas), counts) = testing::measure(|| {
             attribute_commit_files(Some(&repo), Some(&ownership_index), &files)
         });

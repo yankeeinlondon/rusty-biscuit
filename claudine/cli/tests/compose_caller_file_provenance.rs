@@ -2,7 +2,11 @@
 
 mod common;
 
-use common::{CliProcessFixture, strip_ansi, write, write_executable};
+use common::{CliProcessFixture, strip_ansi, write};
+// Consumed only inside the `#[cfg(unix)]` statements below; ungated, the
+// Windows check (`just check-windows`) reports it unused.
+#[cfg(unix)]
+use common::write_executable;
 
 /// A Goose stub that records its delivered prompt and, when
 /// `CLAUDINE_INLINE_TARGET` names a document, edits that document's body the
@@ -117,9 +121,11 @@ fn run_compose(
 ) -> String {
     // Escape: caller-relative references must resolve from this fixture directory.
     let mut command = fixture.command_builder().ambient_context(cwd).build();
-    command
-        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
-        .args(["compose", "--goose", document.to_str().unwrap()]);
+    command.env("PATHEXT", ".COM;.EXE;.BAT;.CMD").args([
+        "compose",
+        "--goose",
+        document.to_str().unwrap(),
+    ]);
     command.args(setters);
     let assertion = command.assert().success();
     strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr))
@@ -131,9 +137,10 @@ fn run_compose_failure(
     document: &std::path::Path,
     setters: &[&str],
 ) -> (String, serde_json::Value) {
-    let snapshot = fixture
-        .cwd()
-        .join(format!("diagnostic-{}.json", document.file_stem().unwrap().to_string_lossy()));
+    let snapshot = fixture.cwd().join(format!(
+        "diagnostic-{}.json",
+        document.file_stem().unwrap().to_string_lossy()
+    ));
     // Escape: caller-relative references must resolve from this fixture directory.
     let mut command = fixture.command_builder().ambient_context(cwd).build();
     command
@@ -143,11 +150,14 @@ fn run_compose_failure(
     command.args(setters);
     let assertion = command.assert().failure();
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
-    let diagnostic = serde_json::from_str(
-        &std::fs::read_to_string(&snapshot)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}\nstderr:\n{stderr}", snapshot.display())),
-    )
-    .unwrap_or_else(|error| panic!("invalid diagnostic snapshot: {error}\nstderr:\n{stderr}"));
+    let diagnostic =
+        serde_json::from_str(&std::fs::read_to_string(&snapshot).unwrap_or_else(|error| {
+            panic!(
+                "failed to read {}: {error}\nstderr:\n{stderr}",
+                snapshot.display()
+            )
+        }))
+        .unwrap_or_else(|error| panic!("invalid diagnostic snapshot: {error}\nstderr:\n{stderr}"));
     (stderr, diagnostic)
 }
 
@@ -175,23 +185,25 @@ fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target(
     );
 
     let router = fixture.cwd().join("prompts/implement.md");
-    write(
-        &router,
-        include_str!("../../../prompts/implement.md"),
-    );
+    write(&router, include_str!("../../../prompts/implement.md"));
     write(
         &fixture
             .cwd()
             .join("prompts/_implement/implement-suggestions.md"),
         include_str!("../../../prompts/_implement/implement-suggestions.md"),
     );
-
-    let stderr = run_compose(
-        &fixture,
-        &package,
-        &router,
-        &["spec=fixes/case/spec.md"],
+    // The shipped route transcludes these two snippets; without them the
+    // redirect fails on a missing file instead of reaching its assertions.
+    write(
+        &fixture.cwd().join("prompts/_no_formatting.md"),
+        include_str!("../../../prompts/_no_formatting.md"),
     );
+    write(
+        &fixture.cwd().join("prompts/_os.md"),
+        include_str!("../../../prompts/_os.md"),
+    );
+
+    let stderr = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
 
     assert!(
         stderr.contains("Iteration: 4"),
@@ -203,7 +215,8 @@ fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target(
     );
     let absent_design_prompt =
         std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
-    let portable_package = biscuit_file::to_portable_string(&std::fs::canonicalize(&package).unwrap());
+    let portable_package =
+        biscuit_file::to_portable_string(&std::fs::canonicalize(&package).unwrap());
     // Paths derived from the eager caller value project to the repository-
     // relative display form, whatever spelling the temp repository carries.
     let derived_package = "packages/example";
@@ -241,12 +254,7 @@ fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target(
             .join("fixes/case/design.md"),
         "# Design\n",
     );
-    let _ = run_compose(
-        &fixture,
-        &package,
-        &router,
-        &["spec=fixes/case/spec.md"],
-    );
+    let _ = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
     let present_design_prompt =
         std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
     assert!(
@@ -287,25 +295,36 @@ fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_p
             .join("prompts/_implement/implement-suggestions.md"),
         include_str!("../../../prompts/_implement/implement-suggestions.md"),
     );
+    // The shipped route transcludes these two snippets; without them the
+    // redirect fails on a missing file instead of reaching its assertions.
     write(
-        &fixture
-            .cwd()
-            .join("prompts/_implement/implement-plan.md"),
+        &fixture.cwd().join("prompts/_no_formatting.md"),
+        include_str!("../../../prompts/_no_formatting.md"),
+    );
+    write(
+        &fixture.cwd().join("prompts/_os.md"),
+        include_str!("../../../prompts/_os.md"),
+    );
+    write(
+        &fixture.cwd().join("prompts/_implement/implement-plan.md"),
         include_str!("fixtures/shipped_implement_route/_implement/implement-plan.md"),
     );
 
-    let stderr = run_compose(
-        &fixture,
-        &package,
-        &router,
-        &["spec=fixes/case/spec.md"],
-    );
+    let stderr = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
 
     assert!(
         stderr.contains("Implement Review Suggestions"),
         "an existing unimplemented review must outrank the already-executed plan; stderr:\n{stderr}"
     );
-    assert!(stderr.contains("review-1.md"), "stderr:\n{stderr}");
+    // The stderr panel previews only the first 20 rendered rows, and the
+    // route's leading rule block fills most of them, so the review path is
+    // asserted on the prompt the provider received rather than the preview.
+    let provider_prompt =
+        std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
+    assert!(
+        provider_prompt.contains("review-1.md"),
+        "the routed prompt must name the unimplemented review; prompt:\n{provider_prompt}"
+    );
     assert!(
         !stderr.contains("Implement Phase 5 of 5"),
         "the router must not resume the original plan once a review exists; stderr:\n{stderr}"
@@ -425,7 +444,10 @@ fn a_proxied_retry_rematerializes_from_the_original_caller_record() {
     let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
 
     assert_eq!(
-        events.lines().filter(|line| *line == "retry=original").count(),
+        events
+            .lines()
+            .filter(|line| *line == "retry=original")
+            .count(),
         2,
         "the original attempt and fresh retry must both materialize the caller file; events:\n{events}\nstderr:\n{output}"
     );
@@ -468,11 +490,17 @@ fn a_proxied_resume_rematerializes_from_the_original_caller_record() {
     let provider_events = std::fs::read_to_string(fixture.home().join("provider-events")).unwrap();
 
     assert_eq!(
-        events.lines().filter(|line| *line == "resume=original").count(),
+        events
+            .lines()
+            .filter(|line| *line == "resume=original")
+            .count(),
         2,
         "both the opening and resumed attempts must materialize the original caller file; events:\n{events}\nstderr:\n{stderr}"
     );
-    assert!(provider_events.contains("resume-session-ok"), "{provider_events}");
+    assert!(
+        provider_events.contains("resume-session-ok"),
+        "{provider_events}"
+    );
 }
 
 #[test]
@@ -504,7 +532,10 @@ fn a_proxied_loop_reuses_the_same_materialized_caller_identity() {
     );
     let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
     assert_eq!(
-        events.lines().filter(|line| line.starts_with("loop=original:")).count(),
+        events
+            .lines()
+            .filter(|line| line.starts_with("loop=original:"))
+            .count(),
         3,
         "every reused loop plan must retain the caller file identity; events:\n{events}\nstderr:\n{stderr}"
     );
@@ -551,7 +582,10 @@ fn a_sequence_prompt_task_proxy_reads_the_invocation_wide_caller_file() {
         .success();
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
     let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
-    assert!(events.contains("sequence=caller"), "events:\n{events}\nstderr:\n{stderr}");
+    assert!(
+        events.contains("sequence=caller"),
+        "events:\n{events}\nstderr:\n{stderr}"
+    );
 }
 
 #[test]
@@ -566,10 +600,7 @@ fn sequence_task_params_and_cli_file_inputs_keep_distinct_authoring_origins() {
         &package.join("caller/spec.md"),
         "---\nmarker: caller\n---\n",
     );
-    write(
-        &package.join("task/spec.md"),
-        "---\nmarker: task\n---\n",
-    );
+    write(&package.join("task/spec.md"), "---\nmarker: task\n---\n");
     let sequence = package.join("sequence.md");
     write(
         &sequence,
@@ -599,7 +630,10 @@ fn sequence_task_params_and_cli_file_inputs_keep_distinct_authoring_origins() {
         .success();
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
     let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
-    assert!(events.contains("mixed=caller:task"), "events:\n{events}\nstderr:\n{stderr}");
+    assert!(
+        events.contains("mixed=caller:task"),
+        "events:\n{events}\nstderr:\n{stderr}"
+    );
 }
 
 #[test]
@@ -643,7 +677,10 @@ fn a_sequence_cli_setter_shadows_the_same_named_task_file_param() {
         .success();
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
     let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
-    assert!(events.contains("winner=cli"), "events:\n{events}\nstderr:\n{stderr}");
+    assert!(
+        events.contains("winner=cli"),
+        "events:\n{events}\nstderr:\n{stderr}"
+    );
 }
 
 #[test]
@@ -782,7 +819,9 @@ fn inline_compose_proxy_uses_the_caller_origin_and_closes_over_the_target() {
         "the inline closure must rewrite the adopted target, not the router; target:\n{rewritten}"
     );
     assert!(
-        std::fs::read_to_string(&router).unwrap().contains("Router body."),
+        std::fs::read_to_string(&router)
+            .unwrap()
+            .contains("Router body."),
         "the router must remain unchanged after handing off"
     );
 }
@@ -791,7 +830,12 @@ fn inline_compose_proxy_uses_the_caller_origin_and_closes_over_the_target() {
 fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
     for (case, schema, expression, raw) in [
         ("malformed", "file(eager; required)", "", "@//invalid"),
-        ("eager-missing", "file(eager; required)", "", "cases/missing/spec.md"),
+        (
+            "eager-missing",
+            "file(eager; required)",
+            "",
+            "cases/missing/spec.md",
+        ),
         (
             "lazy-read-missing",
             "file(required)",
@@ -807,9 +851,7 @@ fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
         let target = fixture.cwd().join("prompts/target.md");
         write(
             &target,
-            &format!(
-                "---\n$schema:\n  spec: '{schema}'\n{expression}---\nTarget.\n"
-            ),
+            &format!("---\n$schema:\n  spec: '{schema}'\n{expression}---\nTarget.\n"),
         );
         let router = fixture.cwd().join("prompts/router.md");
         write(
@@ -863,8 +905,7 @@ fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
             );
         }
         assert_eq!(
-            direct_diagnostic["detail"]["base_dir"],
-            proxied_diagnostic["detail"]["base_dir"],
+            direct_diagnostic["detail"]["base_dir"], proxied_diagnostic["detail"]["base_dir"],
             "{case} changed caller base across proxy"
         );
         assert_eq!(
@@ -873,17 +914,15 @@ fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
             "{case} changed caller origin across proxy"
         );
         assert_eq!(
-            direct_diagnostic["detail"]["candidates"],
-            proxied_diagnostic["detail"]["candidates"],
+            direct_diagnostic["detail"]["candidates"], proxied_diagnostic["detail"]["candidates"],
             "{case} changed selected candidate evidence across proxy"
         );
         if case == "malformed" {
             assert!(direct_diagnostic["detail"]["candidates"].is_null());
         } else {
-            let expected_candidate = std::path::Path::new(
-                direct_diagnostic["detail"]["base_dir"].as_str().unwrap(),
-            )
-            .join(raw);
+            let expected_candidate =
+                std::path::Path::new(direct_diagnostic["detail"]["base_dir"].as_str().unwrap())
+                    .join(raw);
             assert_eq!(
                 direct_diagnostic["detail"]["candidates"][0]["path"],
                 biscuit_file::to_portable_string(&expected_candidate),
@@ -936,7 +975,10 @@ fn dynamic_array_selection_keeps_complete_direct_and_proxy_diagnostics() {
             ("direct", &direct, &direct_diagnostic),
             ("proxy", &proxied, &proxied_diagnostic),
         ] {
-            assert!(stderr.contains("invalid file path"), "{index} {route}: {stderr}");
+            assert!(
+                stderr.contains("invalid file path"),
+                "{index} {route}: {stderr}"
+            );
             assert!(stderr.contains(raw), "{index} {route}: {stderr}");
             assert_eq!(diagnostic["code"], "composition.invalid_file_reference");
             assert_eq!(diagnostic["detail"]["reference"], raw, "{index} {route}");
@@ -946,14 +988,18 @@ fn dynamic_array_selection_keeps_complete_direct_and_proxy_diagnostics() {
             let canonical_root = canonical_portable(&caller_root);
             assert_eq!(
                 canonical_portable(std::path::Path::new(
-                    diagnostic["detail"]["base_dir"].as_str().unwrap_or_default()
+                    diagnostic["detail"]["base_dir"]
+                        .as_str()
+                        .unwrap_or_default()
                 )),
                 canonical_root,
                 "{index} {route} lost the caller base"
             );
             assert_eq!(
                 canonical_portable(std::path::Path::new(
-                    diagnostic["detail"]["repository_root"].as_str().unwrap_or_default()
+                    diagnostic["detail"]["repository_root"]
+                        .as_str()
+                        .unwrap_or_default()
                 )),
                 canonical_root,
                 "{index} {route} lost the caller repository root"
@@ -963,7 +1009,9 @@ fn dynamic_array_selection_keeps_complete_direct_and_proxy_diagnostics() {
             let selected = std::path::PathBuf::from_iter(caller_root.join(raw).components());
             assert_eq!(
                 canonical_portable(std::path::Path::new(
-                    diagnostic["detail"]["candidates"][0]["path"].as_str().unwrap_or_default()
+                    diagnostic["detail"]["candidates"][0]["path"]
+                        .as_str()
+                        .unwrap_or_default()
                 )),
                 canonical_portable(&selected),
                 "{index} {route} lost the selected candidate"
@@ -993,14 +1041,16 @@ fn canonical_portable(path: &std::path::Path) -> String {
     let mut existing = path;
     let mut tail = Vec::new();
     while !existing.exists() {
-        let Some(parent) = existing.parent() else { break };
+        let Some(parent) = existing.parent() else {
+            break;
+        };
         if let Some(name) = existing.file_name() {
             tail.push(name.to_os_string());
         }
         existing = parent;
     }
-    let mut out = biscuit_file::canonicalize_simplified(existing)
-        .unwrap_or_else(|_| existing.to_path_buf());
+    let mut out =
+        biscuit_file::canonicalize_simplified(existing).unwrap_or_else(|_| existing.to_path_buf());
     for name in tail.into_iter().rev() {
         out.push(name);
     }

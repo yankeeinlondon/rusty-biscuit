@@ -2,11 +2,11 @@
 name: rust-testing
 description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
-  test design, fixture isolation, `require_level!` gating, nextest filtersets,
-  suite audits, and fuzzing. Load this
+  test design, fixture isolation, `require_level!` / `expect_level!` gating,
+  nextest filtersets, suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 7055b0e89017847d-a78f6d00b59ed3ca
-last_updated: 2026-09-07
+hash: 61d07be7e22c9f45-4f18f6dd156d5643
+last_updated: 2026-09-09
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -37,10 +37,19 @@ test is not required for every implementation edit.
 - **Time and ownership.** Synchronize on readiness or the final condition being
   asserted, with a deadline; do not use a fixed sleep as readiness proof. When
   elapsed time is the contract, preserve its semantic floor and justify the
-  budget, polling cadence, and shutdown margin under CI contention. Fixtures
-  own and clean up children, threads, sockets, and directories on failure too.
-  Serialize only tests sharing an actual resource, using runner-visible
-  coordination when tests execute in separate processes.
+  budget, polling cadence, and shutdown margin under CI contention. Also check
+  whether the *child* is waiting on the harness: a bare PTY answers no terminal
+  query, so a child that probes it — DSR cursor position (`ESC[6n`), OSC 10/11
+  foreground and background colour — pays a full timeout per unanswered probe
+  before it emits anything. Answer each on observation, as
+  `claudine/cli/tests/common/pty.rs` and `biscuit-terminal`'s `ProbeAnswer` do;
+  match the newly-read chunk, not the cumulative transcript, so a late
+  duplicate reply cannot land in a raw-mode prompt as an `ESC` keystroke.
+  Fixtures own and clean up children, threads, sockets, and directories on
+  failure too. Serialize only tests sharing an actual resource, using
+  runner-visible coordination when tests execute in separate processes — and
+  do not label a per-test resource shared: nextest gives every test its own
+  process, so a `#[serial]` group there enforces nothing and misleads.
 - **Reachability.** Confirm that the test's name, `cfg`, required features, and
   recipe select it on the intended platforms. L1 includes hermetic subprocess
   and filesystem tests. OS-specific behavior alone does not require L2/L3.
@@ -61,7 +70,12 @@ pending on CI; distinguish implementation completion from verification.
 
 For a requested comprehensive test audit or test-performance specification,
 read [test-suite-audits.md](test-suite-audits.md). Ordinary feature work does
-not require a suite-wide audit.
+not require a suite-wide audit. The tooling those audits run on (listing
+captures, CI JUnit gates, inventory reconciliation, cost attribution,
+alternating-run measurement, and work-count comparison) is the shared
+`tools/test-audit` package, driven by a per-area `audit.config.json`; see
+[test-audit-tooling.md](test-audit-tooling.md) for install, commands,
+configuration, and how to read its numbers.
 
 ## Decision Tree: "What tier should my test live in?"
 
@@ -122,6 +136,19 @@ Symptoms that you have mis-tiered an OS-specific test:
 - it is `#[ignore]`d with a reason that names a *platform* rather than a
   *resource*;
 - a tier prefix and a `#[cfg]` gate encode the same fact twice.
+
+**Compile the other platform's arms locally.** An area's `just check-windows`
+runs `cargo check -p <crates> --tests --target x86_64-pc-windows-gnu`
+(mingw, with `-Wa,-mbig-obj`; `rustup target add x86_64-pc-windows-gnu`
+first). Use that target, not `x86_64-pc-windows-msvc`: on a macOS host the
+MSVC check dies inside `aws-lc-sys` for want of Windows SDK headers, which is
+how one fix concluded its `#[cfg(windows)]` arms were uncompilable off CI.
+Compiling is not running — `windows-latest` stays the runtime authority — but
+a typo in a Windows arm becomes a local error instead of a CI surprise, and
+an import used only inside `#[cfg(unix)]` cases shows up as
+`unused_imports` here and nowhere else (gate the import too). A warm re-run
+re-emits cached warnings only for what it re-checks; when the warning count
+is the evidence, check into a fresh `CARGO_TARGET_DIR`.
 
 ## Test Levels
 
@@ -209,6 +236,24 @@ fixture builder, say — use `decide_harness!`, which records evidence and yield
 the `LevelDecision`. Calling `evaluate_harness` directly skips the recording and
 leaves the backend unproven even though its tests ran.
 
+**Level 1 gates use `expect_level!`, not `require_level!`.** The clean skip is
+right for L2/L3, where the harness is genuinely optional. L1 is the mandatory
+suite and has no optional-harness contract, so a skip there is
+indistinguishable from a pass: an unprovisioned runner reports green while
+proving nothing. `expect_level!` takes the same arguments and panics — naming
+the missing requirement, so the skip's diagnostic survives as the failure
+message. Keep such a test off a platform with a compile-time exclusion
+(`#![cfg(unix)]` at the top of the binary), never a runtime probe. An
+operator-selected exclusion (`BISCUIT_TEST_LEVEL`, `RUN_LEVEL3`) still skips.
+
+```rust
+expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+```
+
+Claudine's 32 L1 PTY gates were `require_level!` until review-3 of
+`fixes/2026-09-07-faster-claudine-tests`; a host without `/dev/ptmx` skipped all
+seven binaries and the run stayed green.
+
 For browser tests:
 
 ```rust
@@ -258,6 +303,10 @@ Before running any final build, test, or lint gate:
    `--dry-run` prints the scope). The pre-push hook runs exactly
    `just ci-local --lint-only` for the same reason, and no tests: L1 is CI's
    job, and a lint immediately followed by nextest reuses stale test binaries.
+   A non-comment change to a global path such as `.config/nextest.toml`
+   selects the **whole** workspace in `ci-local` and CI alike (73 packages,
+   ~45 minutes locally on 2026-09-08); budget for it before touching runner
+   configuration.
 4. Report the selected scope and commands with the gate results.
 
 For durable native CI, declare package policy in the package's own
@@ -410,6 +459,14 @@ An area that sets `BISCUIT_TEST_FILTER` carries its own copy of these
 expressions and must anchor them too — `_tier_filter` cannot reach inside an
 override.
 
+**Narrowing a recipe to one test binary** is `--test <stem>` through the
+recipe's `*args` (`just test-cli --test context_command`): it leaves the
+tier filterset alone. `-E 'binary(x)'` does not survive the recipes' two-layer
+argument interpolation, and `BISCUIT_TEST_FILTER` replaces the tier expression
+outright. Where a public `test-l2` fans out to a second package (claudine's
+also runs `claudine-gen`), narrow by calling the shared recipe directly:
+`just _test_l2 <pkg> --features terminal-tests --test <stem>`.
+
 ## Leaked Process Detection
 
 Two complementary layers catch tests that spawn child processes and fail to
@@ -466,9 +523,20 @@ reference implementation:
 
 | Piece | Where | Contract |
 |---|---|---|
-| Fixture | `claudine/cli/tests/common/mod.rs` — `CliProcessFixture` | Temp `cwd`/`home`/`bin`; `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA` → fixture home, `HOMEDRIVE`/`HOMEPATH`/`XDG_CONFIG_HOME` removed |
+| Fixture | `claudine/cli/tests/common/mod.rs` and `darkmatter/cli/tests/common/fixture.rs` — `CliProcessFixture` | Per-test temp `cwd`/`home`/`bin` plus area-owned config/cache/temp policy; platform home variables point inside the fixture |
 | Builder | `CliProcessFixture::command()` / `command_builder()` | The one supported spawn. `current_dir` pinned to the fixture `cwd` |
-| Guard | `claudine/cli/tests/spawn_site_guard.rs` | Source scan; a raw `Command::cargo_bin("<bin>")` outside the builder fails the suite |
+| Raw surface | `command_std()` / `command_builder()…build_std()` | The same policy on a `std::process::Command`, for a test that has to keep the child — a signal, a deadline, a streaming read, an `expectrl` session |
+| Guard | each area's `cli/tests/spawn_site_guard.rs` | Source scan; a raw `Command::cargo_bin("<bin>")`, isolation escape, or stale exemption fails the suite |
+
+**Two command surfaces, one policy.** `assert_cmd::Command` has no `spawn`, so a
+live-child test needs a `std::process::Command` — and hand-building one
+re-derives the isolation at the call site, which is the per-test `.env(…)` chain
+the fixture replaced. Do not give the two surfaces separate builders: compute
+the policy once as data (clear flag, ordered removes, ordered sets,
+`current_dir`) and apply it through a small trait each command type implements.
+Then assert the two produce the **same effective environment** against a
+recording stub, so a policy change that reaches only one of them fails there
+rather than in a platform-only test months later.
 
 **Default `PATH` is the fixture `bin` plus a minimal system set** — `/usr/bin:/bin`
 on Unix, `%SystemRoot%\System32` on Windows, `PATHEXT` untouched so `.cmd` stubs
@@ -496,6 +564,24 @@ test overrides. Keep cache roots and platform home variables inside the
 fixture where the application uses them. Choose a documented deny list or a
 cleared environment based on actual runtime needs; Windows command stubs may
 need `SystemRoot`, `COMSPEC`, and `PATHEXT` restored.
+
+**Also disable the side effects that outlive the process.** Two of claudine's
+defaults exist only because the child can start work that the child's own exit
+does not end:
+
+- `CLAUDINE_RENDEZVOUS_REPORT=false` — absence means *enabled*, so a test that
+  merely forgets the key reports a live session to the developer's daemon.
+- `PLAYA_DRY_RUN=1` plus a fixture-local `PLAYA_SPOOL_DIR` — a lifecycle audio
+  effect makes the CLI re-exec **itself** as playa's detached spool worker,
+  which deliberately survives the command that enqueued the job. Without the
+  default, an L1 test that composes a prompt carrying such an effect leaves two
+  orphaned binaries per run and plays a sound through the developer's speakers.
+  `just test-leaks` is what surfaces this; no assertion in the test will.
+
+Both live inside namespaces the builder sweeps by prefix, so the *ordering* is
+part of the contract: scrub first, then apply defaults. Assert them against a
+parent that exported the opposite value — a set-equality comparison between two
+command surfaces cannot catch a policy that is identically wrong on both.
 
 Give the guard an **explicit allowlist of `(file, one-line reason)` entries with
 stale-entry failure**: an entry matching no live site fails too, so the list
@@ -574,7 +660,7 @@ Fuzz is **not** part of `sanity`, `test`, or PR gates. It runs nightly in CI.
 
 | Crate                     | Purpose                                                                                                                                                         |
 |---------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `test_toolkit`            | `require_level!`, `EnvGuard`, `trace_phase!`                                                                                                                    |
+| `test_toolkit`            | `require_level!` / `expect_level!`, `EnvGuard`, `trace_phase!`                                                                                                                    |
 | `biscuit_test_harness`    | Terminal harnesses (WezTerm, Kitty, tmux, Apple Terminal); `SharedHarness` + per-backend `shared_or_spawn()`; `biscuit-harness-broker` binary used by `test-l2`. For backend selection and API, load the `biscuit-test-harness` skill via the Skill tool. |
 | `biscuit_browser_harness` | Headless Chrome harness (`ChromeHarness`, `require_browser`)                                                                                                    |
 | `criterion`               | Benchmarking                                                                                                                                                    |
@@ -604,6 +690,7 @@ Open the topic file when the task matches:
 | Performance testing tool choice (Criterion vs Divan)                 | `performance-testing.md`                |
 | Criterion benchmarking (getting started → deep dive → Bencher)       | `criterion.md`                          |
 | Nextest details                                                      | `nextest.md`                            |
+| Audit tooling (`tools/test-audit`: capture, fetch, junit, reconcile, attribute, measure, counters) | `test-audit-tooling.md`               |
 
 ## Resources
 

@@ -20,8 +20,7 @@ use std::sync::{Arc, Mutex};
 
 use claudine::composition::{
     CompositionError, CompositionExecutionRequest, CompositionMode, DefaultLifecycleEmitter,
-    LIFECYCLE_EVENT_KEYS, LifecycleRuntimeContext,
-    LoopExecutionOptions, LoopExecutionResult,
+    LIFECYCLE_EVENT_KEYS, LifecycleRuntimeContext, LoopExecutionOptions, LoopExecutionResult,
     PrepareOptions, PreparedComposition, ProxyHandoff, ResolvedCompositionSource,
     ResolvedExecutionTarget, RunLedger, SharedApprovalCache, SharedRunLedger, SurfacedHandoff,
     SystemShellRunner, build_loop_seed_with_lifecycle, commit_proxy_in_context,
@@ -35,8 +34,8 @@ use tracing::info_span;
 
 use super::interrupt::{USER_INTERRUPT_EXIT_CODE, install_user_interrupt_guard};
 use super::loop_run::{
-    build_loop_iteration_output, emit_compose_warnings, emit_rate_limit_halt,
-    record_prep_substage, run_loop_with_overrides,
+    build_loop_iteration_output, emit_compose_warnings, emit_rate_limit_halt, record_prep_substage,
+    run_loop_with_overrides,
 };
 use super::setters::{merge_set_overrides, parse_composition_positionals};
 use super::{CompositionKind, SharedComposeArgs};
@@ -45,8 +44,8 @@ use crate::commands::schema_interactive::{
     pre_validate_with_interactive_collection, resolve_interactive_options,
 };
 use crate::commands::wrap::composition::{
-    CompositionPrepContext, eagerly_resolve_target, execute_composition_request_inner,
-    execute_composition_attempt, install_agent_env_for_composition,
+    CompositionPrepContext, eagerly_resolve_target, execute_composition_attempt,
+    execute_composition_request_inner, install_agent_env_for_composition,
 };
 use crate::commands::wrap::overlay::merge_frontmatter_overlay;
 use crate::commands::wrap::wrap_terminal;
@@ -148,18 +147,12 @@ pub(crate) fn run_composition_inner(
     let frontmatter_load_t = std::time::Instant::now();
     let invocation = InvocationContext::capture()?;
     let provisional_context = invocation.launch_file_resolution_context().clone();
-    let mut caller_input_records =
-        claudine::composition::CallerInputLayers::from_caller_overrides(
-            set_overrides.clone(),
-            provisional_context.clone(),
-        )
-        .caller_input_records;
-    let source = resolve_composition_source(
-        &file,
-        kind,
-        &shared,
-        &provisional_context,
-    )?;
+    let mut caller_input_records = claudine::composition::CallerInputLayers::from_caller_overrides(
+        set_overrides.clone(),
+        provisional_context.clone(),
+    )
+    .caller_input_records;
+    let source = resolve_composition_source(&file, kind, &shared, &provisional_context)?;
     // Derive the definitive source bundle from the same owner so a
     // top-level document selected from a different repository keeps that
     // repository's nested references (D2/D10, AC12). The launch projection is
@@ -195,8 +188,8 @@ pub(crate) fn run_composition_inner(
     // Captured once for frontmatter-excerpt enrichment of any error rendered
     // below; gates whether the YAML block is shown (TTY or FORCE_COLOR) or
     // withheld (pipe/CI/NO_COLOR).
-    let stderr_is_tty = std::io::stderr().is_terminal()
-        || std::env::var_os("FORCE_COLOR").is_some();
+    let stderr_is_tty =
+        std::io::stderr().is_terminal() || std::env::var_os("FORCE_COLOR").is_some();
 
     // Schema-aware pre-prepare validation. Runs BEFORE the preflight
     // compose pass so the user-visible error surface is Claudine's
@@ -242,12 +235,11 @@ pub(crate) fn run_composition_inner(
         // a `file(match)` partial, and invalid optionals may have been dropped;
         // the caller records must carry the same values, still anchored at
         // the launch origin.
-        caller_input_records =
-            claudine::composition::CallerInputLayers::from_caller_overrides(
-                pre.set_overrides.clone(),
-                provisional_context.clone(),
-            )
-            .caller_input_records;
+        caller_input_records = claudine::composition::CallerInputLayers::from_caller_overrides(
+            pre.set_overrides.clone(),
+            provisional_context.clone(),
+        )
+        .caller_input_records;
         (pre.source, pre.set_overrides)
     };
     // The inline `prompt` verdict comes after eager collection so a collected
@@ -358,14 +350,12 @@ pub(crate) fn run_composition_inner(
                 // catch a refusal, so it is used directly — the target is never
                 // resolved or hop-checked twice.
                 let handoff: ProxyHandoff = match surfaced {
-                    SurfacedHandoff::Request(request) => {
-                        commit_proxy_in_context(
-                            &mut ledger.lock().unwrap(),
-                            request,
-                            &active_file_resolution_context,
-                        )
-                            .map_err(color_eyre::eyre::Report::from)?
-                    }
+                    SurfacedHandoff::Request(request) => commit_proxy_in_context(
+                        &mut ledger.lock().unwrap(),
+                        request,
+                        &active_file_resolution_context,
+                    )
+                    .map_err(color_eyre::eyre::Report::from)?,
                     SurfacedHandoff::Committed(handoff) => *handoff,
                 };
                 let target_ref = handoff.resolved_target().to_string_lossy().into_owned();
@@ -492,7 +482,12 @@ pub(crate) fn prepare_and_run_active_document(
         source_context,
         &shared.excluded(),
     )?;
-    record_prep_substage(&mut prep_substages, perf_enabled, "prep context", prep_ctx_t);
+    record_prep_substage(
+        &mut prep_substages,
+        perf_enabled,
+        "prep context",
+        prep_ctx_t,
+    );
     // This document's own repository root resolves its `@repo/…` proxy
     // targets; captured before `execute_loop_or_single` consumes the context.
     let commit_repo_root = prep_context.source_repo_root.clone();
@@ -503,8 +498,9 @@ pub(crate) fn prepare_and_run_active_document(
     // Hints come from the raw frontmatter (no compose). For a proxied target
     // this reads the *target's* hints, so provider/model launch state is
     // rebuilt per document (R6) under the caller's explicit-CLI precedence.
-    let raw_hints =
-        claudine::composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter())?;
+    let raw_hints = claudine::composition::parse_selection_hints_from_frontmatter(
+        source.markdown.frontmatter(),
+    )?;
     let resolved_target = {
         let _span = info_span!("compose_prep.eager_target").entered();
         eagerly_resolve_target(
@@ -513,6 +509,7 @@ pub(crate) fn prepare_and_run_active_document(
             shared.explicit_provider(),
             shared.model.as_deref(),
             shared.dry_run,
+            shared.silent,
             &source.resolved_path,
         )
         .map_err(|e| enrich_report(e, &source, stderr_is_tty))?
@@ -536,7 +533,9 @@ pub(crate) fn prepare_and_run_active_document(
     // interactively. `raw_hints.interactive` carries the authored
     // frontmatter value, so resolving it here keeps the eager header in
     // agreement with the executor's `session_interactive`.
-    let header_interactive = shared.resolve_session_interactivity(raw_hints.interactive).value;
+    let header_interactive = shared
+        .resolve_session_interactivity(raw_hints.interactive)
+        .value;
     let header_emitted = match (shared.silent, resolved_target.as_ref()) {
         (false, Some(target)) => emit_execution_header(
             target.provider,
@@ -581,9 +580,8 @@ pub(crate) fn prepare_and_run_active_document(
     // authoritative for file resolution, transclusion, and `$schema`.
     let document_epoch = invocation.begin_document_epoch();
     let prepared_context = {
-        let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
-            &source.markdown,
-        );
+        let requirements =
+            darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
         let mut ctx = document_epoch.capture_launch_context(&requirements);
         for (key, value) in &env_overrides {
             ctx.env_mut().insert(key.clone(), value.clone());
@@ -730,17 +728,18 @@ pub(crate) fn resolve_composition_source(
     shared: &SharedComposeArgs,
     file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedCompositionSource> {
-    let stderr_is_tty = std::io::stderr().is_terminal()
-        || std::env::var_os("FORCE_COLOR").is_some();
-    match claudine::composition::resolve_composition_source_in_context(file, file_resolution_context) {
+    let stderr_is_tty =
+        std::io::stderr().is_terminal() || std::env::var_os("FORCE_COLOR").is_some();
+    match claudine::composition::resolve_composition_source_in_context(
+        file,
+        file_resolution_context,
+    ) {
         Ok(source) => Ok(source),
         Err(no_match @ CompositionError::FileReferenceNoMatch { .. }) => {
             match crate::completion::operation_file::recover_operation_file(file, no_match) {
                 crate::completion::operation_file::OperationFileRecovery::AttemptAutocomplete => {
                     let mode = match kind {
-                        CompositionKind::Direct => {
-                            crate::completion::scopes::ComposeMode::Compose
-                        }
+                        CompositionKind::Direct => crate::completion::scopes::ComposeMode::Compose,
                         CompositionKind::Inline => {
                             crate::completion::scopes::ComposeMode::InlineCompose
                         }
@@ -854,12 +853,8 @@ fn build_and_run_loop(
     // lifecycle from it would drop every event block and leave the loop with no
     // `initialize`/`start`/terminal/`finalize` or `loop:` gate concerns. The
     // non-loop path parses lifecycle from `prepared.lifecycle`; this matches it.
-    let loop_seed = build_loop_seed_with_lifecycle(
-        source,
-        &config,
-        loop_prepare_options.clone(),
-        kind.mode(),
-    )?;
+    let loop_seed =
+        build_loop_seed_with_lifecycle(source, &config, loop_prepare_options.clone(), kind.mode())?;
     let initial_frontmatter = loop_seed.seed;
     let lifecycle_config = loop_seed.lifecycle;
 
@@ -899,8 +894,8 @@ fn build_and_run_loop(
         context: Some(prepared_context),
     };
 
-    let lifecycle_mutation_root = effective_repo_root
-        .unwrap_or(prep_context.launch_workspace.child_cwd.as_path());
+    let lifecycle_mutation_root =
+        effective_repo_root.unwrap_or(prep_context.launch_workspace.child_cwd.as_path());
     let effect_engine = darkmatter::effects::EffectEngine::builder()
         .mutation_root(lifecycle_mutation_root)
         .auto_rehash(false)
@@ -926,12 +921,8 @@ fn build_and_run_loop(
         |ctx, guard| {
             let prepared = {
                 let _span = match kind {
-                    CompositionKind::Direct => {
-                        info_span!("compose_prep.prepare_direct").entered()
-                    }
-                    CompositionKind::Inline => {
-                        info_span!("compose_prep.prepare_inline").entered()
-                    }
+                    CompositionKind::Direct => info_span!("compose_prep.prepare_direct").entered(),
+                    CompositionKind::Inline => info_span!("compose_prep.prepare_inline").entered(),
                 };
                 // Iteration 1 prepares at the stage the coordinator selected;
                 // re-entry passes skip schema validation and shell pre-flight
@@ -949,13 +940,12 @@ fn build_and_run_loop(
                 // behind. Reaching the verdict here instead would put the schema
                 // ahead of `initialize` for every looping document (R4).
                 let mut iteration_options = loop_prepare_options.clone();
-                iteration_options.set_overrides = Some(
-                    claudine::composition::layered_set_overrides(
+                iteration_options.set_overrides =
+                    Some(claudine::composition::layered_set_overrides(
                         Some(&ctx.as_set_overrides()),
                         Some(&runtime_state.snapshot()),
                         None,
-                    ),
-                );
+                    ));
                 if ctx.iteration == 1 {
                     kind.prepare_staged(
                         source,
@@ -1187,8 +1177,8 @@ fn execute_loop_or_single(
     // Captured once for frontmatter-excerpt enrichment of any error rendered
     // below; gates whether the YAML block is shown (TTY or FORCE_COLOR) or
     // withheld (pipe/CI/NO_COLOR).
-    let stderr_is_tty = std::io::stderr().is_terminal()
-        || std::env::var_os("FORCE_COLOR").is_some();
+    let stderr_is_tty =
+        std::io::stderr().is_terminal() || std::env::var_os("FORCE_COLOR").is_some();
 
     let file_for_loop = file.clone();
 
@@ -1320,9 +1310,7 @@ fn execute_loop_or_single(
                 env_overrides: env_overrides.clone(),
                 perf_enabled: shared.perf,
                 source_repo_root: prep_context.source_repo_root.clone(),
-                shell_working_directory: Some(
-                    prep_context.launch_workspace.child_cwd.clone(),
-                ),
+                shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
                 prepared_context: Some(prepared_context.clone()),
                 file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
                 file_resolution_context: Some(file_resolution_context.clone()),

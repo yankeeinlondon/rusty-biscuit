@@ -3,7 +3,7 @@ use std::{env, fs, path::PathBuf};
 
 use tracing::{debug, warn};
 
-use super::{Service, ENRICHMENT_CHUNK};
+use super::{ENRICHMENT_CHUNK, Service};
 use crate::process::{self, timeouts};
 
 pub(crate) fn list_runit_services() -> Vec<Service> {
@@ -157,7 +157,8 @@ mod tests {
     /// `sv` writes diagnostics for unknown services; they must not become entries.
     #[test]
     fn ignores_unparseable_lines() {
-        let stdout = "warning: nosuch: unable to open supervise/ok\ngarbage\nrun: real: (pid 1) 1s\n";
+        let stdout =
+            "warning: nosuch: unable to open supervise/ok\ngarbage\nrun: real: (pid 1) 1s\n";
         let mut statuses = HashMap::new();
         parse_sv_status_lines(stdout, &mut statuses);
 

@@ -51,6 +51,7 @@ pub fn code_for_error_kind(kind: &str) -> Option<&'static str> {
         "repeated_stream_error" => "provider.stream_error",
         "context_pressure" => "provider.context_pressure",
         "interrupted" => "provider.interrupted",
+        "incomplete_subagents" => "provider.incomplete_subagents",
         "launch_failed" => "provider.launch_failed",
         "agent_failure" => "provider.exited",
         _ => return None,
@@ -109,6 +110,23 @@ mod tests {
     }
 
     #[test]
+    fn incomplete_subagents_classifies_as_unrecoverable_provider_work() {
+        // The ledger's `error_kind` is the stable machine label; this is the
+        // seam that gives it a catalog identity instead of leaving the failure
+        // facet-less (silent-success-and-startup-stall §4).
+        let code = code_for_error_kind("incomplete_subagents")
+            .expect("`incomplete_subagents` must classify");
+        assert_eq!(code, "provider.incomplete_subagents");
+        let spec = code_spec(code).expect("the code must resolve in the locked catalog");
+        assert_eq!(spec.category, Category::Provider);
+        assert_eq!(
+            spec.disposition,
+            crate::diagnostics::Disposition::Unrecoverable
+        );
+        assert_eq!(spec.origin, crate::diagnostics::Origin::Provider);
+    }
+
+    #[test]
     fn unknown_kind_is_unclassified() {
         assert_eq!(code_for_error_kind("shell"), None);
         assert_eq!(code_for_error_kind("set_frontmatter"), None);
@@ -129,6 +147,7 @@ mod tests {
             "interrupted",
             "launch_failed",
             "agent_failure",
+            "incomplete_subagents",
             "rate_limit",
             "billing_error",
             "quota_exceeded",

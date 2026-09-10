@@ -11,9 +11,8 @@
 
 use predicates::str::contains;
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 // ============================================================================
 // Validation tests
@@ -21,8 +20,9 @@ use common::{augmented_path, strip_ansi, write_executable};
 
 #[test]
 fn sequence_requires_positional_arg() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let assert = fixture
+        .command()
         .args(["sequence"])
         .assert()
         .code(2);
@@ -34,8 +34,9 @@ fn sequence_requires_positional_arg() {
 
 #[test]
 fn sequence_missing_file_with_setter_only() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let assert = fixture
+        .command()
         .args(["sequence", "topic=async"])
         .assert()
         .code(1);
@@ -49,16 +50,16 @@ fn sequence_missing_file_with_setter_only() {
 
 #[test]
 fn sequence_errors_when_source_has_no_sequence_property() {
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("plain.md");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let md_file = fixture.cwd().join("plain.md");
     fs::write(
         &md_file,
         "---\ntitle: No sequence here\n---\n# Plain content\n",
     )
     .unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let assert = fixture
+        .command()
         .args(["sequence", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -73,16 +74,16 @@ fn sequence_errors_when_source_has_no_sequence_property() {
 
 #[test]
 fn sequence_malformed_root_frontmatter_fence_surfaces_typed_parse_error() {
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("malformed-sequence.md");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let md_file = fixture.cwd().join("malformed-sequence.md");
     fs::write(
         &md_file,
         "----\nsequence:\n  - alpha\ndescription: near-miss fence\n----\nStep {{state}}\n",
     )
     .unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let assert = fixture
+        .command()
         .args(["sequence", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -110,12 +111,10 @@ fn sequence_malformed_root_frontmatter_fence_surfaces_typed_parse_error() {
 #[cfg(unix)]
 #[test]
 fn sequence_fail_fast_true_stops_on_first_failure() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -132,7 +131,7 @@ Run step {{state}}
     // Provider fails on every call. With fail-fast=true, only the first
     // step should run and the sequence should abort.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -144,12 +143,9 @@ exit 7
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(workspace.path())
         .args([
             "sequence",
             "--goose",
@@ -178,12 +174,10 @@ exit 7
 #[cfg(unix)]
 #[test]
 fn sequence_fail_fast_false_continues_and_exits_one_on_any_failure() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -200,7 +194,7 @@ Run step {{state}}
 
     // Provider fails on the second call only. All three steps should run.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -215,12 +209,9 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(workspace.path())
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -243,12 +234,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn sequence_opencode_requires_model_when_missing() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let args_path = workspace.path().join("opencode-args.txt");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let args_path = fixture.cwd().join("opencode-args.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -261,7 +250,7 @@ Run step {{state}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
     echo '[]'
@@ -272,13 +261,10 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env_remove("MODEL")
-        .current_dir(workspace.path())
         .args(["sequence", "--opencode", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -303,12 +289,10 @@ exit 0
 #[test]
 fn sequence_cli_fail_fast_flag_overrides_document_default() {
     // Document sets fail_fast: false, but CLI overrides to true.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -324,7 +308,7 @@ Do step {{state}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -336,12 +320,9 @@ exit 3
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(workspace.path())
         .args([
             "sequence",
             "--goose",
@@ -367,13 +348,11 @@ exit 3
 #[cfg(unix)]
 #[test]
 fn sequence_propagates_fail_fast_to_child_env_and_prompt() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let env_path = workspace.path().join("child-env.txt");
-    let prompt_path = workspace.path().join("child-stdin.txt");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let env_path = fixture.cwd().join("child-env.txt");
+    let prompt_path = fixture.cwd().join("child-stdin.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     // The document body interpolates {{env.CLAUDINE_FAIL_FAST}} so we can verify
     // the composed prompt saw the same value as the child env.
     fs::write(
@@ -391,7 +370,7 @@ CLAUDINE_FAIL_FAST={{env.CLAUDINE_FAIL_FAST}} STATE={{state}}
     // argument (Goose delivers the composed prompt via -t) so the test
     // can inspect both.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 printf 'CLAUDINE_FAIL_FAST=%s\n' "$CLAUDINE_FAIL_FAST" > "$CLAUDINE_ENV_FILE"
 prev=""
@@ -405,13 +384,10 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_ENV_FILE", &env_path)
         .env("CLAUDINE_STDIN_FILE", &prompt_path)
-        .current_dir(workspace.path())
         .args([
             "sequence",
             "--goose",
@@ -442,12 +418,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn sequence_shorthand_override_reaches_prompt() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let prompt_path = workspace.path().join("child-stdin.txt");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let prompt_path = fixture.cwd().join("child-stdin.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -460,7 +434,7 @@ TOPIC={{topic}} STATE={{state}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 prev=""
 for arg in "$@"; do
@@ -474,12 +448,9 @@ exit 0
     );
 
     // Setter placed BEFORE the file reference to exercise the positional parser.
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_STDIN_FILE", &prompt_path)
-        .current_dir(workspace.path())
         .args([
             "sequence",
             "--goose",
@@ -499,12 +470,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn sequence_shorthand_wins_over_set_flag() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let prompt_path = workspace.path().join("child-stdin.txt");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let prompt_path = fixture.cwd().join("child-stdin.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -517,7 +486,7 @@ MODE={{mode}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 prev=""
 for arg in "$@"; do
@@ -530,12 +499,9 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_STDIN_FILE", &prompt_path)
-        .current_dir(workspace.path())
         .args([
             "sequence",
             "--goose",
@@ -561,12 +527,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn sequence_injects_per_step_state_into_prompt() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let prompts_path = workspace.path().join("all-prompts.txt");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let prompts_path = fixture.cwd().join("all-prompts.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -584,7 +548,7 @@ COLOR={{state}} STEP={{state.index}}/{{state.count}}
     // flag) to a single file so we can verify step-by-step state/step
     // interpolation.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 prev=""
 for arg in "$@"; do
@@ -600,12 +564,9 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_PROMPTS_FILE", &prompts_path)
-        .current_dir(workspace.path())
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -646,18 +607,16 @@ fn sequence_preflight_applies_whitelist_on_every_step() {
     //      `shared_cache_covers_harness_command_path`,
     //      `shared_cache_spans_template_and_harness_sources`)
     // Those exercise non-whitelisted commands with mock approval handlers.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("sequence-cli");
 
     // Whitelist echo in the workspace policy root.
     fs::write(
-        workspace.path().join(".darkmatter-shell-whitelist"),
+        fixture.cwd().join(".darkmatter-shell-whitelist"),
         "prefix echo\n",
     )
     .unwrap();
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -671,17 +630,14 @@ Step {{state}}: ::shell echo approved
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
     // Successful exit means every step's pre-flight accepted the
     // whitelisted `echo` command without a TTY.
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    fixture
+        .command()
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -694,11 +650,9 @@ Step {{state}}: ::shell echo approved
 #[cfg(unix)]
 #[test]
 fn sequence_summary_emits_final_line() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("sequence-cli");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nsequence:\n  - alpha\n  - beta\n---\nStep {{state}}\n",
@@ -706,15 +660,12 @@ fn sequence_summary_emits_final_line() {
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    fixture
+        .command()
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success()
@@ -730,13 +681,11 @@ fn sequence_summary_emits_final_line() {
 /// composes with that state through the normal invocation path.
 #[test]
 fn sequence_resolves_a_data_file_with_offset_and_operator() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let prompts_path = workspace.path().join("all-prompts.txt");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let prompts_path = fixture.cwd().join("all-prompts.txt");
 
     fs::write(
-        workspace.path().join("things.yaml"),
+        fixture.cwd().join("things.yaml"),
         r#"description: research into things
 colors:
     description: the best colors in the spectrum
@@ -747,7 +696,7 @@ colors:
     )
     .unwrap();
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -760,7 +709,7 @@ COLOR={{state}} STEP={{state.index}}/{{state.count}}
 
     #[cfg(unix)]
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 prev=""
 for arg in "$@"; do
@@ -774,7 +723,7 @@ exit 0
     );
     #[cfg(windows)]
     {
-        let source = path_dir.join("goose.rs");
+        let source = fixture.bin_dir().join("goose.rs");
         fs::write(
             &source,
             r#"use std::{env, fs::OpenOptions, io::Write};
@@ -797,18 +746,15 @@ fn main() {
             .args(["--edition=2024"])
             .arg(&source)
             .arg("-o")
-            .arg(path_dir.join("goose.exe"))
+            .arg(fixture.bin_dir().join("goose.exe"))
             .status()
             .unwrap();
         assert!(status.success(), "failed to compile the Goose test fixture");
     }
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_PROMPTS_FILE", &prompts_path)
-        .current_dir(workspace.path())
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -828,12 +774,10 @@ fn main() {
 /// notice on stderr, exit `0`, and no provider launched.
 #[test]
 fn sequence_with_an_empty_dynamic_source_is_a_no_op() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let launched_path = workspace.path().join("launched.txt");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let launched_path = fixture.cwd().join("launched.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -846,19 +790,16 @@ Work on {{state}}.
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 printf 'launched\n' >> "$CLAUDINE_LAUNCHED_FILE"
 exit 0
 "#,
     );
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let output = fixture
+        .command()
         .env("CLAUDINE_LAUNCHED_FILE", &launched_path)
-        .current_dir(workspace.path())
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success()
@@ -880,18 +821,16 @@ exit 0
 /// the graceful no-op is for *dynamic* emptiness only.
 #[test]
 fn sequence_with_a_static_empty_list_still_fails() {
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nsequence: []\n---\nWork on {{state}}.\n",
     )
     .unwrap();
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .current_dir(workspace.path())
+    fixture
+        .command()
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure()
@@ -902,24 +841,22 @@ fn sequence_with_a_static_empty_list_still_fails() {
 /// the property authors must migrate to.
 #[test]
 fn sequence_rejects_the_retired_list_shape() {
-    let workspace = tempdir().unwrap();
+    let fixture = CliProcessFixture::named("sequence-cli");
     fs::write(
-        workspace.path().join("legacy.yaml"),
+        fixture.cwd().join("legacy.yaml"),
         "kind: sequence\nlist:\n  - name: one\n",
     )
     .unwrap();
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nsequence: legacy.yaml\n---\nWork on {{state}}.\n",
     )
     .unwrap();
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .current_dir(workspace.path())
+    fixture
+        .command()
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure()
@@ -931,12 +868,10 @@ fn sequence_rejects_the_retired_list_shape() {
 /// carried is gone.
 #[test]
 fn sequence_yaml_invoked_directly_uses_the_same_shape() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let prompts_path = workspace.path().join("all-prompts.txt");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let prompts_path = fixture.cwd().join("all-prompts.txt");
 
-    let yaml_file = workspace.path().join("steps.yaml");
+    let yaml_file = fixture.cwd().join("steps.yaml");
     fs::write(
         &yaml_file,
         r#"kind: sequence
@@ -950,19 +885,16 @@ sequence:
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\nprintf 'launched\\n' >> \"$CLAUDINE_PROMPTS_FILE\"\nexit 0\n",
     );
 
     // Every step carries an executable, so a bodyless YAML source is valid.
     // Phase 4 only has to resolve the plan; execution of `shell:` steps lands
     // in phase 7, so this asserts the shape is *accepted*, not that it runs.
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let output = fixture
+        .command()
         .env("CLAUDINE_PROMPTS_FILE", &prompts_path)
-        .current_dir(workspace.path())
         .args(["sequence", "--goose", yaml_file.to_str().unwrap()])
         .assert()
         .get_output()
@@ -986,35 +918,30 @@ sequence:
 /// Install a fake provider that records every launch, and return the witness
 /// path that must stay absent when preflight aborts.
 #[cfg(unix)]
-fn preflight_witness(workspace: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
-    let path_dir = workspace.join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+fn preflight_witness(fixture: &CliProcessFixture) -> std::path::PathBuf {
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\nprintf 'launched\\n' >> \"$CLAUDINE_PROMPTS_FILE\"\nexit 0\n",
     );
-    (path_dir, workspace.join("launches.txt"))
+    fixture.cwd().join("launches.txt")
 }
 
 /// Run `claudine sequence` against `file`, returning `(stderr, launched)`.
 #[cfg(unix)]
 fn run_preflight(
-    workspace: &std::path::Path,
+    fixture: &CliProcessFixture,
     file: &std::path::Path,
     extra_args: &[&str],
 ) -> (String, bool) {
-    let (path_dir, witness) = preflight_witness(workspace);
+    let witness = preflight_witness(fixture);
     let mut args: Vec<&str> = vec!["sequence", "--goose"];
     args.extend_from_slice(extra_args);
     let file_arg = file.to_str().unwrap();
     args.push(file_arg);
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace)
-        .env("PATH", augmented_path(&path_dir))
+    let output = fixture
+        .command()
         .env("CLAUDINE_PROMPTS_FILE", &witness)
-        .current_dir(workspace)
         .args(&args)
         .assert()
         .get_output()
@@ -1031,15 +958,15 @@ fn run_preflight(
 #[test]
 #[cfg(unix)]
 fn sequence_rejects_direct_group_execution() {
-    let workspace = tempdir().unwrap();
-    let group = workspace.path().join("group.yaml");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let group = fixture.cwd().join("group.yaml");
     fs::write(
         &group,
         "kind: group\nname: bundle\ntasks:\n    - shell: echo x\n",
     )
     .unwrap();
 
-    let (stderr, launched) = run_preflight(workspace.path(), &group, &[]);
+    let (stderr, launched) = run_preflight(&fixture, &group, &[]);
     assert!(
         stderr.contains("kind: group") && stderr.contains("sequence task"),
         "the rejection must name the construct and the fix; stderr: {stderr}"
@@ -1052,20 +979,20 @@ fn sequence_rejects_direct_group_execution() {
 #[test]
 #[cfg(unix)]
 fn sequence_rejects_a_nested_sequence_prompt_document() {
-    let workspace = tempdir().unwrap();
+    let fixture = CliProcessFixture::named("sequence-cli");
     fs::write(
-        workspace.path().join("inner.md"),
+        fixture.cwd().join("inner.md"),
         "---\nsequence:\n    - one\n---\nInner.\n",
     )
     .unwrap();
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nsequence:\n    - name: one\n      prompt: inner.md\n---\nBody.\n",
     )
     .unwrap();
 
-    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &[]);
+    let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
     assert!(
         stderr.contains("nested sequences are not supported"),
         "stderr: {stderr}"
@@ -1077,25 +1004,25 @@ fn sequence_rejects_a_nested_sequence_prompt_document() {
 #[test]
 #[cfg(unix)]
 fn sequence_rejects_a_reference_cycle_with_the_full_chain() {
-    let workspace = tempdir().unwrap();
+    let fixture = CliProcessFixture::named("sequence-cli");
     fs::write(
-        workspace.path().join("a.yaml"),
+        fixture.cwd().join("a.yaml"),
         "kind: task\ntask: b.yaml\n",
     )
     .unwrap();
     fs::write(
-        workspace.path().join("b.yaml"),
+        fixture.cwd().join("b.yaml"),
         "kind: task\ntask: a.yaml\n",
     )
     .unwrap();
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nsequence:\n    - name: one\n      task: a.yaml\n---\nBody.\n",
     )
     .unwrap();
 
-    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &[]);
+    let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
     assert!(stderr.contains("reference cycle"), "stderr: {stderr}");
     // Long absolute paths are hyphen-wrapped by the terminal renderer, so the
     // chain is asserted by its arrow count (entry → a → b → a) rather than by
@@ -1113,15 +1040,15 @@ fn sequence_rejects_a_reference_cycle_with_the_full_chain() {
 #[test]
 #[cfg(unix)]
 fn sequence_rejects_group_loop() {
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nsequence:\n    - name: one\n      group:\n          name: looper\n          loop:\n              while: \"true\"\n          tasks:\n              - shell: echo x\n---\nBody.\n",
     )
     .unwrap();
 
-    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &[]);
+    let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
     assert!(stderr.contains("group `loop`"), "stderr: {stderr}");
     assert!(!launched);
 }
@@ -1131,15 +1058,15 @@ fn sequence_rejects_group_loop() {
 #[test]
 #[cfg(unix)]
 fn sequence_rejects_a_shell_command_depending_on_outputs() {
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nsequence:\n    - name: one\n      shell: \"echo {{ last(outputs) }}\"\n---\nBody.\n",
     )
     .unwrap();
 
-    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &[]);
+    let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
     assert!(
         stderr.contains("outputs") && stderr.contains("preflight"),
         "stderr: {stderr}"
@@ -1152,24 +1079,32 @@ fn sequence_rejects_a_shell_command_depending_on_outputs() {
 #[test]
 #[cfg(unix)]
 fn sequence_rejects_a_parallel_write_back_collision() {
-    let workspace = tempdir().unwrap();
+    let fixture = CliProcessFixture::named("sequence-cli");
     fs::write(
-        workspace.path().join("target.md"),
+        fixture.cwd().join("target.md"),
         "---\nprompt: Write something.\n---\nold\n",
     )
     .unwrap();
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nsequence:\n    - name: one\n      group:\n          name: racers\n          execution: parallel\n          tasks:\n              - prompt: target.md\n                name: first\n              - prompt: target.md\n                name: second\n---\nBody.\n",
     )
     .unwrap();
 
-    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &[]);
+    let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
+    // The diagnostic is word-wrapped to the terminal width with a box gutter,
+    // and where the break lands depends on the workspace path length, so the
+    // phrase is asserted on the flattened prose.
+    let flat = stderr
+        .replace('┃', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(
-        stderr.contains("write back")
-            && stderr.contains("racers")
-            && stderr.contains("(`first` and `second`)"),
+        flat.contains("write back")
+            && flat.contains("racers")
+            && flat.contains("(`first` and `second`)"),
         "stderr: {stderr}"
     );
     assert!(!launched);
@@ -1181,20 +1116,20 @@ fn sequence_rejects_a_parallel_write_back_collision() {
 #[test]
 #[cfg(unix)]
 fn preflight_failure_aborts_even_with_fail_fast_false() {
-    let workspace = tempdir().unwrap();
+    let fixture = CliProcessFixture::named("sequence-cli");
     fs::write(
-        workspace.path().join("inner.md"),
+        fixture.cwd().join("inner.md"),
         "---\nsequence:\n    - one\n---\nInner.\n",
     )
     .unwrap();
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nfail_fast: false\nsequence:\n    - name: bad\n      prompt: inner.md\n    - name: good\n---\nBody.\n",
     )
     .unwrap();
 
-    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &["--fail-fast", "false"]);
+    let (stderr, launched) = run_preflight(&fixture, &md_file, &["--fail-fast", "false"]);
     assert!(
         stderr.contains("nested sequences are not supported"),
         "stderr: {stderr}"
@@ -1210,20 +1145,20 @@ fn preflight_failure_aborts_even_with_fail_fast_false() {
 #[test]
 #[cfg(unix)]
 fn dry_run_performs_the_same_preflight() {
-    let workspace = tempdir().unwrap();
+    let fixture = CliProcessFixture::named("sequence-cli");
     fs::write(
-        workspace.path().join("inner.md"),
+        fixture.cwd().join("inner.md"),
         "---\nsequence:\n    - one\n---\nInner.\n",
     )
     .unwrap();
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nsequence:\n    - name: one\n      prompt: inner.md\n---\nBody.\n",
     )
     .unwrap();
 
-    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &["--dry-run"]);
+    let (stderr, launched) = run_preflight(&fixture, &md_file, &["--dry-run"]);
     assert!(
         stderr.contains("nested sequences are not supported"),
         "--dry-run must run the same preflight; stderr: {stderr}"
@@ -1236,25 +1171,25 @@ fn dry_run_performs_the_same_preflight() {
 #[test]
 #[cfg(unix)]
 fn well_formed_graph_passes_preflight() {
-    let workspace = tempdir().unwrap();
+    let fixture = CliProcessFixture::named("sequence-cli");
     fs::write(
-        workspace.path().join(".darkmatter-shell-whitelist"),
+        fixture.cwd().join(".darkmatter-shell-whitelist"),
         "prefix echo\n",
     )
     .unwrap();
     fs::write(
-        workspace.path().join("task.yaml"),
+        fixture.cwd().join("task.yaml"),
         "kind: task\nshell: echo from-task\n",
     )
     .unwrap();
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nsequence:\n    - name: one\n      task: task.yaml\n    - name: two\n      group:\n          name: bundle\n          tasks:\n              - shell: echo grouped\n---\nBody.\n",
     )
     .unwrap();
 
-    let (stderr, _) = run_preflight(workspace.path(), &md_file, &["--dry-run"]);
+    let (stderr, _) = run_preflight(&fixture, &md_file, &["--dry-run"]);
     for rejection in [
         "reference cycle",
         "not supported",
@@ -1285,15 +1220,15 @@ fn well_formed_graph_passes_preflight() {
 #[cfg(unix)]
 #[test]
 fn starting_preflight_status_precedes_phase_1c_work() {
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-cli");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\n$schema:\n  topic: 'string(required)'\nsequence:\n    - alpha\n---\nStep about {{topic}}.\n",
     )
     .unwrap();
 
-    let (stderr, launched) = run_preflight(workspace.path(), &md_file, &[]);
+    let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
     assert!(
         stderr.to_lowercase().contains("sequence missing properties"),
         "the fixture must abort inside Phase 1c for this test to prove \
@@ -1311,20 +1246,20 @@ fn starting_preflight_status_precedes_phase_1c_work() {
 #[cfg(unix)]
 #[test]
 fn preflight_statuses_bracket_phase_1c() {
-    let workspace = tempdir().unwrap();
+    let fixture = CliProcessFixture::named("sequence-cli");
     fs::write(
-        workspace.path().join(".darkmatter-shell-whitelist"),
+        fixture.cwd().join(".darkmatter-shell-whitelist"),
         "prefix echo\n",
     )
     .unwrap();
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nsequence:\n    - name: one\n      shell: echo hello\n---\nBody.\n",
     )
     .unwrap();
 
-    let (stderr, _) = run_preflight(workspace.path(), &md_file, &["--dry-run"]);
+    let (stderr, _) = run_preflight(&fixture, &md_file, &["--dry-run"]);
     let starting = stderr
         .find("Starting pre-flight checks")
         .unwrap_or_else(|| panic!("no starting status; stderr:\n{stderr}"));

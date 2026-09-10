@@ -4,7 +4,8 @@ use super::Service;
 use crate::process::{self, timeouts};
 
 pub(crate) fn list_launchd_services() -> Vec<Service> {
-    let output = match process::run_with_timeout("launchctl", &["list"], timeouts::SERVICE_COMMAND) {
+    let output = match process::run_with_timeout("launchctl", &["list"], timeouts::SERVICE_COMMAND)
+    {
         Ok(o) if o.status.success() => o,
         Ok(_) => return Vec::new(),
         Err(e) => {

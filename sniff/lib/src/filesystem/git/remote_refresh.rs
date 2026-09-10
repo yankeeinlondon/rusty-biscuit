@@ -124,12 +124,18 @@ impl RefSnapshot {
             };
 
             if decorations {
-                snapshot.decorations.entry(tip).or_default().push(RefDecoration {
-                    is_head: kind == RefKind::LocalBranch
-                        && head_target.as_ref().is_some_and(|head| head == &display_name),
-                    name: display_name,
-                    kind,
-                });
+                snapshot
+                    .decorations
+                    .entry(tip)
+                    .or_default()
+                    .push(RefDecoration {
+                        is_head: kind == RefKind::LocalBranch
+                            && head_target
+                                .as_ref()
+                                .is_some_and(|head| head == &display_name),
+                        name: display_name,
+                        kind,
+                    });
             }
         }
 
@@ -238,10 +244,7 @@ pub(crate) fn get_branch_info_from_snapshot(
 
         branches.push(BranchInfo {
             current: current_branch.is_some_and(|current| current == name),
-            remote_represented: refs
-                .remote_branches
-                .iter()
-                .any(|remote| remote.tip == tip),
+            remote_represented: refs.remote_branches.iter().any(|remote| remote.tip == tip),
             name,
             sha,
             upstream,
@@ -664,9 +667,9 @@ fn fetch_single_remote(
         .env("GIT_TERMINAL_PROMPT", "0")
         .args(["fetch", "--quiet", "--prune", remote_name]);
     let _ = runner(&mut command, timeout).map_err(|e| {
-            warn!(remote = remote_name, error = %e, "git fetch failed");
-            e
-        });
+        warn!(remote = remote_name, error = %e, "git fetch failed");
+        e
+    });
 }
 
 /// Derive the user-facing behind status from per-remote tracking counts.
@@ -942,9 +945,9 @@ pub(crate) fn get_worktrees_from_snapshot(
             let sha = wt_head.map(|o| o.to_string()).unwrap_or_default();
 
             // Determine whether this worktree is the current one.
-            let is_current = current_canonical.as_ref().is_some_and(|current| {
-                metadata.path.as_path() == current.as_path()
-            });
+            let is_current = current_canonical
+                .as_ref()
+                .is_some_and(|current| metadata.path.as_path() == current.as_path());
 
             // Skip expensive commit-graph walks for non-current worktrees when
             // the caller has not requested full details.
@@ -964,9 +967,9 @@ pub(crate) fn get_worktrees_from_snapshot(
             }
             let mut opened_worktree = if !base_is_worktree && compute_full {
                 performance::increment_counter(counters::GIT_WORKTREE_OPENS, 1);
-                let Some(mut opened) = super::open::trusted_open_registered_worktree(
-                    &metadata.path,
-                )? else {
+                let Some(mut opened) =
+                    super::open::trusted_open_registered_worktree(&metadata.path)?
+                else {
                     return Ok(None);
                 };
                 super::open::configure_cache(&mut opened);
@@ -2199,10 +2202,9 @@ mod tests {
         let gix_repo = gix::open(dir.path()).unwrap();
 
         let collector = crate::performance::PerformanceCollector::new_shared();
-        let worktrees = crate::performance::with_current_collector(
-            Some(collector.clone()),
-            || get_worktrees(&gix_repo, true, Some(&feature_path)).unwrap(),
-        );
+        let worktrees = crate::performance::with_current_collector(Some(collector.clone()), || {
+            get_worktrees(&gix_repo, true, Some(&feature_path)).unwrap()
+        });
 
         let feature = worktrees
             .get("feature")
@@ -2217,9 +2219,7 @@ mod tests {
             other.ahead > 0,
             "non-current worktree must also have ahead in full-detail mode"
         );
-        let counters = collector
-            .snapshot(std::time::Duration::ZERO)
-            .counters;
+        let counters = collector.snapshot(std::time::Duration::ZERO).counters;
         assert_eq!(
             counters
                 .get(counters::GIT_WORKTREE_OPENS)

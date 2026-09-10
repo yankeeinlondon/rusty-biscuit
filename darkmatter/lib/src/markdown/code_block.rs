@@ -249,10 +249,7 @@ impl CodeBlock {
     fn code_node(&self) -> RenderNode {
         let lang = self.language.as_ref().map(|g| g.to_string());
         let lang_label = lang.clone().unwrap_or_default();
-        let meta = self
-            .raw_meta
-            .clone()
-            .or_else(|| serialize_meta(&self.meta));
+        let meta = self.raw_meta.clone().or_else(|| serialize_meta(&self.meta));
         let mut node = RenderNode::code(lang, meta, self.code.clone());
         node.attrs.set_code_hints(&CodeRenderHints {
             header_row: true,
@@ -273,7 +270,10 @@ impl CodeBlock {
     ///
     /// Returns [`CodeBlockError::InvalidDirective`] if the info string
     /// contains a malformed DSL directive.
-    pub fn meta_from_fence(lang: &str, raw_meta: Option<&str>) -> Result<CodeBlockMeta, CodeBlockError> {
+    pub fn meta_from_fence(
+        lang: &str,
+        raw_meta: Option<&str>,
+    ) -> Result<CodeBlockMeta, CodeBlockError> {
         let info = match raw_meta {
             Some(m) if !m.trim().is_empty() => format!("{lang} {m}"),
             _ => lang.to_string(),
@@ -305,8 +305,8 @@ impl TerminalRenderable for CodeBlock {
     #[allow(deprecated)]
     fn render(&self, term: &Terminal) -> String {
         let node = <Self as TreeRenderable>::render_tree(self);
-        let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn)
-            .with_code_renderer(Rc::new(
+        let opts =
+            TerminalRenderOptions::new(term, RenderStrictness::Warn).with_code_renderer(Rc::new(
                 TerminalCodeRenderer::for_terminal(term, CodeBlockMode::default())
                     .with_theme_override(self.theme),
             ));
@@ -694,9 +694,11 @@ mod tests {
         let code = "fn demo() -> usize { 42 }";
 
         unsafe { std::env::set_var("THEME", "github") };
-        let with_env = TerminalRenderable::render(&CodeBlock::rust(code).with_theme(ThemePair::Nord), &term);
+        let with_env =
+            TerminalRenderable::render(&CodeBlock::rust(code).with_theme(ThemePair::Nord), &term);
         unsafe { std::env::set_var("THEME", "nord") };
-        let other_env = TerminalRenderable::render(&CodeBlock::rust(code).with_theme(ThemePair::Nord), &term);
+        let other_env =
+            TerminalRenderable::render(&CodeBlock::rust(code).with_theme(ThemePair::Nord), &term);
         unsafe { std::env::remove_var("THEME") };
 
         assert_eq!(
@@ -710,7 +712,7 @@ mod tests {
     /// set — two distinct `THEME` values must yield distinct HTML.
     #[test]
     #[serial]
-    fn browser_honors_theme_env_when_no_override() {
+    fn render_browser_honors_theme_env_when_no_override() {
         let _code_theme = EnvVarGuard::capture("CODE_THEME");
         let _theme = EnvVarGuard::capture("THEME");
         unsafe { std::env::remove_var("CODE_THEME") };
@@ -732,7 +734,7 @@ mod tests {
     /// theme when no `with_theme` override is set.
     #[test]
     #[serial]
-    fn browser_honors_code_theme_env_when_no_override() {
+    fn render_browser_honors_code_theme_env_when_no_override() {
         let _code_theme = EnvVarGuard::capture("CODE_THEME");
         let _theme = EnvVarGuard::capture("THEME");
         unsafe { std::env::remove_var("THEME") };
@@ -754,18 +756,22 @@ mod tests {
     /// browser surface too.
     #[test]
     #[serial]
-    fn browser_override_wins_over_theme_env() {
+    fn render_browser_override_wins_over_theme_env() {
         let _code_theme = EnvVarGuard::capture("CODE_THEME");
         let _theme = EnvVarGuard::capture("THEME");
         unsafe { std::env::remove_var("CODE_THEME") };
         let code = "fn demo() -> usize { 42 }";
 
         unsafe { std::env::set_var("THEME", "github") };
-        let with_env =
-            BrowserRenderable::render_html_fragment(&CodeBlock::rust(code).with_theme(ThemePair::Nord)).render();
+        let with_env = BrowserRenderable::render_html_fragment(
+            &CodeBlock::rust(code).with_theme(ThemePair::Nord),
+        )
+        .render();
         unsafe { std::env::set_var("THEME", "nord") };
-        let other_env =
-            BrowserRenderable::render_html_fragment(&CodeBlock::rust(code).with_theme(ThemePair::Nord)).render();
+        let other_env = BrowserRenderable::render_html_fragment(
+            &CodeBlock::rust(code).with_theme(ThemePair::Nord),
+        )
+        .render();
         unsafe { std::env::remove_var("THEME") };
 
         assert_eq!(
@@ -930,12 +936,15 @@ mod tests {
         let block = CodeBlock::rust("fn main() {}").with_meta(meta);
         let out = TerminalRenderable::render(&block, &Terminal::new_optimistic(80));
         let plain = crate::testing::strip_ansi_codes(&out);
-        assert!(plain.contains("Demo"), "expected title in terminal output: {plain:?}");
+        assert!(
+            plain.contains("Demo"),
+            "expected title in terminal output: {plain:?}"
+        );
     }
 
     /// The browser fragment must wrap a rust block in `<pre><code class="language-rust">`.
     #[test]
-    fn browser_emits_rust_language_class() {
+    fn render_browser_emits_rust_language_class() {
         let block = CodeBlock::rust("fn main() {}");
         let html = BrowserRenderable::render_html_fragment(&block).render();
         assert!(html.contains("language-rust"), "html: {html}");
@@ -958,8 +967,8 @@ mod tests {
     #[test]
     #[serial]
     fn fenced_rust_block_routes_through_code_block() {
-        use crate::markdown::output::terminal::TerminalOptions;
         use crate::markdown::Markdown;
+        use crate::markdown::output::terminal::TerminalOptions;
 
         let _code_theme = EnvVarGuard::capture("CODE_THEME");
         let _theme = EnvVarGuard::capture("THEME");

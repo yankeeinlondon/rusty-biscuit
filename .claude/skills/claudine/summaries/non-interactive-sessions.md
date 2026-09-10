@@ -14,7 +14,7 @@ Second is output format selection: whether the provider has human text, single f
 
 Third is the stream and event contract: framing, discriminator fields, event order, correlation identifiers, terminal events, unknown-event policy, and whether assistant/tool output arrives as deltas or completed items.
 
-Fourth is exit semantics: whether a semantic terminal event exists, whether process exit is reliable, and how to classify runs that exit without a terminal stream event.
+Fourth is exit semantics: whether a semantic terminal event exists, whether process exit is reliable, how to classify runs that exit without a terminal stream event, and — the case that is easiest to miss — whether a terminal event that reports success can be trusted on its own.
 
 Fifth is operational-condition detectability: whether auth failures, caps, billing failures, permission denials, token usage, model identity, fallback, subagents, and human-in-loop hazards are visible as structured fields or only as text and exit status.
 
@@ -26,7 +26,7 @@ Claude Code is closest to the ideal wrapper contract. The preferred invocation i
 claude -p "PROMPT" --output-format stream-json --verbose
 ```
 
-`stream-json` is newline-delimited JSON on stdout, with `type` as the top-level discriminator and `type=result` as the semantic terminal event. It can expose session initialization, assistant/user messages, tool results, permission denials, API retries, rate-limit events, auth status, model fallback, thinking-token telemetry, hook events, usage, and final result metadata. Its main cost is parser complexity: some events are opt-in, plugin records can precede `system/init`, prompt suggestions can arrive after `result`, and there is no standalone versioned JSON Schema. Claudine should treat `result` as semantic completion, use process exit as a consistency check, and preserve unknown events for drift analysis.
+`stream-json` is newline-delimited JSON on stdout, with `type` as the top-level discriminator and `type=result` as the semantic terminal event. It can expose session initialization, assistant/user messages, tool results, permission denials, API retries, rate-limit events, auth status, model fallback, thinking-token telemetry, hook events, usage, and final result metadata. Its main cost is parser complexity: some events are opt-in, plugin records can precede `system/init`, prompt suggestions can arrive after `result`, and there is no standalone versioned JSON Schema. Claudine should treat `result` as the turn's terminal event and preserve unknown events for drift analysis, but not as proof of success on its own. `result` carries its own `is_error` verdict, and Claude can force-stop a background task, report it with `status: "stopped"`, finish the parent turn, and still exit `0`. Semantic completion therefore requires `result`, a clean `is_error`, and a terminal observation for every sub-agent task the stream started; process exit is a consistency check on all three rather than the arbiter.
 
 Codex CLI has a clean but compact one-shot stream:
 
@@ -141,7 +141,7 @@ Shared invariants:
 - stdout parser input must be structured-only in the selected machine-readable mode.
 - stderr is diagnostic evidence unless a provider contract explicitly promotes selected structured stderr records.
 - unknown events should be tolerated, logged, and preserved for drift analysis.
-- terminal stream or protocol events are preferred over process exit when the provider emits them.
+- terminal stream or protocol events are preferred over process exit when the provider emits them, but a terminal event marks the end of a turn, not a successful one — its own error verdict and any work it left unresolved still decide the outcome.
 - non-zero exit, signal termination, missing terminal events, and malformed/no stream output must remain distinct evidence.
 - wrapper-captured launch metadata must fill gaps the provider stream does not expose.
 - richer protocol modes such as ACP, app-server, HTTP/SSE, Wire, or RPC need separate adapter logic from one-shot subprocess JSON parsers.

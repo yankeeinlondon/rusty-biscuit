@@ -27,10 +27,10 @@ pub(crate) mod overlay;
 pub(crate) mod policy;
 pub(crate) mod prompt_source;
 pub(crate) mod resume;
-pub(crate) mod wrapper_stages;
 pub(crate) mod write_grant;
 pub(crate) mod wrapper_exec;
 pub(crate) mod wrapper_mcp;
+pub(crate) mod wrapper_stages;
 
 // Re-exports from split modules
 pub use flags::WrapperArgs;
@@ -41,10 +41,10 @@ pub(crate) use flags::{
 pub(crate) use harness_orch::{
     AttemptLaunch, CachedHarnessLoopContext, HarnessPromptMode, HarnessPromptState,
     MaterializedHarnessPrompt, apply_composition_shell_overrides, build_harness_launch,
-    build_harness_shell_options, build_harness_shell_options_with_cache, execute_harness_attempt,
-    build_harness_shell_options_for_source, build_harness_shell_options_for_source_with_cache,
-    find_wrapper_harness_source, harness_policy_root, harness_prompt_mode_label,
-    materialize_harness_prompt, materialize_passthrough_harness_seed,
+    build_harness_shell_options, build_harness_shell_options_for_source,
+    build_harness_shell_options_for_source_with_cache, build_harness_shell_options_with_cache,
+    execute_harness_attempt, find_wrapper_harness_source, harness_policy_root,
+    harness_prompt_mode_label, materialize_harness_prompt, materialize_passthrough_harness_seed,
     materialized_harness_prompt_from_prepared, run_harness_loop,
 };
 pub(crate) use inline::{
@@ -249,7 +249,7 @@ fn run_provider_wrapper_inner(
     args: WrapperArgs,
     verbose: u8,
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
-) -> Result<(i32, Option<String>, Option<profile::OpenCodeModelSource>)> {
+) -> Result<(i32, Option<String>, Option<profile::ModelSource>)> {
     let perf_enabled = perf_collector.is_some();
     // ------------------------------------------------------------------
     // Stage 1: Resolve profile and binary
@@ -420,7 +420,7 @@ fn run_provider_wrapper_inner(
     // presentation stays wrapper-specific: render the agent error report and
     // exit instead of propagating.
     let has_model_env = env_overrides.iter().any(|(k, _)| k == "MODEL");
-    let opencode_model_source: Option<profile::OpenCodeModelSource> =
+    let model_source: Option<profile::ModelSource> =
         match crate::commands::exec_prep::resolve_model_and_validate(
             provider,
             profile,
@@ -432,7 +432,7 @@ fn run_provider_wrapper_inner(
             &mut |warn| deferred_warnings.push(warn),
         ) {
             Ok(source) => source,
-            Err(crate::commands::exec_prep::ModelStageError::NoOpenCodeModel(_)) => {
+            Err(crate::commands::exec_prep::ModelStageError::NoModel(_)) => {
                 let term = wrap_terminal();
                 let report =
                     crate::output::error_report::AgentErrorReport::no_model_provided(provider);
@@ -686,7 +686,7 @@ fn run_provider_wrapper_inner(
         quiet_requested,
         detail_requested,
         &launch_context,
-        opencode_model_source.as_ref(),
+        model_source.as_ref(),
         &term,
         verbose,
     );
@@ -803,7 +803,7 @@ fn run_provider_wrapper_inner(
     // ------------------------------------------------------------------
     exec::cleanup_mcp_injection(mcp_cleanup);
 
-    Ok((exit_code, stderr_capture, opencode_model_source))
+    Ok((exit_code, stderr_capture, model_source))
 }
 
 #[cfg(test)]

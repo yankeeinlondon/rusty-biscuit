@@ -3,10 +3,43 @@ use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail};
 use std::path::Path;
 
-use super::{PromptDelivery, WrapperProfile};
+use super::{ConfiguredModel, PromptDelivery, WrapperProfile};
 use std::io::Write;
+use std::path::PathBuf;
 
 pub(crate) struct OpencodeWrapper;
+
+/// OpenCode's global config file names in its own precedence order: the
+/// current `opencode.jsonc` / `opencode.json`, then the legacy `config.json`
+/// older installs still carry. A later file is consulted only when an earlier
+/// one names no model.
+const GLOBAL_CONFIG_FILES: [&str; 3] = ["opencode.jsonc", "opencode.json", "config.json"];
+
+/// `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` — the directory
+/// OpenCode reads its global config from.
+fn opencode_config_dir() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
+        .map(|config| config.join("opencode"))
+}
+
+/// The `model` entry of the first global config file under `dir` that names
+/// one. Files are JSONC (comments, trailing commas), so they are parsed as
+/// JSON5; an unreadable or malformed file is skipped, not an error.
+pub(crate) fn configured_default_model_in(dir: &std::path::Path) -> Option<ConfiguredModel> {
+    GLOBAL_CONFIG_FILES.iter().find_map(|name| {
+        let path = dir.join(name);
+        let text = std::fs::read_to_string(&path).ok()?;
+        let json = biscuit_file::Json5::from_str(&text).ok()?;
+        let model = json.value().get("model")?.as_str()?.trim();
+        (!model.is_empty()).then(|| ConfiguredModel {
+            model: model.to_string(),
+            path,
+        })
+    })
+}
 
 impl WrapperProfile for OpencodeWrapper {
     fn provider(&self) -> Provider {
@@ -81,25 +114,8 @@ impl WrapperProfile for OpencodeWrapper {
         Ok(app)
     }
 
-    fn apply_model(
-        &self,
-        args: &mut Vec<String>,
-        env_overrides: &mut Vec<(String, String)>,
-        model: &str,
-    ) -> Option<String> {
-        // This path runs only for *interactive* OpenCode — the non-interactive
-        // pipeline resolves the model via `apply_opencode_model_resolution`,
-        // which short-circuits when interactive. The OpenCode TUI honors the
-        // `--model` flag (never a bare `MODEL` env var), so the argv push is
-        // what actually selects the model; the env override is kept for
-        // Claudine's own templating/reporting surfaces.
-        let has_model_flag = args.iter().any(|a| a == "--model" || a == "-m");
-        if !has_model_flag {
-            args.push("--model".to_string());
-            args.push(model.to_string());
-        }
-        env_overrides.push(("MODEL".to_string(), model.to_string()));
-        None
+    fn configured_default_model(&self) -> Option<ConfiguredModel> {
+        configured_default_model_in(&opencode_config_dir()?)
     }
 
     fn prompt_delivery(
@@ -199,12 +215,10 @@ impl WrapperProfile for OpencodeWrapper {
 mod tests {
     use super::*;
 
-    // Interactive OpenCode reaches model selection only through `apply_model`
-    // (`apply_opencode_model_resolution` returns early when interactive). The
-    // OpenCode TUI honors `--model` / `OPENCODE_MODEL`, never a bare `MODEL`
-    // env var — so `apply_model` must push the `--model` argv flag or the
-    // user's `-i --model X` selection is silently dropped (regression in
-    // 9e38c794c).
+    // The OpenCode TUI honors `--model` / `OPENCODE_MODEL`, never a bare
+    // `MODEL` env var — so the catalog-driven `apply_model` must push the
+    // `--model` argv flag or the user's `-i --model X` selection is silently
+    // dropped (regression in 9e38c794c).
     #[test]
     fn apply_model_pushes_model_flag_for_interactive_opencode() {
         let wrapper = OpencodeWrapper;
@@ -218,6 +232,61 @@ mod tests {
             .iter()
             .position(|a| a == "--model")
             .expect("--model flag must be pushed for interactive OpenCode");
-        assert_eq!(args.get(model_idx + 1).map(String::as_str), Some("kimi-for-coding/k2p6"));
+        assert_eq!(
+            args.get(model_idx + 1).map(String::as_str),
+            Some("kimi-for-coding/k2p6")
+        );
+    }
+
+    fn write(dir: &std::path::Path, name: &str, text: &str) {
+        std::fs::write(dir.join(name), text).unwrap();
+    }
+
+    #[test]
+    fn configured_default_reads_jsonc_with_comments_and_trailing_comma() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "opencode.jsonc",
+            "{\n  // global default\n  \"model\": \"zai-coding-plan/glm-5.2\",\n}\n",
+        );
+        let configured = configured_default_model_in(dir.path()).expect("model");
+        assert_eq!(configured.model, "zai-coding-plan/glm-5.2");
+        assert_eq!(configured.path, dir.path().join("opencode.jsonc"));
+    }
+
+    #[test]
+    fn configured_default_prefers_current_file_names_over_legacy_config_json() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "config.json", "{\"model\": \"legacy/model\"}");
+        write(dir.path(), "opencode.json", "{\"model\": \"json/model\"}");
+        assert_eq!(
+            configured_default_model_in(dir.path()).unwrap().model,
+            "json/model"
+        );
+        write(dir.path(), "opencode.jsonc", "{\"model\": \"jsonc/model\"}");
+        assert_eq!(
+            configured_default_model_in(dir.path()).unwrap().model,
+            "jsonc/model"
+        );
+    }
+
+    #[test]
+    fn configured_default_falls_through_files_that_name_no_model() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "opencode.jsonc", "{\"model\": \"\"}");
+        write(dir.path(), "opencode.json", "{\"theme\": \"dark\"}");
+        write(dir.path(), "config.json", "{\"model\": \"legacy/model\"}");
+        let configured = configured_default_model_in(dir.path()).unwrap();
+        assert_eq!(configured.model, "legacy/model");
+        assert_eq!(configured.path, dir.path().join("config.json"));
+    }
+
+    #[test]
+    fn configured_default_is_none_without_a_config_directory_or_model() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(configured_default_model_in(&dir.path().join("missing")).is_none());
+        write(dir.path(), "opencode.json", "not json at all");
+        assert!(configured_default_model_in(dir.path()).is_none());
     }
 }

@@ -10,120 +10,34 @@
 //! In-memory session (no real terminal or network resource), so it runs in the
 //! standard `just test` gate with no terminal harness.
 
-use std::sync::mpsc;
-use std::time::Duration;
+mod common;
 
-use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
+use common::{LspFixture, LspWorkspace};
 use serde_json::{Value, json};
 
-struct Fixture {
-    client: Connection,
-    outcome: mpsc::Receiver<Result<(), String>>,
-    next_id: i32,
-    notifications: Vec<Notification>,
-}
-
-impl Fixture {
-    fn start() -> Self {
-        let (server_side, client_side) = Connection::memory();
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let result = dmls::run_server(server_side, dmls::RunOptions::default())
-                .map_err(|error| error.to_string());
-            let _ = tx.send(result);
-        });
-        Self {
-            client: client_side,
-            outcome: rx,
-            next_id: 0,
-            notifications: Vec::new(),
-        }
-    }
-
-    fn request(&mut self, method: &str, params: Value) -> Response {
-        self.next_id += 1;
-        let id = RequestId::from(self.next_id);
-        self.client
-            .sender
-            .send(Message::Request(Request::new(id.clone(), method.to_string(), params)))
-            .expect("send request");
-        loop {
-            let message = self
-                .client
-                .receiver
-                .recv_timeout(Duration::from_secs(10))
-                .expect("response before timeout");
-            match message {
-                Message::Response(response) if response.id == id => return response,
-                Message::Notification(notification) => self.notifications.push(notification),
-                Message::Request(_) => {}
-                other => panic!("unexpected message: {other:?}"),
-            }
-        }
-    }
-
-    fn notify(&self, method: &str, params: Value) {
-        self.client
-            .sender
-            .send(Message::Notification(Notification::new(method.to_string(), params)))
-            .expect("send notification");
-    }
-
-    fn wait_for_diagnostics(&mut self, uri: &str) -> Vec<Value> {
-        for _ in 0..64 {
-            if let Some(position) = self.notifications.iter().rposition(|notification| {
-                notification.method == "textDocument/publishDiagnostics"
-                    && notification.params["uri"] == json!(uri)
-            }) {
-                let notification = self.notifications.remove(position);
-                return notification.params["diagnostics"]
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default();
-            }
-            let message = self
-                .client
-                .receiver
-                .recv_timeout(Duration::from_secs(10))
-                .expect("diagnostics before timeout");
-            match message {
-                Message::Notification(notification) => self.notifications.push(notification),
-                Message::Request(_) => {}
-                other => panic!("unexpected message: {other:?}"),
-            }
-        }
-        panic!("no diagnostics for {uri}");
-    }
-
-    fn initialize(&mut self, root: &std::path::Path) {
-        let root_uri = url::Url::from_directory_path(root).unwrap();
-        let response = self.request(
-            "initialize",
-            json!({
-                "processId": null,
-                "capabilities": {
-                    "general": { "positionEncodings": ["utf-8", "utf-16"] },
-                    "textDocument": { "foldingRange": { "lineFoldingOnly": true } }
-                },
-                "workspaceFolders": [ { "uri": root_uri.as_str(), "name": "scratch" } ]
-            }),
-        );
-        assert!(response.error.is_none(), "initialize failed: {:?}", response.error);
-        self.notify("initialized", json!({}));
-    }
-
-    fn shutdown(mut self) {
-        let response = self.request("shutdown", Value::Null);
-        assert!(response.error.is_none());
-        self.notify("exit", Value::Null);
-        let outcome = self.outcome.recv_timeout(Duration::from_secs(10)).expect("server finished");
-        assert_eq!(outcome, Ok(()), "server exited with error");
-    }
+/// Initialize params for the passive-analysis session: no `clientInfo`, no
+/// workspace configuration, and line-only folding.
+fn passive_initialize_params(root: &std::path::Path) -> Value {
+    let root_uri = url::Url::from_directory_path(root).unwrap();
+    json!({
+        "processId": null,
+        "capabilities": {
+            "general": { "positionEncodings": ["utf-8", "utf-16"] },
+            "textDocument": { "foldingRange": { "lineFoldingOnly": true } }
+        },
+        "workspaceFolders": [ { "uri": root_uri.as_str(), "name": "scratch" } ]
+    })
 }
 
 #[test]
 fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
-    let workspace = tempfile::tempdir().unwrap();
+    #[cfg(feature = "effects-instrumentation")]
+    let before = (
+        darkmatter::effects::engine_build_count(),
+        darkmatter::effects::network_attempt_count(),
+    );
+
+    let workspace = LspWorkspace::new();
     // A sentinel a shell directive *would* create if DMLS ever executed it. Its
     // continued absence after every request is the "no child process" proof.
     let sentinel = workspace.path().join("SENTINEL_SHOULD_NOT_EXIST");
@@ -151,8 +65,8 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
     std::fs::write(&doc_path, &text).unwrap();
     let doc_uri = url::Url::from_file_path(&doc_path).unwrap();
 
-    let mut fixture = Fixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(passive_initialize_params(workspace.path()));
     fixture.notify(
         "textDocument/didOpen",
         json!({
@@ -170,7 +84,10 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
     let has_security = diagnostics
         .iter()
         .any(|diagnostic| diagnostic["code"] == json!("dm.security.disallowed_command"));
-    assert!(has_security, "the dangerous ::shell must be diagnosed: {diagnostics:?}");
+    assert!(
+        has_security,
+        "the dangerous ::shell must be diagnosed: {diagnostics:?}"
+    );
 
     // Drive every read-side request across the shell/remote spans and the
     // Expression-typed frontmatter values. Each must return promptly (no Git or
@@ -204,7 +121,11 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
                 params["context"] = json!({ "includeDeclaration": true });
             }
             let response = fixture.request(method, params);
-            assert!(response.error.is_none(), "{method} errored: {:?}", response.error);
+            assert!(
+                response.error.is_none(),
+                "{method} errored: {:?}",
+                response.error
+            );
         }
     }
     let folding = fixture.request(
@@ -224,7 +145,11 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
         "textDocument/semanticTokens/full",
         json!({ "textDocument": { "uri": doc_uri.as_str() } }),
     );
-    assert!(full.error.is_none(), "semanticTokens/full errored: {:?}", full.error);
+    assert!(
+        full.error.is_none(),
+        "semanticTokens/full errored: {:?}",
+        full.error
+    );
     let range = fixture.request(
         "textDocument/semanticTokens/range",
         json!({
@@ -235,7 +160,11 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
             }
         }),
     );
-    assert!(range.error.is_none(), "semanticTokens/range errored: {:?}", range.error);
+    assert!(
+        range.error.is_none(),
+        "semanticTokens/range errored: {:?}",
+        range.error
+    );
 
     // The standalone content-activation path must be equally passive. Neither
     // the named import nor the example reference is opened on a keystroke.
@@ -263,7 +192,11 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
                 "position": { "line": 1, "character": 16 }
             }),
         );
-        assert!(response.error.is_none(), "{method} errored: {:?}", response.error);
+        assert!(
+            response.error.is_none(),
+            "{method} errored: {:?}",
+            response.error
+        );
     }
 
     fixture.shutdown();
@@ -273,5 +206,15 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
     assert!(
         !sentinel.exists(),
         "a shell directive was executed — the language server is not passive"
+    );
+
+    #[cfg(feature = "effects-instrumentation")]
+    assert_eq!(
+        (
+            darkmatter::effects::engine_build_count(),
+            darkmatter::effects::network_attempt_count(),
+        ),
+        before,
+        "passive LSP requests must build no effect engine and attempt no network access",
     );
 }

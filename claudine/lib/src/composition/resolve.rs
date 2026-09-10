@@ -517,6 +517,44 @@ pub fn validate_file_permissions(path: &Path) -> Result<(), CompositionError> {
     Ok(())
 }
 
+/// Resolve a fixture document without the ambient repository walk.
+///
+/// [`resolve_composition_source`] first captures the *process* working
+/// directory's repository topology. Under `cargo nextest` that directory is the
+/// monorepo checkout, so every call performs a full 35-member package scan —
+/// measured at 0.23 s per call against 0.01 s from outside a repository, paid
+/// once per test process.
+///
+/// That topology decides nothing for a fixture: `path` is an absolute path to a
+/// file the test just wrote, so it resolves identically from any anchor, and
+/// [`ResolvedCompositionSource`] carries no context forward — every downstream
+/// stage re-anchors on the document's own parent. Tests whose subject *is*
+/// discovery build their own repository and keep the ambient entry point.
+///
+/// ## Panics
+///
+/// Panics when `path` is relative. A relative fixture reference would resolve
+/// against the synthetic anchor rather than the process CWD, which is a
+/// different question from the one the ambient entry point answers — failing
+/// loudly is the only way that difference cannot pass silently.
+#[cfg(test)]
+pub(crate) fn resolve_fixture_source(
+    path: &str,
+) -> Result<ResolvedCompositionSource, CompositionError> {
+    let anchor = Path::new(path);
+    assert!(
+        anchor.is_absolute(),
+        "resolve_fixture_source needs an absolute fixture path; got `{path}`. A relative \
+         reference resolves against the ambient CWD, so use resolve_composition_source."
+    );
+    let context = FileResolutionContext::new(
+        anchor
+            .parent()
+            .expect("an absolute path with a file name has a parent"),
+    );
+    resolve_composition_source_in_context(path, &context)
+}
+
 /// Validate that a path has a markdown extension.
 #[allow(dead_code)]
 pub fn is_markdown_path(path: &Path) -> bool {

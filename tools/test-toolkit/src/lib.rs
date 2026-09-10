@@ -16,6 +16,12 @@
 //! requested level's harness is unavailable, or to hard-fail when the env
 //! contract demands enforcement.
 //!
+//! Level 1 is the mandatory suite and grants no optional-harness contract, so
+//! its gates use [`expect_level!`] instead: missing infrastructure on a
+//! selected platform fails rather than reporting green. Keeping a Level 1 test
+//! off a platform is a compile-time exclusion (`#![cfg(unix)]`), not a runtime
+//! probe.
+//!
 //! ## Standard env contract
 //!
 //! - `BISCUIT_TEST_LEVEL=1|2|3` — runtime gate. Tests above this level skip
@@ -204,6 +210,40 @@ pub fn evaluate_harness<'a>(
     LevelDecision::Run
 }
 
+/// Decide whether a test whose tier grants **no** optional-harness contract
+/// should run, given a harness-availability result.
+///
+/// Identical to [`evaluate_harness`] except that an unavailable harness is
+/// never a clean skip: it becomes `Panic(...)` naming the missing requirement.
+/// Operator-selected exclusions ([`BISCUIT_TEST_LEVEL`], [`RUN_LEVEL3`]) still
+/// skip, because those are deliberate range choices rather than absent
+/// infrastructure.
+///
+/// ## Notes
+///
+/// Level 1 is the mandatory suite; a test selected there that quietly skips on
+/// a host missing `/dev/ptmx` reports green while proving nothing. The
+/// supported way to keep such a test off a platform is compile-time exclusion
+/// (`#![cfg(unix)]`), not a runtime probe.
+#[must_use]
+pub fn evaluate_required<'a>(
+    level: Level,
+    available: bool,
+    harness: impl Into<HarnessSpec<'a>>,
+) -> LevelDecision {
+    let harness = harness.into();
+    match evaluate_harness(level, available, harness) {
+        LevelDecision::Skip(_) if !available => LevelDecision::Panic(format!(
+            "level {} requires {}, which is unavailable on this platform. \
+             This tier has no optional-harness contract: provision the requirement, \
+             or exclude the test at compile time with `#[cfg(...)]`.",
+            level.as_u8(),
+            harness.label(),
+        )),
+        other => other,
+    }
+}
+
 /// Record a gate decision when the requirement carries a [`Backend`].
 ///
 /// Called by [`require_level!`]; exposed so bespoke gates can contribute the
@@ -212,6 +252,24 @@ pub fn record_decision(harness: HarnessSpec<'_>, test: &str, decision: Execution
     if let Some(backend) = harness.backend() {
         record_backend_execution(backend, test, decision);
     }
+}
+
+/// Record a gate's execution evidence and hand the decision back unchanged.
+///
+/// The shared tail of [`decide_harness!`] and [`expect_level!`], so both gate
+/// styles contribute identical evidence.
+#[must_use]
+pub fn record_gate(harness: HarnessSpec<'_>, test: &str, decision: LevelDecision) -> LevelDecision {
+    record_decision(
+        harness,
+        test,
+        match &decision {
+            LevelDecision::Run => ExecutionDecision::Run,
+            LevelDecision::Skip(_) => ExecutionDecision::Skip,
+            LevelDecision::Panic(_) => ExecutionDecision::Panic,
+        },
+    );
+    decision
 }
 
 fn read_level_env(key: &str) -> Option<u8> {
@@ -271,6 +329,54 @@ macro_rules! require_level {
     }};
 }
 
+/// Assert that a mandatory-tier test's infrastructure is present.
+///
+/// Takes the same arguments as [`require_level!`] and behaves the same way,
+/// except that an unavailable harness **panics** instead of skipping — see
+/// [`evaluate_required`]. Use it wherever the tier itself is mandatory, which
+/// today means every Level 1 gate: a skip there is indistinguishable from a
+/// pass in the suite that must not be optional.
+///
+/// The panic names the missing requirement, so the diagnostic a skip used to
+/// print survives as the failure message.
+///
+/// An operator-selected exclusion ([`BISCUIT_TEST_LEVEL`], [`RUN_LEVEL3`])
+/// still skips and still `return`s from the enclosing function.
+///
+/// ## Examples
+///
+/// ```ignore
+/// use test_toolkit::{expect_level, Level};
+///
+/// #[test]
+/// fn pty_prompt_accepts_a_keystroke() {
+///     expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+///     // ... a host without /dev/ptmx fails here rather than reporting green.
+/// }
+/// ```
+#[macro_export]
+macro_rules! expect_level {
+    ($level:expr, $available:expr, $harness:expr $(,)?) => {{
+        let __test_toolkit_harness: $crate::HarnessSpec<'_> =
+            ::core::convert::Into::into($harness);
+        let __test_toolkit_decision = $crate::record_gate(
+            __test_toolkit_harness,
+            $crate::current_test_name!(),
+            $crate::evaluate_required($level, $available, __test_toolkit_harness),
+        );
+        match __test_toolkit_decision {
+            $crate::LevelDecision::Run => {}
+            $crate::LevelDecision::Skip(msg) => {
+                eprintln!("{}", msg);
+                return;
+            }
+            $crate::LevelDecision::Panic(msg) => {
+                panic!("{}", msg);
+            }
+        }
+    }};
+}
+
 /// Evaluate a gate and record its execution evidence, yielding the
 /// [`LevelDecision`] instead of acting on it.
 ///
@@ -284,18 +390,11 @@ macro_rules! decide_harness {
     ($level:expr, $available:expr, $harness:expr $(,)?) => {{
         let __test_toolkit_harness: $crate::HarnessSpec<'_> =
             ::core::convert::Into::into($harness);
-        let __test_toolkit_decision =
-            $crate::evaluate_harness($level, $available, __test_toolkit_harness);
-        $crate::record_decision(
+        $crate::record_gate(
             __test_toolkit_harness,
             $crate::current_test_name!(),
-            match __test_toolkit_decision {
-                $crate::LevelDecision::Run => $crate::ExecutionDecision::Run,
-                $crate::LevelDecision::Skip(_) => $crate::ExecutionDecision::Skip,
-                $crate::LevelDecision::Panic(_) => $crate::ExecutionDecision::Panic,
-            },
-        );
-        __test_toolkit_decision
+            $crate::evaluate_harness($level, $available, __test_toolkit_harness),
+        )
     }};
 }
 
@@ -550,7 +649,7 @@ fn previous_value(key: &OsStr) -> PreviousEnvValue {
 mod tests {
     use super::{
         BISCUIT_TEST_LEVEL, BISCUIT_TEST_LEVEL_REQUIRED, BISCUIT_TEST_REQUIRED_BACKENDS, EnvGuard,
-        Level, LevelDecision, RUN_LEVEL3, evaluate_level, init_test_tracing,
+        Level, LevelDecision, RUN_LEVEL3, evaluate_level, evaluate_required, init_test_tracing,
     };
     use std::env;
     use std::sync::{Arc, Mutex};
@@ -792,6 +891,59 @@ mod tests {
         // Level 2 unavailable, but REQUIRED=3 → should skip, not panic.
         match evaluate_level(Level::L2, false, "WezTerm") {
             LevelDecision::Skip(_) => {}
+            other => panic!("expected Skip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn evaluate_required_panics_when_harness_unavailable_without_any_env() {
+        let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
+        let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
+        let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_TEST_REQUIRED_BACKENDS);
+
+        // The same inputs that make `evaluate_level` skip must fail here: a
+        // mandatory tier has no optional-harness contract.
+        assert!(matches!(
+            evaluate_level(Level::L1, false, "PTY (/dev/ptmx)"),
+            LevelDecision::Skip(_)
+        ));
+        match evaluate_required(Level::L1, false, "PTY (/dev/ptmx)") {
+            LevelDecision::Panic(msg) => {
+                assert!(msg.contains("PTY (/dev/ptmx)"), "reason lost: {msg}");
+                assert!(msg.contains("level 1"), "level lost: {msg}");
+            }
+            other => panic!("expected Panic, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn evaluate_required_runs_when_available() {
+        let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
+        let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
+        let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_TEST_REQUIRED_BACKENDS);
+
+        assert_eq!(
+            evaluate_required(Level::L1, true, "PTY (/dev/ptmx)"),
+            LevelDecision::Run,
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn evaluate_required_still_skips_an_operator_selected_level_ceiling() {
+        let _g1 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL, "1");
+        let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
+        let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+        let _g4 = EnvGuard::remove_safe(BISCUIT_TEST_REQUIRED_BACKENDS);
+
+        // Available harness, excluded by range: a deliberate selection, not
+        // missing infrastructure, so it stays a skip.
+        match evaluate_required(Level::L2, true, "WezTerm") {
+            LevelDecision::Skip(msg) => assert!(msg.contains("BISCUIT_TEST_LEVEL=1")),
             other => panic!("expected Skip, got {other:?}"),
         }
     }

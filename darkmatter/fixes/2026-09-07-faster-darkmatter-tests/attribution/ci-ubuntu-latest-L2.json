@@ -1,0 +1,51 @@
+{
+  "families": [
+    {
+      "id": "cli-l2-tmux-schema-about",
+      "package": "darkmatter-cli",
+      "count": 3,
+      "summed": 3.7729999999999997,
+      "mean": 1.2576666666666665,
+      "max": 1.279,
+      "min": 1.215,
+      "slowest": {
+        "name": "darkmatter-cli::level2_schema_about level2_schema_about_dark_terminal_uses_light_code_theme",
+        "seconds": 1.279
+      },
+      "share": 0.4303638644918446
+    },
+    {
+      "id": "cli-l2-render-capture",
+      "package": "darkmatter-cli",
+      "count": 66,
+      "summed": 3.3289999999999953,
+      "mean": 0.05043939393939387,
+      "max": 1.212,
+      "min": 0.004,
+      "slowest": {
+        "name": "darkmatter-cli::level2_code_block_styling level2_align_code_block_center_indents_more_than_left",
+        "seconds": 1.212
+      },
+      "share": 0.37971940230409457
+    },
+    {
+      "id": "dmls-l2-neovim",
+      "package": "dmls",
+      "count": 3,
+      "summed": 1.665,
+      "mean": 0.555,
+      "max": 1.467,
+      "min": 0.094,
+      "slowest": {
+        "name": "dmls::level2_editor_neovim level2_neovim_tmux_renders_recipe_colors_and_repaints",
+        "seconds": 1.467
+      },
+      "share": 0.18991673320406077
+    }
+  ],
+  "summed": 8.766999999999996,
+  "elapsed": 8.774,
+  "count": 72,
+  "violations": []
+}
+GATE EXIT=0

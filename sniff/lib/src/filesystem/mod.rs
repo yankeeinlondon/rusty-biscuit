@@ -29,16 +29,16 @@ pub use file_types::{
 };
 pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
 pub use git::{
-    BehindStatus, CommitDesc, CommitDescSet, CommitInfo, DEFAULT_PATH_HISTORY_SCAN_LIMIT, DeltaKind,
-    FileChange, GitHostingProvider, GitInfo, GitRepo, LocalBranchInfo, PathHistoryOptions,
-    PathHistoryResult, PeriodSpecifier, RemoteInfo, RepoStatus, commit_browser_url,
-    commit_by_sha_at, commit_files_at, commits_for_branch_at, commits_for_path_at, detect_git,
-    detect_git_with_request,
-    detect_merge_conflicts, get_commit_by_sha, get_commit_files, get_commits_for_branch,
-    get_commits_for_path, get_recent_commits_by_count, get_recent_commits_by_date,
-    get_recent_commits_by_duration, get_recent_commits_by_hash, get_recent_commits_in_range,
-    merge_conflicts_at, merge_conflicts_with_branch_at, parse_commit_message, parse_period,
-    preferred_remote_url, remote_url, repo_root,
+    BehindStatus, CommitDesc, CommitDescSet, CommitInfo, DEFAULT_PATH_HISTORY_SCAN_LIMIT,
+    DeltaKind, FileChange, GitHostingProvider, GitInfo, GitRepo, LocalBranchInfo,
+    PathHistoryOptions, PathHistoryResult, PeriodSpecifier, RemoteInfo, RepoStatus,
+    commit_browser_url, commit_by_sha_at, commit_files_at, commits_for_branch_at,
+    commits_for_path_at, detect_git, detect_git_with_request, detect_merge_conflicts,
+    get_commit_by_sha, get_commit_files, get_commits_for_branch, get_commits_for_path,
+    get_recent_commits_by_count, get_recent_commits_by_date, get_recent_commits_by_duration,
+    get_recent_commits_by_hash, get_recent_commits_in_range, merge_conflicts_at,
+    merge_conflicts_with_branch_at, parse_commit_message, parse_period, preferred_remote_url,
+    remote_url, repo_root,
 };
 pub use just::{JustRecipe, JustRecipeParam, JustfileInfo, detect_justfiles};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
@@ -411,10 +411,7 @@ pub fn detect_filesystem_with_observation(
     observation: &FilesystemObservation,
 ) -> Result<FilesystemInfo> {
     validate_observation_root(root, observation)?;
-    Ok(
-        detect_filesystem_with_request_inner(root, request, false, Some(observation))?
-            .filesystem,
-    )
+    Ok(detect_filesystem_with_request_inner(root, request, false, Some(observation))?.filesystem)
 }
 
 pub(crate) struct AggregateFilesystemDetection {
@@ -657,12 +654,7 @@ fn detect_filesystem_with_request_inner(
                 repo_context.info.as_ref(),
                 repo_context.ownership_index.as_ref(),
             ) {
-                docs::assign_packages_from_repo(
-                    &mut docs,
-                    repo,
-                    ownership_index,
-                    &docs_root,
-                );
+                docs::assign_packages_from_repo(&mut docs, repo, ownership_index, &docs_root);
             }
 
             if docs.is_empty() { None } else { Some(docs) }
@@ -874,9 +866,8 @@ mod tests {
 
         let ordinary = detect_filesystem_with_request(&path, &request).unwrap();
         let observation = FilesystemObservation::discover(&path);
-        let (seeded, counts) = testing::measure(|| {
-            detect_filesystem_with_observation(&path, &request, &observation)
-        });
+        let (seeded, counts) =
+            testing::measure(|| detect_filesystem_with_observation(&path, &request, &observation));
         let seeded = seeded.unwrap();
 
         assert_eq!(
@@ -990,9 +981,8 @@ mod tests {
             .without_formatting()
             .without_file_inventory();
 
-        let (result, counts) = testing::measure(|| {
-            detect_filesystem_with_observation(&path, &request, &observation)
-        });
+        let (result, counts) =
+            testing::measure(|| detect_filesystem_with_observation(&path, &request, &observation));
         assert!(
             result
                 .unwrap()
@@ -1019,7 +1009,9 @@ mod tests {
             .unwrap()
             .expect("fixture should have a repository observation");
         assert!(
-            changes.iter().any(|change| change.path == Path::new("hello.txt")),
+            changes
+                .iter()
+                .any(|change| change.path == Path::new("hello.txt")),
             "modified tracked file should be projected: {changes:?}"
         );
         assert!(
@@ -1264,8 +1256,7 @@ mod tests {
             .without_docs()
             .without_file_inventory();
 
-        let (result, counts) =
-            testing::measure(|| detect_filesystem_with_request(&path, &request));
+        let (result, counts) = testing::measure(|| detect_filesystem_with_request(&path, &request));
         result.expect("formatting-only detection should succeed");
 
         assert_eq!(
@@ -1381,8 +1372,7 @@ mod planner_counter_propagation {
             .without_formatting()
             .without_file_inventory();
 
-        let (result, counts) =
-            testing::measure(|| detect_filesystem_with_request(&path, &request));
+        let (result, counts) = testing::measure(|| detect_filesystem_with_request(&path, &request));
         let git = result
             .expect("detection should succeed")
             .git

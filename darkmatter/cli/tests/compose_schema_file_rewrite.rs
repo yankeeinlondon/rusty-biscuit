@@ -14,18 +14,16 @@
 //!
 //! See `darkmatter/features/2026-06-27-file-property-rewrite/spec.md`.
 
+mod common;
+
+use common::CliProcessFixture;
 use darkmatter::markdown::Markdown;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use tempfile::TempDir;
 
-fn md_cmd() -> assert_cmd::Command {
-    assert_cmd::Command::cargo_bin("md").unwrap()
-}
-
-fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
-    let path = dir.path().join(name);
+fn write_file(dir: &Path, name: &str, content: &str) -> PathBuf {
+    let path = dir.join(name);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
     }
@@ -37,16 +35,20 @@ fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
 /// Creates a temp directory that looks like a git repository root (with a
 /// `.git` marker) so the rewrite projects git-root-relative independent of
 /// the host's real repo boundaries.
-fn repo_fixture() -> TempDir {
-    let dir = TempDir::new().unwrap();
-    fs::create_dir_all(dir.path().join(".git")).unwrap();
+fn repo_fixture(process: &CliProcessFixture) -> PathBuf {
+    let dir = process.cwd().to_path_buf();
+    fs::create_dir_all(dir.join(".git")).unwrap();
     dir
 }
 
 /// Composes `doc` with `--frontmatter` and re-parses the emitted document's
 /// frontmatter so the caller can inspect the *serialized* rewritten values.
-fn composed_frontmatter(doc: &Path) -> serde_json::Map<String, serde_json::Value> {
-    let assert = md_cmd()
+fn composed_frontmatter(
+    process: &CliProcessFixture,
+    doc: &Path,
+) -> serde_json::Map<String, serde_json::Value> {
+    let assert = process
+        .command()
         .args(["compose", "--frontmatter"])
         .arg(doc)
         .assert()
@@ -71,16 +73,17 @@ fn composed_frontmatter(doc: &Path) -> serde_json::Map<String, serde_json::Value
 /// becomes `area/spec.md`).
 #[test]
 fn compose_frontmatter_shows_resolved_repo_relative_spec() {
-    let repo = repo_fixture();
-    fs::create_dir_all(repo.path().join("area")).unwrap();
-    fs::write(repo.path().join("area/spec.md"), "# Spec\n").unwrap();
+    let process = CliProcessFixture::new();
+    let repo = repo_fixture(&process);
+    fs::create_dir_all(repo.join("area")).unwrap();
+    fs::write(repo.join("area/spec.md"), "# Spec\n").unwrap();
     let doc = write_file(
         &repo,
         "prompt.md",
         "---\n$schema:\n  spec: 'file(eager; required)'\nspec: ./area/spec.md\n---\nBody\n",
     );
 
-    let fm = composed_frontmatter(&doc);
+    let fm = composed_frontmatter(&process, &doc);
     // Raw `./area/spec.md` -> repo-relative `area/spec.md`.
     assert_eq!(fm.get("spec"), Some(&serde_json::json!("area/spec.md")));
 }
@@ -96,9 +99,10 @@ fn compose_frontmatter_shows_resolved_repo_relative_spec() {
 /// fallback.
 #[test]
 fn compose_write_back_persists_rewritten_value_as_fixpoint() {
-    let repo = repo_fixture();
-    fs::create_dir_all(repo.path().join("area")).unwrap();
-    fs::write(repo.path().join("area/spec.md"), "# Spec\n").unwrap();
+    let process = CliProcessFixture::new();
+    let repo = repo_fixture(&process);
+    fs::create_dir_all(repo.join("area")).unwrap();
+    fs::write(repo.join("area/spec.md"), "# Spec\n").unwrap();
     let original = write_file(
         &repo,
         "prompt.md",
@@ -106,20 +110,20 @@ fn compose_write_back_persists_rewritten_value_as_fixpoint() {
     );
 
     // First compose: capture the rewritten frontmatter.
-    let fm1 = composed_frontmatter(&original);
+    let fm1 = composed_frontmatter(&process, &original);
     assert_eq!(fm1.get("spec"), Some(&serde_json::json!("area/spec.md")));
 
     // Persist the rewritten document to a new file (simulating the on-disk
     // write-back) and re-compose it. The rewritten value is a fixpoint —
     // it must not drift across runs.
-    let persisted = repo.path().join("persisted.md");
+    let persisted = repo.join("persisted.md");
     fs::write(
         &persisted,
         "---\n$schema:\n  spec: 'file(eager; required)'\nspec: area/spec.md\n---\nBody\n",
     )
     .unwrap();
 
-    let fm2 = composed_frontmatter(&persisted);
+    let fm2 = composed_frontmatter(&process, &persisted);
     assert_eq!(
         fm2.get("spec"),
         Some(&serde_json::json!("area/spec.md")),
@@ -140,13 +144,14 @@ fn compose_write_back_persists_rewritten_value_as_fixpoint() {
 
 #[test]
 fn review_feature_fixture_dirname_and_review_file_agree_after_rewrite() {
-    let repo = repo_fixture();
-    fs::create_dir_all(repo.path().join("area")).unwrap();
-    fs::write(repo.path().join("area/spec.md"), "# Spec\n").unwrap();
+    let process = CliProcessFixture::new();
+    let repo = repo_fixture(&process);
+    fs::create_dir_all(repo.join("area")).unwrap();
+    fs::write(repo.join("area/spec.md"), "# Spec\n").unwrap();
     // Create the review file so the derived `review_file` path exists on disk
     // when composition resolves it — proving the path is correct. The bug's
     // symptom was a non-existent doubled path that threw at event time.
-    fs::write(repo.path().join("area/review-1.md"), "# Review\n").unwrap();
+    fs::write(repo.join("area/review-1.md"), "# Review\n").unwrap();
 
     let doc = write_file(
         &repo,
@@ -162,7 +167,7 @@ fn review_feature_fixture_dirname_and_review_file_agree_after_rewrite() {
          ---\nBody\n",
     );
 
-    let fm = composed_frontmatter(&doc);
+    let fm = composed_frontmatter(&process, &doc);
     // The rewrite stores the repo-relative spec.
     let spec = fm
         .get("spec")
@@ -190,7 +195,7 @@ fn review_feature_fixture_dirname_and_review_file_agree_after_rewrite() {
     );
 
     // The derived path exists on disk (the doubled-path bug would have missed).
-    let resolved = repo.path().join(review_file);
+    let resolved = repo.join(review_file);
     assert!(
         resolved.exists(),
         "derived review_file `{}` must exist on disk; the doubled-path bug would have missed it",

@@ -48,7 +48,6 @@ pub(super) fn detect_uv_workspace(
         PackageProvenance::Globbed,
     ));
 
-
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::UvWorkspace,
         root: root.to_path_buf(),

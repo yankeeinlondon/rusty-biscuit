@@ -1283,6 +1283,8 @@ class CiToolingFlagTests(unittest.TestCase):
             "scripts/ci-rollup-tests.rs",
             "scripts/ci/test_affected_scope.py",
             ".github/ci/ci-baseline.toml",
+            "tools/test-audit/src/cli.ts",
+            "pnpm-lock.yaml",
         ]:
             with self.subTest(path=path):
                 scope = self.scope([path])

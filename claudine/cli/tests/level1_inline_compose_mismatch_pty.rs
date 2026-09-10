@@ -8,8 +8,11 @@
 //! Each test spawns the real `claudine` binary with stderr attached to a PTY so
 //! `std::io::stderr().is_terminal()` is true (TTY branch) and forces an
 //! optimistic color terminal (`FORCE_COLOR=1`) so the SGR + OSC 8 pipeline runs
-//! at full fidelity. Gated by `require_level!(Level::L1, pty_available(), …)` so
-//! they skip cleanly without a PTY and panic under `BISCUIT_TEST_LEVEL_REQUIRED=1`.
+//! at full fidelity. `#![cfg(unix)]` is the only exclusion, because `expectrl`'s
+//! `OsSession` is Unix-only; on a selected platform
+//! `expect_level!(Level::L1, pty_available(), …)` **fails** when the PTY is
+//! missing rather than skipping, since Level 1 is the mandatory suite where a
+//! skip is indistinguishable from a pass.
 //!
 //! Exact YAML line-ending fidelity (LF vs CRLF, delimiter exclusion) is proved
 //! precisely by the unit capture/render tests in
@@ -19,18 +22,14 @@
 
 #![cfg(unix)]
 
-#[allow(deprecated)]
-use assert_cmd::cargo::cargo_bin;
 use expectrl::Session;
 use expectrl::session::OsSession;
 use std::io::Write;
-use std::process::Command;
 use std::time::{Duration, Instant};
-use tempfile::tempdir;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Level, expect_level};
 
 mod common;
-use common::{pty_available, strip_ansi};
+use common::{CliProcessFixture, pty_available, strip_ansi, write};
 
 /// A mismatch fixture that exercises the YAML fidelity surface: a leading
 /// comment, non-canonical property order (`sequence` before `prompt`), a YAML
@@ -68,11 +67,18 @@ fn read_all_available(session: &mut OsSession, total_deadline: Duration) -> Stri
 /// `claudine inline-compose <doc>` under an optimistic-color PTY, returning the
 /// merged stdout/stderr transcript and the resolved document path.
 fn run_mismatch_under_pty() -> (String, std::path::PathBuf) {
-    let workspace = tempdir().expect("create workspace tempdir");
-    let md_file = workspace.path().join("doc.md");
-    std::fs::write(&md_file, MISMATCH_FIXTURE).expect("write fixture");
+    let fixture = CliProcessFixture::named("level1-inline-compose-mismatch-pty");
+    // Under a PTY claudine sees an interactive stdin and runs the first-run
+    // wizard when the user config is absent; it would swallow the transcript.
+    // (Before the fixture, this passed only because it inherited the
+    // developer's own `~/.claudine/config.json`.)
+    fixture.seed_user_config();
+    let md_file = fixture.cwd().join("doc.md");
+    write(&md_file, MISMATCH_FIXTURE);
 
-    let mut cmd = Command::new(cargo_bin("claudine"));
+    // `expectrl` needs a live `std::process::Command`; the builder's raw
+    // surface hands one over carrying the same policy.
+    let mut cmd = fixture.command_std();
     cmd.arg("inline-compose").arg(&md_file);
     // Force a known-good color terminal so SGR + OSC 8 are emitted regardless of
     // the inherited environment; strip anything that would suppress color.
@@ -81,7 +87,6 @@ fn run_mismatch_under_pty() -> (String, std::path::PathBuf) {
     cmd.env("FORCE_COLOR", "1");
     cmd.env_remove("NO_COLOR");
     cmd.env_remove("CLAUDINE_PLAIN");
-    cmd.current_dir(workspace.path());
 
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
     session.set_expect_timeout(Some(Duration::from_secs(5)));
@@ -95,9 +100,8 @@ fn run_mismatch_under_pty() -> (String, std::path::PathBuf) {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level1_pty_mismatch_takes_tty_branch_with_yaml_block() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let (transcript, _doc) = run_mismatch_under_pty();
 
     assert!(
@@ -139,9 +143,8 @@ fn level1_pty_mismatch_takes_tty_branch_with_yaml_block() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level1_pty_mismatch_emits_sgr_and_osc8_link() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let (transcript, doc) = run_mismatch_under_pty();
 
     // Styling fired: the status block border and inline `<cyan>` tags emit SGR

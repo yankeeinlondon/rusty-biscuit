@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use tracing::warn;
 
-use super::{Service, ENRICHMENT_CHUNK};
+use super::{ENRICHMENT_CHUNK, Service};
 use crate::process::{self, timeouts};
 
 pub(crate) fn list_systemd_services() -> Vec<Service> {
@@ -189,7 +189,9 @@ exit 1
         // which supplies its own no-op body and would clobber this script.
         let shim = dir.path().join("systemctl");
         std::fs::write(&shim, script).expect("write shim");
-        let mut perms = std::fs::metadata(&shim).expect("shim metadata").permissions();
+        let mut perms = std::fs::metadata(&shim)
+            .expect("shim metadata")
+            .permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&shim, perms).expect("set shim mode");
 
@@ -231,9 +233,8 @@ exit 1
 
         let units = 300;
         let collector = PerformanceCollector::new_shared();
-        let (services, calls) = with_current_collector(Some(Arc::clone(&collector)), || {
-            run_against_shim(units)
-        });
+        let (services, calls) =
+            with_current_collector(Some(Arc::clone(&collector)), || run_against_shim(units));
 
         assert_eq!(services.len(), units);
         assert!(services.iter().all(|s| s.pid == Some(100)));

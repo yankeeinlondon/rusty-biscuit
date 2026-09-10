@@ -60,6 +60,28 @@ sanity:
 check *args="":
     @cargo check -p sniff --features remote -p sniff-cli {{ args }}
 
+# Type-check the library and CLI *including test targets* for Windows.
+#
+# Compile evidence only — `windows-latest` remains the runtime authority — but
+# it turns a typo in a `#[cfg(windows)]` arm into a local error. Requires the
+# mingw-w64 toolchain and the `x86_64-pc-windows-gnu` rustup target; the msvc
+# target dies in `aws-lc-sys` without the Windows SDK.
+#
+# Two host workarounds are load-bearing, not incidental:
+#   - `RUSTC_WRAPPER=""` — a `rustc-wrapper` in ~/.cargo/config.toml leaks into
+#     cc-rs as a compiler launcher and breaks every C build for this target.
+#   - `-Wa,-mbig-obj` — a unity C build reached through the dev-dependency graph
+#     emits objects past COFF's 32767-section limit, which mingw's assembler
+#     rejects until told to use the big-object format.
+check-windows:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export RUSTC_WRAPPER=""
+    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target/windows-check}"
+    export CFLAGS_x86_64_pc_windows_gnu="-Wa,-mbig-obj"
+    export CXXFLAGS_x86_64_pc_windows_gnu="-Wa,-mbig-obj"
+    cargo check -p sniff --features remote -p sniff-cli --tests --target x86_64-pc-windows-gnu
+
 # test library and CLI
 #
 # `remote` transitively enables `network`. Selecting `network` alone would

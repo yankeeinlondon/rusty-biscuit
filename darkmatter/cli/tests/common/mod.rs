@@ -1,16 +1,31 @@
 #![allow(dead_code)]
 
-use std::io::Write;
+pub mod fixture;
+pub mod protected_env;
+
+// Re-exported so a call site keeps saying `common::CliProcessFixture`; the
+// definitions live in their own file so this shared module stays near its
+// current size (the area's 500-line soft-cap report flags `cli/tests`). Not
+// every including binary uses every name yet (Phase 6 migrates callers).
+#[allow(unused_imports)]
+pub use fixture::{
+    ChildEnvironment, CliProcessFixture, ConfigurableCommand, EnvironmentOp, GIT_PLUMBING_VARS,
+    MdCommandBuilder, checkout_containment_error, copy_tree, git, helper_command,
+    minimal_system_path, write, write_executable,
+};
+#[allow(unused_imports)]
+pub use protected_env::{ProtectedClass, protected_class};
+
+use std::collections::VecDeque;
+use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
+    mpsc,
 };
-use std::thread;
-
-pub fn md_cmd() -> assert_cmd::Command {
-    assert_cmd::Command::cargo_bin("md").unwrap()
-}
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 pub fn md_file(content: &str) -> tempfile::NamedTempFile {
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
@@ -27,7 +42,15 @@ pub struct MockHttpResponse {
 pub struct MockHttpServer {
     base_url: String,
     requests: Arc<AtomicUsize>,
+    request_messages: Arc<Mutex<Vec<String>>>,
+    shutdown: Option<mpsc::Sender<()>>,
+    worker: Option<JoinHandle<()>>,
 }
+
+/// The worker checks for shutdown every 10 ms. The larger public bound allows
+/// one in-flight request read to hit its 1 s I/O timeout before the worker
+/// joins on a contended CI host.
+pub const MOCK_HTTP_SHUTDOWN_BOUND: Duration = Duration::from_secs(2);
 
 impl MockHttpServer {
     pub fn url(&self, path: &str) -> String {
@@ -37,6 +60,30 @@ impl MockHttpServer {
     pub fn request_count(&self) -> usize {
         self.requests.load(Ordering::SeqCst)
     }
+
+    pub fn requests(&self) -> Vec<String> {
+        self.request_messages.lock().unwrap().clone()
+    }
+
+    pub fn shutdown(mut self) {
+        self.stop_worker().expect("mock HTTP worker panicked");
+    }
+
+    fn stop_worker(&mut self) -> thread::Result<()> {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(worker) = self.worker.take() {
+            worker.join()?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for MockHttpServer {
+    fn drop(&mut self) {
+        let _ = self.stop_worker();
+    }
 }
 
 pub fn mock_http_server(responses: Vec<MockHttpResponse>) -> MockHttpServer {
@@ -44,16 +91,51 @@ pub fn mock_http_server(responses: Vec<MockHttpResponse>) -> MockHttpServer {
     let addr = listener.local_addr().unwrap();
     let requests = Arc::new(AtomicUsize::new(0));
     let request_count = Arc::clone(&requests);
+    let request_messages = Arc::new(Mutex::new(Vec::new()));
+    let captured_requests = Arc::clone(&request_messages);
+    let (shutdown_tx, shutdown_rx) = mpsc::channel();
+    listener.set_nonblocking(true).unwrap();
 
-    thread::spawn(move || {
-        for response in responses {
-            let Ok((mut stream, _)) = listener.accept() else {
+    let worker = thread::spawn(move || {
+        let mut responses = VecDeque::from(responses);
+        while !responses.is_empty() {
+            if shutdown_rx.try_recv().is_ok() {
                 break;
+            }
+            let (mut stream, _) = match listener.accept() {
+                Ok(connection) => connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(_) => break,
             };
-            request_count.fetch_add(1, Ordering::SeqCst);
+            let response = responses.pop_front().unwrap();
+            // Accepted sockets can inherit the listener's nonblocking mode.
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
 
-            let mut buf = [0_u8; 4096];
-            let _ = std::io::Read::read(&mut stream, &mut buf);
+            let mut request = Vec::new();
+            let mut buf = [0_u8; 1024];
+            while request.len() < 16 * 1024 {
+                match stream.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(read) => {
+                        request.extend_from_slice(&buf[..read]);
+                        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            captured_requests
+                .lock()
+                .unwrap()
+                .push(String::from_utf8_lossy(&request).into_owned());
+            request_count.fetch_add(1, Ordering::SeqCst);
 
             let status_text = match response.status {
                 200 => "OK",
@@ -79,6 +161,9 @@ pub fn mock_http_server(responses: Vec<MockHttpResponse>) -> MockHttpServer {
     MockHttpServer {
         base_url: format!("http://{addr}"),
         requests,
+        request_messages,
+        shutdown: Some(shutdown_tx),
+        worker: Some(worker),
     }
 }
 
@@ -268,7 +353,8 @@ pub mod layout {
             None => TestFill::Full,
             Some(p) => {
                 let l = &p.layout;
-                if l.width == Width::Auto && l.max_width.is_none() && l.padding == Edges::default() {
+                if l.width == Width::Auto && l.max_width.is_none() && l.padding == Edges::default()
+                {
                     TestFill::Full
                 } else if l.width == Width::Auto
                     && l.max_width.is_none()
@@ -282,7 +368,9 @@ pub mod layout {
                     } else {
                         TestFill::Indent(tv_length(&l.padding.left))
                     }
-                } else if let Some(max_width) = &l.max_width && l.width == Width::Auto {
+                } else if let Some(max_width) = &l.max_width
+                    && l.width == Width::Auto
+                {
                     TestFill::Max(tv_length(max_width))
                 } else if matches!(l.width, Width::Fixed(_)) {
                     TestFill::Explicit(width_length(&l.width))

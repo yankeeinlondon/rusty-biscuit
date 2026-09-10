@@ -811,3 +811,316 @@ fn round_trip_fidelity_across_mixed_events() {
         assert_eq!(v, v2, "round-trip lost fidelity for {}", event.kind_str());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Terminal task normalization and the authoritative session ledger
+// ---------------------------------------------------------------------------
+
+#[test]
+fn task_progress_with_a_status_still_stays_info() {
+    // Only `task_notification` carries terminal status; `task_progress` is
+    // progress by definition and must never be promoted.
+    let (sink, mut parser) = new_parser();
+    parser.feed_line(
+        r#"{"type":"task_progress","task_id":"sa_1","name":"researcher","status":"stopped","message":"working"}"#,
+    );
+    assert_eq!(sink.kinds(), vec!["info"]);
+}
+
+#[test]
+fn terminal_task_notification_preserves_id_name_and_raw_status() {
+    let (sink, mut parser) = new_parser();
+    parser.feed_line(
+        r#"{"type":"task_notification","task_id":"sa_1","name":"researcher","status":"stopped"}"#,
+    );
+    let events = sink.snapshot();
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        SemanticEvent::SubagentStop {
+            name, id, status, ..
+        } => {
+            assert_eq!(name.as_deref(), Some("researcher"));
+            assert_eq!(id.as_deref(), Some("sa_1"));
+            assert_eq!(status.as_deref(), Some("stopped"));
+        }
+        other => panic!("expected SubagentStop, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_task_notification_with_an_explicit_progress_status_remains_info() {
+    // `thinking` is in the progress vocabulary, which is why this stays `Info`
+    // — not because an unrecognized status defaults to progress.
+    let (sink, mut parser) = new_parser();
+    parser.feed_line(
+        r#"{"type":"task_notification","task_id":"sa_1","message":"still thinking","status":"thinking"}"#,
+    );
+    assert_eq!(sink.kinds(), vec!["info"]);
+    // And it must not have invented a completion.
+    let summary = parser.finish(0);
+    assert!(!summary.is_error);
+    assert!(summary.subagent_outcomes.is_empty());
+}
+
+#[test]
+fn a_task_notification_with_no_status_remains_info_and_stays_clean() {
+    let (sink, mut parser) = new_parser();
+    parser.feed_line(r#"{"type":"task_notification","message":"heartbeat"}"#);
+    parser.feed_line(r#"{"type":"task_notification","task_id":"sa_1","status":"   "}"#);
+    assert_eq!(sink.kinds(), vec!["info", "info"]);
+    let summary = parser.finish(0);
+    assert!(!summary.is_error);
+    assert!(summary.subagent_outcomes.is_empty());
+}
+
+#[test]
+fn an_unrecognized_notification_status_fails_closed_after_a_start() {
+    // A future provider vocabulary must not resolve a started task by being
+    // unreadable: the observation is terminal, unresolved, and keeps its word.
+    let (sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"task_started","task_id":"sa_1","name":"researcher"}"#,
+        r#"{"type":"task_notification","task_id":"sa_1","name":"researcher","status":"evaporated"}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    assert_eq!(sink.kinds(), vec!["subagent_start", "subagent_stop"]);
+
+    let summary = parser.finish(0);
+    assert!(summary.is_error);
+    assert_eq!(summary.error_kind.as_deref(), Some("incomplete_subagents"));
+    assert_eq!(summary.subagent_outcomes.len(), 1);
+    let fact = &summary.subagent_outcomes[0];
+    assert_eq!(fact.task_id.as_deref(), Some("sa_1"));
+    assert_eq!(fact.name.as_deref(), Some("researcher"));
+    assert_eq!(fact.raw_status.as_deref(), Some("evaporated"));
+    assert_eq!(
+        fact.outcome,
+        crate::stream::task_ledger::TaskOutcome::UnknownStatus,
+        "an unreadable status must be unresolved, not merely unfinished"
+    );
+}
+
+#[test]
+fn an_unrecognized_notification_status_enrolls_a_fact_without_a_prior_start() {
+    let (_sink, mut parser) = new_parser();
+    parser.feed_line(
+        r#"{"type":"task_notification","task_id":"sa_9","name":"orphan","status":"evaporated"}"#,
+    );
+    let summary = parser.finish(0);
+    assert!(summary.is_error);
+    assert_eq!(summary.subagent_outcomes.len(), 1);
+    assert_eq!(
+        summary.subagent_outcomes[0].raw_status.as_deref(),
+        Some("evaporated")
+    );
+    assert_eq!(
+        summary.subagent_outcomes[0].outcome,
+        crate::stream::task_ledger::TaskOutcome::UnknownStatus
+    );
+}
+
+#[test]
+fn stopped_task_notifications_poison_a_native_exit_zero_session() {
+    // The 2026-08-31 incident shape: two dispatched sub-agents, both reported
+    // `stopped`, the parent turn completed, and Claude exited 0.
+    let (_sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"init","session_id":"s1","model":"claude-opus"}"#,
+        r#"{"type":"task_started","task_id":"sa_1","name":"commit-a"}"#,
+        r#"{"type":"task_started","task_id":"sa_2","name":"commit-b"}"#,
+        r#"{"type":"task_notification","task_id":"sa_1","name":"commit-a","status":"stopped"}"#,
+        r#"{"type":"task_notification","task_id":"sa_2","name":"commit-b","status":"stopped"}"#,
+        r#"{"type":"result","subtype":"success","duration_ms":600000}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    let summary = parser.finish(0);
+
+    // Claudine did not kill the child: the native exit stays honest.
+    assert_eq!(summary.exit_code, 0);
+    assert!(summary.is_error);
+    assert_eq!(summary.error_kind.as_deref(), Some("incomplete_subagents"));
+    assert_eq!(summary.subagent_outcomes.len(), 2);
+    let names: Vec<_> = summary
+        .subagent_outcomes
+        .iter()
+        .map(|fact| fact.name.clone().unwrap())
+        .collect();
+    assert_eq!(names, vec!["commit-a", "commit-b"]);
+    assert!(
+        summary
+            .subagent_outcomes
+            .iter()
+            .all(|fact| fact.raw_status.as_deref() == Some("stopped"))
+    );
+    let message = summary.error_message.unwrap();
+    assert!(message.contains("commit-a"), "{message}");
+    assert!(message.contains("commit-b"), "{message}");
+}
+
+#[test]
+fn more_than_five_stopped_tasks_all_reach_the_summary() {
+    let (_sink, mut parser) = new_parser();
+    for index in 0..7 {
+        parser.feed_line(&format!(
+            r#"{{"type":"task_started","task_id":"sa_{index}","name":"agent-{index}"}}"#
+        ));
+    }
+    for index in 0..7 {
+        parser.feed_line(&format!(
+            r#"{{"type":"task_notification","task_id":"sa_{index}","name":"agent-{index}","status":"stopped"}}"#
+        ));
+    }
+    let summary = parser.finish(0);
+    assert_eq!(summary.subagent_outcomes.len(), 7);
+}
+
+#[test]
+fn a_completed_notification_clears_an_earlier_stop_for_the_same_id() {
+    let (_sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"task_started","task_id":"sa_1","name":"retryable"}"#,
+        r#"{"type":"task_notification","task_id":"sa_1","name":"retryable","status":"stopped"}"#,
+        r#"{"type":"task_completed","task_id":"sa_1","name":"retryable","status":"completed"}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    let summary = parser.finish(0);
+    assert!(!summary.is_error);
+    assert!(summary.subagent_outcomes.is_empty());
+}
+
+#[test]
+fn a_started_task_with_no_terminal_event_fails_the_session() {
+    let (_sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"task_started","task_id":"sa_1","name":"abandoned"}"#,
+        r#"{"type":"result","subtype":"success"}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    let summary = parser.finish(0);
+    assert!(summary.is_error);
+    assert_eq!(summary.error_kind.as_deref(), Some("incomplete_subagents"));
+    assert_eq!(summary.subagent_outcomes.len(), 1);
+    assert_eq!(
+        summary.subagent_outcomes[0].outcome,
+        crate::stream::task_ledger::TaskOutcome::Unfinished
+    );
+}
+
+#[test]
+fn an_unknown_terminal_status_is_preserved_and_unresolved() {
+    let (_sink, mut parser) = new_parser();
+    parser.feed_line(
+        r#"{"type":"task_completed","task_id":"sa_1","name":"odd","status":"evaporated"}"#,
+    );
+    let summary = parser.finish(0);
+    assert!(summary.is_error);
+    assert_eq!(summary.subagent_outcomes.len(), 1);
+    assert_eq!(
+        summary.subagent_outcomes[0].raw_status.as_deref(),
+        Some("evaporated")
+    );
+    assert_eq!(
+        summary.subagent_outcomes[0].outcome,
+        crate::stream::task_ledger::TaskOutcome::UnknownStatus
+    );
+}
+
+#[test]
+fn a_clean_task_session_stays_clean() {
+    let (_sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"task_started","task_id":"sa_1","name":"alpha"}"#,
+        r#"{"type":"task_completed","task_id":"sa_1","name":"alpha","status":"success"}"#,
+        r#"{"type":"result","subtype":"success"}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    let summary = parser.finish(0);
+    assert!(!summary.is_error);
+    assert!(summary.error_kind.is_none());
+    assert!(summary.subagent_outcomes.is_empty());
+    let json = serde_json::to_string(&summary).unwrap();
+    assert!(!json.contains("subagent_outcomes"));
+}
+
+#[test]
+fn a_task_free_session_never_grows_the_ledger() {
+    let (_sink, mut parser) = new_parser();
+    parser.feed_line(r#"{"type":"result","subtype":"success"}"#);
+    let summary = parser.finish(0);
+    assert!(!summary.is_error);
+    assert!(summary.subagent_outcomes.is_empty());
+}
+
+#[test]
+fn a_message_only_result_failure_survives_incomplete_subagent_finalization() {
+    // Review-3 finding 1 probe: `result.is_error=true` records text without a
+    // kind, and an unresolved task then finalizes the summary. Both facts
+    // must reach the concise message.
+    let (_sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"system","subtype":"init","session_id":"s1","model":"claude-opus"}"#,
+        r#"{"type":"task_started","task_id":"sa_1","name":"alpha"}"#,
+        r#"{"type":"task_notification","task_id":"sa_1","name":"alpha","status":"Evaporated"}"#,
+        r#"{"type":"result","is_error":true,"result":"Provider rejected the request"}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    let summary = parser.finish(0);
+
+    assert!(summary.is_error);
+    assert_eq!(summary.error_kind.as_deref(), Some("incomplete_subagents"));
+    let message = summary.error_message.as_deref().unwrap();
+    assert!(message.contains("Provider rejected the request"), "{message}");
+    assert!(message.contains("alpha"), "{message}");
+    assert_eq!(summary.subagent_outcomes.len(), 1);
+}
+
+#[test]
+fn a_padded_terminal_status_reaches_the_summary_byte_for_byte() {
+    // Review-3 finding 2 probe: the authored status must survive the ledger
+    // unchanged and agree with the status the live `SubagentStop` carried.
+    let (sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"system","subtype":"init","session_id":"s1","model":"claude-opus"}"#,
+        r#"{"type":"task_started","task_id":"sa_1","name":"alpha"}"#,
+        r#"{"type":"task_started","task_id":"sa_2","name":"beta"}"#,
+        r#"{"type":"task_notification","task_id":"sa_1","name":"alpha","status":"  Evaporated  "}"#,
+        r#"{"type":"task_notification","task_id":"sa_2","name":"beta","status":"  stopped "}"#,
+        r#"{"type":"result","is_error":false,"result":"done"}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    let summary = parser.finish(0);
+
+    assert!(summary.is_error);
+    let outcomes = &summary.subagent_outcomes;
+    assert_eq!(outcomes.len(), 2);
+    assert_eq!(
+        outcomes[0].outcome,
+        crate::stream::task_ledger::TaskOutcome::UnknownStatus
+    );
+    assert_eq!(outcomes[0].raw_status.as_deref(), Some("  Evaporated  "));
+    assert_eq!(
+        outcomes[1].outcome,
+        crate::stream::task_ledger::TaskOutcome::Stopped
+    );
+    assert_eq!(outcomes[1].raw_status.as_deref(), Some("  stopped "));
+
+    let live_statuses: Vec<Option<String>> = sink
+        .snapshot()
+        .into_iter()
+        .filter_map(|event| match event {
+            SemanticEvent::SubagentStop { status, .. } => Some(status),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        live_statuses,
+        vec![Some("  Evaporated  ".to_string()), Some("  stopped ".to_string())]
+    );
+}

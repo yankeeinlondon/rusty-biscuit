@@ -6,6 +6,7 @@ fn outcome(termination: ProcessTermination) -> AttemptOutcome {
         session_id: None,
         final_response: String::new(),
         exit_code: 1,
+        is_error: false,
         termination,
         stderr_text: None,
         error_kind: None,
@@ -297,4 +298,154 @@ fn stderr_oversized_last_line_clamped_to_single_line() {
     assert_eq!(rendered.lines().count(), 1);
     assert!(rendered.chars().count() <= FAILURE_MESSAGE_MAX_CHARS);
     assert!(rendered.ends_with('…'));
+}
+
+// ---------------------------------------------------------------------------
+// Semantic-error classification: exit code 0 is not proof of success
+// ---------------------------------------------------------------------------
+
+/// A completed attempt with the given native exit code and semantic verdict.
+fn completed(exit_code: i32, is_error: bool) -> AttemptOutcome {
+    AttemptOutcome {
+        exit_code,
+        is_error,
+        ..outcome(ProcessTermination::Completed)
+    }
+}
+
+#[test]
+fn a_clean_completed_exit_zero_attempt_is_still_a_success() {
+    assert!(classify_failure(&completed(0, false)).is_none());
+}
+
+#[test]
+fn a_completed_nonzero_exit_is_an_agent_failure() {
+    assert_eq!(
+        classify_failure(&completed(3, false)),
+        Some(FailureEvent::AgentFailure)
+    );
+}
+
+#[test]
+fn a_non_task_semantic_error_with_native_exit_zero_is_an_agent_failure() {
+    // The general contract, deliberately not a Claude/sub-agent special case:
+    // any parser that truthfully reports `is_error` fails the attempt.
+    let mut attempt = completed(0, true);
+    attempt.error_kind = Some("repeated_stream_error".into());
+    attempt.error_message = Some("provider stream errored 5 times".into());
+    assert_eq!(
+        classify_failure(&attempt),
+        Some(FailureEvent::AgentFailure)
+    );
+}
+
+#[test]
+fn incomplete_subagents_with_native_exit_zero_is_an_agent_failure_not_a_timeout() {
+    let mut attempt = completed(0, true);
+    attempt.error_kind = Some("incomplete_subagents".into());
+    // Fail-fast, not the retryable timeout path.
+    assert_eq!(
+        classify_failure(&attempt),
+        Some(FailureEvent::AgentFailure)
+    );
+}
+
+#[test]
+fn a_semantic_error_never_overrides_a_user_interrupt() {
+    let attempt = AttemptOutcome {
+        exit_code: 0,
+        is_error: true,
+        ..outcome(ProcessTermination::Interrupted)
+    };
+    assert!(classify_failure(&attempt).is_none());
+}
+
+#[test]
+fn a_semantic_error_on_a_timed_out_attempt_stays_a_timeout() {
+    let attempt = AttemptOutcome {
+        exit_code: 0,
+        is_error: true,
+        ..outcome(ProcessTermination::TimedOut)
+    };
+    assert_eq!(classify_failure(&attempt), Some(FailureEvent::Timeout));
+}
+
+#[test]
+fn build_attempt_outcome_carries_the_summary_semantic_verdict() {
+    use crate::stream::task_ledger::{SubagentOutcome, TaskOutcome};
+
+    let summary = StreamExecutionSummary {
+        exit_code: 0,
+        is_error: true,
+        error_kind: Some("incomplete_subagents".into()),
+        error_message: Some("2 sub-agent tasks did not complete: a, b".into()),
+        subagent_outcomes: vec![SubagentOutcome {
+            task_id: Some("sa_1".into()),
+            name: Some("a".into()),
+            outcome: TaskOutcome::Stopped,
+            raw_status: Some("stopped".into()),
+        }],
+        ..Default::default()
+    };
+    let built = build_attempt_outcome(1, &summary, ProcessTermination::Completed);
+
+    assert!(built.is_error);
+    // The native exit and termination are reported as observed.
+    assert_eq!(built.exit_code, 0);
+    assert_eq!(built.termination, ProcessTermination::Completed);
+    assert_eq!(built.error_kind.as_deref(), Some("incomplete_subagents"));
+    assert_eq!(
+        classify_failure(&built),
+        Some(FailureEvent::AgentFailure),
+        "an exit-0 completed attempt with unresolved sub-agents must fail"
+    );
+}
+
+#[test]
+fn build_attempt_outcome_leaves_a_clean_summary_successful() {
+    let summary = StreamExecutionSummary {
+        exit_code: 0,
+        is_error: false,
+        ..Default::default()
+    };
+    let built = build_attempt_outcome(1, &summary, ProcessTermination::Completed);
+    assert!(!built.is_error);
+    assert!(classify_failure(&built).is_none());
+}
+
+#[test]
+fn the_incomplete_headline_is_clamped_while_the_facts_stay_complete() {
+    use crate::stream::task_ledger::TaskLedger;
+
+    let mut ledger = TaskLedger::new();
+    for index in 0..40 {
+        let id = format!("sa_{index}");
+        let name = format!("a-deliberately-long-sub-agent-task-name-{index}");
+        ledger.record_start(Some(&id), Some(&name));
+        ledger.record_terminal(Some(&id), Some(&name), Some("stopped"));
+    }
+    let mut summary = StreamExecutionSummary {
+        exit_code: 0,
+        ..Default::default()
+    };
+    ledger.apply_to_summary(&mut summary);
+
+    let built = build_attempt_outcome(1, &summary, ProcessTermination::Completed);
+    let headline = failure_message(&built, 1);
+    // The headline obeys the shared 240-character hygiene contract …
+    assert!(
+        headline.chars().count() <= 240,
+        "headline was {} chars: {headline}",
+        headline.chars().count()
+    );
+    assert!(headline.starts_with("40 sub-agent tasks did not complete"), "{headline}");
+    // … and the truncation it forces never reaches the machine record.
+    assert_eq!(summary.subagent_outcomes.len(), 40);
+    assert!(
+        summary
+            .subagent_outcomes
+            .iter()
+            .any(|fact| fact.task_id.as_deref() == Some("sa_39")),
+        "the last fact must survive the headline clamp"
+    );
 }

@@ -1,12 +1,14 @@
 mod common;
 
-use common::{md_cmd, md_file};
+use common::{CliProcessFixture, md_file};
 use predicates::prelude::*;
 use std::io::Write;
 
 #[test]
 fn test_stdin_rendering_auto_non_tty_outputs_markdown() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_stdin_rendering_auto_non_tty_outputs_markdown");
+    fixture
+        .command()
         .arg("-")
         .write_stdin("# Hello\n\nWorld")
         .assert()
@@ -17,9 +19,11 @@ fn test_stdin_rendering_auto_non_tty_outputs_markdown() {
 
 #[test]
 fn test_file_rendering() {
+    let fixture = CliProcessFixture::named("test_file_rendering");
     let tmp = md_file("# Test File\n\nSome content here.\n");
 
-    md_cmd()
+    fixture
+        .command()
         .arg(tmp.path())
         .assert()
         .success()
@@ -28,7 +32,9 @@ fn test_file_rendering() {
 
 #[test]
 fn test_file_not_found() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_file_not_found");
+    fixture
+        .command()
         .arg("/tmp/nonexistent-darkmatter-test-file.md")
         .assert()
         .failure();
@@ -36,7 +42,9 @@ fn test_file_not_found() {
 
 #[test]
 fn test_output_markdown_alias_text() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_output_markdown_alias_text");
+    fixture
+        .command()
         .args(["--output", "text", "-"])
         .write_stdin("# Alias Test")
         .assert()
@@ -46,7 +54,9 @@ fn test_output_markdown_alias_text() {
 
 #[test]
 fn test_output_html() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_output_html");
+    fixture
+        .command()
         .args(["--output", "html", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
@@ -57,7 +67,9 @@ fn test_output_html() {
 
 #[test]
 fn test_output_html_alias_browser() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_output_html_alias_browser");
+    fixture
+        .command()
         .args(["--output", "browser", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
@@ -67,8 +79,11 @@ fn test_output_html_alias_browser() {
 
 #[test]
 fn test_output_markdown_plus_renders_disclosure_as_html_details() {
+    let fixture =
+        CliProcessFixture::named("test_output_markdown_plus_renders_disclosure_as_html_details");
     let input = "::disclosure Summary\n::details\nBody\n::end-disclosure";
-    md_cmd()
+    fixture
+        .command()
         .args(["--output", "markdown-plus", "-"])
         .write_stdin(input)
         .assert()
@@ -83,10 +98,12 @@ fn test_output_markdown_plus_renders_disclosure_as_html_details() {
 
 #[test]
 fn test_output_json_alias_ast() {
+    let fixture = CliProcessFixture::named("test_output_json_alias_ast");
     // `--output ast` serializes the render-tree `Document` (`md.as_document()`),
     // whose node discriminant is `kind` (not `type`); `root` is the top-level
     // document node.
-    md_cmd()
+    fixture
+        .command()
         .args(["--output", "ast", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
@@ -98,18 +115,22 @@ fn test_output_json_alias_ast() {
 
 #[test]
 fn test_show_option_with_markdown_output() {
-    md_cmd()
-        .env("MD_DRY_RUN", "1")
+    let fixture = CliProcessFixture::named("test_show_option_with_markdown_output");
+    fixture
+        .command_builder()
+        .application_input("MD_DRY_RUN", "1")
+        .build()
         .args(["--output", "markdown", "--show", "-"])
         .write_stdin("# Show Test")
         .assert()
         .success();
 }
 
-
 #[test]
 fn test_render_explicit() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_render_explicit");
+    fixture
+        .command()
         .args(["render", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
@@ -120,11 +141,13 @@ fn test_render_explicit() {
 
 #[test]
 fn test_render_default_backward_compat() {
+    let fixture = CliProcessFixture::named("test_render_default_backward_compat");
     // md file.md (no subcommand) still works
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
     writeln!(tmp, "# Backward\n\nCompat test.").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .arg(tmp.path())
         .assert()
         .success()
@@ -133,7 +156,9 @@ fn test_render_default_backward_compat() {
 
 #[test]
 fn test_render_explicit_with_output() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_render_explicit_with_output");
+    fixture
+        .command()
         .args(["render", "--output", "html", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
@@ -141,14 +166,15 @@ fn test_render_explicit_with_output() {
         .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
 }
 
-
 #[test]
 fn test_line_numbers_html_output() {
+    let fixture = CliProcessFixture::named("test_line_numbers_html_output");
     let input = "```rust\nfn main() {}\n```";
     // Use `--line-numbers=true` to avoid the optional-arg ambiguity with the
     // `-` stdin marker positional. The bare form `--line-numbers -` would let
     // clap consume `-` as the optional value.
-    md_cmd()
+    fixture
+        .command()
         .args(["--output", "html", "--line-numbers=true", "-"])
         .write_stdin(input)
         .assert()
@@ -157,19 +183,20 @@ fn test_line_numbers_html_output() {
         .stdout(predicate::str::contains("main"));
 }
 
-
 /// - emits the error type name (`TransclusionError`) on stderr,
 /// - emits a human-readable summary (`cycle detected`),
 /// - emits a hint-tagged token from the rendered block.
 #[test]
 fn test_block_rendering_transclusion_cycle_tty() {
+    let fixture = CliProcessFixture::named("test_block_rendering_transclusion_cycle_tty");
     let dir = tempfile::TempDir::new().unwrap();
     let a = dir.path().join("a.md");
     let b = dir.path().join("b.md");
     std::fs::write(&a, "# A\n\n::file b.md\n").unwrap();
     std::fs::write(&b, "# B\n\n::file a.md\n").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .arg("compose")
         .arg(&a)
         .assert()
@@ -185,13 +212,14 @@ fn test_block_rendering_transclusion_cycle_tty() {
 /// this test naturally exercises the non-TTY branch in `main.rs`.
 #[test]
 fn test_block_rendering_transclusion_cycle_non_tty() {
+    let fixture = CliProcessFixture::named("test_block_rendering_transclusion_cycle_non_tty");
     let dir = tempfile::TempDir::new().unwrap();
     let a = dir.path().join("a.md");
     let b = dir.path().join("b.md");
     std::fs::write(&a, "# A\n\n::file b.md\n").unwrap();
     std::fs::write(&b, "# B\n\n::file a.md\n").unwrap();
 
-    let output = md_cmd().arg("compose").arg(&a).output().unwrap();
+    let output = fixture.command().arg("compose").arg(&a).output().unwrap();
 
     assert!(!output.status.success(), "expected non-zero exit code");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -205,12 +233,13 @@ fn test_block_rendering_transclusion_cycle_non_tty() {
     );
 }
 
-
 #[test]
 fn render_accepts_code_block_flag() {
+    let fixture = CliProcessFixture::named("render_accepts_code_block_flag");
     let tmp = md_file("# Title\n\n```rust\nfn main() {}\n```\n");
     for mode in ["inverse", "dark", "light", "same"] {
-        md_cmd()
+        fixture
+            .command()
             .args(["--code-block", mode])
             .arg(tmp.path())
             .assert()
@@ -221,8 +250,10 @@ fn render_accepts_code_block_flag() {
 
 #[test]
 fn render_rejects_invalid_code_block_value() {
+    let fixture = CliProcessFixture::named("render_rejects_invalid_code_block_value");
     let tmp = md_file("# Title\n");
-    md_cmd()
+    fixture
+        .command()
         .args(["--code-block", "sideways"])
         .arg(tmp.path())
         .assert()

@@ -5,8 +5,8 @@ use serial_test::serial;
 use sniff::SniffError;
 use sniff::filesystem::git::{ApiFlavor, RemoteEndpoint, ResolvedRemote, resolve_remote_at};
 use sniff::remote::{
-    CiCdJobQuery, CiCdJobReference, FocusedProviderClient, GitProvider, PullRequestQuery,
-    CanonicalPullRequestState, QueryValues,
+    CanonicalPullRequestState, CiCdJobQuery, CiCdJobReference, FocusedProviderClient, GitProvider,
+    PullRequestQuery, QueryValues,
 };
 use test_toolkit::EnvGuard;
 use wiremock::matchers::{header, method, path, path_regex, query_param};
@@ -107,13 +107,8 @@ fn client(server: &MockServer, flavor: ApiFlavor) -> FocusedProviderClient {
     let policy = FetchPolicy::deny_all().allow_host("127.0.0.1");
     let api_base = format!("{}/api", server.uri());
     if flavor == ApiFlavor::Gitea {
-        FocusedProviderClient::with_api_base_and_server_version(
-            remote,
-            policy,
-            &api_base,
-            "1.25.0",
-        )
-        .unwrap()
+        FocusedProviderClient::with_api_base_and_server_version(remote, policy, &api_base, "1.25.0")
+            .unwrap()
     } else {
         FocusedProviderClient::with_api_base(remote, policy, &api_base).unwrap()
     }
@@ -181,33 +176,55 @@ fn expected(flavor: ApiFlavor, host: &str, namespace: &str, native_id: &str) -> 
 #[test]
 fn canonical_web_urls_resolve_every_supported_provider() {
     for (url, wanted) in [
-        ("https://github.com/acme/project/pull/7",
-         expected(ApiFlavor::GitHub, "github.com", "acme", "7")),
-        ("https://gitlab.com/group/sub/project/-/merge_requests/8",
-         expected(ApiFlavor::GitLab, "gitlab.com", "group/sub", "8")),
-        ("https://gitea.example/acme/project/pulls/9",
-         expected(ApiFlavor::Gitea, "gitea.example", "acme", "9")),
-        ("https://forgejo.example/acme/project/pulls/9",
-         expected(ApiFlavor::Forgejo, "forgejo.example", "acme", "9")),
-        ("https://codeberg.org/acme/project/pulls/9",
-         expected(ApiFlavor::Forgejo, "codeberg.org", "acme", "9")),
-        ("https://bitbucket.org/acme/project/pull-requests/10",
-         expected(ApiFlavor::Bitbucket, "bitbucket.org", "acme", "10")),
+        (
+            "https://github.com/acme/project/pull/7",
+            expected(ApiFlavor::GitHub, "github.com", "acme", "7"),
+        ),
+        (
+            "https://gitlab.com/group/sub/project/-/merge_requests/8",
+            expected(ApiFlavor::GitLab, "gitlab.com", "group/sub", "8"),
+        ),
+        (
+            "https://gitea.example/acme/project/pulls/9",
+            expected(ApiFlavor::Gitea, "gitea.example", "acme", "9"),
+        ),
+        (
+            "https://forgejo.example/acme/project/pulls/9",
+            expected(ApiFlavor::Forgejo, "forgejo.example", "acme", "9"),
+        ),
+        (
+            "https://codeberg.org/acme/project/pulls/9",
+            expected(ApiFlavor::Forgejo, "codeberg.org", "acme", "9"),
+        ),
+        (
+            "https://bitbucket.org/acme/project/pull-requests/10",
+            expected(ApiFlavor::Bitbucket, "bitbucket.org", "acme", "10"),
+        ),
     ] {
         assert_eq!(pr_identity(url).unwrap(), wanted, "{url}");
     }
 
     for (url, wanted) in [
-        ("https://github.com/acme/project/actions/runs/20/job/21",
-         expected(ApiFlavor::GitHub, "github.com", "acme", "21")),
-        ("https://gitlab.com/group/sub/project/-/jobs/22",
-         expected(ApiFlavor::GitLab, "gitlab.com", "group/sub", "22")),
-        ("https://gitea.example/acme/project/actions/runs/20/jobs/23",
-         expected(ApiFlavor::Gitea, "gitea.example", "acme", "23")),
-        ("https://forgejo.example/acme/project/actions/runs/20/jobs/23",
-         expected(ApiFlavor::Forgejo, "forgejo.example", "acme", "23")),
-        ("https://bitbucket.org/acme/project/pipelines/results/p1/steps/s1",
-         expected(ApiFlavor::Bitbucket, "bitbucket.org", "acme", "p1/s1")),
+        (
+            "https://github.com/acme/project/actions/runs/20/job/21",
+            expected(ApiFlavor::GitHub, "github.com", "acme", "21"),
+        ),
+        (
+            "https://gitlab.com/group/sub/project/-/jobs/22",
+            expected(ApiFlavor::GitLab, "gitlab.com", "group/sub", "22"),
+        ),
+        (
+            "https://gitea.example/acme/project/actions/runs/20/jobs/23",
+            expected(ApiFlavor::Gitea, "gitea.example", "acme", "23"),
+        ),
+        (
+            "https://forgejo.example/acme/project/actions/runs/20/jobs/23",
+            expected(ApiFlavor::Forgejo, "forgejo.example", "acme", "23"),
+        ),
+        (
+            "https://bitbucket.org/acme/project/pipelines/results/p1/steps/s1",
+            expected(ApiFlavor::Bitbucket, "bitbucket.org", "acme", "p1/s1"),
+        ),
     ] {
         assert_eq!(job_identity(url).unwrap(), wanted, "{url}");
     }
@@ -219,31 +236,51 @@ fn canonical_web_urls_resolve_every_supported_provider() {
 #[test]
 fn canonical_api_urls_resolve_every_supported_provider() {
     for (url, wanted) in [
-        ("https://api.github.com/repos/acme/project/pulls/7",
-         expected(ApiFlavor::GitHub, "github.com", "acme", "7")),
-        ("https://gitlab.com/api/v4/projects/group%2Fsub%2Fproject/merge_requests/8",
-         expected(ApiFlavor::GitLab, "gitlab.com", "group/sub", "8")),
-        ("https://gitea.example/api/v1/repos/acme/project/pulls/9",
-         expected(ApiFlavor::Gitea, "gitea.example", "acme", "9")),
-        ("https://forgejo.example/api/v1/repos/acme/project/pulls/9",
-         expected(ApiFlavor::Forgejo, "forgejo.example", "acme", "9")),
-        ("https://api.bitbucket.org/2.0/repositories/acme/project/pullrequests/10",
-         expected(ApiFlavor::Bitbucket, "bitbucket.org", "acme", "10")),
+        (
+            "https://api.github.com/repos/acme/project/pulls/7",
+            expected(ApiFlavor::GitHub, "github.com", "acme", "7"),
+        ),
+        (
+            "https://gitlab.com/api/v4/projects/group%2Fsub%2Fproject/merge_requests/8",
+            expected(ApiFlavor::GitLab, "gitlab.com", "group/sub", "8"),
+        ),
+        (
+            "https://gitea.example/api/v1/repos/acme/project/pulls/9",
+            expected(ApiFlavor::Gitea, "gitea.example", "acme", "9"),
+        ),
+        (
+            "https://forgejo.example/api/v1/repos/acme/project/pulls/9",
+            expected(ApiFlavor::Forgejo, "forgejo.example", "acme", "9"),
+        ),
+        (
+            "https://api.bitbucket.org/2.0/repositories/acme/project/pullrequests/10",
+            expected(ApiFlavor::Bitbucket, "bitbucket.org", "acme", "10"),
+        ),
     ] {
         assert_eq!(pr_identity(url).unwrap(), wanted, "{url}");
     }
 
     for (url, wanted) in [
-        ("https://api.github.com/repos/acme/project/actions/jobs/21",
-         expected(ApiFlavor::GitHub, "github.com", "acme", "21")),
-        ("https://gitlab.com/api/v4/projects/group%2Fsub%2Fproject/jobs/22",
-         expected(ApiFlavor::GitLab, "gitlab.com", "group/sub", "22")),
-        ("https://gitea.example/api/v1/repos/acme/project/actions/jobs/23",
-         expected(ApiFlavor::Gitea, "gitea.example", "acme", "23")),
-        ("https://forgejo.example/api/v1/repos/acme/project/actions/jobs/23",
-         expected(ApiFlavor::Forgejo, "forgejo.example", "acme", "23")),
-        ("https://api.bitbucket.org/2.0/repositories/acme/project/pipelines/p1/steps/s1",
-         expected(ApiFlavor::Bitbucket, "bitbucket.org", "acme", "p1/s1")),
+        (
+            "https://api.github.com/repos/acme/project/actions/jobs/21",
+            expected(ApiFlavor::GitHub, "github.com", "acme", "21"),
+        ),
+        (
+            "https://gitlab.com/api/v4/projects/group%2Fsub%2Fproject/jobs/22",
+            expected(ApiFlavor::GitLab, "gitlab.com", "group/sub", "22"),
+        ),
+        (
+            "https://gitea.example/api/v1/repos/acme/project/actions/jobs/23",
+            expected(ApiFlavor::Gitea, "gitea.example", "acme", "23"),
+        ),
+        (
+            "https://forgejo.example/api/v1/repos/acme/project/actions/jobs/23",
+            expected(ApiFlavor::Forgejo, "forgejo.example", "acme", "23"),
+        ),
+        (
+            "https://api.bitbucket.org/2.0/repositories/acme/project/pipelines/p1/steps/s1",
+            expected(ApiFlavor::Bitbucket, "bitbucket.org", "acme", "p1/s1"),
+        ),
     ] {
         assert_eq!(job_identity(url).unwrap(), wanted, "{url}");
     }
@@ -254,12 +291,42 @@ fn canonical_api_urls_resolve_every_supported_provider() {
 #[test]
 fn enterprise_and_self_managed_urls_retain_scheme_and_non_default_port() {
     for (url, flavor, host, namespace) in [
-        ("https://ghe.example:8443/api/v3/repos/acme/project/pulls/7", ApiFlavor::GitHub, "ghe.example", "acme"),
-        ("http://ghe.example:8080/acme/project/pull/7", ApiFlavor::GitHub, "ghe.example", "acme"),
-        ("https://git.example:8443/api/v4/projects/group%2Fproject/merge_requests/8", ApiFlavor::GitLab, "git.example", "group"),
-        ("http://git.example:8080/group/project/-/merge_requests/8", ApiFlavor::GitLab, "git.example", "group"),
-        ("https://gitea.example:3000/api/v1/repos/acme/project/pulls/9", ApiFlavor::Gitea, "gitea.example", "acme"),
-        ("https://forgejo.example:3000/acme/project/pulls/9", ApiFlavor::Forgejo, "forgejo.example", "acme"),
+        (
+            "https://ghe.example:8443/api/v3/repos/acme/project/pulls/7",
+            ApiFlavor::GitHub,
+            "ghe.example",
+            "acme",
+        ),
+        (
+            "http://ghe.example:8080/acme/project/pull/7",
+            ApiFlavor::GitHub,
+            "ghe.example",
+            "acme",
+        ),
+        (
+            "https://git.example:8443/api/v4/projects/group%2Fproject/merge_requests/8",
+            ApiFlavor::GitLab,
+            "git.example",
+            "group",
+        ),
+        (
+            "http://git.example:8080/group/project/-/merge_requests/8",
+            ApiFlavor::GitLab,
+            "git.example",
+            "group",
+        ),
+        (
+            "https://gitea.example:3000/api/v1/repos/acme/project/pulls/9",
+            ApiFlavor::Gitea,
+            "gitea.example",
+            "acme",
+        ),
+        (
+            "https://forgejo.example:3000/acme/project/pulls/9",
+            ApiFlavor::Forgejo,
+            "forgejo.example",
+            "acme",
+        ),
     ] {
         let (client, _) =
             FocusedProviderClient::from_pull_request_url(url, FetchPolicy::deny_all()).unwrap();
@@ -282,7 +349,10 @@ fn enterprise_and_self_managed_urls_retain_scheme_and_non_default_port() {
         "https://git.example:8443/api/v4/projects/group%2Fproject/jobs/22",
     )
     .unwrap();
-    assert_eq!(remote.http_origin().as_deref(), Some("https://git.example:8443"));
+    assert_eq!(
+        remote.http_origin().as_deref(),
+        Some("https://git.example:8443")
+    );
 }
 
 /// A host that pins a provider accepts only that provider's routes, so a route
@@ -460,9 +530,16 @@ fn unicode_repository_identities_survive_canonical_reference_parsing() {
 #[test]
 fn official_api_hostnames_resolve_to_the_repository_web_host() {
     for (url, api_host, web_host) in [
-        ("https://api.github.com/repos/acme/project/pulls/7", "api.github.com", "github.com"),
-        ("https://api.bitbucket.org/2.0/repositories/acme/project/pullrequests/10",
-         "api.bitbucket.org", "bitbucket.org"),
+        (
+            "https://api.github.com/repos/acme/project/pulls/7",
+            "api.github.com",
+            "github.com",
+        ),
+        (
+            "https://api.bitbucket.org/2.0/repositories/acme/project/pullrequests/10",
+            "api.bitbucket.org",
+            "bitbucket.org",
+        ),
     ] {
         let (client, _) =
             FocusedProviderClient::from_pull_request_url(url, FetchPolicy::deny_all()).unwrap();
@@ -474,16 +551,51 @@ fn official_api_hostnames_resolve_to_the_repository_web_host() {
 #[tokio::test]
 async fn exact_pull_requests_preserve_identity_and_authoritative_not_found() {
     let cases = [
-        (ApiFlavor::GitHub, "/api/repos/acme/project/pulls/7", "/api/repos/acme/project/pulls/8", serde_json::json!({"number": 7, "title": "Fix", "state": "open", "user": {"login": "alice"}, "created_at": "2024-01-01", "html_url": "https://127.0.0.1/pr/7", "url": "https://api.example/pr/7"})),
-        (ApiFlavor::GitLab, "/api/projects/acme%2Fproject/merge_requests/7", "/api/projects/acme%2Fproject/merge_requests/8", serde_json::json!({"iid": 7, "title": "Fix", "state": "opened", "author": {"username": "alice"}, "created_at": "2024-01-01", "web_url": "https://127.0.0.1/mr/7"})),
-        (ApiFlavor::Gitea, "/api/repos/acme/project/pulls/7", "/api/repos/acme/project/pulls/8", serde_json::json!({"number": 7, "title": "Fix", "state": "open", "user": {"login": "alice"}, "created_at": "2024-01-01", "html_url": "https://127.0.0.1/pr/7"})),
-        (ApiFlavor::Forgejo, "/api/repos/acme/project/pulls/7", "/api/repos/acme/project/pulls/8", serde_json::json!({"number": 7, "title": "Fix", "state": "open", "user": {"login": "alice"}, "created_at": "2024-01-01", "html_url": "https://127.0.0.1/pr/7"})),
-        (ApiFlavor::Bitbucket, "/api/repositories/acme/project/pullrequests/7", "/api/repositories/acme/project/pullrequests/8", serde_json::json!({"id": 7, "title": "Fix", "state": "OPEN", "author": {"display_name": "alice"}, "created_on": "2024-01-01", "links": {"html": {"href": "https://127.0.0.1/pr/7"}}})),
+        (
+            ApiFlavor::GitHub,
+            "/api/repos/acme/project/pulls/7",
+            "/api/repos/acme/project/pulls/8",
+            serde_json::json!({"number": 7, "title": "Fix", "state": "open", "user": {"login": "alice"}, "created_at": "2024-01-01", "html_url": "https://127.0.0.1/pr/7", "url": "https://api.example/pr/7"}),
+        ),
+        (
+            ApiFlavor::GitLab,
+            "/api/projects/acme%2Fproject/merge_requests/7",
+            "/api/projects/acme%2Fproject/merge_requests/8",
+            serde_json::json!({"iid": 7, "title": "Fix", "state": "opened", "author": {"username": "alice"}, "created_at": "2024-01-01", "web_url": "https://127.0.0.1/mr/7"}),
+        ),
+        (
+            ApiFlavor::Gitea,
+            "/api/repos/acme/project/pulls/7",
+            "/api/repos/acme/project/pulls/8",
+            serde_json::json!({"number": 7, "title": "Fix", "state": "open", "user": {"login": "alice"}, "created_at": "2024-01-01", "html_url": "https://127.0.0.1/pr/7"}),
+        ),
+        (
+            ApiFlavor::Forgejo,
+            "/api/repos/acme/project/pulls/7",
+            "/api/repos/acme/project/pulls/8",
+            serde_json::json!({"number": 7, "title": "Fix", "state": "open", "user": {"login": "alice"}, "created_at": "2024-01-01", "html_url": "https://127.0.0.1/pr/7"}),
+        ),
+        (
+            ApiFlavor::Bitbucket,
+            "/api/repositories/acme/project/pullrequests/7",
+            "/api/repositories/acme/project/pullrequests/8",
+            serde_json::json!({"id": 7, "title": "Fix", "state": "OPEN", "author": {"display_name": "alice"}, "created_on": "2024-01-01", "links": {"html": {"href": "https://127.0.0.1/pr/7"}}}),
+        ),
     ];
     for (flavor, found_path, missing_path, body) in cases {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).and(path(found_path)).respond_with(ResponseTemplate::new(200).set_body_json(body)).expect(1).mount(&server).await;
-        Mock::given(method("GET")).and(path(missing_path)).respond_with(ResponseTemplate::new(404)).expect(1).mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path(found_path))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(missing_path))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(1)
+            .mount(&server)
+            .await;
         let adapter = client(&server, flavor);
         let record = adapter.get_pull_request("7").await.unwrap().unwrap();
         assert_eq!(record.identity.native_id, "7");
@@ -527,7 +639,9 @@ async fn exact_and_list_paths_encode_unicode_and_structural_identity_bytes() {
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path(format!("/api/{repository_base}/actions/jobs/{encoded_id}")))
+            .and(path(format!(
+                "/api/{repository_base}/actions/jobs/{encoded_id}"
+            )))
             .respond_with(ResponseTemplate::new(200).set_body_json(job_item(7)))
             .expect(1)
             .mount(&server)
@@ -566,7 +680,13 @@ async fn exact_and_list_paths_encode_unicode_and_structural_identity_bytes() {
             display_id: exact_id.to_string(),
             ..reference(ApiFlavor::Gitea, exact_id)
         };
-        assert!(adapter.get_cicd_job(&exact_reference).await.unwrap().is_some());
+        assert!(
+            adapter
+                .get_cicd_job(&exact_reference)
+                .await
+                .unwrap()
+                .is_some()
+        );
         assert!(
             adapter
                 .query_cicd_jobs(CiCdJobQuery::default())
@@ -584,9 +704,10 @@ async fn exact_and_list_paths_encode_unicode_and_structural_identity_bytes() {
             );
             assert_ne!(request.url.fragment(), Some("fragment"));
             assert!(
-                request.url.query_pairs().all(|(key, value)| {
-                    !(key == "state" && value == "closed") && key != "x"
-                }),
+                request
+                    .url
+                    .query_pairs()
+                    .all(|(key, value)| { !(key == "state" && value == "closed") && key != "x" }),
                 "identity bytes retargeted the query: {}",
                 request.url
             );
@@ -597,10 +718,30 @@ async fn exact_and_list_paths_encode_unicode_and_structural_identity_bytes() {
 #[tokio::test]
 async fn exact_jobs_are_normalized_for_every_supported_flavor() {
     let cases = [
-        (ApiFlavor::GitHub, "10", "/api/repos/acme/project/actions/jobs/10", serde_json::json!({"id": 10, "name": "test", "status": "completed", "conclusion": "success", "run_id": 1})),
-        (ApiFlavor::GitLab, "10", "/api/projects/acme%2Fproject/jobs/10", serde_json::json!({"id": 10, "name": "test", "status": "success", "pipeline_id": 1})),
-        (ApiFlavor::Gitea, "10", "/api/repos/acme/project/actions/jobs/10", serde_json::json!({"id": 10, "name": "test", "status": "success", "run_id": 1})),
-        (ApiFlavor::Bitbucket, "parent/step", "/api/repositories/acme/project/pipelines/parent/steps/step", serde_json::json!({"uuid": "step", "name": "test", "state": {"name": "COMPLETED", "result": {"name": "SUCCESSFUL"}}})),
+        (
+            ApiFlavor::GitHub,
+            "10",
+            "/api/repos/acme/project/actions/jobs/10",
+            serde_json::json!({"id": 10, "name": "test", "status": "completed", "conclusion": "success", "run_id": 1}),
+        ),
+        (
+            ApiFlavor::GitLab,
+            "10",
+            "/api/projects/acme%2Fproject/jobs/10",
+            serde_json::json!({"id": 10, "name": "test", "status": "success", "pipeline_id": 1}),
+        ),
+        (
+            ApiFlavor::Gitea,
+            "10",
+            "/api/repos/acme/project/actions/jobs/10",
+            serde_json::json!({"id": 10, "name": "test", "status": "success", "run_id": 1}),
+        ),
+        (
+            ApiFlavor::Bitbucket,
+            "parent/step",
+            "/api/repositories/acme/project/pipelines/parent/steps/step",
+            serde_json::json!({"uuid": "step", "name": "test", "state": {"name": "COMPLETED", "result": {"name": "SUCCESSFUL"}}}),
+        ),
     ];
     for (flavor, id, endpoint, body) in cases {
         let server = MockServer::start().await;
@@ -610,7 +751,11 @@ async fn exact_jobs_are_normalized_for_every_supported_flavor() {
             .expect(1)
             .mount(&server)
             .await;
-        let job = client(&server, flavor).get_cicd_job(&reference(flavor, id)).await.unwrap().unwrap();
+        let job = client(&server, flavor)
+            .get_cicd_job(&reference(flavor, id))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(job.name, "test");
         assert_eq!(job.normalized_status, "success");
         assert!(!job.parent.native_id.is_empty());
@@ -619,7 +764,12 @@ async fn exact_jobs_are_normalized_for_every_supported_flavor() {
 
 #[tokio::test]
 async fn job_listing_uses_each_supported_flavor_strategy() {
-    for flavor in [ApiFlavor::GitHub, ApiFlavor::GitLab, ApiFlavor::Gitea, ApiFlavor::Bitbucket] {
+    for flavor in [
+        ApiFlavor::GitHub,
+        ApiFlavor::GitLab,
+        ApiFlavor::Gitea,
+        ApiFlavor::Bitbucket,
+    ] {
         let server = MockServer::start().await;
         if flavor == ApiFlavor::GitLab {
             Mock::given(method("GET"))
@@ -640,15 +790,43 @@ async fn job_listing_uses_each_supported_flavor_strategy() {
                 .mount(&server)
                 .await;
         } else {
-            let (parents_path, jobs_path, parent_body, jobs_body) = if flavor == ApiFlavor::Bitbucket {
-                ("/api/repositories/acme/project/pipelines", "/api/repositories/acme/project/pipelines/p1/steps", serde_json::json!({"values": [{"uuid": "p1"}]}), serde_json::json!({"values": [{"uuid": "s1", "name": "test", "state": {"name": "COMPLETED", "result": {"name": "SUCCESSFUL"}}}]}))
+            let (parents_path, jobs_path, parent_body, jobs_body) = if flavor
+                == ApiFlavor::Bitbucket
+            {
+                (
+                    "/api/repositories/acme/project/pipelines",
+                    "/api/repositories/acme/project/pipelines/p1/steps",
+                    serde_json::json!({"values": [{"uuid": "p1"}]}),
+                    serde_json::json!({"values": [{"uuid": "s1", "name": "test", "state": {"name": "COMPLETED", "result": {"name": "SUCCESSFUL"}}}]}),
+                )
             } else {
-                ("/api/repos/acme/project/actions/runs", "/api/repos/acme/project/actions/runs/1/jobs", serde_json::json!({"workflow_runs": [{"id": 1, "name": "CI"}]}), serde_json::json!({"jobs": [{"id": 10, "name": "test", "status": "success"}]}))
+                (
+                    "/api/repos/acme/project/actions/runs",
+                    "/api/repos/acme/project/actions/runs/1/jobs",
+                    serde_json::json!({"workflow_runs": [{"id": 1, "name": "CI"}]}),
+                    serde_json::json!({"jobs": [{"id": 10, "name": "test", "status": "success"}]}),
+                )
             };
-            Mock::given(method("GET")).and(path(parents_path)).respond_with(ResponseTemplate::new(200).set_body_json(parent_body)).expect(1).mount(&server).await;
-            Mock::given(method("GET")).and(path(jobs_path)).respond_with(ResponseTemplate::new(200).set_body_json(jobs_body)).expect(1).mount(&server).await;
+            Mock::given(method("GET"))
+                .and(path(parents_path))
+                .respond_with(ResponseTemplate::new(200).set_body_json(parent_body))
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .and(path(jobs_path))
+                .respond_with(ResponseTemplate::new(200).set_body_json(jobs_body))
+                .expect(1)
+                .mount(&server)
+                .await;
         }
-        let page = client(&server, flavor).query_cicd_jobs(CiCdJobQuery { limit: Some(2), ..Default::default() }).await.unwrap();
+        let page = client(&server, flavor)
+            .query_cicd_jobs(CiCdJobQuery {
+                limit: Some(2),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].name, "test");
     }
@@ -838,7 +1016,9 @@ async fn exact_jobs_retain_every_field_the_record_promises() {
     Mock::given(method("GET"))
         // Bitbucket UUIDs are brace-wrapped, and braces are not path-safe, so the
         // request that actually reaches the provider is percent-encoded.
-        .and(path("/api/repositories/acme/project/pipelines/%7Bp1%7D/steps/%7Bs1%7D"))
+        .and(path(
+            "/api/repositories/acme/project/pipelines/%7Bp1%7D/steps/%7Bs1%7D",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(bitbucket_step()))
         .expect(1)
         .mount(&server)
@@ -976,7 +1156,9 @@ async fn parent_run_metadata_reaches_the_jobs_beneath_it() {
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path("/api/repositories/acme/project/pipelines/%7Bp1%7D/steps"))
+        .and(path(
+            "/api/repositories/acme/project/pipelines/%7Bp1%7D/steps",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "values": [bitbucket_step()]
         })))
@@ -1080,7 +1262,10 @@ async fn pull_request_list_orders_the_complete_domain_before_truncating() {
         .await
         .unwrap();
     assert_eq!(
-        ids(page.items.iter().map(|item| item.identity.native_id.clone())),
+        ids(page
+            .items
+            .iter()
+            .map(|item| item.identity.native_id.clone())),
         ["103", "102"]
     );
     assert_eq!(page.total, Some(103));
@@ -1100,7 +1285,10 @@ async fn pull_request_list_honors_explicit_ascending_direction() {
         .await
         .unwrap();
     assert_eq!(
-        ids(page.items.iter().map(|item| item.identity.native_id.clone())),
+        ids(page
+            .items
+            .iter()
+            .map(|item| item.identity.native_id.clone())),
         ["1", "2"]
     );
 }
@@ -1115,9 +1303,7 @@ async fn pull_request_filters_reach_matches_beyond_the_first_page() {
         Mock::given(method("GET"))
             .and(path("/api/repos/acme/project/pulls"))
             .and(query_param("page", page.to_string()))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(pr_page(1..=PAGE_SIZE, "bob")),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(pr_page(1..=PAGE_SIZE, "bob")))
             .mount(&server)
             .await;
     }
@@ -1135,7 +1321,10 @@ async fn pull_request_filters_reach_matches_beyond_the_first_page() {
         .await
         .unwrap();
     assert_eq!(
-        ids(page.items.iter().map(|item| item.identity.native_id.clone())),
+        ids(page
+            .items
+            .iter()
+            .map(|item| item.identity.native_id.clone())),
         ["203", "202", "201"]
     );
     assert_eq!(page.total, Some(3));
@@ -1161,7 +1350,10 @@ async fn pull_request_list_reports_an_unexhausted_domain_as_an_error() {
     assert!(
         matches!(
             error,
-            SniffError::IncompleteRemoteDomain { bound: "pull-request pages", .. }
+            SniffError::IncompleteRemoteDomain {
+                bound: "pull-request pages",
+                ..
+            }
         ),
         "expected an explicit incomplete-domain error, got {error:?}"
     );
@@ -1173,26 +1365,72 @@ async fn pull_request_list_reports_an_unexhausted_domain_as_an_error() {
 #[tokio::test]
 async fn pull_request_state_is_projected_into_each_provider_vocabulary() {
     let cases: [(ApiFlavor, &[CanonicalPullRequestState], &[&str]); 14] = [
-        (ApiFlavor::GitHub, &[CanonicalPullRequestState::Open], &["open"]),
-        (ApiFlavor::GitHub, &[CanonicalPullRequestState::Closed], &["closed"]),
-        (ApiFlavor::GitHub, &[CanonicalPullRequestState::Merged], &["closed"]),
         (
             ApiFlavor::GitHub,
-            &[CanonicalPullRequestState::Open, CanonicalPullRequestState::Merged],
+            &[CanonicalPullRequestState::Open],
+            &["open"],
+        ),
+        (
+            ApiFlavor::GitHub,
+            &[CanonicalPullRequestState::Closed],
+            &["closed"],
+        ),
+        (
+            ApiFlavor::GitHub,
+            &[CanonicalPullRequestState::Merged],
+            &["closed"],
+        ),
+        (
+            ApiFlavor::GitHub,
+            &[
+                CanonicalPullRequestState::Open,
+                CanonicalPullRequestState::Merged,
+            ],
             &["all"],
         ),
-        (ApiFlavor::Gitea, &[CanonicalPullRequestState::Merged], &["closed"]),
-        (ApiFlavor::Forgejo, &[CanonicalPullRequestState::Open], &["open"]),
-        (ApiFlavor::GitLab, &[CanonicalPullRequestState::Open], &["opened"]),
-        (ApiFlavor::GitLab, &[CanonicalPullRequestState::Closed], &["closed"]),
-        (ApiFlavor::GitLab, &[CanonicalPullRequestState::Merged], &["merged"]),
+        (
+            ApiFlavor::Gitea,
+            &[CanonicalPullRequestState::Merged],
+            &["closed"],
+        ),
+        (
+            ApiFlavor::Forgejo,
+            &[CanonicalPullRequestState::Open],
+            &["open"],
+        ),
         (
             ApiFlavor::GitLab,
-            &[CanonicalPullRequestState::Open, CanonicalPullRequestState::Merged],
+            &[CanonicalPullRequestState::Open],
+            &["opened"],
+        ),
+        (
+            ApiFlavor::GitLab,
+            &[CanonicalPullRequestState::Closed],
+            &["closed"],
+        ),
+        (
+            ApiFlavor::GitLab,
+            &[CanonicalPullRequestState::Merged],
+            &["merged"],
+        ),
+        (
+            ApiFlavor::GitLab,
+            &[
+                CanonicalPullRequestState::Open,
+                CanonicalPullRequestState::Merged,
+            ],
             &["all"],
         ),
-        (ApiFlavor::Bitbucket, &[CanonicalPullRequestState::Open], &["OPEN"]),
-        (ApiFlavor::Bitbucket, &[CanonicalPullRequestState::Merged], &["MERGED"]),
+        (
+            ApiFlavor::Bitbucket,
+            &[CanonicalPullRequestState::Open],
+            &["OPEN"],
+        ),
+        (
+            ApiFlavor::Bitbucket,
+            &[CanonicalPullRequestState::Merged],
+            &["MERGED"],
+        ),
         (
             ApiFlavor::Bitbucket,
             &[CanonicalPullRequestState::Closed],
@@ -1200,7 +1438,10 @@ async fn pull_request_state_is_projected_into_each_provider_vocabulary() {
         ),
         (
             ApiFlavor::Bitbucket,
-            &[CanonicalPullRequestState::Open, CanonicalPullRequestState::Merged],
+            &[
+                CanonicalPullRequestState::Open,
+                CanonicalPullRequestState::Merged,
+            ],
             &["OPEN", "MERGED"],
         ),
     ];
@@ -1270,7 +1511,10 @@ async fn widened_provider_state_is_narrowed_by_the_exact_local_filter() {
         .unwrap();
     assert_eq!(recorded_state_params(&server).await, ["closed"]);
     assert_eq!(
-        ids(page.items.iter().map(|item| item.identity.native_id.clone())),
+        ids(page
+            .items
+            .iter()
+            .map(|item| item.identity.native_id.clone())),
         ["2"]
     );
 }
@@ -1293,21 +1537,35 @@ async fn cicd_direct_listing_orders_the_complete_domain_before_truncating() {
         .await;
 
     let newest = client(&server, ApiFlavor::GitLab)
-        .query_cicd_jobs(CiCdJobQuery { descending: true, limit: Some(2), ..Default::default() })
+        .query_cicd_jobs(CiCdJobQuery {
+            descending: true,
+            limit: Some(2),
+            ..Default::default()
+        })
         .await
         .unwrap();
     assert_eq!(
-        ids(newest.items.iter().map(|job| job.reference.native_id.clone())),
+        ids(newest
+            .items
+            .iter()
+            .map(|job| job.reference.native_id.clone())),
         ["103", "102"]
     );
     assert_eq!(newest.total, Some(103));
 
     let oldest = client(&server, ApiFlavor::GitLab)
-        .query_cicd_jobs(CiCdJobQuery { descending: false, limit: Some(2), ..Default::default() })
+        .query_cicd_jobs(CiCdJobQuery {
+            descending: false,
+            limit: Some(2),
+            ..Default::default()
+        })
         .await
         .unwrap();
     assert_eq!(
-        ids(oldest.items.iter().map(|job| job.reference.native_id.clone())),
+        ids(oldest
+            .items
+            .iter()
+            .map(|job| job.reference.native_id.clone())),
         ["1", "2"]
     );
 }
@@ -1328,7 +1586,13 @@ async fn cicd_direct_listing_reports_an_unexhausted_domain_as_an_error() {
         .await
         .unwrap_err();
     assert!(
-        matches!(error, SniffError::IncompleteRemoteDomain { bound: "job pages", .. }),
+        matches!(
+            error,
+            SniffError::IncompleteRemoteDomain {
+                bound: "job pages",
+                ..
+            }
+        ),
         "expected an explicit incomplete-domain error, got {error:?}"
     );
 }
@@ -1360,7 +1624,11 @@ async fn cicd_parent_traversal_orders_across_every_parent() {
         .mount(&server)
         .await;
     let page = client(&server, ApiFlavor::GitHub)
-        .query_cicd_jobs(CiCdJobQuery { descending: true, limit: Some(1), ..Default::default() })
+        .query_cicd_jobs(CiCdJobQuery {
+            descending: true,
+            limit: Some(1),
+            ..Default::default()
+        })
         .await
         .unwrap();
     assert_eq!(
@@ -1386,10 +1654,10 @@ async fn cicd_parent_traversal_reports_the_parent_cap_as_an_error() {
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path_regex(r"^/api/repos/acme/project/actions/runs/\d+/jobs$"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({"jobs": []})),
-        )
+        .and(path_regex(
+            r"^/api/repos/acme/project/actions/runs/\d+/jobs$",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"jobs": []})))
         .mount(&server)
         .await;
     let error = client(&server, ApiFlavor::GitHub)
@@ -1399,7 +1667,10 @@ async fn cicd_parent_traversal_reports_the_parent_cap_as_an_error() {
     assert!(
         matches!(
             error,
-            SniffError::IncompleteRemoteDomain { bound: "parent executions", .. }
+            SniffError::IncompleteRemoteDomain {
+                bound: "parent executions",
+                ..
+            }
         ),
         "expected an explicit incomplete-domain error, got {error:?}"
     );
@@ -1422,16 +1693,18 @@ async fn cicd_parent_traversal_reports_the_inspected_job_cap_as_an_error() {
         .await;
     let full = (1..=PAGE_SIZE).map(job_item).collect::<Vec<_>>();
     Mock::given(method("GET"))
-        .and(path_regex(r"^/api/repos/acme/project/actions/runs/\d+/jobs$"))
+        .and(path_regex(
+            r"^/api/repos/acme/project/actions/runs/\d+/jobs$",
+        ))
         .and(query_param("page", "1"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({"jobs": full})),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"jobs": full})))
         .mount(&server)
         .await;
     let partial = (1..=50).map(job_item).collect::<Vec<_>>();
     Mock::given(method("GET"))
-        .and(path_regex(r"^/api/repos/acme/project/actions/runs/\d+/jobs$"))
+        .and(path_regex(
+            r"^/api/repos/acme/project/actions/runs/\d+/jobs$",
+        ))
         .and(query_param("page", "2"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(serde_json::json!({"jobs": partial})),
@@ -1445,7 +1718,10 @@ async fn cicd_parent_traversal_reports_the_inspected_job_cap_as_an_error() {
     assert!(
         matches!(
             error,
-            SniffError::IncompleteRemoteDomain { bound: "inspected jobs", .. }
+            SniffError::IncompleteRemoteDomain {
+                bound: "inspected jobs",
+                ..
+            }
         ),
         "expected an explicit incomplete-domain error, got {error:?}"
     );
@@ -1500,7 +1776,13 @@ fn single_filter_case(field: &str) -> (PullRequestQuery, Vec<&'static str>) {
             },
             vec!["1", "2"],
         ),
-        "sort" => (PullRequestQuery { sort: Some("created".to_string()), ..base() }, vec!["2", "1"]),
+        "sort" => (
+            PullRequestQuery {
+                sort: Some("created".to_string()),
+                ..base()
+            },
+            vec!["2", "1"],
+        ),
         "state" => (
             PullRequestQuery {
                 state: Some(QueryValues::Many(vec![CanonicalPullRequestState::Merged])),
@@ -1508,38 +1790,83 @@ fn single_filter_case(field: &str) -> (PullRequestQuery, Vec<&'static str>) {
             },
             vec!["3"],
         ),
-        "draft" => (PullRequestQuery { draft: Some(true), ..base() }, vec!["1"]),
+        "draft" => (
+            PullRequestQuery {
+                draft: Some(true),
+                ..base()
+            },
+            vec!["1"],
+        ),
         "source_branch" => (
-            PullRequestQuery { source_branch: Some("feature/a".to_string()), ..base() },
+            PullRequestQuery {
+                source_branch: Some("feature/a".to_string()),
+                ..base()
+            },
             vec!["1"],
         ),
         "target_branch" => (
-            PullRequestQuery { target_branch: Some("develop".to_string()), ..base() },
+            PullRequestQuery {
+                target_branch: Some("develop".to_string()),
+                ..base()
+            },
             vec!["2"],
         ),
-        "author" => (PullRequestQuery { author: Some("bob".to_string()), ..base() }, vec!["2"]),
+        "author" => (
+            PullRequestQuery {
+                author: Some("bob".to_string()),
+                ..base()
+            },
+            vec!["2"],
+        ),
         "labels" => (
-            PullRequestQuery { labels: vec!["chore".to_string()], ..base() },
+            PullRequestQuery {
+                labels: vec!["chore".to_string()],
+                ..base()
+            },
             vec!["2"],
         ),
-        "search" => (PullRequestQuery { search: Some("alpha".to_string()), ..base() }, vec!["1"]),
+        "search" => (
+            PullRequestQuery {
+                search: Some("alpha".to_string()),
+                ..base()
+            },
+            vec!["1"],
+        ),
         "created_after" => (
-            PullRequestQuery { created_after: Some(ts(10)), ..base() },
+            PullRequestQuery {
+                created_after: Some(ts(10)),
+                ..base()
+            },
             vec!["2"],
         ),
         "updated_after" => (
-            PullRequestQuery { updated_after: Some(ts(10)), ..base() },
+            PullRequestQuery {
+                updated_after: Some(ts(10)),
+                ..base()
+            },
             vec!["2"],
         ),
         "created_before" => (
-            PullRequestQuery { created_before: Some(ts(10)), ..base() },
+            PullRequestQuery {
+                created_before: Some(ts(10)),
+                ..base()
+            },
             vec!["1"],
         ),
         "updated_before" => (
-            PullRequestQuery { updated_before: Some(ts(10)), ..base() },
+            PullRequestQuery {
+                updated_before: Some(ts(10)),
+                ..base()
+            },
             vec!["1"],
         ),
-        "limit" => (PullRequestQuery { limit: Some(1), ..base() }, vec!["2"]),
+        "limit" => (
+            PullRequestQuery {
+                limit: Some(1),
+                ..base()
+            },
+            vec!["2"],
+        ),
         other => panic!("declared filter {other} has no discriminating probe"),
     };
     (query, expected)
@@ -1567,7 +1894,10 @@ async fn declared_filters_match_the_filters_the_client_actually_honors() {
             .await
             .unwrap_or_else(|error| panic!("declared filter {field} was not honored: {error}"));
         assert_eq!(
-            ids(page.items.iter().map(|item| item.identity.native_id.clone())),
+            ids(page
+                .items
+                .iter()
+                .map(|item| item.identity.native_id.clone())),
             expected,
             "declared filter {field} did not select the rows it promises"
         );
@@ -1579,10 +1909,22 @@ async fn declared_filters_match_the_filters_the_client_actually_honors() {
             "{field} is rejected at runtime but still advertised"
         );
         let query = match field {
-            "assignee" => PullRequestQuery { assignee: Some("x".to_string()), ..Default::default() },
-            "reviewer" => PullRequestQuery { reviewer: Some("x".to_string()), ..Default::default() },
-            "milestone" => PullRequestQuery { milestone: Some("x".to_string()), ..Default::default() },
-            _ => PullRequestQuery { commit: Some("x".to_string()), ..Default::default() },
+            "assignee" => PullRequestQuery {
+                assignee: Some("x".to_string()),
+                ..Default::default()
+            },
+            "reviewer" => PullRequestQuery {
+                reviewer: Some("x".to_string()),
+                ..Default::default()
+            },
+            "milestone" => PullRequestQuery {
+                milestone: Some("x".to_string()),
+                ..Default::default()
+            },
+            _ => PullRequestQuery {
+                commit: Some("x".to_string()),
+                ..Default::default()
+            },
         };
         assert!(
             matches!(
@@ -1602,8 +1944,16 @@ async fn declared_filters_match_the_filters_the_client_actually_honors() {
 #[tokio::test]
 async fn denial_validation_and_provider_failures_remain_distinct() {
     let server = MockServer::start().await;
-    let denied = FocusedProviderClient::with_api_base(remote(ApiFlavor::GitHub), FetchPolicy::deny_all(), &format!("{}/api", server.uri())).unwrap();
-    assert!(matches!(denied.get_pull_request("1").await, Err(SniffError::RemotePolicyDenied { .. })));
+    let denied = FocusedProviderClient::with_api_base(
+        remote(ApiFlavor::GitHub),
+        FetchPolicy::deny_all(),
+        &format!("{}/api", server.uri()),
+    )
+    .unwrap();
+    assert!(matches!(
+        denied.get_pull_request("1").await,
+        Err(SniffError::RemotePolicyDenied { .. })
+    ));
     assert!(server.received_requests().await.unwrap().is_empty());
 
     let mut mismatched_remote = remote(ApiFlavor::GitHub);
@@ -1620,27 +1970,57 @@ async fn denial_validation_and_provider_failures_remain_distinct() {
     ));
     assert!(server.received_requests().await.unwrap().is_empty());
 
-    let unsupported = client(&server, ApiFlavor::GitHub).query_pull_requests(PullRequestQuery {
-        reviewer: Some("alice".to_string()),
-        ..Default::default()
-    }).await.unwrap_err();
-    assert!(matches!(unsupported, SniffError::UnsupportedRemoteFilter { field: "reviewer", .. }));
+    let unsupported = client(&server, ApiFlavor::GitHub)
+        .query_pull_requests(PullRequestQuery {
+            reviewer: Some("alice".to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        unsupported,
+        SniffError::UnsupportedRemoteFilter {
+            field: "reviewer",
+            ..
+        }
+    ));
     assert!(server.received_requests().await.unwrap().is_empty());
 
-    for (status, expected) in [(401, "auth"), (403, "forbidden"), (429, "rate") ] {
+    for (status, expected) in [(401, "auth"), (403, "forbidden"), (429, "rate")] {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/api/repos/acme/project/pulls/1")).respond_with(ResponseTemplate::new(status)).expect(1).mount(&server).await;
-        let error = client(&server, ApiFlavor::GitHub).get_pull_request("1").await.unwrap_err();
+        Mock::given(method("GET"))
+            .and(path("/api/repos/acme/project/pulls/1"))
+            .respond_with(ResponseTemplate::new(status))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let error = client(&server, ApiFlavor::GitHub)
+            .get_pull_request("1")
+            .await
+            .unwrap_err();
         match expected {
-            "auth" => assert!(matches!(error, SniffError::MissingCredentials { .. } | SniffError::InvalidCredentials { .. })),
+            "auth" => assert!(matches!(
+                error,
+                SniffError::MissingCredentials { .. } | SniffError::InvalidCredentials { .. }
+            )),
             "forbidden" => assert!(matches!(error, SniffError::RemoteForbidden { .. })),
             _ => assert!(matches!(error, SniffError::RateLimited { .. })),
         }
     }
 
     let server = MockServer::start().await;
-    Mock::given(method("GET")).and(path("/api/repos/acme/project/pulls/1")).respond_with(ResponseTemplate::new(200).set_body_string("not json")).expect(1).mount(&server).await;
-    assert!(matches!(client(&server, ApiFlavor::GitHub).get_pull_request("1").await, Err(SniffError::RemoteApi { status: 200, .. })));
+    Mock::given(method("GET"))
+        .and(path("/api/repos/acme/project/pulls/1"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("not json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    assert!(matches!(
+        client(&server, ApiFlavor::GitHub)
+            .get_pull_request("1")
+            .await,
+        Err(SniffError::RemoteApi { status: 200, .. })
+    ));
 
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -1652,12 +2032,22 @@ async fn denial_validation_and_provider_failures_remain_distinct() {
         .mount(&server)
         .await;
     assert!(matches!(
-        client(&server, ApiFlavor::GitHub).get_pull_request("1").await,
+        client(&server, ApiFlavor::GitHub)
+            .get_pull_request("1")
+            .await,
         Err(SniffError::RemoteUnreachable { .. })
     ));
 
-    let unavailable = FocusedProviderClient::with_api_base(remote(ApiFlavor::GitHub), FetchPolicy::deny_all().allow_host("127.0.0.1"), "http://127.0.0.1:9/api").unwrap();
-    assert!(matches!(unavailable.get_pull_request("1").await, Err(SniffError::RemoteUnreachable { .. })));
+    let unavailable = FocusedProviderClient::with_api_base(
+        remote(ApiFlavor::GitHub),
+        FetchPolicy::deny_all().allow_host("127.0.0.1"),
+        "http://127.0.0.1:9/api",
+    )
+    .unwrap();
+    assert!(matches!(
+        unavailable.get_pull_request("1").await,
+        Err(SniffError::RemoteUnreachable { .. })
+    ));
 }
 
 /// D24: newest-first is the default for both queries; Darkmatter's authored
@@ -1679,7 +2069,10 @@ fn canonical_validation_rejects_unparseable_and_inverted_datetimes() {
     };
     assert!(matches!(
         unparseable.validate_canonical(),
-        Err(SniffError::InvalidRemoteQuery { field: "created_after", .. })
+        Err(SniffError::InvalidRemoteQuery {
+            field: "created_after",
+            ..
+        })
     ));
 
     // 23:00-05:00 is 04:00Z the next day, so byte order calls this ascending.
@@ -1690,7 +2083,10 @@ fn canonical_validation_rejects_unparseable_and_inverted_datetimes() {
     };
     assert!(matches!(
         inverted.validate_canonical(),
-        Err(SniffError::InvalidRemoteQuery { field: "created_after", .. })
+        Err(SniffError::InvalidRemoteQuery {
+            field: "created_after",
+            ..
+        })
     ));
 
     // The mirror: byte order rejects this window, instant order accepts it.
@@ -1717,7 +2113,13 @@ async fn cursor_is_refused_by_the_focused_client_before_io() {
         })
         .await
         .unwrap_err();
-    assert!(matches!(error, SniffError::InvalidRemoteQuery { field: "cursor", .. }));
+    assert!(matches!(
+        error,
+        SniffError::InvalidRemoteQuery {
+            field: "cursor",
+            ..
+        }
+    ));
 
     let error = client(&server, ApiFlavor::GitLab)
         .query_cicd_jobs(CiCdJobQuery {
@@ -1726,7 +2128,13 @@ async fn cursor_is_refused_by_the_focused_client_before_io() {
         })
         .await
         .unwrap_err();
-    assert!(matches!(error, SniffError::InvalidRemoteQuery { field: "cursor", .. }));
+    assert!(matches!(
+        error,
+        SniffError::InvalidRemoteQuery {
+            field: "cursor",
+            ..
+        }
+    ));
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 
@@ -1740,7 +2148,11 @@ async fn stage_filter_is_refused_before_io_on_flavors_without_stage_data() {
         let server = MockServer::start().await;
         let adapter = client(&server, flavor);
         assert!(
-            !adapter.capabilities().cicd_job_filters.iter().any(|field| field == "stage"),
+            !adapter
+                .capabilities()
+                .cicd_job_filters
+                .iter()
+                .any(|field| field == "stage"),
             "{flavor:?} advertises stage but cannot honor it"
         );
         let error = adapter
@@ -1751,7 +2163,10 @@ async fn stage_filter_is_refused_before_io_on_flavors_without_stage_data() {
             .await
             .unwrap_err();
         assert!(
-            matches!(error, SniffError::UnsupportedRemoteFilter { field: "stage", .. }),
+            matches!(
+                error,
+                SniffError::UnsupportedRemoteFilter { field: "stage", .. }
+            ),
             "{flavor:?} did not refuse stage: {error:?}"
         );
         assert!(
@@ -1771,9 +2186,18 @@ async fn stage_filter_is_refused_before_io_on_flavors_without_stage_data() {
         .mount(&server)
         .await;
     let adapter = client(&server, ApiFlavor::GitLab);
-    assert!(adapter.capabilities().cicd_job_filters.iter().any(|field| field == "stage"));
+    assert!(
+        adapter
+            .capabilities()
+            .cicd_job_filters
+            .iter()
+            .any(|field| field == "stage")
+    );
     let page = adapter
-        .query_cicd_jobs(CiCdJobQuery { stage: Some("deploy".to_string()), ..Default::default() })
+        .query_cicd_jobs(CiCdJobQuery {
+            stage: Some("deploy".to_string()),
+            ..Default::default()
+        })
         .await
         .unwrap();
     assert_eq!(
@@ -1860,7 +2284,10 @@ async fn provider_default_sort_preserves_provider_order_in_both_directions() {
             .await
             .unwrap();
         assert_eq!(
-            ids(page.items.iter().map(|item| item.identity.native_id.clone())),
+            ids(page
+                .items
+                .iter()
+                .map(|item| item.identity.native_id.clone())),
             ["2", "3", "1"],
             "provider order was not preserved with descending={descending}"
         );
@@ -1890,7 +2317,10 @@ async fn datetime_filters_compare_instants_not_strings() {
         .await
         .unwrap();
     assert_eq!(
-        ids(page.items.iter().map(|item| item.identity.native_id.clone())),
+        ids(page
+            .items
+            .iter()
+            .map(|item| item.identity.native_id.clone())),
         ["1"]
     );
 }
@@ -1956,7 +2386,9 @@ async fn neutral_host_self_managed_gitlab_resolves_through_the_production_path()
         .await;
 
     let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
-    let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+    let resolved = resolve_remote_at(directory.path(), None)
+        .unwrap()
+        .expect("remote resolved");
     assert_eq!(
         resolved.api_flavor,
         ApiFlavor::Unknown,
@@ -1969,15 +2401,17 @@ async fn neutral_host_self_managed_gitlab_resolves_through_the_production_path()
         "the mock server's non-default port must be retained"
     );
 
-    let client = FocusedProviderClient::discover(
-        resolved,
-        FetchPolicy::deny_all().allow_host("127.0.0.1"),
-    )
-    .await
-    .unwrap();
+    let client =
+        FocusedProviderClient::discover(resolved, FetchPolicy::deny_all().allow_host("127.0.0.1"))
+            .await
+            .unwrap();
     assert_eq!(client.remote().api_flavor, ApiFlavor::GitLab);
 
-    let record = client.get_pull_request("7").await.unwrap().expect("PR found");
+    let record = client
+        .get_pull_request("7")
+        .await
+        .unwrap()
+        .expect("PR found");
     assert_eq!(record.identity.provider, GitProvider::GitLab);
     assert_eq!(record.details.title, "Fix");
     assert_eq!(record.details.author, "alice");
@@ -2006,17 +2440,21 @@ async fn neutral_host_github_enterprise_resolves_through_the_production_path() {
         .await;
 
     let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
-    let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
-    let client = FocusedProviderClient::discover(
-        resolved,
-        FetchPolicy::deny_all().allow_host("127.0.0.1"),
-    )
-    .await
-    .unwrap();
+    let resolved = resolve_remote_at(directory.path(), None)
+        .unwrap()
+        .expect("remote resolved");
+    let client =
+        FocusedProviderClient::discover(resolved, FetchPolicy::deny_all().allow_host("127.0.0.1"))
+            .await
+            .unwrap();
     assert_eq!(client.remote().api_flavor, ApiFlavor::GitHub);
     assert_eq!(client.discovery().server_version.as_deref(), Some("3.16.1"));
 
-    let record = client.get_pull_request("7").await.unwrap().expect("PR found");
+    let record = client
+        .get_pull_request("7")
+        .await
+        .unwrap()
+        .expect("PR found");
     assert_eq!(record.identity.provider, GitProvider::GitHub);
 }
 
@@ -2026,7 +2464,10 @@ async fn neutral_host_github_enterprise_resolves_through_the_production_path() {
 async fn neutral_host_gitea_and_forgejo_are_distinguished_by_the_discovery_probe() {
     for (version_body, expected_flavor) in [
         (serde_json::json!({"version": "1.22.3"}), ApiFlavor::Gitea),
-        (serde_json::json!({"version": "9.0.0+forgejo-1.0"}), ApiFlavor::Forgejo),
+        (
+            serde_json::json!({"version": "9.0.0+forgejo-1.0"}),
+            ApiFlavor::Forgejo,
+        ),
     ] {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -2046,7 +2487,9 @@ async fn neutral_host_gitea_and_forgejo_are_distinguished_by_the_discovery_probe
             .await;
 
         let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
-        let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+        let resolved = resolve_remote_at(directory.path(), None)
+            .unwrap()
+            .expect("remote resolved");
         let client = FocusedProviderClient::discover(
             resolved,
             FetchPolicy::deny_all().allow_host("127.0.0.1"),
@@ -2055,7 +2498,11 @@ async fn neutral_host_gitea_and_forgejo_are_distinguished_by_the_discovery_probe
         .unwrap();
         assert_eq!(client.remote().api_flavor, expected_flavor);
 
-        let record = client.get_pull_request("7").await.unwrap().expect("PR found");
+        let record = client
+            .get_pull_request("7")
+            .await
+            .unwrap()
+            .expect("PR found");
         assert_eq!(record.details.author, "alice");
     }
 }
@@ -2147,7 +2594,9 @@ async fn private_gitea_and_forgejo_queries_use_host_bound_api_key_authentication
         }
 
         let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
-        let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+        let resolved = resolve_remote_at(directory.path(), None)
+            .unwrap()
+            .expect("remote resolved");
         let client = FocusedProviderClient::discover(
             resolved,
             FetchPolicy::deny_all().allow_host("127.0.0.1"),
@@ -2210,8 +2659,7 @@ async fn gitea_job_capabilities_cross_the_1_25_endpoint_threshold() {
         Mock::given(method("GET"))
             .and(path("/api/v1/version"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({"version": version})),
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"version": version})),
             )
             .expect(1)
             .mount(&server)
@@ -2237,7 +2685,9 @@ async fn gitea_job_capabilities_cross_the_1_25_endpoint_threshold() {
         }
 
         let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
-        let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+        let resolved = resolve_remote_at(directory.path(), None)
+            .unwrap()
+            .expect("remote resolved");
         let adapter = FocusedProviderClient::discover(
             resolved,
             FetchPolicy::deny_all().allow_host("127.0.0.1"),
@@ -2252,9 +2702,7 @@ async fn gitea_job_capabilities_cross_the_1_25_endpoint_threshold() {
         let exact = adapter
             .get_cicd_job(&reference(ApiFlavor::Gitea, "10"))
             .await;
-        let list = adapter
-            .query_cicd_jobs(CiCdJobQuery::default())
-            .await;
+        let list = adapter.query_cicd_jobs(CiCdJobQuery::default()).await;
         if supported {
             assert_eq!(exact.unwrap().unwrap().reference.native_id, "10");
             assert_eq!(list.unwrap().items.len(), 1);
@@ -2301,13 +2749,13 @@ async fn forgejo_14_rejects_exact_and_list_jobs_before_io() {
         .await;
 
     let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
-    let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
-    let adapter = FocusedProviderClient::discover(
-        resolved,
-        FetchPolicy::deny_all().allow_host("127.0.0.1"),
-    )
-    .await
-    .unwrap();
+    let resolved = resolve_remote_at(directory.path(), None)
+        .unwrap()
+        .expect("remote resolved");
+    let adapter =
+        FocusedProviderClient::discover(resolved, FetchPolicy::deny_all().allow_host("127.0.0.1"))
+            .await
+            .unwrap();
     assert_eq!(adapter.discovery().api_flavor, ApiFlavor::Forgejo);
     assert!(!adapter.capabilities().cicd_jobs);
     let request_count_after_discovery = server.received_requests().await.unwrap().len();
@@ -2346,7 +2794,9 @@ async fn forgejo_14_rejects_exact_and_list_jobs_before_io() {
 async fn neutral_host_discovery_is_denied_before_any_request() {
     let server = MockServer::start().await;
     let directory = loopback_repository(&format!("{}/acme/project.git", server.uri()));
-    let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+    let resolved = resolve_remote_at(directory.path(), None)
+        .unwrap()
+        .expect("remote resolved");
 
     let error = FocusedProviderClient::discover(resolved, FetchPolicy::deny_all())
         .await
@@ -2365,7 +2815,9 @@ async fn neutral_host_ssh_and_scp_discovery_checks_the_synthesized_https_host_po
         "git@git.example:acme/project.git",
     ] {
         let directory = loopback_repository(remote_url);
-        let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+        let resolved = resolve_remote_at(directory.path(), None)
+            .unwrap()
+            .expect("remote resolved");
         assert_eq!(resolved.api_flavor, ApiFlavor::Unknown);
 
         let error = FocusedProviderClient::discover(resolved, FetchPolicy::deny_all())
@@ -2385,7 +2837,9 @@ async fn ssh_and_scp_gitlab_remotes_construct_through_the_public_discovery_api()
         "git@gitlab.com:acme/project.git",
     ] {
         let directory = loopback_repository(remote_url);
-        let resolved = resolve_remote_at(directory.path(), None).unwrap().expect("remote resolved");
+        let resolved = resolve_remote_at(directory.path(), None)
+            .unwrap()
+            .expect("remote resolved");
 
         let client = FocusedProviderClient::discover(resolved, FetchPolicy::deny_all())
             .await
@@ -2416,12 +2870,14 @@ async fn known_flavor_clients_derive_the_api_base_from_the_configured_origin() {
         port: Some(server.address().port()),
     });
 
-    let client = FocusedProviderClient::new(
-        resolved,
-        FetchPolicy::deny_all().allow_host("127.0.0.1"),
-    )
-    .unwrap();
-    let record = client.get_pull_request("7").await.unwrap().expect("PR found");
+    let client =
+        FocusedProviderClient::new(resolved, FetchPolicy::deny_all().allow_host("127.0.0.1"))
+            .unwrap();
+    let record = client
+        .get_pull_request("7")
+        .await
+        .unwrap()
+        .expect("PR found");
     assert_eq!(record.details.title, "Fix");
     // `.expect(1)` above: the exact PR request and nothing else — a known
     // flavor must not spend version probes.
@@ -2480,13 +2936,22 @@ async fn hostile_pull_request_links_are_dropped_on_exact_and_list_surfaces() {
         let adapter = client(&server, ApiFlavor::GitHub);
         let exact = adapter.get_pull_request("7").await.unwrap().unwrap();
         assert_eq!(exact.identity.web_url, None, "exact accepted {hostile:?}");
-        assert!(exact.details.html_url.is_empty(), "exact leaked {hostile:?}");
+        assert!(
+            exact.details.html_url.is_empty(),
+            "exact leaked {hostile:?}"
+        );
 
         let listed = adapter
-            .query_pull_requests(PullRequestQuery { limit: Some(1), ..Default::default() })
+            .query_pull_requests(PullRequestQuery {
+                limit: Some(1),
+                ..Default::default()
+            })
             .await
             .unwrap();
-        assert_eq!(listed.items[0].identity.web_url, None, "list accepted {hostile:?}");
+        assert_eq!(
+            listed.items[0].identity.web_url, None,
+            "list accepted {hostile:?}"
+        );
         // The record itself still projects: a hostile link costs the link, not
         // the item.
         assert_eq!(listed.items[0].identity.native_id, "7");
@@ -2524,7 +2989,10 @@ async fn hostile_cicd_job_links_are_dropped_on_exact_and_list_surfaces() {
         assert_eq!(exact.web_url, None, "exact accepted {hostile:?}");
 
         let listed = adapter
-            .query_cicd_jobs(CiCdJobQuery { limit: Some(1), ..Default::default() })
+            .query_cicd_jobs(CiCdJobQuery {
+                limit: Some(1),
+                ..Default::default()
+            })
             .await
             .unwrap();
         assert_eq!(listed.items[0].web_url, None, "list accepted {hostile:?}");
@@ -2592,24 +3060,37 @@ async fn parent_run_links_obey_the_same_origin_policy() {
     run["html_url"] = serde_json::json!("https://evil.example/acme/project/actions/runs/29679449");
     Mock::given(method("GET"))
         .and(path("/api/repos/acme/project/actions/runs"))
-        .respond_with(ResponseTemplate::new(200)
-            .set_body_json(serde_json::json!({"workflow_runs": [run]})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"workflow_runs": [run]})),
+        )
         .mount(&server)
         .await;
     Mock::given(method("GET"))
         .and(path("/api/repos/acme/project/actions/runs/29679449/jobs"))
-        .respond_with(ResponseTemplate::new(200)
-            .set_body_json(serde_json::json!({"jobs": [github_actions_job()]})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"jobs": [github_actions_job()]})),
+        )
         .mount(&server)
         .await;
 
     let page = client(&server, ApiFlavor::GitHub)
-        .query_cicd_jobs(CiCdJobQuery { limit: Some(1), ..Default::default() })
+        .query_cicd_jobs(CiCdJobQuery {
+            limit: Some(1),
+            ..Default::default()
+        })
         .await
         .unwrap();
     let job = &page.items[0];
-    assert_eq!(job.parent.web_url, None, "a cross-site run link must not be published");
-    assert_eq!(job.parent.name.as_deref(), Some("CI"), "the run itself still projects");
+    assert_eq!(
+        job.parent.web_url, None,
+        "a cross-site run link must not be published"
+    );
+    assert_eq!(
+        job.parent.name.as_deref(),
+        Some("CI"),
+        "the run itself still projects"
+    );
     assert_eq!(
         job.web_url.as_deref(),
         Some("https://127.0.0.1/acme/project/actions/runs/29679449/job/399444496"),

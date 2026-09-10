@@ -3,7 +3,7 @@
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, bin_exe, strip_ansi};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness, bin_exe, capture_settled, strip_ansi};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -403,13 +403,7 @@ pub fn run_with_sentinel_env(
         .send_command_with_env(&wrapped, env)
         .expect("send_command_with_env failed");
     match wait_for_sentinel(harness, &sentinel) {
-        Ok(frame) => {
-            // The sentinel only guarantees `md` finished; the pane grid may
-            // still be settling (scroll, redraw). Settle and re-capture so
-            // assertions see the final stable frame, not a transitional one.
-            std::thread::sleep(Duration::from_millis(250));
-            harness.capture().unwrap_or(frame)
-        }
+        Ok(frame) => capture_settled(harness).unwrap_or(frame),
         Err(last) => panic!(
             "timed out waiting for sentinel {sentinel} after {SENTINEL_TIMEOUT:?}. \
              last plain capture:\n{}",
@@ -422,7 +416,6 @@ pub fn run_with_sentinel_env(
 pub fn rtrim(s: &str) -> &str {
     s.trim_end_matches([' ', '\t'])
 }
-
 
 pub fn run_md_after_shell_prefix(
     file_body: &str,
@@ -450,7 +443,11 @@ pub fn run_md_after_shell_prefix(
 
     // Use the Cargo-built `md` via the shim so prefix-wrapped invocations
     // also verify the code under review (review-2 finding #1).
-    let cmd = format!("{prefix} {} {} {extra_args}", md_shim(), file_path.display());
+    let cmd = format!(
+        "{prefix} {} {} {extra_args}",
+        md_shim(),
+        file_path.display()
+    );
     let frame = run_with_sentinel(harness, &cmd);
     Some((frame, file_path))
 }

@@ -23,13 +23,44 @@
 #![cfg(feature = "test-fixtures")]
 
 use assert_cmd::cargo::cargo_bin;
+use biscuit_test_harness::CapturedFrame;
 use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
-use serial_test::serial;
+use std::time::Duration;
 use test_toolkit::{Backend, Level, require_level};
 
+mod common;
+
+const RENDER_DEADLINE: Duration = Duration::from_secs(5);
+const VISIBLE_EVIDENCE: &[&str] = &[
+    "Status",
+    "Worktrees",
+    "Meta",
+    "main:",
+    "Current Worktree:",
+    "Other Worktrees:",
+    "login-fix",
+];
+
+fn final_git_status_frame_is_visible(frame: &CapturedFrame) -> bool {
+    let visible = VISIBLE_EVIDENCE
+        .iter()
+        .all(|needle| frame.plain.contains(needle));
+    let underline =
+        frame.raw.contains("4:2m") || frame.raw.contains("[4m") || frame.raw.contains(";4m");
+    let link = frame.raw.contains("]8;;") || frame.plain.contains("](file");
+    let lines: Vec<&str> = frame.plain.lines().collect();
+    let layout = lines
+        .iter()
+        .position(|line| line.contains("Worktrees"))
+        .is_some_and(|index| {
+            index >= 2 && lines[index - 1].trim().is_empty() && !lines[index - 2].trim().is_empty()
+        });
+
+    visible && underline && link && layout
+}
+
 #[test]
-#[serial(level2_terminal)]
 fn level2_git_status_headers_and_links_render_styled_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
@@ -37,24 +68,17 @@ fn level2_git_status_headers_and_links_render_styled_in_tmux() {
 
     let bin_path = cargo_bin("render_git_status_fixture").display().to_string();
     harness
-        .send_command_with_env(&bin_path, &[("FORCE_COLOR", "1")])
+        .send_command_with_env(&format!("clear; {bin_path}"), &[("FORCE_COLOR", "1")])
         .expect("send_command_with_env failed");
 
-    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = common::capture_until(
+        &mut harness,
+        RENDER_DEADLINE,
+        final_git_status_frame_is_visible,
+    );
 
     // Visible text: all three section headers plus the worktree-section bodies.
-    for needle in [
-        "Status",
-        "Worktrees",
-        "Meta",
-        "main:",
-        "Current Worktree:",
-        "Other Worktrees:",
-        "login-fix",
-    ] {
+    for needle in VISIBLE_EVIDENCE {
         assert!(
             frame.plain.contains(needle),
             "expected '{needle}' in captured pane.\nplain:\n{}",

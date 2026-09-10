@@ -54,9 +54,7 @@ pub fn build_installed_snapshot(
 /// past a deliberately restricted `PATH`. This mirrors the direct wrapper's
 /// `which`-based binary resolution, so "installed" means the same thing on
 /// both surfaces.
-pub fn detect_installed_providers(
-    clients: &sniff::programs::InstalledAiClients,
-) -> Vec<Provider> {
+pub fn detect_installed_providers(clients: &sniff::programs::InstalledAiClients) -> Vec<Provider> {
     PROVIDERS_DISPLAY_ORDER
         .into_iter()
         .filter(|p| {
@@ -103,9 +101,13 @@ pub fn classify_agent_resolution(
         }
         Some(AgentHint::Single(provider)) => {
             if snapshot.runnable.contains(provider) {
-                AgentResolutionState::Selected { provider: *provider }
+                AgentResolutionState::Selected {
+                    provider: *provider,
+                }
             } else {
-                AgentResolutionState::SingleNotInstalled { provider: *provider }
+                AgentResolutionState::SingleNotInstalled {
+                    provider: *provider,
+                }
             }
         }
         Some(AgentHint::List(providers)) => {
@@ -163,9 +165,9 @@ pub fn resolve_target_non_tty(
 
 /// Resolve provider and model for a non-TTY session with an optional catalog.
 ///
-/// When a [`ModelCatalogService`] is provided, frontmatter `model` hints are
-/// validated against the merged catalog. Invalid hints are skipped rather than
-/// treated as errors.
+/// When a [`ModelCatalogService`] is provided it orders list-valued
+/// frontmatter `model` hints (first recognized entry wins); it never rejects
+/// a hint. See [`resolve_model_with_catalog`].
 pub fn resolve_target_non_tty_with_catalog(
     explicit_provider: Option<Provider>,
     prepared: &super::types::PreparedComposition,
@@ -400,7 +402,7 @@ pub fn build_picker_plan_with_hints(
 /// 1. CLI `--model`
 /// 2. Provider-specific env var(s)
 /// 3. Generic `MODEL` env var
-/// 4. Frontmatter `model` (validated against catalog when available)
+/// 4. Frontmatter `model` (always forwarded; a catalog only orders lists)
 /// 5. Provider default (`None`)
 #[allow(dead_code)]
 pub fn resolve_model(
@@ -417,12 +419,14 @@ pub fn resolve_model(
     )
 }
 
-/// Resolve model with an optional catalog for frontmatter validation.
+/// Resolve model with an optional catalog for list-hint ordering.
 ///
-/// When `catalog` is provided, frontmatter `model` hints are validated
-/// against the merged catalog. Invalid single hints fall through to the
-/// provider default; invalid list entries are skipped until a valid one
-/// is found or the list is exhausted.
+/// A frontmatter `model` hint is always forwarded. When `catalog` is
+/// provided, a list-valued hint resolves to its first catalog-recognized
+/// entry, else to its first entry; a single hint is unaffected by the
+/// catalog. Callers that want to surface an unrecognized frontmatter model
+/// check [`ModelCatalogService::is_valid`] on the result — the chain itself
+/// never demotes a document's declaration to the provider default.
 pub fn resolve_model_with_catalog(
     provider: Provider,
     prepared: &super::types::PreparedComposition,
@@ -448,13 +452,32 @@ pub fn resolve_model_with_hints(
     cli_model: Option<&str>,
     catalog: Option<&ModelCatalogService>,
 ) -> (Option<String>, ModelResolutionReason) {
-    resolve_model_with_env(
-        provider,
-        hints,
-        cli_model,
-        |var| std::env::var(var).ok(),
-        catalog,
-    )
+    resolve_model_with_hints_from(provider, hints, cli_model, catalog, ambient_env_lookup)
+}
+
+/// [`resolve_model_with_hints`] against a caller-supplied environment.
+///
+/// Steps 2 and 3 of the chain read the process environment, which a test
+/// process cannot scrub for itself: `std::env::set_var` is unsound while other
+/// tests share the process, and nextest gives a binary's tests one process
+/// between them. Callers that must be reproducible under whatever the
+/// developer's shell exports supply their own lookup instead.
+pub fn resolve_model_with_hints_from<E>(
+    provider: Provider,
+    hints: &EffectiveSelectionHints,
+    cli_model: Option<&str>,
+    catalog: Option<&ModelCatalogService>,
+    env_lookup: E,
+) -> (Option<String>, ModelResolutionReason)
+where
+    E: Fn(&str) -> Option<String>,
+{
+    resolve_model_with_env(provider, hints, cli_model, env_lookup, catalog)
+}
+
+/// The process environment, as the chain reads it outside a test.
+pub fn ambient_env_lookup(var: &str) -> Option<String> {
+    std::env::var(var).ok()
 }
 
 fn resolve_model_with_env<E>(
@@ -489,24 +512,23 @@ where
         return (Some(value), ModelResolutionReason::GenericEnv);
     }
 
-    // 4. Frontmatter model (validated against catalog when available)
+    // 4. Frontmatter model. The document's declaration is always forwarded:
+    //    the provider is the authority on which ids it accepts, and the
+    //    catalog is a drift signal (Phase F ruling, 2026-07-06). A catalog
+    //    that recognizes none of a list's entries cannot demote the document
+    //    to the provider default; it only orders the list.
     if let Some(ref hint) = hints.model {
         match hint {
             ModelHint::Single(model) => {
-                if catalog.is_none() || catalog.unwrap().is_valid(provider, model) {
-                    return (
-                        Some(model.clone()),
-                        ModelResolutionReason::FrontmatterSingle,
-                    );
-                }
+                return (
+                    Some(model.clone()),
+                    ModelResolutionReason::FrontmatterSingle,
+                );
             }
             ModelHint::List(models) => {
-                if let Some(catalog) = catalog {
-                    if let Some(valid) = catalog.first_valid(provider, models) {
-                        return (Some(valid), ModelResolutionReason::FrontmatterList);
-                    }
-                } else if let Some(first) = models.first() {
-                    return (Some(first.clone()), ModelResolutionReason::FrontmatterList);
+                let recognized = catalog.and_then(|catalog| catalog.first_valid(provider, models));
+                if let Some(model) = recognized.or_else(|| models.first().cloned()) {
+                    return (Some(model), ModelResolutionReason::FrontmatterList);
                 }
             }
         }

@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "area": "sniff",
+  "root": "../../..",
+  "evidenceDir": ".",
+  "notes": [
+    "Configuration for the shared `test-audit` tool (tools/test-audit). Paths are relative to this file.",
+    "Feature selections are the coverage contract: `remote` transitively enables `network`; `network` alone cfg-outs `sniff::remote` and silently empties its Wiremock suites. `lib-bare` and `lib-network` are captured to show what those selections do NOT list.",
+    "`test-fixtures` on sniff-cli is L2-only locally (gates the real-terminal helper binaries); CI and `test-l2` enable it. Local L1 leaves it off, so `cli-bare` and `cli-fixtures` are distinct L1 populations.",
+    "Families (families.json) are declared in Phase 2 of the sniff fix: deterministic (fixture-owned inputs), native-detector (real platform APIs, cfg-gated, kept separate from deterministic cost), and real-resource (`real_`, `test-real`).",
+    "The sanity cohort is timed separately against its 15-second fast-confidence budget.",
+    "Counter readings carry `requestShape` (the DetectionPlan/GitRequest/RepoRequest tier used), `counterVersion` (sniff/lib/src/performance/counters.rs names are the contract), and `phase` (acquisition vs execution) so readings across different boundaries are never paired.",
+    "Native Windows and WSL2 are distinct environments (`platformKind`); WSL follows the Linux compile path."
+  ],
+  "packages": [
+    { "name": "sniff", "path": "sniff/lib", "sourceRoots": ["sniff/lib/src", "sniff/lib/tests", "sniff/lib/benches", "sniff/lib/examples"] },
+    { "name": "sniff-cli", "path": "sniff/cli", "sourceRoots": ["sniff/cli/src", "sniff/cli/tests"] }
+  ],
+  "routes": [
+    { "id": "sanity", "kind": "nextest", "command": "just sanity", "executes": true, "note": "_sanity_all: sniff --features remote; sniff-cli --features test-fixtures; lib + bins, !slow; 15 s budget" },
+    { "id": "test-local", "kind": "nextest", "command": "just test", "executes": true, "note": "_test_local_all: one invocation, sniff --features remote + sniff-cli (no test-fixtures)" },
+    { "id": "test-ci", "kind": "nextest", "command": "NEXTEST_PROFILE=ci just test", "ci": "_package-ci.yml test job (per package)", "executes": true, "note": "_test_all: sniff --features remote; sniff-cli --features test-fixtures" },
+    { "id": "test-l2", "kind": "nextest", "command": "just test-l2", "ci": "_package-ci.yml l2 job (tmux legs)", "executes": true, "note": "sniff-cli --features test-fixtures; CI/CD status-cell and git-status styling" },
+    { "id": "test-real", "kind": "nextest", "command": "just test-real", "executes": true, "note": "sniff --features network (real_ probes, skip-clean when absent); sniff-cli" },
+    { "id": "test-l3", "kind": "absent", "command": "just test-l3", "executes": false, "note": "declared not applicable" },
+    { "id": "test-browser", "kind": "absent", "command": "just test-browser", "executes": false, "note": "declared not applicable" },
+    { "id": "doctest", "kind": "doctest", "command": "just doctest", "executes": true, "note": "sniff --features remote; sniff-cli --features test-fixtures" },
+    { "id": "coverage", "kind": "script", "command": "just coverage", "executes": true, "note": "local LCOV only; not a CI producer" },
+    { "id": "bench", "kind": "bench", "command": "just bench", "ci": "sniff-performance.yml sniff-bench (PR, Linux, artifact-only)", "executes": false },
+    { "id": "work-counts", "kind": "script", "command": "cargo run -p sniff --features remote --example work_counts", "ci": "sniff-performance.yml sniff-work-counts (scheduled, macOS/Linux/Windows)", "executes": false, "note": "work-counter table per OS; the counter evidence source" },
+    { "id": "fuzz", "kind": "absent", "command": "just fuzz", "executes": false, "note": "no cargo-fuzz targets" },
+    { "id": "check-windows", "kind": "absent", "command": "(none)", "executes": false, "note": "no local mingw check recipe; windows-latest is the Windows compile and runtime authority" },
+    { "id": "feature-gap-probe", "kind": "manual", "command": "cargo nextest list -p sniff / -p sniff --features network", "executes": false, "note": "listings taken only to show which identities the bare and network-only selections omit" }
+  ],
+  "selections": [
+    { "label": "l1-local-all", "packages": ["sniff", "sniff-cli"], "features": ["sniff/remote"], "routes": ["test-local"], "note": "one-scheduler local invocation; `-F sniff/remote` is how _test_local_all spells a per-package feature" },
+    { "label": "lib-remote", "packages": ["sniff"], "features": ["remote"], "routes": ["sanity", "test-ci", "doctest", "coverage"] },
+    { "label": "cli-bare", "packages": ["sniff-cli"], "features": [], "routes": ["test-local", "test-real"] },
+    { "label": "cli-fixtures", "packages": ["sniff-cli"], "features": ["test-fixtures"], "routes": ["sanity", "test-ci", "test-l2", "doctest", "coverage"] },
+    { "label": "lib-network", "packages": ["sniff"], "features": ["network"], "routes": ["test-real", "feature-gap-probe"] },
+    { "label": "lib-bare", "packages": ["sniff"], "features": [], "routes": ["feature-gap-probe"] }
+  ],
+  "cohorts": [
+    { "id": "sanity", "description": "fast confidence subset per package (lib + bins, !slow); measured against the 15 s budget", "population": "local", "recipe": "just sanity", "selections": ["lib-remote", "cli-fixtures"], "tiers": ["sanity"] },
+    { "id": "l1-local", "description": "local-default L1: sniff (remote) + sniff-cli (no test-fixtures) in one invocation", "population": "local", "recipe": "just test", "selections": ["l1-local-all"], "filter": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))", "tiers": ["L1"] },
+    { "id": "l1-ci", "description": "CI-selected L1: per package, sniff-cli with test-fixtures, ci profile, JUnit staged", "population": "ci", "recipe": "NEXTEST_PROFILE=ci just test", "env": { "NEXTEST_PROFILE": "ci" }, "selections": ["lib-remote", "cli-fixtures"], "filter": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))", "tiers": ["L1"] },
+    { "id": "l2", "description": "real-terminal styling tests (tmux)", "population": "local", "recipe": "just test-l2", "selections": ["cli-fixtures"], "filter": "test(/(^|::)level2_/)", "tiers": ["L2"] },
+    { "id": "real", "description": "real-resource tests: network probes under the `network` feature, host filesystem", "population": "local", "recipe": "just test-real", "selections": ["lib-network", "cli-bare"], "filter": "test(/(^|::)real_/)", "tiers": ["real"] }
+  ],
+  "environments": [
+    { "name": "ubuntu-latest", "kind": "native", "os": "linux", "workflow": "_package-ci.yml",
+      "cells": [ { "tier": "L1", "package": "sniff" }, { "tier": "L1", "package": "sniff-cli" }, { "tier": "L2", "package": "sniff-cli" } ] },
+    { "name": "macos-latest", "kind": "native", "os": "macos", "workflow": "_package-ci.yml",
+      "cells": [ { "tier": "L1", "package": "sniff" }, { "tier": "L1", "package": "sniff-cli" }, { "tier": "L2", "package": "sniff-cli" } ] },
+    { "name": "windows-latest", "kind": "native", "os": "windows", "workflow": "_package-ci.yml",
+      "cells": [ { "tier": "L1", "package": "sniff" }, { "tier": "L1", "package": "sniff-cli" } ] },
+    { "name": "wsl2-ubuntu", "kind": "wsl", "os": "linux", "workflow": "_wsl-ci.yml",
+      "cells": [ { "tier": "L1", "package": "sniff" }, { "tier": "L1", "package": "sniff-cli" } ] }
+  ],
+  "families": "families.json",
+  "inventory": "inventory.md",
+  "enumeration": "enumeration",
+  "sourceScan": { "exclude": ["/fixtures/", "/snapshots/"] },
+  "junit": { "requiredTests": [], "platformExclusions": {}, "timeoutFloors": {}, "enforceTimeoutFloors": false },
+  "counters": {
+    "signals": [
+      { "id": "filesystem-walk", "description": "shared walker entries and walk starts (filesystem.walk.*)", "coverage": "instrumented", "source": "sniff/lib/src/performance/counters.rs FS_WALK_*; `work_counts` example" },
+      { "id": "filesystem-io", "description": "file opens, bytes read, metadata probes, read_dirs, canonicalizations (filesystem.io.*)", "coverage": "instrumented", "source": "counters.rs FS_FILE_OPENS, FS_BYTES_READ, FS_METADATA_PROBES, FS_READ_DIRS, FS_CANONICALIZATIONS" },
+      { "id": "filesystem-inventory", "description": "files accepted/saturated and documents parsed (filesystem.file_inventory.*, filesystem.docs.*)", "coverage": "instrumented", "source": "counters.rs FS_INVENTORY_*, FS_DOCS_PARSED" },
+      { "id": "repo-structure", "description": "manifest/lockfile/config parses, enrichments, marker and membership walks (filesystem.repo.*)", "coverage": "instrumented", "source": "counters.rs REPO_*" },
+      { "id": "git", "description": "repository discoveries/opens, status walks, blob loads, diffs, ref walks, commit visits, worktree opens (git.*)", "coverage": "instrumented", "source": "counters.rs GIT_*" },
+      { "id": "process", "description": "subprocess spawns and timeouts (process.*)", "coverage": "instrumented", "source": "counters.rs PROC_SPAWNS, PROC_TIMEOUTS" },
+      { "id": "remote-requests", "description": "provider API requests (remote.api_requests, remote_operation(...))", "coverage": "instrumented", "source": "counters.rs REMOTE_REQUESTS; Wiremock request counts in deterministic tests" },
+      { "id": "network-wan", "description": "WAN IP endpoint attempts (network.wan_ip.endpoint_attempts)", "coverage": "instrumented", "source": "counters.rs NETWORK_WAN_ATTEMPTS" }
+    ],
+    "compatibilityKeys": ["signal", "environment", "platformKind", "requestShape", "counterVersion", "phase"],
+    "boundaries": [
+      { "key": "production-caching-2026-07-22", "description": "sniff/fixes/2026-07-22-inefficient-calling (process-wide detector caching) has NOT landed as of 2026-09-08; every reading is `before`. A reading taken after it lands is `after` and may not be paired with a `before` reading." }
+    ]
+  }
+}

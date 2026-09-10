@@ -479,6 +479,7 @@ pub(super) fn run_composition_body(
             fallback_provider_reason: target.provider_reason,
             dispatch_context,
             launch_plan_inputs: launch_plan_inputs.clone(),
+            env_lookup: claudine::composition::ambient_env_lookup,
         },
         &env_plan.env,
         &mut prompt_state,

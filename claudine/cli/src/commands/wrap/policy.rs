@@ -294,6 +294,11 @@ pub(crate) fn build_structured_plumbing(
 /// `eprintln!`.
 pub(crate) struct StreamSummaryContext<'a> {
     pub(crate) summary: &'a claudine::stream::summary::StreamExecutionSummary,
+    /// How the child ended. `summary.exit_code` alone cannot distinguish a
+    /// native exit from the synthetic code a watchdog kill stamps, and the
+    /// incomplete-sub-agent diagnostic must not claim a normal exit after
+    /// one.
+    pub(crate) termination: claudine::harness::ProcessTermination,
     pub(crate) profile: &'a dyn super::profile::WrapperProfile,
     pub(crate) env_context: &'a EnvironmentContext,
     pub(crate) verbosity: Verbosity,
@@ -320,6 +325,7 @@ pub(crate) struct StreamSummaryContext<'a> {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_stream_summary(
     summary: &claudine::stream::summary::StreamExecutionSummary,
+    termination: claudine::harness::ProcessTermination,
     profile: &dyn super::profile::WrapperProfile,
     env_context: &EnvironmentContext,
     verbosity: Verbosity,
@@ -333,6 +339,7 @@ pub(crate) fn emit_stream_summary(
     emit_stream_summary_inner(
         StreamSummaryContext {
             summary,
+            termination,
             profile,
             env_context,
             verbosity,
@@ -353,6 +360,7 @@ fn emit_stream_summary_inner(
 ) {
     let StreamSummaryContext {
         summary,
+        termination,
         profile,
         env_context,
         verbosity,
@@ -373,6 +381,22 @@ fn emit_stream_summary_inner(
     } else {
         format_verbose_summary_details_prose(summary, details)
     };
+    // The full incomplete-sub-agent diagnostic. Unlike the concise lifecycle
+    // headline it is not budgeted, so it names every task; it is suppressed
+    // only by `Silent`, which suppresses all trailer output.
+    if verbosity != Verbosity::Silent && !summary.subagent_outcomes.is_empty() {
+        use biscuit_terminal::components::renderable::TerminalRenderable;
+
+        let term = crate::log::terminal();
+        let rendered = claudine::render::IncompleteSubagents::new(&summary.subagent_outcomes)
+            .with_exit(termination, summary.exit_code)
+            .render(&term);
+        if let Some(section_stream) = section_stream {
+            section_stream.emit_stderr(super::section::Section::TrailerMetadata, &rendered);
+        } else {
+            eprintln!("{rendered}");
+        }
+    }
     if primary_markup.is_some() || secondary_markup.is_some() {
         use super::section::Section;
         use biscuit_terminal::components::prose::Prose;

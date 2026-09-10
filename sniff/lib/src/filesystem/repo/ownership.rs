@@ -55,17 +55,14 @@ impl PackageOwnershipIndex {
             .collect();
         Self::from_normalized_keys(
             root,
-            entries
-                .iter()
-                .map(|(resolved, relative, index)| (resolved.as_path(), relative.as_path(), *index)),
+            entries.iter().map(|(resolved, relative, index)| {
+                (resolved.as_path(), relative.as_path(), *index)
+            }),
         )
     }
 
     /// Build for APIs whose package catalog is already repo-relative.
-    pub(crate) fn from_relative_paths(
-        root: &Path,
-        packages: &[(String, PathBuf)],
-    ) -> Self {
+    pub(crate) fn from_relative_paths(root: &Path, packages: &[(String, PathBuf)]) -> Self {
         let root = canonicalize_path(root);
         let mut owners = HashMap::new();
         for (index, (_, relative)) in packages.iter().enumerate() {
@@ -108,19 +105,27 @@ mod tests {
     fn index() -> PackageOwnershipIndex {
         let root = PathBuf::from("/repo");
         let entries = [
-            (PathBuf::from("/repo/crates/pkg-a"), PathBuf::from("crates/pkg-a"), 0),
+            (
+                PathBuf::from("/repo/crates/pkg-a"),
+                PathBuf::from("crates/pkg-a"),
+                0,
+            ),
             (
                 PathBuf::from("/repo/crates/pkg-a/nested"),
                 PathBuf::from("crates/pkg-a/nested"),
                 1,
             ),
-            (PathBuf::from("/repo/crates/pkg-a2"), PathBuf::from("crates/pkg-a2"), 2),
+            (
+                PathBuf::from("/repo/crates/pkg-a2"),
+                PathBuf::from("crates/pkg-a2"),
+                2,
+            ),
         ];
         PackageOwnershipIndex::from_normalized_keys(
             root,
-            entries
-                .iter()
-                .map(|(resolved, relative, index)| (resolved.as_path(), relative.as_path(), *index)),
+            entries.iter().map(|(resolved, relative, index)| {
+                (resolved.as_path(), relative.as_path(), *index)
+            }),
         )
     }
 
@@ -139,7 +144,10 @@ mod tests {
             index.lookup_relative(Path::new("crates/pkg-a2/src/lib.rs")),
             Some(2)
         );
-        assert_eq!(index.lookup_relative(Path::new("crates/pkg-a20/lib.rs")), None);
+        assert_eq!(
+            index.lookup_relative(Path::new("crates/pkg-a20/lib.rs")),
+            None
+        );
     }
 
     #[test]
@@ -168,9 +176,9 @@ mod tests {
         let entries = [(resolved, relative.clone(), 7)];
         let index = PackageOwnershipIndex::from_normalized_keys(
             PathBuf::from("/repo"),
-            entries
-                .iter()
-                .map(|(resolved, relative, owner)| (resolved.as_path(), relative.as_path(), *owner)),
+            entries.iter().map(|(resolved, relative, owner)| {
+                (resolved.as_path(), relative.as_path(), *owner)
+            }),
         );
 
         assert_eq!(index.lookup_relative(&relative.join("src/lib.rs")), Some(7));
@@ -186,12 +194,18 @@ mod tests {
         )];
         let index = PackageOwnershipIndex::from_normalized_keys(
             PathBuf::from(r"C:\Repo"),
-            entries
-                .iter()
-                .map(|(resolved, relative, owner)| (resolved.as_path(), relative.as_path(), *owner)),
+            entries.iter().map(|(resolved, relative, owner)| {
+                (resolved.as_path(), relative.as_path(), *owner)
+            }),
         );
 
-        assert_eq!(index.lookup_relative(Path::new(r"crates\pkg\src\lib.rs")), Some(3));
-        assert_eq!(index.lookup_relative(Path::new(r"crates\PKG\src\lib.rs")), None);
+        assert_eq!(
+            index.lookup_relative(Path::new(r"crates\pkg\src\lib.rs")),
+            Some(3)
+        );
+        assert_eq!(
+            index.lookup_relative(Path::new(r"crates\PKG\src\lib.rs")),
+            None
+        );
     }
 }

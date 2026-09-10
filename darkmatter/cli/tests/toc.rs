@@ -1,11 +1,13 @@
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 use predicates::prelude::*;
 
 #[test]
 fn test_toc_subcommand_output() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("toc-test-toc-subcommand-output");
+    fixture
+        .command()
         .args(["toc", "-"])
         .write_stdin("# Top\n\n## Section A\n\n## Section B\n")
         .assert()
@@ -16,7 +18,9 @@ fn test_toc_subcommand_output() {
 
 #[test]
 fn test_toc_subcommand_json_output() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("toc-test-toc-subcommand-json-output");
+    fixture
+        .command()
         .args(["toc", "--json", "-"])
         .write_stdin("# Top\n\n## Section A\n\n## Section B\n")
         .assert()
@@ -26,9 +30,12 @@ fn test_toc_subcommand_json_output() {
 
 #[test]
 fn test_toc_subcommand_ignores_tab_indented_frontmatter() {
+    let fixture =
+        CliProcessFixture::named("toc-test-toc-subcommand-ignores-tab-indented-frontmatter");
     let input = "---\nprompt: |-\n\tLine one\n\tLine two\nlast_updated: 2026-02-27\n---\n# macOS Audio\n\n## Details\n";
 
-    md_cmd()
+    fixture
+        .command()
         .args(["toc", "-"])
         .write_stdin(input)
         .assert()
@@ -37,4 +44,3 @@ fn test_toc_subcommand_ignores_tab_indented_frontmatter() {
         .stdout(predicate::str::contains("Details"))
         .stdout(predicate::str::contains("last_updated").not());
 }
-

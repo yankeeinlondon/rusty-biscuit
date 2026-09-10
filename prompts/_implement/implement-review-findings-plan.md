@@ -31,6 +31,8 @@ loop:
     until: "phase >= total_phases"
     action: "increment(phase)"
 ---
+::file "../_no_formatting.md"
+
 ::block when="total_phases"
 # Implement Phase {{phase}} of {{total_phases}}
 ::end-block
@@ -132,3 +134,5 @@ You are done when:
 - You do not need to run tests across the entire monorepo as this will take far too long. Only 
 - once the implementation is complete update the '{{ctx.current_package_area}}' if there were any notable changes needed in this skill
 - you are running as part of a non-interactive session! Do not ask the user for feedback or permissions as they can not answer!
+
+::file "../_os.md"

@@ -485,7 +485,11 @@ fn build_string_aggregate_json(
     }
 }
 
-fn render_string_values(values: &[String], args: &RepoPackageManagerArgs, multiple: bool) -> String {
+fn render_string_values(
+    values: &[String],
+    args: &RepoPackageManagerArgs,
+    multiple: bool,
+) -> String {
     if args.csv {
         return format!("{}\n", values.join(", "));
     }
@@ -665,8 +669,8 @@ pub(super) fn handle_repo_version(
     // `--package` / `--package-area` select across the whole repo even when
     // `--base` points inside a package directory of a monorepo.
     let dir_for_scope = base_dir.unwrap_or(&cwd);
-    let root = sniff::filesystem::repo_root(dir_for_scope)?
-        .unwrap_or_else(|| dir_for_scope.to_path_buf());
+    let root =
+        sniff::filesystem::repo_root(dir_for_scope)?.unwrap_or_else(|| dir_for_scope.to_path_buf());
 
     let info = detect_repo_structure_or_root_package(&root)?;
 

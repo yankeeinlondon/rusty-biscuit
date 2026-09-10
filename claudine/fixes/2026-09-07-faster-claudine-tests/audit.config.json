@@ -1,0 +1,486 @@
+{
+  "version": 1,
+  "area": "claudine",
+  "root": "../../..",
+  "evidenceDir": ".",
+  "notes": [
+    "Compatibility configuration for the shared `test-audit` tool: it reproduces what the first-generation scripts in this directory hard-coded (package roots, the four-leg matrix, the required timeout-shaped tests and their floors). The wrappers junit-metrics.ts, inventory-reconciler.ts, attribution.ts, and measurement.ts beside it delegate to the shared tool with this file.",
+    "Each of the four CI legs carries one gated cell (L1/claudine-cli), as the predecessor fix's acceptance criterion measured; other packages' CI cells are not gated here."
+  ],
+  "packages": [
+    {
+      "name": "claudine-catalog-types",
+      "path": "claudine/catalog-types"
+    },
+    {
+      "name": "claudine",
+      "path": "claudine/lib"
+    },
+    {
+      "name": "claudine-contract",
+      "path": "claudine/contract"
+    },
+    {
+      "name": "claudine-cli",
+      "path": "claudine/cli"
+    },
+    {
+      "name": "claudine-gen",
+      "path": "claudine/gen"
+    },
+    {
+      "name": "rendezvous-core",
+      "path": "claudine/rendezvous/core"
+    },
+    {
+      "name": "rendezvous-daemon",
+      "path": "claudine/rendezvous/daemon"
+    },
+    {
+      "name": "rendezvous-client",
+      "path": "claudine/rendezvous/client"
+    }
+  ],
+  "routes": [
+    {
+      "id": "sanity",
+      "kind": "nextest",
+      "command": "just sanity",
+      "executes": true
+    },
+    {
+      "id": "test",
+      "kind": "nextest",
+      "command": "just test",
+      "executes": true,
+      "note": "_test_local_all over catalog-types, lib, contract, cli, gen (bare features locally)"
+    },
+    {
+      "id": "test-ci",
+      "kind": "nextest",
+      "command": "NEXTEST_PROFILE=ci just test",
+      "ci": "_package-ci.yml test job",
+      "executes": true,
+      "note": "_test_all: claudine-cli --features daemon-tests,terminal-tests; claudine-gen --features terminal-tests"
+    },
+    {
+      "id": "test-rendezvous",
+      "kind": "nextest",
+      "command": "just test-rendezvous",
+      "executes": true
+    },
+    {
+      "id": "test-daemon",
+      "kind": "nextest",
+      "command": "just test-daemon",
+      "executes": true
+    },
+    {
+      "id": "test-contract",
+      "kind": "nextest",
+      "command": "just test-contract",
+      "executes": true
+    },
+    {
+      "id": "test-l2",
+      "kind": "nextest",
+      "command": "just test-l2",
+      "ci": "_package-ci.yml l2 job",
+      "executes": true
+    },
+    {
+      "id": "test-real",
+      "kind": "nextest",
+      "command": "just test-real",
+      "executes": true
+    },
+    {
+      "id": "doctest",
+      "kind": "doctest",
+      "command": "just doctest",
+      "executes": true
+    },
+    {
+      "id": "feature-union-probe",
+      "kind": "manual",
+      "command": "cargo nextest list (feature unions)",
+      "executes": false,
+      "note": "captures taken to enumerate every identity any feature combination can list"
+    }
+  ],
+  "selections": [
+    {
+      "label": "catalog-types-bare",
+      "packages": [
+        "claudine-catalog-types"
+      ],
+      "features": [],
+      "routes": [
+        "test"
+      ]
+    },
+    {
+      "label": "lib-bare",
+      "packages": [
+        "claudine"
+      ],
+      "features": [],
+      "routes": [
+        "test"
+      ]
+    },
+    {
+      "label": "contract-bare",
+      "packages": [
+        "claudine-contract"
+      ],
+      "features": [],
+      "routes": [
+        "test",
+        "test-contract"
+      ]
+    },
+    {
+      "label": "contract-real",
+      "packages": [
+        "claudine-contract"
+      ],
+      "features": [
+        "real-tests"
+      ],
+      "routes": [
+        "test-real"
+      ]
+    },
+    {
+      "label": "cli-bare",
+      "packages": [
+        "claudine-cli"
+      ],
+      "features": [],
+      "routes": [
+        "test"
+      ]
+    },
+    {
+      "label": "cli-daemon",
+      "packages": [
+        "claudine-cli"
+      ],
+      "features": [
+        "daemon-tests"
+      ],
+      "routes": [
+        "test-daemon"
+      ]
+    },
+    {
+      "label": "cli-terminal",
+      "packages": [
+        "claudine-cli"
+      ],
+      "features": [
+        "terminal-tests"
+      ],
+      "routes": [
+        "test-l2"
+      ]
+    },
+    {
+      "label": "cli-real",
+      "packages": [
+        "claudine-cli"
+      ],
+      "features": [
+        "real-tests"
+      ],
+      "routes": [
+        "test-real"
+      ]
+    },
+    {
+      "label": "cli-ci",
+      "packages": [
+        "claudine-cli"
+      ],
+      "features": [
+        "daemon-tests",
+        "terminal-tests"
+      ],
+      "routes": [
+        "test-ci"
+      ]
+    },
+    {
+      "label": "cli-all",
+      "packages": [
+        "claudine-cli"
+      ],
+      "features": [
+        "daemon-tests",
+        "terminal-tests",
+        "real-tests"
+      ],
+      "routes": [
+        "feature-union-probe"
+      ]
+    },
+    {
+      "label": "gen-bare",
+      "packages": [
+        "claudine-gen"
+      ],
+      "features": [],
+      "routes": [
+        "test"
+      ]
+    },
+    {
+      "label": "gen-terminal",
+      "packages": [
+        "claudine-gen"
+      ],
+      "features": [
+        "terminal-tests"
+      ],
+      "routes": [
+        "test-ci",
+        "test-l2"
+      ]
+    },
+    {
+      "label": "rz-core-bare",
+      "packages": [
+        "rendezvous-core"
+      ],
+      "features": [],
+      "routes": [
+        "test-rendezvous"
+      ]
+    },
+    {
+      "label": "rz-core-testsupport",
+      "packages": [
+        "rendezvous-core"
+      ],
+      "features": [
+        "test-support"
+      ],
+      "routes": [
+        "feature-union-probe"
+      ]
+    },
+    {
+      "label": "rz-daemon-bare",
+      "packages": [
+        "rendezvous-daemon"
+      ],
+      "features": [],
+      "routes": [
+        "test-rendezvous"
+      ]
+    },
+    {
+      "label": "rz-client-bare",
+      "packages": [
+        "rendezvous-client"
+      ],
+      "features": [],
+      "routes": [
+        "test-rendezvous"
+      ]
+    }
+  ],
+  "cohorts": [
+    {
+      "id": "l1-local",
+      "description": "local-default L1 over the five claudine packages",
+      "population": "local",
+      "recipe": "just test",
+      "selections": [
+        "catalog-types-bare",
+        "lib-bare",
+        "contract-bare",
+        "cli-bare",
+        "gen-bare"
+      ],
+      "tiers": [
+        "L1"
+      ]
+    },
+    {
+      "id": "l1-ci",
+      "description": "CI-selected L1 (cli with daemon+terminal features, gen with terminal)",
+      "population": "ci",
+      "recipe": "NEXTEST_PROFILE=ci just test",
+      "env": {
+        "NEXTEST_PROFILE": "ci"
+      },
+      "selections": [
+        "catalog-types-bare",
+        "lib-bare",
+        "contract-bare",
+        "cli-ci",
+        "gen-terminal"
+      ],
+      "tiers": [
+        "L1"
+      ]
+    },
+    {
+      "id": "rendezvous",
+      "description": "the three rendezvous crates",
+      "population": "local",
+      "recipe": "just test-rendezvous",
+      "selections": [
+        "rz-core-bare",
+        "rz-daemon-bare",
+        "rz-client-bare"
+      ],
+      "tiers": [
+        "L1"
+      ]
+    },
+    {
+      "id": "l2",
+      "description": "real-terminal tier (cli, gen)",
+      "population": "local",
+      "recipe": "just test-l2",
+      "selections": [
+        "cli-terminal",
+        "gen-terminal"
+      ],
+      "tiers": [
+        "L2"
+      ]
+    }
+  ],
+  "environments": [
+    {
+      "name": "ubuntu-latest",
+      "kind": "native",
+      "os": "linux",
+      "workflow": "_package-ci.yml",
+      "cells": [
+        {
+          "tier": "L1",
+          "package": "claudine-cli"
+        }
+      ]
+    },
+    {
+      "name": "macos-latest",
+      "kind": "native",
+      "os": "macos",
+      "workflow": "_package-ci.yml",
+      "cells": [
+        {
+          "tier": "L1",
+          "package": "claudine-cli"
+        }
+      ]
+    },
+    {
+      "name": "windows-latest",
+      "kind": "native",
+      "os": "windows",
+      "workflow": "_package-ci.yml",
+      "cells": [
+        {
+          "tier": "L1",
+          "package": "claudine-cli"
+        }
+      ]
+    },
+    {
+      "name": "wsl2-ubuntu",
+      "kind": "wsl",
+      "os": "linux",
+      "workflow": "_wsl-ci.yml",
+      "cells": [
+        {
+          "tier": "L1",
+          "package": "claudine-cli"
+        }
+      ]
+    }
+  ],
+  "families": "families.json",
+  "inventory": "inventory.md",
+  "enumeration": "enumeration",
+  "sourceScan": {
+    "exclude": [
+      "/fixtures/",
+      "/snapshots/"
+    ]
+  },
+  "junit": {
+    "requiredTests": [
+      "watchdog_subagent_hang_terminates_and_names_stuck_ids",
+      "watchdog_stream_idle_timeout_after_tool_call_hang",
+      "watchdog_wall_clock_timeout_terminates_active_stream",
+      "watchdog_opencode_post_fanout_silence_does_not_kill_prematurely",
+      "compose_non_harness_respects_cli_timeout",
+      "inline_compose_non_harness_respects_cli_step_timeout",
+      "sequence_per_step_step_timeout_override",
+      "opencode_stderr_rate_limit_before_stdout_forces_early_termination",
+      "opencode_stderr_stream_error_cap_1_17_8_forces_early_termination",
+      "inline_compose_wrong_type_prompt_takes_precedence_over_schema_scrub",
+      "a_loop_accumulates_outputs_and_retains_mutations_across_iterations"
+    ],
+    "platformExclusions": {
+      "windows-latest": [
+        "watchdog_subagent_hang_terminates_and_names_stuck_ids",
+        "watchdog_stream_idle_timeout_after_tool_call_hang",
+        "watchdog_wall_clock_timeout_terminates_active_stream",
+        "watchdog_opencode_post_fanout_silence_does_not_kill_prematurely",
+        "compose_non_harness_respects_cli_timeout",
+        "inline_compose_non_harness_respects_cli_step_timeout",
+        "sequence_per_step_step_timeout_override",
+        "opencode_stderr_rate_limit_before_stdout_forces_early_termination",
+        "opencode_stderr_stream_error_cap_1_17_8_forces_early_termination",
+        "inline_compose_wrong_type_prompt_takes_precedence_over_schema_scrub",
+        "a_loop_accumulates_outputs_and_retains_mutations_across_iterations"
+      ]
+    },
+    "timeoutFloors": {
+      "watchdog_subagent_hang_terminates_and_names_stuck_ids": {
+        "budget": 1,
+        "tick": 0.2
+      },
+      "watchdog_stream_idle_timeout_after_tool_call_hang": {
+        "budget": 1,
+        "tick": 0.2
+      },
+      "watchdog_wall_clock_timeout_terminates_active_stream": {
+        "budget": 1,
+        "tick": 0.2
+      },
+      "watchdog_opencode_post_fanout_silence_does_not_kill_prematurely": {
+        "budget": 1,
+        "tick": 0.2
+      },
+      "compose_non_harness_respects_cli_timeout": {
+        "budget": 1,
+        "tick": 0.2
+      },
+      "inline_compose_non_harness_respects_cli_step_timeout": {
+        "budget": 1,
+        "tick": 0.2
+      },
+      "sequence_per_step_step_timeout_override": {
+        "budget": 0.5,
+        "tick": 0.1
+      },
+      "opencode_stderr_rate_limit_before_stdout_forces_early_termination": {
+        "budget": 0,
+        "tick": 0.2
+      },
+      "opencode_stderr_stream_error_cap_1_17_8_forces_early_termination": {
+        "budget": 0,
+        "tick": 0.2
+      }
+    },
+    "enforceTimeoutFloors": false
+  }
+}

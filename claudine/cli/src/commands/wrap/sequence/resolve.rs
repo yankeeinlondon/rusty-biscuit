@@ -47,7 +47,9 @@ pub(super) fn apply_user_set_to_hints(
 /// auto-select; every other state is a prompting state that must show the
 /// picker on a TTY or abort in a no-TTY session. Mirrors the selected-provider
 /// branch of the direct compose path's `resolve_live_target_with_tty`.
-pub(super) fn is_auto_selectable_state(state: &claudine::composition::AgentResolutionState) -> bool {
+pub(super) fn is_auto_selectable_state(
+    state: &claudine::composition::AgentResolutionState,
+) -> bool {
     use claudine::composition::AgentResolutionState;
     matches!(
         state,
@@ -65,8 +67,9 @@ pub(super) fn is_auto_selectable_state(state: &claudine::composition::AgentResol
 /// resolve to a concrete target so `{{env.AGENT}}` interpolates and the
 /// model resolves; every other agent-resolution state returns `None` so the
 /// per-step dry-run seam renders it from the installed snapshot. The model
-/// catalog is never consulted under `--dry-run` (catalog `None`), matching
-/// the direct compose path.
+/// resolves through the shared [`resolve_document_model`] under the caller's
+/// dry-run mode (compiled baseline, no listing refresh), matching the direct
+/// compose path.
 ///
 /// Sequence steps share one source frontmatter `agent` hint, so the same
 /// target applies to every step.
@@ -75,14 +78,19 @@ pub(super) fn dry_run_sequence_target(
     raw_hints: &claudine::composition::EffectiveSelectionHints,
     snapshot: &claudine::composition::InstalledProviderSnapshot,
     cli_model: Option<&str>,
+    catalog: &claudine::model_catalog::ModelCatalogService,
+    mode: super::super::composition::ModelResolveMode,
 ) -> Option<claudine::composition::ResolvedExecutionTarget> {
     use claudine::composition::{
         AgentResolutionState, ProviderResolutionReason, ResolvedExecutionTarget,
-        classify_agent_resolution, resolve_model_with_hints,
+        classify_agent_resolution,
     };
 
+    use super::super::composition::resolve_document_model;
+
     if let Some(provider) = explicit_provider {
-        let (model, model_reason) = resolve_model_with_hints(provider, raw_hints, cli_model, None);
+        let (model, model_reason) =
+            resolve_document_model(catalog, provider, raw_hints, cli_model, mode);
         return Some(ResolvedExecutionTarget {
             provider,
             provider_reason: ProviderResolutionReason::ExplicitFlag,
@@ -100,7 +108,8 @@ pub(super) fn dry_run_sequence_target(
         }
         _ => return None,
     };
-    let (model, model_reason) = resolve_model_with_hints(provider, raw_hints, cli_model, None);
+    let (model, model_reason) =
+        resolve_document_model(catalog, provider, raw_hints, cli_model, mode);
     Some(ResolvedExecutionTarget {
         provider,
         provider_reason,

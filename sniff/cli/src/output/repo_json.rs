@@ -859,9 +859,12 @@ fn aggregate_result_to_value<T>(
 
     match result {
         AggregateResult::Singular(value) => Value::String(render(value)),
-        AggregateResult::Multiple(values) => {
-            Value::Array(values.iter().map(|value| Value::String(render(value))).collect())
-        }
+        AggregateResult::Multiple(values) => Value::Array(
+            values
+                .iter()
+                .map(|value| Value::String(render(value)))
+                .collect(),
+        ),
         AggregateResult::Empty => Value::Null,
     }
 }
@@ -2399,20 +2402,20 @@ mod tests {
                 packages: None,
             };
             let request = sniff::request::FilesystemRequest::new()
-                .git(sniff::request::GitRequest::full().metadata(
-                    sniff::request::GitMetadataRequest::none()
-                        .remotes(true)
-                        .config(true),
-                ))
+                .git(
+                    sniff::request::GitRequest::full().metadata(
+                        sniff::request::GitMetadataRequest::none()
+                            .remotes(true)
+                            .config(true),
+                    ),
+                )
                 .without_repo()
                 .without_file_inventory()
                 .without_formatting()
                 .without_docs();
-            let mut filesystem = sniff::filesystem::detect_filesystem_with_request(
-                repo_root,
-                &request,
-            )
-            .expect("aggregate fixture detection succeeds");
+            let mut filesystem =
+                sniff::filesystem::detect_filesystem_with_request(repo_root, &request)
+                    .expect("aggregate fixture detection succeeds");
             filesystem.repo = Some(repo);
             SniffResult {
                 os: None,
@@ -2635,8 +2638,13 @@ mod tests {
             for key in ["dirty", "staged", "unstaged", "untracked"] {
                 let leaf = &value[key];
                 assert!(leaf.is_object(), "{key} must be an object: {value}");
-                for field in ["files", "source_code", "documentation", "packages", "package_areas"]
-                {
+                for field in [
+                    "files",
+                    "source_code",
+                    "documentation",
+                    "packages",
+                    "package_areas",
+                ] {
                     assert_eq!(
                         leaf[field],
                         json!([]),
@@ -2663,8 +2671,14 @@ mod tests {
                     "{key} must be an object in aggregate: {value}"
                 );
                 assert!(value[key]["period"].is_object(), "{key} period: {value}");
-                assert!(value[key].get("repo_root").is_none(), "{key} repo_root: {value}");
-                assert!(value[key].get("packages").is_none(), "{key} packages: {value}");
+                assert!(
+                    value[key].get("repo_root").is_none(),
+                    "{key} repo_root: {value}"
+                );
+                assert!(
+                    value[key].get("packages").is_none(),
+                    "{key} packages: {value}"
+                );
                 assert!(value[key].get("filter").is_none(), "{key} filter: {value}");
             }
         }
@@ -2699,7 +2713,10 @@ mod tests {
             let aggregate = aggregate_fixture(&path, &result);
             let value = build_aggregate_value(&result, &aggregate);
 
-            assert!(value["packages"].is_array(), "top-level package names: {value}");
+            assert!(
+                value["packages"].is_array(),
+                "top-level package names: {value}"
+            );
             assert!(
                 value["structure"].get("packages").is_none(),
                 "structure must not embed package catalog: {value}"

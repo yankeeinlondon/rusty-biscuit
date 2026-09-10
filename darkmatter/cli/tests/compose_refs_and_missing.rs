@@ -1,11 +1,13 @@
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 use predicates::prelude::*;
 
 #[test]
 fn test_compose_scalar_ctx_without_allow_override_fails() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_compose_scalar_ctx_without_allow_override_fails");
+    fixture
+        .command()
         .args(["compose", "-", "--no-baseline-schema"])
         .write_stdin("---\nctx: hello\n---\n# Test {{ ctx.today }}")
         .assert()
@@ -16,9 +18,16 @@ fn test_compose_scalar_ctx_without_allow_override_fails() {
 
 #[test]
 fn test_compose_scalar_ctx_with_allow_override_succeeds() {
+    let fixture = CliProcessFixture::named("test_compose_scalar_ctx_with_allow_override_succeeds");
     // --allow-ctx-override downgrades the error to a warning
-    md_cmd()
-        .args(["compose", "-", "--allow-ctx-override", "--no-baseline-schema"])
+    fixture
+        .command()
+        .args([
+            "compose",
+            "-",
+            "--allow-ctx-override",
+            "--no-baseline-schema",
+        ])
         .write_stdin("---\nctx: hello\n---\n# Test")
         .assert()
         .success()
@@ -27,9 +36,11 @@ fn test_compose_scalar_ctx_with_allow_override_succeeds() {
 
 #[test]
 fn test_compose_object_ctx_collision_emits_warning() {
+    let fixture = CliProcessFixture::named("test_compose_object_ctx_collision_emits_warning");
     // A document with an object ctx that collides with runtime keys should
     // succeed but emit a collision warning on stderr.
-    md_cmd()
+    fixture
+        .command()
         .args(["compose", "-", "--no-baseline-schema"])
         .write_stdin("---\nctx:\n  today: custom-value\n---\n# Test")
         .assert()
@@ -39,19 +50,18 @@ fn test_compose_object_ctx_collision_emits_warning() {
         ));
 }
 
-
 /// - emits the error type name (`TransclusionError`) on stderr,
 /// - emits a human-readable summary (`cycle detected`),
 /// - emits a hint-tagged token from the rendered block.
 #[test]
 fn test_block_rendering_transclusion_cycle_tty() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let a = dir.path().join("a.md");
-    let b = dir.path().join("b.md");
-    std::fs::write(&a, "# A\n\n::file b.md\n").unwrap();
-    std::fs::write(&b, "# B\n\n::file a.md\n").unwrap();
+    let fixture = CliProcessFixture::named("test_block_rendering_transclusion_cycle_tty");
+    assert!(fixture.initialize_repository());
+    let a = fixture.write_file("cwd/a.md", "# A\n\n::file ./b.md\n");
+    fixture.write_file("cwd/b.md", "# B\n\n::file ./a.md\n");
 
-    md_cmd()
+    fixture
+        .command()
         .arg("compose")
         .arg(&a)
         .assert()
@@ -67,13 +77,12 @@ fn test_block_rendering_transclusion_cycle_tty() {
 /// this test naturally exercises the non-TTY branch in `main.rs`.
 #[test]
 fn test_block_rendering_transclusion_cycle_non_tty() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let a = dir.path().join("a.md");
-    let b = dir.path().join("b.md");
-    std::fs::write(&a, "# A\n\n::file b.md\n").unwrap();
-    std::fs::write(&b, "# B\n\n::file a.md\n").unwrap();
+    let fixture = CliProcessFixture::named("test_block_rendering_transclusion_cycle_non_tty");
+    assert!(fixture.initialize_repository());
+    let a = fixture.write_file("cwd/a.md", "# A\n\n::file ./b.md\n");
+    fixture.write_file("cwd/b.md", "# B\n\n::file ./a.md\n");
 
-    let output = md_cmd().arg("compose").arg(&a).output().unwrap();
+    let output = fixture.command().arg("compose").arg(&a).output().unwrap();
 
     assert!(!output.status.success(), "expected non-zero exit code");
     let stderr = String::from_utf8_lossy(&output.stderr);

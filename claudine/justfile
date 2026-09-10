@@ -181,17 +181,22 @@ test-browser:
 # by CLAUDINE_CONTRACT_REAL=1 and the provider binary on PATH; each test skips
 # cleanly when its provider/model is unavailable.
 #   - contract adapter against an enabled provider (claude/codex)
-# - the OpenCode YOLO subagent external-directory regression (compose CLI)
+#   - the OpenCode YOLO subagent external-directory regression (compose CLI)
+#
+# Runs through `_test_real`, i.e. nextest, like every other tier in this area.
+# It used to shell out to `cargo test` — the only recipe here that did — which
+# cost it the JUnit report, the slow/leak policy, and test-group scheduling, so
+# its identities appeared in no CI artifact. The reason given was that one
+# unavailable provider must not mask the other's result; `_test_real` already
+# runs per package and this recipe already aggregated the exit code, so keeping
+# two invocations preserves that without leaving the runner.
 test-real *args="":
     #!/usr/bin/env bash
-    # Run both real-tier binaries independently: one provider being unavailable
-    # in this environment must not mask the other's result. Aggregate the exit
-    # code so a genuine failure still fails the recipe.
     set -uo pipefail
+    export CLAUDINE_CONTRACT_REAL=1
     rc=0
-    CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-contract --features real-tests --test real_provider {{ args }} || rc=$?
-    CLAUDINE_CONTRACT_REAL=1 cargo nextest run -p claudine-cli --features real-tests --test real_inline_write_grant {{ args }} || rc=$?
-    CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-cli --features real-tests --test real_opencode_yolo_subagent {{ args }} || rc=$?
+    just _test_real claudine-contract --features real-tests {{ args }} || rc=$?
+    just _test_real claudine-cli --features real-tests {{ args }} || rc=$?
     exit $rc
 
 # Guard against typed errors collapsing to prose anywhere in lib/src, cli/src,

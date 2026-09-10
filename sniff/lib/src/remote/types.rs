@@ -385,7 +385,11 @@ impl PullRequestQuery {
     /// datetime that is not RFC 3339 / ISO 8601, or an inverted time range.
     pub fn validate_canonical(&self) -> Result<(), SniffError> {
         validate_limit(self.limit)?;
-        if self.state.as_ref().is_some_and(|states| states.as_slice().is_empty()) {
+        if self
+            .state
+            .as_ref()
+            .is_some_and(|states| states.as_slice().is_empty())
+        {
             return Err(SniffError::InvalidRemoteQuery {
                 field: "state",
                 message: "must not be empty".to_string(),
@@ -577,7 +581,13 @@ pub struct CiCdJob {
 
 /// Normalized CI/CD lifecycle states a canonical query may select.
 pub const CICD_JOB_STATUSES: &[&str] = &[
-    "queued", "running", "success", "failed", "cancelled", "skipped", "manual",
+    "queued",
+    "running",
+    "success",
+    "failed",
+    "cancelled",
+    "skipped",
+    "manual",
 ];
 
 /// Provider-neutral CI/CD job query vocabulary.
@@ -735,7 +745,8 @@ fn parse_query_timestamp(value: &str) -> Option<DateTime<FixedOffset>> {
     let naive = NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S")
         .or_else(|_| NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S"))
         .or_else(|_| {
-            NaiveDate::parse_from_str(value, "%Y-%m-%d").map(|date| date.and_hms_opt(0, 0, 0).expect("midnight is always valid"))
+            NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                .map(|date| date.and_hms_opt(0, 0, 0).expect("midnight is always valid"))
         })
         .ok()?;
     Some(Utc.from_utc_datetime(&naive).fixed_offset())

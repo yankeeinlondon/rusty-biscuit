@@ -1,11 +1,13 @@
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 use predicates::prelude::*;
 
 #[test]
 fn test_help_flag() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_help_flag");
+    fixture
+        .command()
         .arg("--help")
         .assert()
         .success()
@@ -23,16 +25,18 @@ fn test_help_flag() {
 
 #[test]
 fn test_version_flag() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_version_flag");
+    fixture
+        .command()
         .arg("--version")
         .assert()
         .success()
         .stdout(predicate::str::contains("md"));
 }
 
-
 #[test]
 fn test_removed_flags_are_rejected() {
+    let fixture = CliProcessFixture::named("test_removed_flags_are_rejected");
     for flag in [
         "--html",
         "--show-html",
@@ -46,7 +50,8 @@ fn test_removed_flags_are_rejected() {
         "--fm-merge-with",
         "--fm-defaults",
     ] {
-        md_cmd()
+        fixture
+            .command()
             .args([flag, "-"])
             .write_stdin("# Test")
             .assert()
@@ -57,7 +62,9 @@ fn test_removed_flags_are_rejected() {
 
 #[test]
 fn test_subcommand_rejects_render_options() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_subcommand_rejects_render_options");
+    fixture
+        .command()
         .args(["--output", "html", "toc", "-"])
         .write_stdin("# Test")
         .assert()
@@ -65,10 +72,11 @@ fn test_subcommand_rejects_render_options() {
         .stderr(predicate::str::contains("subcommands cannot be combined"));
 }
 
-
 #[test]
 fn test_list_themes() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_list_themes");
+    fixture
+        .command()
         .arg("--list-themes")
         .assert()
         .success()
@@ -79,7 +87,9 @@ fn test_list_themes() {
 
 #[test]
 fn test_completions_bash() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_completions_bash");
+    fixture
+        .command()
         .args(["--completions", "bash"])
         .assert()
         .success()
@@ -88,7 +98,9 @@ fn test_completions_bash() {
 
 #[test]
 fn test_completions_zsh() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_completions_zsh");
+    fixture
+        .command()
         .args(["--completions", "zsh"])
         .assert()
         .success()
@@ -97,10 +109,11 @@ fn test_completions_zsh() {
 
 #[test]
 fn test_completions_fish() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_completions_fish");
+    fixture
+        .command()
         .args(["--completions", "fish"])
         .assert()
         .success()
         .stdout(predicate::str::is_empty().not());
 }
-

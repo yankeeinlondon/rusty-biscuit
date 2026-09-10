@@ -1672,8 +1672,8 @@ mod tests {
             fs::create_dir(&dir1).expect("should create dir1");
             fs::create_dir(&dir2).expect("should create dir2");
 
-            let path_value = std::env::join_paths([dir1.as_os_str(), dir2.as_os_str()])
-                .expect("join PATH dirs");
+            let path_value =
+                std::env::join_paths([dir1.as_os_str(), dir2.as_os_str()]).expect("join PATH dirs");
 
             let mut env = ScopedEnv::new();
             env.set_os("PATH", &path_value);
@@ -1714,9 +1714,8 @@ mod tests {
             // separators). `join_paths` serializes them with the platform
             // separator so the test stays cross-platform.
             let empty = std::ffi::OsStr::new("");
-            let path_value =
-                std::env::join_paths([empty, empty, dir.as_os_str(), empty, empty])
-                    .expect("join PATH with empty entries");
+            let path_value = std::env::join_paths([empty, empty, dir.as_os_str(), empty, empty])
+                .expect("join PATH with empty entries");
 
             let mut env = ScopedEnv::new();
             env.set_os("PATH", &path_value);

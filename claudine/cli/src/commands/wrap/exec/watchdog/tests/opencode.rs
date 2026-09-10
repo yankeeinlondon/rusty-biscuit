@@ -8,11 +8,17 @@ use super::super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[test]
-fn evaluate_timeout_tick_opencode_grace_suppresses_silence_until_step_finish() {
+fn evaluate_timeout_tick_opencode_cold_start_is_bounded_by_the_budget() {
     // OpenCode + step_timeout + no `step_finish` boundary observed
-    // (provider_status is None) + silence beyond budget → suppressed.
-    // This is the regression guard for the
-    // 2026-05-10-opencode-timeout-regression fix.
+    // (provider_status is None) + silence beyond budget → breach. Missing
+    // `provider_status` used to suppress this unconditionally, which is what
+    // let the 2026-08-30 startup stalls run until the wall-clock budget (or,
+    // with no `timeout` configured, forever). The cold-start window is now
+    // bounded by the same `step_timeout` budget as every other silence.
+    //
+    // Pair with `opencode_cold_start_suppresses_within_the_budget`, which
+    // holds the other side: a slow first turn inside the budget is still
+    // protected.
     let config = TimeoutConfig {
         timeout: None,
         step_timeout: Some(Duration::from_secs(5)),
@@ -31,10 +37,50 @@ fn evaluate_timeout_tick_opencode_grace_suppresses_silence_until_step_finish() {
     }
 
     let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+    match result {
+        WatchdogTickResult::Breach(ref w) => {
+            assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+            assert!(
+                w.message.contains("never completed a step"),
+                "a pre-first-step OpenCode stall must be named as such; got: {}",
+                w.message
+            );
+        }
+        other => panic!(
+            "OpenCode cold start must not exempt a stale silence clock; got: {other:?}"
+        ),
+    }
+    assert!(fired.load(Ordering::SeqCst));
+}
+
+#[test]
+fn opencode_cold_start_suppresses_within_the_budget() {
+    // Counter-case for the bound above: a slow first turn that is still
+    // inside `step_timeout` must not be killed. Without this the fix could
+    // collapse into "always time out".
+    let config = TimeoutConfig {
+        timeout: None,
+        step_timeout: Some(Duration::from_secs(60)),
+        provider: Some(claudine::provider::Provider::OpenCode),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let t0 = Instant::now() - Duration::from_secs(10);
+
+    {
+        let mut m = metrics.lock().unwrap();
+        m.last_event_at = Some(t0);
+        assert!(m.provider_status.is_none());
+        assert!(!m.step_in_flight);
+    }
+
+    let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
     assert_eq!(
         result,
         WatchdogTickResult::Ok,
-        "OpenCode without an observed step_finish must suppress step_timeout"
+        "a cold start inside the budget must still be protected; got: {result:?}"
     );
     assert!(!fired.load(Ordering::SeqCst));
 }
@@ -172,11 +218,16 @@ fn evaluate_timeout_tick_grace_does_not_apply_when_provider_unset() {
     );
 }
 
+/// Mid-step suppression requires a *fresh* clock, and an absent clock is
+/// never fresh.
+///
+/// This is the exact state the pre-fix predicate mis-read: it asked whether
+/// BOTH clocks were stale, answered "no" because the byte clock was absent,
+/// and read that as recent activity — so an open step whose only populated
+/// clock had gone stale suppressed the breach forever. Retains the original
+/// failing input; only the expectation moved to the ratified contract.
 #[test]
-fn opencode_step_in_flight_suppresses_silence() {
-    // OpenCode + step_timeout + step_finish observed (provider_status is
-    // Some) BUT step_in_flight is true → silence beyond budget must be
-    // suppressed. Once step_in_flight is cleared, the breach should fire.
+fn opencode_mid_step_breaches_when_event_clock_is_stale_and_byte_clock_absent() {
     let config = TimeoutConfig {
         timeout: None,
         step_timeout: Some(Duration::from_secs(5)),
@@ -191,22 +242,9 @@ fn opencode_step_in_flight_suppresses_silence() {
     {
         let mut m = metrics.lock().unwrap();
         m.last_event_at = Some(t0);
+        assert!(m.last_byte_at.is_none());
         m.provider_status = Some("stop".into());
         m.step_in_flight = true;
-    }
-
-    let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
-    assert_eq!(
-        result,
-        WatchdogTickResult::Ok,
-        "OpenCode with step_in_flight=true must suppress step_timeout even after step_finish"
-    );
-    assert!(!fired.load(Ordering::SeqCst));
-
-    // Now clear step_in_flight (emulate step_finish) and re-evaluate
-    {
-        let mut m = metrics.lock().unwrap();
-        m.step_in_flight = false;
     }
 
     let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
@@ -214,11 +252,182 @@ fn opencode_step_in_flight_suppresses_silence() {
         WatchdogTickResult::Breach(ref w) => {
             assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
         }
-        other => {
-            panic!("expected StepTimeout breach once step_in_flight is cleared, got: {other:?}")
-        }
+        other => panic!(
+            "an open step whose only populated clock is stale must not be suppressed; got: {other:?}"
+        ),
     }
     assert!(fired.load(Ordering::SeqCst));
+}
+
+/// The mirror permutation: the raw-byte clock is the populated-but-stale one
+/// and the structured-event clock never existed.
+#[test]
+fn opencode_mid_step_breaches_when_byte_clock_is_stale_and_event_clock_absent() {
+    let config = TimeoutConfig {
+        timeout: None,
+        step_timeout: Some(Duration::from_secs(5)),
+        provider: Some(claudine::provider::Provider::OpenCode),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let t0 = Instant::now() - Duration::from_secs(10);
+
+    {
+        let mut m = metrics.lock().unwrap();
+        m.last_byte_at = Some(t0);
+        assert!(m.last_event_at.is_none());
+        m.step_in_flight = true;
+    }
+
+    let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+    match result {
+        WatchdogTickResult::Breach(ref w) => {
+            assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+        }
+        other => panic!(
+            "an open step whose only populated clock is stale must not be suppressed; got: {other:?}"
+        ),
+    }
+    assert!(fired.load(Ordering::SeqCst));
+}
+
+/// Counter-case for the two above: a single clock that is *fresh* still
+/// protects an open step, so the predicate did not collapse into "always
+/// time out".
+#[test]
+fn opencode_mid_step_suppresses_when_the_only_event_clock_is_fresh() {
+    let config = TimeoutConfig {
+        timeout: None,
+        step_timeout: Some(Duration::from_secs(60)),
+        provider: Some(claudine::provider::Provider::OpenCode),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let now_t = Instant::now();
+    let started_at = now_t - Duration::from_secs(600);
+
+    {
+        let mut m = metrics.lock().unwrap();
+        m.last_event_at = Some(now_t - Duration::from_secs(1));
+        assert!(m.last_byte_at.is_none());
+        m.step_in_flight = true;
+    }
+
+    let result = evaluate_timeout_tick(&config, now_t, started_at, &state, &metrics, &fired);
+    assert_eq!(
+        result,
+        WatchdogTickResult::Ok,
+        "a fresh event clock must protect an open step even with no byte clock; got: {result:?}"
+    );
+    assert!(!fired.load(Ordering::SeqCst));
+}
+
+/// Byte-clock mirror of the counter-case above.
+#[test]
+fn opencode_mid_step_suppresses_when_the_only_byte_clock_is_fresh() {
+    let config = TimeoutConfig {
+        timeout: None,
+        step_timeout: Some(Duration::from_secs(60)),
+        provider: Some(claudine::provider::Provider::OpenCode),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let now_t = Instant::now();
+    let started_at = now_t - Duration::from_secs(600);
+
+    {
+        let mut m = metrics.lock().unwrap();
+        m.last_byte_at = Some(now_t - Duration::from_secs(1));
+        assert!(m.last_event_at.is_none());
+        m.step_in_flight = true;
+    }
+
+    let result = evaluate_timeout_tick(&config, now_t, started_at, &state, &metrics, &fired);
+    assert_eq!(
+        result,
+        WatchdogTickResult::Ok,
+        "a fresh byte clock must protect an open step even with no event clock; got: {result:?}"
+    );
+    assert!(!fired.load(Ordering::SeqCst));
+}
+
+/// A cold start *inside* an already-open step: `step_start` was parsed but
+/// neither activity clock was ever populated. No clock is fresh, so the
+/// spawn-anchored silence budget bounds it like every other silent state.
+#[test]
+fn opencode_mid_step_breaches_when_neither_clock_exists() {
+    let config = TimeoutConfig {
+        timeout: None,
+        step_timeout: Some(Duration::from_secs(5)),
+        provider: Some(claudine::provider::Provider::OpenCode),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let started_at = Instant::now() - Duration::from_secs(10);
+
+    {
+        let mut m = metrics.lock().unwrap();
+        m.step_in_flight = true;
+        assert!(m.last_event_at.is_none());
+        assert!(m.last_byte_at.is_none());
+    }
+
+    let result =
+        evaluate_timeout_tick(&config, Instant::now(), started_at, &state, &metrics, &fired);
+    match result {
+        WatchdogTickResult::Breach(ref w) => {
+            assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+            assert!(
+                w.message
+                    .contains("no output since the wrapped process launched"),
+                "an open step that produced nothing must still be spawn-anchored; got: {}",
+                w.message
+            );
+        }
+        other => panic!("an open step with no activity clock at all must breach; got: {other:?}"),
+    }
+    assert!(fired.load(Ordering::SeqCst));
+}
+
+/// Mid-step suppression is unchanged: one fresh clock is enough while a
+/// step is open, even with the other stale past the budget.
+#[test]
+fn opencode_mid_step_suppresses_while_one_clock_is_fresh() {
+    let config = TimeoutConfig {
+        timeout: None,
+        step_timeout: Some(Duration::from_secs(5)),
+        provider: Some(claudine::provider::Provider::OpenCode),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let now_t = Instant::now();
+    let stale = now_t - Duration::from_secs(30);
+
+    {
+        let mut m = metrics.lock().unwrap();
+        m.last_event_at = Some(stale);
+        m.last_byte_at = Some(now_t);
+        m.step_in_flight = true;
+        m.provider_status = Some("tool-calls".into());
+    }
+
+    let result = evaluate_timeout_tick(&config, now_t, stale, &state, &metrics, &fired);
+    assert_eq!(
+        result,
+        WatchdogTickResult::Ok,
+        "a fresh byte clock must protect an open step; got: {result:?}"
+    );
+    assert!(!fired.load(Ordering::SeqCst));
 }
 
 #[test]
@@ -229,6 +438,11 @@ fn opencode_step_in_flight_resets_per_step() {
     // on a SINGLE `LiveMetricsState` instance so the toggling logic is
     // exercised end-to-end — not just the predicate behavior against
     // a hand-set field.
+    //
+    // Each `step_start` is observed at the current instant and each
+    // `step_finish` well past the budget, because suppression needs an open
+    // step AND a fresh activity clock; `observe_event` moves `last_event_at`
+    // to whatever instant it is handed.
     let config = TimeoutConfig {
         timeout: None,
         step_timeout: Some(Duration::from_secs(5)),
@@ -248,7 +462,7 @@ fn opencode_step_in_flight_resets_per_step() {
                 message: "step_start".into(),
                 extra: serde_json::json!({"step_phase": "start"}),
             },
-            Instant::now() - Duration::from_secs(30),
+            Instant::now(),
         );
         assert!(
             m.step_in_flight,
@@ -266,7 +480,7 @@ fn opencode_step_in_flight_resets_per_step() {
     assert_eq!(
         result,
         WatchdogTickResult::Ok,
-        "first step_start must suppress step_timeout (silence stale, step_in_flight=true)"
+        "first step_start must suppress step_timeout (step_in_flight=true, event clock fresh)"
     );
     assert!(!fired.load(Ordering::SeqCst));
 
@@ -309,7 +523,7 @@ fn opencode_step_in_flight_resets_per_step() {
                 message: "step_start".into(),
                 extra: serde_json::json!({"step_phase": "start"}),
             },
-            Instant::now() - Duration::from_secs(10),
+            Instant::now(),
         );
         assert!(
             m.step_in_flight,
@@ -420,17 +634,12 @@ fn opencode_step_started_but_never_finished_fires_on_stale_clocks() {
 }
 
 #[test]
-fn opencode_cold_start_suppresses_even_when_both_clocks_stale() {
-    // Cold-start counter-test: `provider_status` is None (no `step_finish`
-    // has ever been observed) and BOTH the structured-event clock and
-    // the raw-byte clock are stale past `step_timeout`. The documented
-    // OpenCode-grace contract says the breach must NOT fire — cold-start
-    // protection is unconditional on the byte-heartbeat backstop because
-    // the wrapper is still inside the slow-first-turn window.
-    //
-    // Pair with `opencode_byte_heartbeat_still_catches_zero_byte_hang`
-    // which covers the post-cold-start `step_in_flight=true` arm where
-    // the byte-heartbeat DOES escape suppression.
+fn opencode_cold_start_breaches_when_both_clocks_are_stale() {
+    // Cold start with BOTH the structured-event clock and the raw-byte clock
+    // stale past `step_timeout`. This is the exact state the 2026-08-30
+    // OpenCode incidents sat in for 30 minutes: configuration files loaded
+    // (so bytes arrived), then nothing, and no step ever started. The
+    // byte-heartbeat backstop must reach it.
     let config = TimeoutConfig {
         timeout: None,
         step_timeout: Some(Duration::from_secs(5)),
@@ -454,12 +663,80 @@ fn opencode_cold_start_suppresses_even_when_both_clocks_stale() {
 
     let result =
         evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
-    assert_eq!(
-        result,
-        WatchdogTickResult::Ok,
-        "cold-start path (provider_status=None) must suppress step_timeout even when both clocks are stale; got: {result:?}"
+    match result {
+        WatchdogTickResult::Breach(ref w) => {
+            assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+        }
+        other => panic!(
+            "cold start with both clocks stale must breach, not suppress; got: {other:?}"
+        ),
+    }
+    assert!(fired.load(Ordering::SeqCst));
+}
+
+/// The OpenCode incident with no output at all: nothing ever reached either
+/// activity clock, so the spawn instant is the only reference there is.
+#[test]
+fn opencode_startup_with_no_output_at_all_breaches_from_spawn() {
+    let config = TimeoutConfig {
+        timeout: None,
+        step_timeout: Some(Duration::from_secs(5)),
+        provider: Some(claudine::provider::Provider::OpenCode),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let started_at = Instant::now() - Duration::from_secs(10);
+
+    let result =
+        evaluate_timeout_tick(&config, Instant::now(), started_at, &state, &metrics, &fired);
+    match result {
+        WatchdogTickResult::Breach(ref w) => {
+            assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+            assert!(
+                w.message
+                    .contains("no output since the wrapped process launched"),
+                "the diagnostic must say nothing was ever produced; got: {}",
+                w.message
+            );
+            assert!(
+                !w.message.contains("never completed a step"),
+                "a child that produced nothing has no OpenCode-activity story to tell; got: {}",
+                w.message
+            );
+        }
+        other => panic!("expected a spawn-anchored StepTimeout breach; got: {other:?}"),
+    }
+    assert!(fired.load(Ordering::SeqCst));
+}
+
+/// Wall-clock precedence survives the bounded cold-start guard.
+#[test]
+fn opencode_cold_start_breach_yields_to_the_wall_clock() {
+    let config = TimeoutConfig {
+        timeout: Some(Duration::from_secs(5)),
+        step_timeout: Some(Duration::from_secs(5)),
+        provider: Some(claudine::provider::Provider::OpenCode),
+        ..Default::default()
+    };
+    let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let fired = AtomicBool::new(false);
+    let stale = Instant::now() - Duration::from_secs(10);
+
+    {
+        let mut m = metrics.lock().unwrap();
+        m.last_event_at = Some(stale);
+        m.last_byte_at = Some(stale);
+    }
+
+    let result =
+        evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
+    assert!(
+        matches!(result, WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::Timeout),
+        "wall-clock must still win when both budgets breach on one tick; got: {result:?}"
     );
-    assert!(!fired.load(Ordering::SeqCst));
 }
 
 #[test]

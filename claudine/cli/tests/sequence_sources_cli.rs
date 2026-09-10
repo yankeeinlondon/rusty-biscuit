@@ -14,16 +14,15 @@
 
 use std::fs;
 use std::path::Path;
-use tempfile::{TempDir, tempdir};
 mod common;
-use common::strip_ansi;
+use common::{CliProcessFixture, strip_ansi};
 
 /// Dry-run `file` and return the composed step bodies, in order.
 ///
 /// A step body is emitted on stdout; status framing goes to stderr. Reading
 /// only stdout is therefore both the assertion and a standing check that the
 /// stream split holds.
-fn composed_steps(workspace: &TempDir, file: &Path, extra_args: &[&str]) -> Vec<String> {
+fn composed_steps(workspace: &CliProcessFixture, file: &Path, extra_args: &[&str]) -> Vec<String> {
     let (stdout, _) = dry_run(workspace, file, extra_args, true);
     stdout
         .lines()
@@ -35,7 +34,18 @@ fn composed_steps(workspace: &TempDir, file: &Path, extra_args: &[&str]) -> Vec<
 
 /// Dry-run `file`, returning `(stdout, stderr)` with ANSI stripped.
 fn dry_run(
-    workspace: &TempDir,
+    workspace: &CliProcessFixture,
+    file: &Path,
+    extra_args: &[&str],
+    expect_success: bool,
+) -> (String, String) {
+    dry_run_command(workspace.command(), file, extra_args, expect_success)
+}
+
+/// [`dry_run`] over a command the caller has already shaped, for the one
+/// case whose subject needs something other than the fixture's default PATH.
+fn dry_run_command(
+    mut command: assert_cmd::Command,
     file: &Path,
     extra_args: &[&str],
     expect_success: bool,
@@ -45,12 +55,7 @@ fn dry_run(
     let file_arg = file.to_str().unwrap();
     args.push(file_arg);
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .current_dir(workspace.path())
-        .args(&args)
-        .assert();
+    let assert = command.args(&args).assert();
     let assert = if expect_success { assert.success() } else { assert.failure() };
     let output = assert.get_output().clone();
 
@@ -60,8 +65,8 @@ fn dry_run(
     )
 }
 
-fn write(workspace: &TempDir, name: &str, body: &str) -> std::path::PathBuf {
-    let path = workspace.path().join(name);
+fn write(workspace: &CliProcessFixture, name: &str, body: &str) -> std::path::PathBuf {
+    let path = workspace.cwd().join(name);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
     }
@@ -70,7 +75,7 @@ fn write(workspace: &TempDir, name: &str, body: &str) -> std::path::PathBuf {
 }
 
 /// A Markdown document whose body renders each step's name on its own line.
-fn source_doc(workspace: &TempDir, name: &str, source: &str) -> std::path::PathBuf {
+fn source_doc(workspace: &CliProcessFixture, name: &str, source: &str) -> std::path::PathBuf {
     write(
         workspace,
         name,
@@ -88,7 +93,7 @@ fn source_doc(workspace: &TempDir, name: &str, source: &str) -> std::path::PathB
 /// makes a future format-specific divergence visible.
 #[test]
 fn yaml_json_json5_jsonl_and_ndjson_sources_produce_the_same_plan() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     write(&workspace, "d.yaml", "wrap:\n  items:\n    - one\n    - two\n");
     write(&workspace, "d.json", r#"{"wrap": {"items": ["one", "two"]}}"#);
     write(
@@ -128,7 +133,7 @@ fn yaml_json_json5_jsonl_and_ndjson_sources_produce_the_same_plan() {
 
 #[test]
 fn the_three_operators_each_produce_a_usable_name() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     write(
         &workspace,
         "d.yaml",
@@ -154,7 +159,7 @@ fn the_three_operators_each_produce_a_usable_name() {
 
 #[test]
 fn map_removes_the_source_key_while_name_retains_it() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     write(&workspace, "d.yaml", "items:\n  - color: blue\n");
 
     // The distinction is invisible in the step name and only observable in the
@@ -183,7 +188,7 @@ fn map_removes_the_source_key_while_name_retains_it() {
 /// the wiring, not just the classifier's own unit tests.
 #[test]
 fn every_string_list_form_classifies_through_the_real_invocation_path() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     let cases: &[(&str, &str, &[&str])] = &[
         ("csv", "\"alpha, beta, gamma\"", &["alpha", "beta", "gamma"]),
         ("tsv", "\"alpha\tbeta\"", &["alpha", "beta"]),
@@ -208,7 +213,7 @@ fn every_string_list_form_classifies_through_the_real_invocation_path() {
 
 #[test]
 fn markdown_list_markers_win_over_line_splitting() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     // Both bodies are multi-line, so line-separation would also "work" — the
     // marker precedence rule is what strips the bullets and numbers.
     let unordered = write(
@@ -228,7 +233,7 @@ fn markdown_list_markers_win_over_line_splitting() {
 
 #[test]
 fn quoted_csv_delimiters_and_crlf_survive_classification() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     // A naive `split(',')` would produce four entries here, and a naive line
     // split would leave a trailing `\r` on every name.
     let doc = write(
@@ -258,7 +263,7 @@ fn quoted_csv_delimiters_and_crlf_survive_classification() {
 /// pins the strict half of the same boundary.
 #[test]
 fn a_foreign_source_coerces_scalars_and_names_nameless_objects() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     let scalars = write(
         &workspace,
         "scalars.md",
@@ -280,12 +285,26 @@ fn a_foreign_source_coerces_scalars_and_names_nameless_objects() {
 
 #[test]
 fn a_shell_expanded_source_becomes_a_classified_list() {
-    let workspace = tempdir().unwrap();
-    // `echo` is one of the few commands with the same surface on `sh` and
-    // `cmd`, which keeps this case off a platform gate. `--yolo` stands in for
-    // the approval the preflight would otherwise ask for.
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
+    // The shell source is executed as a program, and `echo` is one of the few
+    // with the same surface everywhere — but on Windows it exists only as
+    // Git's echo.exe outside System32, so this case declares the host PATH
+    // rather than a platform gate. `--yolo` stands in for the approval the
+    // preflight would otherwise ask for.
     let doc = source_doc(&workspace, "shell.md", "\"$(echo alpha,beta)\"");
-    assert_eq!(composed_steps(&workspace, &doc, &["--yolo"]), ["alpha", "beta"]);
+    let (stdout, _) = dry_run_command(
+        workspace.command_builder().host_path().build(),
+        &doc,
+        &["--yolo"],
+        true,
+    );
+    let steps: Vec<String> = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("Step "))
+        .map(|line| line.trim_start_matches("Step ").trim_end_matches('.').to_string())
+        .collect();
+    assert_eq!(steps, ["alpha", "beta"]);
 }
 
 // ============================================================================
@@ -301,7 +320,7 @@ fn a_shell_expanded_source_becomes_a_classified_list() {
 /// environment variables in a child process.
 #[test]
 fn file_references_resolve_from_the_authoring_document() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     write(&workspace, "nested/data.yaml", "items:\n  - nested-hit\n");
     write(&workspace, "my data/data.yaml", "items:\n  - spaced-hit\n");
     write(&workspace, "a@b/data.yaml", "items:\n  - at-hit\n");
@@ -321,8 +340,8 @@ fn file_references_resolve_from_the_authoring_document() {
     }
 
     let doc = source_doc(&workspace, "tilde.md", "\"~/tilde.yaml -> items\"");
-    let request_context = biscuit_file::FileResolutionContext::new(workspace.path())
-        .with_home_dir(workspace.path())
+    let request_context = biscuit_file::FileResolutionContext::new(workspace.cwd())
+        .with_home_dir(workspace.cwd())
         .with_source_path(&doc);
     let source = claudine::composition::resolve_composition_source_in_context(
         doc.to_str().unwrap(),
@@ -344,7 +363,7 @@ fn file_references_resolve_from_the_authoring_document() {
 
 #[test]
 fn a_reference_resolves_relative_to_its_own_document_not_the_process_cwd() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     write(&workspace, "deep/data.yaml", "items:\n  - deep-hit\n");
     // A sibling reference, authored one directory down. Resolving from the
     // process CWD (the workspace root) would miss it entirely.
@@ -355,7 +374,7 @@ fn a_reference_resolves_relative_to_its_own_document_not_the_process_cwd() {
 
 #[test]
 fn a_quoted_operator_argument_keeps_its_delimiters() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     // The field name holds a comma — the argument separator — so an unquoted
     // splitter would read this as a two-argument `name(...)` and fail arity.
     write(&workspace, "d.yaml", "items:\n  - \"k, v\": quoted-hit\n");
@@ -370,7 +389,7 @@ fn a_quoted_operator_argument_keeps_its_delimiters() {
 
 #[test]
 fn a_referenced_formal_document_applies_template_before_generated_fields() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     write(
         &workspace,
         "formal.yaml",
@@ -389,7 +408,7 @@ fn a_referenced_formal_document_applies_template_before_generated_fields() {
 
 #[test]
 fn a_referenced_formal_documents_schema_validates_the_step_state() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     write(
         &workspace,
         "formal.yaml",
@@ -419,7 +438,7 @@ fn a_referenced_formal_documents_schema_validates_the_step_state() {
 /// has no Markdown body, so its steps render through a document-level `prompt`
 /// the referencing document supplies as its body instead. Both strings are
 /// therefore identical, and so are both results.
-fn write_parity_fixture(workspace: &TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
+fn write_parity_fixture(workspace: &CliProcessFixture) -> (std::path::PathBuf, std::path::PathBuf) {
     const STEP_BODY: &str = "Step {{ state.name }}/{{ state.desc }}/{{ state.rank }}.";
 
     let direct = write(
@@ -442,7 +461,7 @@ fn write_parity_fixture(workspace: &TempDir) -> (std::path::PathBuf, std::path::
 
 #[test]
 fn a_formal_document_normalizes_identically_through_both_entry_paths() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     let (direct, referenced) = write_parity_fixture(&workspace);
 
     let expected = ["blue/blue!/5", "red/red!/3"];
@@ -465,7 +484,7 @@ fn a_formal_document_normalizes_identically_through_both_entry_paths() {
 /// reported `rank` merely missing from the document root.
 #[test]
 fn a_directly_invoked_documents_schema_validates_the_step_state() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     let doc = write(
         &workspace,
         "formal.yaml",
@@ -490,7 +509,7 @@ fn a_directly_invoked_documents_schema_validates_the_step_state() {
 /// mode outright.
 #[test]
 fn a_directly_invoked_yaml_runs_executable_steps_without_a_body() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     write(&workspace, "p.md", "---\ntitle: p\n---\nStep {{ state.name }}.\n");
     let doc = write(
         &workspace,
@@ -506,7 +525,7 @@ fn a_directly_invoked_yaml_runs_executable_steps_without_a_body() {
 /// `topic` even though the first step rendered it.
 #[test]
 fn a_directly_invoked_yaml_keeps_its_frontmatter_across_step_boundaries() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     let doc = write(
         &workspace,
         "headless.yaml",
@@ -521,7 +540,7 @@ fn a_directly_invoked_yaml_keeps_its_frontmatter_across_step_boundaries() {
 
 #[test]
 fn a_bodyless_step_that_declares_no_executable_is_still_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     // The empty-body guard is relaxed only for a step that runs a task; a step
     // that would send an empty prompt to a provider must still say so.
     let doc = write(&workspace, "empty.md", "---\nsequence:\n  - alpha\n---\n");
@@ -542,7 +561,7 @@ fn a_bodyless_step_that_declares_no_executable_is_still_rejected() {
 /// levels never do, and this pins both halves in one fixture.
 #[test]
 fn document_level_prompt_is_prose_while_task_level_prompt_is_a_file_reference() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
 
     let document_level = write(
         &workspace,
@@ -578,7 +597,7 @@ fn document_level_prompt_is_prose_while_task_level_prompt_is_a_file_reference() 
 
 #[test]
 fn a_dry_run_leaves_an_inline_compose_source_untouched() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     let original =
         "---\nprompt: \"Step {{ state.name }}.\"\nsequence:\n  - alpha\n---\nOriginal body\n";
     let doc = write(&workspace, "inline.md", original);
@@ -600,7 +619,7 @@ fn a_dry_run_leaves_an_inline_compose_source_untouched() {
 /// the same loader.
 #[test]
 fn external_task_group_and_catalog_references_all_load_and_run() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     write(&workspace, "p.md", "---\ntitle: p\n---\nStep {{ state.name }}.\n");
     write(&workspace, "task.yaml", "kind: task\nprompt: p.md\n");
     write(&workspace, "group.yaml", "kind: group\nname: G\ntasks:\n  - prompt: p.md\n");
@@ -625,7 +644,7 @@ fn external_task_group_and_catalog_references_all_load_and_run() {
 
 #[test]
 fn a_reference_inside_an_external_task_resolves_from_that_tasks_directory() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-sources-cli");
     // The prompt sits beside the *task* file, not beside the sequence. Only
     // resolving from the task's own directory finds it.
     write(&workspace, "tasks/p.md", "---\ntitle: p\n---\nStep {{ state.name }}.\n");

@@ -190,6 +190,18 @@ gitnexus:
 # emitted no XML at all (a compile failure, say). A MISSING report is signal
 # for the rollup, so the record is still written.
 #
+# A `provenance.json` file sits beside `manifest.jsonl` when `GITHUB_SHA` is
+# present at staging time, carrying immutable CI/source metadata from GitHub
+# Actions environment variables:
+#
+#     sha runId runNumber runAttempt ref event workflow
+#
+# Absent provenance records the tree as `local` evidence; present provenance
+# makes the tree `ci` evidence only when all counted samples carry it, all
+# share one source revision, and run numbers are consecutive. Staging never
+# fails when provenance is unavailable — it is recorded as absent rather than
+# causing the invocation to exit non-zero.
+#
 # `_stage_junit_reset` runs BEFORE the invocation rather than deleting the
 # report after copying it, for two reasons: a run that never reaches the report
 # stage cannot then be credited with its predecessor's XML, and the last
@@ -297,6 +309,21 @@ _stage_junit tier pkg exit_code duration:
         --argjson report_present "${report_present}" \
         '{tier: $tier, package: $package, xml: $xml, exit_code: $exit_code, environment: $environment, duration_s: $duration_s, report_present: $report_present}' \
         >> "${stage}/manifest.jsonl" 2>/dev/null || exit 0
+
+    # Write provenance.json once per staging tree when CI environment is present.
+    # Missing provenance records the tree as local rather than failing the invocation.
+    if [[ ! -f "${stage}/provenance.json" && -n "${GITHUB_SHA:-}" ]]; then
+        jq -c -n \
+            --arg sha "${GITHUB_SHA}" \
+            --arg runId "${GITHUB_RUN_ID:-}" \
+            --argjson runNumber "${GITHUB_RUN_NUMBER:-0}" \
+            --argjson runAttempt "${GITHUB_RUN_ATTEMPT:-0}" \
+            --arg ref "${GITHUB_REF:-}" \
+            --arg event "${GITHUB_EVENT_NAME:-}" \
+            --arg workflow "${GITHUB_WORKFLOW:-}" \
+            '{sha: $sha, runId: $runId, runNumber: $runNumber, runAttempt: $runAttempt, ref: $ref, event: $event, workflow: $workflow}' \
+            > "${stage}/provenance.json" 2>/dev/null || true
+    fi
     exit 0
 
 # Run one canonical tier recipe across several packages, continuing past a

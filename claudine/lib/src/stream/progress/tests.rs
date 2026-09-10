@@ -17,9 +17,10 @@ fn records_and_completes_tool_lifecycle() {
 fn should_warn_stall_returns_false_when_threshold_not_reached() {
     let mut state = LiveMetricsState::default();
     let now = Instant::now();
+    let spawned_at = now - Duration::from_secs(600);
     state.last_event_at = Some(now);
     assert!(
-        !should_warn_stall(&state, now, Duration::from_secs(60)),
+        !should_warn_stall(&state, now, Duration::from_secs(60), spawned_at),
         "fresh activity must not trigger a stall warning"
     );
 }
@@ -28,9 +29,10 @@ fn should_warn_stall_returns_false_when_threshold_not_reached() {
 fn should_warn_stall_returns_true_after_threshold() {
     let mut state = LiveMetricsState::default();
     let now = Instant::now();
+    let spawned_at = now - Duration::from_secs(600);
     state.last_event_at = Some(now - Duration::from_secs(120));
     assert!(
-        should_warn_stall(&state, now, Duration::from_secs(60)),
+        should_warn_stall(&state, now, Duration::from_secs(60), spawned_at),
         "elapsed-since-activity past threshold must trigger a warning"
     );
 }
@@ -39,11 +41,12 @@ fn should_warn_stall_returns_true_after_threshold() {
 fn should_warn_stall_dedupes_within_one_episode() {
     let mut state = LiveMetricsState::default();
     let last_event = Instant::now() - Duration::from_secs(120);
+    let spawned_at = last_event - Duration::from_secs(60);
     state.last_event_at = Some(last_event);
     // Mark the warning as already fired during this stall episode.
     state.last_stall_warning_at = Some(last_event + Duration::from_secs(60));
     assert!(
-        !should_warn_stall(&state, Instant::now(), Duration::from_secs(60)),
+        !should_warn_stall(&state, Instant::now(), Duration::from_secs(60), spawned_at),
         "stall warning must not re-fire within the same stall episode"
     );
 }
@@ -54,21 +57,104 @@ fn should_warn_stall_re_fires_after_activity_resumes() {
     // Activity resumed AFTER a previous stall warning was emitted.
     let prior_warning = Instant::now() - Duration::from_secs(180);
     let resumed_at = Instant::now() - Duration::from_secs(120);
+    let spawned_at = prior_warning - Duration::from_secs(60);
     state.last_stall_warning_at = Some(prior_warning);
     state.last_event_at = Some(resumed_at);
     assert!(
-        should_warn_stall(&state, Instant::now(), Duration::from_secs(60)),
+        should_warn_stall(&state, Instant::now(), Duration::from_secs(60), spawned_at),
         "a fresh stall episode after resumed activity must warn again"
     );
 }
 
+/// A child that spawns successfully and then emits nothing has no activity
+/// clock at all. The spawn instant is the reference, so the warning still
+/// fires once the threshold elapses.
 #[test]
-fn should_warn_stall_returns_false_when_no_activity_seen_yet() {
+fn should_warn_stall_warns_from_spawn_when_no_activity_seen_yet() {
     let state = LiveMetricsState::default();
+    let spawned_at = Instant::now() - Duration::from_secs(120);
     assert!(
-        !should_warn_stall(&state, Instant::now(), Duration::from_secs(60)),
-        "must not warn when no activity has been observed at all"
+        should_warn_stall(&state, Instant::now(), Duration::from_secs(60), spawned_at),
+        "startup silence past the threshold must warn from the spawn instant"
     );
+}
+
+/// Counter-case for the spawn fallback: a child that has only just started
+/// is not stalled, so no warning is due yet.
+#[test]
+fn should_warn_stall_stays_quiet_before_the_spawn_threshold() {
+    let state = LiveMetricsState::default();
+    let spawned_at = Instant::now() - Duration::from_secs(5);
+    assert!(
+        !should_warn_stall(&state, Instant::now(), Duration::from_secs(60), spawned_at),
+        "a freshly spawned child must not warn before the threshold elapses"
+    );
+}
+
+/// The startup warning is one-shot: with the reference pinned at spawn, a
+/// warning already emitted after that instant blocks every later tick.
+#[test]
+fn should_warn_stall_startup_warning_fires_once_per_episode() {
+    let mut state = LiveMetricsState::default();
+    let spawned_at = Instant::now() - Duration::from_secs(300);
+    state.last_stall_warning_at = Some(spawned_at + Duration::from_secs(60));
+    assert!(
+        !should_warn_stall(&state, Instant::now(), Duration::from_secs(60), spawned_at),
+        "the startup stall must warn once, not on every timing tick"
+    );
+}
+
+/// …and the episode resets once the child finally produces output: the
+/// reference advances past the stored warning timestamp.
+#[test]
+fn should_warn_stall_startup_warning_resets_after_activity() {
+    let mut state = LiveMetricsState::default();
+    let spawned_at = Instant::now() - Duration::from_secs(300);
+    state.last_stall_warning_at = Some(spawned_at + Duration::from_secs(60));
+    state.record_byte_activity("first real output", spawned_at + Duration::from_secs(120));
+    assert!(
+        should_warn_stall(&state, Instant::now(), Duration::from_secs(60), spawned_at),
+        "activity after a startup warning must open a new stall episode"
+    );
+}
+
+/// Non-whitespace bytes are activity for the warning clock too, so a
+/// provider that is visibly producing output is not accused of stalling.
+#[test]
+fn should_warn_stall_honors_the_byte_clock() {
+    let mut state = LiveMetricsState::default();
+    let now = Instant::now();
+    let spawned_at = now - Duration::from_secs(600);
+    state.last_event_at = Some(now - Duration::from_secs(120));
+    state.record_byte_activity("still writing", now);
+    assert!(
+        !should_warn_stall(&state, now, Duration::from_secs(60), spawned_at),
+        "fresh non-whitespace bytes must suppress the stall warning"
+    );
+}
+
+#[test]
+fn silence_reference_falls_back_to_spawn_then_tracks_activity() {
+    let mut state = LiveMetricsState::default();
+    let spawned_at = Instant::now() - Duration::from_secs(600);
+    assert_eq!(state.silence_reference(spawned_at), spawned_at);
+    assert_eq!(state.silence_origin(), SilenceOrigin::Launch);
+
+    let activity = spawned_at + Duration::from_secs(30);
+    state.record_byte_activity("output", activity);
+    assert_eq!(state.silence_reference(spawned_at), activity);
+    assert_eq!(state.silence_origin(), SilenceOrigin::Activity);
+}
+
+/// Whitespace-only output leaves the reference on the spawn instant, so a
+/// child that only flushes blank lines cannot hold the budget open.
+#[test]
+fn silence_reference_ignores_whitespace_only_output() {
+    let mut state = LiveMetricsState::default();
+    let spawned_at = Instant::now() - Duration::from_secs(600);
+    state.record_byte_activity("  \n\t ", spawned_at + Duration::from_secs(30));
+    assert_eq!(state.silence_reference(spawned_at), spawned_at);
+    assert_eq!(state.silence_origin(), SilenceOrigin::Launch);
 }
 
 #[test]

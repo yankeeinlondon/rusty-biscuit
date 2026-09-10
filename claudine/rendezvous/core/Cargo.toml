@@ -40,3 +40,13 @@ libc = "0.2"
 [build-dependencies]
 tonic-prost-build = "0.14"
 protoc-bin-vendored = "3"
+
+# Declared rather than defaulted (2026-09-07-faster-claudine-tests, Phase 6).
+# The leaf crate: protobuf/gRPC stubs, identity, envelopes, and the typed
+# `LocalEndpoint`. All 82 identities are L1 and run on the default feature set;
+# `test-support` only widens the endpoint constructors for daemon fixtures, so
+# enabling it in CI would test a surface no shipped binary can reach.
+[package.metadata.ci.tests]
+tiers = ["L1"]
+features = []
+local-features = []

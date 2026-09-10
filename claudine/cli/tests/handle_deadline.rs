@@ -1,10 +1,9 @@
-use std::fs;
 use std::time::{Duration, Instant};
 
 use serial_test::serial;
 
 mod common;
-use common::{CliProcessFixture, TestWorkspace};
+use common::CliProcessFixture;
 
 /// Regression guard: a plain `claudine handle turn_complete` with no config
 /// and a representative Gemini payload must complete in well under the 15s
@@ -52,19 +51,14 @@ fn handle_turn_complete_fast_path_completes_under_3s() {
 #[test]
 #[serial]
 fn handle_exits_on_deadline() {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
-    let workspace = TestWorkspace::named("claudine-handle-deadline-hang");
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("cwd");
-    fs::create_dir_all(&home_dir).unwrap();
-    fs::create_dir_all(&cwd).unwrap();
+    let fixture = CliProcessFixture::named("claudine-handle-deadline-hang");
 
-    let bin = common::claudine_bin();
-    let mut child = Command::new(bin)
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    // The child has to stay alive across the deadline, so this is the builder's
+    // raw-command surface rather than `command()`; the policy is the same one.
+    let mut child = fixture
+        .command_std()
         .env("CLAUDINE_HANDLE_DEADLINE_SECONDS", "1")
         .args(["handle", "session_end", "--provider", "claude"])
         .stdin(Stdio::piped())

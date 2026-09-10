@@ -1,0 +1,705 @@
+{
+  "_comment": [
+    "Budget input for `test-audit attribute budgets` (fix 2026-09-07-faster-darkmatter-tests).",
+    "Per-leg family summed values are filled from attribution/ci-*.json, which the",
+    "shared tool derived from the single compatible CI baseline run 34008778001's",
+    "JUnit artifacts (verified byte-reproducible 2026-09-08). Each leg stands at one",
+    "green run of the three consecutive the gate requires, so ratification is",
+    "pending: two more green runs of this source state (operator-gated",
+    "`gh run rerun 34008778001`, decided in Phase 9) or the equivalent baseline",
+    "samples Phase 10 compares against. Local timing (attribution/local-*,",
+    "launch-probe-*) attributes cost and is never a budget input."
+  ],
+  "provenance": {
+    "kind": "ci",
+    "legs": [
+      "ubuntu-latest",
+      "macos-latest",
+      "windows-latest",
+      "wsl2-ubuntu"
+    ],
+    "runsPerLeg": {
+      "ubuntu-latest": 1,
+      "macos-latest": 1,
+      "windows-latest": 1,
+      "wsl2-ubuntu": 1
+    },
+    "runs": [
+      "34008778001"
+    ]
+  },
+  "perLegFamilySummed": {
+    "ubuntu-latest": {
+      "cli-l1-clean-hash-frontmatter": [
+        13.455
+      ],
+      "cli-l1-compose-diagnostics": [
+        5.15
+      ],
+      "cli-l1-compose-remote-http": [
+        27.695
+      ],
+      "cli-l1-compose-render-graph": [
+        74.835
+      ],
+      "cli-l1-compose-shell": [
+        9.544
+      ],
+      "cli-l1-inline-spawn-baseline": [
+        0.637
+      ],
+      "cli-l1-layout-inprocess": [
+        0.091
+      ],
+      "cli-l1-private-helpers": [
+        51.529
+      ],
+      "cli-l2-harness-integrity": [
+        0.169
+      ],
+      "cli-l2-render-capture": [
+        3.329
+      ],
+      "cli-l2-tmux-schema-about": [
+        3.773
+      ],
+      "cli-unit": [
+        1.817
+      ],
+      "dmls-bin-args": [
+        0.04
+      ],
+      "dmls-l1-lsp-session": [
+        11.257
+      ],
+      "dmls-l1-packaging-contracts": [
+        0.021
+      ],
+      "dmls-l1-passive-proof": [
+        0.4
+      ],
+      "dmls-l1-stdio-subprocess": [
+        0.031
+      ],
+      "dmls-l1-workspace-fixtures": [
+        0.521
+      ],
+      "dmls-l2-neovim": [
+        1.665
+      ],
+      "dmls-unit": [
+        18.798
+      ],
+      "lib-browser": [
+        37.255
+      ],
+      "lib-browser-binary-unprefixed": [
+        0.227
+      ],
+      "lib-browser-prefixed-inprocess": [
+        3.321
+      ],
+      "lib-compose-e2e": [
+        67.27
+      ],
+      "lib-compose-e2e-env-serial": [
+        1.384
+      ],
+      "lib-compose-shell-e2e": [
+        2.472
+      ],
+      "lib-effects-integration": [
+        0.072
+      ],
+      "lib-error-snapshots": [
+        17.036
+      ],
+      "lib-fixture-tables": [
+        0.107
+      ],
+      "lib-git-context": [
+        1.152
+      ],
+      "lib-l2-binary-unprefixed": [
+        0.037
+      ],
+      "lib-override-ambient-capture": [
+        0.921
+      ],
+      "lib-override-preflight-proptest": [
+        6.743
+      ],
+      "lib-override-slow-cleanup": [
+        10.475
+      ],
+      "lib-passive-schema": [
+        5.952
+      ],
+      "lib-proptest": [
+        1.741
+      ],
+      "lib-reference-integration": [
+        2.728
+      ],
+      "lib-render-e2e": [
+        12.926
+      ],
+      "lib-shipped-example-docs": [
+        0.264
+      ],
+      "lib-shipped-schema-corpus": [
+        5.026
+      ],
+      "lib-snapshots-insta": [
+        13.726
+      ],
+      "lib-snapshots-layout-env": [
+        1.069
+      ],
+      "lib-structural-guards": [
+        2.457
+      ],
+      "lib-unit-compose-cleanup-rendering": [
+        58.139
+      ],
+      "lib-unit-compose-context": [
+        18.023
+      ],
+      "lib-unit-compose-core": [
+        211.776
+      ],
+      "lib-unit-compose-preflight-acceptance": [
+        10.861
+      ],
+      "lib-unit-compose-remote": [
+        24.132
+      ],
+      "lib-unit-compose-shell": [
+        82.551
+      ],
+      "lib-unit-layout": [
+        6.152
+      ],
+      "lib-unit-markdown-rest": [
+        65.587
+      ],
+      "lib-unit-schemas": [
+        25.571
+      ],
+      "lib-unit-style": [
+        6.893
+      ],
+      "lib-unit-support-modules": [
+        4.202
+      ],
+      "lib-work-counters": [
+        0.537
+      ],
+      "zed-cli-bin-args": [
+        0.006
+      ],
+      "zed-cli-raw-spawn": [
+        0.238
+      ],
+      "zed-cli-unit": [
+        0.143
+      ]
+    },
+    "macos-latest": {
+      "cli-l1-clean-hash-frontmatter": [
+        21.614
+      ],
+      "cli-l1-compose-diagnostics": [
+        3.474
+      ],
+      "cli-l1-compose-remote-http": [
+        15.434
+      ],
+      "cli-l1-compose-render-graph": [
+        48.27
+      ],
+      "cli-l1-compose-shell": [
+        6.411
+      ],
+      "cli-l1-inline-spawn-baseline": [
+        0.936
+      ],
+      "cli-l1-layout-inprocess": [
+        0.171
+      ],
+      "cli-l1-private-helpers": [
+        42.146
+      ],
+      "cli-l2-harness-integrity": [
+        0.152
+      ],
+      "cli-l2-render-capture": [
+        6.927
+      ],
+      "cli-l2-tmux-schema-about": [
+        6.29
+      ],
+      "cli-unit": [
+        4.512
+      ],
+      "dmls-bin-args": [
+        0.122
+      ],
+      "dmls-l1-lsp-session": [
+        10.063
+      ],
+      "dmls-l1-packaging-contracts": [
+        0.047
+      ],
+      "dmls-l1-passive-proof": [
+        0.454
+      ],
+      "dmls-l1-stdio-subprocess": [
+        0.264
+      ],
+      "dmls-l1-workspace-fixtures": [
+        0.734
+      ],
+      "dmls-l2-neovim": [
+        4.074
+      ],
+      "dmls-unit": [
+        20.052
+      ],
+      "lib-browser-binary-unprefixed": [
+        0.679
+      ],
+      "lib-compose-e2e": [
+        34.084
+      ],
+      "lib-compose-e2e-env-serial": [
+        0.776
+      ],
+      "lib-compose-shell-e2e": [
+        4.521
+      ],
+      "lib-effects-integration": [
+        0.096
+      ],
+      "lib-error-snapshots": [
+        13.11
+      ],
+      "lib-fixture-tables": [
+        0.252
+      ],
+      "lib-git-context": [
+        1.035
+      ],
+      "lib-l2-binary-unprefixed": [
+        0.09
+      ],
+      "lib-override-ambient-capture": [
+        1.277
+      ],
+      "lib-override-preflight-proptest": [
+        5.455
+      ],
+      "lib-override-slow-cleanup": [
+        6.046
+      ],
+      "lib-passive-schema": [
+        5.564
+      ],
+      "lib-proptest": [
+        1.0
+      ],
+      "lib-reference-integration": [
+        2.37
+      ],
+      "lib-render-e2e": [
+        37.763
+      ],
+      "lib-shipped-example-docs": [
+        0.73
+      ],
+      "lib-shipped-schema-corpus": [
+        3.818
+      ],
+      "lib-snapshots-insta": [
+        10.822
+      ],
+      "lib-snapshots-layout-env": [
+        1.063
+      ],
+      "lib-structural-guards": [
+        1.991
+      ],
+      "lib-unit-compose-cleanup-rendering": [
+        32.089
+      ],
+      "lib-unit-compose-context": [
+        9.805
+      ],
+      "lib-unit-compose-core": [
+        121.398
+      ],
+      "lib-unit-compose-preflight-acceptance": [
+        6.897
+      ],
+      "lib-unit-compose-remote": [
+        17.485
+      ],
+      "lib-unit-compose-shell": [
+        79.606
+      ],
+      "lib-unit-layout": [
+        10.979
+      ],
+      "lib-unit-markdown-rest": [
+        68.748
+      ],
+      "lib-unit-schemas": [
+        26.751
+      ],
+      "lib-unit-style": [
+        9.487
+      ],
+      "lib-unit-support-modules": [
+        6.563
+      ],
+      "lib-work-counters": [
+        0.617
+      ],
+      "zed-cli-bin-args": [
+        0.019
+      ],
+      "zed-cli-raw-spawn": [
+        0.983
+      ],
+      "zed-cli-unit": [
+        0.717
+      ]
+    },
+    "windows-latest": {
+      "cli-l1-clean-hash-frontmatter": [
+        23.227
+      ],
+      "cli-l1-compose-diagnostics": [
+        9.346
+      ],
+      "cli-l1-compose-remote-http": [
+        48.552
+      ],
+      "cli-l1-compose-render-graph": [
+        134.903
+      ],
+      "cli-l1-compose-shell": [
+        11.35
+      ],
+      "cli-l1-inline-spawn-baseline": [
+        1.044
+      ],
+      "cli-l1-layout-inprocess": [
+        0.204
+      ],
+      "cli-l1-private-helpers": [
+        82.816
+      ],
+      "cli-l2-harness-integrity": [
+        0.466
+      ],
+      "cli-unit": [
+        3.501
+      ],
+      "dmls-bin-args": [
+        0.069
+      ],
+      "dmls-l1-lsp-session": [
+        15.395
+      ],
+      "dmls-l1-packaging-contracts": [
+        0.032
+      ],
+      "dmls-l1-passive-proof": [
+        0.55
+      ],
+      "dmls-l1-stdio-subprocess": [
+        0.071
+      ],
+      "dmls-l1-workspace-fixtures": [
+        0.926
+      ],
+      "dmls-unit": [
+        25.816
+      ],
+      "lib-browser-binary-unprefixed": [
+        1.856
+      ],
+      "lib-compose-e2e": [
+        99.656
+      ],
+      "lib-compose-e2e-env-serial": [
+        1.97
+      ],
+      "lib-compose-e2e-windows-only": [
+        0.272
+      ],
+      "lib-compose-shell-e2e": [
+        5.838
+      ],
+      "lib-effects-integration": [
+        0.054
+      ],
+      "lib-error-snapshots": [
+        26.014
+      ],
+      "lib-fixture-tables": [
+        0.237
+      ],
+      "lib-git-context": [
+        2.731
+      ],
+      "lib-l2-binary-unprefixed": [
+        0.033
+      ],
+      "lib-override-ambient-capture": [
+        3.473
+      ],
+      "lib-override-preflight-proptest": [
+        11.724
+      ],
+      "lib-override-slow-cleanup": [
+        19.869
+      ],
+      "lib-passive-schema": [
+        10.81
+      ],
+      "lib-proptest": [
+        2.146
+      ],
+      "lib-reference-integration": [
+        7.059
+      ],
+      "lib-render-e2e": [
+        15.135
+      ],
+      "lib-shipped-example-docs": [
+        0.654
+      ],
+      "lib-shipped-schema-corpus": [
+        8.224
+      ],
+      "lib-snapshots-insta": [
+        18.794
+      ],
+      "lib-snapshots-layout-env": [
+        1.248
+      ],
+      "lib-structural-guards": [
+        3.597
+      ],
+      "lib-unit-compose-cleanup-rendering": [
+        110.426
+      ],
+      "lib-unit-compose-context": [
+        16.046
+      ],
+      "lib-unit-compose-core": [
+        237.87
+      ],
+      "lib-unit-compose-preflight-acceptance": [
+        16.025
+      ],
+      "lib-unit-compose-remote": [
+        25.482
+      ],
+      "lib-unit-compose-shell": [
+        152.938
+      ],
+      "lib-unit-layout": [
+        7.381
+      ],
+      "lib-unit-markdown-rest": [
+        88.322
+      ],
+      "lib-unit-schemas": [
+        37.217
+      ],
+      "lib-unit-style": [
+        10.34
+      ],
+      "lib-unit-support-modules": [
+        6.041
+      ],
+      "lib-work-counters": [
+        0.612
+      ],
+      "zed-cli-bin-args": [
+        0.117
+      ],
+      "zed-cli-raw-spawn": [
+        5.823
+      ],
+      "zed-cli-unit": [
+        1.145
+      ]
+    },
+    "wsl2-ubuntu": {
+      "cli-l1-clean-hash-frontmatter": [
+        16.607
+      ],
+      "cli-l1-compose-diagnostics": [
+        5.415
+      ],
+      "cli-l1-compose-remote-http": [
+        32.051
+      ],
+      "cli-l1-compose-render-graph": [
+        85.826
+      ],
+      "cli-l1-compose-shell": [
+        17.393
+      ],
+      "cli-l1-inline-spawn-baseline": [
+        0.808
+      ],
+      "cli-l1-layout-inprocess": [
+        0.113
+      ],
+      "cli-l1-private-helpers": [
+        92.281
+      ],
+      "cli-l2-harness-integrity": [
+        0.61
+      ],
+      "cli-unit": [
+        2.433
+      ],
+      "dmls-bin-args": [
+        0.045
+      ],
+      "dmls-l1-lsp-session": [
+        11.438
+      ],
+      "dmls-l1-packaging-contracts": [
+        0.022
+      ],
+      "dmls-l1-passive-proof": [
+        0.431
+      ],
+      "dmls-l1-stdio-subprocess": [
+        0.039
+      ],
+      "dmls-l1-workspace-fixtures": [
+        0.6
+      ],
+      "dmls-unit": [
+        19.561
+      ],
+      "lib-browser-binary-unprefixed": [
+        0.119
+      ],
+      "lib-compose-e2e": [
+        91.397
+      ],
+      "lib-compose-e2e-env-serial": [
+        1.255
+      ],
+      "lib-compose-shell-e2e": [
+        2.854
+      ],
+      "lib-effects-integration": [
+        0.102
+      ],
+      "lib-error-snapshots": [
+        2.209
+      ],
+      "lib-fixture-tables": [
+        0.107
+      ],
+      "lib-git-context": [
+        1.978
+      ],
+      "lib-l2-binary-unprefixed": [
+        0.029
+      ],
+      "lib-override-ambient-capture": [
+        1.168
+      ],
+      "lib-override-preflight-proptest": [
+        5.992
+      ],
+      "lib-override-slow-cleanup": [
+        12.345
+      ],
+      "lib-passive-schema": [
+        6.155
+      ],
+      "lib-proptest": [
+        1.526
+      ],
+      "lib-reference-integration": [
+        2.394
+      ],
+      "lib-render-e2e": [
+        9.189
+      ],
+      "lib-shipped-example-docs": [
+        0.41
+      ],
+      "lib-shipped-schema-corpus": [
+        4.751
+      ],
+      "lib-snapshots-insta": [
+        1.568
+      ],
+      "lib-snapshots-layout-env": [
+        0.302
+      ],
+      "lib-structural-guards": [
+        2.315
+      ],
+      "lib-unit-compose-cleanup-rendering": [
+        63.163
+      ],
+      "lib-unit-compose-context": [
+        48.636
+      ],
+      "lib-unit-compose-core": [
+        370.696
+      ],
+      "lib-unit-compose-preflight-acceptance": [
+        8.513
+      ],
+      "lib-unit-compose-remote": [
+        27.191
+      ],
+      "lib-unit-compose-shell": [
+        89.543
+      ],
+      "lib-unit-layout": [
+        6.5
+      ],
+      "lib-unit-markdown-rest": [
+        81.08
+      ],
+      "lib-unit-schemas": [
+        31.238
+      ],
+      "lib-unit-style": [
+        8.695
+      ],
+      "lib-unit-support-modules": [
+        11.373
+      ],
+      "lib-work-counters": [
+        0.63
+      ],
+      "zed-cli-bin-args": [
+        0.007
+      ],
+      "zed-cli-raw-spawn": [
+        0.155
+      ],
+      "zed-cli-unit": [
+        0.345
+      ]
+    }
+  },
+  "headroom": 0.25
+}

@@ -22,7 +22,7 @@
 
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 
 /// A document that composes successfully but emits one compose **warning**
 /// (`{{ 1 + }}` fails to parse) so the warnings-footer render branch also runs.
@@ -42,15 +42,20 @@ fn count_terminal_detections(stderr: &[u8]) -> usize {
 /// terminal. (Finding 3.)
 #[test]
 fn compose_verbose_perf_performs_single_terminal_detection() {
+    let fixture =
+        CliProcessFixture::named("compose_verbose_perf_performs_single_terminal_detection");
     let doc = common::md_file(DOC_WITH_WARNING);
 
-    let output = md_cmd()
+    let output = fixture
+        .command_builder()
+        .plain_terminal(80, 24)
+        // Surface the `biscuit_terminal::terminal` detection span so we can
+        // count constructions. `--debug` is ignored when RUST_LOG is set.
+        .application_input("RUST_LOG", "biscuit_terminal=debug")
+        .build()
         .args(["compose"])
         .arg(doc.path())
         .args(["-vv", "--perf"])
-        // Surface the `biscuit_terminal::terminal` detection span so we can
-        // count constructions. `--debug` is ignored when RUST_LOG is set.
-        .env("RUST_LOG", "biscuit_terminal=debug")
         .output()
         .expect("failed to run md compose");
 
@@ -100,11 +105,13 @@ fn compose_verbose_perf_performs_single_terminal_detection() {
 #[cfg(target_os = "macos")]
 #[test]
 fn compose_redirected_does_not_spawn_appearance_defaults() {
+    let fixture = CliProcessFixture::named("compose_redirected_does_not_spawn_appearance_defaults");
     use std::os::unix::fs::PermissionsExt;
 
-    let shim_dir = tempfile::tempdir().expect("shim tempdir");
-    let sentinel = shim_dir.path().join("appearance-probe-was-invoked");
-    let shim = shim_dir.path().join("defaults");
+    let sentinel = fixture
+        .workspace_path()
+        .join("appearance-probe-was-invoked");
+    let shim = fixture.bin_dir().join("defaults");
 
     // Every invocation exits 1 (a `defaults` no-match) so unrelated callers see
     // unchanged behavior whether or not they matched the sentinel.
@@ -120,20 +127,20 @@ fn compose_redirected_does_not_spawn_appearance_defaults() {
         ),
     )
     .expect("write shim");
-    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755))
-        .expect("chmod shim");
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).expect("chmod shim");
 
     let doc = common::md_file(DOC_WITH_WARNING);
 
-    let existing_path = std::env::var("PATH").unwrap_or_default();
-    let child_path = format!("{}:{}", shim_dir.path().display(), existing_path);
-
-    let output = md_cmd()
+    // The fixture shim must precede the real macOS `defaults` and host shell.
+    let output = fixture
+        .command_builder()
+        .host_path()
+        .plain_terminal(80, 24)
+        .rendering_input_removed("DARK_MODE")
+        .build()
         .args(["compose"])
         .arg(doc.path())
         .args(["-vv", "--perf"])
-        .env("PATH", child_path)
-        .env_remove("DARK_MODE")
         .output()
         .expect("failed to run md compose");
 

@@ -573,12 +573,7 @@ fn repo_relative(absolute: &Path, root: &Path) -> String {
         .ok()
         .and_then(|p| p.to_str())
         .map(|s| s.replace('\\', "/"))
-        .unwrap_or_else(|| {
-            absolute
-                .to_str()
-                .map(|s| s.to_string())
-                .unwrap_or_default()
-        })
+        .unwrap_or_else(|| absolute.to_str().map(|s| s.to_string()).unwrap_or_default())
 }
 
 /// Resolve an explicit scope override, falling back to the CWD-derived scope
@@ -620,8 +615,7 @@ fn resolve_named_package(info: &RepoInfo, name: &str) -> Result<AggregateScope> 
         .collect();
     match matches.len() {
         0 => {
-            let mut valid: Vec<&str> =
-                packages.iter().map(|p| p.name.as_str()).collect();
+            let mut valid: Vec<&str> = packages.iter().map(|p| p.name.as_str()).collect();
             valid.sort();
             valid.dedup();
             Err(crate::SniffError::UnknownPackage {
@@ -629,7 +623,9 @@ fn resolve_named_package(info: &RepoInfo, name: &str) -> Result<AggregateScope> 
                 valid: valid.join(", "),
             })
         }
-        1 => Ok(AggregateScope::Package(matches.pop().expect("len == 1").to_string())),
+        1 => Ok(AggregateScope::Package(
+            matches.pop().expect("len == 1").to_string(),
+        )),
         _ => {
             matches.sort();
             Err(crate::SniffError::AmbiguousPackage {
@@ -869,11 +865,23 @@ mod tests {
         // Two crates governed by the same workspace-root nextest config: one
         // entry, both packages attributed.
         let packages = vec![
-            runner_pkg("a", "x", vec![config(TestRunner::Nextest, ".config/nextest.toml")]),
-            runner_pkg("b", "x", vec![config(TestRunner::Nextest, ".config/nextest.toml")]),
+            runner_pkg(
+                "a",
+                "x",
+                vec![config(TestRunner::Nextest, ".config/nextest.toml")],
+            ),
+            runner_pkg(
+                "b",
+                "x",
+                vec![config(TestRunner::Nextest, ".config/nextest.toml")],
+            ),
         ];
         let entries = aggregate_test_runners(&packages, &AggregateScope::Repo);
-        assert_eq!(entries.len(), 1, "shared config should collapse, got {entries:?}");
+        assert_eq!(
+            entries.len(),
+            1,
+            "shared config should collapse, got {entries:?}"
+        );
         assert_eq!(entries[0].usage.runner, TestRunner::Nextest);
         assert_eq!(entries[0].packages, vec!["a".to_string(), "b".to_string()]);
     }
@@ -882,8 +890,16 @@ mod tests {
     fn test_runner_distinct_usages_stay_separate_entries() {
         use crate::programs::enums::TestRunner;
         let packages = vec![
-            runner_pkg("a", "x", vec![config(TestRunner::Nextest, ".config/nextest.toml")]),
-            runner_pkg("b", "x", vec![config(TestRunner::Vitest, "b/vitest.config.ts")]),
+            runner_pkg(
+                "a",
+                "x",
+                vec![config(TestRunner::Nextest, ".config/nextest.toml")],
+            ),
+            runner_pkg(
+                "b",
+                "x",
+                vec![config(TestRunner::Vitest, "b/vitest.config.ts")],
+            ),
         ];
         let entries = aggregate_test_runners(&packages, &AggregateScope::Repo);
         assert_eq!(entries.len(), 2);
@@ -1141,7 +1157,10 @@ mod tests {
 
         let packages = vec![pkg_with_path("a", "root", a)];
         let entries = aggregate_versions(&packages, &AggregateScope::Repo, root);
-        assert!(entries.is_empty(), "no manifest → no entry, got {entries:?}");
+        assert!(
+            entries.is_empty(),
+            "no manifest → no entry, got {entries:?}"
+        );
     }
 
     #[test]
@@ -1157,10 +1176,7 @@ mod tests {
         let b = root.join("b");
         std::fs::create_dir_all(&a).unwrap();
         std::fs::create_dir_all(&b).unwrap();
-        write_cargo_toml(
-            &a,
-            "[package]\nname = \"a\"\nversion = \"0.1.0\"\n",
-        );
+        write_cargo_toml(&a, "[package]\nname = \"a\"\nversion = \"0.1.0\"\n");
         // b has a package.json with no version field; resolution falls
         // through to the root package.json (the npm root-fallback).
         write_package_json(&b, r#"{"name":"b"}"#);
@@ -1170,10 +1186,7 @@ mod tests {
         let entries = aggregate_versions(&packages, &AggregateScope::Repo, root);
         assert_eq!(entries.len(), 1, "same version collapses to one entry");
         assert_eq!(entries[0].version, "0.1.0");
-        assert_eq!(
-            entries[0].packages,
-            vec!["a".to_string(), "b".to_string()]
-        );
+        assert_eq!(entries[0].packages, vec!["a".to_string(), "b".to_string()]);
         assert!(
             entries[0].sources.len() > 1,
             "expected multiple sources for the same version, got {entries:?}"
@@ -1218,23 +1231,18 @@ mod tests {
             root,
             "[workspace]\nmembers = [\"a\", \"b\"]\n\n[workspace.package]\nversion = \"2.0.0\"\n",
         );
-        write_cargo_toml(
-            &a,
-            "[package]\nname = \"a\"\nversion.workspace = true\n",
-        );
-        write_cargo_toml(
-            &b,
-            "[package]\nname = \"b\"\nversion.workspace = true\n",
-        );
+        write_cargo_toml(&a, "[package]\nname = \"a\"\nversion.workspace = true\n");
+        write_cargo_toml(&b, "[package]\nname = \"b\"\nversion.workspace = true\n");
 
         let packages = vec![pkg_with_path("a", "root", a), pkg_with_path("b", "root", b)];
         let entries = aggregate_versions(&packages, &AggregateScope::Repo, root);
-        assert_eq!(entries.len(), 1, "shared workspace version collapses, got {entries:?}");
-        assert_eq!(entries[0].version, "2.0.0");
         assert_eq!(
-            entries[0].packages,
-            vec!["a".to_string(), "b".to_string()]
+            entries.len(),
+            1,
+            "shared workspace version collapses, got {entries:?}"
         );
+        assert_eq!(entries[0].version, "2.0.0");
+        assert_eq!(entries[0].packages, vec!["a".to_string(), "b".to_string()]);
         assert_eq!(entries[0].sources.len(), 1);
         assert_eq!(entries[0].sources[0].source.manifest, "Cargo.toml");
         assert!(
@@ -1257,10 +1265,7 @@ mod tests {
         let a = root.join("a");
         std::fs::create_dir_all(&a).unwrap();
         write_cargo_toml(root, "[workspace]\nmembers = [\"a\"]\n");
-        write_cargo_toml(
-            &a,
-            "[package]\nname = \"a\"\nversion.workspace = true\n",
-        );
+        write_cargo_toml(&a, "[package]\nname = \"a\"\nversion.workspace = true\n");
 
         let packages = vec![pkg_with_path("a", "root", a)];
         let entries = aggregate_versions(&packages, &AggregateScope::Repo, root);
@@ -1351,28 +1356,18 @@ mod tests {
     #[test]
     fn resolve_scope_overrides_valid_package() {
         let info = info_with_areas(&["alpha", "beta"]);
-        let scope = resolve_scope_with_overrides(
-            &info,
-            Path::new("/repo"),
-            false,
-            Some("alpha"),
-            None,
-        )
-        .expect("known package should resolve");
+        let scope =
+            resolve_scope_with_overrides(&info, Path::new("/repo"), false, Some("alpha"), None)
+                .expect("known package should resolve");
         assert_eq!(scope, AggregateScope::Package("alpha".to_string()));
     }
 
     #[test]
     fn resolve_scope_overrides_unknown_package_errors() {
         let info = info_with_areas(&["alpha", "beta"]);
-        let err = resolve_scope_with_overrides(
-            &info,
-            Path::new("/repo"),
-            false,
-            Some("ghost"),
-            None,
-        )
-        .expect_err("unknown package should error");
+        let err =
+            resolve_scope_with_overrides(&info, Path::new("/repo"), false, Some("ghost"), None)
+                .expect_err("unknown package should error");
         match err {
             crate::SniffError::UnknownPackage { name, valid } => {
                 assert_eq!(name, "ghost");
@@ -1394,14 +1389,9 @@ mod tests {
             .as_mut()
             .unwrap()
             .push(pkg("core", "tools", &["cargo"]));
-        let err = resolve_scope_with_overrides(
-            &info,
-            Path::new("/repo"),
-            false,
-            Some("core"),
-            None,
-        )
-        .expect_err("ambiguous package should error");
+        let err =
+            resolve_scope_with_overrides(&info, Path::new("/repo"), false, Some("core"), None)
+                .expect_err("ambiguous package should error");
         match err {
             crate::SniffError::AmbiguousPackage { name, count, .. } => {
                 assert_eq!(name, "core");
@@ -1415,28 +1405,18 @@ mod tests {
     fn resolve_scope_overrides_valid_package_area() {
         let mut info = info_with_areas(&["a"]);
         info.packages.as_mut().unwrap()[0].package_area = "sniff".to_string();
-        let scope = resolve_scope_with_overrides(
-            &info,
-            Path::new("/repo"),
-            false,
-            None,
-            Some("sniff"),
-        )
-        .expect("known area should resolve");
+        let scope =
+            resolve_scope_with_overrides(&info, Path::new("/repo"), false, None, Some("sniff"))
+                .expect("known area should resolve");
         assert_eq!(scope, AggregateScope::PackageArea("sniff".to_string()));
     }
 
     #[test]
     fn resolve_scope_overrides_unknown_package_area_errors() {
         let info = info_with_areas(&["a"]);
-        let err = resolve_scope_with_overrides(
-            &info,
-            Path::new("/repo"),
-            false,
-            None,
-            Some("ghost"),
-        )
-        .expect_err("unknown area should error");
+        let err =
+            resolve_scope_with_overrides(&info, Path::new("/repo"), false, None, Some("ghost"))
+                .expect_err("unknown area should error");
         match err {
             crate::SniffError::UnknownPackageArea { area, valid } => {
                 assert_eq!(area, "ghost");
@@ -1476,10 +1456,7 @@ mod tests {
         write_cargo_toml(&a, "[package]\nname = \"a\"\nversion = \"0.1.0\"\n");
         write_cargo_toml(&b, "[package]\nname = \"b\"\nversion = \"0.1.0\"\n");
 
-        let packages = vec![
-            pkg_with_path("a", "root", a),
-            pkg_with_path("b", "root", b),
-        ];
+        let packages = vec![pkg_with_path("a", "root", a), pkg_with_path("b", "root", b)];
         assert_eq!(
             bare_aggregate_version(&packages, root),
             Some("0.1.0".to_string())
@@ -1504,10 +1481,7 @@ mod tests {
         write_cargo_toml(&a, "[package]\nname = \"a\"\nversion = \"1.0.0\"\n");
         write_cargo_toml(&b, "[package]\nname = \"b\"\nversion = \"2.0.0\"\n");
 
-        let packages = vec![
-            pkg_with_path("a", "root", a),
-            pkg_with_path("b", "root", b),
-        ];
+        let packages = vec![pkg_with_path("a", "root", a), pkg_with_path("b", "root", b)];
         assert!(
             bare_aggregate_version(&packages, root).is_none(),
             "variance must collapse to `None`"

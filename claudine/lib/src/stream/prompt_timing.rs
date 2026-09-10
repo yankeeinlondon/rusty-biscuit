@@ -15,6 +15,8 @@ use std::time::Duration;
 use chrono::{DateTime, Local, TimeZone};
 use chrono_tz::Tz;
 
+use super::progress::SilenceOrigin;
+
 /// Everything a streaming run needs to emit the prompt-scoped timing
 /// header and its associated warnings.
 ///
@@ -166,28 +168,40 @@ pub fn render_timeout_warn_prose(
 
 /// Render the `step_timeout_warn` message body in Prose markup.
 ///
-/// `silence` — silence since the last provider event.
+/// `silence` — age of the silence measured from
+/// [`LiveMetricsState::silence_reference`](crate::stream::progress::LiveMetricsState::silence_reference).
+/// `origin` — whether that reference is the child's spawn instant
+/// ([`SilenceOrigin::Launch`], which gets startup wording) or real output.
 /// `hard_step_remaining` — `Some((remaining, deadline))` when a hard
 /// `step_timeout` is also configured; `None` when only the warn is set.
 pub fn render_step_timeout_warn_prose(
     silence: Duration,
+    origin: SilenceOrigin,
     hard_step_remaining: Option<(Duration, DateTime<Local>)>,
     ctx: &PromptTimingContext,
 ) -> String {
     let link = prompt_link(ctx);
     let silence_str = format_timing_duration(silence);
+    let lead = match origin {
+        SilenceOrigin::Launch => format!(
+            "the {link} has produced no output at all since the agent launched {silence_str} ago"
+        ),
+        SilenceOrigin::Activity => {
+            format!("the {link} has not produced output for {silence_str}")
+        }
+    };
     match hard_step_remaining {
         Some((remaining, deadline)) => {
             let deadline_str = deadline.format("%H:%M").to_string();
             let remaining_str = format_timing_duration(remaining);
             format!(
-                "the {link} has not produced output for {silence_str}, \
+                "{lead}, \
                  this is longer than we'd expect, but we won't abort this step \
                  until we reach {deadline_str} in {remaining_str}."
             )
         }
         None => format!(
-            "the {link} has not produced output for {silence_str}, \
+            "{lead}, \
              this is longer than we'd expect. \
              Press CTRL+C to terminate this prompt if you're convinced that the prompt has hung."
         ),
@@ -355,7 +369,12 @@ mod tests {
         let silence = Duration::from_secs(90);
         let remaining = Duration::from_secs(30);
         let deadline = Local::now();
-        let rendered = render_step_timeout_warn_prose(silence, Some((remaining, deadline)), &ctx());
+        let rendered = render_step_timeout_warn_prose(
+            silence,
+            SilenceOrigin::Activity,
+            Some((remaining, deadline)),
+            &ctx(),
+        );
         assert!(
             rendered.contains("not produced output for 1m"),
             "silence duration must render in minutes: {rendered}"
@@ -369,9 +388,39 @@ mod tests {
     #[test]
     fn step_timeout_warn_without_hard_step_timeout_mentions_ctrl_c() {
         let silence = Duration::from_secs(75);
-        let rendered = render_step_timeout_warn_prose(silence, None, &ctx());
+        let rendered =
+            render_step_timeout_warn_prose(silence, SilenceOrigin::Activity, None, &ctx());
         assert!(rendered.contains("not produced output for 1m"));
         assert!(rendered.contains("Press CTRL+C"));
+    }
+
+    /// A stall before the child's first output is a different operator
+    /// problem from a mid-run stall, so it must not borrow the mid-run
+    /// wording.
+    #[test]
+    fn step_timeout_warn_uses_startup_wording_before_any_output() {
+        let silence = Duration::from_secs(90);
+        let rendered = render_step_timeout_warn_prose(silence, SilenceOrigin::Launch, None, &ctx());
+        assert!(
+            rendered.contains("produced no output at all since the agent launched 1m ago"),
+            "startup silence must be named as such: {rendered}"
+        );
+        assert!(
+            !rendered.contains("has not produced output for"),
+            "startup wording must replace the mid-run phrasing: {rendered}"
+        );
+    }
+
+    #[test]
+    fn step_timeout_warn_startup_wording_keeps_the_hard_deadline_segment() {
+        let rendered = render_step_timeout_warn_prose(
+            Duration::from_secs(90),
+            SilenceOrigin::Launch,
+            Some((Duration::from_secs(30), Local::now())),
+            &ctx(),
+        );
+        assert!(rendered.contains("since the agent launched 1m ago"));
+        assert!(rendered.contains("in 30s"));
     }
 
     #[test]

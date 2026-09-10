@@ -31,10 +31,9 @@
 //! terminal glyphs, SGR sequences, or scrollback. There is nothing to capture
 //! from a real terminal here — the proof is a deterministic on-disk record of
 //! what the lifecycle stacks observed. So this uses the lighter
-//! `assert_cmd::Command::cargo_bin("claudine").unwrap()` subprocess harness (from `loop_cli.rs`) rather
-//! than the heavier `level2_*` tmux harness (which exists to assert real-
-//! terminal rendering). It runs under the standard integration-test recipe;
-//! it needs no tmux/WezTerm backend.
+//! `CliProcessFixture` subprocess harness rather than the heavier `level2_*`
+//! tmux harness (which exists to assert real-terminal rendering). It runs under
+//! the standard integration-test recipe; it needs no tmux/WezTerm backend.
 //!
 //! ## Side-effect path resolution
 //!
@@ -48,11 +47,9 @@
 
 use std::fs;
 use std::time::Duration;
-use tempfile::tempdir;
 
 mod common;
-use common::wrap::seed_minimal_config;
-use common::{augmented_path, init_git_repo, write_executable};
+use common::{CliProcessFixture, write_executable};
 
 /// The provider-authored error text. Deliberately a phrase a provider stream
 /// would emit — and one that shares no substring with the generic exit-code
@@ -75,17 +72,15 @@ const PROVIDER_ERROR: &str = "upstream timeout";
 /// and neither may fall back to the generic exit-code message.
 #[test]
 fn structured_provider_error_message_reaches_failure_and_finalize_err_msg() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("level1-structured-error-message");
+    fixture.seed_user_config();
     // Git repo so the effect engine's mutation root resolves to the workspace
     // root; `append_line "events.log"` then lands at `<workspace>/events.log`.
-    assert!(init_git_repo(workspace.path()), "git init failed");
+    fixture.initialize_repository();
 
-    let events_log = workspace.path().join("events.log");
+    let events_log = fixture.cwd().join("events.log");
 
-    let md_file = workspace.path().join("doc.md");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         r#"---
@@ -107,7 +102,7 @@ Structured error seam probe.
     // Fake opencode: pass the `models` preflight, drain the composed prompt off
     // stdin, then emit a structured error carrying `error_message` and exit 1.
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         &format!(
             r#"#!/bin/sh
 if [ "$1" = "models" ]; then
@@ -124,12 +119,9 @@ exit 1
         ),
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .current_dir(workspace.path())
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .timeout(Duration::from_secs(30))
         .assert()

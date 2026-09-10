@@ -55,6 +55,16 @@ Compare against that, never against `to_string_lossy()`.
   file arguments are invalid"). A fake provider that receives a multi-line
   prompt must be a compiled `.exe`; see the rustc-built fixture in claudine's
   `inline_compose_hash.rs`.
+- **Overriding `USERPROFILE` alone breaks the per-user known folders.**
+  `dirs::data_local_dir()` / `data_dir()` go through `SHGetKnownFolderPath`,
+  which resolves `LocalAppData`/`RoamingAppData` *beneath `USERPROFILE`* and
+  verifies the directory exists; `LOCALAPPDATA`/`APPDATA` are not consulted.
+  A fixture that points `USERPROFILE` at a bare temp home therefore gets
+  `None` from `dirs` (zed-dmls: "unable to determine the required per-user
+  directory") while the same binary works under the host profile. Fix: create
+  `home\AppData\Local` and `home\AppData\Roaming` under the fixture home.
+  Measured on build-win-native, 2026-09-10; `dirs::home_dir()` itself
+  (`FOLDERID_Profile`) is fine with a bare directory.
 - **Open handles block delete and rename.** A `File`, temp dir, mmap, or
   child that still holds a handle makes cleanup assertions fail on Windows
   only. Drop before asserting.

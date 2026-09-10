@@ -156,9 +156,11 @@ pub fn execute_install_flow(
         InstallInterviewOutcome::Failed { .. } => Err("installation failed".into()),
         // The interview already emitted the detached-descendant warning; this
         // message only has to keep the exit non-zero and name the cause.
-        InstallInterviewOutcome::TimedOut { .. } => {
-            Err(format!("installation timed out after {}s", opts.install.timeout_secs).into())
-        }
+        InstallInterviewOutcome::TimedOut { .. } => Err(format!(
+            "installation timed out after {}s",
+            opts.install.timeout_secs
+        )
+        .into()),
     }
 }
 

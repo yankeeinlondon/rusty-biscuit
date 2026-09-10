@@ -14,9 +14,8 @@
 
 use std::fs;
 use std::path::Path;
-use tempfile::{TempDir, tempdir};
 mod common;
-use common::strip_ansi;
+use common::{CliProcessFixture, strip_ansi};
 
 /// Run `claudine sequence --dry-run` against `file` and return flattened stderr.
 ///
@@ -24,16 +23,14 @@ use common::strip_ansi;
 /// prefixes continuation lines. Flattening to single-spaced text lets an
 /// assertion name the message rather than the wrap points, which are a
 /// function of the host's width and would make these tests width-sensitive.
-fn run_and_flatten(workspace: &TempDir, file: &Path, extra_args: &[&str]) -> String {
+fn run_and_flatten(workspace: &CliProcessFixture, file: &Path, extra_args: &[&str]) -> String {
     let mut args: Vec<&str> = vec!["sequence", "--dry-run"];
     args.extend_from_slice(extra_args);
     let file_arg = file.to_str().unwrap();
     args.push(file_arg);
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .current_dir(workspace.path())
+    let output = workspace
+        .command()
         .args(&args)
         .assert()
         .failure()
@@ -52,8 +49,8 @@ fn flatten(text: &str) -> String {
 }
 
 /// Write `body` as `<workspace>/<name>` and return its path.
-fn write(workspace: &TempDir, name: &str, body: &str) -> std::path::PathBuf {
-    let path = workspace.path().join(name);
+fn write(workspace: &CliProcessFixture, name: &str, body: &str) -> std::path::PathBuf {
+    let path = workspace.cwd().join(name);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
     }
@@ -62,7 +59,7 @@ fn write(workspace: &TempDir, name: &str, body: &str) -> std::path::PathBuf {
 }
 
 /// Write a Markdown sequence document whose `sequence:` value is `source`.
-fn source_doc(workspace: &TempDir, name: &str, source: &str) -> std::path::PathBuf {
+fn source_doc(workspace: &CliProcessFixture, name: &str, source: &str) -> std::path::PathBuf {
     write(
         workspace,
         name,
@@ -76,7 +73,7 @@ fn source_doc(workspace: &TempDir, name: &str, source: &str) -> std::path::PathB
 
 #[test]
 fn a_step_declaring_two_executables_names_both_fields() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "two.md",
@@ -100,7 +97,7 @@ fn a_step_declaring_two_executables_names_both_fields() {
 
 #[test]
 fn a_generated_state_key_cannot_be_authored() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "gen.md",
@@ -116,7 +113,7 @@ fn a_generated_state_key_cannot_be_authored() {
 
 #[test]
 fn a_root_reserved_key_cannot_be_authored_as_state() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "root.md",
@@ -132,7 +129,7 @@ fn a_root_reserved_key_cannot_be_authored_as_state() {
 
 #[test]
 fn a_task_field_meaningless_for_the_executable_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     // `params` are user setters applied to a *prompt* document; a shell task
     // has no document to set them on, so silently dropping them would hide a
     // real authoring mistake.
@@ -155,7 +152,7 @@ fn a_task_field_meaningless_for_the_executable_is_rejected() {
 
 #[test]
 fn an_authored_object_step_without_a_name_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "noname.md",
@@ -171,7 +168,7 @@ fn an_authored_object_step_without_a_name_is_rejected() {
 
 #[test]
 fn an_authored_non_string_scalar_step_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "num.md",
@@ -191,7 +188,7 @@ fn an_authored_non_string_scalar_step_is_rejected() {
 
 #[test]
 fn a_null_item_is_rejected_even_from_a_lenient_source() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     // A whole-value expression source is lenient — numbers and booleans coerce
     // — but `null` has no name to derive and stays an error.
     let doc = write(
@@ -213,7 +210,7 @@ fn a_null_item_is_rejected_even_from_a_lenient_source() {
 
 #[test]
 fn more_than_one_operator_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     write(&workspace, "data.yaml", "a:\n  - color: blue\n");
     let doc = source_doc(&workspace, "two-ops.md", "data.yaml -> a::map(color, name)::name(x)");
 
@@ -226,7 +223,7 @@ fn more_than_one_operator_is_rejected() {
 
 #[test]
 fn an_unknown_operator_is_rejected_with_the_accepted_set() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     write(&workspace, "data.yaml", "a:\n  - color: blue\n");
     let doc = source_doc(&workspace, "unknown.md", "data.yaml -> a::rename(color, name)");
 
@@ -243,7 +240,7 @@ fn an_unknown_operator_is_rejected_with_the_accepted_set() {
 
 #[test]
 fn an_operator_with_the_wrong_arity_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     write(&workspace, "data.yaml", "a:\n  - color: blue\n");
     let doc = source_doc(&workspace, "arity.md", "data.yaml -> a::name(color, extra)");
 
@@ -260,7 +257,7 @@ fn an_operator_with_the_wrong_arity_is_rejected() {
 
 #[test]
 fn a_missing_offset_path_reports_where_traversal_failed() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     write(&workspace, "data.yaml", "colors:\n  data:\n    - blue\n");
     let doc = source_doc(&workspace, "missing.md", "data.yaml -> colors.palette");
 
@@ -277,7 +274,7 @@ fn a_missing_offset_path_reports_where_traversal_failed() {
 
 #[test]
 fn an_offset_resolving_to_a_non_list_reports_what_it_found() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     write(&workspace, "data.yaml", "colors:\n  data: just-a-string\n");
     let doc = source_doc(&workspace, "notalist.md", "data.yaml -> colors.data");
 
@@ -290,7 +287,7 @@ fn an_offset_resolving_to_a_non_list_reports_what_it_found() {
 
 #[test]
 fn an_offset_against_a_line_delimited_file_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     write(&workspace, "data.jsonl", "{\"color\": \"blue\"}\n");
     let doc = source_doc(&workspace, "jsonl-offset.md", "data.jsonl -> anything");
 
@@ -307,7 +304,7 @@ fn an_offset_against_a_line_delimited_file_is_rejected() {
 
 #[test]
 fn an_operator_missing_its_source_field_names_the_item_index() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     write(
         &workspace,
         "data.yaml",
@@ -324,7 +321,7 @@ fn an_operator_missing_its_source_field_names_the_item_index() {
 
 #[test]
 fn an_operator_applied_to_a_scalar_item_names_the_item_index() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     write(&workspace, "data.yaml", "a:\n  - color: blue\n  - plain\n");
     let doc = source_doc(&workspace, "op-scalar.md", "data.yaml -> a::map(color, name)");
 
@@ -337,7 +334,7 @@ fn an_operator_applied_to_a_scalar_item_names_the_item_index() {
 
 #[test]
 fn a_template_operator_producing_an_empty_name_names_the_item_index() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     write(&workspace, "data.yaml", "a:\n  - color: blue\n  - color: \"\"\n");
     let doc = source_doc(&workspace, "op-empty.md", "data.yaml -> a::template(color)");
 
@@ -354,7 +351,7 @@ fn a_template_operator_producing_an_empty_name_names_the_item_index() {
 
 #[test]
 fn max_parallel_on_a_serial_group_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "mp-serial.md",
@@ -370,7 +367,7 @@ fn max_parallel_on_a_serial_group_is_rejected() {
 
 #[test]
 fn max_parallel_below_one_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "mp-zero.md",
@@ -386,7 +383,7 @@ fn max_parallel_below_one_is_rejected() {
 
 #[test]
 fn a_group_with_no_tasks_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "g-empty.md",
@@ -402,7 +399,7 @@ fn a_group_with_no_tasks_is_rejected() {
 
 #[test]
 fn a_group_nested_inside_a_group_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "g-nested.md",
@@ -418,7 +415,7 @@ fn a_group_nested_inside_a_group_is_rejected() {
 
 #[test]
 fn a_catalog_reference_to_an_undefined_group_lists_what_is_available() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     write(
         &workspace,
         "catalog.yaml",
@@ -452,7 +449,7 @@ fn a_catalog_reference_to_an_undefined_group_lists_what_is_available() {
 
 #[test]
 fn a_group_document_cannot_be_executed_directly() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     let group = write(
         &workspace,
         "group.yaml",
@@ -468,7 +465,7 @@ fn a_group_document_cannot_be_executed_directly() {
 
 #[test]
 fn a_nested_sequence_prompt_document_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     write(&workspace, "inner.md", "---\nsequence:\n  - one\n---\nInner.\n");
     let doc = write(
         &workspace,
@@ -485,7 +482,7 @@ fn a_nested_sequence_prompt_document_is_rejected() {
 
 #[test]
 fn a_reference_cycle_reports_every_hop() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     write(&workspace, "a.yaml", "kind: task\ntask: b.yaml\n");
     write(&workspace, "b.yaml", "kind: task\ntask: a.yaml\n");
     let doc = write(
@@ -507,7 +504,7 @@ fn a_reference_cycle_reports_every_hop() {
 
 #[test]
 fn a_group_carrying_loop_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "seq.md",
@@ -523,7 +520,7 @@ fn a_group_carrying_loop_is_rejected() {
 
 #[test]
 fn a_shell_command_depending_on_outputs_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     // Approved bytes must equal executed bytes, and `outputs` does not exist at
     // preflight — so this command could never be approved up front.
     let doc = write(
@@ -541,7 +538,7 @@ fn a_shell_command_depending_on_outputs_is_rejected() {
 
 #[test]
 fn a_parallel_write_back_collision_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     write(&workspace, "target.md", "---\nprompt: Write something.\n---\nold\n");
     let doc = write(
         &workspace,
@@ -568,7 +565,7 @@ fn a_parallel_write_back_collision_is_rejected() {
 
 #[test]
 fn a_zero_shell_timeout_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "t-zero.md",
@@ -584,7 +581,7 @@ fn a_zero_shell_timeout_is_rejected() {
 
 #[test]
 fn a_unitless_shell_timeout_is_rejected() {
-    let workspace = tempdir().unwrap();
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "t-bare.md",

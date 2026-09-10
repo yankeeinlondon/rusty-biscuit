@@ -6,10 +6,8 @@
 //! `common::wrap`.
 
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::wrap::*;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 /// End-to-end: for every wrapped provider, verify that
 /// `claudine sequence compose.md --<provider> --dry-run` runs cleanly
@@ -25,25 +23,25 @@ fn sequence_composition_dry_run_for_every_provider() {
     for provider_slug in [
         "claude", "codex", "gemini", "kimi", "opencode", "qwen", "goose",
     ] {
-        let workspace = tempdir().unwrap();
-        let path_dir = workspace.path().join("bin");
-        fs::create_dir_all(&path_dir).unwrap();
-        seed_minimal_config(workspace.path());
+        let fixture = CliProcessFixture::named("wrap-sequence-composition");
+        fixture.seed_user_config();
 
-        write_executable(&path_dir.join(provider_slug), "#!/bin/sh\nexit 0\n");
+        write_executable(&fixture.bin_dir().join(provider_slug), "#!/bin/sh\nexit 0\n");
 
-        let compose_file = workspace.path().join("compose.md");
+        let compose_file = fixture.cwd().join("compose.md");
         fs::write(
             &compose_file,
             "---\nsequence:\n  - step_one\n---\ncomposed body text\n",
         )
         .unwrap();
 
-        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
+        let output = fixture
+            .command_builder()
+            // Only the staged stub may resolve: the subject is that every
+            // provider composes, not that the host has one installed.
+            .fake_only_path()
+            .build()
             .env("OPENCODE_MODEL", "test-model")
-            .env("PATH", &path_dir)
-            .current_dir(workspace.path())
             .args([
                 "sequence",
                 "compose.md",
@@ -67,29 +65,24 @@ fn sequence_composition_dry_run_for_every_provider() {
 #[cfg(unix)]
 #[test]
 fn sequence_preflight_rejects_blacklisted_lifecycle_shell_before_launch() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-sequence-composition");
+    fixture.seed_user_config();
 
-    let sentinel = workspace.path().join("provider-ran.flag");
+    let sentinel = fixture.cwd().join("provider-ran.flag");
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!("#!/bin/sh\n: > '{}'\nexit 0\n", sentinel.display()),
     );
 
-    let compose_file = workspace.path().join("compose.md");
+    let compose_file = fixture.cwd().join("compose.md");
     fs::write(
         &compose_file,
         "---\nsequence:\n  - step_one\nsuccess:\n  stack:\n    - action:\n        - action: shell\n          command: cargo metadata\n---\nSEQUENCE_BODY\n",
     )
     .unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let output = fixture
+        .command()
         .args(["sequence", "compose.md", "--goose", "--yolo"])
         .output()
         .unwrap();
@@ -112,14 +105,12 @@ fn sequence_preflight_rejects_blacklisted_lifecycle_shell_before_launch() {
 #[cfg(unix)]
 #[test]
 fn sequence_yolo_approves_lifecycle_shell_during_preflight() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-sequence-composition");
+    fixture.seed_user_config();
 
-    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
-    let lifecycle_marker = workspace.path().join("lifecycle-ran.flag");
-    let compose_file = workspace.path().join("compose.md");
+    write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
+    let lifecycle_marker = fixture.cwd().join("lifecycle-ran.flag");
+    let compose_file = fixture.cwd().join("compose.md");
     fs::write(
         &compose_file,
         format!(
@@ -129,11 +120,8 @@ fn sequence_yolo_approves_lifecycle_shell_during_preflight() {
     )
     .unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let output = fixture
+        .command()
         .args(["sequence", "compose.md", "--goose", "--yolo"])
         .output()
         .unwrap();
@@ -161,32 +149,27 @@ fn sequence_yolo_approves_lifecycle_shell_during_preflight() {
 #[cfg(unix)]
 #[test]
 fn sequence_dry_run_concatenates_bodies_with_dividers() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-sequence-composition");
+    fixture.seed_user_config();
 
     // Provider stub writes a sentinel; under --dry-run it must never run.
-    let sentinel = workspace.path().join("provider-ran.flag");
+    let sentinel = fixture.cwd().join("provider-ran.flag");
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", sentinel.display()),
     );
 
     // Three-step sequence; every step composes the same document body, so the
     // body marker appears once per step on stdout.
-    let compose_file = workspace.path().join("compose.md");
+    let compose_file = fixture.cwd().join("compose.md");
     fs::write(
         &compose_file,
         "---\nsequence:\n  - step_one\n  - step_two\n  - step_three\n---\nSEQUENCE_BODY_XYZZY\n",
     )
     .unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let output = fixture
+        .command()
         .args(["sequence", "compose.md", "--goose", "--dry-run"])
         .output()
         .unwrap();
@@ -237,25 +220,20 @@ fn sequence_dry_run_concatenates_bodies_with_dividers() {
 #[test]
 fn sequence_dry_run_quiet_and_silent_are_no_op() {
     for flag in ["--quiet", "--silent"] {
-        let workspace = tempdir().unwrap();
-        let path_dir = workspace.path().join("bin");
-        fs::create_dir_all(&path_dir).unwrap();
-        seed_minimal_config(workspace.path());
+        let fixture = CliProcessFixture::named("wrap-sequence-composition");
+        fixture.seed_user_config();
 
-        write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+        write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
 
-        let compose_file = workspace.path().join("compose.md");
+        let compose_file = fixture.cwd().join("compose.md");
         fs::write(
             &compose_file,
             "---\nsequence:\n  - step_one\n  - step_two\n---\nSEQUENCE_BODY_XYZZY\n",
         )
         .unwrap();
 
-        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
-            .env("HOME", workspace.path())
-            .env("PATH", augmented_path(&path_dir))
-            .current_dir(workspace.path())
+        let output = fixture
+            .command()
             .args(["sequence", "compose.md", "--goose", "--dry-run", flag])
             .output()
             .unwrap();
@@ -295,29 +273,24 @@ fn sequence_dry_run_quiet_and_silent_are_no_op() {
 #[cfg(unix)]
 #[test]
 fn sequence_dry_run_fail_fast_on_composition_error() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-sequence-composition");
+    fixture.seed_user_config();
 
-    let sentinel = workspace.path().join("provider-ran.flag");
+    let sentinel = fixture.cwd().join("provider-ran.flag");
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", sentinel.display()),
     );
 
-    let compose_file = workspace.path().join("compose.md");
+    let compose_file = fixture.cwd().join("compose.md");
     fs::write(
         &compose_file,
         "---\n$schema:\n  topic: 'string(required)'\nsequence:\n  - step_one\n  - step_two\n---\nPlan for {{topic}}.\n",
     )
     .unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["sequence", "compose.md", "--goose", "--dry-run"])
         .assert()
         .failure();
@@ -358,34 +331,31 @@ fn run_sequence_dry_run_agent_state(
     agent_line: &str,
     installed: &[&str],
 ) -> (bool, String, String) {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-sequence-composition");
+    fixture.seed_user_config();
 
     // Any installed provider writes a sentinel; under --dry-run it must never
     // run, regardless of how the agent state resolves.
-    let sentinel = workspace.path().join("provider-ran.flag");
+    let sentinel = fixture.cwd().join("provider-ran.flag");
     for slug in installed {
         write_executable(
-            &path_dir.join(slug),
+            &fixture.bin_dir().join(slug),
             &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", sentinel.display()),
         );
     }
 
-    let compose_file = workspace.path().join("compose.md");
+    let compose_file = fixture.cwd().join("compose.md");
     fs::write(
         &compose_file,
         format!("---\nsequence:\n  - step_one\n  - step_two\n{agent_line}---\nSEQ_BODY_MARKER\n"),
     )
     .unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
+    let output = fixture
+        .command_builder()
         // Restrict PATH to the fake bin so only `installed` providers count.
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+        .fake_only_path()
+        .build()
         .args(["sequence", "compose.md", "--dry-run"])
         .output()
         .unwrap();
@@ -503,37 +473,34 @@ fn sequence_dry_run_zero_installed_list_renders_state_per_step() {
 /// does. Returns `(exit_code, ansi_stripped_stderr, provider_ran)`.
 #[cfg(unix)]
 fn run_sequence_live_agent_state(agent_line: &str, installed: &[&str]) -> (i32, String, bool) {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-sequence-composition");
+    fixture.seed_user_config();
 
-    let sentinel = workspace.path().join("provider-ran.flag");
+    let sentinel = fixture.cwd().join("provider-ran.flag");
     for slug in installed {
         write_executable(
-            &path_dir.join(slug),
+            &fixture.bin_dir().join(slug),
             &format!("#!/bin/sh\n: > '{}'\nexit 0\n", sentinel.display()),
         );
     }
 
-    let compose_file = workspace.path().join("compose.md");
+    let compose_file = fixture.cwd().join("compose.md");
     fs::write(
         &compose_file,
         format!("---\nsequence:\n  - step_one\n  - step_two\n{agent_line}---\nSEQ_BODY_MARKER\n"),
     )
     .unwrap();
 
-    let stdin_file = workspace.path().join("empty-stdin.txt");
+    let stdin_file = fixture.cwd().join("empty-stdin.txt");
     fs::write(&stdin_file, "").unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
+    let output = fixture
+        .command_builder()
         // Restrict PATH to the fake bin so only `installed` providers count.
-        .env("PATH", &path_dir)
+        .fake_only_path()
+        .build()
         .pipe_stdin(&stdin_file)
         .unwrap()
-        .current_dir(workspace.path())
         .args(["sequence", "compose.md"])
         .output()
         .unwrap();
@@ -653,34 +620,32 @@ fn sequence_live_auto_selectable_launches_provider() {
 #[cfg(unix)]
 #[test]
 fn sequence_live_silent_does_not_suppress_agent_resolution_abort() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-sequence-composition");
+    fixture.seed_user_config();
 
-    let sentinel = workspace.path().join("provider-ran.flag");
+    let sentinel = fixture.cwd().join("provider-ran.flag");
     write_executable(
-        &path_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         &format!("#!/bin/sh\n: > '{}'\nexit 0\n", sentinel.display()),
     );
 
-    let compose_file = workspace.path().join("compose.md");
+    let compose_file = fixture.cwd().join("compose.md");
     fs::write(
         &compose_file,
         "---\nsequence:\n  - step_one\nagent: not-real\n---\nSEQ_BODY_MARKER\n",
     )
     .unwrap();
 
-    let stdin_file = workspace.path().join("empty-stdin.txt");
+    let stdin_file = fixture.cwd().join("empty-stdin.txt");
     fs::write(&stdin_file, "").unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let output = fixture
+        .command_builder()
+        // Restrict PATH to the fake bin so only `installed` providers count.
+        .fake_only_path()
+        .build()
         .pipe_stdin(&stdin_file)
         .unwrap()
-        .current_dir(workspace.path())
         .args(["sequence", "compose.md", "--silent"])
         .output()
         .unwrap();

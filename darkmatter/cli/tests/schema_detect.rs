@@ -1,16 +1,14 @@
 //! Integration tests for `md schema detect`.
 
+mod common;
+
+use common::CliProcessFixture;
 use predicates::prelude::*;
 use std::io::Write;
-use std::path::PathBuf;
-use tempfile::TempDir;
+use std::path::{Path, PathBuf};
 
-fn md_cmd() -> assert_cmd::Command {
-    assert_cmd::Command::cargo_bin("md").unwrap()
-}
-
-fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
-    let path = dir.path().join(name);
+fn write_file(dir: &Path, name: &str, content: &str) -> PathBuf {
+    let path = dir.join(name);
     let mut f = std::fs::File::create(&path).unwrap();
     f.write_all(content.as_bytes()).unwrap();
     path
@@ -18,10 +16,12 @@ fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
 
 #[test]
 fn schema_detect_yaml_emits_simplified_schema() {
-    let tmp = TempDir::new().unwrap();
-    let doc = write_file(&tmp, "doc.md", "---\ntitle: Hello\ncount: 42\n---\nBody\n");
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let doc = write_file(tmp, "doc.md", "---\ntitle: Hello\ncount: 42\n---\nBody\n");
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "detect"])
         .arg(&doc)
         .assert()
@@ -33,10 +33,12 @@ fn schema_detect_yaml_emits_simplified_schema() {
 
 #[test]
 fn schema_detect_json_emits_json_schema() {
-    let tmp = TempDir::new().unwrap();
-    let doc = write_file(&tmp, "doc.md", "---\ntitle: Hello\n---\nBody\n");
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let doc = write_file(tmp, "doc.md", "---\ntitle: Hello\n---\nBody\n");
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "detect", "--format", "json"])
         .arg(&doc)
         .assert()
@@ -48,11 +50,13 @@ fn schema_detect_json_emits_json_schema() {
 
 #[test]
 fn schema_detect_merge_promotes_required() {
-    let tmp = TempDir::new().unwrap();
-    let a = write_file(&tmp, "a.md", "---\ntitle: A\n---\n");
-    let b = write_file(&tmp, "b.md", "---\ntitle: B\n---\n");
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let a = write_file(tmp, "a.md", "---\ntitle: A\n---\n");
+    let b = write_file(tmp, "b.md", "---\ntitle: B\n---\n");
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "detect", "--merge"])
         .arg(&a)
         .arg(&b)
@@ -63,11 +67,13 @@ fn schema_detect_merge_promotes_required() {
 
 #[test]
 fn schema_detect_no_merge_emits_per_file_headers() {
-    let tmp = TempDir::new().unwrap();
-    let a = write_file(&tmp, "a.md", "---\ntitle: A\n---\n");
-    let b = write_file(&tmp, "b.md", "---\nname: B\n---\n");
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let a = write_file(tmp, "a.md", "---\ntitle: A\n---\n");
+    let b = write_file(tmp, "b.md", "---\nname: B\n---\n");
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "detect"])
         .arg(&a)
         .arg(&b)
@@ -79,14 +85,16 @@ fn schema_detect_no_merge_emits_per_file_headers() {
 
 #[test]
 fn schema_detect_unparseable_frontmatter_exits_3() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let bad = write_file(
-        &tmp,
+        tmp,
         "bad.md",
         "---\n: : : not valid yaml ::\n  - [unbalanced\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "detect"])
         .arg(&bad)
         .assert()

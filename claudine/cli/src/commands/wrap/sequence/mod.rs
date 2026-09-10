@@ -27,10 +27,10 @@ mod task_frames;
 mod task_run;
 
 use jit::StepComposeContext;
-use phase1c::run_phase_1c_with_schema;
-use resolve::{apply_user_set_to_hints, dry_run_sequence_target, is_auto_selectable_state};
 #[cfg(test)]
 use phase1c::find_first_unsupported;
+use phase1c::run_phase_1c_with_schema;
+use resolve::{apply_user_set_to_hints, dry_run_sequence_target, is_auto_selectable_state};
 
 /// Exit code emitted when Ctrl+C is observed during a sequence run.
 /// Matches the standard `128 + SIGINT(2)` convention used by shells.
@@ -94,9 +94,8 @@ fn approve_preflight_graph(
         // document needs: plain `ctx.*` stays launch-anchored no matter where
         // the prompt document is stored, while the document's own
         // `SourceContext` below still drives its file resolution.
-        let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
-            &document,
-        );
+        let requirements =
+            darkmatter::markdown::compose::ContextRequirements::for_document(&document);
         let mut context = graph_context.clone();
         invocation.extend_launch_context(&mut context, &requirements);
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
@@ -257,10 +256,11 @@ pub(crate) fn execute_sequence(
     // matter which repository a referenced task, group, or prompt document is
     // stored in. Per-task epochs below clone or extend this base and apply
     // their own resolved target overrides (D4).
-    let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
-        &source.markdown,
-    );
-    let graph_context = prep_context.invocation.capture_launch_context(&requirements);
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+    let graph_context = prep_context
+        .invocation
+        .capture_launch_context(&requirements);
     prep_context.invocation.record_prepared_context_consumer(
         claudine::invocation_context::PreparedContextConsumer::Preflight,
     );
@@ -322,7 +322,14 @@ pub(crate) fn execute_sequence(
     let resolved_targets: Vec<Option<claudine::composition::ResolvedExecutionTarget>> = if shared
         .dry_run
     {
-        let target = dry_run_sequence_target(explicit_provider, &raw_hints, snapshot, cli_model);
+        let target = dry_run_sequence_target(
+            explicit_provider,
+            &raw_hints,
+            snapshot,
+            cli_model,
+            &catalog,
+            super::composition::ModelResolveMode::dry_run(silent),
+        );
         (0..total_steps).map(|_| target.clone()).collect()
     } else {
         // Live path: every step shares the document-level `agent` hint, so
@@ -409,30 +416,19 @@ pub(crate) fn execute_sequence(
             };
 
             let (model, model_reason) = if let Some(provider) = resolved_provider {
-                // Probe model resolution without catalog so the refresh gate
-                // can observe whether CLI / provider env / generic MODEL would
-                // override the frontmatter `model` hint. Refresh is skipped in
-                // those cases (matches the direct compose path).
-                let (_, probe_reason) = claudine::composition::resolve_model_with_hints(
-                    provider, &raw_hints, cli_model, None,
-                );
-                // Refresh once per unique provider, and only when the
-                // frontmatter `model` hint will actually be validated against
-                // the catalog.
-                if refreshed_providers.insert(provider) {
-                    let _span = tracing::info_span!("compose_prep.model_catalog", provider = %provider.as_slug(), step = step_index).entered();
-                    super::composition::refresh_for_model_validation(
-                        &catalog,
-                        provider,
-                        &raw_hints,
-                        Some(&probe_reason),
-                    );
-                }
-                claudine::composition::resolve_model_with_hints(
+                // Refresh once per unique provider; every step shares the
+                // document-level hints, so one warning per provider as well.
+                let first_for_provider = refreshed_providers.insert(provider);
+                let _span = tracing::info_span!("compose_prep.model_catalog", provider = %provider.as_slug(), step = step_index).entered();
+                super::composition::resolve_document_model(
+                    &catalog,
                     provider,
                     &raw_hints,
                     cli_model,
-                    Some(&catalog),
+                    super::composition::ModelResolveMode {
+                        refresh: first_for_provider,
+                        warn: first_for_provider && !silent,
+                    },
                 )
             } else {
                 (
@@ -466,67 +462,65 @@ pub(crate) fn execute_sequence(
             && shared_state
                 .as_ref()
                 .is_some_and(|state| !is_auto_selectable_state(state));
-        let live_targets: Vec<claudine::composition::ResolvedExecutionTarget> =
-            if needs_review {
-                // Emit the state-specific pre-prompt message before the review
-                // table renders, mirroring direct compose's
-                // `prompt_for_agent_state`: a styled `Invalid Agent:` line for
-                // a scalar invalid hint, the zero-installed-list breakdown for
-                // an all-uninstallable list. Auto-selectable and plain picker
-                // states never reach this arm (they take the `else` branch), so
-                // every state here returns a message or `None` for a plain
-                // picker. The message shares its source of truth with the
-                // dry-run table cell and the no-TTY abort body, so the three
-                // surfaces cannot drift. `shared_state` is always `Some` here
-                // because `needs_review` requires it.
-                if let Some(state) = shared_state.as_ref()
-                    && let Some(markup) =
-                        super::composition::agent_prompt_message(state, &source.resolved_path)
-                {
-                    log::message(&Prose::new(markup).render(&log::terminal()));
-                }
-                // TTY review screen. The --dry-run arm above returns before
-                // this point, so the dry-run seam never invokes a picker.
-                match super::selection_ui::review_sequence(drafts, &catalog) {
-                    Ok(targets) => targets,
-                    Err(e) => {
-                        if e.kind() == std::io::ErrorKind::Other
-                            && e.to_string().contains("cancelled")
-                        {
-                            return Ok(130); // Treat as interrupt
-                        }
-                        return Err(e.into());
+        let live_targets: Vec<claudine::composition::ResolvedExecutionTarget> = if needs_review {
+            // Emit the state-specific pre-prompt message before the review
+            // table renders, mirroring direct compose's
+            // `prompt_for_agent_state`: a styled `Invalid Agent:` line for
+            // a scalar invalid hint, the zero-installed-list breakdown for
+            // an all-uninstallable list. Auto-selectable and plain picker
+            // states never reach this arm (they take the `else` branch), so
+            // every state here returns a message or `None` for a plain
+            // picker. The message shares its source of truth with the
+            // dry-run table cell and the no-TTY abort body, so the three
+            // surfaces cannot drift. `shared_state` is always `Some` here
+            // because `needs_review` requires it.
+            if let Some(state) = shared_state.as_ref()
+                && let Some(markup) =
+                    super::composition::agent_prompt_message(state, &source.resolved_path)
+            {
+                log::message(&Prose::new(markup).render(&log::terminal()));
+            }
+            // TTY review screen. The --dry-run arm above returns before
+            // this point, so the dry-run seam never invokes a picker.
+            match super::selection_ui::review_sequence(drafts, &catalog) {
+                Ok(targets) => targets,
+                Err(e) => {
+                    if e.kind() == std::io::ErrorKind::Other && e.to_string().contains("cancelled")
+                    {
+                        return Ok(130); // Treat as interrupt
                     }
+                    return Err(e.into());
                 }
-            } else {
-                // Auto-selectable, explicit flag, or non-TTY: each step's
-                // provider was resolved deterministically onto the draft.
-                let list_one = matches!(
-                    shared_state.as_ref(),
-                    Some(claudine::composition::AgentResolutionState::ListOneInstalled { .. })
-                );
-                drafts
-                    .into_iter()
-                    .map(|draft| {
-                        let provider = draft
-                            .resolved_provider
-                            .unwrap_or(claudine::provider::Provider::Claude);
-                        let provider_reason = if explicit_provider.is_some() {
-                            claudine::composition::ProviderResolutionReason::ExplicitFlag
-                        } else if list_one {
-                            claudine::composition::ProviderResolutionReason::FrontmatterList
-                        } else {
-                            claudine::composition::ProviderResolutionReason::FrontmatterSingle
-                        };
-                        claudine::composition::ResolvedExecutionTarget {
-                            provider,
-                            provider_reason,
-                            model: draft.proposed_model,
-                            model_reason: draft.model_reason,
-                        }
-                    })
-                    .collect()
-            };
+            }
+        } else {
+            // Auto-selectable, explicit flag, or non-TTY: each step's
+            // provider was resolved deterministically onto the draft.
+            let list_one = matches!(
+                shared_state.as_ref(),
+                Some(claudine::composition::AgentResolutionState::ListOneInstalled { .. })
+            );
+            drafts
+                .into_iter()
+                .map(|draft| {
+                    let provider = draft
+                        .resolved_provider
+                        .unwrap_or(claudine::provider::Provider::Claude);
+                    let provider_reason = if explicit_provider.is_some() {
+                        claudine::composition::ProviderResolutionReason::ExplicitFlag
+                    } else if list_one {
+                        claudine::composition::ProviderResolutionReason::FrontmatterList
+                    } else {
+                        claudine::composition::ProviderResolutionReason::FrontmatterSingle
+                    };
+                    claudine::composition::ResolvedExecutionTarget {
+                        provider,
+                        provider_reason,
+                        model: draft.proposed_model,
+                        model_reason: draft.model_reason,
+                    }
+                })
+                .collect()
+        };
         live_targets.into_iter().map(Some).collect()
     };
 

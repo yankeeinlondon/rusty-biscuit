@@ -1,16 +1,14 @@
 //! Integration tests for `md schema validate`.
 
+mod common;
+
+use common::CliProcessFixture;
 use predicates::prelude::*;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use tempfile::TempDir;
 
-fn md_cmd() -> assert_cmd::Command {
-    assert_cmd::Command::cargo_bin("md").unwrap()
-}
-
-fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
-    let path = dir.path().join(name);
+fn write_file(dir: &Path, name: &str, content: &str) -> PathBuf {
+    let path = dir.join(name);
     let mut f = std::fs::File::create(&path).unwrap();
     f.write_all(content.as_bytes()).unwrap();
     path
@@ -18,14 +16,16 @@ fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
 
 #[test]
 fn schema_validate_valid_inline_succeeds() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "post.md",
         "---\n$schema:\n  title: 'string(required)'\ntitle: Hello\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
@@ -35,14 +35,16 @@ fn schema_validate_valid_inline_succeeds() {
 
 #[test]
 fn schema_validate_failing_returns_exit_1() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "draft.md",
         "---\n$schema:\n  title: 'string(required)'\nother: stuff\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
@@ -51,14 +53,16 @@ fn schema_validate_failing_returns_exit_1() {
 
 #[test]
 fn schema_validate_json_format_emits_ndjson() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "post.md",
         "---\n$schema:\n  title: 'string(required)'\ntitle: Hello\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate", "--format", "json"])
         .arg(&doc)
         .assert()
@@ -69,14 +73,16 @@ fn schema_validate_json_format_emits_ndjson() {
 
 #[test]
 fn schema_validate_json_format_reports_problems() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "draft.md",
         "---\n$schema:\n  title: 'string(required)'\nother: stuff\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate", "--format", "json"])
         .arg(&doc)
         .assert()
@@ -87,10 +93,12 @@ fn schema_validate_json_format_reports_problems() {
 
 #[test]
 fn schema_validate_no_schema_no_baseline_is_vacuous_success() {
-    let tmp = TempDir::new().unwrap();
-    let doc = write_file(&tmp, "no-schema.md", "---\nname: alice\n---\nBody\n");
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let doc = write_file(tmp, "no-schema.md", "---\nname: alice\n---\nBody\n");
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
@@ -99,14 +107,16 @@ fn schema_validate_no_schema_no_baseline_is_vacuous_success() {
 
 #[test]
 fn schema_validate_quiet_suppresses_success_lines() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "post.md",
         "---\n$schema:\n  title: 'string(required)'\ntitle: Hello\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate", "--quiet"])
         .arg(&doc)
         .assert()
@@ -126,19 +136,21 @@ fn resolved_display(path: &Path) -> String {
 
 #[test]
 fn schema_validate_pretty_reports_bare_sidecar_advisory_without_failing() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let sidecar = write_file(
-        &tmp,
+        tmp,
         "schema.yaml",
         "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
     );
     let doc = write_file(
-        &tmp,
+        tmp,
         "doc.md",
         "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
@@ -157,19 +169,21 @@ fn schema_validate_pretty_reports_bare_sidecar_advisory_without_failing() {
 
 #[test]
 fn schema_validate_json_reports_structured_bare_sidecar_advisory() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let sidecar = write_file(
-        &tmp,
+        tmp,
         "schema.yaml",
         "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
     );
     let doc = write_file(
-        &tmp,
+        tmp,
         "doc.md",
         "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nBody\n",
     );
 
-    let output = md_cmd()
+    let output = process
+        .command()
         .args(["schema", "validate", "--format", "json"])
         .arg(&doc)
         .assert()
@@ -184,10 +198,7 @@ fn schema_validate_json_reports_structured_bare_sidecar_advisory() {
     assert_eq!(value["warnings"].as_array().unwrap().len(), 1);
     let warning = &value["warnings"][0];
     assert_eq!(warning["source"], "darkmatter.schema");
-    assert_eq!(
-        warning["code"],
-        "dm.schema.missing_simplified_envelope"
-    );
+    assert_eq!(warning["code"], "dm.schema.missing_simplified_envelope");
     assert_eq!(warning["path"], resolved_display(&sidecar));
     assert!(
         warning["message"]
@@ -199,19 +210,21 @@ fn schema_validate_json_reports_structured_bare_sidecar_advisory() {
 
 #[test]
 fn schema_validate_quiet_suppresses_bare_sidecar_advisory() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     write_file(
-        &tmp,
+        tmp,
         "schema.yaml",
         "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
     );
     let doc = write_file(
-        &tmp,
+        tmp,
         "doc.md",
         "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate", "--quiet"])
         .arg(&doc)
         .assert()
@@ -221,15 +234,17 @@ fn schema_validate_quiet_suppresses_bare_sidecar_advisory() {
 
 #[test]
 fn schema_validate_baseline_from_flag() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let baseline = write_file(
-        &tmp,
+        tmp,
         "baseline.yaml",
         "$schema:\n  owner: 'string(required)'\n",
     );
-    let doc = write_file(&tmp, "doc.md", "---\ntitle: hi\n---\nBody\n");
+    let doc = write_file(tmp, "doc.md", "---\ntitle: hi\n---\nBody\n");
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate", "--schema"])
         .arg(&baseline)
         .arg(&doc)
@@ -240,18 +255,21 @@ fn schema_validate_baseline_from_flag() {
 
 #[test]
 fn schema_validate_baseline_from_env_var() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let baseline = write_file(
-        &tmp,
+        tmp,
         "baseline.yaml",
         "$schema:\n  owner: 'string(required)'\n",
     );
-    let doc = write_file(&tmp, "doc.md", "---\ntitle: hi\n---\nBody\n");
+    let doc = write_file(tmp, "doc.md", "---\ntitle: hi\n---\nBody\n");
 
-    md_cmd()
+    process
+        .command_builder()
+        .application_input("BASELINE_SCHEMA", &baseline)
+        .build()
         .args(["schema", "validate"])
         .arg(&doc)
-        .env("BASELINE_SCHEMA", &baseline)
         .assert()
         .code(1)
         .stdout(predicate::str::contains("owner"));
@@ -259,11 +277,13 @@ fn schema_validate_baseline_from_env_var() {
 
 #[test]
 fn schema_validate_bad_baseline_exits_2() {
-    let tmp = TempDir::new().unwrap();
-    let bad = write_file(&tmp, "baseline.yaml", "not: a-schema\n");
-    let doc = write_file(&tmp, "doc.md", "---\ntitle: hi\n---\nBody\n");
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let bad = write_file(tmp, "baseline.yaml", "not: a-schema\n");
+    let doc = write_file(tmp, "doc.md", "---\ntitle: hi\n---\nBody\n");
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate", "--schema"])
         .arg(&bad)
         .arg(&doc)
@@ -273,15 +293,17 @@ fn schema_validate_bad_baseline_exits_2() {
 
 #[test]
 fn schema_validate_unparseable_frontmatter_exits_3() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     // Intentionally malformed YAML inside frontmatter delimiters.
     let doc = write_file(
-        &tmp,
+        tmp,
         "bad.md",
         "---\n: : : not valid yaml ::\n  - [unbalanced\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
@@ -290,15 +312,17 @@ fn schema_validate_unparseable_frontmatter_exits_3() {
 
 #[test]
 fn schema_validate_pretty_reports_line_for_type_mismatch() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     // `rating` lands on line 3 of the canonical re-serialised frontmatter.
     let doc = write_file(
-        &tmp,
+        tmp,
         "draft.md",
         "---\n$schema:\n  rating: number\nrating: nope\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
@@ -309,14 +333,16 @@ fn schema_validate_pretty_reports_line_for_type_mismatch() {
 
 #[test]
 fn schema_validate_json_reports_arm_index_for_root_union() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "draft.md",
         "---\n$schema:\n  - title: 'string(required)'\n  - name: 'string(required)'\nother: value\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate", "--format", "json"])
         .arg(&doc)
         .assert()
@@ -326,14 +352,16 @@ fn schema_validate_json_reports_arm_index_for_root_union() {
 
 #[test]
 fn schema_validate_unresolved_document_schema_exits_2() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "post.md",
         "---\n$schema: ./missing.yaml\ntitle: hi\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
@@ -342,22 +370,24 @@ fn schema_validate_unresolved_document_schema_exits_2() {
 
 #[test]
 fn schema_validate_unresolved_document_schema_outranks_validation_failure() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     // One file has a missing `$schema` reference (schema-load error → 2);
     // the other has a normal validation failure (→ 1). Schema-load errors
     // outrank validation failures so the overall exit code must be 2.
     let bad_schema = write_file(
-        &tmp,
+        tmp,
         "bad_schema.md",
         "---\n$schema: ./missing.yaml\ntitle: hi\n---\nBody\n",
     );
     let bad_value = write_file(
-        &tmp,
+        tmp,
         "bad_value.md",
         "---\n$schema:\n  title: 'string(required)'\nother: stuff\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&bad_schema)
         .arg(&bad_value)
@@ -367,14 +397,16 @@ fn schema_validate_unresolved_document_schema_outranks_validation_failure() {
 
 #[test]
 fn schema_validate_pretty_prefixes_root_union_problems_with_arm_index() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "draft.md",
         "---\n$schema:\n  - title: 'string(required)'\n  - name: 'string(required)'\nother: value\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
@@ -384,17 +416,19 @@ fn schema_validate_pretty_prefixes_root_union_problems_with_arm_index() {
 
 #[test]
 fn schema_validate_pretty_does_not_render_root_label_as_markup() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     // Missing-required at the root produced `<root>` markup which the
     // Prose renderer interpreted as a tag. The rendered output must not
     // leak a closing `</root>` (or any other angle-bracketed artifact).
     let doc = write_file(
-        &tmp,
+        tmp,
         "draft.md",
         "---\n$schema:\n  title: 'string(required)'\nother: stuff\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
@@ -405,19 +439,21 @@ fn schema_validate_pretty_does_not_render_root_label_as_markup() {
 
 #[test]
 fn schema_validate_pretty_reports_source_line_for_problem() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     // The opening `---` is line 1. `$schema:` is line 2, the inline
     // mapping spans lines 3-4, the blank comment is line 5, and the
     // invalid `rating: nope` value is on line 6 of the source. The
     // position must be reported against the original source, not against
     // a re-serialised view.
     let doc = write_file(
-        &tmp,
+        tmp,
         "draft.md",
         "---\n$schema:\n  rating: number\n# important: do not reorder\n\nrating: nope\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate", "--format", "json"])
         .arg(&doc)
         .assert()
@@ -427,19 +463,21 @@ fn schema_validate_pretty_reports_source_line_for_problem() {
 
 #[test]
 fn schema_validate_multiple_files_aggregates_failure() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let good = write_file(
-        &tmp,
+        tmp,
         "good.md",
         "---\n$schema:\n  title: 'string(required)'\ntitle: ok\n---\n",
     );
     let bad = write_file(
-        &tmp,
+        tmp,
         "bad.md",
         "---\n$schema:\n  title: 'string(required)'\nother: stuff\n---\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&good)
         .arg(&bad)
@@ -449,14 +487,16 @@ fn schema_validate_multiple_files_aggregates_failure() {
 
 #[test]
 fn schema_validate_assignment_satisfies_required_property() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "draft.md",
         "---\n$schema:\n  title: 'string(required)'\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .arg("title=Hello")
@@ -466,14 +506,16 @@ fn schema_validate_assignment_satisfies_required_property() {
 
 #[test]
 fn schema_validate_assignment_parses_yaml_scalar_types() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "post.md",
         "---\n$schema:\n  count: 'number(integer; required)'\n  flag: 'boolean(required)'\n---\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .arg("count=5")
@@ -484,14 +526,16 @@ fn schema_validate_assignment_parses_yaml_scalar_types() {
 
 #[test]
 fn schema_validate_assignment_parses_flow_sequence() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "post.md",
         "---\n$schema:\n  tags: 'string[](min(2); required)'\n---\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .arg("tags=[a, b, c]")
@@ -501,22 +545,25 @@ fn schema_validate_assignment_parses_flow_sequence() {
 
 #[test]
 fn schema_validate_assignment_overrides_existing_value() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "post.md",
         "---\n$schema:\n  title: 'string(min(5))'\ntitle: Hi\n---\n",
     );
 
     // Without override, "Hi" fails min(5).
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
         .code(1);
 
     // Overriding with a longer value makes the document valid.
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .arg("title=HelloWorld")
@@ -526,14 +573,16 @@ fn schema_validate_assignment_overrides_existing_value() {
 
 #[test]
 fn schema_validate_assignment_nested_dot_notation() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "post.md",
         "---\n$schema:\n  user: 'object(required)'\n---\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .arg("user.email=ken@ken.net")
@@ -544,19 +593,21 @@ fn schema_validate_assignment_nested_dot_notation() {
 
 #[test]
 fn schema_validate_assignment_applies_to_multiple_files() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let a = write_file(
-        &tmp,
+        tmp,
         "a.md",
         "---\n$schema:\n  title: 'string(required)'\n---\n",
     );
     let b = write_file(
-        &tmp,
+        tmp,
         "b.md",
         "---\n$schema:\n  title: 'string(required)'\n---\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&a)
         .arg(&b)
@@ -567,14 +618,16 @@ fn schema_validate_assignment_applies_to_multiple_files() {
 
 #[test]
 fn schema_validate_assignment_failing_value_still_exits_1() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "post.md",
         "---\n$schema:\n  count: 'number(min(10); required)'\n---\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .arg("count=3")
@@ -584,10 +637,12 @@ fn schema_validate_assignment_failing_value_still_exits_1() {
 
 #[test]
 fn schema_validate_invalid_assignment_yaml_returns_usage_error() {
-    let tmp = TempDir::new().unwrap();
-    let doc = write_file(&tmp, "post.md", "---\n$schema:\n  title: 'string'\n---\n");
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let doc = write_file(tmp, "post.md", "---\n$schema:\n  title: 'string'\n---\n");
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         // Unclosed flow mapping is invalid YAML and is reported as a usage
@@ -599,19 +654,21 @@ fn schema_validate_invalid_assignment_yaml_returns_usage_error() {
 
 #[test]
 fn schema_validate_assignment_coerces_to_string_for_string_typed_property() {
+    let process = CliProcessFixture::new();
     // Regression: `bar=true` against `bar: string(required)` used to be
     // parsed as a YAML boolean and fail validation. The CLI now consults
     // the schema and stores the raw RHS as a string when the property is
     // declared as a string-shaped scalar.
-    let tmp = TempDir::new().unwrap();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "needs-bar.md",
         "---\n$schema:\n  bar: 'string(required)'\n---\nBody\n",
     );
 
     for rhs in ["true", "false", "42"] {
-        md_cmd()
+        process
+            .command()
             .args(["schema", "validate"])
             .arg(&doc)
             .arg(format!("bar={rhs}"))
@@ -622,17 +679,19 @@ fn schema_validate_assignment_coerces_to_string_for_string_typed_property() {
 
 #[test]
 fn schema_validate_assignment_keeps_boolean_for_boolean_typed_property() {
+    let process = CliProcessFixture::new();
     // Counterpart to the coercion test: when the schema declares a boolean
     // property, a bare `flag=true` still parses as a YAML boolean and the
     // document validates.
-    let tmp = TempDir::new().unwrap();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "needs-flag.md",
         "---\n$schema:\n  flag: 'boolean(required)'\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .arg("flag=true")
@@ -642,16 +701,18 @@ fn schema_validate_assignment_keeps_boolean_for_boolean_typed_property() {
 
 #[test]
 fn schema_validate_pretty_surfaces_property_description() {
+    let process = CliProcessFixture::new();
     // Track A: a `-> {description}` arrow on the failing property surfaces as
     // a dimmed sub-line beneath the problem bullet.
-    let tmp = TempDir::new().unwrap();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "post.md",
         "---\n$schema:\n  title: 'string(required) -> The headline shown in listing pages'\nother: stuff\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
@@ -663,16 +724,18 @@ fn schema_validate_pretty_surfaces_property_description() {
 
 #[test]
 fn schema_validate_pretty_omits_sub_line_when_no_description() {
+    let process = CliProcessFixture::new();
     // Track A: a description-less schema renders no description text — the
     // feature is purely additive (Decision #8).
-    let tmp = TempDir::new().unwrap();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "draft.md",
         "---\n$schema:\n  rating: number\nrating: nope\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
@@ -683,16 +746,18 @@ fn schema_validate_pretty_omits_sub_line_when_no_description() {
 
 #[test]
 fn schema_validate_json_carries_description_field() {
+    let process = CliProcessFixture::new();
     // Track B: the JSON problem object gains a `"description"` field with the
     // declared description string.
-    let tmp = TempDir::new().unwrap();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "post.md",
         "---\n$schema:\n  title: 'string(required) -> The headline shown in listing pages'\nother: stuff\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate", "--format", "json"])
         .arg(&doc)
         .assert()
@@ -704,16 +769,18 @@ fn schema_validate_json_carries_description_field() {
 
 #[test]
 fn schema_validate_json_description_is_null_when_absent() {
+    let process = CliProcessFixture::new();
     // Track B: the JSON problem object carries `"description":null` when the
     // property declares no description.
-    let tmp = TempDir::new().unwrap();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "draft.md",
         "---\n$schema:\n  rating: number\nrating: nope\n---\nBody\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate", "--format", "json"])
         .arg(&doc)
         .assert()
@@ -723,17 +790,17 @@ fn schema_validate_json_description_is_null_when_absent() {
 
 #[test]
 fn schema_validate_path_with_equals_disambiguated_by_dot_slash() {
+    let process = CliProcessFixture::new();
     // A file literally named `weird=name.md` would otherwise look like an
     // assignment, but the `./` prefix forces it to be classified as a file
     // because the LHS-before-`=` is not a valid identifier.
-    let tmp = TempDir::new().unwrap();
-    let path = tmp.path().join("weird=name.md");
+    let path = process.cwd().join("weird=name.md");
     let mut f = std::fs::File::create(&path).unwrap();
     f.write_all(b"---\n$schema:\n  title: 'string(required)'\ntitle: ok\n---\n")
         .unwrap();
 
-    md_cmd()
-        .current_dir(tmp.path())
+    process
+        .command()
         .args(["schema", "validate", "./weird=name.md"])
         .assert()
         .success();

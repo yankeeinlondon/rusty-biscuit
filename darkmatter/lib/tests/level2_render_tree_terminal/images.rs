@@ -46,7 +46,10 @@ fn level2_tree_rich_image_node_emits_protocol_and_renders_in_real_terminal() {
         name: "rich_image".into(),
     };
     let (doc, diags) = fold_markdown_to_document(source, "![cat](pic.png)\n");
-    assert!(diags.is_empty(), "image fixture must fold cleanly: {diags:?}");
+    assert!(
+        diags.is_empty(),
+        "image fixture must fold cleanly: {diags:?}"
+    );
 
     // Rich tier on an iTerm2-capable TTY (WezTerm renders iTerm2 graphics).
     let mut term = Terminal::new_optimistic(120);
@@ -92,25 +95,6 @@ fn level2_tree_rich_image_node_emits_protocol_and_renders_in_real_terminal() {
         "real terminal showed the alt-text fallback instead of consuming the image. plain:\n{}",
         frame.plain,
     );
-}
-
-#[test]
-fn pixel_classification_distinguishes_magenta_from_black() {
-    const MAGENTA: [u8; 3] = [255, 0, 255];
-    let dir = tempdir().unwrap();
-
-    let magenta_path = dir.path().join("m.png");
-    write_solid_png(&magenta_path, 64, MAGENTA);
-    let (near, non_black, total) = classify_pixels(&fs::read(&magenta_path).unwrap(), MAGENTA, 60);
-    assert_eq!(total, 64 * 64);
-    assert_eq!(near, total, "every magenta pixel must classify as near-target");
-    assert_eq!(non_black, total, "magenta is not black");
-
-    let black_path = dir.path().join("b.png");
-    write_solid_png(&black_path, 64, [0, 0, 0]);
-    let (near, non_black, _) = classify_pixels(&fs::read(&black_path).unwrap(), MAGENTA, 60);
-    assert_eq!(near, 0, "black has no magenta");
-    assert_eq!(non_black, 0, "black capture must read as blocked/empty");
 }
 
 // The pixel-readback companion (`level3_rich_image_node_paints_distinctive_pixels`)

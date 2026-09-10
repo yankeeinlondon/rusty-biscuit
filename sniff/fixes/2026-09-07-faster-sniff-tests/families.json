@@ -1,0 +1,1522 @@
+{
+  "families": [
+    {
+      "id": "lib-unit-credentials",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "credentials"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-error",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "error"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-executable-index",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "executable_index"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-filesystem",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "filesystem"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-hardware",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "hardware"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-network",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "network"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-os",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "os"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-package",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "package"
+        ]
+      },
+      "exclude": {
+        "tests": [
+          "package::network::tests::real_cargo_network_find_package",
+          "package::network::tests::real_cargo_network_latest_version",
+          "package::network::tests::real_cargo_network_nonexistent_package",
+          "package::network::tests::real_enrich_dependency_cargo",
+          "package::network::tests::real_enrich_dependency_npm",
+          "package::network::tests::real_npm_network_find_package",
+          "package::network::tests::real_npm_network_latest_version",
+          "package::network::tests::real_npm_network_nonexistent_package"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-performance",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "performance"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-process",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "process"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-programs",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "programs"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-remote",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "remote"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-request",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "request"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-services",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "services"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-test-helpers",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "test_helpers"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-tests",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "modules": [
+          "tests"
+        ]
+      }
+    },
+    {
+      "id": "lib-real-network",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff"
+        ],
+        "tests": [
+          "package::network::tests::real_cargo_network_find_package",
+          "package::network::tests::real_cargo_network_latest_version",
+          "package::network::tests::real_cargo_network_nonexistent_package",
+          "package::network::tests::real_enrich_dependency_cargo",
+          "package::network::tests::real_enrich_dependency_npm",
+          "package::network::tests::real_npm_network_find_package",
+          "package::network::tests::real_npm_network_latest_version",
+          "package::network::tests::real_npm_network_nonexistent_package"
+        ]
+      }
+    },
+    {
+      "id": "cli-unit-args",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli"
+        ],
+        "modules": [
+          "args"
+        ]
+      }
+    },
+    {
+      "id": "cli-unit-commands",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli"
+        ],
+        "modules": [
+          "commands"
+        ]
+      }
+    },
+    {
+      "id": "cli-unit-install",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli"
+        ],
+        "modules": [
+          "install"
+        ]
+      }
+    },
+    {
+      "id": "cli-unit-install-plan-cmd",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli"
+        ],
+        "modules": [
+          "install_plan_cmd"
+        ]
+      }
+    },
+    {
+      "id": "cli-unit-install-ui",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli"
+        ],
+        "modules": [
+          "install_ui"
+        ]
+      }
+    },
+    {
+      "id": "cli-unit-output",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli"
+        ],
+        "modules": [
+          "output"
+        ]
+      }
+    },
+    {
+      "id": "cli-process-fixture",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli_process_fixture"
+        ]
+      }
+    },
+    {
+      "id": "cli-spawn-site-guard",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::spawn_site_guard"
+        ]
+      }
+    },
+    {
+      "id": "lib-bench-fixtures",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::bench_fixtures"
+        ]
+      }
+    },
+    {
+      "id": "lib-bench-ids-sync",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::bench_ids_sync"
+        ]
+      }
+    },
+    {
+      "id": "lib-bench-plans",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::bench_plans"
+        ]
+      }
+    },
+    {
+      "id": "lib-benchmark-workloads",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::benchmark_workloads"
+        ]
+      }
+    },
+    {
+      "id": "lib-focused-provider",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::focused_provider"
+        ]
+      }
+    },
+    {
+      "id": "lib-foo",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::foo"
+        ]
+      },
+      "expectEmpty": "the placeholder test binary was removed in Phase 5 because it proved no product behavior"
+    },
+    {
+      "id": "lib-git-parity",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::git_parity"
+        ]
+      }
+    },
+    {
+      "id": "lib-host-capability-cache",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::host_capability_cache"
+        ]
+      }
+    },
+    {
+      "id": "lib-integration",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::integration"
+        ]
+      }
+    },
+    {
+      "id": "lib-merge-conflict-prediction",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::merge_conflict_prediction"
+        ]
+      }
+    },
+    {
+      "id": "lib-program-installable",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::program_installable"
+        ]
+      }
+    },
+    {
+      "id": "lib-program-serialization",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::program_serialization"
+        ]
+      }
+    },
+    {
+      "id": "lib-remote-observation",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::remote_observation"
+        ]
+      }
+    },
+    {
+      "id": "lib-remote-providers",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::remote_providers"
+        ]
+      }
+    },
+    {
+      "id": "lib-remote-resolution",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::remote_resolution"
+        ]
+      }
+    },
+    {
+      "id": "lib-uv-with-install-plan",
+      "package": "sniff",
+      "match": {
+        "suites": [
+          "sniff::uv_with_install_plan"
+        ]
+      }
+    },
+    {
+      "id": "cli-install-interactive-pty",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::install_interactive_pty"
+        ]
+      },
+      "expectEmpty": "the bespoke-gated PTY binary was removed in Phase 5 because its behavior is covered by the canonical install interview test"
+    },
+    {
+      "id": "cli-install-interview-cli",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::install_interview_cli"
+        ]
+      }
+    },
+    {
+      "id": "cli-install-plan",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::install_plan"
+        ]
+      }
+    },
+    {
+      "id": "cli-level2-cicd-styling",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::level2_cicd_styling"
+        ]
+      }
+    },
+    {
+      "id": "cli-level2-git-status-styling",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::level2_git_status_styling"
+        ]
+      }
+    },
+    {
+      "id": "cli-snapshots",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::snapshots"
+        ]
+      }
+    },
+    {
+      "id": "cli-tty",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::tty"
+        ]
+      }
+    },
+    {
+      "id": "cli-help-version",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_help_flag",
+          "test_version_flag",
+          "test_help_mentions_subcommands"
+        ]
+      }
+    },
+    {
+      "id": "cli-completions",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_completions_bash_shows_setup",
+          "test_completions_zsh_shows_setup",
+          "test_completions_fish_shows_setup",
+          "test_completions_powershell_shows_setup",
+          "test_dynamic_completions_bash",
+          "test_dynamic_completions_zsh",
+          "test_dynamic_completions_fish",
+          "test_help_mentions_completions",
+          "test_completions_help_flag_shows_setup"
+        ]
+      }
+    },
+    {
+      "id": "cli-output-mode",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_no_subcommand_shows_help",
+          "test_no_subcommand_with_json_outputs_json",
+          "test_subcommand_outputs_text_by_default",
+          "test_subcommand_with_json_flag_outputs_json"
+        ]
+      }
+    },
+    {
+      "id": "cli-flag-position",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_json_flag_before_subcommand",
+          "test_json_flag_after_subcommand",
+          "test_verbose_flag_before_subcommand",
+          "test_verbose_flag_after_subcommand",
+          "test_double_verbose_flag",
+          "with_network_global_flag_is_rejected",
+          "with_network_subcommand_flag_is_rejected",
+          "repo_name_json_is_leaf_only"
+        ]
+      }
+    },
+    {
+      "id": "cli-repo-json-aggregate",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "repo_aggregate_json_is_valid_object",
+          "repo_aggregate_perf_covers_complete_command",
+          "repo_aggregate_json_excludes_network_and_parameterized_keys",
+          "repo_aggregate_json_not_partial",
+          "repo_aggregate_json_uses_snake_case_and_drops_old_kebab_keys",
+          "repo_aggregate_json_context_groups_cwd_relative_facts",
+          "repo_json_output_is_valid_json_on_stdout_with_clean_stderr",
+          "repo_json_stdout_is_exactly_one_json_document",
+          "repo_json_succeeds_in_a_shallow_clone",
+          "repo_default_and_plain_emit_text_with_clean_stderr",
+          "repo_structure_json_output_is_valid_json_on_stdout_with_clean_stderr",
+          "repo_aggregate_json_scope_buckets_have_stable_shape",
+          "repo_aggregate_json_does_not_duplicate_full_package_catalogs",
+          "repo_aggregate_json_never_re_embeds_the_full_package_catalog",
+          "repo_aggregate_json_is_offline",
+          "repo_name_json_is_still_leaf_only"
+        ]
+      }
+    },
+    {
+      "id": "cli-repo-leaf-e2e",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "repo_is_monorepo_json_emits_object",
+          "repo_is_monorepo_text_prints_label",
+          "repo_is_monorepo_no_error_exits_zero_when_false",
+          "repo_is_monorepo_text_in_monorepo_exits_zero_with_label",
+          "repo_is_monorepo_text_in_non_monorepo_exits_nonzero_with_false",
+          "repo_is_monorepo_json_in_non_monorepo_exits_nonzero_with_valid_json",
+          "repo_is_monorepo_genuine_failure_exits_nonzero_with_stderr_even_with_no_error",
+          "repo_package_count_json_is_single_key_number",
+          "repo_package_count_text_is_integer",
+          "repo_version_json_returns_array_shape_under_real_repo",
+          "repo_version_json_no_error_exits_zero",
+          "repo_version_text_absent_exits_one"
+        ]
+      }
+    },
+    {
+      "id": "cli-terminal-subset",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "repo_name_verbose_is_name_only",
+          "repo_default_is_bare_name",
+          "repo_default_verbose_is_rich_oneliner",
+          "test_base_flag_before_subcommand",
+          "test_base_flag_after_subcommand_is_accepted",
+          "test_filesystem_scoped_flags_parse_in_help",
+          "test_repo_scoped_flags_parse_in_help",
+          "test_topics_subcommand_output"
+        ]
+      }
+    },
+    {
+      "id": "cli-section-subcommands",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_os_subcommand_text_output",
+          "test_os_subcommand_json_output",
+          "test_runtime_subcommand_text_output",
+          "test_runtime_subcommand_json_output",
+          "test_hardware_subcommand_text_output",
+          "test_hardware_subcommand_json_output",
+          "test_network_subcommand_text_output",
+          "test_network_subcommand_verbose_text_output",
+          "test_network_subcommand_json_output",
+          "test_filesystem_subcommand_text_output",
+          "test_filesystem_subcommand_json_output"
+        ]
+      }
+    },
+    {
+      "id": "cli-hardware-detail",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_cpu_subcommand_text_output",
+          "test_cpu_subcommand_json_output",
+          "test_gpu_subcommand_text_output",
+          "test_gpu_subcommand_json_output",
+          "test_memory_subcommand_text_output",
+          "test_memory_subcommand_json_output",
+          "test_storage_subcommand_text_output",
+          "test_storage_subcommand_json_output"
+        ]
+      }
+    },
+    {
+      "id": "cli-filesystem-detail",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_git_status_subcommand_text_output",
+          "test_git_status_subcommand_with_history_flag",
+          "test_git_status_subcommand_compact_output",
+          "test_git_status_subcommand_json_output",
+          "test_repo_subcommand_text_output",
+          "test_repo_subcommand_json_output",
+          "test_language_subcommand_text_output",
+          "test_language_subcommand_json_output",
+          "test_repo_language_text_returns_rust_for_rust_repo",
+          "test_repo_language_json_returns_rust_for_rust_repo",
+          "test_repo_language_base_flag_all_three_placements",
+          "test_repo_language_text_empty_repo_exits_one_with_no_stdout",
+          "test_repo_language_json_empty_repo_emits_null_and_exits_one",
+          "test_repo_help_lists_language_subcommand"
+        ]
+      }
+    },
+    {
+      "id": "cli-software",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_software_subcommand_text_output",
+          "test_software_subcommand_json_output",
+          "test_software_subcommand_rejects_json_format_flag",
+          "test_software_editors_subcommand_text_output",
+          "test_software_editors_subcommand_json_output",
+          "test_software_utilities_subcommand_text_output",
+          "test_software_utilities_subcommand_json_output",
+          "test_software_language_package_managers_subcommand_text_output",
+          "test_software_language_package_managers_subcommand_json_output",
+          "test_software_os_package_managers_subcommand_text_output",
+          "test_software_os_package_managers_subcommand_json_output",
+          "test_software_tts_clients_subcommand_text_output",
+          "test_software_tts_clients_subcommand_json_output",
+          "test_software_terminal_apps_subcommand_text_output",
+          "test_software_terminal_apps_subcommand_json_output",
+          "test_software_audio_players_subcommand_text_output",
+          "test_software_audio_players_subcommand_json_output",
+          "test_software_agents_subcommand_text_output",
+          "test_software_agents_subcommand_json_output",
+          "test_software_notification_helpers_subcommand_text_output",
+          "test_software_notification_helpers_subcommand_json_output"
+        ]
+      }
+    },
+    {
+      "id": "cli-test-runner",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_software_test_runners_subcommand_text_output",
+          "test_software_test_runners_subcommand_json_output_shape",
+          "test_software_test_runners_json_stdout_is_parseable_without_stderr",
+          "test_software_test_runners_plain_suppresses_hint_and_ansi",
+          "test_repo_test_runner_json_reports_package_usage",
+          "test_repo_test_runner_list_reports_library_values",
+          "test_repo_test_runner_output_modes",
+          "test_repo_test_runner_verbose_machine_formats_keep_evidence",
+          "test_repo_test_runner_detects_workspace_root_nextest",
+          "test_repo_package_manager_json_uses_shared_collapse"
+        ]
+      }
+    },
+    {
+      "id": "cli-repo-version",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_repo_version_json_reports_array_shape",
+          "test_repo_version_text_output_default",
+          "test_repo_version_csv_output_is_names_only",
+          "test_repo_version_md_output_uses_dash_prefix",
+          "test_repo_version_list_output_is_names_only",
+          "test_repo_version_monorepo_root_reports_collapsed_versions",
+          "test_repo_version_all_override_returns_repo_scope",
+          "test_repo_version_package_override_scopes_to_single_package",
+          "test_repo_version_package_area_override_scopes_to_single_area",
+          "test_repo_version_unknown_package_errors",
+          "test_repo_version_unknown_package_area_errors",
+          "test_repo_version_single_package_unknown_package_errors",
+          "test_repo_version_single_package_unknown_area_errors",
+          "test_repo_version_single_package_known_package_resolves",
+          "test_repo_version_variance_reports_each_version_separately",
+          "test_repo_version_empty_exits_one_with_no_stdout",
+          "test_repo_version_empty_with_no_error_exits_zero",
+          "test_repo_version_verbose_named_workspace_inheritance",
+          "test_bare_repo_json_version_collapses_workspace_inheritance_from_member",
+          "test_repo_version_empty_json_emits_array_shape",
+          "test_repo_package_manager_variant_list_uses_unique_values",
+          "test_repo_package_manager_output_modes"
+        ]
+      }
+    },
+    {
+      "id": "cli-negative-program-paths",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_old_programs_command_fails",
+          "test_old_editors_command_fails",
+          "test_old_utilities_command_fails",
+          "test_old_language_package_managers_command_fails",
+          "test_old_os_package_managers_command_fails",
+          "test_old_tts_clients_command_fails",
+          "test_old_terminal_apps_command_fails",
+          "test_old_audio_players_command_fails",
+          "test_old_agents_command_fails",
+          "test_old_notification_helpers_command_fails"
+        ]
+      }
+    },
+    {
+      "id": "cli-services",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_services_subcommand_text_output",
+          "test_services_subcommand_json_output",
+          "test_services_state_all",
+          "test_services_state_running",
+          "test_services_state_stopped"
+        ]
+      }
+    },
+    {
+      "id": "cli-scoped-enrichment",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_enrichment_flags_in_help",
+          "test_filesystem_help_mentions_scoped_flags",
+          "test_git_status_help_mentions_refresh_remotes",
+          "test_repo_help_mentions_latest_versions",
+          "test_git_status_json_is_git_info",
+          "test_repo_package_dependencies_help_mentions_ui",
+          "test_repo_deps_is_not_an_alias",
+          "test_repo_branches_json_shape",
+          "test_single_package_cargo_reports_root_facts",
+          "test_single_package_node_reports_root_facts",
+          "test_single_package_python_reports_root_facts",
+          "test_repo_dependencies_filters_dev_dependencies",
+          "test_repo_aggregate_dependencies_are_cwd_invariant",
+          "test_invalid_refresh_remotes_on_remote_subcommand_fails"
+        ]
+      }
+    },
+    {
+      "id": "cli-verbose",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_verbose_with_software_adds_columns",
+          "test_verbose_with_hardware_shows_details"
+        ]
+      }
+    },
+    {
+      "id": "cli-negative",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_invalid_subcommand_fails",
+          "test_old_flag_syntax_fails"
+        ]
+      }
+    },
+    {
+      "id": "cli-remote",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_repo_remote_help",
+          "test_help_mentions_remote_via_repo"
+        ]
+      }
+    },
+    {
+      "id": "cli-install",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_software_editors_shows_table_without_install",
+          "test_software_editors_install_invalid_name_fails",
+          "test_software_utilities_install_invalid_name_fails",
+          "test_software_install_invalid_name_fails",
+          "test_software_editors_install_help_works",
+          "test_help_mentions_software_install",
+          "test_software_editors_json_still_works_with_install_subcommand"
+        ]
+      }
+    },
+    {
+      "id": "cli-plain",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_plain_flag_strips_escape_codes",
+          "test_plain_with_json_ignores_plain"
+        ]
+      }
+    },
+    {
+      "id": "cli-repo-command",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_repo_git_status_subcommand",
+          "test_repo_help_shows_examples"
+        ]
+      }
+    },
+    {
+      "id": "cli-blast-radius",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_repo_has_merge_conflict_surfaces_corrupt_index",
+          "test_repo_hash_surfaces_corrupt_commit_object",
+          "test_repo_git_status_surfaces_corrupt_history",
+          "test_repo_recent_commits_surfaces_corrupt_history",
+          "test_repo_source_code_changes_surfaces_corrupt_history",
+          "test_repo_git_status_reports_packed_checkout_branch",
+          "test_repo_git_status_branch_surfaces_malformed_remote_ref",
+          "test_repo_git_status_branch_absent_short_hex_succeeds",
+          "test_repo_git_status_branch_absent_valid_length_hex_succeeds",
+          "test_repo_git_status_branch_absent_ordinary_name_succeeds",
+          "test_repo_dirty_source_code_returns_source_files",
+          "test_repo_staged_source_code_returns_staged_only",
+          "test_repo_staged_files_uses_new_path",
+          "test_repo_staged_files_json_uses_new_shape",
+          "test_repo_unstaged_files_json_uses_new_shape",
+          "test_repo_untracked_files_json_uses_new_shape",
+          "test_repo_dirty_files_returns_all_file_types",
+          "test_repo_file_list_no_results_exits_1",
+          "test_repo_file_list_no_error_exits_0",
+          "test_repo_file_list_on_error_to_stderr",
+          "test_repo_file_list_on_error_plus_no_error_to_stdout",
+          "test_blast_radius_dirty_matches_documents",
+          "test_blast_radius_staged_matches_documents",
+          "test_blast_radius_last_commit_matches_documents",
+          "test_blast_radius_no_matches_exits_1",
+          "test_blast_radius_no_error_exits_0",
+          "test_blast_radius_on_error_to_stderr",
+          "test_blast_radius_json_output",
+          "test_blast_radius_list_format",
+          "test_docs_stdout_stderr_split",
+          "test_docs_blast_radius_filter",
+          "test_repo_dirty_source_code_with_list_flag",
+          "test_repo_unstaged_source_code_returns_modified_only"
+        ]
+      }
+    },
+    {
+      "id": "cli-recent-commits-basic",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_repo_recent_commits_default_period",
+          "test_repo_recent_commits_with_period",
+          "test_repo_recent_commits_with_count_period",
+          "test_repo_source_code_changes_with_count_period",
+          "test_repo_recent_commits_with_json",
+          "test_repo_recent_commits_with_plain",
+          "test_repo_source_code_changes",
+          "test_repo_source_code_changes_with_json",
+          "test_repo_documentation_changes",
+          "test_repo_documentation_changes_with_json",
+          "test_source_code_changes_json_filters_commits_and_files",
+          "test_documentation_changes_json_filters_commits_and_files",
+          "test_filtered_commit_json_trims_packages",
+          "test_recent_commits_json_unchanged",
+          "test_repo_recent_commits_no_error_flag",
+          "test_repo_recent_commits_invalid_period_error",
+          "test_repo_recent_commits_on_error_flag"
+        ]
+      }
+    },
+    {
+      "id": "cli-recent-commits-routing",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_repo_recent_commits_with_hash_period",
+          "test_repo_recent_commits_with_today_period",
+          "test_repo_recent_commits_with_date_period",
+          "test_repo_recent_commits_action_filter_single_action",
+          "test_repo_recent_commits_action_filter_or_semantics",
+          "test_repo_recent_commits_package_filter",
+          "test_repo_recent_commits_package_area_filter",
+          "test_repo_recent_commits_package_json_scoped",
+          "test_repo_recent_commits_unknown_package_error"
+        ]
+      }
+    },
+    {
+      "id": "cli-recent-commits-payload",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_repo_recent_commits_json_includes_empty_commits",
+          "test_repo_recent_commits_json_exact_commit_fields",
+          "test_repo_source_code_changes_json_exact_fields",
+          "test_repo_documentation_changes_json_exact_fields",
+          "test_repo_recent_commits_plain_output_exact_structure"
+        ]
+      }
+    },
+    {
+      "id": "cli-repo-packages",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_repo_packages_csv_default",
+          "test_repo_packages_md_format",
+          "test_repo_packages_list_format",
+          "test_repo_packages_md_and_list_conflict",
+          "test_repo_packages_package_area_filter",
+          "test_repo_packages_verbose_shows_root_dir",
+          "test_repo_packages_verbose_does_not_emit_tracing",
+          "test_repo_packages_json_output",
+          "test_repo_packages_no_error_empty_filter",
+          "test_repo_packages_no_error_allows_empty_filter",
+          "test_repo_packages_on_error_message",
+          "test_repo_packages_no_error_json_empty_filter",
+          "test_repo_packages_no_error_json_with_flag"
+        ]
+      }
+    },
+    {
+      "id": "cli-package-areas",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_repo_package_areas_csv_default",
+          "test_repo_package_areas_md_format",
+          "test_repo_package_areas_list_format",
+          "test_repo_package_areas_md_and_list_conflict",
+          "test_repo_package_areas_package_area_filter",
+          "test_repo_package_areas_positional_filter",
+          "test_repo_package_areas_positional_filter_negation",
+          "test_repo_package_areas_verbose_shows_root_dir",
+          "test_repo_package_areas_root_area_verbose_renders_dot_slash",
+          "test_repo_package_areas_verbose_does_not_emit_tracing",
+          "test_repo_package_areas_json_output",
+          "test_repo_package_areas_json_perf_stdout_is_valid_json",
+          "test_repo_package_areas_no_error_empty_filter",
+          "test_repo_package_areas_no_error_allows_empty_filter",
+          "test_repo_package_areas_on_error_message",
+          "test_repo_package_areas_no_error_json_empty_filter",
+          "test_repo_package_areas_no_error_json_with_flag",
+          "test_repo_root_json_perf_stdout_is_valid_json",
+          "test_repo_root_is_absolute_without_base_from_subdir",
+          "test_repo_dirty_files_json_perf_stdout_is_valid_json",
+          "test_repo_recent_commits_json_perf_stdout_is_valid_json",
+          "test_repo_has_merge_conflict_json_perf_stdout_is_valid_json"
+        ]
+      }
+    },
+    {
+      "id": "cli-stable-json-shape",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_package_json_empty_name_stable_shape",
+          "test_package_area_json_empty_name_stable_shape",
+          "test_root_json_outside_git_repo_stable_shape",
+          "test_dirty_packages_json_shape",
+          "test_dirty_package_areas_json_shape",
+          "test_staged_packages_json_shape",
+          "test_staged_package_areas_json_shape",
+          "test_unstaged_packages_json_shape",
+          "test_unstaged_package_areas_json_shape",
+          "test_dirty_packages_json_does_not_emit_prose_error_for_non_monorepo",
+          "test_repo_deps_json_shape"
+        ]
+      }
+    },
+    {
+      "id": "cli-remote-pr",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_repo_pr_help_documents_bitbucket_draft_limitation"
+        ]
+      }
+    },
+    {
+      "id": "cli-locator-json",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_has_merge_conflict_json_false",
+          "test_is_current_package_area_dirty_json_outside_area_emits_false",
+          "test_is_current_package_area_dirty_json_clean",
+          "test_package_area_has_source_code_changes_json_clean",
+          "test_package_root_json_when_present",
+          "test_package_name_json",
+          "test_repo_subcommand_json_shapes_are_distinct",
+          "test_git_status_json_perf_attaches_performance_field",
+          "test_is_current_package_area_dirty_json_perf_attaches_performance_field",
+          "test_repo_structure_filter_json_filters_packages",
+          "test_package_area_json_resolves_to_real_area",
+          "test_package_area_root_json_when_present",
+          "test_git_status_json_with_package_scope",
+          "test_is_current_package_area_dirty_json_true_branch",
+          "test_package_area_has_source_code_changes_json_true_branch",
+          "test_package_area_has_source_code_changes_json_docs_only_is_false"
+        ]
+      }
+    },
+    {
+      "id": "cli-repo-worktree",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_git_status_from_linked_worktree_renders_case_a",
+          "test_git_status_from_main_worktree_renders_case_b",
+          "test_git_status_json_worktree_ahead_is_lazy_by_default",
+          "test_git_status_text_and_json_agree_on_current_worktree",
+          "test_repo_worktree_inside_linked_worktree_returns_name",
+          "test_repo_worktree_inside_main_worktree_exits_1",
+          "test_repo_worktree_no_error_exits_0",
+          "test_repo_worktree_on_error_to_stderr",
+          "test_repo_worktree_json_success",
+          "test_repo_worktree_json_failure_no_error",
+          "test_repo_worktree_verbose_includes_path",
+          "test_repo_worktree_help_mentions_subcommand"
+        ]
+      }
+    },
+    {
+      "id": "cli-repo-worktrees",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_repo_worktrees_default_output",
+          "test_repo_worktrees_md_output",
+          "test_repo_worktrees_list_output",
+          "test_repo_worktrees_csv_output",
+          "test_repo_worktrees_verbose_output",
+          "test_repo_worktrees_list_verbose_composes_and_has_no_leading_space",
+          "test_repo_worktrees_md_verbose_keeps_bullet_and_metadata",
+          "test_repo_worktrees_csv_verbose_single_line_with_metadata",
+          "test_repo_worktrees_json_output",
+          "test_repo_worktrees_plain_verbose_no_escape_codes",
+          "test_repo_worktrees_current_marker_from_main_worktree",
+          "test_repo_worktrees_current_marker_from_linked_worktree",
+          "test_repo_worktrees_detached_head"
+        ]
+      }
+    },
+    {
+      "id": "cli-package-scope-flags",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_repo_package_flag_returns_single_package",
+          "test_repo_package_area_flag_uses_prefix_semantics",
+          "test_repo_package_and_area_flags_overlap_succeeds",
+          "test_repo_package_and_area_flags_non_overlap_errors",
+          "test_repo_unknown_package_errors_with_valid_list",
+          "test_repo_unknown_package_area_errors_with_valid_list",
+          "test_repo_positional_filter_and_package_flag_combine",
+          "test_repo_dirty_files_short_p_flag_scopes_to_package",
+          "test_repo_git_status_package_with_area_name_errors"
+        ]
+      }
+    },
+    {
+      "id": "cli-repo-area",
+      "package": "sniff-cli",
+      "match": {
+        "suites": [
+          "sniff-cli::cli"
+        ],
+        "tests": [
+          "test_repo_area_inside_package_returns_package_name",
+          "test_repo_area_at_area_dir_returns_area_name",
+          "test_repo_area_at_repo_root_returns_root",
+          "test_repo_area_json_emits_name_outcome",
+          "test_repo_area_non_monorepo_repo_silent_failure",
+          "test_repo_area_non_monorepo_verbose_message_on_stderr",
+          "test_repo_area_not_in_repo_verbose_message_on_stderr",
+          "test_repo_area_no_error_zero_exit_when_no_monorepo",
+          "test_repo_area_on_error_prints_message_to_stdout",
+          "test_repo_git_status_outside_git_repo_is_graceful"
+        ]
+      }
+    }
+  ],
+  "exclusions": [
+    {
+      "package": "sniff",
+      "name": "alsa_cards_parses_card_entries",
+      "gate": "#[cfg(target_os = \"linux\")]",
+      "route": "test-ci (ubuntu-latest or WSL2 as applicable)"
+    },
+    {
+      "package": "sniff",
+      "name": "alsa_missing_pcm_falls_back_to_output_only",
+      "gate": "#[cfg(target_os = \"linux\")]",
+      "route": "test-ci (ubuntu-latest or WSL2 as applicable)"
+    },
+    {
+      "package": "sniff",
+      "name": "alsa_pcm_capture_only_card",
+      "gate": "#[cfg(target_os = \"linux\")]",
+      "route": "test-ci (ubuntu-latest or WSL2 as applicable)"
+    },
+    {
+      "package": "sniff",
+      "name": "alsa_pcm_detects_playback_and_capture",
+      "gate": "#[cfg(target_os = \"linux\")]",
+      "route": "test-ci (ubuntu-latest or WSL2 as applicable)"
+    },
+    {
+      "package": "sniff",
+      "name": "classify_alsa_kind_matches_expected_categories",
+      "gate": "#[cfg(target_os = \"linux\")]",
+      "route": "test-ci (ubuntu-latest or WSL2 as applicable)"
+    },
+    {
+      "package": "sniff",
+      "name": "current_user_id_returns_a_canonical_token_user_sid",
+      "gate": "#[cfg(windows)]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "expand_env_vars_handles_empty_string",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "expand_env_vars_passes_through_plain_string",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "expand_env_vars_preserves_unknown_variable",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "expand_env_vars_resolves_system_root",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "extra_system_config_windows_does_not_panic_when_file_absent",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "install_root_dirs_reads_env_vars",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "orphaned_hkcu_entry_is_filtered",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "path_wins_over_fallbacks_for_cmd",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "phase5_non_utf8_ref_is_not_silently_dropped",
+      "gate": "#[cfg(target_os = \"linux\")]",
+      "route": "test-ci (ubuntu-latest or WSL2 as applicable)"
+    },
+    {
+      "package": "sniff",
+      "name": "preserves_windows_drive_prefix_and_casing",
+      "gate": "#[cfg(windows)]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "scan_app_paths_filters_orphaned_entries",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "scan_app_paths_honors_hkcu_precedence_over_hklm",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "test_detect_timezone_windows_populates_timezone_name",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "test_detect_windows_package_managers_on_windows",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "test_find_macos_app_bundle_all_known_apps_return_none",
+      "gate": "#[cfg(not(target_os = \"macos\"))]",
+      "route": "test-ci (platform matrix)"
+    },
+    {
+      "package": "sniff",
+      "name": "test_find_macos_app_bundle_empty_returns_none",
+      "gate": "#[cfg(not(target_os = \"macos\"))]",
+      "route": "test-ci (platform matrix)"
+    },
+    {
+      "package": "sniff",
+      "name": "test_find_macos_app_bundle_returns_none",
+      "gate": "#[cfg(not(target_os = \"macos\"))]",
+      "route": "test-ci (platform matrix)"
+    },
+    {
+      "package": "sniff",
+      "name": "test_get_path_dirs_splits_semicolon_separated_entries",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "test_installable_false_for_builtin_tts",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "test_linux_package_managers_finds_at_least_one",
+      "gate": "#[cfg(target_os = \"linux\")]",
+      "route": "test-ci (ubuntu-latest or WSL2 as applicable)"
+    },
+    {
+      "package": "sniff",
+      "name": "test_list_windows_scm_services_returns_real_services",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "test_parse_linux_proc_default_route_interface",
+      "gate": "#[cfg(target_os = \"linux\")]",
+      "route": "test-ci (ubuntu-latest or WSL2 as applicable)"
+    },
+    {
+      "package": "sniff",
+      "name": "test_parse_linux_proc_default_route_interface_no_default_route",
+      "gate": "#[cfg(target_os = \"linux\")]",
+      "route": "test-ci (ubuntu-latest or WSL2 as applicable)"
+    },
+    {
+      "package": "sniff",
+      "name": "test_services_detailed_running_filter_windows",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "test_services_detailed_stopped_filter_windows",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "walk_install_roots_first_write_wins_across_roots",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "walk_install_roots_ignores_nested_bin_directory",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "walk_install_roots_indexes_exe_at_child_root",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "walk_install_roots_skips_missing_root",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "windows_audio_probe_drains_large_stdout_and_stderr",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "windows_audio_probe_honors_injected_deadline",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "windows_default_route_probe_drains_large_output",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "windows_default_route_probe_honors_injected_deadline",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "windows_timezone_probe_drains_large_output",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    },
+    {
+      "package": "sniff",
+      "name": "windows_timezone_probe_honors_injected_deadline",
+      "gate": "#[cfg(target_os = \"windows\")]",
+      "route": "test-ci (windows-latest)"
+    }
+  ]
+}

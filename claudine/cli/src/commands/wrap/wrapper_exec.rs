@@ -189,6 +189,7 @@ pub(crate) fn run_structured_stream_session(
 
     policy::emit_stream_summary(
         &summary,
+        stream_result.termination,
         profile,
         env_context,
         stream_verbosity,

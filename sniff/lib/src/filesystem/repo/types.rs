@@ -536,8 +536,7 @@ pub fn detect_repo_with_request(
     root: &Path,
     request: &crate::request::RepoRequest,
 ) -> Result<Option<RepoInfo>> {
-    super::detection::detect_repo_inner_with_request(root, request)
-        .map(|(info, _inventory)| info)
+    super::detection::detect_repo_inner_with_request(root, request).map(|(info, _inventory)| info)
 }
 
 /// Like [`detect_repo_structure`], but synthesizes a single-package `RepoInfo`
@@ -668,9 +667,10 @@ mod tests {
                     .map(|package| package.name.as_str()),
                 Some("pkg-a2")
             );
-            assert!(repo
-                .package_for_dir(Path::new("/repo/crates/pkg-a20/src"))
-                .is_none());
+            assert!(
+                repo.package_for_dir(Path::new("/repo/crates/pkg-a20/src"))
+                    .is_none()
+            );
         });
 
         assert_eq!(

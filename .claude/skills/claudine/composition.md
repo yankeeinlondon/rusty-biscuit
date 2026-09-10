@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-2c43816879a1b7f1
-last_updated: 2026-09-06
+hash: ef46db3751d8e999-f0d28688305cdfb1
+last_updated: 2026-09-09
 ---
 # Claudine Composition
 
@@ -577,7 +577,7 @@ model: gpt-4o
 model: [gpt-4o, o3-mini]
 ```
 
-List-valued `agent` is treated as author preference order: the first installed provider wins. List-valued `model` is validated against the provider's model catalog; the first valid entry wins. When a catalog is unavailable (e.g., Gemini, Kimi, Goose in v1), frontmatter `model` is gracefully skipped rather than treated as an error.
+List-valued `agent` is treated as author preference order: the first installed provider wins. A frontmatter `model` is always forwarded to the provider: the provider is the authority on which ids it accepts, and Claudine's compiled model catalog is a drift signal, not a gate. A list-valued `model` resolves to the first entry the catalog recognizes, else to its first entry. When the resolved frontmatter model is outside the provider's expected offerings (for OpenCode that baseline is the `opencode/*` aggregator ids, so any provider configured in `opencode.jsonc`, such as `minimax/…` or `zai-coding-plan/…`, qualifies), composition prints one `warning: [model] …` naming the value and the provider, suppressed by `--silent`, and launches with the value unchanged. `--dry-run` resolves the same way and prints the same warning.
 
 ### Model Resolution
 
@@ -586,15 +586,15 @@ Model selection follows a single chain independent of TTY mode:
 1. **CLI `--model`**
 2. **Provider-specific env var** (`CODEX_MODEL`, `CLAUDE_MODEL`, `OPENCODE_MODEL`, etc.)
 3. **Generic `MODEL` env var**
-4. **Frontmatter `model`** (validated against catalog when available)
+4. **Frontmatter `model`** (always forwarded; the catalog orders list hints and warns on an unrecognized value)
 5. **Provider default** (`None` — let the provider choose)
 
-### OpenCode Non-TTY Requirement
+### Providers That Require a Model in Non-Interactive Mode
 
-OpenCode requires a model in non-interactive mode. If no model survives the resolution chain when running OpenCode in non-TTY mode, Claudine emits a hard error before launching the provider:
+A provider whose catalog sets `model_required_in_non_tty` (OpenCode today) cannot launch non-interactively without a model. When nothing in the chain above resolves one, the shared prep stage (`exec_prep::resolve_model_and_validate`, the same function for every provider and for the direct wrapper) looks for one on the provider's behalf through two data sources: the catalog's `model_env_vars` (`OPENCODE_MODEL`), applied exactly like an explicit `--model`, then the provider's own configured default through the `WrapperProfile::configured_default_model` hook. For OpenCode that is the `model` key of `opencode.jsonc` / `opencode.json` (then the legacy `config.json`) under `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`, parsed JSONC-tolerant; a configured default is exported as `MODEL` and reported in the preflight preamble without pushing a flag, because OpenCode reads it itself. Only when neither names a model does Claudine fail before launch:
 
 ```
-OpenCode requires a model in non-interactive mode; set --model, OPENCODE_MODEL, or MODEL
+No model specified! OpenCode requires a model in non-interactive mode.
 ```
 
 ### Shorthand Flags

@@ -156,6 +156,17 @@ pub fn summary_to_event_meta_with_context(
         extra.insert("badges".into(), value);
     }
 
+    // Top-level and complete: this is the stable machine contract for
+    // incomplete sub-agent work. It deliberately does not live under
+    // `provider_summary` or a provider's `raw_summary`, because consumers must
+    // be able to read it without knowing which provider produced the run, and
+    // it must stay whole even when the operator-facing headline truncates.
+    if !summary.subagent_outcomes.is_empty()
+        && let Ok(value) = serde_json::to_value(&summary.subagent_outcomes)
+    {
+        extra.insert("subagent_outcomes".into(), value);
+    }
+
     if !signals.is_empty() {
         extra.insert(
             "signals".into(),

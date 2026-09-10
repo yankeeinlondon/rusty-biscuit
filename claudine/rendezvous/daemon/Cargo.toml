@@ -63,3 +63,14 @@ rendezvous-core = { path = "../core", features = ["test-support"] }
 # the daemon's mode does not come from the umask.
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
+
+# Declared rather than defaulted (2026-09-07-faster-claudine-tests, Phase 6).
+# CI runs L1 with no features. `peer_discovery.rs`'s two `real_*` identities
+# bind a real mDNS responder to the runner's network and are excluded by the L1
+# tier filter by name; their route is `just test-real` inside
+# `claudine/rendezvous`, which Phase 6 added — before it they were reachable by
+# no recipe at all.
+[package.metadata.ci.tests]
+tiers = ["L1"]
+features = []
+local-features = []

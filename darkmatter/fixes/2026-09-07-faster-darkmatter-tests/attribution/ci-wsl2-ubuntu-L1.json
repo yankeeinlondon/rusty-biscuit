@@ -1,0 +1,751 @@
+{
+  "families": [
+    {
+      "id": "lib-unit-compose-core",
+      "package": "darkmatter",
+      "count": 1754,
+      "summed": 370.6960000000001,
+      "mean": 0.21134321550741167,
+      "max": 46.604,
+      "min": 0.018,
+      "slowest": {
+        "name": "darkmatter markdown::compose::tests::frontmatter::dm2_subtree_strict_rejects_malformed_span",
+        "seconds": 46.604
+      },
+      "share": 0.3137229678665336
+    },
+    {
+      "id": "cli-l1-private-helpers",
+      "package": "darkmatter-cli",
+      "count": 116,
+      "summed": 92.28100000000013,
+      "mean": 0.7955258620689667,
+      "max": 36.471,
+      "min": 0.026,
+      "slowest": {
+        "name": "darkmatter-cli::compose_schema materialized_optional_parameter_is_known_to_strict_subtree_compose",
+        "seconds": 36.471
+      },
+      "share": 0.07809814294648883
+    },
+    {
+      "id": "lib-compose-e2e",
+      "package": "darkmatter",
+      "count": 121,
+      "summed": 91.39700000000005,
+      "mean": 0.7553471074380169,
+      "max": 31.638,
+      "min": 0.006,
+      "slowest": {
+        "name": "darkmatter::expression_regression regression_ctx_agent_uses_compose_env_override",
+        "seconds": 31.638
+      },
+      "share": 0.07735000672814808
+    },
+    {
+      "id": "lib-unit-compose-shell",
+      "package": "darkmatter",
+      "count": 532,
+      "summed": 89.54300000000013,
+      "mean": 0.16831390977443633,
+      "max": 2.754,
+      "min": 0.018,
+      "slowest": {
+        "name": "darkmatter markdown::compose::shell_expansion::integration_tests::pipeline_timeout_fallback_emits_warning",
+        "seconds": 2.754
+      },
+      "share": 0.07578095180868705
+    },
+    {
+      "id": "cli-l1-compose-render-graph",
+      "package": "darkmatter-cli",
+      "count": 191,
+      "summed": 85.82600000000016,
+      "mean": 0.449350785340315,
+      "max": 2.38,
+      "min": 0.01,
+      "slowest": {
+        "name": "darkmatter-cli::compose_interpolation test_compose_frontmatter_interpolation_nested_state",
+        "seconds": 2.38
+      },
+      "share": 0.07263522519831117
+    },
+    {
+      "id": "lib-unit-markdown-rest",
+      "package": "darkmatter",
+      "count": 1438,
+      "summed": 81.08000000000028,
+      "mean": 0.05638386648122412,
+      "max": 1.414,
+      "min": 0.021,
+      "slowest": {
+        "name": "darkmatter markdown::reference::validate::tests::validate_fragment_existing_heading",
+        "seconds": 1.414
+      },
+      "share": 0.06861864771839628
+    },
+    {
+      "id": "lib-unit-compose-cleanup-rendering",
+      "package": "darkmatter",
+      "count": 69,
+      "summed": 63.16299999999999,
+      "mean": 0.9154057971014491,
+      "max": 6.312,
+      "min": 0.024,
+      "slowest": {
+        "name": "darkmatter markdown::compose::tests::rendering::test_compose_cleanup_preserves_nested_lists_inside_blockquotes",
+        "seconds": 6.312
+      },
+      "share": 0.05345534836996853
+    },
+    {
+      "id": "lib-unit-compose-context",
+      "package": "darkmatter",
+      "count": 142,
+      "summed": 48.636,
+      "mean": 0.34250704225352113,
+      "max": 41.18,
+      "min": 0.022,
+      "slowest": {
+        "name": "darkmatter markdown::compose::context::catalog::capture_shape_tests::capture_shape_matches_projected_type",
+        "seconds": 41.18
+      },
+      "share": 0.041161032935766034
+    },
+    {
+      "id": "cli-l1-compose-remote-http",
+      "package": "darkmatter-cli",
+      "count": 10,
+      "summed": 32.051,
+      "mean": 3.2051000000000003,
+      "max": 7.524,
+      "min": 0.028,
+      "slowest": {
+        "name": "darkmatter-cli::compose_remote_caching test_compose_remote_refresh_revalidates_cached_url",
+        "seconds": 7.524
+      },
+      "share": 0.027125015762485345
+    },
+    {
+      "id": "lib-unit-schemas",
+      "package": "darkmatter",
+      "count": 901,
+      "summed": 31.237999999999865,
+      "mean": 0.03467036625971128,
+      "max": 0.131,
+      "min": 0.021,
+      "slowest": {
+        "name": "darkmatter markdown::schemas::tests::clean_quoting::test_matching_trigger_constrains_document",
+        "seconds": 0.131
+      },
+      "share": 0.02643696740783481
+    },
+    {
+      "id": "lib-unit-compose-remote",
+      "package": "darkmatter",
+      "count": 129,
+      "summed": 27.191000000000003,
+      "mean": 0.21078294573643414,
+      "max": 4.272,
+      "min": 0.018,
+      "slowest": {
+        "name": "darkmatter markdown::compose::tests::provider_network::incomplete_domain_is_fatal_on_all_three_surfaces",
+        "seconds": 4.272
+      },
+      "share": 0.02301195917749022
+    },
+    {
+      "id": "dmls-unit",
+      "package": "dmls",
+      "count": 511,
+      "summed": 19.561000000000078,
+      "mean": 0.038279843444227156,
+      "max": 1.126,
+      "min": 0.009,
+      "slowest": {
+        "name": "dmls providers::frontmatter::tests::root_union_shared_property_merges_divergent_defs_when_unresolved",
+        "seconds": 1.126
+      },
+      "share": 0.016554629600635796
+    },
+    {
+      "id": "cli-l1-compose-shell",
+      "package": "darkmatter-cli",
+      "count": 8,
+      "summed": 17.393,
+      "mean": 2.174125,
+      "max": 3.979,
+      "min": 0.352,
+      "slowest": {
+        "name": "darkmatter-cli::compose_shell test_compose_with_nonexistent_command_fails",
+        "seconds": 3.979
+      },
+      "share": 0.014719833988234612
+    },
+    {
+      "id": "cli-l1-clean-hash-frontmatter",
+      "package": "darkmatter-cli",
+      "count": 183,
+      "summed": 16.607,
+      "mean": 0.09074863387978142,
+      "max": 1.164,
+      "min": 0.025,
+      "slowest": {
+        "name": "darkmatter-cli::clean_frontmatter test_clean_is_idempotent_across_fixture_classes",
+        "seconds": 1.164
+      },
+      "share": 0.014054635947945277
+    },
+    {
+      "id": "lib-override-slow-cleanup",
+      "package": "darkmatter",
+      "count": 1,
+      "summed": 12.345,
+      "mean": 12.345,
+      "max": 12.345,
+      "min": 12.345,
+      "slowest": {
+        "name": "darkmatter markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code",
+        "seconds": 12.345
+      },
+      "share": 0.010447671510651199
+    },
+    {
+      "id": "dmls-l1-lsp-session",
+      "package": "dmls",
+      "count": 107,
+      "summed": 11.437999999999999,
+      "mean": 0.10689719626168223,
+      "max": 1.119,
+      "min": 0.012,
+      "slowest": {
+        "name": "dmls::lsp_session meta_schema_completion_matches_complete_structural_pointers",
+        "seconds": 1.119
+      },
+      "share": 0.009680070209706633
+    },
+    {
+      "id": "lib-unit-support-modules",
+      "package": "darkmatter",
+      "count": 211,
+      "summed": 11.372999999999967,
+      "mean": 0.053900473933649135,
+      "max": 1.727,
+      "min": 0.017,
+      "slowest": {
+        "name": "darkmatter catalog::tests::every_display_only_example_carries_a_non_empty_reason",
+        "seconds": 1.727
+      },
+      "share": 0.009625060193652146
+    },
+    {
+      "id": "lib-render-e2e",
+      "package": "darkmatter",
+      "count": 106,
+      "summed": 9.189,
+      "mean": 0.08668867924528302,
+      "max": 0.309,
+      "min": 0.008,
+      "slowest": {
+        "name": "darkmatter::render_invariants blank_line_count_is_idempotent",
+        "seconds": 0.309
+      },
+      "share": 0.007776723654222265
+    },
+    {
+      "id": "lib-unit-style",
+      "package": "darkmatter",
+      "count": 337,
+      "summed": 8.694999999999975,
+      "mean": 0.025801186943620106,
+      "max": 0.132,
+      "min": 0.021,
+      "slowest": {
+        "name": "darkmatter style::bespoke::tests::hyperlink_color_injected_into_html",
+        "seconds": 0.132
+      },
+      "share": 0.007358647532208336
+    },
+    {
+      "id": "lib-unit-compose-preflight-acceptance",
+      "package": "darkmatter",
+      "count": 12,
+      "summed": 8.513000000000002,
+      "mean": 0.7094166666666668,
+      "max": 2.696,
+      "min": 0.033,
+      "slowest": {
+        "name": "darkmatter markdown::compose::preflight::acceptance_tests::approval_set_is_loop_stable",
+        "seconds": 2.696
+      },
+      "share": 0.007204619487255866
+    },
+    {
+      "id": "lib-unit-layout",
+      "package": "darkmatter",
+      "count": 103,
+      "summed": 6.499999999999998,
+      "mean": 0.06310679611650484,
+      "max": 0.162,
+      "min": 0.021,
+      "slowest": {
+        "name": "darkmatter layout::page::tests::terminal_matched_layout_policy_does_not_change_unrelated_capabilities",
+        "seconds": 0.162
+      },
+      "share": 0.0055010016054461534
+    },
+    {
+      "id": "lib-passive-schema",
+      "package": "darkmatter",
+      "count": 99,
+      "summed": 6.155,
+      "mean": 0.06217171717171718,
+      "max": 0.803,
+      "min": 0.008,
+      "slowest": {
+        "name": "darkmatter::schemas_literal_expression literal_number_coerces_string_document_value",
+        "seconds": 0.803
+      },
+      "share": 0.005209025366387859
+    },
+    {
+      "id": "lib-override-preflight-proptest",
+      "package": "darkmatter",
+      "count": 1,
+      "summed": 5.992,
+      "mean": 5.992,
+      "max": 5.992,
+      "min": 5.992,
+      "slowest": {
+        "name": "darkmatter markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions",
+        "seconds": 5.992
+      },
+      "share": 0.005071077172282056
+    },
+    {
+      "id": "cli-l1-compose-diagnostics",
+      "package": "darkmatter-cli",
+      "count": 4,
+      "summed": 5.414999999999999,
+      "mean": 1.3537499999999998,
+      "max": 2.275,
+      "min": 0.008,
+      "slowest": {
+        "name": "darkmatter-cli::compose_perf test_compose_perf_emits_report_to_stderr",
+        "seconds": 2.275
+      },
+      "share": 0.004582757491306297
+    },
+    {
+      "id": "lib-shipped-schema-corpus",
+      "package": "darkmatter",
+      "count": 55,
+      "summed": 4.750999999999999,
+      "mean": 0.08638181818181816,
+      "max": 0.734,
+      "min": 0.008,
+      "slowest": {
+        "name": "darkmatter::meta_schema_phase4 semantic_carriers_are_validation_and_compose_no_ops",
+        "seconds": 0.734
+      },
+      "share": 0.004020809019611489
+    },
+    {
+      "id": "lib-compose-shell-e2e",
+      "package": "darkmatter",
+      "count": 24,
+      "summed": 2.8540000000000005,
+      "mean": 0.11891666666666668,
+      "max": 1.027,
+      "min": 0.019,
+      "slowest": {
+        "name": "darkmatter::shell_block_integration compose_shell_block_with_timeout",
+        "seconds": 1.027
+      },
+      "share": 0.0024153628587605122
+    },
+    {
+      "id": "cli-unit",
+      "package": "darkmatter-cli",
+      "count": 137,
+      "summed": 2.4329999999999994,
+      "mean": 0.017759124087591237,
+      "max": 0.143,
+      "min": 0.01,
+      "slowest": {
+        "name": "darkmatter-cli commands::schema::about::tests::schema_about_markdown_code_uses_inverted_theme_for_both_terminal_modes",
+        "seconds": 0.143
+      },
+      "share": 0.0020590672163154603
+    },
+    {
+      "id": "lib-reference-integration",
+      "package": "darkmatter",
+      "count": 62,
+      "summed": 2.394,
+      "mean": 0.038612903225806454,
+      "max": 0.687,
+      "min": 0.019,
+      "slowest": {
+        "name": "darkmatter::reference_integration prebuilt_graph_rejects_different_url_source",
+        "seconds": 0.687
+      },
+      "share": 0.002026061206682784
+    },
+    {
+      "id": "lib-structural-guards",
+      "package": "darkmatter",
+      "count": 13,
+      "summed": 2.3149999999999995,
+      "mean": 0.17807692307692305,
+      "max": 0.67,
+      "min": 0.02,
+      "slowest": {
+        "name": "darkmatter::prelude_exports prelude_exports_validation_report_view",
+        "seconds": 0.67
+      },
+      "share": 0.0019592028794781302
+    },
+    {
+      "id": "lib-error-snapshots",
+      "package": "darkmatter",
+      "count": 110,
+      "summed": 2.2089999999999983,
+      "mean": 0.020081818181818166,
+      "max": 0.07,
+      "min": 0.011,
+      "slowest": {
+        "name": "darkmatter::error_snapshots condition::eval_points_at_state",
+        "seconds": 0.07
+      },
+      "share": 0.001869494237912392
+    },
+    {
+      "id": "lib-git-context",
+      "package": "darkmatter",
+      "count": 8,
+      "summed": 1.9779999999999998,
+      "mean": 0.24724999999999997,
+      "max": 1.154,
+      "min": 0.061,
+      "slowest": {
+        "name": "darkmatter::git_context_integration normal_compose_path_renders_all_git_context_values_from_one_snapshot",
+        "seconds": 1.154
+      },
+      "share": 0.00167399710393423
+    },
+    {
+      "id": "lib-snapshots-insta",
+      "package": "darkmatter",
+      "count": 52,
+      "summed": 1.5679999999999976,
+      "mean": 0.030153846153846108,
+      "max": 0.18,
+      "min": 0.008,
+      "slowest": {
+        "name": "darkmatter::horizontal_rule_snapshots tests::test_snapshot_complex_document",
+        "seconds": 0.18
+      },
+      "share": 0.0013270108488214706
+    },
+    {
+      "id": "lib-proptest",
+      "package": "darkmatter",
+      "count": 17,
+      "summed": 1.5260000000000002,
+      "mean": 0.08976470588235295,
+      "max": 0.18,
+      "min": 0.032,
+      "slowest": {
+        "name": "darkmatter::schema_quoting_safety auto_apply_preserves_scalar_text",
+        "seconds": 0.18
+      },
+      "share": 0.0012914659153708977
+    },
+    {
+      "id": "lib-compose-e2e-env-serial",
+      "package": "darkmatter",
+      "count": 2,
+      "summed": 1.255,
+      "mean": 0.6275,
+      "max": 1.057,
+      "min": 0.198,
+      "slowest": {
+        "name": "darkmatter::expression_regression regression_ctx_agent_in_interpolation",
+        "seconds": 1.057
+      },
+      "share": 0.0010621164638207575
+    },
+    {
+      "id": "lib-override-ambient-capture",
+      "package": "darkmatter",
+      "count": 2,
+      "summed": 1.168,
+      "mean": 0.584,
+      "max": 0.995,
+      "min": 0.173,
+      "slowest": {
+        "name": "darkmatter::ambient_ctx_capture every_catalog_variable_survives_ambient_options",
+        "seconds": 0.995
+      },
+      "share": 0.000988487673101709
+    },
+    {
+      "id": "cli-l1-inline-spawn-baseline",
+      "package": "darkmatter-cli",
+      "count": 2,
+      "summed": 0.808,
+      "mean": 0.404,
+      "max": 0.424,
+      "min": 0.384,
+      "slowest": {
+        "name": "darkmatter-cli::schema_validate_baseline schema_validate_legacy_pretty_output_is_byte_identical",
+        "seconds": 0.424
+      },
+      "share": 0.0006838168149539221
+    },
+    {
+      "id": "lib-work-counters",
+      "package": "darkmatter",
+      "count": 8,
+      "summed": 0.63,
+      "mean": 0.07875,
+      "max": 0.155,
+      "min": 0.017,
+      "slowest": {
+        "name": "darkmatter::clean_counters one_resolved_context_serves_repeated_analyses",
+        "seconds": 0.155
+      },
+      "share": 0.0005331740017586274
+    },
+    {
+      "id": "cli-l2-harness-integrity",
+      "package": "darkmatter-cli",
+      "count": 4,
+      "summed": 0.61,
+      "mean": 0.1525,
+      "max": 0.583,
+      "min": 0.009,
+      "slowest": {
+        "name": "darkmatter-cli::level2_harness_integrity assert_shim_resolves_to_built_rejects_foreign_link",
+        "seconds": 0.583
+      },
+      "share": 0.0005162478429726391
+    },
+    {
+      "id": "dmls-l1-workspace-fixtures",
+      "package": "dmls",
+      "count": 15,
+      "summed": 0.6,
+      "mean": 0.04,
+      "max": 0.145,
+      "min": 0.012,
+      "slowest": {
+        "name": "dmls::level1_graph_index generated_corpus_indexes_without_panic",
+        "seconds": 0.145
+      },
+      "share": 0.0005077847635796451
+    },
+    {
+      "id": "dmls-l1-passive-proof",
+      "package": "dmls",
+      "count": 1,
+      "summed": 0.431,
+      "mean": 0.431,
+      "max": 0.431,
+      "min": 0.431,
+      "slowest": {
+        "name": "dmls::no_side_effects dsl_requests_spawn_no_processes_and_open_no_sockets",
+        "seconds": 0.431
+      },
+      "share": 0.00036475872183804503
+    },
+    {
+      "id": "lib-shipped-example-docs",
+      "package": "darkmatter",
+      "count": 14,
+      "summed": 0.41000000000000003,
+      "mean": 0.029285714285714286,
+      "max": 0.129,
+      "min": 0.011,
+      "slowest": {
+        "name": "darkmatter::style_frontmatter percent_margin_retained_and_resolved_per_target",
+        "seconds": 0.129
+      },
+      "share": 0.0003469862551127575
+    },
+    {
+      "id": "zed-cli-unit",
+      "package": "zed-dmls-cli",
+      "count": 20,
+      "summed": 0.345,
+      "mean": 0.017249999999999998,
+      "max": 0.046,
+      "min": 0.009,
+      "slowest": {
+        "name": "zed-dmls-cli tests::invalid_manifest_does_not_mutate_existing_stage",
+        "seconds": 0.046
+      },
+      "share": 0.0002919762390582959
+    },
+    {
+      "id": "lib-snapshots-layout-env",
+      "package": "darkmatter",
+      "count": 3,
+      "summed": 0.302,
+      "mean": 0.10066666666666667,
+      "max": 0.208,
+      "min": 0.022,
+      "slowest": {
+        "name": "darkmatter::layout_snapshots end_to_end_example_snapshot",
+        "seconds": 0.208
+      },
+      "share": 0.00025558499766842134
+    },
+    {
+      "id": "zed-cli-raw-spawn",
+      "package": "zed-dmls-cli",
+      "count": 6,
+      "summed": 0.155,
+      "mean": 0.025833333333333333,
+      "max": 0.044,
+      "min": 0.013,
+      "slowest": {
+        "name": "zed-dmls-cli::cli conditional_stage_is_silent_when_zed_is_absent",
+        "seconds": 0.044
+      },
+      "share": 0.00013117773059140832
+    },
+    {
+      "id": "lib-browser-binary-unprefixed",
+      "package": "darkmatter",
+      "count": 1,
+      "summed": 0.119,
+      "mean": 0.119,
+      "max": 0.119,
+      "min": 0.119,
+      "slowest": {
+        "name": "darkmatter::browser_render sanitized_real_mermaid_retains_diagram_geometry",
+        "seconds": 0.119
+      },
+      "share": 0.0001007106447766296
+    },
+    {
+      "id": "cli-l1-layout-inprocess",
+      "package": "darkmatter-cli",
+      "count": 10,
+      "summed": 0.11299999999999998,
+      "mean": 0.011299999999999998,
+      "max": 0.016,
+      "min": 0.01,
+      "slowest": {
+        "name": "darkmatter-cli::layout_alignment layout_parsed_line_numbers_flag_values",
+        "seconds": 0.016
+      },
+      "share": 0.00009563279714083314
+    },
+    {
+      "id": "lib-fixture-tables",
+      "package": "darkmatter",
+      "count": 2,
+      "summed": 0.10700000000000001,
+      "mean": 0.053500000000000006,
+      "max": 0.07,
+      "min": 0.037,
+      "slowest": {
+        "name": "darkmatter::schemas_validate_table validate_table",
+        "seconds": 0.07
+      },
+      "share": 0.00009055494950503672
+    },
+    {
+      "id": "lib-effects-integration",
+      "package": "darkmatter",
+      "count": 2,
+      "summed": 0.10200000000000001,
+      "mean": 0.051000000000000004,
+      "max": 0.079,
+      "min": 0.023,
+      "slowest": {
+        "name": "darkmatter::effects_integration http_post_uses_allowed_host_policy",
+        "seconds": 0.079
+      },
+      "share": 0.00008632340980853968
+    },
+    {
+      "id": "dmls-bin-args",
+      "package": "dmls",
+      "count": 6,
+      "summed": 0.045,
+      "mean": 0.0075,
+      "max": 0.008,
+      "min": 0.007,
+      "slowest": {
+        "name": "dmls::bin/dmls tests::test_parse_all_flags",
+        "seconds": 0.008
+      },
+      "share": 0.00003808385726847338
+    },
+    {
+      "id": "dmls-l1-stdio-subprocess",
+      "package": "dmls",
+      "count": 1,
+      "summed": 0.039,
+      "mean": 0.039,
+      "max": 0.039,
+      "min": 0.039,
+      "slowest": {
+        "name": "dmls::stdio_subprocess native_binary_speaks_lsp_over_stdio",
+        "seconds": 0.039
+      },
+      "share": 0.00003300600963267693
+    },
+    {
+      "id": "lib-l2-binary-unprefixed",
+      "package": "darkmatter",
+      "count": 1,
+      "summed": 0.029,
+      "mean": 0.029,
+      "max": 0.029,
+      "min": 0.029,
+      "slowest": {
+        "name": "darkmatter::level2_render_tree_terminal images::pixel_classification_distinguishes_magenta_from_black",
+        "seconds": 0.029
+      },
+      "share": 0.000024542930239682847
+    },
+    {
+      "id": "dmls-l1-packaging-contracts",
+      "package": "dmls",
+      "count": 2,
+      "summed": 0.022,
+      "mean": 0.011,
+      "max": 0.013,
+      "min": 0.009,
+      "slowest": {
+        "name": "dmls::zed_extension_contract zed_extension_manifest_and_crate_shape_are_loadable",
+        "seconds": 0.013
+      },
+      "share": 0.000018618774664586984
+    },
+    {
+      "id": "zed-cli-bin-args",
+      "package": "zed-dmls-cli",
+      "count": 1,
+      "summed": 0.007,
+      "mean": 0.007,
+      "max": 0.007,
+      "min": 0.007,
+      "slowest": {
+        "name": "zed-dmls-cli::bin/zed-dmls tests::parses_global_overrides_before_or_after_subcommand",
+        "seconds": 0.007
+      },
+      "share": 0.00000592415557509586
+    }
+  ],
+  "summed": 1181.6030000000012,
+  "elapsed": 304.209,
+  "count": 7667,
+  "violations": []
+}
+GATE EXIT=0

@@ -12,27 +12,25 @@
 #![cfg(unix)]
 
 use std::fs;
-use std::path::Path;
-use tempfile::tempdir;
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 /// Install a fake `goose` that runs `script` as its body.
 ///
 /// `$HOME` is the workspace, so a script can leave state behind for a later
 /// step to observe — which is how "this ran at its turn" becomes assertable.
-fn fake_goose(workspace: &Path, script: &str) -> std::path::PathBuf {
-    let path_dir = workspace.join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    write_executable(&path_dir.join("goose"), &format!("#!/bin/sh\n{script}\n"));
-    path_dir
+fn fake_goose(fixture: &CliProcessFixture, script: &str) {
+    write_executable(
+        &fixture.bin_dir().join("goose"),
+        &format!("#!/bin/sh\n{script}\n"),
+    );
 }
 
 /// A fake provider that echoes an incrementing counter, so each launch's output
 /// is distinguishable and the launch count is readable from disk afterwards.
-fn counting_goose(workspace: &Path) -> std::path::PathBuf {
+fn counting_goose(fixture: &CliProcessFixture) {
     fake_goose(
-        workspace,
+        fixture,
         r#"count=0
 if [ -f "$HOME/n.txt" ]; then
   IFS= read -r count < "$HOME/n.txt"
@@ -44,12 +42,9 @@ exit 0"#,
     )
 }
 
-fn run(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, String, i32) {
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace)
-        .env("PATH", augmented_path(path_dir))
-        .current_dir(workspace)
+fn run(fixture: &CliProcessFixture, args: &[&str]) -> (String, String, i32) {
+    let output = fixture
+        .command()
         .args(args)
         .assert()
         .get_output()
@@ -73,18 +68,21 @@ fn run(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, String, i32
 /// step 2 would render the pre-run `marker` and this fails.
 #[test]
 fn a_later_step_composes_against_the_edit_an_earlier_step_made() {
-    let workspace = tempdir().unwrap();
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-jit");
+    let md = fixture.cwd().join("seq.md");
     // The provider rewrites the sequence document's own frontmatter on its
     // first (and only its first) launch.
-    let path_dir = fake_goose(
-        workspace.path(),
-        r#"if [ ! -f "$HOME/done" ]; then
+    fake_goose(
+        &fixture,
+        &format!(
+            r#"if [ ! -f "$HOME/done" ]; then
   : > "$HOME/done"
-  printf -- '---\nmarker: rewritten\nsequence:\n  - alpha\n  - beta\nstart:\n  info: "marker is {{ doc.marker }}"\n---\nBody {{state}}.\n' > "$HOME/seq.md"
+  printf -- '---\nmarker: rewritten\nsequence:\n  - alpha\n  - beta\nstart:\n  info: "marker is {{{{ doc.marker }}}}"\n---\nBody {{{{state}}}}.\n' > "{md}"
 fi
 printf 'ok\n'
 exit 0"#,
+            md = md.display()
+        ),
     );
     fs::write(
         &md,
@@ -93,8 +91,7 @@ exit 0"#,
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", md.to_str().unwrap()],
     );
 
@@ -116,10 +113,10 @@ exit 0"#,
 /// must still end after two steps.
 #[test]
 fn a_mid_run_edit_to_the_sequence_list_does_not_change_the_plan() {
-    let workspace = tempdir().unwrap();
-    let md = workspace.path().join("seq.md");
-    let path_dir = fake_goose(
-        workspace.path(),
+    let fixture = CliProcessFixture::named("sequence-jit");
+    let md = fixture.cwd().join("seq.md");
+    fake_goose(
+        &fixture,
         r#"if [ ! -f "$HOME/done" ]; then
   : > "$HOME/done"
   printf -- '---\nsequence:\n  - alpha\n  - beta\n  - gamma\n---\nBody {{state}}.\n' > "$HOME/seq.md"
@@ -134,8 +131,7 @@ exit 0"#,
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", md.to_str().unwrap()],
     );
 
@@ -154,15 +150,19 @@ exit 0"#,
 /// the filesystem as of that moment rather than as of sequence start.
 #[test]
 fn a_body_shell_expansion_reads_the_filesystem_at_its_turn() {
-    let workspace = tempdir().unwrap();
-    let md = workspace.path().join("seq.md");
-    let path_dir = fake_goose(
-        workspace.path(),
-        r#"printf 'step-ran\n' >> "$HOME/log.txt"
-printf 'ok\n'
-exit 0"#,
+    let fixture = CliProcessFixture::named("sequence-jit");
+    let md = fixture.cwd().join("seq.md");
+    // The `::shell` expansion reads `log.txt` from the *launch* directory, so
+    // the stub has to append to that same file rather than to one under `$HOME`.
+    let log = fixture.cwd().join("log.txt");
+    fake_goose(
+        &fixture,
+        &format!(
+            "printf 'step-ran\\n' >> \"{log}\"\nprintf 'ok\\n'\nexit 0",
+            log = log.display()
+        ),
     );
-    fs::write(workspace.path().join("log.txt"), "").unwrap();
+    fs::write(&log, "").unwrap();
     fs::write(
         &md,
         "---\nsequence:\n  - alpha\n  - beta\nstart:\n  info: 'lines so far'\n---\nSeen so far: ::shell wc -l < log.txt\n",
@@ -170,19 +170,18 @@ exit 0"#,
     .unwrap();
     // Pre-approve the command so the run is non-interactive.
     fs::write(
-        workspace.path().join(".darkmatter-shell-whitelist"),
+        fixture.cwd().join(".darkmatter-shell-whitelist"),
         "prefix wc\n",
     )
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", md.to_str().unwrap()],
     );
 
     assert_eq!(code, 0, "sequence should succeed; stderr:\n{stderr}");
-    let log = fs::read_to_string(workspace.path().join("log.txt")).unwrap();
+    let log = fs::read_to_string(&log).unwrap();
     assert_eq!(
         log.lines().count(),
         2,
@@ -199,9 +198,9 @@ exit 0"#,
 /// above the live document, so the body interpolates the mutated value.
 #[test]
 fn a_set_from_an_earlier_step_is_composed_into_a_later_step() {
-    let workspace = tempdir().unwrap();
-    let path_dir = counting_goose(workspace.path());
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-jit");
+    counting_goose(&fixture);
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         "---\nphase: initial\nsequence:\n  - alpha\n  - beta\nsuccess:\n  stack:\n    - action: {set: [phase, advanced]}\nstart:\n  info: 'phase={{ doc.phase }}'\n---\nBody for {{state}} in {{ doc.phase }}.\n",
@@ -209,8 +208,7 @@ fn a_set_from_an_earlier_step_is_composed_into_a_later_step() {
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", md.to_str().unwrap()],
     );
 
@@ -239,9 +237,9 @@ fn a_set_from_an_earlier_step_is_composed_into_a_later_step() {
 /// after composition, where the typed object is what is in scope.
 #[test]
 fn the_reserved_overlay_outranks_a_runtime_mutation() {
-    let workspace = tempdir().unwrap();
-    let path_dir = counting_goose(workspace.path());
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-jit");
+    counting_goose(&fixture);
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         "---\nsequence:\n  - alpha\n  - beta\nsuccess:\n  stack:\n    - action: {set: [state, hijacked]}\nstart:\n  info: 'state={{ state.name }}'\n---\nBody {{state}}.\n",
@@ -249,8 +247,7 @@ fn the_reserved_overlay_outranks_a_runtime_mutation() {
     .unwrap();
 
     let (_, stderr, _) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", md.to_str().unwrap()],
     );
 
@@ -269,9 +266,9 @@ fn the_reserved_overlay_outranks_a_runtime_mutation() {
 /// snapshot.
 #[test]
 fn a_later_step_composes_the_previous_steps_output() {
-    let workspace = tempdir().unwrap();
-    let path_dir = counting_goose(workspace.path());
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-jit");
+    counting_goose(&fixture);
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         "---\nsequence:\n  - alpha\n  - beta\nstart:\n  info: 'prior=[{{ last(outputs) }}]'\n---\nBody {{state}}.\n",
@@ -279,8 +276,7 @@ fn a_later_step_composes_the_previous_steps_output() {
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", md.to_str().unwrap()],
     );
 
@@ -303,10 +299,10 @@ fn a_later_step_composes_the_previous_steps_output() {
 /// `fail_fast: false` the remaining steps still run.
 #[test]
 fn a_step_failure_lets_later_steps_run_when_fail_fast_is_false() {
-    let workspace = tempdir().unwrap();
+    let fixture = CliProcessFixture::named("sequence-jit");
     // Fail the first launch, succeed afterwards.
-    let path_dir = fake_goose(
-        workspace.path(),
+    fake_goose(
+        &fixture,
         r#"if [ ! -f "$HOME/first" ]; then
   : > "$HOME/first"
   printf 'boom\n'
@@ -315,7 +311,7 @@ fi
 printf 'ok\n'
 exit 0"#,
     );
-    let md = workspace.path().join("seq.md");
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{state}}.\n",
@@ -323,8 +319,7 @@ exit 0"#,
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &[
             "sequence",
             "--goose",
@@ -345,14 +340,14 @@ exit 0"#,
 /// never launches step 2.
 #[test]
 fn a_step_failure_stops_the_run_when_fail_fast_is_true() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(
-        workspace.path(),
+    let fixture = CliProcessFixture::named("sequence-jit");
+    fake_goose(
+        &fixture,
         r#"printf 'ran\n' >> "$HOME/launches.txt"
 printf 'boom\n'
 exit 3"#,
     );
-    let md = workspace.path().join("seq.md");
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{state}}.\n",
@@ -360,8 +355,7 @@ exit 3"#,
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &[
             "sequence",
             "--goose",
@@ -372,7 +366,7 @@ exit 3"#,
     );
 
     assert_ne!(code, 0, "a failed step must fail the run; stderr:\n{stderr}");
-    let launches = fs::read_to_string(workspace.path().join("launches.txt")).unwrap();
+    let launches = fs::read_to_string(fixture.home().join("launches.txt")).unwrap();
     assert_eq!(
         launches.lines().count(),
         1,
@@ -393,33 +387,32 @@ exit 3"#,
 /// entry, visible to the next step.
 #[test]
 fn a_shell_task_step_replaces_the_body_and_contributes_its_stdout() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(
-        workspace.path(),
+    let fixture = CliProcessFixture::named("sequence-jit");
+    fake_goose(
+        &fixture,
         r#"printf 'launched\n' >> "$HOME/launches.txt"
 printf 'ok\n'
 exit 0"#,
     );
-    let md = workspace.path().join("seq.md");
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         "---\nsequence:\n  - name: work\n    shell: \"echo from-shell\"\n  - name: report\nstart:\n  info: 'prior=[{{ last(outputs) }}]'\n---\nBody {{state}}.\n",
     )
     .unwrap();
     fs::write(
-        workspace.path().join(".darkmatter-shell-whitelist"),
+        fixture.cwd().join(".darkmatter-shell-whitelist"),
         "prefix echo\n",
     )
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", md.to_str().unwrap()],
     );
 
     assert_eq!(code, 0, "sequence should succeed; stderr:\n{stderr}");
-    let launches = fs::read_to_string(workspace.path().join("launches.txt")).unwrap_or_default();
+    let launches = fs::read_to_string(fixture.home().join("launches.txt")).unwrap_or_default();
     assert_eq!(
         launches.lines().count(),
         1,
@@ -435,23 +428,22 @@ exit 0"#,
 /// exactly as it does for a failing provider step.
 #[test]
 fn a_failing_shell_task_fails_its_step() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path(), "printf 'ok\\n'\nexit 0");
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-jit");
+    fake_goose(&fixture, "printf 'ok\\n'\nexit 0");
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         "---\nsequence:\n  - name: work\n    shell: \"false\"\n---\nBody {{state}}.\n",
     )
     .unwrap();
     fs::write(
-        workspace.path().join(".darkmatter-shell-whitelist"),
+        fixture.cwd().join(".darkmatter-shell-whitelist"),
         "prefix false\n",
     )
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", md.to_str().unwrap()],
     );
 
@@ -470,25 +462,24 @@ fn a_failing_shell_task_fails_its_step() {
 /// *initial* state, launching nothing and writing nothing back.
 #[test]
 fn dry_run_composes_every_step_and_launches_nothing() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(
-        workspace.path(),
+    let fixture = CliProcessFixture::named("sequence-jit");
+    fake_goose(
+        &fixture,
         r#"printf 'launched\n' >> "$HOME/launches.txt"
 exit 0"#,
     );
-    let md = workspace.path().join("seq.md");
+    let md = fixture.cwd().join("seq.md");
     let original = "---\nprompt: 'Do {{state}}'\nsequence:\n  - alpha\n  - beta\n---\nBody.\n";
     fs::write(&md, original).unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--dry-run", md.to_str().unwrap()],
     );
 
     assert_eq!(code, 0, "dry-run should succeed; stderr:\n{stderr}");
     assert!(
-        !workspace.path().join("launches.txt").exists(),
+        !fixture.home().join("launches.txt").exists(),
         "dry-run must launch no provider; stderr:\n{stderr}"
     );
     assert_eq!(
@@ -506,9 +497,9 @@ exit 0"#,
 /// reference renders as it would for the very first step — every step alike.
 #[test]
 fn dry_run_composes_every_step_against_the_initial_state() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path(), "exit 0");
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-jit");
+    fake_goose(&fixture, "exit 0");
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         "---\nsequence:\n  - alpha\n  - beta\n---\nPrior was [{{ last(outputs) }}].\n",
@@ -516,8 +507,7 @@ fn dry_run_composes_every_step_against_the_initial_state() {
     .unwrap();
 
     let (stdout, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--dry-run", md.to_str().unwrap()],
     );
 
@@ -542,15 +532,15 @@ fn dry_run_composes_every_step_against_the_initial_state() {
 /// before composing the next step.
 #[test]
 fn an_interrupt_between_steps_exits_130_with_a_partial_summary() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(
-        workspace.path(),
+    let fixture = CliProcessFixture::named("sequence-jit");
+    fake_goose(
+        &fixture,
         r#"printf 'launched\n' >> "$HOME/launches.txt"
 kill -INT "$PPID" 2>/dev/null
 printf 'ok\n'
 exit 0"#,
     );
-    let md = workspace.path().join("seq.md");
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{state}}.\n",
@@ -558,8 +548,7 @@ exit 0"#,
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", md.to_str().unwrap()],
     );
 
@@ -567,7 +556,7 @@ exit 0"#,
         code, 130,
         "an interrupted sequence must exit 130; stderr:\n{stderr}"
     );
-    let launches = fs::read_to_string(workspace.path().join("launches.txt")).unwrap();
+    let launches = fs::read_to_string(fixture.home().join("launches.txt")).unwrap();
     assert_eq!(
         launches.lines().count(),
         1,

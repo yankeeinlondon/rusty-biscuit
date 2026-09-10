@@ -36,8 +36,8 @@ pub mod looping;
 pub mod mismatch;
 pub mod preflight;
 mod prepare;
-mod resolve;
 mod reserved;
+mod resolve;
 pub mod runtime_state;
 pub mod schema;
 mod select;
@@ -63,16 +63,22 @@ pub use coordinator::{
 };
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
-    ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
-    FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, LoopExpressionCause,
-    MarkdownLoadCause, MissingProperty,
-    SequenceExpressionCause, SequenceLoadCause, SequenceMissingPropertiesStep,
-    SequenceSelectionFailure, SequenceShellCause, ShellApprovalFailure, TextFormat,
+    ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource,
+    DroppedOptionalStage, FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE,
+    LoopExpressionCause, MarkdownLoadCause, MissingProperty, SequenceExpressionCause,
+    SequenceLoadCause, SequenceMissingPropertiesStep, SequenceSelectionFailure, SequenceShellCause,
+    ShellApprovalFailure, TextFormat,
 };
 pub use file_detail::{FileDetail, extract_markdown_detail, extract_yaml_sequence_detail};
 pub use frontmatter_excerpt::FrontmatterExcerpt;
+pub use hints::{parse_interactive_hint, parse_selection_hints_from_frontmatter};
 pub use guardrails::{document_path_span, native_document_path};
 pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
+pub use lifecycle::runtime::{
+    IterationSummarySignals, LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchResult,
+    LifecycleCatchState, LifecycleCatchStep, LifecycleTransitionAbort, LifecycleTransitionDecision,
+    LifecycleTransitionError, LifecycleTransitionInput, decide_lifecycle_transition,
+};
 #[allow(deprecated)]
 pub use lifecycle::{
     DefaultLifecycleEmitter, LIFECYCLE_EVENT_KEYS, LifecycleConfig, LifecycleEmitter,
@@ -96,45 +102,38 @@ pub use lifecycle_executor::{
     LifecycleEventOutcome, LifecycleExprError, ShellRunError, ShellRunner, StackControl,
     StackExecutionContext, SystemShellRunner,
 };
-pub use lifecycle::runtime::{
-    IterationSummarySignals, LifecycleTransitionAbort, LifecycleTransitionDecision,
-    LifecycleTransitionError, LifecycleTransitionInput, LifecycleCatchExecution,
-    LifecycleCatchProtocol, LifecycleCatchResult, LifecycleCatchState, LifecycleCatchStep,
-    decide_lifecycle_transition,
-};
-pub use looping::{
-    extract_control_variables, resolve_fail_fast_from_env, resolve_loop_config,
-    resolve_max_iterations_from_env, resolve_pause_reset_margin_from_env,
-};
 pub use looping::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
     LoopIterationOutput, LoopSeed, build_loop_seed, build_loop_seed_with_lifecycle, execute_loop,
     execute_loop_with_config, execute_loop_with_lifecycle,
 };
 pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
-pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
-pub use runtime_state::{
-    OUTPUTS_KEY, RuntimeMutationError, RuntimeSnapshot, RuntimeState, layered_set_overrides,
-    trim_transport_newline, with_initialized_outputs,
+pub use looping::{
+    extract_control_variables, resolve_fail_fast_from_env, resolve_loop_config,
+    resolve_max_iterations_from_env, resolve_pause_reset_margin_from_env,
 };
+pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
 pub use preflight::{
     PreFlightResult, resolve_graph_shell_approvals, resolve_lifecycle_shell_approvals,
     resolve_shell_approvals,
 };
-pub use hints::{parse_interactive_hint, parse_selection_hints_from_frontmatter};
 pub use prepare::{
-    DocumentEntryReason, DocumentPreparation, LoopOwnership, PrepareOptions, PreparationStages,
-    PromptSource, SchemaStage, SourceBasis, bind_agent_workspace, prepare_direct,
-    prepare_document,
-    prepare_inline, preflight_document_shell,
+    DocumentEntryReason, DocumentPreparation, LoopOwnership, PreparationStages, PrepareOptions,
+    PromptSource, SchemaStage, SourceBasis, bind_agent_workspace, preflight_document_shell,
+    prepare_direct, prepare_document, prepare_inline,
 };
+#[cfg(test)]
+pub(crate) use resolve::resolve_fixture_source;
 pub use resolve::{
     build_prompt_reference, capture_file_resolution_context, derive_request_context_for_source,
     enrich_composition_source_load_error, enrich_composition_source_load_error_in_context,
-    is_yaml_source,
-    load_yaml_document, prompt_magic_roots, reload_composition_source,
-    resolve_composition_source, resolve_composition_source_in_context,
-    validate_file_permissions, without_formal_sequence_keys,
+    is_yaml_source, load_yaml_document, prompt_magic_roots, reload_composition_source,
+    resolve_composition_source, resolve_composition_source_in_context, validate_file_permissions,
+    without_formal_sequence_keys,
+};
+pub use runtime_state::{
+    OUTPUTS_KEY, RuntimeMutationError, RuntimeSnapshot, RuntimeState, layered_set_overrides,
+    trim_transport_newline, with_initialized_outputs,
 };
 pub use schema::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
@@ -145,17 +144,11 @@ pub use schema::{
     render_required_line, schema_status_report_prose,
 };
 pub use select::{
-    build_candidate_set, build_installed_snapshot, build_picker_plan, build_picker_plan_with_hints,
-    classify_agent_resolution, detect_installed_providers, resolve_model,
-    resolve_model_with_catalog, resolve_model_with_hints,
-    resolve_target_non_tty, resolve_target_non_tty_with_catalog, resolve_target_non_tty_with_hints,
-    select_provider,
-};
-pub use sequence::{
-    ExecutableField, ExternalTaskRef, GroupRef, OutputEntry, RuntimeMutation, SequencePlan,
-    SequenceReference, SequenceSource, SequenceSourceOptions, SequenceSourceSpec, SequenceStep,
-    SequenceStepOverlay, ShellSourceRunner, SourceOperator, StepExecutable, StepState, Strictness,
-    build_step_overlay, resolve_sequence_plan, resolve_sequence_plan_with,
+    ambient_env_lookup, build_candidate_set, build_installed_snapshot, build_picker_plan,
+    build_picker_plan_with_hints, classify_agent_resolution, detect_installed_providers,
+    resolve_model, resolve_model_with_catalog, resolve_model_with_hints,
+    resolve_model_with_hints_from, resolve_target_non_tty, resolve_target_non_tty_with_catalog,
+    resolve_target_non_tty_with_hints, select_provider,
 };
 pub use sequence::preflight::{
     DiscoveredCommand, GroupExecution, PreflightAction, PreflightGraph, PreflightGroup,
@@ -168,6 +161,12 @@ pub use sequence::task::{
     RunawayTripKind, ShellCommandOutput, SystemTaskShell, TaskDiagnostic, TaskExecution,
     TaskOutcome, TaskShellError, TaskShellRunner, TaskStage, TaskStatus, UnavailablePromptRunner,
 };
+pub use sequence::{
+    ExecutableField, ExternalTaskRef, GroupRef, OutputEntry, RuntimeMutation, SequencePlan,
+    SequenceReference, SequenceSource, SequenceSourceOptions, SequenceSourceSpec, SequenceStep,
+    SequenceStepOverlay, ShellSourceRunner, SourceOperator, StepExecutable, StepState, Strictness,
+    build_step_overlay, resolve_sequence_plan, resolve_sequence_plan_with,
+};
 pub use types::{
     AgentHint, AgentResolutionState, AmbientVariable, CallerInputLayers, CompositionClosurePlan,
     CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
@@ -175,8 +174,8 @@ pub use types::{
     ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
     ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,
-    SelectedProvider, SelectionReason, SessionInteractivitySource, SequenceExecutionOptions,
-    SequenceRunSummary, SequenceStepDraft, SequenceStepResult, SequenceTaskResult,
+    SelectedProvider, SelectionReason, SequenceExecutionOptions, SequenceRunSummary,
+    SequenceStepDraft, SequenceStepResult, SequenceTaskResult, SessionInteractivitySource,
     SharedApprovalCache,
 };
 

@@ -166,233 +166,89 @@ fn opencode_yolo_non_interactive_idempotent() {
     assert_eq!(count, 1, "flag must not be duplicated");
 }
 
-// -- resolve_opencode_model tests ----------------------------------------
+// -- resolve_model_source tests ---------------------------------------------
+
+fn no_env(_: &str) -> Option<String> {
+    None
+}
+
+fn configured(model: &str) -> ConfiguredModel {
+    ConfiguredModel {
+        model: model.to_string(),
+        path: std::path::PathBuf::from("/cfg/opencode.jsonc"),
+    }
+}
 
 #[test]
-fn opencode_resolve_cli_switch_when_model_provided() {
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: None,
-        opencode_config_model: None,
+fn model_source_prefers_the_first_provider_env_var_that_is_set() {
+    let env = |var: &str| match var {
+        "SECOND_MODEL" => Some("second".to_string()),
+        "FIRST_MODEL" => Some("first".to_string()),
+        _ => None,
     };
-    let source = resolve_opencode_model(Some("cli-model"), &snapshot).unwrap();
+    let source = resolve_model_source(&["FIRST_MODEL", "SECOND_MODEL"], env, || {
+        Some(configured("config-model"))
+    });
     assert_eq!(
         source,
-        OpenCodeModelSource::CliSwitch("cli-model".to_string())
+        Some(ModelSource::ProviderEnv {
+            var: "FIRST_MODEL",
+            model: "first".to_string()
+        })
     );
 }
 
 #[test]
-fn opencode_resolve_env_var_when_no_cli_switch() {
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: Some("env-model".to_string()),
-        opencode_config_model: None,
-    };
-    let source = resolve_opencode_model(None, &snapshot).unwrap();
+fn model_source_skips_empty_env_values_and_falls_back_to_configured_default() {
+    let env = |var: &str| (var == "OPENCODE_MODEL").then(String::new);
+    let source = resolve_model_source(&["OPENCODE_MODEL"], env, || Some(configured("config-model")));
     assert_eq!(
         source,
-        OpenCodeModelSource::OpenCodeModelEnv("env-model".to_string())
+        Some(ModelSource::ConfigDefault(configured("config-model")))
     );
 }
 
 #[test]
-fn opencode_resolve_config_default_when_json_has_model() {
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: None,
-        opencode_config_model: Some("config-model".to_string()),
-    };
-    let source = resolve_opencode_model(None, &snapshot).unwrap();
+fn model_source_is_none_when_nothing_names_a_model() {
+    assert_eq!(resolve_model_source(&["OPENCODE_MODEL"], no_env, || None), None);
+    assert_eq!(resolve_model_source(&[], no_env, || None), None);
+}
+
+#[test]
+fn model_source_does_not_read_the_configured_default_when_an_env_var_decides() {
+    let env = |_: &str| Some("env-model".to_string());
+    let source = resolve_model_source(&["OPENCODE_MODEL"], env, || {
+        panic!("configured default must not be read when an env var decided")
+    });
+    assert_eq!(source.unwrap().model(), "env-model");
+}
+
+#[test]
+fn model_source_location_strings_name_the_deciding_source() {
     assert_eq!(
-        source,
-        OpenCodeModelSource::ConfigDefault("config-model".to_string())
-    );
-}
-
-#[test]
-fn opencode_resolve_err_no_model_provided_when_none_available() {
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: None,
-        opencode_config_model: None,
-    };
-    let result = resolve_opencode_model(None, &snapshot);
-    assert_eq!(result, Err(NoModelProvided));
-}
-
-#[test]
-fn opencode_resolve_precedence_cli_over_env() {
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: Some("env-model".to_string()),
-        opencode_config_model: Some("config-model".to_string()),
-    };
-    let source = resolve_opencode_model(Some("cli-model"), &snapshot).unwrap();
-    assert_eq!(
-        source,
-        OpenCodeModelSource::CliSwitch("cli-model".to_string())
-    );
-}
-
-#[test]
-fn opencode_resolve_precedence_env_over_config() {
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: Some("env-model".to_string()),
-        opencode_config_model: Some("config-model".to_string()),
-    };
-    let source = resolve_opencode_model(None, &snapshot).unwrap();
-    assert_eq!(
-        source,
-        OpenCodeModelSource::OpenCodeModelEnv("env-model".to_string())
-    );
-}
-
-#[test]
-fn opencode_resolve_model_env_var_ignored_entirely() {
-    // This test was to ensure `MODEL` env is ignored and only `OPENCODE_MODEL` is checked
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: None,
-        opencode_config_model: None,
-    };
-    let result = resolve_opencode_model(None, &snapshot);
-    assert_eq!(result, Err(NoModelProvided));
-}
-
-#[test]
-fn opencode_resolve_malformed_config_json_yields_no_model() {
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: None,
-        opencode_config_model: None,
-    };
-    let result = resolve_opencode_model(None, &snapshot);
-    assert_eq!(result, Err(NoModelProvided));
-}
-
-#[test]
-fn opencode_resolve_missing_config_file_yields_no_model() {
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: None,
-        opencode_config_model: None,
-    };
-    let result = resolve_opencode_model(None, &snapshot);
-    assert_eq!(result, Err(NoModelProvided));
-}
-
-#[test]
-fn opencode_resolve_empty_string_model_yields_no_model() {
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: None,
-        opencode_config_model: None,
-    };
-    let result = resolve_opencode_model(None, &snapshot);
-    assert_eq!(result, Err(NoModelProvided));
-}
-
-#[test]
-fn opencode_model_source_location_strings() {
-    assert_eq!(
-        OpenCodeModelSource::CliSwitch(String::new()).location_string(),
+        ModelSource::CliSwitch(String::new()).location_string(),
         "the --model CLI switch"
     );
     assert_eq!(
-        OpenCodeModelSource::OpenCodeModelEnv(String::new()).location_string(),
+        ModelSource::ProviderEnv {
+            var: "OPENCODE_MODEL",
+            model: String::new()
+        }
+        .location_string(),
         "the OPENCODE_MODEL environment variable"
     );
     assert_eq!(
-        OpenCodeModelSource::ConfigDefault(String::new()).location_string(),
-        "the config file ~/.config/opencode/config.json"
+        ModelSource::ConfigDefault(configured("x")).location_string(),
+        "the config file /cfg/opencode.jsonc"
     );
 }
 
 #[test]
-fn opencode_no_model_provided_display() {
-    assert_eq!(NoModelProvided.to_string(), "no model provided");
-}
-
-#[test]
-fn opencode_apply_to_args_cli_switch_pushes_model_flag_and_env() {
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: None,
-        opencode_config_model: None,
-    };
-    let mut args = vec!["run".to_string()];
-    let mut env = Vec::new();
-    apply_opencode_model_resolution(
-        &mut args,
-        &mut |k, v| env.push((k, v)),
-        false,
-        Some("gpt-4o"),
-        true,
-        &snapshot,
-    )
-    .unwrap();
-    assert!(args.contains(&"--model".to_string()));
-    assert!(args.contains(&"gpt-4o".to_string()));
-    assert!(env.contains(&("MODEL".to_string(), "gpt-4o".to_string())));
-}
-
-#[test]
-fn opencode_apply_to_args_env_var_pushes_model_flag_and_env() {
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: Some("env-model".to_string()),
-        opencode_config_model: None,
-    };
-    let mut args = vec!["run".to_string()];
-    let mut env = Vec::new();
-    apply_opencode_model_resolution(
-        &mut args,
-        &mut |k, v| env.push((k, v)),
-        false,
-        None,
-        true,
-        &snapshot,
-    )
-    .unwrap();
-    assert!(args.contains(&"--model".to_string()));
-    assert!(args.contains(&"env-model".to_string()));
-    assert!(env.contains(&("MODEL".to_string(), "env-model".to_string())));
-}
-
-#[test]
-fn opencode_apply_to_args_config_default_pushes_env_only() {
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: None,
-        opencode_config_model: Some("config-model".to_string()),
-    };
-    let mut args = vec!["run".to_string()];
-    let mut env = Vec::new();
-    apply_opencode_model_resolution(
-        &mut args,
-        &mut |k, v| env.push((k, v)),
-        false,
-        None,
-        true,
-        &snapshot,
-    )
-    .unwrap();
-    assert!(!args.contains(&"--model".to_string()));
-    assert!(env.contains(&("MODEL".to_string(), "config-model".to_string())));
-}
-
-#[test]
-fn opencode_apply_to_args_does_not_duplicate_existing_model_flag() {
-    let snapshot = OpenCodeEnvSnapshot {
-        opencode_model_env: None,
-        opencode_config_model: None,
-    };
-    let mut args = vec![
-        "run".to_string(),
-        "--model".to_string(),
-        "existing".to_string(),
-    ];
-    let mut env = Vec::new();
-    apply_opencode_model_resolution(
-        &mut args,
-        &mut |k, v| env.push((k, v)),
-        false,
-        Some("existing"),
-        true,
-        &snapshot,
-    )
-    .unwrap();
-    let count = args.iter().filter(|a| *a == "--model").count();
-    assert_eq!(count, 1, "should not duplicate --model flag");
+fn no_model_error_names_the_catalog_env_vars_and_the_cli_switch() {
+    let message = no_model_error(Provider::OpenCode).to_string();
+    assert!(message.contains("No model specified!"));
+    assert!(message.contains("OPENCODE_MODEL"));
+    assert!(message.contains("--model <model>"));
 }
 
 #[test]

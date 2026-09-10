@@ -8,10 +8,12 @@ mod fixtures;
 use std::sync::Arc;
 use std::time::Duration;
 
-use sniff::filesystem::detect_filesystem_with_request;
 use sniff::filesystem::repo::detect_repo_structure;
+use sniff::filesystem::{
+    FilesystemObservation, detect_filesystem_with_observation, detect_filesystem_with_request,
+};
 use sniff::performance::{PerformanceCollector, counters, with_current_collector};
-use sniff::request::FilesystemRequest;
+use sniff::request::{FilesystemRequest, GitRequest};
 
 #[test]
 fn formatting_workload_keeps_descendant_work_at_zero() {
@@ -28,8 +30,91 @@ fn formatting_workload_keeps_descendant_work_at_zero() {
     });
     let counts = collector.snapshot(Duration::ZERO).counters;
 
-    assert_eq!(counts.get(counters::FS_WALK_STARTS).copied().unwrap_or(0), 0);
-    assert_eq!(counts.get(counters::FS_WALK_ENTRIES).copied().unwrap_or(0), 0);
+    assert_eq!(
+        counts.get(counters::FS_WALK_STARTS).copied().unwrap_or(0),
+        0
+    );
+    assert_eq!(
+        counts.get(counters::FS_WALK_ENTRIES).copied().unwrap_or(0),
+        0
+    );
+    assert_eq!(
+        counts.get(counters::GIT_DISCOVERIES).copied().unwrap_or(0),
+        0
+    );
+    assert_eq!(
+        counts.get(counters::GIT_STATUS_WALKS).copied().unwrap_or(0),
+        0
+    );
+}
+
+#[test]
+fn seeded_git_execution_and_projection_do_not_rediscover_the_repository() {
+    let fixture = fixtures::git_repo_with_dirty_files(4);
+
+    let acquisition = PerformanceCollector::new_shared();
+    let observation = with_current_collector(Some(Arc::clone(&acquisition)), || {
+        FilesystemObservation::discover(fixture.path())
+    });
+    let acquisition_counts = acquisition.snapshot(Duration::ZERO).counters;
+    assert_eq!(
+        acquisition_counts
+            .get(counters::GIT_DISCOVERIES)
+            .copied()
+            .unwrap_or(0),
+        1
+    );
+
+    let execution = PerformanceCollector::new_shared();
+    let (filesystem, changes) = with_current_collector(Some(Arc::clone(&execution)), || {
+        let filesystem = detect_filesystem_with_observation(
+            fixture.path(),
+            &FilesystemRequest::new()
+                .git(GitRequest::full())
+                .without_repo()
+                .without_docs()
+                .without_formatting()
+                .without_file_inventory(),
+            &observation,
+        )
+        .expect("seeded filesystem detection");
+        let changes = observation
+            .detect_file_changes()
+            .expect("seeded file-change projection")
+            .expect("fixture repository observation");
+        (filesystem, changes)
+    });
+
+    let git = filesystem.git.expect("Git was requested");
+    assert!(git.status.is_some_and(|status| status.is_dirty));
+    assert_eq!(changes.len(), 4);
+    assert!(changes.iter().all(|change| change.path.starts_with("src")));
+
+    let execution_counts = execution.snapshot(Duration::ZERO).counters;
+    assert_eq!(
+        execution_counts
+            .get(counters::GIT_DISCOVERIES)
+            .copied()
+            .unwrap_or(0),
+        0,
+        "seeded execution and projection must reuse the observed handle"
+    );
+    assert_eq!(
+        execution_counts
+            .get(counters::GIT_OPENS)
+            .copied()
+            .unwrap_or(0),
+        0,
+        "reusing an observed handle must not reopen the repository"
+    );
+    assert_eq!(
+        execution_counts
+            .get(counters::GIT_STATUS_WALKS)
+            .copied()
+            .unwrap_or(0),
+        2,
+        "full detection and file-change projection each perform one requested status walk"
+    );
 }
 
 #[test]

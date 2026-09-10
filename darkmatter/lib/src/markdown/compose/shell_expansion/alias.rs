@@ -380,7 +380,7 @@ mod tests {
     /// Integration test: resolve a known alias from the current shell.
     /// Ignored by default since it depends on the user's shell configuration.
     #[test]
-    #[ignore]
+    #[ignore = "requires an `ll` alias in the user's login-shell configuration"]
     fn resolve_alias_ll() {
         if let Some(resolved) = resolve_alias("ll") {
             println!(

@@ -1,225 +1,18 @@
 //! Level-1 integration tests: full LSP conversations over an in-memory
-//! connection pair (`lsp_server::Connection::memory()`), the fixture shape
-//! ported from `iwes/tests/fixture.rs` (Apache-2.0, IWE project).
+//! connection pair (`lsp_server::Connection::memory()`), driven by the shared
+//! [`common::LspFixture`].
 //!
 //! These sessions are in-memory (no real terminal, PTY, or network resource),
 //! so they run in the standard `just test` gate with no terminal harness.
 
-use std::sync::mpsc;
+mod common;
+
 use std::time::Duration;
 
+use common::{LspFixture, LspWorkspace, TeardownEvent};
 use dmls::overlay::expressions;
-use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
+use lsp_server::{RequestId, Response};
 use serde_json::{Value, json};
-
-/// Client-side driver over the in-memory pair; joins the server thread on
-/// drop-free shutdown so protocol failures surface as test failures.
-struct ClientFixture {
-    client: Connection,
-    server_outcome: mpsc::Receiver<Result<(), String>>,
-    next_id: i32,
-    /// Server → client notifications buffered while awaiting a response (the
-    /// server pushes `publishDiagnostics` out-of-band).
-    notifications: Vec<Notification>,
-    /// Server → client requests buffered while awaiting a response (the server
-    /// pushes `workspace/semanticTokens/refresh`, progress-create, and watcher
-    /// registrations fire-and-forget).
-    server_requests: Vec<Request>,
-}
-
-impl ClientFixture {
-    fn start() -> Self {
-        let (server_side, client_side) = Connection::memory();
-        let (outcome_tx, outcome_rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let result = dmls::run_server(server_side, dmls::RunOptions::default())
-                .map_err(|error| error.to_string());
-            let _ = outcome_tx.send(result);
-        });
-        Self {
-            client: client_side,
-            server_outcome: outcome_rx,
-            next_id: 0,
-            notifications: Vec::new(),
-            server_requests: Vec::new(),
-        }
-    }
-
-    fn request(&mut self, method: &str, params: Value) -> Response {
-        self.next_id += 1;
-        let id = RequestId::from(self.next_id);
-        self.send_request_with_id(id.clone(), method, params);
-        self.expect_response(id)
-    }
-
-    fn send_request_with_id(&self, id: RequestId, method: &str, params: Value) {
-        self.client
-            .sender
-            .send(Message::Request(Request::new(id, method.to_string(), params)))
-            .expect("send request");
-    }
-
-    fn notify(&self, method: &str, params: Value) {
-        self.client
-            .sender
-            .send(Message::Notification(Notification::new(
-                method.to_string(),
-                params,
-            )))
-            .expect("send notification");
-    }
-
-    fn expect_response(&mut self, id: RequestId) -> Response {
-        loop {
-            let message = self
-                .client
-                .receiver
-                .recv_timeout(Duration::from_secs(10))
-                .expect("response before timeout");
-            match message {
-                Message::Response(response) if response.id == id => return response,
-                Message::Notification(notification) => self.notifications.push(notification),
-                // Server-initiated requests (progress create, watcher
-                // registration, semantic-tokens refresh) are fire-and-forget;
-                // buffer them so tests can observe what the server pushed.
-                Message::Request(request) => self.server_requests.push(request),
-                other => panic!("unexpected message while waiting for response: {other:?}"),
-            }
-        }
-    }
-
-    /// Waits for the latest `publishDiagnostics` for `uri`, returning its
-    /// `diagnostics` array. Drains buffered notifications first.
-    fn wait_for_diagnostics(&mut self, uri: &str) -> Vec<Value> {
-        self.wait_for_diagnostics_params(uri)["diagnostics"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    fn wait_for_diagnostics_params(&mut self, uri: &str) -> Value {
-        loop {
-            if let Some(params) = self.take_buffered_diagnostics(uri) {
-                return params;
-            }
-            let message = self
-                .client
-                .receiver
-                .recv_timeout(Duration::from_secs(10))
-                .expect("diagnostics before timeout");
-            match message {
-                Message::Notification(notification) => self.notifications.push(notification),
-                Message::Request(request) => self.server_requests.push(request),
-                other => panic!("unexpected message while waiting for diagnostics: {other:?}"),
-            }
-        }
-    }
-
-    fn take_buffered_diagnostics(&mut self, uri: &str) -> Option<Value> {
-        let position = self.notifications.iter().rposition(|notification| {
-            notification.method == "textDocument/publishDiagnostics"
-                && notification.params["uri"] == json!(uri)
-        })?;
-        let notification = self.notifications.remove(position);
-        Some(notification.params)
-    }
-
-    /// Drains messages until the startup-index `workDoneProgress` `end` arrives,
-    /// guaranteeing the background disk walk has finished. Only usable when the
-    /// client advertised `window.workDoneProgress`.
-    fn wait_for_startup_complete(&mut self) {
-        let is_end = |notification: &Notification| {
-            notification.method == "$/progress"
-                && notification.params["token"] == json!("dmls/startup-index")
-                && notification.params["value"]["kind"] == json!("end")
-        };
-        loop {
-            if let Some(position) = self.notifications.iter().position(is_end) {
-                self.notifications.remove(position);
-                return;
-            }
-            let message = self
-                .client
-                .receiver
-                .recv_timeout(Duration::from_secs(10))
-                .expect("startup progress before timeout");
-            match message {
-                Message::Notification(notification) => self.notifications.push(notification),
-                Message::Request(request) => self.server_requests.push(request),
-                other => panic!("unexpected message while waiting for startup: {other:?}"),
-            }
-        }
-    }
-
-    fn initialize(&mut self, params: Value) -> Value {
-        let response = self.request("initialize", params);
-        assert!(
-            response.error.is_none(),
-            "initialize failed: {:?}",
-            response.error
-        );
-        self.notify("initialized", json!({}));
-        response.result.expect("initialize result")
-    }
-
-    fn flush_server(&mut self) {
-        let response = self.request("workspace/symbol", json!({ "query": "" }));
-        assert!(response.error.is_none(), "server flush request failed: {:?}", response.error);
-    }
-
-    /// Pumps messages until a buffered server-initiated request with `method`
-    /// is seen, removing and returning `true`; returns `false` if none arrives
-    /// within a short window (the in-memory pair delivers immediately, so a
-    /// miss reliably means the server never sent it).
-    fn wait_for_server_request(&mut self, method: &str) -> bool {
-        self.take_server_request(method).is_some()
-    }
-
-    /// Like [`wait_for_server_request`], but returns the matched `Request` so a
-    /// caller can inspect its `id` (e.g. proving two refreshes carry distinct
-    /// request ids); `None` on the same short-window miss.
-    fn take_server_request(&mut self, method: &str) -> Option<Request> {
-        loop {
-            if let Some(position) =
-                self.server_requests.iter().position(|request| request.method == method)
-            {
-                return Some(self.server_requests.remove(position));
-            }
-            match self.client.receiver.recv_timeout(Duration::from_secs(1)) {
-                Ok(Message::Request(request)) => self.server_requests.push(request),
-                Ok(Message::Notification(notification)) => self.notifications.push(notification),
-                Ok(Message::Response(_)) => {}
-                Err(_) => return None,
-            }
-        }
-    }
-
-    /// Sends a client → server response, e.g. answering a server-initiated
-    /// `workspace/semanticTokens/refresh` so it routes through the loop's
-    /// `Message::Response` arm and into the `RefreshLedger`.
-    fn respond(&self, response: Response) {
-        self.client
-            .sender
-            .send(Message::Response(response))
-            .expect("send response");
-    }
-
-    fn shutdown(self) {
-        let mut fixture = self;
-        let response = fixture.request("shutdown", Value::Null);
-        assert!(
-            response.error.is_none(),
-            "shutdown failed: {:?}",
-            response.error
-        );
-        fixture.notify("exit", Value::Null);
-        let outcome = fixture
-            .server_outcome
-            .recv_timeout(Duration::from_secs(10))
-            .expect("server thread finished");
-        assert_eq!(outcome, Ok(()), "server exited with error");
-    }
-}
 
 fn neovim_like_initialize_params(root: &std::path::Path) -> Value {
     let root_uri = url::Url::from_directory_path(root).unwrap();
@@ -247,14 +40,14 @@ fn watched_initialize_params(root: &std::path::Path) -> Value {
 
 #[test]
 fn initialize_open_change_shutdown() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(
         workspace.path().join(".dmls.toml"),
         "[diagnostics]\ndebounce_ms = 150\n",
     )
     .unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     let result = fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     // Negotiation: first client-offered encoding DMLS supports.
@@ -314,7 +107,11 @@ fn initialize_open_change_shutdown() {
             "position": { "line": 0, "character": 0 }
         }),
     );
-    assert!(response.error.is_none(), "hover must not error: {:?}", response.error);
+    assert!(
+        response.error.is_none(),
+        "hover must not error: {:?}",
+        response.error
+    );
     assert_eq!(response.result, Some(Value::Null));
 
     // A genuinely unimplemented method still answers MethodNotFound. Range
@@ -327,14 +124,18 @@ fn initialize_open_change_shutdown() {
             "options": { "tabSize": 2, "insertSpaces": true }
         }),
     );
-    assert_eq!(response.error.expect("rangeFormatting unimplemented").code, -32601);
+    assert_eq!(
+        response.error.expect("rangeFormatting unimplemented").code,
+        -32601
+    );
 
     fixture.shutdown();
 }
 
 #[test]
 fn default_negotiation_is_utf16() {
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     let result = fixture.initialize(json!({
         "processId": null,
         "capabilities": {}
@@ -346,7 +147,7 @@ fn default_negotiation_is_utf16() {
 const DOC_A: &str = "---\ntitle: A\n---\n\n# Overview\n\nSee [top](#overview) and [b](b.md#target) and [missing](nope.md).\n\n## Details\n\n- one\n- two\n";
 const DOC_B: &str = "# Target\n";
 
-fn open(fixture: &ClientFixture, uri: &str, text: &str) {
+fn open(fixture: &LspFixture<'_>, uri: &str, text: &str) {
     fixture.notify(
         "textDocument/didOpen",
         json!({
@@ -362,7 +163,7 @@ fn open(fixture: &ClientFixture, uri: &str, text: &str) {
 
 #[test]
 fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let sidecar_path = workspace.path().join("schema.yaml");
     let document_path = workspace.path().join("doc.md");
     let bare_sidecar = "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n";
@@ -371,7 +172,7 @@ fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
     std::fs::write(&sidecar_path, bare_sidecar).unwrap();
     std::fs::write(&document_path, document).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let document_uri = url::Url::from_file_path(&document_path).unwrap();
     let sidecar_uri = url::Url::from_file_path(&sidecar_path).unwrap();
@@ -380,9 +181,7 @@ fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
     let initial = fixture.wait_for_diagnostics(document_uri.as_str());
     let advisories: Vec<_> = initial
         .iter()
-        .filter(|diagnostic| {
-            diagnostic["code"] == json!("dm.schema.missing_simplified_envelope")
-        })
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.missing_simplified_envelope"))
         .collect();
     assert_eq!(advisories.len(), 1, "consumer diagnostics: {initial:?}");
     let advisory = advisories[0];
@@ -457,7 +256,7 @@ fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
 
 #[test]
 fn bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let bare_path = workspace.path().join("bare.yaml");
     let raw_path = workspace.path().join("raw.yaml");
     let union_path = workspace.path().join("union.md");
@@ -472,7 +271,7 @@ fn bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema() 
     std::fs::write(&union_path, union_document).unwrap();
     std::fs::write(&raw_document_path, raw_document).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let union_uri = url::Url::from_file_path(&union_path).unwrap();
     open(&fixture, union_uri.as_str(), union_document);
@@ -504,7 +303,7 @@ fn bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema() 
 /// Requests `textDocument/hover` at `(line, character)` and returns the rendered
 /// Markdown body (empty string on a null hover). Collapses the request +
 /// `contents.value` extraction that hover assertions would otherwise repeat.
-fn hover_markup(fixture: &mut ClientFixture, uri: &str, line: u32, character: u32) -> String {
+fn hover_markup(fixture: &mut LspFixture<'_>, uri: &str, line: u32, character: u32) -> String {
     hover_value(fixture, uri, line, character)["contents"]["value"]
         .as_str()
         .unwrap_or_default()
@@ -513,7 +312,7 @@ fn hover_markup(fixture: &mut ClientFixture, uri: &str, line: u32, character: u3
 
 /// The whole `textDocument/hover` result, for assertions that also pin the
 /// response `range` (the source span the hover was anchored to).
-fn hover_value(fixture: &mut ClientFixture, uri: &str, line: u32, character: u32) -> Value {
+fn hover_value(fixture: &mut LspFixture<'_>, uri: &str, line: u32, character: u32) -> Value {
     fixture
         .request(
             "textDocument/hover",
@@ -528,11 +327,11 @@ fn hover_value(fixture: &mut ClientFixture, uri: &str, line: u32, character: u32
 
 #[test]
 fn layer0_provider_round_trips() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("a.md"), DOC_A).unwrap();
     std::fs::write(workspace.path().join("b.md"), DOC_B).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let a_uri = url::Url::from_file_path(workspace.path().join("a.md")).unwrap();
@@ -585,7 +384,10 @@ fn layer0_provider_round_trips() {
         )
         .result
         .expect("references");
-    assert!(!references.as_array().unwrap().is_empty(), "expected backlinks");
+    assert!(
+        !references.as_array().unwrap().is_empty(),
+        "expected backlinks"
+    );
 
     // documentLink: at least the three in-body links resolve to targets.
     let links = fixture
@@ -652,8 +454,8 @@ fn layer0_provider_round_trips() {
 
 #[test]
 fn broken_link_diagnostic_updates_on_edit() {
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("notes.md")).unwrap();
@@ -665,7 +467,11 @@ fn broken_link_diagnostic_updates_on_edit() {
     );
 
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
-    assert_eq!(diagnostics.len(), 1, "expected one broken-link diagnostic: {diagnostics:?}");
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "expected one broken-link diagnostic: {diagnostics:?}"
+    );
     assert_eq!(diagnostics[0]["code"], json!("dm.links.broken_path"));
     assert_eq!(diagnostics[0]["source"], json!("darkmatter.links"));
 
@@ -678,7 +484,10 @@ fn broken_link_diagnostic_updates_on_edit() {
         }),
     );
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
-    assert!(diagnostics.is_empty(), "diagnostics should clear: {diagnostics:?}");
+    assert!(
+        diagnostics.is_empty(),
+        "diagnostics should clear: {diagnostics:?}"
+    );
 
     fixture.shutdown();
 }
@@ -689,7 +498,7 @@ fn server_rescan_fallback_tracks_unopened_files_on_save() {
     // client (Neovim-on-Linux shape — no reliable file watcher) must still see
     // an unopened file's create/delete. Its only trigger is a save, so a
     // `didSave` drives a workspace rescan that reconciles the graph.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let a_path = workspace.path().join("a.md");
     let b_path = workspace.path().join("b.md");
     let a_text = "# A\n\n[to b](b.md)\n";
@@ -703,7 +512,7 @@ fn server_rescan_fallback_tracks_unopened_files_on_save() {
     let mut init = neovim_like_initialize_params(workspace.path());
     init["capabilities"]["window"] = json!({ "workDoneProgress": true });
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(init);
     fixture.wait_for_startup_complete();
 
@@ -713,7 +522,9 @@ fn server_rescan_fallback_tracks_unopened_files_on_save() {
     // The unopened, absent b.md makes the link broken.
     let diagnostics = fixture.wait_for_diagnostics(a_uri.as_str());
     assert!(
-        diagnostics.iter().any(|d| d["code"] == json!("dm.links.broken_path")),
+        diagnostics
+            .iter()
+            .any(|d| d["code"] == json!("dm.links.broken_path")),
         "expected a broken-link diagnostic while b.md is absent: {diagnostics:?}"
     );
 
@@ -738,7 +549,9 @@ fn server_rescan_fallback_tracks_unopened_files_on_save() {
     );
     let diagnostics = fixture.wait_for_diagnostics(a_uri.as_str());
     assert!(
-        diagnostics.iter().any(|d| d["code"] == json!("dm.links.broken_path")),
+        diagnostics
+            .iter()
+            .any(|d| d["code"] == json!("dm.links.broken_path")),
         "deleting b.md on disk should re-break the link after a save: {diagnostics:?}"
     );
 
@@ -747,34 +560,44 @@ fn server_rescan_fallback_tracks_unopened_files_on_save() {
 
 #[test]
 fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let schemas = workspace.path().join("schemas");
     std::fs::create_dir(&schemas).unwrap();
-    std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
+    std::fs::write(
+        workspace.path().join(".dmls.toml"),
+        "[schema]\nstrict = true\n",
+    )
+    .unwrap();
     let envelope_path = schemas.join("prompt.trigger.yaml");
     let payload_path = schemas.join("prompt.yaml");
     let document_path = workspace.path().join("prompt.md");
-    let envelope = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+    let envelope =
+        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
     let payload = "$schema:\n  model: string(required)\n";
     let document = "---\nprompt: hello\n---\n\nBody\n";
     std::fs::write(&envelope_path, envelope).unwrap();
     std::fs::write(&payload_path, payload).unwrap();
     std::fs::write(&document_path, document).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let envelope_uri = url::Url::from_file_path(&envelope_path).unwrap();
     let document_uri = url::Url::from_file_path(&document_path).unwrap();
     open(&fixture, envelope_uri.as_str(), envelope);
     let initial_envelope = fixture.wait_for_diagnostics(envelope_uri.as_str());
-    assert!(initial_envelope.is_empty(), "valid envelope diagnostics: {initial_envelope:?}");
+    assert!(
+        initial_envelope.is_empty(),
+        "valid envelope diagnostics: {initial_envelope:?}"
+    );
     open(&fixture, document_uri.as_str(), document);
 
     let initial = fixture.wait_for_diagnostics(document_uri.as_str());
     assert!(
         initial.iter().any(|diagnostic| {
             diagnostic["code"] == json!("dm.schema.missing_required")
-                && diagnostic["message"].as_str().is_some_and(|message| message.contains("model"))
+                && diagnostic["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("model"))
         }),
         "the trigger must initially contribute its required property: {initial:?}"
     );
@@ -807,7 +630,9 @@ fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
     assert!(
         retained.iter().any(|diagnostic| {
             diagnostic["code"] == json!("dm.schema.missing_required")
-                && diagnostic["message"].as_str().is_some_and(|message| message.contains("model"))
+                && diagnostic["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("model"))
         }),
         "the consumer must retain the prior effective schema after payload removal: {retained:?}"
     );
@@ -816,21 +641,26 @@ fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
 }
 
 fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let schemas = workspace.path().join("schemas");
     std::fs::create_dir(&schemas).unwrap();
-    std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
+    std::fs::write(
+        workspace.path().join(".dmls.toml"),
+        "[schema]\nstrict = true\n",
+    )
+    .unwrap();
     let envelope_path = schemas.join("prompt.trigger.yaml");
     let payload_path = schemas.join("prompt.yaml");
     let document_path = workspace.path().join("prompt.md");
-    let envelope = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+    let envelope =
+        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
     let payload = "$schema:\n  model: string(required)\n";
     let document = "---\nprompt: hello\n---\n\nBody\n";
     std::fs::write(&envelope_path, envelope).unwrap();
     std::fs::write(&payload_path, payload).unwrap();
     std::fs::write(&document_path, document).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     let init = if client_watched {
         watched_initialize_params(workspace.path())
     } else {
@@ -845,7 +675,9 @@ fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
     assert!(
         initial.iter().any(|diagnostic| {
             diagnostic["code"] == json!("dm.schema.missing_required")
-                && diagnostic["message"].as_str().is_some_and(|message| message.contains("model"))
+                && diagnostic["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("model"))
         }),
         "the trigger must initially contribute its required property: {initial:?}"
     );
@@ -873,7 +705,9 @@ fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
     );
     let retained = fixture.wait_for_diagnostics(document_uri.as_str());
     assert!(
-        retained.iter().any(|diagnostic| diagnostic["code"] == json!("dm.schema.missing_required")),
+        retained
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.missing_required")),
         "the consumer must retain its last-good trigger schema: {retained:?}"
     );
 
@@ -890,7 +724,10 @@ fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
         );
     }
     let repaired = fixture.wait_for_diagnostics(envelope_uri.as_str());
-    assert!(repaired.is_empty(), "repair must clear the unopened envelope: {repaired:?}");
+    assert!(
+        repaired.is_empty(),
+        "repair must clear the unopened envelope: {repaired:?}"
+    );
 
     fixture.shutdown();
 }
@@ -907,18 +744,19 @@ fn client_watcher_publishes_and_clears_unopened_trigger_envelope_diagnostic() {
 
 #[test]
 fn repairing_trigger_payload_clears_open_envelope_immediately() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let schemas = workspace.path().join("schemas");
     std::fs::create_dir(&schemas).unwrap();
     let envelope_path = schemas.join("prompt.trigger.yaml");
     let payload_path = schemas.join("prompt.yaml");
     let document_path = workspace.path().join("prompt.md");
-    let envelope = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+    let envelope =
+        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
     let document = "---\nprompt: hello\n---\n\nBody\n";
     std::fs::write(&envelope_path, envelope).unwrap();
     std::fs::write(&document_path, document).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let envelope_uri = url::Url::from_file_path(&envelope_path).unwrap();
     let document_uri = url::Url::from_file_path(&document_path).unwrap();
@@ -927,7 +765,9 @@ fn repairing_trigger_payload_clears_open_envelope_immediately() {
     fixture.flush_server();
     let failed = fixture.wait_for_diagnostics(envelope_uri.as_str());
     assert!(
-        failed.iter().any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")),
+        failed
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")),
         "the open envelope must receive its trigger-load diagnostic: {failed:?}"
     );
     let _ = fixture.wait_for_diagnostics(document_uri.as_str());
@@ -940,14 +780,22 @@ fn repairing_trigger_payload_clears_open_envelope_immediately() {
     fixture.flush_server();
 
     let repaired = fixture.wait_for_diagnostics_params(envelope_uri.as_str());
-    assert_eq!(repaired["version"], json!(1), "open-envelope diagnostics must be versioned");
-    assert_eq!(repaired["diagnostics"], json!([]), "repair must clear the open envelope");
+    assert_eq!(
+        repaired["version"],
+        json!(1),
+        "open-envelope diagnostics must be versioned"
+    );
+    assert_eq!(
+        repaired["diagnostics"],
+        json!([]),
+        "repair must clear the open envelope"
+    );
 
     fixture.shutdown();
 }
 
 fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let schemas = workspace.path().join("schemas");
     std::fs::create_dir(&schemas).unwrap();
     let envelope_a_path = schemas.join("a.trigger.yaml");
@@ -963,7 +811,7 @@ fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
     std::fs::write(&payload_b_path, "$schema:\n  beta: string\n").unwrap();
     std::fs::write(&document_path, document).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let envelope_a_uri = url::Url::from_file_path(&envelope_a_path).unwrap();
     let envelope_b_uri = url::Url::from_file_path(&envelope_b_path).unwrap();
@@ -979,7 +827,9 @@ fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
     let _ = fixture.wait_for_diagnostics(document_uri.as_str());
     let failed_a = fixture.wait_for_diagnostics(envelope_a_uri.as_str());
     assert!(
-        failed_a.iter().any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")),
+        failed_a
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")),
         "envelope A must initially own the trigger-load diagnostic: {failed_a:?}"
     );
 
@@ -992,14 +842,29 @@ fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
     fixture.flush_server();
 
     let repaired_a = fixture.wait_for_diagnostics_params(envelope_a_uri.as_str());
-    assert_eq!(repaired_a["version"], json!(1), "open envelope A must be versioned");
-    assert_eq!(repaired_a["diagnostics"], json!([]), "envelope A must clear immediately");
+    assert_eq!(
+        repaired_a["version"],
+        json!(1),
+        "open envelope A must be versioned"
+    );
+    assert_eq!(
+        repaired_a["diagnostics"],
+        json!([]),
+        "envelope A must clear immediately"
+    );
     let failed_b = fixture.wait_for_diagnostics_params(envelope_b_uri.as_str());
-    assert!(failed_b["version"].is_null(), "closed envelope B must remain file-level");
     assert!(
-        failed_b["diagnostics"].as_array().is_some_and(|diagnostics| {
-            diagnostics.iter().any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare"))
-        }),
+        failed_b["version"].is_null(),
+        "closed envelope B must remain file-level"
+    );
+    assert!(
+        failed_b["diagnostics"]
+            .as_array()
+            .is_some_and(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare"))
+            }),
         "envelope B must receive transferred trigger-load ownership immediately: {failed_b:?}"
     );
 
@@ -1014,14 +879,14 @@ fn trigger_failure_transfer_republishes_open_envelope_for_either_open_order() {
 
 #[test]
 fn wiki_link_navigation_diagnostics_and_completion() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let notes = workspace.path().join("notes");
     std::fs::create_dir_all(&notes).unwrap();
     std::fs::write(notes.join("Target.md"), "# Target\n\n## Section\n").unwrap();
     let source = "# Source\n\n[[Target]] and [[Target#Section]] and [[No Such Note]]\n";
     std::fs::write(notes.join("Source.md"), source).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let source_uri = url::Url::from_file_path(notes.join("Source.md")).unwrap();
@@ -1086,7 +951,10 @@ fn wiki_link_navigation_diagnostics_and_completion() {
         .result
         .expect("hover");
     assert!(
-        hover["contents"]["value"].as_str().unwrap().contains("Section"),
+        hover["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("Section"),
         "hover should mention the heading: {hover:?}"
     );
 
@@ -1099,7 +967,7 @@ fn config_reload_reindexes_wiki_roots() {
     // rebuild the wiki resolution universe and re-publish diagnostics without a
     // server restart: a link that resolves under the default roots becomes
     // unresolved once the root is narrowed.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let notes = workspace.path().join("notes");
     std::fs::create_dir_all(&notes).unwrap();
     std::fs::write(notes.join("Target.md"), "# Target\n").unwrap();
@@ -1108,7 +976,7 @@ fn config_reload_reindexes_wiki_roots() {
     let source = "# Source\n\n[[/notes/Target]]\n";
     std::fs::write(notes.join("Source.md"), source).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let source_uri = url::Url::from_file_path(notes.join("Source.md")).unwrap();
@@ -1152,10 +1020,10 @@ const SCHEMA_DOC: &str = "---\n$schema:\n  title: string(required)\n  status: en
 
 #[test]
 fn frontmatter_schema_intelligence() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), SCHEMA_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1236,12 +1104,12 @@ const NESTED_SCHEMA_DOC: &str = "---\n$schema:\n  settings:\n    mode: enum(dev,
 
 #[test]
 fn frontmatter_nested_schema_intelligence() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), NESTED_SCHEMA_DOC).unwrap();
     // A sibling document so the nested `file(...)` value completion has a target.
     std::fs::write(workspace.path().join("other.md"), "# Other\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1260,7 +1128,10 @@ fn frontmatter_nested_schema_intelligence() {
         .result
         .expect("nested key completions");
     assert!(
-        keys.as_array().unwrap().iter().any(|item| item["label"] == json!("level")),
+        keys.as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["label"] == json!("level")),
         "expected a nested `level` key completion: {keys:?}"
     );
 
@@ -1277,7 +1148,11 @@ fn frontmatter_nested_schema_intelligence() {
         .result
         .expect("nested enum value completions");
     assert!(
-        enum_values.as_array().unwrap().iter().any(|item| item["label"] == json!("prod")),
+        enum_values
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["label"] == json!("prod")),
         "expected a nested enum value completion: {enum_values:?}"
     );
 
@@ -1294,7 +1169,11 @@ fn frontmatter_nested_schema_intelligence() {
         .result
         .expect("nested file value completions");
     assert!(
-        file_values.as_array().unwrap().iter().any(|item| item["label"] == json!("other.md")),
+        file_values
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["label"] == json!("other.md")),
         "expected a nested file-path value completion: {file_values:?}"
     );
 
@@ -1311,7 +1190,10 @@ fn frontmatter_nested_schema_intelligence() {
         .result
         .expect("nested hover");
     assert!(
-        hover["contents"]["value"].as_str().unwrap_or_default().contains("dev"),
+        hover["contents"]["value"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("dev"),
         "nested hover should describe the enum: {hover:?}"
     );
 
@@ -1325,12 +1207,12 @@ const FILE_NAV_DOC: &str = "---\n$schema:\n  home: file\n  settings:\n    doc: f
 
 #[test]
 fn frontmatter_nested_file_navigation() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), FILE_NAV_DOC).unwrap();
     std::fs::write(workspace.path().join("top.md"), "# Top\n").unwrap();
     std::fs::write(workspace.path().join("nested.md"), "# Nested\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1369,7 +1251,9 @@ fn frontmatter_nested_file_navigation() {
         .expect("top-level definition");
     let locations = definition.as_array().expect("definition array");
     assert!(
-        locations.iter().any(|loc| loc["uri"].as_str().unwrap().ends_with("top.md")),
+        locations
+            .iter()
+            .any(|loc| loc["uri"].as_str().unwrap().ends_with("top.md")),
         "top-level definition should reach top.md: {locations:?}"
     );
 
@@ -1384,15 +1268,21 @@ fn frontmatter_nested_file_navigation() {
         .expect("links");
     let links = links.as_array().expect("link array");
     let nested_link = links.iter().find(|link| {
-        link["target"].as_str().is_some_and(|target| target.ends_with("nested.md"))
+        link["target"]
+            .as_str()
+            .is_some_and(|target| target.ends_with("nested.md"))
     });
     let nested_link = nested_link.expect("a document link over the nested file value");
     // The link's range sits on the nested value line (line 7), not a stray line.
-    assert_eq!(nested_link["range"]["start"]["line"], json!(7), "{nested_link:?}");
+    assert_eq!(
+        nested_link["range"]["start"]["line"],
+        json!(7),
+        "{nested_link:?}"
+    );
     assert!(
-        links
-            .iter()
-            .any(|link| link["target"].as_str().is_some_and(|t| t.ends_with("top.md"))),
+        links.iter().any(|link| link["target"]
+            .as_str()
+            .is_some_and(|t| t.ends_with("top.md"))),
         "top-level file link must still be produced: {links:?}"
     );
 
@@ -1407,12 +1297,12 @@ const EXTENSIONLESS_FILE_DOC: &str =
 
 #[test]
 fn frontmatter_extensionless_file_navigation() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), EXTENSIONLESS_FILE_DOC).unwrap();
     // The extensionless target must exist so resolution has something to reach.
     std::fs::write(workspace.path().join("LICENSE"), "All rights reserved.\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1431,7 +1321,11 @@ fn frontmatter_extensionless_file_navigation() {
         .result
         .expect("extensionless definition");
     let locations = definition.as_array().expect("definition array");
-    assert_eq!(locations.len(), 1, "extensionless file definition: {locations:?}");
+    assert_eq!(
+        locations.len(),
+        1,
+        "extensionless file definition: {locations:?}"
+    );
     assert!(
         locations[0]["uri"].as_str().unwrap().ends_with("LICENSE"),
         "definition should reach the LICENSE file: {locations:?}"
@@ -1448,9 +1342,17 @@ fn frontmatter_extensionless_file_navigation() {
     let links = links.as_array().expect("link array");
     let license_link = links
         .iter()
-        .find(|link| link["target"].as_str().is_some_and(|target| target.ends_with("LICENSE")))
+        .find(|link| {
+            link["target"]
+                .as_str()
+                .is_some_and(|target| target.ends_with("LICENSE"))
+        })
         .expect("a document link over the extensionless file value");
-    assert_eq!(license_link["range"]["start"]["line"], json!(3), "{license_link:?}");
+    assert_eq!(
+        license_link["range"]["start"]["line"],
+        json!(3),
+        "{license_link:?}"
+    );
 
     fixture.shutdown();
 }
@@ -1464,12 +1366,12 @@ const UNION_VALUE_DOC: &str =
 
 #[test]
 fn frontmatter_union_value_completion() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), UNION_VALUE_DOC).unwrap();
     // A sibling document so the `file(...)` arm's value completion has a target.
     std::fs::write(workspace.path().join("other.md"), "# Other\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1488,7 +1390,11 @@ fn frontmatter_union_value_completion() {
         .result
         .expect("value completions");
     assert!(
-        values.as_array().unwrap().iter().any(|item| item["label"] == json!("other.md")),
+        values
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["label"] == json!("other.md")),
         "expected a file-path value completion from the second union arm: {values:?}"
     );
 
@@ -1503,11 +1409,11 @@ const UNION_FILE_NAV_DOC: &str =
 
 #[test]
 fn frontmatter_union_file_navigation() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), UNION_FILE_NAV_DOC).unwrap();
     std::fs::write(workspace.path().join("top.md"), "# Top\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1527,13 +1433,18 @@ fn frontmatter_union_file_navigation() {
         .expect("definition");
     let locations = definition.as_array().expect("definition array");
     assert!(
-        locations.iter().any(|loc| loc["uri"].as_str().unwrap().ends_with("top.md")),
+        locations
+            .iter()
+            .any(|loc| loc["uri"].as_str().unwrap().ends_with("top.md")),
         "union file arm definition should reach top.md: {locations:?}"
     );
 
     // documentLink produces a link over the value targeting top.md.
     let links = fixture
-        .request("textDocument/documentLink", json!({ "textDocument": { "uri": uri.as_str() } }))
+        .request(
+            "textDocument/documentLink",
+            json!({ "textDocument": { "uri": uri.as_str() } }),
+        )
         .result
         .expect("links");
     assert!(
@@ -1541,7 +1452,9 @@ fn frontmatter_union_file_navigation() {
             .as_array()
             .expect("link array")
             .iter()
-            .any(|link| link["target"].as_str().is_some_and(|t| t.ends_with("top.md"))),
+            .any(|link| link["target"]
+                .as_str()
+                .is_some_and(|t| t.ends_with("top.md"))),
         "union file arm should produce a document link: {links:?}"
     );
 
@@ -1555,11 +1468,11 @@ const UNION_NESTED_DOC: &str = "---\n$schema:\n  settings:\n    - string\n    - 
 
 #[test]
 fn frontmatter_union_nested_schema_intelligence() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), UNION_NESTED_DOC).unwrap();
     std::fs::write(workspace.path().join("nested.md"), "# Nested\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -1578,7 +1491,10 @@ fn frontmatter_union_nested_schema_intelligence() {
         .result
         .expect("nested key completions");
     assert!(
-        keys.as_array().unwrap().iter().any(|item| item["label"] == json!("level")),
+        keys.as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["label"] == json!("level")),
         "expected a nested `level` key completion through the union arm: {keys:?}"
     );
 
@@ -1595,7 +1511,11 @@ fn frontmatter_union_nested_schema_intelligence() {
         .result
         .expect("nested enum value completions");
     assert!(
-        enum_values.as_array().unwrap().iter().any(|item| item["label"] == json!("prod")),
+        enum_values
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["label"] == json!("prod")),
         "expected a nested enum value completion through the union arm: {enum_values:?}"
     );
 
@@ -1612,7 +1532,11 @@ fn frontmatter_union_nested_schema_intelligence() {
         .result
         .expect("nested file value completions");
     assert!(
-        file_values.as_array().unwrap().iter().any(|item| item["label"] == json!("nested.md")),
+        file_values
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["label"] == json!("nested.md")),
         "expected a nested file-path value completion through the union arm: {file_values:?}"
     );
 
@@ -1644,7 +1568,7 @@ fn frontmatter_union_nested_schema_intelligence() {
 fn claudine_extension_is_pure_config() {
     // Criterion 6: a Claudine prompt activates a schema baseline through
     // configuration alone — no Claudine-specific code path exists in DMLS.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(
         workspace.path().join(".dmls.toml"),
         "[schema.extensions.claudine]\npath = \"claudine.yaml\"\nglobs = [\".claude/**\"]\n",
@@ -1660,7 +1584,7 @@ fn claudine_extension_is_pure_config() {
     let prompt = "---\nprovider: bogus\n---\n\n# Prompt\n";
     std::fs::write(claude_dir.join("prompt.md"), prompt).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(claude_dir.join("prompt.md")).unwrap();
@@ -1670,7 +1594,9 @@ fn claudine_extension_is_pure_config() {
     // enum member, so a `darkmatter.schema` diagnostic is published.
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
-        diagnostics.iter().any(|d| d["source"] == json!("darkmatter.schema")),
+        diagnostics
+            .iter()
+            .any(|d| d["source"] == json!("darkmatter.schema")),
         "expected an extension-schema diagnostic: {diagnostics:?}"
     );
 
@@ -1700,7 +1626,8 @@ fn claudine_extension_is_pure_config() {
 
 #[test]
 fn cancelled_request_answers_request_cancelled() {
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(json!({ "processId": null, "capabilities": {} }));
 
     // A cancellation that beats its request: the router's ledger answers
@@ -1723,11 +1650,11 @@ const INTRO_DOC: &str = "# Intro\n\nWelcome.\n";
 
 #[test]
 fn dsl_overlay_navigation_hover_and_diagnostics() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("guide.md"), DSL_DOC).unwrap();
     std::fs::write(workspace.path().join("intro.md"), INTRO_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let guide_uri = url::Url::from_file_path(workspace.path().join("guide.md")).unwrap();
@@ -1748,8 +1675,14 @@ fn dsl_overlay_navigation_hover_and_diagnostics() {
         .result
         .expect("hover");
     let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
-    assert!(hover_text.contains("::file"), "directive hover: {hover_text}");
-    assert!(hover_text.contains("intro.md"), "resolved target: {hover_text}");
+    assert!(
+        hover_text.contains("::file"),
+        "directive hover: {hover_text}"
+    );
+    assert!(
+        hover_text.contains("intro.md"),
+        "resolved target: {hover_text}"
+    );
 
     // Definition on the same target jumps into intro.md.
     let definition = fixture
@@ -1764,7 +1697,9 @@ fn dsl_overlay_navigation_hover_and_diagnostics() {
         .expect("definition");
     let locations = definition.as_array().expect("definition array");
     assert!(
-        locations.iter().any(|loc| loc["uri"] == json!(intro_uri.as_str())),
+        locations
+            .iter()
+            .any(|loc| loc["uri"] == json!(intro_uri.as_str())),
         "definition should reach intro.md: {locations:?}"
     );
 
@@ -1780,7 +1715,10 @@ fn dsl_overlay_navigation_hover_and_diagnostics() {
         .result
         .expect("interpolation hover");
     let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
-    assert!(hover_text.contains("Guide"), "static value from frontmatter: {hover_text}");
+    assert!(
+        hover_text.contains("Guide"),
+        "static value from frontmatter: {hover_text}"
+    );
 
     // Diagnostics: unknown directive, broken transclusion, unknown fence language.
     let diagnostics = fixture.wait_for_diagnostics(guide_uri.as_str());
@@ -1789,8 +1727,14 @@ fn dsl_overlay_navigation_hover_and_diagnostics() {
         .filter_map(|diagnostic| diagnostic["code"].as_str())
         .collect();
     assert!(codes.contains(&"dm.directive.unknown"), "codes: {codes:?}");
-    assert!(codes.contains(&"dm.transclusion.broken_path"), "codes: {codes:?}");
-    assert!(codes.contains(&"dm.fence.unknown_language"), "codes: {codes:?}");
+    assert!(
+        codes.contains(&"dm.transclusion.broken_path"),
+        "codes: {codes:?}"
+    );
+    assert!(
+        codes.contains(&"dm.fence.unknown_language"),
+        "codes: {codes:?}"
+    );
 
     fixture.shutdown();
 }
@@ -1798,11 +1742,11 @@ fn dsl_overlay_navigation_hover_and_diagnostics() {
 /// Compose-parity: a directive-name completion after `::` offers the catalog.
 #[test]
 fn dsl_directive_name_completion() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "# Doc\n\n::fi\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -1818,7 +1762,10 @@ fn dsl_directive_name_completion() {
         .result
         .expect("completion");
     let items = completion.as_array().expect("completion array");
-    let labels: Vec<&str> = items.iter().filter_map(|item| item["label"].as_str()).collect();
+    let labels: Vec<&str> = items
+        .iter()
+        .filter_map(|item| item["label"].as_str())
+        .collect();
     assert!(labels.contains(&"::file"), "labels: {labels:?}");
     assert!(labels.contains(&"::file-links"), "labels: {labels:?}");
 
@@ -1833,11 +1780,11 @@ const VALID_DSL_DOC: &str = "---\ntitle: Guide\n---\n\n# Guide\n\n::file ./intro
 
 #[test]
 fn dsl_valid_document_has_no_dsl_diagnostics() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("guide.md"), VALID_DSL_DOC).unwrap();
     std::fs::write(workspace.path().join("intro.md"), INTRO_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let guide_uri = url::Url::from_file_path(workspace.path().join("guide.md")).unwrap();
     let intro_uri = url::Url::from_file_path(workspace.path().join("intro.md")).unwrap();
@@ -1856,7 +1803,10 @@ fn dsl_valid_document_has_no_dsl_diagnostics() {
                 || code.starts_with("dm.fence.")
         })
         .collect();
-    assert!(dsl_codes.is_empty(), "valid doc must have no DSL diagnostics: {dsl_codes:?}");
+    assert!(
+        dsl_codes.is_empty(),
+        "valid doc must have no DSL diagnostics: {dsl_codes:?}"
+    );
 
     fixture.shutdown();
 }
@@ -1871,10 +1821,10 @@ const SCHEMA_PROPERTY_DOC: &str = "---\ntitle: Review\n$schema:\n  spec: file(re
 
 #[test]
 fn schema_declared_property_and_json5_mermaid_have_no_dsl_diagnostics() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("review.md"), SCHEMA_PROPERTY_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("review.md")).unwrap();
     open(&fixture, uri.as_str(), SCHEMA_PROPERTY_DOC);
@@ -1906,7 +1856,10 @@ fn schema_declared_property_and_json5_mermaid_have_no_dsl_diagnostics() {
         .result
         .expect("interpolation hover");
     let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
-    assert!(hover_text.contains("file"), "schema type in hover: {hover_text}");
+    assert!(
+        hover_text.contains("file"),
+        "schema type in hover: {hover_text}"
+    );
     assert!(
         hover_text.contains("the specification file being reviewed"),
         "schema description in hover: {hover_text}"
@@ -1925,15 +1878,14 @@ fn schema_declared_property_and_json5_mermaid_have_no_dsl_diagnostics() {
 /// command inside the block is flagged with `dm.security.disallowed_command`,
 /// ranged on the offending body line, while a benign sibling line is not — and
 /// hovering a body command line shows the command with a policy verdict.
-const SHELL_BLOCK_DOC: &str =
-    "---\ntitle: Shell\n---\n\n# Shell\n\n::shell-block\necho hello\nrm -rf /tmp/danger\n::end-block\n";
+const SHELL_BLOCK_DOC: &str = "---\ntitle: Shell\n---\n\n# Shell\n\n::shell-block\necho hello\nrm -rf /tmp/danger\n::end-block\n";
 
 #[test]
 fn dsl_shell_block_body_disallowed_command_is_diagnosed() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), SHELL_BLOCK_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), SHELL_BLOCK_DOC);
@@ -1943,7 +1895,11 @@ fn dsl_shell_block_body_disallowed_command_is_diagnosed() {
         .iter()
         .filter(|diagnostic| diagnostic["code"] == json!("dm.security.disallowed_command"))
         .collect();
-    assert_eq!(security.len(), 1, "one shell-block line is disallowed: {diagnostics:?}");
+    assert_eq!(
+        security.len(),
+        1,
+        "one shell-block line is disallowed: {diagnostics:?}"
+    );
     // Ranged on the `rm -rf` body line (0-indexed line 8), not the benign echo.
     assert_eq!(
         security[0]["range"]["start"]["line"],
@@ -1957,10 +1913,10 @@ fn dsl_shell_block_body_disallowed_command_is_diagnosed() {
 
 #[test]
 fn dsl_shell_block_body_hover_shows_policy_verdict() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), SHELL_BLOCK_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), SHELL_BLOCK_DOC);
@@ -1978,8 +1934,14 @@ fn dsl_shell_block_body_hover_shows_policy_verdict() {
         .expect("shell-block body hover");
     let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
     assert!(hover_text.contains("Shell command"), "hover: {hover_text}");
-    assert!(hover_text.contains("echo hello"), "hover command: {hover_text}");
-    assert!(hover_text.contains("Policy:"), "hover verdict: {hover_text}");
+    assert!(
+        hover_text.contains("echo hello"),
+        "hover command: {hover_text}"
+    );
+    assert!(
+        hover_text.contains("Policy:"),
+        "hover verdict: {hover_text}"
+    );
 
     fixture.shutdown();
 }
@@ -1991,10 +1953,10 @@ const BENIGN_SHELL_BLOCK_DOC: &str =
 
 #[test]
 fn dsl_shell_block_benign_body_has_no_security_diagnostic() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), BENIGN_SHELL_BLOCK_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), BENIGN_SHELL_BLOCK_DOC);
@@ -2003,7 +1965,10 @@ fn dsl_shell_block_benign_body_has_no_security_diagnostic() {
     let has_security = diagnostics
         .iter()
         .any(|diagnostic| diagnostic["code"] == json!("dm.security.disallowed_command"));
-    assert!(!has_security, "benign shell block must not be flagged: {diagnostics:?}");
+    assert!(
+        !has_security,
+        "benign shell block must not be flagged: {diagnostics:?}"
+    );
 
     fixture.shutdown();
 }
@@ -2017,10 +1982,10 @@ const QUOTED_SHELL_BLOCK_DOC: &str =
 
 #[test]
 fn dsl_quoted_shell_block_body_disallowed_command_is_diagnosed() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), QUOTED_SHELL_BLOCK_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), QUOTED_SHELL_BLOCK_DOC);
@@ -2074,14 +2039,22 @@ fn collect_new_texts(edit: &Value) -> Vec<String> {
     if let Some(ops) = edit["documentChanges"].as_array() {
         for op in ops {
             if let Some(edits) = op["edits"].as_array() {
-                out.extend(edits.iter().filter_map(|e| e["newText"].as_str().map(str::to_string)));
+                out.extend(
+                    edits
+                        .iter()
+                        .filter_map(|e| e["newText"].as_str().map(str::to_string)),
+                );
             }
         }
     }
     if let Some(changes) = edit["changes"].as_object() {
         for edits in changes.values() {
             if let Some(edits) = edits.as_array() {
-                out.extend(edits.iter().filter_map(|e| e["newText"].as_str().map(str::to_string)));
+                out.extend(
+                    edits
+                        .iter()
+                        .filter_map(|e| e["newText"].as_str().map(str::to_string)),
+                );
             }
         }
     }
@@ -2106,8 +2079,8 @@ fn collect_edit_uris(edit: &Value) -> Vec<String> {
 
 #[test]
 fn formatting_is_byte_equivalent_to_library_cleanup() {
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
 
     let doc_uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -2138,10 +2111,10 @@ fn formatting_is_byte_equivalent_to_library_cleanup() {
 
 #[test]
 fn code_action_creates_missing_wiki_note() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("note.md"), "See [[NewNote]].\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
 
     let note_uri = url::Url::from_file_path(workspace.path().join("note.md")).unwrap();
@@ -2173,11 +2146,16 @@ fn code_action_creates_missing_wiki_note() {
             .is_some_and(|ops| {
                 ops.iter().any(|op| {
                     op["kind"] == json!("create")
-                        && op["uri"].as_str().is_some_and(|uri| uri.ends_with("NewNote.md"))
+                        && op["uri"]
+                            .as_str()
+                            .is_some_and(|uri| uri.ends_with("NewNote.md"))
                 })
             })
     });
-    assert!(creates_note, "expected a create-wiki-note action: {actions:?}");
+    assert!(
+        creates_note,
+        "expected a create-wiki-note action: {actions:?}"
+    );
 
     fixture.shutdown();
 }
@@ -2187,11 +2165,11 @@ const RENAME_DOC_B: &str = "See [[doc_a#Overview]].\n";
 
 #[test]
 fn heading_rename_rewrites_references() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc_a.md"), RENAME_DOC_A).unwrap();
     std::fs::write(workspace.path().join("doc_b.md"), RENAME_DOC_B).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
 
     let a_uri = url::Url::from_file_path(workspace.path().join("doc_a.md")).unwrap();
@@ -2240,11 +2218,11 @@ fn heading_rename_rewrites_references() {
 
 #[test]
 fn rename_refuses_ambiguous_heading() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let source = "# Same\n\ntext\n\n# Same\n";
     std::fs::write(workspace.path().join("dup.md"), source).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
 
     let uri = url::Url::from_file_path(workspace.path().join("dup.md")).unwrap();
@@ -2279,11 +2257,11 @@ fn rename_refuses_ambiguous_heading() {
 
 #[test]
 fn will_rename_files_updates_and_refuses() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("note1.md"), "See [[note2]].\n").unwrap();
     std::fs::write(workspace.path().join("note2.md"), "# Note Two\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
 
     let note1 = url::Url::from_file_path(workspace.path().join("note1.md")).unwrap();
@@ -2315,7 +2293,11 @@ fn will_rename_files_updates_and_refuses() {
         )
         .result
         .expect("willRenameFiles result");
-    assert_eq!(response, Value::Null, "rename onto an existing file must refuse");
+    assert_eq!(
+        response,
+        Value::Null,
+        "rename onto an existing file must refuse"
+    );
 
     fixture.shutdown();
 }
@@ -2324,7 +2306,8 @@ fn will_rename_files_updates_and_refuses() {
 
 #[test]
 fn initialize_advertises_period_completion_trigger() {
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     let result = fixture.initialize(json!({ "processId": null, "capabilities": {} }));
 
     // D3: `.` joins the trigger set without dropping any existing trigger.
@@ -2344,15 +2327,14 @@ fn initialize_advertises_period_completion_trigger() {
 
 /// A document whose frontmatter carries a `ctx.packages` key and whose body
 /// interpolates the same variable, so the two hover surfaces can be compared.
-const CTX_HOVER_DOC: &str =
-    "---\nctx:\n  packages: []\n---\n\n# Doc\n\nList: {{ ctx.packages }}\n";
+const CTX_HOVER_DOC: &str = "---\nctx:\n  packages: []\n---\n\n# Doc\n\nList: {{ ctx.packages }}\n";
 
 #[test]
 fn interpolation_ctx_hover_matches_frontmatter_block() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), CTX_HOVER_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), CTX_HOVER_DOC);
@@ -2374,7 +2356,10 @@ fn interpolation_ctx_hover_matches_frontmatter_block() {
         .result
         .expect("interpolation hover");
     let interpolation_text = hover["contents"]["value"].as_str().unwrap_or_default();
-    assert!(interpolation_text.contains("string[]"), "catalog type: {interpolation_text}");
+    assert!(
+        interpolation_text.contains("string[]"),
+        "catalog type: {interpolation_text}"
+    );
     assert!(
         interpolation_text.contains(&block),
         "catalog-backed block must be the shared formatter's bytes: {interpolation_text}"
@@ -2384,7 +2369,10 @@ fn interpolation_ctx_hover_matches_frontmatter_block() {
         "passive compose-time note must be appended: {interpolation_text}"
     );
     // The hover range is the complete `{{ ... }}` expression.
-    assert_eq!(hover["range"]["start"], json!({ "line": 7, "character": 6 }));
+    assert_eq!(
+        hover["range"]["start"],
+        json!({ "line": 7, "character": 6 })
+    );
     assert_eq!(hover["range"]["end"], json!({ "line": 7, "character": 24 }));
 
     // Frontmatter hover on the `packages` key under `ctx:` (line 2): the same
@@ -2422,10 +2410,10 @@ const INDEX_CTX_DOC: &str =
 
 #[test]
 fn interpolation_ctx_hover_surfaces_through_index_access() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), INDEX_CTX_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), INDEX_CTX_DOC);
@@ -2461,7 +2449,10 @@ fn interpolation_ctx_hover_surfaces_through_index_access() {
 
     // The hover range spans the complete `{{ ctx.packages[0] }}` expression
     // (D2): `{{` opens at column 6 and `}}` closes at column 27 (exclusive).
-    assert_eq!(hover["range"]["start"], json!({ "line": 7, "character": 6 }));
+    assert_eq!(
+        hover["range"]["start"],
+        json!({ "line": 7, "character": 6 })
+    );
     assert_eq!(hover["range"]["end"], json!({ "line": 7, "character": 27 }));
 
     fixture.shutdown();
@@ -2474,10 +2465,10 @@ const ASTRAL_CTX_COMPLETION_DOC: &str = "# Doc\n\n💡 {{ ctx.pa\n";
 
 #[test]
 fn ctx_completion_shape_under_utf16_astral_prefix() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), ASTRAL_CTX_COMPLETION_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     // VS Code-like client: offers UTF-16 only, so positions are UTF-16 columns.
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
@@ -2504,12 +2495,21 @@ fn ctx_completion_shape_under_utf16_astral_prefix() {
     assert_eq!(packages["kind"], json!(6), "kind VARIABLE: {packages:?}");
     assert_eq!(packages["detail"], json!("string[]"));
     assert_eq!(packages["documentation"]["kind"], json!("markdown"));
-    assert_eq!(packages["documentation"]["value"], json!(descriptor.description));
+    assert_eq!(
+        packages["documentation"]["value"],
+        json!(descriptor.description)
+    );
     // The eager `textEdit` replaces exactly the typed token, in UTF-16 columns
     // (start 6, not the byte column 8 — the astral 💡 counts as two units).
     assert_eq!(packages["textEdit"]["newText"], json!("ctx.packages"));
-    assert_eq!(packages["textEdit"]["range"]["start"], json!({ "line": 2, "character": 6 }));
-    assert_eq!(packages["textEdit"]["range"]["end"], json!({ "line": 2, "character": 12 }));
+    assert_eq!(
+        packages["textEdit"]["range"]["start"],
+        json!({ "line": 2, "character": 6 })
+    );
+    assert_eq!(
+        packages["textEdit"]["range"]["end"],
+        json!({ "line": 2, "character": 12 })
+    );
 
     fixture.shutdown();
 }
@@ -2518,10 +2518,10 @@ const FUNCTION_COMPLETION_DOC: &str = "# Doc\n\nValue: {{ len\n";
 
 #[test]
 fn function_completion_shape() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), FUNCTION_COMPLETION_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), FUNCTION_COMPLETION_DOC);
@@ -2552,9 +2552,18 @@ fn function_completion_shape() {
         "fallible typed signature must carry `| error`: {length:?}"
     );
     assert_eq!(length["documentation"]["kind"], json!("markdown"));
-    assert_eq!(length["documentation"]["value"], json!(descriptor.description));
-    assert_eq!(length["textEdit"]["range"]["start"], json!({ "line": 2, "character": 10 }));
-    assert_eq!(length["textEdit"]["range"]["end"], json!({ "line": 2, "character": 13 }));
+    assert_eq!(
+        length["documentation"]["value"],
+        json!(descriptor.description)
+    );
+    assert_eq!(
+        length["textEdit"]["range"]["start"],
+        json!({ "line": 2, "character": 10 })
+    );
+    assert_eq!(
+        length["textEdit"]["range"]["end"],
+        json!({ "line": 2, "character": 13 })
+    );
 
     fixture.shutdown();
 }
@@ -2563,10 +2572,10 @@ const FUNCTION_HOVER_DOC: &str = "# Doc\n\nA: {{ as_csv(items) }} and {{ mystery
 
 #[test]
 fn function_call_hover_known_and_unknown() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), FUNCTION_HOVER_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), FUNCTION_HOVER_DOC);
@@ -2589,7 +2598,10 @@ fn function_call_hover_known_and_unknown() {
         "known function renders the catalog block: {hover_text}"
     );
     // The hover range remains the complete `{{ ... }}` expression.
-    assert_eq!(hover["range"]["start"], json!({ "line": 2, "character": 3 }));
+    assert_eq!(
+        hover["range"]["start"],
+        json!({ "line": 2, "character": 3 })
+    );
     assert_eq!(hover["range"]["end"], json!({ "line": 2, "character": 22 }));
 
     // Hover inside `mystery(...)` keeps the generic parsed-expression hover.
@@ -2622,11 +2634,14 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
         .iter()
         .filter(|descriptor| {
             (descriptor.category == "Repository" && descriptor.subsection == "Git")
-                || (descriptor.category == "File Changes"
-                    && descriptor.subsection == "Conflicts")
+                || (descriptor.category == "File Changes" && descriptor.subsection == "Conflicts")
         })
         .collect();
-    assert_eq!(git_context.len(), 3, "the shipped Git context descriptor set changed");
+    assert_eq!(
+        git_context.len(),
+        3,
+        "the shipped Git context descriptor set changed"
+    );
     assert_eq!(
         git_context
             .iter()
@@ -2681,7 +2696,12 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
         let completion_character = completion_source.len() as u32;
         text.push_str(&completion_source);
         text.push('\n');
-        context_positions.push((*descriptor, hover_line, completion_line, completion_character));
+        context_positions.push((
+            *descriptor,
+            hover_line,
+            completion_line,
+            completion_character,
+        ));
     }
     let mut function_positions = Vec::new();
     for function in &git_functions {
@@ -2703,11 +2723,11 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
         function_positions.push((*function, hover_line, completion_line, completion_character));
     }
 
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("doc.md");
     std::fs::write(&path, &text).unwrap();
     let uri = url::Url::from_file_path(&path).unwrap();
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), &text);
 
@@ -2731,7 +2751,10 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
             .unwrap_or_else(|| panic!("completion missing catalog descriptor `{label}`"));
         assert_eq!(item["detail"], json!(descriptor.display_type.to_string()));
         assert_eq!(item["documentation"]["kind"], json!("markdown"));
-        assert_eq!(item["documentation"]["value"], json!(descriptor.description));
+        assert_eq!(
+            item["documentation"]["value"],
+            json!(descriptor.description)
+        );
 
         let hover = fixture
             .request(
@@ -2773,13 +2796,13 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
                 item["label"] == json!(function.signature)
                     && item["textEdit"]["newText"] == json!(function_name)
             })
-            .unwrap_or_else(|| {
-                panic!("completion missing Git signature `{}`", function.signature)
-            });
+            .unwrap_or_else(|| panic!("completion missing Git signature `{}`", function.signature));
         assert_eq!(item["detail"], json!(function.typed_signature()));
         assert_eq!(item["documentation"]["value"], json!(function.description));
 
-        let Some(hover_line) = hover_line else { continue };
+        let Some(hover_line) = hover_line else {
+            continue;
+        };
         let hover = fixture
             .request(
                 "textDocument/hover",
@@ -2804,10 +2827,10 @@ const PROSE_PERIOD_DOC: &str = "# Doc\n\nplain prose ctx.\n";
 
 #[test]
 fn period_trigger_outside_interpolation_offers_nothing() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("doc.md"), PROSE_PERIOD_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), PROSE_PERIOD_DOC);
@@ -2858,7 +2881,13 @@ struct Tok {
 }
 
 fn tok(line: u32, character: u32, length: u32, token_type: u32, modifiers: u32) -> Tok {
-    Tok { line, character, length, token_type, modifiers }
+    Tok {
+        line,
+        character,
+        length,
+        token_type,
+        modifiers,
+    }
 }
 
 /// A minimal valid `textDocument.semanticTokens` client capability.
@@ -2887,8 +2916,14 @@ fn semantic_capable_params(root: &std::path::Path, encoding: &str, refresh: bool
 /// Reverses the LSP relative-delta encoding in a semantic-token response back to
 /// absolute `(line, character, length, type, modifiers)` tuples.
 fn decode_tokens(result: &Value) -> Vec<Tok> {
-    let data = result["data"].as_array().expect("semantic-token data array");
-    assert_eq!(data.len() % 5, 0, "token data must be 5-integer groups: {data:?}");
+    let data = result["data"]
+        .as_array()
+        .expect("semantic-token data array");
+    assert_eq!(
+        data.len() % 5,
+        0,
+        "token data must be 5-integer groups: {data:?}"
+    );
     let mut out = Vec::new();
     let mut line = 0u32;
     let mut character = 0u32;
@@ -2912,16 +2947,19 @@ fn decode_tokens(result: &Value) -> Vec<Tok> {
     out
 }
 
-fn semantic_full(fixture: &mut ClientFixture, uri: &str) -> Vec<Tok> {
+fn semantic_full(fixture: &mut LspFixture<'_>, uri: &str) -> Vec<Tok> {
     let result = fixture
-        .request("textDocument/semanticTokens/full", json!({ "textDocument": { "uri": uri } }))
+        .request(
+            "textDocument/semanticTokens/full",
+            json!({ "textDocument": { "uri": uri } }),
+        )
         .result
         .expect("full semantic tokens");
     decode_tokens(&result)
 }
 
 fn semantic_range(
-    fixture: &mut ClientFixture,
+    fixture: &mut LspFixture<'_>,
     uri: &str,
     start: (u32, u32),
     end: (u32, u32),
@@ -2952,7 +2990,10 @@ fn assert_ordered_nonoverlapping(tokens: &[Tok]) {
             "tokens not strictly (line, char)-ordered: {a:?} then {b:?}"
         );
         if a.line == b.line {
-            assert!(a.character + a.length <= b.character, "tokens overlap: {a:?} then {b:?}");
+            assert!(
+                a.character + a.length <= b.character,
+                "tokens overlap: {a:?} then {b:?}"
+            );
         }
     }
 }
@@ -2962,14 +3003,16 @@ fn semantic_tokens_capability_is_gated_on_client_support() {
     // Criterion 6: only a client advertising `textDocument.semanticTokens` sees
     // the provider capability, and it publishes the frozen V1 legend with full +
     // range and no delta support.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
 
-    let mut capable = ClientFixture::start();
+    let mut capable = LspFixture::start(&workspace);
     let result = capable.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let provider = result["capabilities"]["semanticTokensProvider"].clone();
     assert_eq!(
         provider["legend"]["tokenTypes"],
-        json!(["macro", "function", "variable", "property", "string", "number", "operator"]),
+        json!([
+            "macro", "function", "variable", "property", "string", "number", "operator"
+        ]),
         "capable client must receive the frozen token-type legend: {provider}"
     );
     assert_eq!(
@@ -2986,14 +3029,25 @@ fn semantic_tokens_capability_is_gated_on_client_support() {
         ]),
         "capable client must receive the frozen modifier legend: {provider}"
     );
-    assert_eq!(provider["full"], json!(true), "full support advertised: {provider}");
-    assert_eq!(provider["range"], json!(true), "range support advertised: {provider}");
-    assert!(provider["delta"].is_null(), "v1 advertises no delta support: {provider}");
+    assert_eq!(
+        provider["full"],
+        json!(true),
+        "full support advertised: {provider}"
+    );
+    assert_eq!(
+        provider["range"],
+        json!(true),
+        "range support advertised: {provider}"
+    );
+    assert!(
+        provider["delta"].is_null(),
+        "v1 advertises no delta support: {provider}"
+    );
     capable.shutdown();
 
     // An incapable client (default Neovim params carry no `semanticTokens`
     // capability) sees no provider entry at all.
-    let mut incapable = ClientFixture::start();
+    let mut incapable = LspFixture::start(&workspace);
     let result = incapable.initialize(neovim_like_initialize_params(workspace.path()));
     assert!(
         result["capabilities"]["semanticTokensProvider"].is_null(),
@@ -3006,11 +3060,11 @@ fn semantic_tokens_capability_is_gated_on_client_support() {
 fn semantic_tokens_full_interpolations_ordinary_inert_and_multiline() {
     // Criteria 1 and 4: an ordinary `{{ }}` interpolation, a `{{{ }}}` inert
     // literal, and a multi-line interpolation split into one token per line.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "{{ title }} and {{{ verbatim }}}\n{{ a\nb }}\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3034,11 +3088,11 @@ fn semantic_tokens_full_interpolations_ordinary_inert_and_multiline() {
 fn semantic_tokens_full_directive_token_classes() {
     // Criterion 2: keyword, structured target, option key, and option value, plus
     // the `closer` modifier on a structural closer.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "::file ./doc.md when=env.DEBUG\n::end-block\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3047,10 +3101,10 @@ fn semantic_tokens_full_directive_token_classes() {
     assert_eq!(
         full,
         vec![
-            tok(0, 0, 6, TT_MACRO, TM_DIRECTIVE),      // ::file
-            tok(0, 7, 8, TT_STRING, TM_DIRECTIVE),     // ./doc.md
-            tok(0, 16, 4, TT_PROPERTY, TM_DIRECTIVE),  // when
-            tok(0, 21, 9, TT_STRING, TM_DIRECTIVE),    // env.DEBUG
+            tok(0, 0, 6, TT_MACRO, TM_DIRECTIVE),              // ::file
+            tok(0, 7, 8, TT_STRING, TM_DIRECTIVE),             // ./doc.md
+            tok(0, 16, 4, TT_PROPERTY, TM_DIRECTIVE),          // when
+            tok(0, 21, 9, TT_STRING, TM_DIRECTIVE),            // env.DEBUG
             tok(1, 0, 11, TT_MACRO, TM_DIRECTIVE | TM_CLOSER), // ::end-block
         ]
     );
@@ -3063,12 +3117,12 @@ fn semantic_tokens_full_directive_token_classes() {
 fn semantic_tokens_full_wiki_segments_identical_for_resolved_and_unresolved() {
     // Criterion 3: bracket/separator machinery is `macro.wiki`, inner segments are
     // `string.wiki`, and the token shape is identical whether the target resolves.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("Target.md"), "# Target\n").unwrap();
     let text = "[[doc#H|Alias]]\n\n[[Target]] and [[Missing]]\n";
     std::fs::write(workspace.path().join("Source.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("Source.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3077,7 +3131,11 @@ fn semantic_tokens_full_wiki_segments_identical_for_resolved_and_unresolved() {
     assert_ordered_nonoverlapping(&full);
 
     // `[[doc#H|Alias]]`: brackets and `#`/`|` separators macro.wiki, segments string.wiki.
-    let line0: Vec<Tok> = full.iter().copied().filter(|token| token.line == 0).collect();
+    let line0: Vec<Tok> = full
+        .iter()
+        .copied()
+        .filter(|token| token.line == 0)
+        .collect();
     assert_eq!(
         line0,
         vec![
@@ -3093,12 +3151,21 @@ fn semantic_tokens_full_wiki_segments_identical_for_resolved_and_unresolved() {
 
     // The resolved `[[Target]]` and the unresolved `[[Missing]]` share a shape.
     let shape = |tokens: &[Tok]| {
-        tokens.iter().map(|token| (token.token_type, token.modifiers)).collect::<Vec<_>>()
+        tokens
+            .iter()
+            .map(|token| (token.token_type, token.modifiers))
+            .collect::<Vec<_>>()
     };
-    let resolved: Vec<Tok> =
-        full.iter().copied().filter(|token| token.line == 2 && token.character < 11).collect();
-    let unresolved: Vec<Tok> =
-        full.iter().copied().filter(|token| token.line == 2 && token.character >= 15).collect();
+    let resolved: Vec<Tok> = full
+        .iter()
+        .copied()
+        .filter(|token| token.line == 2 && token.character < 11)
+        .collect();
+    let unresolved: Vec<Tok> = full
+        .iter()
+        .copied()
+        .filter(|token| token.line == 2 && token.character >= 15)
+        .collect();
     assert_eq!(
         shape(&resolved),
         shape(&unresolved),
@@ -3112,12 +3179,12 @@ fn semantic_tokens_full_wiki_segments_identical_for_resolved_and_unresolved() {
 fn semantic_tokens_encoding_utf8_vs_utf16_on_non_ascii() {
     // Criterion 4: the same interpolation lands at a different column in UTF-8 vs
     // UTF-16 because the preceding `é` is two bytes but one UTF-16 unit.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "é {{ x }}\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
 
-    let mut utf8 = ClientFixture::start();
+    let mut utf8 = LspFixture::start(&workspace);
     utf8.initialize(semantic_capable_params(workspace.path(), "utf-8", false));
     open(&utf8, uri.as_str(), text);
     let utf8_tokens = semantic_full(&mut utf8, uri.as_str());
@@ -3125,7 +3192,7 @@ fn semantic_tokens_encoding_utf8_vs_utf16_on_non_ascii() {
     assert_eq!(utf8_tokens, vec![tok(0, 3, 7, TT_MACRO, TM_INTERPOLATION)]);
     utf8.shutdown();
 
-    let mut utf16 = ClientFixture::start();
+    let mut utf16 = LspFixture::start(&workspace);
     utf16.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     open(&utf16, uri.as_str(), text);
     let utf16_tokens = semantic_full(&mut utf16, uri.as_str());
@@ -3138,11 +3205,11 @@ fn semantic_tokens_encoding_utf8_vs_utf16_on_non_ascii() {
 fn semantic_tokens_crlf_multiline_splits_per_line() {
     // Criterion 4: a multi-line interpolation in a CRLF document splits per line,
     // excluding the line terminators.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "{{ a\r\nb }}\r\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3165,11 +3232,11 @@ fn semantic_tokens_range_is_full_intersected() {
     // Criterion 9: a range response is exactly the full response intersected and
     // clipped to the requested half-open range — including a boundary inside a
     // token and a range that crosses a line ending.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "{{aaa}} {{bbb}}\nzz {{ccc}}\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3214,11 +3281,11 @@ fn semantic_tokens_family_precedence_full_and_range() {
     // Criterion 10: an interpolation inside a directive option value proves F1
     // owns the `{{ }}` bytes and clips the F2 string around it, and the wiki
     // separators exercise structural-subtoken precedence — for both requests.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "::file ./z.md when=\"{{ e }}\"\nSee [[doc#H]] here.\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3262,11 +3329,11 @@ fn semantic_tokens_master_switch_toggles_and_requests_refresh() {
     // Criterion 7: a runtime `true -> false -> true` master-switch transition
     // suppresses and restores emission without a restart, requesting a refresh
     // each time the capable client honors one.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "Body {{ title }} here.\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", true));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3309,11 +3376,11 @@ fn semantic_tokens_two_configs_issue_distinct_refreshes_routed_through_loop() {
     // `workspace/semanticTokens/refresh` request ids, and routing a success and
     // an error `Message::Response` back into the `RefreshLedger` must neither
     // terminate nor disturb the session.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "Body {{ title }} here.\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", true));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3370,11 +3437,11 @@ fn semantic_tokens_two_configs_issue_distinct_refreshes_routed_through_loop() {
 fn semantic_tokens_config_applies_without_refresh_capability() {
     // Criterion 7: a client that does not honor refresh still sees the new config
     // on every later request, and the server sends no refresh it cannot use.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "Body {{ title }} here.\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3396,7 +3463,7 @@ fn semantic_tokens_config_applies_without_refresh_capability() {
     );
     assert!(
         !fixture
-            .server_requests
+            .buffered_server_requests()
             .iter()
             .any(|request| request.method == "workspace/semanticTokens/refresh"),
         "a refresh must not be sent to a client that does not support it"
@@ -3409,11 +3476,11 @@ fn semantic_tokens_config_applies_without_refresh_capability() {
 fn semantic_tokens_wiki_enable_suppresses_only_f4() {
     // Criterion 7: `wiki.enable = false` drops F4 wiki tokens while leaving F1
     // interpolation tokens untouched.
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "{{ a }} [[doc]]\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", false));
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3430,7 +3497,9 @@ fn semantic_tokens_wiki_enable_suppresses_only_f4() {
     );
     let suppressed = semantic_full(&mut fixture, uri.as_str());
     assert!(
-        suppressed.iter().all(|token| token.modifiers & TM_WIKI == 0),
+        suppressed
+            .iter()
+            .all(|token| token.modifiers & TM_WIKI == 0),
         "wiki.enable = false must suppress every F4 token: {suppressed:?}"
     );
     assert_eq!(
@@ -3444,19 +3513,22 @@ fn semantic_tokens_wiki_enable_suppresses_only_f4() {
 
 #[test]
 fn meta_schema_phase1_schema_hover_uses_nominal_type() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "---\n$schema:\n  title: string\ntitle: Hello\n---\nBody\n";
     let path = workspace.path().join("doc.md");
     std::fs::write(&path, text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), text);
 
     let markup = hover_markup(&mut fixture, uri.as_str(), 1, 2);
     println!("{markup}");
-    assert!(markup.contains("Type: **schema**"), "schema hover: {markup}");
+    assert!(
+        markup.contains("Type: **schema**"),
+        "schema hover: {markup}"
+    );
     assert!(!markup.contains("Type: **any**"), "schema hover: {markup}");
     assert!(
         markup.contains("Declares an inline SimplifiedSchema mapping"),
@@ -3468,7 +3540,7 @@ fn meta_schema_phase1_schema_hover_uses_nominal_type() {
 
 #[test]
 fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let valid = concat!(
         "---\n",
         "$schema:\n",
@@ -3497,7 +3569,7 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
     let invalid_path = workspace.path().join("invalid.md");
     std::fs::write(&invalid_path, invalid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let valid_uri = url::Url::from_file_path(valid_path).unwrap();
@@ -3507,7 +3579,10 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
     assert!(hover.contains("Declares: **string | object**"), "{hover}");
     assert!(hover.contains("Required"), "{hover}");
     let quoted_hover = hover_markup(&mut fixture, valid_uri.as_str(), 7, 3);
-    assert!(quoted_hover.contains("Declares: **number**"), "{quoted_hover}");
+    assert!(
+        quoted_hover.contains("Declares: **number**"),
+        "{quoted_hover}"
+    );
     assert!(quoted_hover.contains("Required"), "{quoted_hover}");
 
     let partial_uri = url::Url::from_file_path(partial_path).unwrap();
@@ -3536,9 +3611,7 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
     let diagnostics = fixture.wait_for_diagnostics(invalid_uri.as_str());
     let specialized: Vec<&Value> = diagnostics
         .iter()
-        .filter(|diagnostic| {
-            diagnostic["code"] == json!("dm.schema.invalid_type_definition")
-        })
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition"))
         .collect();
     assert_eq!(specialized.len(), 1, "{diagnostics:?}");
     assert!(
@@ -3547,15 +3620,21 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
             .all(|diagnostic| diagnostic["code"] != json!("dm.schema.constraint")),
         "the generic keyword failure is replaced: {diagnostics:?}"
     );
-    assert_eq!(specialized[0]["range"]["start"], json!({ "line": 3, "character": 12 }));
-    assert_eq!(specialized[0]["range"]["end"], json!({ "line": 3, "character": 24 }));
+    assert_eq!(
+        specialized[0]["range"]["start"],
+        json!({ "line": 3, "character": 12 })
+    );
+    assert_eq!(
+        specialized[0]["range"]["end"],
+        json!({ "line": 3, "character": 24 })
+    );
 
     fixture.shutdown();
 }
 
 #[test]
 fn schema_definition_errors_are_independent_and_property_ranged() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = concat!(
         "---\n",
         "$schema:\n",
@@ -3568,7 +3647,7 @@ fn schema_definition_errors_are_independent_and_property_ranged() {
     let path = workspace.path().join("aggregate-errors.md");
     std::fs::write(&path, text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3622,7 +3701,7 @@ fn eager_catalog_description() -> &'static str {
 
 #[test]
 fn eager_schema_fixture_is_clean_and_catalog_driven() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     // `spec` is declared `file(eager)` and deliberately omitted: eager alone
     // never obliges presence, so an absent eager-only property is clean.
     let text = concat!(
@@ -3646,7 +3725,7 @@ fn eager_schema_fixture_is_clean_and_catalog_driven() {
     let partial_path = workspace.path().join("eager-completion.md");
     std::fs::write(&partial_path, partial).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -3716,12 +3795,12 @@ const STRICT_EAGER_ABSENCE_DOC: &str = concat!(
 
 #[test]
 fn strict_mode_diagnoses_absent_required_eager_but_never_absent_eager_only() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
     let path = workspace.path().join("absence.md");
     std::fs::write(&path, STRICT_EAGER_ABSENCE_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(&path).unwrap();
     open(&fixture, uri.as_str(), STRICT_EAGER_ABSENCE_DOC);
@@ -3884,10 +3963,10 @@ const STRICT_REQUIRED_COUNT_CASES: &[(&str, &str, &[&str], u32)] = &[
 
 #[test]
 fn strict_mode_reports_every_absent_required_property_at_any_required_count() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     for (stem, document, expected, fence_line) in STRICT_REQUIRED_COUNT_CASES {
@@ -3965,11 +4044,11 @@ const SUPPLIED_EAGER_VALUE_DOC: &str = concat!(
 
 #[test]
 fn supplied_invalid_eager_values_are_diagnosed_on_the_value_range() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("supplied.md");
     std::fs::write(&path, SUPPLIED_EAGER_VALUE_DOC).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(&path).unwrap();
     open(&fixture, uri.as_str(), SUPPLIED_EAGER_VALUE_DOC);
@@ -4057,7 +4136,7 @@ const INSTANCE_KEY: (u32, u32) = (3, 0);
 /// contrast. Each declaration gets its own file so an earlier fixture's
 /// diagnostics or overlay state cannot leak into the next.
 fn hover_surfaces(
-    fixture: &mut ClientFixture,
+    fixture: &mut LspFixture<'_>,
     workspace: &std::path::Path,
     name: &str,
     declaration: &str,
@@ -4095,8 +4174,8 @@ const HOVER_MATRIX: &[(&str, &str, bool, bool)] = &[
 
 #[test]
 fn eager_and_required_hover_independently_on_both_surfaces() {
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let description = eager_catalog_description();
 
@@ -4156,8 +4235,8 @@ fn eager_and_required_hover_independently_on_both_surfaces() {
 /// the flat matrix above proves, without gaining a presence marker.
 #[test]
 fn union_arms_and_nested_properties_disclose_eager_without_presence() {
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let description = eager_catalog_description();
 
@@ -4251,7 +4330,7 @@ fn union_arms_and_nested_properties_disclose_eager_without_presence() {
 
 #[test]
 fn original_voip_schema_definitions_are_clean() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = concat!(
         "$schema: \n",
         "    prompt: string(required;eager)\n",
@@ -4262,7 +4341,7 @@ fn original_voip_schema_definitions_are_clean() {
     let path = workspace.path().join("voip-schema.yaml");
     std::fs::write(&path, text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -4279,7 +4358,7 @@ fn original_voip_schema_definitions_are_clean() {
 
 #[test]
 fn referenced_schema_conversion_error_keeps_origin_and_reference_fallback() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let schema = "$schema:\n  bad_string: string(integer)\n";
     let schema_path = workspace.path().join("schema.yaml");
     std::fs::write(&schema_path, schema).unwrap();
@@ -4288,7 +4367,7 @@ fn referenced_schema_conversion_error_keeps_origin_and_reference_fallback() {
     let path = workspace.path().join("document.md");
     std::fs::write(&path, text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     let schema_uri = url::Url::from_file_path(schema_path.canonicalize().unwrap()).unwrap();
@@ -4326,7 +4405,7 @@ fn referenced_schema_conversion_error_keeps_origin_and_reference_fallback() {
 /// below offered completion but no hover.
 #[test]
 fn meta_schema_hover_covers_entries_nested_under_semantic_owners() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
 
     // (file, text, hover line, hover character, expected `Declares:` value)
     let cases = [
@@ -4360,7 +4439,7 @@ fn meta_schema_hover_covers_entries_nested_under_semantic_owners() {
         ),
     ];
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     for (name, text, line, character, declares) in cases {
         let path = workspace.path().join(name);
@@ -4368,8 +4447,14 @@ fn meta_schema_hover_covers_entries_nested_under_semantic_owners() {
         let uri = url::Url::from_file_path(path).unwrap();
         open(&fixture, uri.as_str(), text);
         let hover = hover_markup(&mut fixture, uri.as_str(), line, character);
-        assert!(hover.contains("Type: **type-definition**"), "{name}: {hover}");
-        assert!(hover.contains(&format!("Declares: **{declares}**")), "{name}: {hover}");
+        assert!(
+            hover.contains("Type: **type-definition**"),
+            "{name}: {hover}"
+        );
+        assert!(
+            hover.contains(&format!("Declares: **{declares}**")),
+            "{name}: {hover}"
+        );
         assert!(hover.contains("Required"), "{name}: {hover}");
     }
     fixture.shutdown();
@@ -4384,7 +4469,7 @@ fn meta_schema_hover_covers_entries_nested_under_semantic_owners() {
 /// so `<string>` and friends parsed and had spans but never became hoverable.
 #[test]
 fn meta_schema_hover_covers_pattern_keys_inline_and_standalone() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
 
     const BODY: &str = concat!(
         "  \"<string>\": string(required)\n",
@@ -4403,7 +4488,7 @@ fn meta_schema_hover_covers_pattern_keys_inline_and_standalone() {
         ("tagged.yaml", format!("kind: schema\ntypes:\n{BODY}"), 2),
     ];
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let inline_path = workspace.path().join("inline.md");
@@ -4414,7 +4499,10 @@ fn meta_schema_hover_covers_pattern_keys_inline_and_standalone() {
         let line = 2 + index as u32;
         // Character 4 sits inside the quoted `<…>` key on every line.
         let hover = hover_markup(&mut fixture, inline_uri.as_str(), line, 4);
-        assert!(hover.contains("Type: **type-definition**"), "inline line {line}: {hover}");
+        assert!(
+            hover.contains("Type: **type-definition**"),
+            "inline line {line}: {hover}"
+        );
         assert!(
             hover.contains(&format!("Declares: **{declares}**")),
             "inline line {line}: {hover}"
@@ -4451,25 +4539,34 @@ fn meta_schema_hover_covers_pattern_keys_inline_and_standalone() {
 /// nothing but an autolink and must still hover as one.
 #[test]
 fn markdown_autolink_hover_survives_standalone_schema_arbitration() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "# Doc\n\n<starting::x-509>\n";
     let path = workspace.path().join("doc.md");
     std::fs::write(&path, text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), text);
     let autolink = hover_markup(&mut fixture, uri.as_str(), 2, 5);
-    assert!(autolink.contains("Unresolved link"), "autolink hover: {autolink}");
+    assert!(
+        autolink.contains("Unresolved link"),
+        "autolink hover: {autolink}"
+    );
     fixture.shutdown();
 }
 
 #[test]
 fn meta_schema_phase7_standalone_pure_and_tagged_completion() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let cases = [
-        ("pure.yaml", "$schema:\n  title: str\n", 1u32, 12u32, "string"),
+        (
+            "pure.yaml",
+            "$schema:\n  title: str\n",
+            1u32,
+            12u32,
+            "string",
+        ),
         (
             "pure-union.yaml",
             "$schema:\n  - ./sch\n",
@@ -4486,7 +4583,7 @@ fn meta_schema_phase7_standalone_pure_and_tagged_completion() {
         ),
     ];
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     for (name, text, line, character, expected) in cases {
         let path = workspace.path().join(name);
@@ -4531,13 +4628,21 @@ fn meta_schema_standalone_scalar_reference_completion() {
         ("complete.yaml", "$schema: ./schema.yaml\n", 22),
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     for (name, body, character) in cases {
         for crlf in [false, true] {
-            let text = if crlf { body.replace('\n', "\r\n") } else { body.to_string() };
-            let file = if crlf { format!("crlf-{name}") } else { name.to_string() };
+            let text = if crlf {
+                body.replace('\n', "\r\n")
+            } else {
+                body.to_string()
+            };
+            let file = if crlf {
+                format!("crlf-{name}")
+            } else {
+                name.to_string()
+            };
             let path = workspace.path().join(&file);
             std::fs::write(&path, &text).unwrap();
             let uri = url::Url::from_file_path(path).unwrap();
@@ -4561,7 +4666,11 @@ fn meta_schema_standalone_scalar_reference_completion() {
             // accepted candidate overwrites what was typed rather than
             // appending to it.
             let range = &offered["textEdit"]["range"];
-            assert_eq!(range["end"], json!({ "line": 0, "character": character }), "{file}");
+            assert_eq!(
+                range["end"],
+                json!({ "line": 0, "character": character }),
+                "{file}"
+            );
             assert_eq!(range["start"]["line"], json!(0), "{file}");
             assert_eq!(range["start"]["character"], json!(9), "{file}");
         }
@@ -4574,13 +4683,13 @@ fn meta_schema_standalone_scalar_reference_completion() {
 /// form relies on.
 #[test]
 fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let valid = "$schema: ./schema.yaml\n";
     let malformed = "$schema: ./schema.yaml\n\tbad\n";
     let path = workspace.path().join("scalar-reference.yaml");
     std::fs::write(&path, valid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), valid);
@@ -4625,13 +4734,13 @@ fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() 
 
 #[test]
 fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnostic() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let valid = "$schema:\n  title: string\n";
     let malformed = "$schema:\n  title: str\n";
     let path = workspace.path().join("schema.yaml");
     std::fs::write(&path, valid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), valid);
@@ -4646,9 +4755,9 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
     );
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
-        diagnostics.iter().any(|diagnostic| {
-            diagnostic["code"] == json!("dm.schema.invalid_type_definition")
-        }),
+        diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic["code"] == json!("dm.schema.invalid_type_definition") }),
         "the current malformed definition owns diagnostics: {diagnostics:?}"
     );
 
@@ -4679,13 +4788,13 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
 
 #[test]
 fn meta_schema_explicit_mapping_pairs_retain_last_good_assistance() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let valid = "? kind\n: schema\n? types\n:\n  title: string\n";
     let malformed = "? kind\n: schema\n? types\n:\n  title: nope\n";
     let path = workspace.path().join("explicit-mapping.yaml");
     std::fs::write(&path, valid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), valid);
@@ -4733,7 +4842,7 @@ fn meta_schema_explicit_mapping_pairs_retain_last_good_assistance() {
 
 #[test]
 fn meta_schema_compact_explicit_pair_union_keeps_schema_assistance() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let source = concat!(
         "kind: schema\n",
         "types:\n",
@@ -4745,7 +4854,7 @@ fn meta_schema_compact_explicit_pair_union_keeps_schema_assistance() {
     let path = workspace.path().join("compact-explicit-mapping.yaml");
     std::fs::write(&path, source).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), source);
@@ -4786,13 +4895,13 @@ fn meta_schema_compact_explicit_pair_union_keeps_schema_assistance() {
 /// serving the last-good model.
 #[test]
 fn meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let valid = "types:\n  title: string\nkind: schema\n";
     let malformed = "types:\n  title: foo-\"bar\nkind: schema\n";
     let path = workspace.path().join("types-first.yaml");
     std::fs::write(&path, valid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), valid);
@@ -4859,7 +4968,7 @@ fn meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit
 /// same source positions.
 #[test]
 fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let malformed = "description: foo{ \"bar\nkind: schema\ntypes:\n  title: nope\n";
     let poison_line_len = malformed.lines().next().unwrap().len();
     let valid = format!(
@@ -4869,7 +4978,7 @@ fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
     let path = workspace.path().join("block-plain-flow-indicator.yaml");
     std::fs::write(&path, &valid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), &valid);
@@ -4918,13 +5027,13 @@ fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
 /// mid-token even though whitespace follows it, so the quote remains inert.
 #[test]
 fn meta_schema_standalone_flow_types_first_retains_last_good_across_plain_quote_edit() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let valid = "{types: {title: string}, kind: schema}\n";
     let malformed = "{types: {title: foo- \"bar}, kind: schema}\n";
     let path = workspace.path().join("flow-types-first.yaml");
     std::fs::write(&path, valid).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), valid);
@@ -4994,8 +5103,8 @@ fn meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit(
         ),
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     for (name, valid, malformed, hover_character) in cases {
@@ -5095,8 +5204,8 @@ fn meta_schema_standalone_flow_completion_locates_the_cursor_structurally() {
         ),
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     for (name, valid, malformed, character, label) in cases {
@@ -5146,9 +5255,9 @@ fn meta_schema_standalone_flow_completion_locates_the_cursor_structurally() {
 
 #[test]
 fn meta_schema_phase7_shipped_schema_provider_path() {
-    let workspace = tempfile::tempdir().unwrap();
-    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../docs/schemas/darkmatter.yaml");
+    let workspace = LspWorkspace::new();
+    let shipped =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas/darkmatter.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
     let path = workspace.path().join("darkmatter.yaml");
     std::fs::write(&path, &text).unwrap();
@@ -5163,7 +5272,7 @@ fn meta_schema_phase7_shipped_schema_provider_path() {
         .and_then(|line| line.find("$schema"))
         .expect("shipped $schema column") as u32;
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), &text);
@@ -5178,14 +5287,14 @@ fn meta_schema_phase7_shipped_schema_provider_path() {
 
 #[test]
 fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
-    let workspace = tempfile::tempdir().unwrap();
-    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../docs/schemas/darkmatter.yaml");
+    let workspace = LspWorkspace::new();
+    let shipped =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas/darkmatter.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
     let path = workspace.path().join("darkmatter.yaml");
     std::fs::write(&path, &text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), &text);
@@ -5205,13 +5314,17 @@ fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
     );
     let current = fixture.wait_for_diagnostics(uri.as_str());
     assert_eq!(
-        current.iter().filter(|diagnostic| {
-            diagnostic["code"] == json!("dm.schema.document_malformed")
-        }).count(),
+        current
+            .iter()
+            .filter(|diagnostic| { diagnostic["code"] == json!("dm.schema.document_malformed") })
+            .count(),
         1,
         "the malformed current buffer must own exactly one schema diagnostic: {current:?}"
     );
-    assert_eq!(current[0]["range"]["start"], json!({ "line": 0, "character": 0 }));
+    assert_eq!(
+        current[0]["range"]["start"],
+        json!({ "line": 0, "character": 0 })
+    );
 
     fixture.shutdown();
 }
@@ -5265,20 +5378,34 @@ fn meta_schema_completion_reads_parser_state_for_partially_authored_values() {
             "min",
         ),
         // Double-quoted projection.
-        ("double-quoted.md", "definition: \"string(mi\"\n", 3, 22, "min"),
+        (
+            "double-quoted.md",
+            "definition: \"string(mi\"\n",
+            3,
+            22,
+            "min",
+        ),
         // Multibyte content inside the value being completed.
         ("utf8.md", "definition: enum(café)[](mi\n", 3, 27, "min"),
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     for (name, body, line, character, expected) in cases {
         for crlf in [false, true] {
             let text = format!("---\n{ACTIVATION}{body}---\n\nbody\n");
-            let text = if crlf { text.replace('\n', "\r\n") } else { text };
-            let file = if crlf { format!("crlf-{name}") } else { name.to_string() };
+            let text = if crlf {
+                text.replace('\n', "\r\n")
+            } else {
+                text
+            };
+            let file = if crlf {
+                format!("crlf-{name}")
+            } else {
+                name.to_string()
+            };
             let path = workspace.path().join(&file);
             std::fs::write(&path, &text).unwrap();
             let uri = url::Url::from_file_path(path).unwrap();
@@ -5301,7 +5428,11 @@ fn meta_schema_completion_reads_parser_state_for_partially_authored_values() {
             // The replaced range is the authored token, located by the parser
             // rather than by searching the decoded text.
             let range = &offered["textEdit"]["range"];
-            assert_eq!(range["end"], json!({ "line": line, "character": character }), "{file}");
+            assert_eq!(
+                range["end"],
+                json!({ "line": line, "character": character }),
+                "{file}"
+            );
             assert_eq!(range["start"]["line"], json!(line), "{file}");
             assert!(
                 range["start"]["character"].as_u64().unwrap() < u64::from(character),
@@ -5324,8 +5455,11 @@ fn mixed_semantic_union_doc(
 ) -> String {
     let semantic_arm = format!("    - {semantic}");
     let other = format!("    - \"{arm}\"");
-    let (first, second) =
-        if semantic_first { (semantic_arm, other) } else { (other, semantic_arm) };
+    let (first, second) = if semantic_first {
+        (semantic_arm, other)
+    } else {
+        (other, semantic_arm)
+    };
     format!("---\n$schema:\n  value:\n{first}\n{second}\n{value_line}\n---\n\nbody\n")
 }
 
@@ -5361,8 +5495,8 @@ fn mixed_semantic_union_gates_the_specialized_diagnostic_on_whole_union_failure(
         ),
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let mut counter = 0usize;
@@ -5393,8 +5527,8 @@ fn mixed_semantic_union_gates_the_specialized_diagnostic_on_whole_union_failure(
 fn single_arm_semantic_type_keeps_its_specialized_diagnostic() {
     // The common non-union path is unchanged: one specialized diagnostic, and
     // the generic custom-keyword problem it replaces stays suppressed.
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     let text = "---\n$schema:\n  value: type-definition\nvalue: string(nope)\n---\n\nbody\n";
@@ -5405,7 +5539,10 @@ fn single_arm_semantic_type_keeps_its_specialized_diagnostic() {
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     let codes = codes(&diagnostics);
     assert_eq!(
-        codes.iter().filter(|code| *code == "dm.schema.invalid_type_definition").count(),
+        codes
+            .iter()
+            .filter(|code| *code == "dm.schema.invalid_type_definition")
+            .count(),
         1,
         "exactly one specialized diagnostic: {diagnostics:?}"
     );
@@ -5421,8 +5558,8 @@ fn single_arm_semantic_type_keeps_its_specialized_diagnostic() {
 fn mixed_semantic_union_completion_merges_sibling_arm_candidates() {
     // `[type-definition, enum(foo, bar)]` activates semantic authoring on one
     // arm; the enum arm's members must still reach the merged union list.
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     for semantic_first in [true, false] {
@@ -5547,8 +5684,8 @@ fn standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged() {
         "dm.schema.invalid_type_definition",
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     for (file, text, expected_code, offending) in cases {
         let path = workspace.path().join(file);
@@ -5602,7 +5739,11 @@ fn standalone_reference_declarations_match_the_shared_declaration_parser() {
     let cases: [(&str, &str, Option<&str>); 5] = [
         // None of these targets exist on disk: classification is passive, so a
         // valid reference must not depend on the file being present.
-        ("valid-scalar-reference.yaml", "$schema: ./other.yaml\n", None),
+        (
+            "valid-scalar-reference.yaml",
+            "$schema: ./other.yaml\n",
+            None,
+        ),
         (
             "whitespace-arm.yaml",
             "$schema: [\"   \"]\n",
@@ -5619,7 +5760,11 @@ fn standalone_reference_declarations_match_the_shared_declaration_parser() {
             "$schema:\n  - ./valid.yaml\n  - https://example.com/schema.yaml\n",
             Some("https://example.com/schema.yaml"),
         ),
-        ("valid-reference-union.yaml", "$schema:\n  - ./a.yaml\n  - ./b.yaml\n", None),
+        (
+            "valid-reference-union.yaml",
+            "$schema:\n  - ./a.yaml\n  - ./b.yaml\n",
+            None,
+        ),
     ];
     let schema_codes = [
         "dm.schema.invalid_schema_shape",
@@ -5627,8 +5772,8 @@ fn standalone_reference_declarations_match_the_shared_declaration_parser() {
         "dm.schema.invalid_type_definition",
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     for (file, text, offending) in cases {
         let path = workspace.path().join(file);
@@ -5748,7 +5893,7 @@ fn github_slug(heading: &str) -> String {
 /// therefore hand back an absolute `file://` URI instead.
 #[test]
 fn vocabulary_link_resolves_from_a_document_outside_the_topic_directory() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     install_topic_doc(workspace.path());
 
     // Deliberately nested, and nowhere near `darkmatter/docs/topics/`.
@@ -5757,14 +5902,20 @@ fn vocabulary_link_resolves_from_a_document_outside_the_topic_directory() {
     let text = "# Notes\n\nRecent work: {{ pr_list(5) }}\n";
     std::fs::write(&document, text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(&document).unwrap();
     open(&fixture, uri.as_str(), text);
 
     // Hover on the `pr_list` function name (D5).
     let line = 2;
-    let character = text.lines().nth(line as usize).unwrap().find("pr_list").unwrap() as u32 + 1;
+    let character = text
+        .lines()
+        .nth(line as usize)
+        .unwrap()
+        .find("pr_list")
+        .unwrap() as u32
+        + 1;
     let hover = hover_markup(&mut fixture, uri.as_str(), line, character);
     assert!(hover.contains("pr_list"), "{hover}");
     let hovered = vocabulary_destination(&hover)
@@ -5804,7 +5955,10 @@ fn vocabulary_link_resolves_from_a_document_outside_the_topic_directory() {
                 .is_some_and(|label| label.starts_with("pr_list("))
         })
         .collect();
-    assert!(!documented.is_empty(), "expected `pr_list` completions: {items:?}");
+    assert!(
+        !documented.is_empty(),
+        "expected `pr_list` completions: {items:?}"
+    );
     for item in documented {
         let documentation = item["documentation"]["value"]
             .as_str()
@@ -5823,12 +5977,12 @@ fn vocabulary_link_resolves_from_a_document_outside_the_topic_directory() {
 /// embedded in hover, so dropping the link costs the reader nothing.
 #[test]
 fn an_unshipped_topic_doc_yields_no_dead_link_on_either_surface() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let document = workspace.path().join("page.md");
     let text = "# Notes\n\nRecent work: {{ cicd_list(5) }}\n";
     std::fs::write(&document, text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(&document).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -5877,7 +6031,7 @@ fn an_unshipped_topic_doc_yields_no_dead_link_on_either_surface() {
 
 /// Requests `textDocument/completion` and returns the item labels.
 fn completion_labels(
-    fixture: &mut ClientFixture,
+    fixture: &mut LspFixture<'_>,
     uri: &str,
     line: u32,
     character: u32,
@@ -5915,7 +6069,7 @@ fn completion_labels(
 /// colliding with a real path separator.
 #[test]
 fn structural_paths_survive_quoted_and_punctuated_frontmatter_keys() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = concat!(
         "---\n",
         "\"$schema\":\n",
@@ -5936,7 +6090,7 @@ fn structural_paths_survive_quoted_and_punctuated_frontmatter_keys() {
     let path = workspace.path().join("punctuated.md");
     std::fs::write(&path, text).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), text);
@@ -5953,7 +6107,10 @@ fn structural_paths_survive_quoted_and_punctuated_frontmatter_keys() {
     // The remaining punctuation classes each resolve to a declared property.
     for (line, character, key) in [(9, 2, "a/b"), (10, 2, "c~d"), (11, 3, "host: port")] {
         let hover = hover_markup(&mut fixture, uri.as_str(), line, character);
-        assert!(!hover.is_empty(), "`{key}` must resolve to its declaration: {hover:?}");
+        assert!(
+            !hover.is_empty(),
+            "`{key}` must resolve to its declaration: {hover:?}"
+        );
     }
 
     // Nested mappings still resolve through the structural parent chain.
@@ -5972,8 +6129,8 @@ fn structural_paths_survive_quoted_and_punctuated_frontmatter_keys() {
 /// implementation is where line-ending handling goes wrong.
 #[test]
 fn meta_schema_completion_owner_and_ancestors_come_from_the_ast() {
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     // (file stem, source, completion line, completion character, why)
@@ -6024,7 +6181,7 @@ fn meta_schema_completion_owner_and_ancestors_come_from_the_ast() {
 /// structurally owned instead of surrendering every one of them at once.
 #[test]
 fn malformed_buffer_retains_structural_ownership_of_untouched_keys() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let good = concat!(
         "---\n",
         "\"$schema\":\n",
@@ -6035,12 +6192,14 @@ fn malformed_buffer_retains_structural_ownership_of_untouched_keys() {
     let path = workspace.path().join("last-good.md");
     std::fs::write(&path, good).unwrap();
 
-    let mut fixture = ClientFixture::start();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), good);
     assert!(
-        completion_labels(&mut fixture, uri.as_str(), 3, 19).iter().any(|l| l == "string"),
+        completion_labels(&mut fixture, uri.as_str(), 3, 19)
+            .iter()
+            .any(|l| l == "string"),
         "baseline: the valid buffer completes"
     );
 
@@ -6077,8 +6236,8 @@ fn malformed_buffer_retains_structural_ownership_of_untouched_keys() {
 /// its scalar and `[]` sequence form, under LF and CRLF.
 #[test]
 fn meta_schema_completion_matches_complete_structural_pointers() {
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     // (file stem, source, line, character, expected label, why)
@@ -6180,8 +6339,8 @@ fn meta_schema_completion_matches_complete_structural_pointers() {
 /// leave them structurally owned rather than surrendering their activation.
 #[test]
 fn malformed_buffer_retains_nested_and_escaped_semantic_owners() {
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
 
     // (file stem, source, line, character)
@@ -6268,8 +6427,8 @@ fn standalone_inner_definition_diagnostics_address_punctuated_keys() {
         ),
     ];
 
-    let workspace = tempfile::tempdir().unwrap();
-    let mut fixture = ClientFixture::start();
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
     for (file, text, offending) in cases {
         let path = workspace.path().join(file);
@@ -6279,7 +6438,9 @@ fn standalone_inner_definition_diagnostics_address_punctuated_keys() {
         let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
 
         assert!(
-            codes(&diagnostics).iter().any(|code| code == "dm.schema.invalid_type_definition"),
+            codes(&diagnostics)
+                .iter()
+                .any(|code| code == "dm.schema.invalid_type_definition"),
             "{file}: a punctuated key must keep the inner-definition code rather \
              than falling through to the document-malformed fallback: {diagnostics:?}"
         );
@@ -6295,4 +6456,58 @@ fn standalone_inner_definition_diagnostics_address_punctuated_keys() {
     }
 
     fixture.shutdown();
+}
+
+// ── Session cleanup ownership (spec.md "Own network, process, and rendering
+// resources": bounded cleanup on success, failure, and cancellation) ──
+
+/// A failing assertion must not detach the server worker: teardown runs during
+/// the unwind, waits for the worker within `common::SERVER_EXIT_BOUND`, and only
+/// then is the workspace released.
+///
+/// The proof is ordering, not liveness. The worker records — from its own
+/// thread, as the last thing it does — whether the workspace root still exists
+/// at the instant its body returns, and `LspWorkspace`'s drop records the
+/// deletion. A teardown that detached the worker instead of waiting for it
+/// would let the delete land first, so the recorded sequence, not merely the
+/// absence of a hang, is what distinguishes the two.
+///
+/// The 300 ms worker epilogue is what makes that distinction deterministic: an
+/// undelayed worker finishes so soon after the connection closes that a
+/// detaching teardown would usually still win the race by accident.
+#[test]
+fn server_worker_finishes_before_workspace_release_during_unwind() {
+    let workspace = LspWorkspace::new();
+    let observations = workspace.observations();
+
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut fixture =
+            LspFixture::start_with_worker_epilogue_delay(&workspace, Duration::from_millis(300));
+        fixture.initialize(neovim_like_initialize_params(workspace.path()));
+        panic!("simulate a failing assertion mid-session");
+    }));
+    assert!(outcome.is_err(), "the failure path must unwind");
+
+    // Everything above has dropped the fixture; the workspace is still alive
+    // here because the fixture borrowed it.
+    assert_eq!(
+        observations.events(),
+        vec![TeardownEvent::WorkerFinished {
+            workspace_present: true
+        }],
+        "the unwinding fixture must reap its server worker, and must observe the \
+         workspace still present when it does"
+    );
+
+    drop(workspace);
+    assert_eq!(
+        observations.events(),
+        vec![
+            TeardownEvent::WorkerFinished {
+                workspace_present: true
+            },
+            TeardownEvent::WorkspaceReleased,
+        ],
+        "the workspace must be deleted strictly after the worker finished"
+    );
 }
