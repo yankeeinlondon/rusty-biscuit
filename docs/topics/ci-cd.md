@@ -3,7 +3,7 @@
 ## Overview
 
 Rusty Biscuit's CI/CD runs on **GitHub Actions** and is layered to match the [testing tier
-taxonomy](./testing-in-rusty-biscuit.md): fast feedback first, then full coverage, then
+taxonomy](../testing-strategy.md): fast feedback first, then full coverage, then
 nightly/advisory work. Releases are automated through [release-plz](https://release-plz.dev) but
 **no crate is published to crates.io** — GitHub releases and version tags are the only
 distribution channel today.
@@ -302,7 +302,7 @@ Before adding a new workflow, check:
 
 - Workflow definitions: `.github/workflows/`
 - Release config: `release-plz.toml`
-- Test tier taxonomy: [`testing-in-rusty-biscuit.md`](./testing-in-rusty-biscuit.md) and
+- Test tier taxonomy: [`testing-strategy.md`](../testing-strategy.md) and
     `.claude/skills/rust-testing/SKILL.md`
 
 - Pre-push hook: `.githooks/pre-push`, tested by `.githooks/tests/`
