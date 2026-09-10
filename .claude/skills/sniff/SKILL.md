@@ -194,10 +194,14 @@ Sniff-only change; include only dependency-derived downstream packages.
 Level 1 `sniff-cli` integration tests obtain the binary through
 `cli/tests/common::SniffCliFixture`. Its default command pins disposable
 cwd/home/config/cache/install roots and a bounded PATH; use the named
-`host_path`, `fake_only_path`, and `ambient_context` escapes with a call-site
-reason. Live-child tests use `command_std`, and parent-side Git setup uses the
-fixture Git command so inherited plumbing and host Git configuration cannot
-contaminate the repository.
+`host_path` and `fake_only_path` PATH escapes with a call-site `//` comment
+naming the tool observed or the absence proved — `cli/tests/spawn_site_guard.rs`
+scans for one and fails the suite without it. The `ambient_context` CWD escape
+needs no comment: it accepts only a directory the test built, inside the fixture
+workspace (builder form) or the system temporary root (fluent forms), and
+panics otherwise. Live-child tests use `command_std`, and parent-side Git setup
+uses the fixture Git command so inherited plumbing and host Git configuration
+cannot contaminate the repository.
 
 Level 2 Sniff terminal tests run only through `just test-l2`, which serializes
 the shared broker pane. After sending a command, poll the complete final
