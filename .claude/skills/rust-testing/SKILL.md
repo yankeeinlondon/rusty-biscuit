@@ -5,8 +5,8 @@ description: |-
   test design, fixture isolation, `require_level!` gating, nextest filtersets,
   suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 7055b0e89017847d-a78f6d00b59ed3ca
-last_updated: 2026-09-07
+hash: 7055b0e89017847d-717a77c3a2341172
+last_updated: 2026-09-10
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -131,7 +131,7 @@ Symptoms that you have mis-tiered an OS-specific test:
 | L2      | `level2_`  | Real terminal / PTY | Harness missing      | `BISCUIT_TEST_REQUIRED_BACKENDS` (per-backend, preferred); `BISCUIT_TEST_LEVEL_REQUIRED=2` (all-or-nothing) |
 | L3      | `level3_`  | OS keyboard/mouse   | `RUN_LEVEL3` unset   | `BISCUIT_TEST_LEVEL_REQUIRED=3`                            |
 | Browser | `browser_` | Chrome/Chromium     | Browser missing      | `BISCUIT_BROWSER_REQUIRED=1`                               |
-| Real    | `real_`    | External device/API | Resource missing     | Per-package env vars                                       |
+| Real    | `real_`    | External device/API | Resource missing     | Per-package env vars; see "Requiring a real resource individually" |
 | Slow    | `slow_`    | None (slow L1)      | Excluded from sanity | —                                                          |
 
 ### Requiring L2 backends individually
@@ -180,6 +180,35 @@ per-package `reset` would erase earlier packages' evidence. An unproven backend
 fails the tier without masking a genuine test failure, and the whole mechanism
 is inert — no output, no file I/O, no added latency — when the variable is
 unset.
+
+### Requiring a real resource individually
+
+The `real_` tier has the same availability-versus-execution problem as L2, and
+solves it the same way. A `real_*` test skips when its backend is absent, so a
+green `just test-real` can mean "the resource was there and playback completed"
+or "nothing ran". A repository-wide switch (`PLAYA_REAL_AUDIO_REQUIRED=1`,
+honored by `playa` and `biscuit-speaks`) turns *every* such skip into a failure,
+which is right for a fully provisioned host and wrong for a runner that has one
+backend and not another.
+
+The per-resource form names only what must be present. `biscuit-speaks` is the
+reference implementation: `BISCUIT_SPEAKS_REQUIRED_PROVIDERS=echogarden,gtts`
+is comma-separated, case-insensitive, whitespace-trimmed, matched exactly
+against the identifiers in `biscuit-speaks/lib/src/test_support.rs`, and a
+misspelled entry fails rather than silently disabling the requirement. Unset
+means nothing is required. Every skip branch of every `real_*` test routes
+through one shared helper (`skip_or_require`), so a new skip path cannot be
+added that bypasses the switch.
+
+Two rules follow from the same reachability contract as OS-specific tests:
+
+- **Never `#[ignore]` a real-resource test.** `just test` filters `real_` out
+  and `just test-real` does not pass `--ignored`, so an ignored `real_*` test
+  runs in no tier at all. Availability gating belongs in the test body, behind
+  the switch, not in an attribute.
+- **A `real_*` name inside `#[cfg(test)] mod tests` in `src/` is selected**, and
+  intentionally so: the filterset matches `(^|::)real_`, and the module path
+  makes the marker the first segment of the test's final name.
 
 ## Gating Tests
 
@@ -442,6 +471,8 @@ reap them:
 | `BISCUIT_TEST_LEVEL_REQUIRED=2\|3`    | Missing harness panics instead of skipping. All-or-nothing; for L2 prefer `BISCUIT_TEST_REQUIRED_BACKENDS`.     |
 | `BISCUIT_TEST_REQUIRED_BACKENDS`     | Comma-separated `tmux,wezterm,kitty,apple-terminal`. Named backends hard-fail; others still skip. Also turns on execution recording, which `backend-proof verify` checks. See "Requiring L2 backends individually". |
 | `BISCUIT_BROWSER_REQUIRED=1`         | Missing Chrome panics instead of skipping.                                                                     |
+| `PLAYA_REAL_AUDIO_REQUIRED=1`        | Missing real audio resource panics instead of skipping. All-or-nothing; prefer the per-resource form below.     |
+| `BISCUIT_SPEAKS_REQUIRED_PROVIDERS`  | Comma-separated TTS provider identifiers (`echogarden`, `gtts`). Named providers hard-fail; others still skip. See "Requiring a real resource individually". |
 | `RUN_LEVEL3=1`                       | Opt-in for OS-keyboard-injection tests.                                                                        |
 | `BISCUIT_JUNIT_STAGE_DIR`            | Staging root for JUnit reports and the backend-execution evidence file. Defaults to `target/nextest/ci-reports`.|
 

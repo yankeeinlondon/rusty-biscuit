@@ -343,6 +343,30 @@ of the engine or voice selected by the user's Claudine settings. Controlled
 provider tests record commands and use empty or invalid audio so intermediate
 volume assertions cannot produce sound.
 
+Tests that reach a real synthesis backend are named `real_*` and run only under
+`just test-real`, which enables the `playa` feature. That includes the ones
+living in `#[cfg(test)] mod tests` inside `lib/src/providers/host/`: the tier
+filterset is `test(/(^|::)real_/)`, and the module path makes the marker the
+first segment of the test's final name. Do not mark such a test `#[ignore]` —
+no canonical recipe runs ignored tests, so the coverage would exist in no tier.
+
+A `real_*` test skips when its backend is absent, and a skip is not evidence.
+Two switches turn a skip into a failure, and they compose:
+
+| Variable | Effect |
+|----------|--------|
+| `PLAYA_REAL_AUDIO_REQUIRED=1` | Playa's repository-wide switch: every real audio resource in the run is required |
+| `BISCUIT_SPEAKS_REQUIRED_PROVIDERS=echogarden,gtts` | Names individual providers whose absence must be fatal, while every other provider still skips cleanly |
+
+The list is comma-separated, case-insensitive, and whitespace around each entry
+is ignored. Entries are matched exactly against the identifiers in
+`lib/src/test_support.rs`; a misspelling fails the test rather than silently
+disabling the requirement. Add an identifier there when a provider gains its
+first `real_*` test. The pair mirrors `BISCUIT_TEST_LEVEL_REQUIRED` and
+`BISCUIT_TEST_REQUIRED_BACKENDS`, for the same reason: a host that can run
+`echogarden` may have no route to Google's TTS endpoint, and an all-or-nothing
+switch would force it to demand both or neither.
+
 CLI fixtures use a private `BISCUIT_SPEAKS_CACHE` and a controlled voice inventory.
 A voice argument alone does not isolate selection: a user's cached inventory can
 resolve `Samantha` to `Samantha (Enhanced)`. The Say fixture supplies only Samantha

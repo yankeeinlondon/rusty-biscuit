@@ -761,6 +761,9 @@ fn parse_languages(langs_str: &str) -> Vec<Language> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "playa")]
+    use crate::test_support::dry_run_enabled;
+    use crate::test_support::{ECHOGARDEN, skip_or_require};
 
     // ========================================================================
     // default_voice tests
@@ -1242,10 +1245,6 @@ Gender: female
         assert_eq!(processed2[0].name, "en_US-lessac-high");
     }
 
-    // ========================================================================
-    // Integration tests - only run if echogarden is installed
-    // ========================================================================
-
     #[tokio::test]
     async fn test_is_ready_check() {
         let provider = EchogardenProvider::new();
@@ -1254,17 +1253,32 @@ Gender: female
         let _ = provider.is_ready().await;
     }
 
+    // ========================================================================
+    // Real-resource tests (`real_*`, selected by `just test-real`)
+    //
+    // These drive the installed `echogarden` binary. Synthesis and playback are
+    // real; the payload is muted with `VolumeLevel::Explicit(0.0)` and says so.
+    // Every skip branch goes through `skip_or_require`, so a host that names
+    // `echogarden` in `BISCUIT_SPEAKS_REQUIRED_PROVIDERS` (or sets
+    // `PLAYA_REAL_AUDIO_REQUIRED=1`) fails instead of skipping.
+    // ========================================================================
+
     #[tokio::test]
-    #[ignore] // Only run manually when echogarden is installed
-    async fn test_list_voices_integration() {
+    async fn real_echogarden_lists_installed_voices() {
         let provider = EchogardenProvider::new();
 
         if !provider.is_ready().await {
-            eprintln!("Skipping test: echogarden not installed");
+            skip_or_require(ECHOGARDEN, "the echogarden binary is not installed");
             return;
         }
 
-        let voices = provider.list_voices().await.unwrap();
+        let voices = match provider.list_voices().await {
+            Ok(voices) => voices,
+            Err(error) => {
+                skip_or_require(ECHOGARDEN, format!("voice enumeration failed: {error}"));
+                return;
+            }
+        };
 
         // Should have voices from at least one engine
         assert!(!voices.is_empty(), "Expected at least one voice");
@@ -1288,38 +1302,111 @@ Gender: female
         }
     }
 
+    /// Real synthesis and playback through the default (Kokoro) engine, muted.
+    ///
+    /// Needs the `playa` feature because the playback report is the evidence
+    /// that zero-volume audio actually reached a route and ran to completion;
+    /// without it there is no playback boundary to observe.
+    #[cfg(feature = "playa")]
     #[tokio::test]
-    #[ignore] // Produces audio - run manually
-    async fn test_speak_integration() {
-        let provider = EchogardenProvider::new();
+    async fn real_echogarden_speaks_muted() {
+        use crate::types::{SpeakPlaybackRoute, SpeakPlaybackVerdict};
 
+        if dry_run_enabled() {
+            skip_or_require(ECHOGARDEN, "PLAYA_DRY_RUN disables real playback");
+            return;
+        }
+
+        let provider = EchogardenProvider::new();
         if !provider.is_ready().await {
-            eprintln!("Skipping test: echogarden not installed");
+            skip_or_require(ECHOGARDEN, "the echogarden binary is not installed");
             return;
         }
 
         let config = TtsConfig::default().with_volume(crate::types::VolumeLevel::Explicit(0.0));
-        let result = provider
-            .speak("This is a test message.", &config)
-            .await;
-        assert!(result.is_ok());
+        let result = match provider
+            .speak_with_result("This is a test message.", &config)
+            .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                skip_or_require(
+                    ECHOGARDEN,
+                    format!("muted playback was unavailable: {error}"),
+                );
+                return;
+            }
+        };
+
+        assert_eq!(
+            result.provider,
+            TtsProvider::Host(HostTtsProvider::EchoGarden)
+        );
+        let report = result
+            .playback
+            .expect("echogarden plays a synthesized file, so it must report a playback route");
+        assert_ne!(
+            report.route,
+            SpeakPlaybackRoute::DryRun,
+            "muted playback must still take a real route, not be skipped"
+        );
+        assert_eq!(
+            report.verdict,
+            SpeakPlaybackVerdict::Complete,
+            "muted WAV playback has a known duration and must run to completion: {report:?}"
+        );
     }
 
+    /// The same muted real path with an explicitly requested Kokoro voice,
+    /// which the result must report back.
+    #[cfg(feature = "playa")]
     #[tokio::test]
-    #[ignore] // Produces audio - run manually
-    async fn test_speak_with_voice() {
-        let provider = EchogardenProvider::with_engine(EchogardenEngine::Kokoro);
+    async fn real_echogarden_speaks_muted_with_requested_voice() {
+        use crate::types::{SpeakPlaybackRoute, SpeakPlaybackVerdict};
 
-        if !provider.is_ready().await {
-            eprintln!("Skipping test: echogarden not installed");
+        if dry_run_enabled() {
+            skip_or_require(ECHOGARDEN, "PLAYA_DRY_RUN disables real playback");
             return;
         }
 
-        let config = TtsConfig::new().with_voice("Heart").with_volume(crate::types::VolumeLevel::Explicit(0.0));
-        let result = provider
-            .speak("This is a test message.", &config)
-            .await;
-        assert!(result.is_ok());
+        let provider = EchogardenProvider::with_engine(EchogardenEngine::Kokoro);
+        if !provider.is_ready().await {
+            skip_or_require(ECHOGARDEN, "the echogarden binary is not installed");
+            return;
+        }
+
+        let config = TtsConfig::new()
+            .with_voice("Heart")
+            .with_volume(crate::types::VolumeLevel::Explicit(0.0));
+        let result = match provider
+            .speak_with_result("This is a test message.", &config)
+            .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                skip_or_require(
+                    ECHOGARDEN,
+                    format!("muted Kokoro `Heart` playback was unavailable: {error}"),
+                );
+                return;
+            }
+        };
+
+        assert_eq!(result.voice.name, "Heart");
+        assert_eq!(result.audio_codec.as_deref(), Some("wav"));
+        let report = result
+            .playback
+            .expect("echogarden plays a synthesized file, so it must report a playback route");
+        assert_ne!(
+            report.route,
+            SpeakPlaybackRoute::DryRun,
+            "muted playback must still take a real route, not be skipped"
+        );
+        assert_eq!(
+            report.verdict,
+            SpeakPlaybackVerdict::Complete,
+            "muted WAV playback has a known duration and must run to completion: {report:?}"
+        );
     }
 
     /// Regression test: Output file must not pre-exist for echogarden.

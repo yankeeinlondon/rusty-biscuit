@@ -143,7 +143,17 @@ before synthesis and publish cached files, matching the other file providers.
 Temporary synthesis files are removed before handoff.
 Never apply playback speed a second time to Say's already rate-adjusted output.
 
-Real speech tests must use zero volume and explicit test-message wording.
+Real speech tests must use zero volume and explicit test-message wording. They
+are named `real_*` — including the ones inside `#[cfg(test)] mod tests` in
+`lib/src/providers/host/`, which the `test(/(^|::)real_/)` filterset selects
+through their module path — and must never be `#[ignore]`d, because no
+canonical recipe runs ignored tests. `just test-real` enables `playa`, which is
+what makes a `SpeakPlaybackReport` (route plus completion verdict) available to
+assert instead of `Result::is_ok()`. A missing backend skips through
+`test_support::skip_or_require`; `BISCUIT_SPEAKS_REQUIRED_PROVIDERS=echogarden,gtts`
+names the providers whose absence must instead fail, and composes with Playa's
+all-or-nothing `PLAYA_REAL_AUDIO_REQUIRED=1`.
+
 Kokoro completion coverage pins `af_heart`, deliberately independent of Claudine's
 normal provider/voice. `lib/tests/volume_control.rs` uses recording executables
 and invalid audio to verify zero and intermediate gains without audible output.

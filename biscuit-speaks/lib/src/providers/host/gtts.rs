@@ -410,6 +410,9 @@ impl TtsVoiceInventory for GttsProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "playa")]
+    use crate::test_support::dry_run_enabled;
+    use crate::test_support::{GTTS, skip_or_require};
 
     // ========================================================================
     // default_voice tests
@@ -731,10 +734,6 @@ mod tests {
         }
     }
 
-    // ========================================================================
-    // Integration tests (require gtts-cli to be installed)
-    // ========================================================================
-
     #[tokio::test]
     async fn test_is_ready_without_binary() {
         // Create a provider - if gtts-cli is not installed, is_ready should return false
@@ -745,17 +744,33 @@ mod tests {
         let _is_ready = provider.is_ready().await;
     }
 
+    // ========================================================================
+    // Real-resource tests (`real_*`, selected by `just test-real`)
+    //
+    // These drive the installed `gtts-cli` binary and Google's TTS endpoint.
+    // Synthesis and playback are real; the payload is muted with
+    // `VolumeLevel::Explicit(0.0)` and says so. Every skip branch goes through
+    // `skip_or_require`, so a host that names `gtts` in
+    // `BISCUIT_SPEAKS_REQUIRED_PROVIDERS` (or sets `PLAYA_REAL_AUDIO_REQUIRED=1`)
+    // fails instead of skipping.
+    // ========================================================================
+
     #[tokio::test]
-    #[ignore] // Only run manually when gtts-cli is installed
-    async fn test_list_voices_integration() {
+    async fn real_gtts_lists_installed_voices() {
         let provider = GttsProvider::new();
 
         if !GttsProvider::binary_exists() {
-            eprintln!("Skipping test: gtts-cli not installed");
+            skip_or_require(GTTS, "the gtts-cli binary is not installed");
             return;
         }
 
-        let voices = provider.list_voices().await.unwrap();
+        let voices = match provider.list_voices().await {
+            Ok(voices) => voices,
+            Err(error) => {
+                skip_or_require(GTTS, format!("voice enumeration failed: {error}"));
+                return;
+            }
+        };
 
         // Should have voices
         assert!(!voices.is_empty(), "Expected at least one voice");
@@ -782,28 +797,81 @@ mod tests {
         }
     }
 
+    /// Real gTTS synthesis and playback, muted.
+    ///
+    /// Needs the `playa` feature because the playback report is the evidence
+    /// that zero-volume audio actually reached a route and was not cut short;
+    /// without it there is no playback boundary to observe.
+    #[cfg(feature = "playa")]
     #[tokio::test]
-    #[ignore] // Produces audio and requires internet - run manually
-    async fn test_gtts_provider_speaks() {
-        let provider = GttsProvider::new();
+    async fn real_gtts_speaks_muted() {
+        use crate::types::{SpeakPlaybackRoute, SpeakPlaybackVerdict};
 
+        if dry_run_enabled() {
+            skip_or_require(GTTS, "PLAYA_DRY_RUN disables real playback");
+            return;
+        }
+
+        let provider = GttsProvider::new();
         if !provider.is_ready().await {
-            eprintln!("Skipping test: gtts-cli not ready (not installed or no internet)");
+            skip_or_require(GTTS, "gtts-cli is not installed or has no route to Google");
             return;
         }
 
         let config = TtsConfig::default().with_volume(crate::types::VolumeLevel::Explicit(0.0));
-        let result = provider
-            .speak("This is a test message.", &config)
-            .await;
-        assert!(result.is_ok());
+        let result = match provider
+            .speak_with_result("This is a test message.", &config)
+            .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                skip_or_require(GTTS, format!("muted playback was unavailable: {error}"));
+                return;
+            }
+        };
+
+        assert_eq!(result.provider, TtsProvider::Host(HostTtsProvider::Gtts));
+        assert_eq!(result.audio_codec.as_deref(), Some("mp3"));
+        let report = result
+            .playback
+            .expect("gTTS plays a synthesized file, so it must report a playback route");
+        assert_ne!(
+            report.route,
+            SpeakPlaybackRoute::DryRun,
+            "muted playback must still take a real route, not be skipped"
+        );
+        // Not `Complete`: an MP3 route may legitimately report `Unverified`
+        // when the decoder exposes no trustworthy duration. Truncation is the
+        // failure this can still distinguish.
+        assert!(
+            !matches!(report.verdict, SpeakPlaybackVerdict::Truncated { .. }),
+            "muted playback ended early: {report:?}"
+        );
     }
 
+    /// gTTS' readiness probe depends on reaching Google, so its own coverage
+    /// belongs in the real tier rather than L1.
     #[tokio::test]
-    #[ignore] // Requires internet - run manually
-    async fn test_check_connectivity() {
-        let is_connected = GttsProvider::check_connectivity().await;
-        println!("Connectivity check result: {}", is_connected);
-        // Can't assert true/false since it depends on network state
+    async fn real_gtts_reports_reachable_network() {
+        if !GttsProvider::check_connectivity().await {
+            skip_or_require(GTTS, "translate.google.com:443 is not reachable");
+            return;
+        }
+
+        if !GttsProvider::binary_exists() {
+            skip_or_require(GTTS, "the gtts-cli binary is not installed");
+            return;
+        }
+
+        let provider = GttsProvider::new();
+        provider.connectivity_ok.store(false, Ordering::Relaxed);
+        assert!(
+            provider.is_ready().await,
+            "gtts-cli is installed and Google is reachable, so the provider is ready"
+        );
+        assert!(
+            provider.connectivity_ok.load(Ordering::Relaxed),
+            "a successful readiness check must refresh the cached connectivity flag"
+        );
     }
 }
