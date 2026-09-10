@@ -380,6 +380,17 @@ jobs:
           name: junit-${{ inputs.package }}-L1-${{ matrix.environment }}
           path: target/nextest/ci-reports
           if-no-files-found: ignore
+      - name: Prepare nested test caches for rust-cache cleanup
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # rust-cache v2 opens both nested targets without awaiting errors.
+          # trybuild creates only tests/trybuild; its absent sibling otherwise
+          # emits ENOENT annotations during post-job cleanup on every OS.
+          if [ -d target/tests ]; then
+            mkdir -p target/tests/target target/tests/trybuild
+          fi
       # `L1`, not `test`: `ci-rollup` keys a status by TIER. A status naming a
       # test tier explains a MISSING cell downstream of it; a status naming
       # anything else becomes a cell in its own right. `test` would manufacture
