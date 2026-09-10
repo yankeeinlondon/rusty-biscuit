@@ -4928,6 +4928,15 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
         root.join("_implement/implement-plan.md"),
     )
     .expect("copy the drift-guarded implement-plan fixture");
+    // The target transcludes these two shipped snippets from its parent
+    // directory; they are prose only, so the shipped bytes serve as-is.
+    for snippet in ["_no_formatting.md", "_os.md"] {
+        fs::copy(
+            repo_root.join("prompts").join(snippet),
+            root.join(snippet),
+        )
+        .expect("copy a snippet the implement-plan fixture transcludes");
+    }
 
     // The router branches on `frontmatter(spec, 'implemented')`; an unimplemented
     // spec is the branch that reaches `implement-plan.md`.

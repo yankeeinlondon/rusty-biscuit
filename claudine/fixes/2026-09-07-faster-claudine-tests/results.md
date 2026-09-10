@@ -22,7 +22,7 @@ CI tranche.
 | Claim | Status | Evidence |
 |---|---|---|
 | **Implemented** | **complete** — Phases 2–7 landed every RB1–RB4 item in the plan; Phase 10's two residual edits are import gates only | `plan.md` Phases 2–7 checkpoints; [`log.md`](log.md) §§ Phase 4–7; `git log 9fc5151a0..HEAD -- claudine .config/nextest.toml` |
-| **Verified locally** | **L1 and lint green on the current candidate**, minus three identities whose only red input is a *third party's uncommitted edit* to the repository's shipped `prompts/` corpus; L2 stale, three tiers pending on host conditions | § Local verification — current candidate, below |
+| **Verified locally** | **L1 and lint green on the current candidate** after the 2026-09-09 merge of `main`; the three `prompts/`-corpus identities are green since their owner committed the edits and the two route tests stage what the route now transcludes (addendum below); L2 stale, three tiers pending on host conditions | § Local verification — current candidate, below |
 | **Verified on CI** | **pending** — baseline 1 of 3 runs per leg, candidate 0 of 3 (no push has happened); no budget exists to compare against | [`baseline/README.md`](baseline/README.md) § Status; [`candidate/README.md`](candidate/README.md) § Handoff |
 
 The three claims are deliberately not collapsed. "Implemented" says the code
@@ -86,6 +86,22 @@ The fixture pin must **not** be refreshed to make them green — that would bake
 third party's in-progress edit into the corpus. They close when those edits are
 committed or reverted by their owner, who then re-derives the fixture with
 `CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1`.
+
+**Addendum, 2026-09-09 (after merging `main`).** The `prompts/` edits were
+committed by their owner as `07bd9810c` on this branch, which made the drift a
+committed fact rather than a third party's work in progress. Closure followed
+the guard's own instructions: the fixture body was re-derived from the shipped
+bytes (its frontmatter keeps only the documented `say:`/`effect:`/`shell:`
+removals), the pin was refreshed with `CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1`,
+and the Level 2 row now stages the two snippets the target transcludes. The two
+`compose_caller_file_provenance` identities had the same root: the shipped
+`implement-suggestions.md` now transcludes `_no_formatting.md` and `_os.md`,
+which neither test staged, and the rule block that transclusion adds fills the
+20-row prompt preview the second test asserted `review-1.md` against. Both
+tests now stage the two snippets, and the review path is asserted on the prompt
+the stub provider received. Result: the three guard binaries
+(`shipped_prompt_route_drift`, `shipped_prompt_contract`,
+`compose_caller_file_provenance`) **23 run: 23 passed**.
 
 **Forbidden shortcuts, checked rather than asserted.** `git diff main --
 .config/nextest.toml` is *not* empty, but every non-comment line in it is a

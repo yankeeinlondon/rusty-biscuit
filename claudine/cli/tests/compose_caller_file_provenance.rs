@@ -192,6 +192,16 @@ fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target(
             .join("prompts/_implement/implement-suggestions.md"),
         include_str!("../../../prompts/_implement/implement-suggestions.md"),
     );
+    // The shipped route transcludes these two snippets; without them the
+    // redirect fails on a missing file instead of reaching its assertions.
+    write(
+        &fixture.cwd().join("prompts/_no_formatting.md"),
+        include_str!("../../../prompts/_no_formatting.md"),
+    );
+    write(
+        &fixture.cwd().join("prompts/_os.md"),
+        include_str!("../../../prompts/_os.md"),
+    );
 
     let stderr = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
 
@@ -285,6 +295,16 @@ fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_p
             .join("prompts/_implement/implement-suggestions.md"),
         include_str!("../../../prompts/_implement/implement-suggestions.md"),
     );
+    // The shipped route transcludes these two snippets; without them the
+    // redirect fails on a missing file instead of reaching its assertions.
+    write(
+        &fixture.cwd().join("prompts/_no_formatting.md"),
+        include_str!("../../../prompts/_no_formatting.md"),
+    );
+    write(
+        &fixture.cwd().join("prompts/_os.md"),
+        include_str!("../../../prompts/_os.md"),
+    );
     write(
         &fixture.cwd().join("prompts/_implement/implement-plan.md"),
         include_str!("fixtures/shipped_implement_route/_implement/implement-plan.md"),
@@ -296,7 +316,15 @@ fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_p
         stderr.contains("Implement Review Suggestions"),
         "an existing unimplemented review must outrank the already-executed plan; stderr:\n{stderr}"
     );
-    assert!(stderr.contains("review-1.md"), "stderr:\n{stderr}");
+    // The stderr panel previews only the first 20 rendered rows, and the
+    // route's leading rule block fills most of them, so the review path is
+    // asserted on the prompt the provider received rather than the preview.
+    let provider_prompt =
+        std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
+    assert!(
+        provider_prompt.contains("review-1.md"),
+        "the routed prompt must name the unimplemented review; prompt:\n{provider_prompt}"
+    );
     assert!(
         !stderr.contains("Implement Phase 5 of 5"),
         "the router must not resume the original plan once a review exists; stderr:\n{stderr}"
