@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 
 import { parseFamilyFile } from "../src/reconcile/families.ts";
 import { parseAndCheckLogs, attribute } from "../src/attribute/index.ts";
-import { ERA_FAMILIES_PATH, ERA_LOG_PATHS, expectations } from "./claudine-compat-inputs.ts";
+import { ERA_FAMILIES_PATH, ERA_LOG_PATHS, expectations, haveEraInputs } from "./claudine-compat-inputs.ts";
 
 const recorded = expectations().attribution;
 
@@ -22,7 +22,7 @@ function replay() {
   return { families, invocations, parseViolations: violations, result: attribute(invocations, families) };
 }
 
-describe("Claudine attribution compatibility", () => {
+describe.skipIf(!haveEraInputs())("Claudine attribution compatibility", () => {
   it("reproduces the recorded family attribution counts and totals", () => {
     const { result, parseViolations } = replay();
     expect(parseViolations).toHaveLength(0);

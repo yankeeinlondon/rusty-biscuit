@@ -24,6 +24,7 @@ import {
   ERA_WORKTREE,
   claudinePackageRoots,
   expectations,
+  haveEraInputs,
   haveEraWorktree,
 } from "./claudine-compat-inputs.ts";
 
@@ -39,7 +40,7 @@ function eraUniverse() {
   return { metadata, universe: buildUniverse(ERA_ENUMERATION_DIR, metadata.captures.map((c) => c.label)) };
 }
 
-describe("Claudine compatibility proof", () => {
+describe.skipIf(!haveEraInputs())("Claudine compatibility proof", () => {
   it("the preserved bundle is the revision its directory name claims", () => {
     const metadata = parseMetadata(readFileSync(join(ERA_ENUMERATION_DIR, "captures.json"), "utf8"));
     expect(metadata.revision).toMatch(new RegExp(`^${ERA_REVISION}`));

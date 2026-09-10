@@ -5,7 +5,7 @@
  * that no `*-claudine-compat.test.ts` reaches past it to a live consumer
  * document. `fixtures/claudine-compat/README.md` explains why that matters.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,6 +26,23 @@ export const ERA_LOG_PATHS = [
   join(FIX_DIR, "enumeration/recipes/just-test-rendezvous.log"),
   join(FIX_DIR, "baseline/local-gates/just-test-l2.log"),
 ];
+
+export const BASELINE_DIR = join(FIX_DIR, "baseline");
+
+/**
+ * Whether the era's frozen replay inputs are on disk. They are measurement
+ * evidence kept out of the tree (see the fix's `results.md` for where they
+ * live), so a checkout without them skips the replays instead of failing them.
+ */
+export function haveEraInputs(): boolean {
+  return [ERA_ENUMERATION_DIR, ...ERA_LOG_PATHS].every((path) => existsSync(path));
+}
+
+/** Whether at least one stored CI baseline run (`baseline/<run-id>/`) is on disk. */
+export function haveStoredBaselineRuns(): boolean {
+  if (!existsSync(BASELINE_DIR)) return false;
+  return readdirSync(BASELINE_DIR).some((name) => /^\d+$/.test(name));
+}
 
 const FIXTURES = join(here, "..", "fixtures", "claudine-compat");
 

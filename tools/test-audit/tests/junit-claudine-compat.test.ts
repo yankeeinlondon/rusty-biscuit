@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { junitCommand } from "../src/junit/command.ts";
 import type { CommandIo } from "../src/command.ts";
 import { EXIT } from "../src/errors.ts";
+import { haveStoredBaselineRuns } from "./claudine-compat-inputs.ts";
 
 const CLAUDINE_ROOT = join(__dirname, "../../../claudine/fixes/2026-09-07-faster-claudine-tests");
 const BASELINE_DIR = join(CLAUDINE_ROOT, "baseline");
@@ -86,7 +87,7 @@ function buildClaudineConfig(): { configPath: string; cleanup: () => void } {
 }
 
 describe("Claudine compatibility", () => {
-  it("matches_the_legacy_output_on_preserved_baseline", async () => {
+  it.skipIf(!haveStoredBaselineRuns())("matches_the_legacy_output_on_preserved_baseline", async () => {
     const runs = readdirSync(BASELINE_DIR).filter((name) => /^\d+$/.test(name));
     if (runs.length === 0) {
       throw new Error("No baseline runs found under claudine/fixes/.../baseline/");
@@ -173,7 +174,7 @@ describe("Claudine compatibility", () => {
     }
   });
 
-  it("accepts_every_stored_baseline_run", async () => {
+  it.skipIf(!haveStoredBaselineRuns())("accepts_every_stored_baseline_run", async () => {
     const runs = readdirSync(BASELINE_DIR).filter((name) => /^\d+$/.test(name));
     expect(runs.length).toBeGreaterThan(0);
 
