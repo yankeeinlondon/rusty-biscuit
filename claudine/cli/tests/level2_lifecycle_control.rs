@@ -5045,12 +5045,23 @@ exit 0
         .ancestors()
         .nth(2)
         .expect("repository root is two levels above claudine/cli");
-    let md_file = root.join("implement-plan.md");
+    // Staged in the shipped layout: the prompt transcludes `../_no_formatting.md`
+    // and `../_os.md`, so it lives one directory down and the two snippets sit
+    // beside that directory, inside the workspace.
+    fs::create_dir_all(root.join("_implement")).unwrap();
+    let md_file = root.join("_implement/implement-plan.md");
     fs::copy(
         repo_root.join("prompts/_implement/implement-plan.md"),
         &md_file,
     )
     .expect("copy the shipped implement-plan prompt");
+    for snippet in ["_no_formatting.md", "_os.md"] {
+        fs::copy(
+            repo_root.join("prompts").join(snippet),
+            root.join(snippet),
+        )
+        .expect("copy a snippet the shipped implement-plan prompt transcludes");
+    }
     fs::write(
         root.join("feature/plan.md"),
         "---\ntotal_phases: 1\nstart_phase: 1\n---\n\n# Plan\n",
