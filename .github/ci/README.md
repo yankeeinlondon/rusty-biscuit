@@ -24,8 +24,10 @@ grid only when all of these conditions hold:
 - GitHub associates the pushed commit with a merged PR targeting this
   repository's `main`, and the PR's merge commit is the pushed commit.
 - The latest matching `pull_request` run of this repository's `ci.yml` has
-  completed successfully. An older green run cannot override a newer failed,
-  canceled, or in-progress run.
+  completed successfully. The commit endpoint supplies the authoritative PR
+  association because GitHub may leave a workflow run's `pull_requests` array
+  empty. An older green run cannot override a newer failed, canceled, or
+  in-progress run.
 - That run has an unexpired `ci-validation-v1-<tree>-<base>-<head>` artifact
   matching the pushed Git tree, pre-push `main` commit, and PR head.
 
@@ -74,17 +76,36 @@ names that *are* runner labels), `l2_environments`, `browser_environments`,
 `node_environments`, and `wsl` (a boolean).
 
 It also derives `gates` — which of `lint`, `check`, and `test` this run selected
-the package for. A package with a source change (or a reverse dependency of
-one) carries all three. A package reached only through a global input carries
-the gates that input can change: `Cargo.toml`, the toolchain, `.cargo/`, and
-the CI workflows widen every gate; `clippy.toml` widens lint alone;
-`.config/nextest.toml` and `_wsl-ci.yml` widen test alone; a just file widens a
-gate only when the recipe that changed is reachable from that gate's CI entry
-recipe (`_lint`, `_test`, `_test_l2`, `_test_browser`; `_ensure-native-libs`
-reaches all three). A gate absent from `gates` schedules no job, and a
-lint-only package declares no test tiers to the rollup, so its unscheduled L1
-is not `MISSING`. `full_scope_gates` on the scope document names the widened
-gates for the run.
+the package for. A package owning a changed source file carries all three.
+Each unchanged package that directly depends on it carries `check` only, which
+compiles that seam without running the unchanged consumer's lint or tests.
+Dependencies of the changed package and transitive reverse dependencies are
+not selected. Documentation, manifests, lockfiles, Just recipes, workflows,
+and other CI configuration select no package jobs; CI tooling has its own
+small contract-test leg. Only an explicit `workflow_dispatch` full-scope run
+selects every package.
+
+Source classification is path based: `build.rs` and package-owned files with a
+known programming or web-source extension select their owning package. A gate
+absent from `gates` schedules no job, and a check-only reverse dependency
+declares no test tiers to the rollup, so its unscheduled L1 is not `MISSING`.
+
+## Local environment evidence
+
+The strict pre-push hook runs lint plus L1 and hostable L2 for source-changed
+packages, and compile-checks their direct reverse dependencies. It uses
+`sniff os --json` to identify macOS, Linux, native Windows, or WSL2. For a
+clean outgoing `HEAD`, it publishes a receipt under
+`refs/notes/ci-local/<environment>` containing the exact base, head, tree, and
+package/tier scope.
+
+L2 uses every available non-focusing backend declared by the package: detached
+tmux, background WezTerm, or keep-focus Kitty. Apple Terminal and Level 3 are
+excluded because a push hook must never take window focus. CI independently recalculates the scope and omits that environment only when
+the note matches exactly. Missing or invalid evidence is a cache miss, never a
+reason to skip work. The receipt covers L1 and L2 only: browser work stays in
+CI, and an environment needed by a companion suite is retained even if that
+duplicates its Rust L1 run. Manual full-scope runs ignore local receipts.
 
 A WSL2 guest *is* Linux, so `_ensure-native-libs` keys off `uname -s` and reads
 the package's `ubuntu-latest` list. `native` therefore stays a **runner OS**

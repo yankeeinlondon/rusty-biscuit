@@ -73,7 +73,6 @@ class ValidationTests(unittest.TestCase):
         for change in (
             {"event": "push"}, {"path": ".github/workflows/other.yml"},
             {"head_sha": MERGE}, {"repository": {"full_name": "other/repo"}},
-            {"pull_requests": []}, {"pull_requests": [{"number": 69}]},
             {"status": "in_progress"}, {"status": "queued"},
             {"conclusion": "failure"}, {"conclusion": "cancelled"},
             {"conclusion": "skipped"}, {"conclusion": None},
@@ -81,6 +80,12 @@ class ValidationTests(unittest.TestCase):
             with self.subTest(change=change):
                 self.run = {**copy.deepcopy(RUN), **change}
                 self.assertEqual(self.find(), "")
+
+    def test_run_level_pr_associations_are_not_required(self) -> None:
+        # GitHub can return an empty pull_requests array for a run even when
+        # the commit endpoint authoritatively identifies the merged PR.
+        self.run["pull_requests"] = []
+        self.assertEqual(self.find(), "295")
 
     def test_newer_failed_run_cannot_resurrect_old_success(self) -> None:
         self.api.side_effect = [

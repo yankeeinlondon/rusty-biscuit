@@ -82,6 +82,12 @@ none are recorded here (see "Noise" below).
 
 ## Cross-cutting
 
+- **A clean pre-push can replace one hosted environment.** The hook uses
+  `sniff os --json` to distinguish macOS, Linux, native Windows, and WSL2, then
+  records the exact source-package L1/L2 scope in an OS-specific Git note. CI
+  omits that environment only when the note matches its own base, head, tree,
+  and scope calculation. Browser and companion-suite work remains in CI.
+
 - **Caches do not warm across runs.** Per-package, per-environment caching
   cannot survive the 10 GB repository cache quota: one full run saves more
   caches than the quota holds and evicts its own predecessors. Only intra-run reuse works

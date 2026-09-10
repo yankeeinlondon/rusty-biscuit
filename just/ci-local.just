@@ -1,10 +1,12 @@
 # Local stand-in for the CI package gates.
 #
 # For every package CI would schedule for this branch's changes, run the same
-# two gates CI runs, with the same arguments:
+# gates CI runs, with the same arguments:
 #
 #   just _lint <pkg>                      clippy, --all-targets, NO features
 #   just _test <pkg> --no-fail-fast <test_args>   L1 with the declared CI features
+#   just _test_l2 <pkg> <test_args>        declared L2 on a hostable backend
+#   cargo check --all-targets -p <pkg>     direct reverse dependencies only
 #
 # The lint gate deliberately builds without features: that is CI's invocation,
 # and it is where incomplete `terminal-tests`/`daemon-tests`-style gating
@@ -26,15 +28,14 @@
 # a stale scope fixture — e.g. a new workspace dependency edge — locally
 # instead of on three preflight cells.
 #
-# Not replicated: L2/L3/browser tiers, WSL archives, companion suites, and the
-# Windows runner. Use `just test-l2` inside an area, and `just cross-check
-# <pkg>` for the Linux/Windows build hosts. CI stays the proof; this is the
-# discovery loop.
+# Not replicated: L3/browser tiers, WSL archives, companion suites, and other
+# operating systems. `--l2` adds the source packages' hostable L2 tier.
 #
 # Usage:
 #   just ci-local                       affected packages vs origin/main
 #   just ci-local --lint-only           clippy gates only
 #   just ci-local --test-only           L1 gates only
+#   just ci-local --l2                  add hostable L2 tests
 #   just ci-local --base <ref>          diff against another ref (or CI_LOCAL_BASE)
 #   just ci-local --all                 every workspace package
 #   just ci-local --dry-run             print the scope and gates, run nothing
@@ -46,14 +47,20 @@ ci-local *args="":
     base="${CI_LOCAL_BASE:-origin/main}"
     run_lint=1
     run_test=1
+    run_check=1
+    run_l2=0
     select_all=0
     dry_run=0
+    scope_out="${BISCUIT_CI_SCOPE_OUT:-}"
     selectors=()
     set -- {{ args }}
     while (( $# > 0 )); do
         case "$1" in
-            --lint-only) run_test=0 ;;
-            --test-only) run_lint=0 ;;
+            --lint-only) run_test=0; run_check=0; run_l2=0 ;;
+            --test-only) run_lint=0; run_check=0; run_l2=0 ;;
+            --l2) run_l2=1 ;;
+            --scope-out) shift; scope_out="${1:?--scope-out needs a path}" ;;
+            --scope-out=*) scope_out="${1#--scope-out=}" ;;
             --all) select_all=1 ;;
             --dry-run) dry_run=1 ;;
             --base) shift; base="${1:?--base needs a ref}" ;;
@@ -70,8 +77,7 @@ ci-local *args="":
     fi
 
     scope_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-scope.XXXXXX")"
-    lock_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-lock.XXXXXX")"
-    trap 'rm -f "${scope_file}" "${lock_file}"' EXIT
+    trap 'rm -f "${scope_file}"' EXIT
 
     if (( select_all == 1 )) || (( ${#selectors[@]} > 0 )); then
         python3 scripts/ci/affected_scope.py --all > "${scope_file}"
@@ -85,12 +91,8 @@ ci-local *args="":
             echo "ci-local: no changes relative to ${base} (${merge_base:0:9}); nothing to gate."
             exit 0
         fi
-        lock_args=()
-        if git show "${merge_base}:Cargo.lock" > "${lock_file}" 2>/dev/null; then
-            lock_args=(--base-lockfile "${lock_file}")
-        fi
         # shellcheck disable=SC2086
-        python3 scripts/ci/affected_scope.py "${lock_args[@]}" --base-ref "${merge_base}" ${changed} > "${scope_file}"
+        python3 scripts/ci/affected_scope.py ${changed} > "${scope_file}"
         echo
         echo "Changed vs ${base} (${merge_base:0:9}): $(wc -l <<< "${changed}" | tr -d ' ') file(s)"
     fi
@@ -125,8 +127,11 @@ ci-local *args="":
     full_scope="$(jq -r '.full_scope' "${scope_file}")"
     change_class="$(jq -r '.change_class' "${scope_file}")"
     full_gates="$(jq -rc '.full_scope_gates | join(",")' "${scope_file}")"
+    if [[ -n "${scope_out}" ]]; then
+        cp "${scope_file}" "${scope_out}"
+    fi
     echo "CI scope: ${count} package(s) (class=${change_class}, full_scope=${full_scope}${full_gates:+ for ${full_gates}})"
-    echo "Gates   : $([[ ${run_lint} == 1 ]] && printf 'lint ')$([[ ${run_test} == 1 ]] && printf 'test')"
+    echo "Gates   : $([[ ${run_lint} == 1 ]] && printf 'lint ')$([[ ${run_check} == 1 ]] && printf 'reverse-check ')$([[ ${run_test} == 1 ]] && printf 'L1 ')$([[ ${run_l2} == 1 ]] && printf 'L2')"
     echo "------------------------------------------------"
     if (( dry_run == 1 )); then
         while IFS= read -r package; do
@@ -140,6 +145,27 @@ ci-local *args="":
     passed=()
     failed=()
     SECONDS=0
+
+    local_environment=""
+    if (( run_l2 == 1 )); then
+        if ! command -v sniff > /dev/null 2>&1 || ! command -v jq > /dev/null 2>&1; then
+            echo "ci-local: --l2 requires sniff and jq; run 'just init'." >&2
+            exit 2
+        fi
+        os_json="$(sniff os --json)"
+        case "$(jq -r '.os_type' <<<"${os_json}")" in
+            MacOS) local_environment="macos-latest" ;;
+            Windows) local_environment="windows-latest" ;;
+            Linux)
+                if [[ "$(jq -r '.kernel' <<<"${os_json}" | tr '[:upper:]' '[:lower:]')" == *microsoft* ]]; then
+                    local_environment="wsl2-ubuntu"
+                else
+                    local_environment="ubuntu-latest"
+                fi
+                ;;
+            *) echo "ci-local: unsupported host reported by sniff." >&2; exit 2 ;;
+        esac
+    fi
 
     # Preflight parity: CI runs this exact suite on every OS before any
     # package gate. Quiet on success; full unittest output on failure.
@@ -155,9 +181,18 @@ ci-local *args="":
     while IFS= read -r package; do
         [[ -n "${package}" ]] || continue
         test_args="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .test_args // ""' "${scope_file}")"
-        # The gates this run selected the package for; a package reached only
-        # through a lint-global input runs no test here, exactly as in CI.
+        # Source packages carry every gate; direct reverse dependencies carry
+        # compile-check only.
         gates="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .gates // ["lint","check","test"] | join(" ")' "${scope_file}")"
+        if (( run_check == 1 )) && [[ " ${gates} " == " check " ]]; then
+            check_args="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .check_args' "${scope_file}")"
+            # shellcheck disable=SC2086
+            if cargo check --all-targets ${check_args}; then
+                passed+=("check ${package} (direct reverse dependency)")
+            else
+                failed+=("check ${package} (direct reverse dependency)")
+            fi
+        fi
         if (( run_lint == 1 )) && [[ " ${gates} " == *" lint "* ]]; then
             if just _lint "${package}"; then
                 passed+=("lint ${package}")
@@ -173,6 +208,33 @@ ci-local *args="":
                 failed+=("test ${package}")
             fi
         fi
+        if (( run_l2 == 1 )) && [[ " ${gates} " == *" test "* ]]; then
+            has_l2="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .tiers | index("L2") != null' "${scope_file}")"
+            l2_here="$(jq -r --arg p "${package}" --arg e "${local_environment}" '.matrix[] | select(.package == $p) | .l2_environments | index($e) != null' "${scope_file}")"
+            if [[ "${has_l2}" == "true" ]]; then
+                backends="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .l2_backends | join(" ")' "${scope_file}")"
+                required=()
+                if [[ " ${backends} " == *" tmux "* ]] && command -v tmux > /dev/null 2>&1; then
+                    required+=(tmux)
+                fi
+                if [[ " ${backends} " == *" wezterm "* ]] && command -v wezterm > /dev/null 2>&1 && [[ -n "${WEZTERM_UNIX_SOCKET:-}" ]]; then
+                    required+=(wezterm)
+                fi
+                if [[ " ${backends} " == *" kitty "* ]] && command -v kitty > /dev/null 2>&1 && [[ -n "${KITTY_LISTEN_ON:-}" ]]; then
+                    required+=(kitty)
+                fi
+                required_csv="$(IFS=,; echo "${required[*]}")"
+                if (( ${#required[@]} == 0 )); then
+                    if [[ "${l2_here}" == "true" ]]; then
+                        failed+=("L2 ${package} (no non-focusing backend available)")
+                    fi
+                elif BISCUIT_TEST_REQUIRED_BACKENDS="${required_csv}" just _test_l2 "${package}" ${test_args}; then
+                    passed+=("L2 ${package} (${required_csv})")
+                else
+                    failed+=("L2 ${package} (${required_csv})")
+                fi
+            fi
+        fi
     done <<< "${packages}"
 
     echo
@@ -186,4 +248,4 @@ ci-local *args="":
         exit 1
     fi
     echo
-    echo -e "{{ green }}All ${#passed[@]} gate(s) passed — CI's lint and L1 jobs should be green for this scope.{{ reset }}"
+    echo -e "{{ green }}All ${#passed[@]} gate(s) passed for this host and scope.{{ reset }}"

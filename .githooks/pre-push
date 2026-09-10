@@ -1,15 +1,15 @@
 #!/bin/sh
 # Rusty Biscuit pre-push hook
 #
-# Runs `just pre-push`, which is `just ci-local --lint-only`: CI's clippy gate
-# (`--all-targets`, no features) for exactly the packages CI would schedule for
-# this branch's changes. Nothing else — L1 tests are CI's job, and a docs-only
-# push gates nothing.
+# Runs lint, L1, and hostable L2 for source-changed packages, plus a compile
+# check for their direct reverse dependencies. Successful exact-tree evidence
+# is attached to the outgoing commit through an OS-specific Git notes ref; CI
+# then omits that environment's duplicate L1/L2/check work.
 #
 # Behavior is controlled by the RUSTY_BISCUIT_PRE_PUSH environment variable:
-#   off    - skip the lint entirely
-#   warn   - run the lint, print failures in red, but allow the push (default)
-#   strict - run the lint, block the push on failure
+#   off    - skip validation entirely
+#   warn   - run the gates, print failures in red, but allow the push
+#   strict - run the gates, block the push on failure (default)
 #
 # RUSTY_BISCUIT_PRE_PUSH_AREAS (space-separated package or area names) replaces
 # the computed scope with a fixed selection.
@@ -18,7 +18,7 @@
 #   ln -s ../../.githooks/pre-push .git/hooks/pre-push
 
 # Mode selection — resolved first so `off` short-circuits before any work.
-MODE="${RUSTY_BISCUIT_PRE_PUSH:-warn}"
+MODE="${RUSTY_BISCUIT_PRE_PUSH:-strict}"
 
 case "$MODE" in
     off)
@@ -42,12 +42,25 @@ esac
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX
 
 SELECTION="${RUSTY_BISCUIT_PRE_PUSH_AREAS:-}"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+HEAD_SHA="$(git rev-parse HEAD)"
+PUSHES_HEAD=0
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+    if [ "$local_sha" = "$HEAD_SHA" ]; then
+        PUSHES_HEAD=1
+    fi
+done
+
+SCOPE_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope.XXXXXX")"
+RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-receipt.XXXXXX")"
+trap 'rm -f "$SCOPE_FILE" "$RECEIPT_FILE"' EXIT
+export BISCUIT_CI_SCOPE_OUT="$SCOPE_FILE"
 
 echo ""
 if [ -n "$SELECTION" ]; then
-    echo "Running pre-push lint for: $SELECTION"
+    echo "Running pre-push validation for: $SELECTION"
 else
-    echo "Running pre-push lint for the packages CI would schedule"
+    echo "Running pre-push validation for source-changed packages"
 fi
 echo "------------------------------------------------"
 echo ""
@@ -58,7 +71,7 @@ EXIT_CODE=$?
 
 if [ "$EXIT_CODE" -ne 0 ]; then
     echo ""
-    printf "\033[31mPre-push lint failed (exit %d)\033[0m\n" "$EXIT_CODE"
+    printf "\033[31mPre-push validation failed (exit %d)\033[0m\n" "$EXIT_CODE"
     echo ""
     if [ "$MODE" = "warn" ]; then
         echo "Continuing push in warn mode. To bypass this hook entirely, use 'git push --no-verify'." >&2
@@ -72,7 +85,47 @@ if [ "$EXIT_CODE" -ne 0 ]; then
 fi
 
 echo ""
-echo "Pre-push lint passed."
+echo "Pre-push validation passed."
 echo ""
+
+# An override proves only the explicitly named packages. Dirty state means the
+# test process did not necessarily execute the outgoing tree. Both cases remain
+# useful local checks but cannot suppress CI evidence.
+if [ "$PUSHES_HEAD" -eq 1 ] && [ -z "$SELECTION" ] \
+    && [ -z "$(git status --porcelain)" ] \
+    && [ -s "$SCOPE_FILE" ] \
+    && command -v sniff >/dev/null 2>&1 \
+    && command -v jq >/dev/null 2>&1 \
+    && BASE_SHA="$(git merge-base origin/main "$HEAD_SHA" 2>/dev/null)"; then
+    OS_JSON="$(sniff os --json)"
+    case "$(printf '%s' "$OS_JSON" | jq -r '.os_type')" in
+        MacOS) ENVIRONMENT="macos-latest" ;;
+        Windows) ENVIRONMENT="windows-latest" ;;
+        Linux)
+            KERNEL="$(printf '%s' "$OS_JSON" | jq -r '.kernel' | tr '[:upper:]' '[:lower:]')"
+            if printf '%s' "$KERNEL" | grep -q microsoft; then
+                ENVIRONMENT="wsl2-ubuntu"
+            else
+                ENVIRONMENT="ubuntu-latest"
+            fi
+            ;;
+        *) ENVIRONMENT="" ;;
+    esac
+
+    if [ -n "$ENVIRONMENT" ] && python3 "$REPO_ROOT/scripts/ci/local_evidence.py" record \
+        --scope "$SCOPE_FILE" --base "$BASE_SHA" --head "$HEAD_SHA" \
+        --environment "$ENVIRONMENT" >"$RECEIPT_FILE"; then
+        NOTES_REF="refs/notes/ci-local/$ENVIRONMENT"
+        REMOTE_NAME="${1:-origin}"
+        git fetch --no-tags "$REMOTE_NAME" "+$NOTES_REF:$NOTES_REF" >/dev/null 2>&1 || true
+        git notes --ref "$NOTES_REF" add -f -F "$RECEIPT_FILE" "$HEAD_SHA"
+        if git push --no-verify "$REMOTE_NAME" "$NOTES_REF:$NOTES_REF" >/dev/null; then
+            SHORT_SHA="$(git rev-parse --short=9 "$HEAD_SHA")"
+            echo "Published $ENVIRONMENT evidence for $SHORT_SHA."
+        else
+            echo "Local evidence passed but could not be published; CI will retain $ENVIRONMENT." >&2
+        fi
+    fi
+fi
 
 exit 0
