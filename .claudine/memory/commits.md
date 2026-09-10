@@ -230,3 +230,12 @@ belong here.
   of `A`-only entries alongside a single `R` is the giveaway: the rename
   collapses a `D + A` into one index fact but every other plain `A` is a
   tracked-path addition, not a move.
+- Extracting a shared fixture into a CI-skipped crate (e.g. one whose
+  `[package.metadata.ci] gates = false` lists the package out of every
+  CI leg's test run) requires a parallel regression test in a CI-gated
+  package — the canonical fixture test in the skipped crate is reference
+  evidence only and is never executed in CI. Ship the parallel test in
+  the same atomic commit as the extraction; otherwise the gate that proves
+  the fix lands in a follow-up that drifts from the fixture's actual
+  behavior, and the only signal that the two have diverged is a developer
+  running both by hand.
