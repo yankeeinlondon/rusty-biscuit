@@ -220,3 +220,13 @@ belong here.
   silently shipping a self-contradicting paragraph.
 - After all groups finish, reconcile `git status --short` against the
   original staged set; anything left belongs to a failed or unassigned group.
+- When a commit subject describes a structural move ("restructure skill tree",
+  "extract to new module", "consolidate under `foo/`") but the staging only
+  adds the new path without staging the old as `D` or `R`, the tracking-tree
+  ends up with both old and new files. The pre-commit diff against HEAD will
+  not surface the leftover because nothing is staged for it; detect by
+  `git ls-files <old-glob>` after staging and either re-stage the deletes or
+  flag the leftover tracked paths in the commit body as a follow-up. A batch
+  of `A`-only entries alongside a single `R` is the giveaway: the rename
+  collapses a `D + A` into one index fact but every other plain `A` is a
+  tracked-path addition, not a move.
