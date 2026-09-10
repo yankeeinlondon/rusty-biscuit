@@ -1049,6 +1049,49 @@ fn shipped_review_router_non_tty_partial_fails_before_initialize() {
     assert!(!fixture.home().join("provider-prompt").exists(), "{stderr}");
 }
 
+/// The caller's document declares no schema, so the proxy target is the first
+/// document that can classify `spec` as a file input. The target's own
+/// `initialize` reads that value, so the resolution pass has to run again for
+/// the adopted document — skipping it there returns the lifecycle evaluation
+/// error this fix removed instead of the typed schema diagnostic.
+#[test]
+fn proxy_target_partial_is_resolved_before_the_target_initialize() {
+    let fixture = CliProcessFixture::named("review-router-proxy-target-partial");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    install_goose(&fixture);
+    let package = fixture.cwd().join("packages/example");
+    write(
+        &package.join("fixes/2026-09-10-local-affected-scope/spec.md"),
+        "---\nreviewed: true\n---\nSpecification.\n",
+    );
+    write(
+        &fixture.cwd().join("prompts/review.md"),
+        include_str!("../../../prompts/review.md"),
+    );
+    let entry = fixture.cwd().join("prompts/entry.md");
+    write(
+        &entry,
+        "---\ninitialize:\n  stack:\n    - action:\n        - proxy: ./review.md\n---\nEntry without a schema.\n",
+    );
+
+    let mut command = fixture.command_builder().ambient_context(&package).build();
+    let output = command
+        .args(["compose", "--goose", "-y"])
+        .arg(&entry)
+        .arg("spec=fixes/2026-09-10-local")
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output));
+    assert!(stderr.contains("no existing file matched reference"), "{stderr}");
+    assert!(stderr.contains("fixes/2026-09-10-local"), "{stderr}");
+    assert!(!stderr.contains("lifecycle evaluation error"), "{stderr}");
+    assert!(!fixture.home().join("provider-prompt").exists(), "{stderr}");
+}
+
 #[test]
 fn shipped_review_router_literal_does_not_collect_absent_route_inputs() {
     let fixture = CliProcessFixture::named("review-router-literal-route");

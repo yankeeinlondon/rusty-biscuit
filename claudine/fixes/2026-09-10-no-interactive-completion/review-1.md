@@ -5,7 +5,9 @@ fix: 2026-09-10-no-interactive-completion/review-1.md
 spec: 2026-09-10-no-interactive-completion/spec.md
 reviewed_by: claude/fable
 created: 2026-09-10T14:02:57-07:00
-implemented: false
+log: claudine/fixes/2026-09-10-no-interactive-completion/log.md
+implemented: true
+implemented_by: claude/opus
 ready: false
 human_review: false
 ---

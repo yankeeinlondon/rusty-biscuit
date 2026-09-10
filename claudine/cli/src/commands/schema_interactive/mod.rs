@@ -114,9 +114,9 @@ pub fn pre_validate_with_interactive_collection(
     // Caller records need canonical projection before a file-schema verdict:
     // this pre-validator has only raw setters and cannot preserve their
     // authoring context in a failure. The caller may therefore defer a plain
-    // schema verdict to preparation; interactive collection below still runs
-    // here, and its own outcomes (a resolved partial, a zero-match failure)
-    // are never deferred.
+    // schema verdict to preparation. Only that verdict defers: missing-value
+    // collection below still runs here, as does the partial-file fallback for
+    // the shapes `resolve_supplied_file_inputs` left unresolved.
     if defer_schema_verdict && matches!(err, CompositionError::SchemaValidation { .. }) {
         return Ok(PreValidatedSchema {
             source: source.clone(),
@@ -190,6 +190,11 @@ pub fn pre_validate_with_interactive_collection(
 /// launch area, filter by the provided substring, and drive a confirmation
 /// dialog (single match) or chooser (multiple). On selection, rewrite the
 /// property override and re-run [`pre_validate_schema`] once.
+///
+/// This is the residual path: a caller-supplied partial is normally completed
+/// earlier by `resolve_supplied_file_inputs`, which reaches only shapes whose
+/// file metadata is unambiguous. Root-level unions with zero or several
+/// applicable arms, and unions with referenced arms, still arrive here.
 ///
 /// The original error is preserved unchanged when the session is not
 /// interactive, when zero candidates match the partial, or when the user

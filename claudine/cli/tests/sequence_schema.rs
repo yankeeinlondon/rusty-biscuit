@@ -482,3 +482,118 @@ Step {{{{ state.name }}}}: {{{{ loaded_title }}}}
         "no provider session should launch when a step document is malformed"
     );
 }
+
+/// A sequence step's proxied target is prepared with a denied interactive
+/// policy, so a caller-supplied partial the target declares as an eager
+/// `file(match)` is never completed through this entry. What that must produce
+/// is the typed schema diagnostic, raised while preparing the adopted target
+/// and naming the target's own `/spec` property — **not** the lifecycle
+/// evaluation error `frontmatter(spec, ...)` raises when it dereferences an
+/// unresolved partial. That lifecycle error is the defect
+/// `fixes/2026-09-10-no-interactive-completion` removed, and seeing it here
+/// would mean the supplied-file pass never ran for the target that
+/// `run_step_proxy_loop` adopts.
+///
+/// The denied policy itself is not observable from L1: with no TTY the chooser
+/// could not run even if the policy allowed it, so both settings land on the
+/// same typed diagnostic. The outcome above is the contract worth pinning; the
+/// spec rules new sequence interaction modes out of scope.
+#[cfg(unix)]
+#[test]
+fn sequence_proxy_target_partial_fails_typed_before_the_target_initialize() {
+    let fixture = CliProcessFixture::named("sequence-proxy-supplied-partial");
+    let count_path = fixture.cwd().join("call-count.txt");
+
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+
+    // A real candidate for the substring, so the partial is genuinely
+    // completable and only the denied policy stops it.
+    let spec = fixture.cwd().join("fixes/2026-09-10-local-affected-scope/spec.md");
+    fs::create_dir_all(spec.parent().unwrap()).unwrap();
+    fs::write(&spec, "---\nreviewed: true\n---\nSpecification.\n").unwrap();
+
+    // The shipped router is the proxy target: it is the first document to
+    // classify `spec` as a file input, and its own `initialize` guard reads
+    // that value through `frontmatter()`.
+    let target = fixture.cwd().join("review.md");
+    fs::write(&target, include_str!("../../../prompts/review.md")).unwrap();
+
+    let md_file = fixture.cwd().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+sequence:
+  - alpha
+initialize:
+  stack:
+    - action:
+        - proxy: "./review.md"
+---
+Step {{ state }}.
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &fixture.bin_dir().join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = fixture
+        .command()
+        .args([
+            "sequence",
+            "--goose",
+            md_file.to_str().unwrap(),
+            "spec=fixes/2026-09-10-local",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    let collapsed = plain
+        .replace('┃', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        collapsed.contains("schema validation failed for"),
+        "expected the typed schema surface; stderr:\n{plain}"
+    );
+    assert!(
+        collapsed.contains("review.md"),
+        "the diagnostic must name the adopted proxy target; stderr:\n{plain}"
+    );
+    assert!(
+        collapsed.contains("/spec"),
+        "the diagnostic must name the target's own property; stderr:\n{plain}"
+    );
+    assert!(
+        collapsed.contains("no existing file matched reference"),
+        "expected the actionable unresolved-file reason; stderr:\n{plain}"
+    );
+    assert!(
+        collapsed.contains("fixes/2026-09-10-local"),
+        "the diagnostic must name the caller's partial; stderr:\n{plain}"
+    );
+    // The discriminator: the guard must never have read the partial. If the
+    // supplied-file pass is skipped for the adopted target, `frontmatter()`
+    // raises and these two appear instead of the diagnostic above.
+    assert!(
+        !collapsed.contains("lifecycle evaluation error"),
+        "the partial reached the target's initialize; stderr:\n{plain}"
+    );
+    assert!(
+        !collapsed.contains("invalid file path"),
+        "the partial was dereferenced as a path; stderr:\n{plain}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider session may launch for an unresolved supplied partial"
+    );
+}

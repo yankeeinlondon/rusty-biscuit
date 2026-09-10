@@ -31,13 +31,37 @@ pub(crate) fn resolve_supplied_file_inputs(
                 repo_info: None,
                 git_root: origin.repository_root().map(std::path::Path::to_path_buf),
             };
-            let path = choose_provided_file_reference(property, provided, patterns, &scope)
-                .ok()
-                .flatten()?;
-            let resolved = FileReference::new(path.to_str()?)
-                .ok()?
-                .resolve_in_context(origin)
-                .ok()??;
+            // A decline or cancellation is `Ok(None)` and is a normal outcome;
+            // only a broken chooser is worth a diagnostic, since both reach the
+            // caller as the same "no existing file matched" surface.
+            let path = match choose_provided_file_reference(property, provided, patterns, &scope) {
+                Ok(selected) => selected?,
+                Err(err) => {
+                    tracing::debug!(
+                        target: "claudine::schema_interactive",
+                        %err,
+                        property,
+                        provided,
+                        "file chooser failed; reporting the reference as unresolved",
+                    );
+                    return None;
+                }
+            };
+            let resolved = match FileReference::new(path.to_str()?)
+                .and_then(|reference| reference.resolve_in_context(origin))
+            {
+                Ok(resolved) => resolved?,
+                Err(err) => {
+                    tracing::debug!(
+                        target: "claudine::schema_interactive",
+                        %err,
+                        property,
+                        chosen = %path.display(),
+                        "chosen file failed to resolve; reporting the reference as unresolved",
+                    );
+                    return None;
+                }
+            };
             Some(serde_json::Value::String(resolved.display().to_string()))
         },
     )

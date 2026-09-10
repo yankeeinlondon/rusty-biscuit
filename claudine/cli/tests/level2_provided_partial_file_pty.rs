@@ -18,6 +18,14 @@
 //! - Scalar string values for `file[]` properties are normalized to a
 //!   single-element array before resolution.
 //!
+//! A second group, from `fixes/2026-09-10-no-interactive-completion`, covers
+//! the same resolution happening before a document's `initialize` can
+//! dereference the value, and surviving a proxy handoff. Those tests share
+//! `review_router_fixture`, which seeds the shipped `prompts/review.md`
+//! router, its proxy target, spec candidates under the `packages/example`
+//! launch area, and a same-substring decoy at the repository root that only a
+//! mis-anchored candidate scope would find.
+//!
 //! Gating mirrors `level2_schema_prompt_pty.rs`: `#![cfg(unix)]` plus
 //! `require_level!(Level::L2, pty_available(), ...)` so the test skips
 //! cleanly without a PTY.

@@ -232,10 +232,9 @@ pub(crate) fn run_composition_inner(
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
         emit_dropped_optional_warnings(&pre.dropped_optionals);
-        // Interactive collection may have supplied a missing value or replaced
-        // a `file(match)` partial, and invalid optionals may have been dropped;
-        // the caller records must carry the same values, still anchored at
-        // the launch origin.
+        // Pre-validation may have supplied a missing value or dropped an
+        // invalid optional; the caller records must carry the same values,
+        // still anchored at the launch origin.
         caller_input_records =
             claudine::composition::CallerInputLayers::from_caller_overrides(
                 pre.set_overrides.clone(),
@@ -255,6 +254,8 @@ pub(crate) fn run_composition_inner(
     )?;
     // Includes any interactive collection wait when stdin is a TTY; in the
     // common non-interactive / dry-run `--perf` case this is pure validation.
+    // Supplied-file resolution is measured here too, so the span holds two
+    // effective-schema loads whenever the caller set a value.
     record_prep_substage(
         &mut prep_substages,
         perf_enabled,
@@ -450,14 +451,19 @@ pub(crate) fn prepare_and_run_active_document(
     // A target can be the first document to declare a caller input's file
     // schema. Persist its selection in the coordinator's caller layer so a
     // later handoff or fresh preparation cannot revive the original partial.
-    resolve_supplied_file_inputs(
-        &source,
-        set_overrides,
-        caller_input_records,
-        &file_resolution_context,
-        interactive,
-    )
-    .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
+    // The caller's own document was already inspected before its lifecycle
+    // could reach the value, so repeating that pass here would only reload and
+    // re-validate the schema to find nothing.
+    if !first {
+        resolve_supplied_file_inputs(
+            &source,
+            set_overrides,
+            caller_input_records,
+            &file_resolution_context,
+            interactive,
+        )
+        .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
+    }
     let set_overrides = set_overrides.clone();
     let caller_input_records = caller_input_records.clone();
 
