@@ -6,6 +6,7 @@ created: 2026-09-09T13:38:56-07:00
 spec: 2026-09-07-faster-sniff-tests/spec.md
 implemented: true
 implemented_by: claude/opus
+next: 2026-09-07-faster-sniff-tests/review-2.md
 log: sniff/fixes/2026-09-07-faster-sniff-tests/log.md
 description: "A **fix** review of `2026-09-07-faster-sniff-tests/spec.md`"
 fix: 2026-09-07-faster-sniff-tests/review-1.md
@@ -54,7 +55,7 @@ Strongest verification present: Level 1 on macOS for the candidate and
 pre-candidate Level 1 CI on the other environments. The required candidate
 Level 1 native-Windows/CI evidence is absent, so this is a verification gap.
 
-DECISION: this will not be used to determine production readiness; we can 
+DECISION: this will not be used to determine production readiness; we can
 run tests locally to ensure no breakage where we feel there is OS risk:
 
 - {{ env.BUILD_LINUX }} - is the host for testing on Linux

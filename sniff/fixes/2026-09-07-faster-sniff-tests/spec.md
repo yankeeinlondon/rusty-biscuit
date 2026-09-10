@@ -6,7 +6,7 @@ reviewed: true
 reviewed_by: opencode/zai-coding-plan/glm-5.3
 reviewed_on: 2026-09-07
 implemented: true
-review_iterations: 1
+review_iterations: 2
 coordinates_with:
     - sniff/fixes/2026-07-22-inefficient-calling/spec.md
 packages:
