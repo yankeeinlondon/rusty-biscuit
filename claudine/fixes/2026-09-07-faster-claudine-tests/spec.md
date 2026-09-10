@@ -51,9 +51,8 @@ historical observations, not this fix's baseline. It also records inherited
 `COLUMNS=44` failures in `compose_schema_cli` and `composition_outputs`.
 
 Sequencing is decided, not open: the predecessor lands on `main` first, and
-its three consecutive green CI runs — the evidence its log still defers —
-are collected before any change from this fix lands. Those same runs are
-this fix's CI baseline, so one push closes the predecessor's obligation and
+its green CI run — the evidence its log still defers — is collected before
+any change from this fix lands. That same run is this fix's CI baseline, so one push closes the predecessor's obligation and
 opens this one's attribution window. Interleaving the two would make the
 predecessor's evidence measure this fix's changes too.
 
@@ -189,9 +188,9 @@ the relevant full L1 suites. Re-run changed timeout/concurrency cases ten times
 under representative suite load. Use work counters or sentinel effects to
 prove eliminated discovery and unrelated launches independently of timing.
 
-Retain baseline and three consecutive candidate CI runs for each configured
+Retain the baseline and one candidate CI run for each configured
 package/environment leg, including Claudine CLI's native Linux/macOS/Windows
-and WSL2 legs. Record intervening failed attempts. Compare matched tests within
+and WSL2 legs. Record any failed attempt that precedes it. Compare matched tests within
 each environment; report additions and platform exclusions separately.
 Document numeric budgets in `inventory.md` beside the baseline table — after
 attribution and before remediation is evaluated — so budget review and
@@ -236,3 +235,13 @@ substitute for a fix.
 - Which source scans can share work without losing independent failure detail?
 - Which technical exceptions remain necessary after live-child support?
 - What per-family timing budgets are justified on the existing CI runners?
+
+## Rulings
+
+- **2026-09-09 — one candidate CI run per leg, not three.** The text above
+  originally required three consecutive candidate CI runs per configured leg
+  before budgets could be derived, and the plan, the test-audit aggregator, and
+  the results all inherited that number. Ken ruled it out: a full-scope run of
+  this branch takes more than a day, so the PR gets exactly one candidate run
+  per leg and is never re-run for sampling. Budgets that need more samples stay
+  open as a residual rather than gating this fix.
