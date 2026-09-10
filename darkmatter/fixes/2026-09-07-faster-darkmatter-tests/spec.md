@@ -165,10 +165,9 @@ substage. The prior
 [redundant-walk results](../2026-07-16-redundant-walk/results.md) illustrate why
 attribution must precede a percentage target.
 
-Collect three consecutive candidate runs — same workflow definition and
-runner image, no intervening workflow edits — for configured CI
-package/environment legs, preserving failures between attempts and compatible
-baseline artifacts.
+Collect one candidate run — same workflow definition and runner image as the
+baseline — for configured CI package/environment legs, preserving any failed
+attempt and compatible baseline artifacts.
 No new runner matrix is required by this draft. Compare matched identities
 within each environment and show added/removed/gated tests separately.
 Measurements absent on a platform remain pending.
@@ -244,3 +243,13 @@ follow-up prevents the duplication from becoming silently permanent.
 - Which DMLS/extension checks are reachable from existing recipes?
 - Which repeated corpus/setup operations can be consolidated without reducing
   diagnostic quality or representative integration coverage?
+
+## Rulings
+
+- **2026-09-09 — one candidate CI run per leg, not three.** The text above
+  originally required three consecutive candidate CI runs per configured leg
+  before budgets could be derived, and the plan, the test-audit aggregator, and
+  the results all inherited that number. Ken ruled it out: a full-scope run of
+  this branch takes more than a day, so the PR gets exactly one candidate run
+  per leg and is never re-run for sampling. Budgets that need more samples stay
+  open as a residual rather than gating this fix.
