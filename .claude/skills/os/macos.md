@@ -85,6 +85,16 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
 - After an OS upgrade, third-party menu-bar and window overlays are the first
   suspect for WindowServer load.
 
+## Audio fixture discovery outside PATH
+
+Sniff's program discovery falls back to macOS application bundles after PATH.
+A private PATH containing only a fake `aplay` still discovered `mpv.app` during
+the silent-audio fix. Therefore a private PATH does not prove that the installed
+player list contains only fixture programs. Playa currently launches host players
+by bare binary name, so an out-of-PATH bundle produces a spawn error; it does not
+launch that bundle. Keep a volume-capable recording player in PATH for controlled
+fallback tests, and test incapable-player rejection at command construction.
+
 ## Proving a call was eliminated
 
 When a change claims a walk, scan, or launch was *removed*, count it with an

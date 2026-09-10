@@ -101,9 +101,9 @@ OS-specific default stacks (highest quality first):
 ## Playback and detached preparation
 
 The `playa` feature also enables `playa/native-playback`. File-producing
-providers (Kokoro, EchoGarden, gTTS, ElevenLabs) use the native route first and
+providers (Say, Kokoro, EchoGarden, gTTS, ElevenLabs) use the native route first and
 fall back to ranked host players. Their `play_with_result` response includes a
-`SpeakPlaybackReport`; direct streaming providers (`say`, SAPI, eSpeak) leave
+`SpeakPlaybackReport`; direct streaming providers (SAPI, eSpeak) leave
 the field absent because their completion duration is unverified.
 
 `Speak::play_detached` returns after publishing a ready job or reserving an
@@ -131,3 +131,28 @@ spool, journal, or subprocess side effects.
 - **biscuit-speaks-cli**: CLI that uses biscuit-speaks (`so-you-say` binary, located at `biscuit-speaks/cli`)
 - **playa**: Audio playback library (optional feature for `biscuit-speaks`)
 - **sniff-lib**: System detection for available TTS providers
+
+## Volume and silent tests
+
+`VolumeLevel::Explicit(0.0)` is mute; all concrete providers honor the normalized
+output gain. eSpeak uses `-a` scaled to 0–100 (100 is unity, not its amplified
+200 maximum), and SAPI uses native percentage volume. Say synthesizes PCM WAV
+with the same selected voice/rate, then uses native Playa at the requested gain;
+without `playa`, it uses macOS `afplay -v`. Say detached jobs reserve preparation
+before synthesis and publish cached files, matching the other file providers.
+Temporary synthesis files are removed before handoff.
+Never apply playback speed a second time to Say's already rate-adjusted output.
+
+Real speech tests must use zero volume and explicit test-message wording.
+Kokoro completion coverage pins `af_heart`, deliberately independent of Claudine's
+normal provider/voice. `lib/tests/volume_control.rs` uses recording executables
+and invalid audio to verify zero and intermediate gains without audible output.
+
+CLI fixtures must also set `BISCUIT_SPEAKS_CACHE` to a private voice-capability
+cache and supply a controlled provider inventory. `--voice Samantha` alone did
+not pin the Say fixture: the user's cached inventory resolved it to
+`Samantha (Enhanced)`. The fixture now answers `say -v '?'` with only Samantha
+and keeps that inventory cache private. Preserve production voice matching;
+isolate test inventories so personal voice installations cannot change what a
+test selects. This voice-capability cache is separate from the synthesized-audio
+cache controlled by the fixture's `TMPDIR`/`TMP`/`TEMP` settings.
