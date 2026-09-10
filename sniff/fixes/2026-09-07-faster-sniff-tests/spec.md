@@ -201,8 +201,8 @@ remediation. Preserve native-detector costs as a separate cohort; do not compare
 a real detector before with a fake projection afterward as a product speedup.
 No universal percentage target is assumed.
 
-Collect three consecutive candidate runs for configured CI package/environment
-legs, retaining baseline artifacts and intervening failures. Compare only within
+Collect one candidate run for configured CI package/environment legs,
+retaining baseline artifacts and any failed attempt. Compare only within
 compatible OS/runner/request/counter versions; native Windows and WSL are
 distinct. No additional CI matrix is required. Missing execution evidence stays
 pending and cannot be satisfied by a feature-disabled run.
@@ -247,3 +247,13 @@ pending and cannot be satisfied by a feature-disabled run.
 - Which bespoke environment gates (for example `SNIFF_INTERACTIVE_PTY`) become
   tiered or recipe-routed tests, and which are removed?
 - What cost and concurrency budgets are justified for each native platform?
+
+## Rulings
+
+- **2026-09-09 — one candidate CI run per leg, not three.** The text above
+  originally required three consecutive candidate CI runs per configured leg
+  before budgets could be derived, and the plan, the test-audit aggregator, and
+  the results all inherited that number. Ken ruled it out: a full-scope run of
+  this branch takes more than a day, so the PR gets exactly one candidate run
+  per leg and is never re-run for sampling. Budgets that need more samples stay
+  open as a residual rather than gating this fix.
