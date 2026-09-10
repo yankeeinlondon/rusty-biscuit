@@ -1298,9 +1298,9 @@ Gender: female
             return;
         }
 
-        let config = TtsConfig::default();
+        let config = TtsConfig::default().with_volume(crate::types::VolumeLevel::Explicit(0.0));
         let result = provider
-            .speak("Hello from the Echogarden provider test.", &config)
+            .speak("This is a test message.", &config)
             .await;
         assert!(result.is_ok());
     }
@@ -1315,9 +1315,9 @@ Gender: female
             return;
         }
 
-        let config = TtsConfig::new().with_voice("Heart");
+        let config = TtsConfig::new().with_voice("Heart").with_volume(crate::types::VolumeLevel::Explicit(0.0));
         let result = provider
-            .speak("Testing with the Heart voice.", &config)
+            .speak("This is a test message.", &config)
             .await;
         assert!(result.is_ok());
     }

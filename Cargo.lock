@@ -1369,10 +1369,12 @@ dependencies = [
  "clap 4.6.1",
  "clap_complete",
  "darkmatter",
+ "fs4",
  "inquire",
  "owo-colors",
  "sniff",
  "strum 0.28.0",
+ "sysinfo",
  "tempfile",
  "tokio",
 ]

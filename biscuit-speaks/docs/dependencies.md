@@ -20,3 +20,12 @@ executable installs Playa's scheduler/delegated-play entrypoints and the private
 biscuit-speaks preparation entrypoint before normal CLI parsing, allowing both
 worker modes to re-exec the same absolute binary without exposing internal
 arguments.
+
+The CLI also uses `fs4` as a dev dependency to verify detached test schedulers
+have released their private worker locks before fixture teardown.
+
+The CLI's `sysinfo` dev dependency supervises detached test processes by their
+canonical executable paths inside a unique fixture directory. Timeout cleanup
+revalidates PID/start time and executable ownership before termination, then
+waits for exit before removing runnable queue records. It never targets a
+process by its generic program name.

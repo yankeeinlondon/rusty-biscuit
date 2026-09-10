@@ -12,6 +12,9 @@
   alongside `espeak-ng`. It uses `biscuit-hash` xxHash for content-addressed
   TTS audio cache names and `fs4` for detached-helper/test coordination. See
   [`biscuit-speaks/docs/dependencies.md`](./biscuit-speaks/docs/dependencies.md).
+- `biscuit-speaks-cli` uses `fs4` and `sysinfo` as development dependencies
+  to wait for detached audio test ownership and terminate only fixture-owned
+  executables when cooperative cleanup times out.
 - Both Claudine crates explicitly enable `playa/native-playback`; their Linux
   native policy includes `libasound2-dev`. Their direct `biscuit-file` and
   `biscuit-hash` edges remain composition/MCP/session authorities rather than

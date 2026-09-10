@@ -28,7 +28,7 @@ This library can use any of the following TTS providers found on the host (or wi
 
 | Provider   | OS             | Vol | Speed | Notes                                                                      |
 |------------|----------------|:---:|:-----:| ----------------------------------------------------------------------------|
-| Say        | macOS          | ❌  | ✅    | Built-in macOS TTS with decent quality                                     |
+| Say        | macOS          | ✅  | ✅    | Built-in macOS TTS with decent quality                                     |
 | eSpeak     | Cross-platform | ✅  | ✅    | Massive language library but voices a bit robotic                          |
 | SAPI       | Windows        | ✅  | ✅    | Windows Speech API with system voices                                      |
 | echogarden | Cross-platform | 🔺  | 🔺    | Uses very high quality **kokoro** voices or decent quality **vits** voices |
@@ -129,17 +129,20 @@ let job_id = Speak::new("Task complete!").play_detached().await?;
 `play_with_result` returns `SpeakResult`. File-producing providers populate its
 optional `playback: SpeakPlaybackReport` with a lossless, always-compiled
 projection of Playa's route, expected/elapsed duration, and completion verdict.
-Direct streaming providers (`say`, SAPI, and eSpeak) leave this field `None`
+Direct streaming providers (SAPI and eSpeak) leave this field `None`
 because their duration cannot be verified.
 
 `play_detached` publishes speech to Playa's private per-user queue and returns
 after durable handoff. Cache hits publish a ready file job immediately. Cache
-misses for Kokoro, EchoGarden, gTTS, and ElevenLabs first reserve their global
+misses for Kokoro, EchoGarden, gTTS, and ElevenLabs, plus macOS `say`, first reserve their global
 sequence, then a detached `so-you-say` helper synthesizes and atomically marks
 that same slot ready. This prevents a later sound from overtaking slow
 synthesis. The scheduler waits up to ten minutes; helper failure or timeout
-marks the slot failed and advances the queue. macOS `say`, Windows SAPI, and
-eSpeak publish direct command jobs with lossless arguments.
+marks the slot failed and advances the queue. Windows SAPI and eSpeak publish
+direct command jobs with lossless arguments. Say synthesizes PCM WAV using the
+selected voice and rate, then queues volume-controlled playback from the same
+content-addressed cache used by other file providers. Temporary synthesis
+files are removed before handoff.
 
 Detached delivery preserves the foreground provider selection and failover
 order. Providers represented only by enum variants remain explicitly
@@ -265,7 +268,10 @@ for provider in get_available_providers() {
     - "Eloquence" voices (robotic, low quality) are automatically filtered out
 - **Available Voices**: Depends on user's Siri/dictation settings and downloaded voice packs. Run `say -v '?'` to see what's installed
 - **Speed Control**: Supports rate adjustment via the `-r` flag (words per minute)
-- **No Volume Control**: The macOS `say` command does NOT support a volume flag
+- **Volume Control**: Speech is synthesized to PCM WAV with the selected voice
+  and rate, then played through native Playa at the requested volume. Without
+  the `playa` feature, macOS `afplay -v` provides volume control and an
+  unverified completion report.
 
 ### eSpeak
 
@@ -322,3 +328,22 @@ for provider in get_available_providers() {
 - **Gender**: gTTS does not distinguish between male and female voices
 - **Quality**: Good quality (Google's neural TTS)
 - **Supported Languages**: 70+ languages and regional variants
+
+### Silent audio tests
+
+Tests that execute speech use `VolumeLevel::Explicit(0.0)` and recognizable
+text such as “This is a test message.” Volume is a normalized 0–1 output gain;
+zero is mute. eSpeak uses amplitude 0–100 (100 is unity gain, while eSpeak's
+optional 200 setting amplifies it); SAPI uses its native percentage control.
+Playa rejects host routes unable to honor requested volume, including fallback.
+
+`real_kokoro_provider_reports_muted_native_complete` intentionally pins Kokoro
+and `af_heart`. It tests that provider's native playback completion, independently
+of the engine or voice selected by the user's Claudine settings. Controlled
+provider tests record commands and use empty or invalid audio so intermediate
+volume assertions cannot produce sound.
+
+CLI fixtures use a private `BISCUIT_SPEAKS_CACHE` and a controlled voice inventory.
+A voice argument alone does not isolate selection: a user's cached inventory can
+resolve `Samantha` to `Samantha (Enhanced)`. The Say fixture supplies only Samantha
+through `say -v '?'`; production voice matching remains unchanged.

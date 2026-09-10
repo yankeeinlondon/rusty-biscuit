@@ -792,9 +792,9 @@ mod tests {
             return;
         }
 
-        let config = TtsConfig::default();
+        let config = TtsConfig::default().with_volume(crate::types::VolumeLevel::Explicit(0.0));
         let result = provider
-            .speak("Hello from the gTTS provider test.", &config)
+            .speak("This is a test message.", &config)
             .await;
         assert!(result.is_ok());
     }
