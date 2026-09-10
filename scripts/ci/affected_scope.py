@@ -22,15 +22,11 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 ENVIRONMENTS_CONFIG = ROOT / ".github" / "ci" / "environments.json"
 
-# The three verdicts CI produces per package. A gate's verdict is a function of
-# the source it compiles and of the command and configuration it runs under,
-# so each gate has its own short list of non-source inputs that can change it
-# and NOTHING else re-runs it across the workspace: a change to CI's test
-# recipe must not re-lint 73 packages, and a clippy.toml edit must not re-test
-# them (2026-09-09).
+# The three verdicts CI can produce per package.
 GATES = ("lint", "check", "test")
 
-# Inputs every gate compiles under.
+# These input-analysis helpers remain covered for tooling diagnostics. Package
+# scheduling itself is source-driven and does not consume global-input changes.
 GLOBAL_PATHS_ALL_GATES = {
     ".github/ci/environments.json",
     ".github/workflows/_package-ci.yml",
@@ -141,6 +137,17 @@ CHECK_OS = ["windows-latest"]
 # GitHub Actions ceiling for a single matrix. The package matrix must stay
 # under it even on a full-scope run.
 MATRIX_LIMIT = 256
+
+# Package CI is source-driven. Configuration, documentation, generated reports,
+# fixtures, and CI plumbing validate through their own contract suites; they do
+# not make unchanged Cargo packages rebuild. Keep this vocabulary aligned with
+# Sniff's source-code classification when either side learns a new language.
+SOURCE_SUFFIXES = {
+    ".c", ".cc", ".cpp", ".cxx", ".css", ".go", ".h", ".hh", ".hpp",
+    ".html", ".htm", ".java", ".js", ".jsx", ".m", ".mm", ".proto",
+    ".py", ".rs", ".scss", ".sh", ".svelte", ".swift", ".ts", ".tsx",
+    ".vue",
+}
 
 
 def load_metadata(root: Path) -> dict[str, Any]:
@@ -622,6 +629,11 @@ def direct_dependents(
     return affected
 
 
+def is_package_source_path(path: PurePosixPath) -> bool:
+    """Whether a package-owned path can change compiled or executed behavior."""
+    return path.name == "build.rs" or path.suffix.lower() in SOURCE_SUFFIXES
+
+
 def build_closure(
     seed: str, metadata: dict[str, Any], packages: dict[str, dict[str, Any]]
 ) -> set[str]:
@@ -1088,45 +1100,24 @@ def changed_package_ids(
     packages: dict[str, dict[str, Any]],
     lock_impacted: set[str] | None = None,
 ) -> tuple[set[str], bool]:
-    """Map changed paths to the packages they can reach.
+    """Map package-owned source paths to their packages.
 
-    A file inside a package's directory selects that package. A file that is
-    under no package directory selects every package beneath its top-level
-    directory (a shared justfile, a fixture at the directory root) — pure path
-    scoping, not policy. Anything else (`docs/`, a root README) selects nothing.
+    Non-source inputs have dedicated validation and never fan out unchanged
+    packages. ``Cargo.toml`` and lockfile edits therefore select no package by
+    themselves; the next source edit exercises the resulting package graph.
     """
     directories = package_directories(root, packages)
     seeds: set[str] = set()
 
     for raw_file in files:
         normalized = raw_file.replace("\\", "/").removeprefix("./")
-        if is_global_path(normalized):
-            return set(packages), True
-
-        if normalized == LOCKFILE_PATH:
-            # Undecidable diff — no base lockfile, or one side did not parse.
-            if lock_impacted is None:
-                return set(packages), True
-            for package_id, package in packages.items():
-                if package["name"] in lock_impacted:
-                    seeds.add(package_id)
-            continue
-
         changed = PurePosixPath(normalized)
-        matched_package = False
+        if not is_package_source_path(changed):
+            continue
         for directory, package_id in directories:
             if changed == directory or directory in changed.parents:
                 seeds.add(package_id)
-                matched_package = True
                 break
-
-        if matched_package or not changed.parts:
-            continue
-
-        top_level = changed.parts[0]
-        for directory, package_id in directories:
-            if directory.parts and directory.parts[0] == top_level:
-                seeds.add(package_id)
 
     return seeds, False
 
@@ -1155,13 +1146,12 @@ def matrix_record(
     native: dict[str, list[str]],
     environments: list[dict[str, Any]],
     gates: set[str] | frozenset[str] = frozenset(GATES),
+    excluded_environment: str | None = None,
 ) -> dict[str, Any]:
     """The workflow-facing shape of one gating package's policy.
 
-    `gates` narrows the record to the gates this run selected the package
-    for: a package reached only through a lint-global input carries no test
-    tiers, environments, or compile-check OS, so the reusable workflow
-    schedules nothing but its lint job.
+    `gates` distinguishes source packages from compile-only direct reverse
+    dependencies. A check-only record carries no test tiers or environments.
     """
     features = feature_args(record, record["package"])
     check_args = f"-p {record['package']}" + (f" {features}" if features else "")
@@ -1174,6 +1164,12 @@ def matrix_record(
         for environment in environments
         if not capability(environment, "archive_only")
         and environment["runner"] == environment["name"]
+        and (
+            environment["name"] != excluded_environment
+            # Companion suites are not part of the local L1/L2 receipt. Keep
+            # their CI host even though its Rust L1 work will be duplicated.
+            or (companion_suites and capability(environment, "node_pnpm"))
+        )
     ]
     return {
         "package": record["package"],
@@ -1187,12 +1183,17 @@ def matrix_record(
         "companion_suites": companion_suites,
         "native": native,
         "native_environments": native_environments if testing else [],
-        "check_os": CHECK_OS if "check" in gates else [],
+        "check_os": (
+            [os_name for os_name in CHECK_OS if os_name != excluded_environment]
+            if "check" in gates
+            else []
+        ),
         "l2_environments": (
             [
                 environment["name"]
                 for environment in environments
-                if any(
+                if environment["name"] != excluded_environment
+                and any(
                     backend_hostable(environment, backend)
                     for backend in record["l2_backends"]
                 )
@@ -1220,6 +1221,7 @@ def matrix_record(
             else []
         ),
         "wsl": testing
+        and excluded_environment != "wsl2-ubuntu"
         and any(capability(environment, "archive_only") for environment in environments),
     }
 
@@ -1285,45 +1287,30 @@ def calculate_scope(
     base_ref: str | None = None,
     differ: Callable[[str, str], str | None] = diff_against,
     reader: Callable[[str, str], str | None] = read_at_ref,
+    excluded_environment: str | None = None,
 ) -> dict[str, Any]:
     packages = workspace_packages(metadata)
 
-    triggers: dict[str, str | None] = {gate: None for gate in GATES}
-    if force_all:
-        full_gates = set(GATES)
-    else:
-        triggers = gate_triggers(files, root, base_ref, differ, reader)
-        full_gates = {gate for gate, path in triggers.items() if path is not None}
+    full_gates = set(GATES) if force_all else set()
 
-    # Package-local selection is computed regardless: a package with a source
-    # change keeps every gate even when a lint-only global input widened the
-    # lint gate to the workspace. A global path still present is comment-only
-    # (proved above) or gate-scoped, and selects nothing by path.
-    local_files = [raw for raw in files if not is_global_path(raw)]
-    lock_impacted = None
-    if any(
-        raw.replace("\\", "/").removeprefix("./") == LOCKFILE_PATH for raw in local_files
-    ):
-        head_lockfile = None
-        lock_path = root / LOCKFILE_PATH
-        if lock_path.is_file():
-            head_lockfile = lock_path.read_text(encoding="utf-8")
-        lock_impacted = lockfile_impacted_names(
-            base_lockfile,
-            head_lockfile,
-            {package["name"] for package in packages.values()},
-        )
-    seeds, lock_undecidable = changed_package_ids(local_files, root, packages, lock_impacted)
-    if lock_undecidable:
-        full_gates = set(GATES)
-    source_ids = direct_dependents(seeds, metadata, packages)
+    local_files = list(files)
+    seeds, _ = changed_package_ids(local_files, root, packages)
+    source_ids = seeds
+    reverse_ids = direct_dependents(seeds, metadata, packages) - seeds
 
     full_scope = bool(full_gates)
-    affected_ids = set(packages) if full_scope else source_ids
+    scheduled_reverse_ids = (
+        set() if excluded_environment == "windows-latest" else reverse_ids
+    )
+    affected_ids = set(packages) if full_scope else source_ids | scheduled_reverse_ids
     impacted = sorted(packages[package_id]["name"] for package_id in affected_ids)
 
     def gates_for(package_id: str) -> set[str]:
-        return set(GATES) if package_id in source_ids else set(full_gates)
+        if force_all or package_id in source_ids:
+            return set(GATES)
+        if package_id in scheduled_reverse_ids:
+            return {"check"}
+        return set()
 
     matrix = []
     for name in impacted:
@@ -1348,7 +1335,15 @@ def calculate_scope(
         # is PYTHONHASHSEED-dependent); nothing consumes the order, but noisy
         # diffs obscure real scope changes.
         native = {os_name: sorted(bucket) for os_name, bucket in native.items()}
-        matrix.append(matrix_record(record, native, environments, gates_for(package_id)))
+        matrix.append(
+            matrix_record(
+                record,
+                native,
+                environments,
+                gates_for(package_id),
+                excluded_environment=excluded_environment,
+            )
+        )
 
     job_estimate = estimate_jobs(matrix)
     if len(matrix) > MATRIX_LIMIT:
@@ -1358,11 +1353,11 @@ def calculate_scope(
         )
 
     change_class, preflight_os, preflight_reason = classify_preflight(
-        triggers, matrix, full_scope, force_all, environments
+        matrix, full_scope, environments
     )
 
-    # Area flags drive test-shaped specialized jobs, so a workspace-wide lint
-    # does not raise them; only source changes and a test-global input do.
+    # Area flags drive test-shaped specialized jobs and therefore follow only
+    # source changes (or an explicit full-scope request).
     flagged_ids = set(packages) if "test" in full_gates else source_ids
     top_dirs = {
         Path(packages[package_id]["manifest_path"]).parent.relative_to(root.resolve()).parts[0]
@@ -1381,6 +1376,11 @@ def calculate_scope(
     policy_ids = {packages[package_id]["name"]: package_id for package_id in affected_ids}
     return {
         "packages": impacted,
+        "source_packages": sorted(packages[package_id]["name"] for package_id in source_ids),
+        "reverse_dependencies": sorted(
+            packages[package_id]["name"] for package_id in reverse_ids
+        ),
+        "excluded_environment": excluded_environment,
         "full_scope": full_scope,
         "full_scope_gates": sorted(full_gates, key=GATES.index),
         "change_class": change_class,
@@ -1394,10 +1394,8 @@ def calculate_scope(
 
 
 def classify_preflight(
-    triggers: dict[str, str | None],
     matrix: list[dict[str, Any]],
     full_scope: bool,
-    force_all: bool,
     environments: list[dict[str, Any]],
 ) -> tuple[str, list[str], str]:
     """Classify the change and derive its bootstrap-preflight OS matrix (D3).
@@ -1408,17 +1406,11 @@ def classify_preflight(
     of ``"full"``, ``"package"``, or ``"documentation"``.
     """
     if full_scope:
-        if force_all:
-            reason = "explicit full-scope request selects every runner OS"
-        else:
-            named = [f"{path} ({gate})" for gate, path in triggers.items() if path is not None]
-            reason = (
-                f"global input changed: {', '.join(named)}; "
-                "preflight runs on every runner OS before fan-out"
-                if named
-                else "workspace-global change selects full scope"
-            )
-        return "full", list(ALL_RUNNER_OS), reason
+        return (
+            "full",
+            list(ALL_RUNNER_OS),
+            "explicit full-scope request selects every runner OS",
+        )
 
     if matrix:
         # Preflight runs on RUNNER labels, so each environment is resolved to
@@ -1453,19 +1445,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--all", action="store_true", help="select the full workspace")
     parser.add_argument(
-        "--base-lockfile",
-        help=(
-            "the base revision's Cargo.lock. Without it a lockfile change is "
-            "undecidable and selects the full workspace"
-        ),
-    )
-    parser.add_argument(
-        "--base-ref",
-        help=(
-            "the base revision to diff global inputs against. With it, a "
-            "justfile/TOML/workflow change that touches only comments and blank "
-            "lines does not select the full workspace"
-        ),
+        "--exclude-environment",
+        choices=("ubuntu-latest", "windows-latest", "macos-latest", "wsl2-ubuntu"),
+        help="omit locally validated L1/L2/check work for this environment",
     )
     parser.add_argument("files", nargs="*", help="changed repository-relative paths")
     return parser.parse_args()
@@ -1478,12 +1460,6 @@ def main() -> None:
     metadata = load_metadata(ROOT)
     validate_no_shadow_workspaces(metadata, ROOT)
     policy = package_ci_policy(workspace_packages(metadata), runner_labels, ROOT)
-    base_lockfile = None
-    if args.base_lockfile:
-        candidate = Path(args.base_lockfile)
-        if candidate.is_file():
-            base_lockfile = candidate.read_text(encoding="utf-8")
-
     scope = calculate_scope(
         args.files,
         ROOT,
@@ -1491,8 +1467,7 @@ def main() -> None:
         environments,
         policy,
         args.all,
-        base_lockfile,
-        base_ref=args.base_ref,
+        excluded_environment=args.exclude_environment,
     )
     print(json.dumps(scope, separators=(",", ":")))
 

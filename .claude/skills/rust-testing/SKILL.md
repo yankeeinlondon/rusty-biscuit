@@ -253,17 +253,19 @@ Before running any final build, test, or lint gate:
    `just build`, `just test`, and `just lint` recipes, or an exact package
    selector when the repository provides a narrower supported recipe. To run
    exactly what CI's `lint` and `test` gates run for the branch's affected
-   packages, use `just ci-local` at the root (`--lint-only` first: the
-   no-features clippy build is where incomplete feature gating surfaces;
-   `--dry-run` prints the scope). The pre-push hook runs exactly
-   `just ci-local --lint-only` for the same reason, and no tests: L1 is CI's
-   job, and a lint immediately followed by nextest reuses stale test binaries.
+   packages, use `just ci-local` at the root (`--dry-run` prints the scope).
+   The pre-push hook runs `just ci-local --l2`: lint and L1 for source-changed
+   packages, compile-check for their direct reverse dependencies, and every
+   hostable L2 suite using a non-focusing backend (tmux, background WezTerm, or
+   keep-focus Kitty). For a clean outgoing `HEAD`, it
+   publishes exact-tree evidence so CI can omit the detected macOS, Linux,
+   native Windows, or WSL2 environment.
 4. Report the selected scope and commands with the gate results.
 
 For durable native CI, declare package policy in the package's own
 `[package.metadata.ci]`. The dependency-aware `.github/workflows/ci.yml`
-caller calculates changed workspace packages plus their reverse Cargo
-dependencies, reads that policy, and fans the resulting matrix into
+caller calculates source-changed workspace packages plus check-only direct
+reverse Cargo dependencies, reads that policy, and fans the resulting matrix into
 `.github/workflows/_package-ci.yml` — one result-producing job per package. A
 bootstrap `preflight` job gates that fan-out (`needs: [scope, preflight]`).
 For each package, `check`, `lint` (build + clippy), and `test` (L1) are

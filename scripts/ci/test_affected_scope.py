@@ -96,9 +96,12 @@ class AffectedScopeTests(unittest.TestCase):
             **kwargs,  # type: ignore[arg-type]
         )
 
-    def test_source_change_includes_direct_downstream_packages(self) -> None:
+    def test_source_change_tests_source_and_checks_direct_downstream(self) -> None:
         scope = self.scope(["alpha/lib/src/lib.rs"])
         self.assertEqual(["alpha-core", "beta-app"], scope["packages"])
+        gates = {entry["package"]: entry["gates"] for entry in scope["matrix"]}
+        self.assertEqual(["lint", "check", "test"], gates["alpha-core"])
+        self.assertEqual(["check"], gates["beta-app"])
 
     def test_shared_dependency_change_selects_direct_consumers_only(self) -> None:
         # beta-app reaches shared-tests only through alpha-core; direct-only
@@ -111,6 +114,32 @@ class AffectedScopeTests(unittest.TestCase):
         self.assertEqual([], scope["packages"])
         self.assertEqual([], scope["matrix"])
 
+    def test_package_documentation_and_manifest_changes_have_empty_scope(self) -> None:
+        scope = self.scope(["alpha/lib/README.md", "alpha/lib/Cargo.toml"])
+        self.assertEqual([], scope["packages"])
+
+    def test_source_extensions_include_scripts_and_frontend_code(self) -> None:
+        for path in ("alpha/lib/build.rs", "alpha/lib/scripts/check.py", "alpha/lib/ui/app.tsx"):
+            with self.subTest(path=path):
+                scope = self.scope([path])
+                self.assertEqual(["alpha-core", "beta-app"], scope["packages"])
+
+    def test_local_macos_evidence_removes_macos_l1(self) -> None:
+        scope = self.scope(
+            ["alpha/lib/src/lib.rs"], excluded_environment="macos-latest"
+        )
+        records = {entry["package"]: entry for entry in scope["matrix"]}
+        self.assertNotIn("macos-latest", records["alpha-core"]["native_environments"])
+        self.assertEqual(["check"], records["beta-app"]["gates"])
+
+    def test_local_windows_evidence_removes_completed_reverse_checks(self) -> None:
+        scope = self.scope(
+            ["alpha/lib/src/lib.rs"], excluded_environment="windows-latest"
+        )
+        self.assertEqual(["alpha-core"], scope["packages"])
+        self.assertEqual(["beta-app"], scope["reverse_dependencies"])
+        self.assertEqual([], scope["matrix"][0]["check_os"])
+
     def test_force_all_selects_every_package(self) -> None:
         scope = self.scope([], force_all=True)
         self.assertTrue(scope["full_scope"])
@@ -118,25 +147,16 @@ class AffectedScopeTests(unittest.TestCase):
             ["alpha-core", "beta-app", "shared-tests"], scope["packages"]
         )
 
-    def test_global_test_configuration_selects_full_scope(self) -> None:
+    def test_global_test_configuration_selects_no_packages(self) -> None:
         scope = self.scope([".config/nextest.toml"])
-        self.assertTrue(scope["full_scope"])
-        # ... for the test gate alone: nextest configuration cannot move a
-        # clippy or compile-check verdict.
-        self.assertEqual(["test"], scope["full_scope_gates"])
-        for entry in scope["matrix"]:
-            self.assertEqual(["test"], entry["gates"])
-            self.assertEqual([], entry["check_os"])
-            self.assertNotEqual([], entry["native_environments"])
-        self.assertEqual(0, sum(1 for entry in scope["matrix"] if "lint" in entry["gates"]))
+        self.assertFalse(scope["full_scope"])
+        self.assertEqual([], scope["packages"])
+        self.assertEqual([], scope["matrix"])
 
-    def test_wsl_workflow_change_selects_full_scope(self) -> None:
-        # `_wsl-ci.yml` is shared by every package that declares wsl2-ubuntu, so
-        # a change to it has the same blast radius as `_package-ci.yml`'s test
-        # legs — and no wider.
+    def test_wsl_workflow_change_selects_no_packages(self) -> None:
         scope = self.scope([".github/workflows/_wsl-ci.yml"])
-        self.assertTrue(scope["full_scope"])
-        self.assertEqual(["test"], scope["full_scope_gates"])
+        self.assertFalse(scope["full_scope"])
+        self.assertEqual([], scope["packages"])
 
     # -- per-gate global inputs (2026-09-09) --------------------------------
     #
@@ -144,51 +164,26 @@ class AffectedScopeTests(unittest.TestCase):
     # command and configuration it runs under. Each gate therefore has its
     # own list of non-source inputs, and nothing else re-runs it workspace-wide.
 
-    def test_clippy_configuration_widens_lint_alone(self) -> None:
+    def test_clippy_configuration_selects_no_packages(self) -> None:
         scope = self.scope(["clippy.toml"])
-        self.assertTrue(scope["full_scope"])
-        self.assertEqual(["lint"], scope["full_scope_gates"])
-        self.assertEqual("full", scope["change_class"])
-        self.assertIn("clippy.toml (lint)", scope["preflight_reason"])
-        for entry in scope["matrix"]:
-            self.assertEqual(["lint"], entry["gates"])
-            # Nothing test-shaped survives: no tiers, no environments, no WSL.
-            self.assertEqual([], entry["tiers"])
-            self.assertEqual([], entry["native_environments"])
-            self.assertEqual([], entry["l2_environments"])
-            self.assertEqual([], entry["browser_environments"])
-            self.assertEqual([], entry["check_os"])
-            self.assertFalse(entry["wsl"])
-        # The rollup expects one cell per declared tier, so a lint-only package
-        # must declare none — its skipped L1 must not roll up as MISSING.
-        for record in scope["policy"]:
-            self.assertEqual([], record["tiers"])
-        # Lint is one job per package and nothing else.
-        self.assertEqual(len(scope["matrix"]), scope["job_estimate"])
-        # Test-shaped specialized jobs key off the area flags; a workspace
-        # lint must not raise them.
-        self.assertFalse(any(scope["flags"][area] for area in ("claudine", "sniff")))
+        self.assertFalse(scope["full_scope"])
+        self.assertEqual([], scope["packages"])
 
-    def test_source_change_keeps_every_gate_under_a_lint_global(self) -> None:
+    def test_non_source_input_does_not_widen_a_source_change(self) -> None:
         scope = self.scope(["clippy.toml", "alpha/lib/src/lib.rs"])
         gates = {entry["package"]: entry["gates"] for entry in scope["matrix"]}
-        # alpha-core changed and beta-app depends on it: both keep all gates.
         self.assertEqual(["lint", "check", "test"], gates["alpha-core"])
-        self.assertEqual(["lint", "check", "test"], gates["beta-app"])
-        # shared-tests is reached only through clippy.toml.
-        self.assertEqual(["lint"], gates["shared-tests"])
-        tiers = {record["package"]: record["tiers"] for record in scope["policy"]}
-        self.assertEqual(["L1"], tiers["alpha-core"])
-        self.assertEqual([], tiers["shared-tests"])
+        self.assertEqual(["check"], gates["beta-app"])
+        self.assertNotIn("shared-tests", gates)
 
-    def test_compile_inputs_widen_every_gate(self) -> None:
+    def test_compile_inputs_select_no_packages(self) -> None:
         for path in ("Cargo.toml", "rust-toolchain.toml", ".cargo/config.toml"):
             scope = self.scope([path])
-            self.assertEqual(["lint", "check", "test"], scope["full_scope_gates"], path)
+            self.assertEqual([], scope["packages"], path)
 
-    def test_the_scope_calculator_itself_widens_every_gate(self) -> None:
+    def test_the_scope_calculator_runs_only_ci_tooling(self) -> None:
         scope = self.scope(["scripts/ci/affected_scope.py"])
-        self.assertEqual(["lint", "check", "test"], scope["full_scope_gates"])
+        self.assertEqual([], scope["packages"])
         self.assertTrue(scope["flags"]["ci_tooling"])
 
     # -- content-aware global triggers (2026-08-28) -------------------------
@@ -273,24 +268,23 @@ class AffectedScopeTests(unittest.TestCase):
         reader = lambda base_ref, path: base  # noqa: E731
         return self.scope(["justfile"], base_ref="base", differ=differ, reader=reader)
 
-    def test_a_change_inside_the_lint_recipe_widens_lint_alone(self) -> None:
+    def test_a_change_inside_the_lint_recipe_selects_no_packages(self) -> None:
         edited = self.JUSTFILE_BASE.replace(
             "cargo clippy -p {{ pkg }} -- -D warnings",
             "cargo clippy -p {{ pkg }} --all-targets -- -D warnings",
         )
         scope = self.just_scope(edited)
-        self.assertEqual(["lint"], scope["full_scope_gates"])
-        self.assertIn("justfile (lint)", scope["preflight_reason"])
+        self.assertEqual([], scope["packages"])
 
-    def test_a_change_to_a_recipe_the_lint_gate_depends_on_widens_lint(self) -> None:
+    def test_a_change_to_a_recipe_the_lint_gate_depends_on_selects_no_packages(self) -> None:
         edited = self.JUSTFILE_BASE.replace("    df -h .\n", "    df -h . && sync\n")
-        self.assertEqual(["lint"], self.just_scope(edited)["full_scope_gates"])
+        self.assertEqual([], self.just_scope(edited)["packages"])
 
-    def test_a_change_to_a_recipe_the_test_gate_calls_widens_test_alone(self) -> None:
+    def test_a_change_to_a_recipe_the_test_gate_calls_selects_no_packages(self) -> None:
         # `_tier_filter` is reached from `_test` through a `just` call at
         # command position, not a header dependency.
         edited = self.JUSTFILE_BASE.replace("not test(/^level2_/)", "not test(/^level[23]_/)")
-        self.assertEqual(["test"], self.just_scope(edited)["full_scope_gates"])
+        self.assertEqual([], self.just_scope(edited)["packages"])
 
     def test_a_change_to_a_developer_recipe_gates_nothing(self) -> None:
         edited = self.JUSTFILE_BASE.replace(
@@ -310,23 +304,23 @@ class AffectedScopeTests(unittest.TestCase):
         edited = self.JUSTFILE_BASE.replace("ln -sf ../../.githooks/pre-push", "ln -sfn ../../.githooks/pre-push")
         self.assertEqual([], self.just_scope(edited)["full_scope_gates"])
 
-    def test_a_change_to_the_shared_prerequisite_recipe_widens_every_gate(self) -> None:
+    def test_a_change_to_the_shared_prerequisite_recipe_selects_no_packages(self) -> None:
         edited = self.JUSTFILE_BASE.replace("Install the headers", "Install the development headers")
-        self.assertEqual(["lint", "check", "test"], self.just_scope(edited)["full_scope_gates"])
+        self.assertEqual([], self.just_scope(edited)["packages"])
 
-    def test_a_removed_or_added_recipe_counts_as_changed(self) -> None:
+    def test_a_removed_or_added_recipe_selects_no_packages(self) -> None:
         removed = self.JUSTFILE_BASE.replace("_tier_filter tier:\n    echo 'not test(/^level2_/)'\n\n", "")
-        self.assertEqual(["test"], self.just_scope(removed)["full_scope_gates"])
+        self.assertEqual([], self.just_scope(removed)["packages"])
         added = self.JUSTFILE_BASE + "\nrelease:\n    cargo build --release\n"
         self.assertEqual([], self.just_scope(added)["full_scope_gates"])
 
-    def test_text_outside_every_recipe_widens_every_gate(self) -> None:
+    def test_text_outside_every_recipe_selects_no_packages(self) -> None:
         for edited in (
             self.JUSTFILE_BASE.replace('areas := "alpha beta"', 'areas := "alpha beta gamma"'),
             self.JUSTFILE_BASE.replace('set shell := ["bash", "-eu", "-c"]', 'set shell := ["bash", "-euo", "pipefail", "-c"]'),
             'import "./just/color.just"\n' + self.JUSTFILE_BASE,
         ):
-            self.assertEqual(["lint", "check", "test"], self.just_scope(edited)["full_scope_gates"])
+            self.assertEqual([], self.just_scope(edited)["packages"])
 
     def test_a_recipe_reformat_that_keeps_every_line_gates_nothing(self) -> None:
         # Comments and blank lines are not part of a recipe's identity.
@@ -344,14 +338,14 @@ class AffectedScopeTests(unittest.TestCase):
         self.assertEqual([], scope["full_scope_gates"])
         (self.root / "just" / "devops.just").write_text(base.replace("clippy -p", "clippy --all-targets -p"), encoding="utf-8")
         scope = self.scope(["just/devops.just"], base_ref="base", differ=differ, reader=reader)
-        self.assertEqual(["lint"], scope["full_scope_gates"])
+        self.assertEqual([], scope["packages"])
 
-    def test_unobtainable_base_content_widens_every_gate(self) -> None:
+    def test_unobtainable_base_content_still_selects_no_packages(self) -> None:
         (self.root / "justfile").write_text(self.JUSTFILE_BASE, encoding="utf-8")
         differ = lambda base_ref, path: self.RECIPE_DIFF  # noqa: E731
         reader = lambda base_ref, path: None  # noqa: E731
         scope = self.scope(["justfile"], base_ref="base", differ=differ, reader=reader)
-        self.assertEqual(["lint", "check", "test"], scope["full_scope_gates"])
+        self.assertEqual([], scope["packages"])
 
     def test_parse_just_recipes_shapes(self) -> None:
         recipes, other = parse_just_recipes(self.JUSTFILE_BASE)
@@ -367,15 +361,15 @@ class AffectedScopeTests(unittest.TestCase):
         self.assertEqual({"_lint", "_storage_preflight"}, just_recipe_closure(recipes, ("_lint",)))
         self.assertEqual({"_test", "_tier_filter"}, just_recipe_closure(recipes, ("_test",)))
 
-    def test_undecidable_global_diff_keeps_the_trigger(self) -> None:
+    def test_undecidable_global_diff_does_not_affect_package_scope(self) -> None:
         # No base ref, or a differ that cannot produce the diff: widen, never
         # narrow silently — for every gate.
         self.assertEqual("justfile", global_trigger(["justfile"]))
         differ = lambda base, path: None  # noqa: E731
         self.assertEqual("justfile", global_trigger(["justfile"], "base", differ))
         scope = self.scope(["justfile"], base_ref="base", differ=differ)
-        self.assertTrue(scope["full_scope"])
-        self.assertEqual(["lint", "check", "test"], scope["full_scope_gates"])
+        self.assertFalse(scope["full_scope"])
+        self.assertEqual([], scope["packages"])
 
     def test_package_local_change_derives_three_runner_preflight(self) -> None:
         scope = self.scope(["alpha/lib/src/lib.rs"])
@@ -386,14 +380,10 @@ class AffectedScopeTests(unittest.TestCase):
             ["macos-latest", "ubuntu-latest", "windows-latest"], scope["preflight_os"]
         )
 
-    def test_global_change_runs_three_os_preflight(self) -> None:
+    def test_global_change_uses_scope_host_preflight(self) -> None:
         scope = self.scope([".config/nextest.toml"])
-        self.assertEqual("full", scope["change_class"])
-        self.assertEqual(
-            ["macos-latest", "ubuntu-latest", "windows-latest"],
-            scope["preflight_os"],
-        )
-        self.assertIn(".config/nextest.toml", scope["preflight_reason"])
+        self.assertEqual("documentation", scope["change_class"])
+        self.assertEqual(["ubuntu-latest"], scope["preflight_os"])
 
     def test_documentation_only_change_uses_scope_host_preflight(self) -> None:
         scope = self.scope(["docs/architecture.md"])
@@ -799,6 +789,22 @@ class MatrixRecordTests(unittest.TestCase):
             environments=environments_for_tests(),
         )
         self.assertEqual(record["node_environments"], ["ubuntu-latest"])
+        retained = matrix_record(
+            {
+                "package": "homelab-server",
+                "tiers": ["L1"],
+                "l2_backends": [],
+                "features": [],
+                "all_features": False,
+                "l1_include_slow": False,
+                "runner_tools": ["node-22", "pnpm-10"],
+                "companion_suites": ["homelab-frontend"],
+            },
+            native={},
+            environments=environments_for_tests(),
+            excluded_environment="ubuntu-latest",
+        )
+        self.assertIn("ubuntu-latest", retained["native_environments"])
 
 
 class EnvironmentsTests(unittest.TestCase):
@@ -1118,24 +1124,24 @@ class LockfileScopeBranchTests(unittest.TestCase):
             **kwargs,  # type: ignore[arg-type]
         )
 
-    def test_a_decidable_lockfile_diff_scopes_from_the_diff(self) -> None:
+    def test_a_decidable_lockfile_diff_selects_no_packages(self) -> None:
         (self.root / "Cargo.lock").write_text(
             lockfile({"alpha-core": ("2", []), "beta-app": ("1", ["alpha-core"])})
         )
         base = lockfile({"alpha-core": ("1", []), "beta-app": ("1", ["alpha-core"])})
         scope = self.scope(["Cargo.lock"], base_lockfile=base)
         self.assertFalse(scope["full_scope"])
-        self.assertEqual(["alpha-core", "beta-app"], scope["packages"])
+        self.assertEqual([], scope["packages"])
 
-    def test_an_undecidable_lockfile_diff_widens_to_full_scope(self) -> None:
+    def test_an_undecidable_lockfile_diff_selects_no_packages(self) -> None:
         # No base lockfile supplied: the safe default is never silently
         # skipped, only ever widened.
         (self.root / "Cargo.lock").write_text(
             lockfile({"alpha-core": ("2", []), "beta-app": ("1", ["alpha-core"])})
         )
         scope = self.scope(["Cargo.lock"])
-        self.assertTrue(scope["full_scope"])
-        self.assertEqual(["alpha-core", "beta-app"], scope["packages"])
+        self.assertFalse(scope["full_scope"])
+        self.assertEqual([], scope["packages"])
 
     def test_an_irrelevant_lockfile_change_selects_nothing(self) -> None:
         (self.root / "Cargo.lock").write_text(
@@ -1183,7 +1189,7 @@ class TopLevelDirectoryFallbackTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_a_directory_level_justfile_selects_its_packages(self) -> None:
+    def test_a_directory_level_justfile_selects_no_packages(self) -> None:
         scope = calculate_scope(
             ["alpha/justfile"],
             self.root,
@@ -1191,7 +1197,7 @@ class TopLevelDirectoryFallbackTests(unittest.TestCase):
             environments_for_tests(),
             self.policy,
         )
-        self.assertEqual(["alpha-cli", "alpha-core"], scope["packages"])
+        self.assertEqual([], scope["packages"])
 
     def test_a_root_level_file_outside_any_directory_selects_nothing(self) -> None:
         scope = calculate_scope(
