@@ -12,9 +12,14 @@ prompt: |-
         - without `mise`
     - benefits of a remote cache versus just a local cache
     - how to setup a kache daemon process
-last_updated: 2026-06-02
+last_updated: 2026-09-10
 ---
 ## Functional Footprint
+
+> For rusty-biscuit, the measured repository ruling in
+> `docs/kache-strategy.md` and [In this repo](#in-this-repo-rusty-biscuit)
+> overrides the generic recommendations below. In particular, CI does not use
+> kache and activation is never inferred from the OS alone.
 
 kache is a `RUSTC_WRAPPER`-compatible binary that intercepts every `rustc` invocation from cargo and manages a content-addressed build cache. Its components are:
 

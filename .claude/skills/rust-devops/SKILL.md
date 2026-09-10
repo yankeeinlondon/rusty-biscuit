@@ -1,33 +1,65 @@
 ---
 name: rust-devops
 description: |
-  Use when deploying a Rust project to package managers (cargo, brew, apt,
-  nixos, uv, npm), speeding up Rust builds with compilation caching (kache,
-  RUSTC_WRAPPER, local/remote S3 caches, CI build cache), or interacting with
-  Git from Rust (git2/libgit2 bindings, gitoxide/gix pure-Rust). Covers release
-  distribution, build-time tooling, and programmatic Git access for Rust projects.
-hash: 81b1157379fa2909-5abdffaf55d47d79
-last_updated: 2026-07-18
+  Use for Rust CI/CD and release engineering: GitHub Actions, affected-package
+  scope, pre-push evidence, release-plz, package distribution, compiler caches,
+  build storage, or programmatic Git through git2/libgit2 and gitoxide/gix.
+  In rusty-biscuit, load this before changing CI scope, local-validation reuse,
+  release automation, or repository-wide Rust build caching.
+hash: 9fa043b64ab27813-fe3042e2e9114ef7
+last_updated: 2026-09-10
 ---
-# Rust Devops
+# Rust DevOps
 
-This **Agent skill** covers common tools and techniques used on Rust projects.
+This skill covers CI orchestration, releases, distribution, build performance,
+and Git integration for Rust projects. In rusty-biscuit, repository policy and
+measured results override generic ecosystem guidance.
+
+## Choose the owning surface
+
+| Work | Read first |
+|---|---|
+| CI scope, pre-push behavior, local evidence, GitHub Actions, release-plz | [CI/CD and releases](./ci-cd.md) |
+| Distribution channels and installers | [Deployment platforms](./deployment-platforms.md) |
+| Compiler caching and build storage | [kache](./kache.md), then `docs/kache-strategy.md` for rusty-biscuit |
+| Embedded Git implementation | [git2](./git2.md) or [gitoxide](./gitoxide.md), according to the decision below |
+
+The supporting deployment and Git-library pages are dated research snapshots,
+not dependency pins or authorization to publish. Verify current versions and
+external service requirements against primary sources before adopting them.
 
 ## Deployment
 
-Rust compiles to self-contained native binaries, which is a gift for distribution: there is no runtime to ship and no interpreter to match. The challenge is **reach** — getting a release in front of users with the least friction, on whatever platform and package manager they already trust.
+Rust can ship native binaries without a language runtime, but native libraries,
+target triples, signing, and installer conventions still determine portability.
+Choose one canonical artifact source, then make package-manager manifests thin
+projections of those immutable artifacts.
 
-- [Deployment Platforms](./deployment-platforms.md)
+For rusty-biscuit, release-plz owns versioning, changelogs, tags, and GitHub
+releases. Crates.io publication remains disabled; do not add a registry or
+installer merely because the deployment survey lists it.
 
 ## Build Caching
 
-Rust's clean-build times grow with the dependency graph, and `cargo clean`, branch switches, and ephemeral CI runners all throw that work away. A `RUSTC_WRAPPER` cache restores compiled artifacts instead of recompiling them — content-addressed, shared locally via hardlinks and across machines via S3.
+Treat caching as a measured storage-and-filesystem decision, not a default Rust
+optimization. Compare total wall time and storage amplification against a
+no-cache control, including restore/save overhead and immutable CI cache
+behavior.
 
-- [kache](./kache.md) — drop-in `RUSTC_WRAPPER` artifact cache: when to use it, OS support, configuration (with and without `mise`), local vs. remote caches, and daemon setup.
+Rusty-biscuit tracks no `RUSTC_WRAPPER` and CI explicitly clears it. Kache is a
+host opt-in only where `just kache-status` proves clone-capable storage between
+the store and that checkout's `target/`; Windows and WSL remain off. Never mix
+wrapped and unwrapped builds in one `target/`.
 
 ## Git Interaction
 
-Reading and writing Git repositories from Rust — status, log, blame, refs, diffing, fetch/push — without shelling out to the `git` binary. Two crates dominate, with a clear trade-off: the mature, C-backed `git2` versus the pure-Rust, increasingly fast `gitoxide`.
+For repository scripts and hooks, prefer the installed Git CLI when exact Git
+semantics, credentials, signing, hooks, or user configuration are part of the
+contract. Embed a library only when the product needs Git operations without a
+Git subprocess.
 
-- [git2](./git2.md) — safe `libgit2` bindings: the full Git surface (status, log, branch, tag, remote, blame, diff, merge), the three-layer FFI architecture, dated version history, and per-operation gotchas and performance characteristics.
-- [gitoxide](./gitoxide.md) — pure-Rust Git via the `gix` facade: the `gix` (library) vs `gitoxide` (CLI) version split, the `Repository` hub, feature-flag and caching model, the same per-operation use cases, hermetic committed-tip merge boundaries, and where it outruns (or still trails) `git2`.
+- Choose `git2` when mature libgit2 coverage outweighs the C build and native
+  dependency surface.
+- Choose `gix` when a pure-Rust implementation, Git-compatible trust model, or
+  fine-grained plumbing crates materially improve the product.
+- Do not replace a working Git CLI boundary solely to avoid spawning a process.
