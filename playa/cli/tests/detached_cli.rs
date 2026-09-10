@@ -58,7 +58,31 @@ fn write_original_kokoro_shape(path: &Path) {
     file.set_len(u64::from(44 + data_size)).unwrap();
 }
 
-fn worker_lock(root: &Path) -> File {
+struct PublicationGuard {
+    root: PathBuf,
+    _lock: File,
+}
+
+impl PublicationGuard {
+    fn clear_pending(&self) -> std::io::Result<()> {
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            if entry.file_name().to_string_lossy().ends_with(".pending.json") {
+                fs::remove_file(entry.path())?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PublicationGuard {
+    fn drop(&mut self) {
+        // The file keeps worker ownership until pending work is removed, even on unwind.
+        let _ = self.clear_pending();
+    }
+}
+
+fn worker_lock(root: &Path) -> PublicationGuard {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -67,7 +91,7 @@ fn worker_lock(root: &Path) -> File {
         .open(root.join("worker.lock"))
         .expect("worker lock should open");
     assert!(file.try_lock_exclusive().expect("worker lock should work"));
-    file
+    PublicationGuard { root: root.to_path_buf(), _lock: file }
 }
 
 fn playa_command(root: &Path, cwd: &Path) -> Command {
@@ -111,8 +135,9 @@ fn multiprocess_background_publication_preserves_options_and_unique_order() {
                 .expect("publisher process should launch")
         }));
     }
-    for publisher in publishers {
-        assert!(publisher.join().expect("publisher should not panic").success());
+    let outcomes: Vec<_> = publishers.into_iter().map(|publisher| publisher.join()).collect();
+    for outcome in outcomes {
+        assert!(outcome.expect("publisher should not panic").success());
     }
 
     // SAFETY: the serial guard prevents concurrent environment mutation in this binary.
@@ -152,7 +177,23 @@ fn multiprocess_background_publication_preserves_options_and_unique_order() {
     assert!(stdout.contains("Detached audio spool"));
     assert!(stdout.contains("preparing") || stdout.contains("ready"));
 
-    fs4::fs_std::FileExt::unlock(&lock).expect("worker lock should release");
+    lock.clear_pending().expect("pending work should be removed while owned");
+    assert!(playa::detached::snapshot().unwrap().pending.is_empty());
+    drop(lock);
+}
+
+#[test]
+fn publication_unwind_removes_pending_before_releasing_worker_ownership() {
+    let root = TestRoot::new("publication-unwind");
+    let pending = root.0.join("1.pending.json");
+    let result = std::panic::catch_unwind(|| {
+        let _lock = worker_lock(&root.0);
+        fs::write(&pending, b"fixture payload").unwrap();
+        panic!("simulated assertion failure");
+    });
+    assert!(result.is_err());
+    assert!(!pending.exists());
+    let _lock = worker_lock(&root.0);
 }
 
 #[test]

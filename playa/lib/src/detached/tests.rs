@@ -266,7 +266,7 @@ fn preparing_head_holds_order_until_atomic_ready_publication() {
     let mut first = ready_envelope(&root.0, 1, "first");
     first.state = JobState::Preparing {
         preparation: PreparingPayload::new(serde_json::json!({
-            "speech": "Phase 1 of the plan in the claudine package area, was implemented successfully"
+            "speech": "This is a test message."
         })),
     };
     let first_path = publish(&root.0, &first);

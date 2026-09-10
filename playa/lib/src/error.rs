@@ -94,6 +94,12 @@ pub enum PlaybackError {
         /// The unsupported player.
         player: AudioPlayer,
     },
+    /// An explicitly selected player cannot honor the requested volume.
+    #[error("player {player:?} does not support explicit volume control")]
+    UnsupportedVolume {
+        /// The player that cannot apply the requested volume.
+        player: AudioPlayer,
+    },
     /// The player cannot handle the specified source type.
     #[error("player {player:?} cannot handle {source_kind} sources")]
     UnsupportedSource {
