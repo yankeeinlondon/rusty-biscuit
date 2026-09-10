@@ -1,6 +1,6 @@
 ---
 created: 2026-09-10
-status: proposed
+status: in_progress
 reviewed: false
 implemented: false
 area: claudine
@@ -29,9 +29,9 @@ inaudible. Speech fixtures must identify themselves as tests, for example,
 “This is a test message.” This applies to foreground playback, detached workers,
 and fallback providers, including work that continues after the test parent exits.
 
-This is a cross-area fix specification only; implementation is not yet authorized
-by this document's creation. The inventory below comes from source and Git history
-inspection, without running potentially audible tests.
+The initial inventory below comes from source and Git history inspection,
+without replaying potentially audible tests. Implementation was subsequently
+authorized; findings and validation are tracked in [evidence.md](./evidence.md).
 
 ## Findings
 
@@ -177,30 +177,30 @@ testing documentation and skills if a new shared test convention is introduced.
 
 ## Acceptance Criteria and Validation
 
-- [ ] Record the affected tests and trace any test execution of real lifecycle
+- [x] Record the affected tests and trace any test execution of real lifecycle
   templates, distinguishing the user's reported symptom from confirmed causes.
-- [ ] Real TTS and non-silent sound-effect tests request effective zero volume;
+- [x] Real TTS and non-silent sound-effect tests request effective zero volume;
   automated speech fixtures clearly identify themselves as test messages.
-- [ ] Intentional differences between test providers/voices and normal Claudine
+- [x] Intentional differences between test providers/voices and normal Claudine
   configuration are documented, including the real test's pinned Kokoro engine.
-- [ ] Verify mute propagation at the actual provider/player boundary, including
+- [x] Verify mute propagation at the actual provider/player boundary, including
   detached children and supported fallback routes. Test an unsupported-volume
   route without allowing it to emit sound.
-- [ ] Affected consumers enable native Playa playback, and first-class TTS
+- [x] Affected consumers enable native Playa playback, and first-class TTS
   volume is honored in foreground and detached provider paths. Exercise zero
   and representative nonzero levels without changing host-wide audio settings.
-- [ ] Preserve relevant synthesis, completion-report, durable-publication,
+- [x] Preserve relevant synthesis, completion-report, durable-publication,
   ordering, and failure assertions; assertions against nonzero configuration
   remain safely isolated.
-- [ ] Exercise teardown and failure paths to establish that no pending job can
+- [x] Exercise teardown and failure paths to establish that no pending job can
   escape containment after its parent test ends.
-- [ ] Run the affected areas' canonical `just test` and applicable `just test-l2`
+- [x] Run the affected areas' canonical `just test` and applicable `just test-l2`
   recipes, plus `just test-real` for the affected real-resource coverage after
   muting is verified. Use nextest through repository recipes, not `cargo test`.
 - [ ] Record platform evidence for macOS, Linux, native Windows, and WSL2,
   including which real backends were exercised and any explicit skips. L2/L3
   checks must not give terminal or browser windows focus.
-- [ ] No application volume defaults, production announcement templates, or
+- [x] No application volume defaults, production announcement templates, or
   host-wide audio settings change as a side effect of this fix.
 
 Do not use listening alone as proof of silence: muted speakers or unavailable

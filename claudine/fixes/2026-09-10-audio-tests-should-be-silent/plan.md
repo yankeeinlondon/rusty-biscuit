@@ -1,6 +1,6 @@
 ---
 created: 2026-09-10
-status: proposed
+status: in_progress
 spec: ./spec.md
 ---
 
@@ -9,7 +9,8 @@ spec: ./spec.md
 Implement [the spec](./spec.md) across Claudine, biscuit-speaks, and Playa.
 Success means that automated tests retain their synthesis, playback, and queue
 coverage without audible output, misleading speech, or delayed audio escaping
-fixture cleanup. This plan does not implement the fix.
+fixture cleanup. Implementation and validation results are recorded in
+[evidence.md](./evidence.md).
 
 ## Design and verified constraints
 
@@ -49,23 +50,23 @@ Paths below are relative to the repository root.
 
 ## Phase 1: Finish the inventory and establish safe boundaries
 
-- [ ] Inspect test call sites, inline test modules, process fixtures, and tier
+- [x] Inspect test call sites, inline test modules, process fixtures, and tier
   recipes in all three areas. Use GitNexus query/context to trace speech,
   effect, composition, and detached-worker flows; use targeted source searches
   for fixtures and text literals. Consult the September 4 audio changes.
-- [ ] Record each affected test's tier, provider/player, source text or audio,
+- [x] Record each affected test's tier, provider/player, source text or audio,
   effective volume, fallback routes, spool/cache isolation, child lifetime,
   and whether it performs real playback or only constructs/inspects requests.
   Keep this inventory and subsequent evidence in this fix directory.
-- [ ] Trace whether any test loads or executes
+- [x] Trace whether any test loads or executes
   `prompts/_implement/implement-suggestions.md` or related real prompt templates.
   If found, isolate its lifecycle emission in the test fixture. Do not edit
   the production announcement. If no caller is found, retain the exact
   reported phrase as unresolved rather than attributing it to another test.
-- [ ] Classify paths as real playback needing mute, already controlled
+- [x] Classify paths as real playback needing mute, already controlled
   construction/execution, or incomplete containment needing repair. Expand
   outside the three areas only for demonstrated callers of the same defect.
-- [ ] Before modifying any existing symbol, run upstream GitNexus impact and
+- [x] Before modifying any existing symbol, run upstream GitNexus impact and
   report direct callers, affected processes, and risk. Surface HIGH/CRITICAL
   results before edits. Refresh a stale index when necessary.
 
@@ -75,53 +76,53 @@ inspection and controlled recording fixtures first.
 
 ## Phase 2: Honor TTS volume and mute real playback
 
-- [ ] Audit `Speak::with_volume`, `TtsConfig::with_volume`, and `VolumeLevel`
+- [x] Audit `Speak::with_volume`, `TtsConfig::with_volume`, and `VolumeLevel`
   through each supported provider's foreground, cache, and detached paths.
   Retain this existing first-class API and define zero as mute, with the
   existing normalized range and clamping semantics. Verify representative
   intermediate levels as well as zero; muting alone is not volume support.
-- [ ] Verify native volume is applied before submitting audio and remains
+- [x] Verify native volume is applied before submitting audio and remains
   effective for normal audio and sound-effect routing. Preserve native feature
   wiring in affected consumers and test recipes. Inspect optional non-Playa
   builds too: an unsupported volume request must not be silently ignored.
-- [ ] Make eSpeak honor configured volume in foreground and detached command
+- [x] Make eSpeak honor configured volume in foreground and detached command
   construction. Verify the provider's authoritative amplitude semantics before
   selecting the conversion from normalized volume; keep both paths consistent.
-- [ ] For `say`, investigate synthesis to a file followed by native Playa
+- [x] For `say`, investigate synthesis to a file followed by native Playa
   playback using the selected voice/rate and requested volume. Prefer the
   existing file/preparation pipeline over a separate playback implementation.
   Preserve detached ordering, cleanup, and return-after-publication semantics
   if direct command jobs become prepared file jobs. Verify platform behavior
   before fixing the exact synthesis format or flags in code.
-- [ ] Audit SAPI and other concrete providers for effective volume support,
+- [x] Audit SAPI and other concrete providers for effective volume support,
   including detached serialization. Use an existing provider-native control
   where it honors the contract; otherwise use synthesis plus controlled Playa
   playback. Do not switch the user's provider/voice just to obtain volume.
-- [ ] Make fallback preserve explicit volume. If a host player cannot honor
+- [x] Make fallback preserve explicit volume. If a host player cannot honor
   it, exclude that player from that request or return an explicit unsupported
   error when no valid route exists. Do not silently play at default volume.
   Apply upstream impact analysis before changing shared selection behavior,
   and document any intentional change to unsupported-request handling.
 
-- [ ] In `biscuit-speaks/lib/tests/real_detached_phase4.rs`, change the spoken
+- [x] In `biscuit-speaks/lib/tests/real_detached_phase4.rs`, change the spoken
   text to “This is a test message.” and set explicit zero volume. Make the
   test's name describe its pinned Kokoro provider and native completion
   contract. Use GitNexus rename for the existing symbol and update references.
-- [ ] Keep Kokoro selection deterministic and retain native-route and complete
+- [x] Keep Kokoro selection deterministic and retain native-route and complete
   verdict assertions. Prevent the real test from reaching an uncontrolled
   fallback player: use the existing discovery/fixture facilities to expose
   only verified volume-capable players and required synthesis dependencies.
   Use `sniff` for executable discovery. Prove that excluded players cannot be
   reached, including after native failure; do not rely on a preflight
   availability check alone.
-- [ ] If existing fixture controls cannot constrain a real route safely,
+- [x] If existing fixture controls cannot constrain a real route safely,
   separate synthesis-to-file from playback and exercise completion with
   verified zero samples, while retaining explicit coverage of the speech
   configuration and handoff. Record any resulting coverage change. Do not
   quietly replace the entire real test with dry-run or a skip.
   This testing fallback does not satisfy the separate requirement to repair
   a production provider that ignores the first-class volume setting.
-- [ ] Replace work-status text in the five files listed in the spec:
+- [x] Replace work-status text in the five files listed in the spec:
   `biscuit-speaks/lib/tests/detached_phase4.rs`,
   `biscuit-speaks/cli/tests/detached_background.rs`,
   `playa/lib/src/detached/tests.rs`,
@@ -129,14 +130,14 @@ inspection and controlled recording fixtures first.
   `claudine/lib/src/dispatch/runner/tests.rs`.
   Preserve the test-message phrase in Unicode/quoting fixtures as well as
   their existing special characters and exact argument assertions.
-- [ ] Update direct-command expectations where effective volume adds arguments
+- [x] Update direct-command expectations where effective volume adds arguments
   or moves speech to file preparation. Replace the obsolete command-shape
   assertion with equivalent lossless-text, voice/rate, volume, and ordered
   handoff coverage; do not freeze the volume bug into expected arguments.
-- [ ] Update cache keys and expected payloads consistently with fixture text.
+- [x] Update cache keys and expected payloads consistently with fixture text.
   Preserve serialization compatibility corpora and nonzero-volume assertions
   when they are safely isolated and test that specific contract.
-- [ ] Apply zero volume to other confirmed real speech/effect tests from the
+- [x] Apply zero volume to other confirmed real speech/effect tests from the
   inventory. Retain Playa's existing zero-filled PCM completion tests.
 
 **Exit criterion:** Real tests have effective mute through every reachable
@@ -145,29 +146,29 @@ behavioral coverage intact.
 
 ## Phase 3: Contain detached jobs through completion and cleanup
 
-- [ ] Set explicit effect volume `0.0` in the configuration assembled by
+- [x] Set explicit effect volume `0.0` in the configuration assembled by
   `claudine/cli/tests/detached_audio.rs`. Assert the persisted job retains it
   alongside the existing durable state and sequence assertions.
-- [ ] In Claudine dispatch publication coverage, use zero effect volume unless
+- [x] In Claudine dispatch publication coverage, use zero effect volume unless
   a nonzero value is essential to the assertion. Keep speech pinned to its
   fixture executable; zero in a speech config is not a replacement for that
   executable boundary.
-- [ ] For lifecycle publication coverage, retain the real default emitter and
+- [x] For lifecycle publication coverage, retain the real default emitter and
   queue inspection. There is no lifecycle effect-volume field in the inspected
   path. Establish non-execution through the private spool and held worker lock,
   then remove executable pending work before releasing ownership. Do not add
   a public lifecycle volume setting solely to accommodate this test.
-- [ ] Apply cleanup consistently to publication tests that leave ready or
+- [x] Apply cleanup consistently to publication tests that leave ready or
   preparing jobs. Use a small test-local RAII fixture where repeated ownership
   ordering requires it. Remove pending payloads while protected, close handles
   before deleting their directory on Windows, and preserve queue lock order.
   Avoid a workspace-wide abstraction unless the inventory demonstrates a need.
-- [ ] For tests that intentionally start helpers or delegates, retain process
+- [x] For tests that intentionally start helpers or delegates, retain process
   ownership or observable completion signals. On success and unwinding,
   release blocked fixture programs, wait with a bounded deadline for exit,
   and terminate/reap only fixture-owned children if needed before removing
   their spool. Merely touching a release marker does not prove completion.
-- [ ] Keep invalid-spool failure tests failing before playback and preserve
+- [x] Keep invalid-spool failure tests failing before playback and preserve
   their warning assertions. Prevent host provider/player fallback even on
   fixture failure. Do not clean or cancel the user's real queue or workers.
 
@@ -189,12 +190,12 @@ Extend existing fixtures and tests instead of duplicating implementation details
 | Publication teardown | No executable pending work remains when worker ownership is released |
 | Active helper teardown | Completion and simulated assertion-failure/unwind paths leave no live fixture worker or playable queued job |
 
-- [ ] Use deterministic markers, recorded commands, and job-state assertions
+- [x] Use deterministic markers, recorded commands, and job-state assertions
   rather than sleeps as the primary proof. Retain bounded timeouts for failure.
-- [ ] Demonstrate that regression assertions detect omitted mute or incomplete
+- [x] Demonstrate that regression assertions detect omitted mute or incomplete
   cleanup using controlled fixtures only; never remove mute from a real
   playback run to prove a test fails.
-- [ ] Recheck original timing, order, durable-publication, completion-report,
+- [x] Recheck original timing, order, durable-publication, completion-report,
   and handoff-warning assertions. Do not loosen them to make cleanup pass.
 
 **Exit criterion:** Evidence covers effective silence and process lifetime,
@@ -202,21 +203,21 @@ not merely a builder's numeric setting or the absence of audible sound.
 
 ## Phase 5: Document and validate across platforms
 
-- [ ] Update relevant testing documentation with the zero-volume rule, explicit
+- [x] Update relevant testing documentation with the zero-volume rule, explicit
   test-message wording, and intentional provider/voice selection. Document
   pinned Kokoro coverage so it cannot be mistaken for a check of the user's
   normal Claudine voice. Update area skills if fixture workflows change.
-- [ ] Review comments on every changed symbol; correct drift encountered in
+- [x] Review comments on every changed symbol; correct drift encountered in
   those symbols without unrelated comment cleanup. Update READMEs if public
   behavior changes and dependency documentation only if dependencies change.
-- [ ] Run focused safe tests first, then `just test` and `just lint` in each
+- [x] Run focused safe tests first, then `just test` and `just lint` in each
   affected area. Use the area's argument forwarding and nextest filters as
   defined by its recipes; check feature gates so the edited targets actually run.
-- [ ] Run applicable Claudine `just test-l2` coverage using the headless harness
+- [x] Run applicable Claudine `just test-l2` coverage using the headless harness
   without focusing terminal/browser windows. Playa and biscuit-speaks currently
   declare L2 inapplicable; their Rust integration-test file layout alone does
   not make those tests L2.
-- [ ] After effective mute is verified, run the relevant Playa and biscuit-speaks
+- [x] After effective mute is verified, run the relevant Playa and biscuit-speaks
   `just test-real` coverage. Record selected provider/player, route, completion
   verdict, and skips. A skipped real test is not playback evidence.
 - [ ] Follow `.claude/skills/os/SKILL.md` and its build-host guidance. Discover
@@ -236,7 +237,13 @@ not merely a builder's numeric setting or the absence of audible sound.
 
 ## Completion record
 
-To be filled during implementation: changed tests and containment decisions,
-commands and results, platform/backend matrix, remaining limitations, and the
-acceptance-criterion checklist. No implementation or runtime validation has been
-performed as part of authoring this plan.
+Implementation and macOS verification are recorded in [evidence.md](./evidence.md)
+and [test-inventory.md](./test-inventory.md). All three area L1 suites and lints
+passed, as did the selected real audio tests. Cross-platform verification remains
+open because remote host provisioning has blocked execution. Keep this fix active
+until those results are available.
+
+The conditional synthesis-only testing fallback in Phase 2 was unnecessary:
+production volume enforcement now rejects incapable explicit players, automatic
+selection filters them, and controlled fallback tests assert effective mute.
+Real Say and Kokoro tests retained native completion coverage.
