@@ -88,8 +88,23 @@ interface CellSpec {
   omitFile?: boolean;
 }
 
+interface ProvenanceSpec {
+  sha: string;
+  runId: string;
+  runNumber: number;
+  runAttempt: number;
+  ref: string;
+  event: string;
+  workflow: string;
+}
+
 /** Write one `<run>/<leg>/` staging tree the way `_stage_junit` builds it. */
-function writeLeg(runDir: string, leg: string, cells: CellSpec[], options: { manifest?: string | null } = {}): void {
+function writeLeg(
+  runDir: string,
+  leg: string,
+  cells: CellSpec[],
+  options: { manifest?: string | null; provenance?: ProvenanceSpec | null } = {}
+): void {
   const legDir = join(runDir, leg);
   mkdirSync(legDir, { recursive: true });
   const records: string[] = [];
@@ -115,6 +130,11 @@ function writeLeg(runDir: string, leg: string, cells: CellSpec[], options: { man
   }
   if (options.manifest === null) return;
   writeFileSync(join(legDir, "manifest.jsonl"), options.manifest ?? `${records.join("\n")}\n`, "utf8");
+
+  // Write provenance.json if provided
+  if (options.provenance !== undefined && options.provenance !== null) {
+    writeFileSync(join(legDir, "provenance.json"), JSON.stringify(options.provenance, null, 2), "utf8");
+  }
 }
 
 const GREEN: CaseSpec[] = [
@@ -168,11 +188,20 @@ describe("aggregate emits the budget input shape", () => {
   });
 
   it("feeds deriveBudgets directly and produces a budget at three green runs", () => {
+    const ciProv = (runNumber: number): ProvenanceSpec => ({
+      sha: "abc123",
+      runId: "12345678",
+      runNumber,
+      runAttempt: 1,
+      ref: "refs/heads/main",
+      event: "push",
+      workflow: "CI",
+    });
     for (const id of ["r1", "r2", "r3"]) {
       const scale = id === "r3" ? 2 : 1;
       writeLeg(join(root, id), "ubuntu-latest", [
         { cases: GREEN.map((c) => ({ ...c, seconds: c.seconds * scale })) },
-      ]);
+      ], { provenance: ciProv(Number(id.slice(1))) });
     }
 
     const result = aggregate({
@@ -199,7 +228,8 @@ describe("aggregate emits the budget input shape", () => {
   });
 
   it("keeps one run at one sample so deriveBudgets still refuses", () => {
-    writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }]);
+    const ciProv = { sha: "abc123", runId: "12345678", runNumber: 1, runAttempt: 1, ref: "refs/heads/main", event: "push", workflow: "CI" };
+    writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }], { provenance: ciProv });
     const result = aggregate({
       runDirs: run("r1"),
       environments: [env("ubuntu-latest")],
@@ -212,11 +242,12 @@ describe("aggregate emits the budget input shape", () => {
   });
 
   it("leaves a family absent from one run short of a sample", () => {
-    writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }]);
+    const ciProv = (n: number) => ({ sha: "abc123", runId: "12345678", runNumber: n, runAttempt: 1, ref: "refs/heads/main", event: "push", workflow: "CI" });
+    writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }], { provenance: ciProv(1) });
     for (const id of ["r2", "r3"]) {
       writeLeg(join(root, id), "ubuntu-latest", [
         { cases: GREEN.filter((c) => c.suite === "demo-pkg::alpha") },
-      ]);
+      ], { provenance: ciProv(Number(id.slice(1))) });
     }
     const result = aggregate({
       runDirs: run("r1", "r2", "r3"),
@@ -233,13 +264,12 @@ describe("aggregate emits the budget input shape", () => {
     ]);
   });
 
-  it("stamps local provenance on request so deriveBudgets refuses before reading a leg", () => {
+  it("derives local provenance when no provenance.json exists so deriveBudgets refuses", () => {
     writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }]);
     const result = aggregate({
       runDirs: run("r1"),
       environments: [env("ubuntu-latest")],
       families: FAMILIES,
-      provenanceKind: "local",
     });
     expect(result.budgetInput.provenance.kind).toBe("local");
     expect(deriveBudgets(result.budgetInput).violations.map((v) => v.kind)).toEqual([
@@ -444,8 +474,9 @@ describe("aggregate refuses evidence it cannot trust", () => {
       environments: [env("ubuntu-latest")],
       families: FAMILIES,
     });
-    expect(result.violations.map((v) => v.kind)).toEqual(["missing-artifact"]);
-    expect(result.violations[0]!.detail).toContain("no manifest record for L1/demo-pkg.xml");
+    expect(result.violations.map((v) => v.kind)).toEqual(["unexpected-manifest-cell", "missing-artifact"]);
+    expect(result.violations[0]!.detail).toContain("L2/demo-pkg");
+    expect(result.violations[1]!.detail).toContain("no manifest record for L1/demo-pkg.xml");
   });
 
   it("reports a run directory that does not exist", () => {
@@ -482,6 +513,160 @@ describe("aggregate refuses evidence it cannot trust", () => {
       "ubuntu-latest": 1,
       "macos-latest": 0,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Provenance validation — derived kind and consistency checks
+// ---------------------------------------------------------------------------
+
+describe("aggregate derives provenance and validates consistency", () => {
+  const ciProv = (runNumber: number, sha = "abc123"): ProvenanceSpec => ({
+    sha,
+    runId: "12345678",
+    runNumber,
+    runAttempt: 1,
+    ref: "refs/heads/main",
+    event: "push",
+    workflow: "CI",
+  });
+
+  it("derives 'local' provenance when no staging tree has provenance.json", () => {
+    writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }]);
+    const result = aggregate({
+      runDirs: run("r1"),
+      environments: [env("ubuntu-latest")],
+      families: FAMILIES,
+    });
+    expect(result.violations).toEqual([]);
+    expect(result.budgetInput.provenance.kind).toBe("local");
+  });
+
+  it("derives 'ci' provenance when all counted samples have provenance.json", () => {
+    for (const id of ["r1", "r2"]) {
+      writeLeg(join(root, id), "ubuntu-latest", [{ cases: GREEN }], { provenance: ciProv(Number(id.slice(1))) });
+    }
+    const result = aggregate({
+      runDirs: run("r1", "r2"),
+      environments: [env("ubuntu-latest")],
+      families: FAMILIES,
+    });
+    expect(result.violations).toEqual([]);
+    expect(result.budgetInput.provenance.kind).toBe("ci");
+  });
+
+  it("derives 'local' when some samples have CI provenance and others do not", () => {
+    writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }], { provenance: ciProv(1) });
+    writeLeg(join(root, "r2"), "ubuntu-latest", [{ cases: GREEN }]);
+    const result = aggregate({
+      runDirs: run("r1", "r2"),
+      environments: [env("ubuntu-latest")],
+      families: FAMILIES,
+    });
+    expect(result.violations).toEqual([]);
+    expect(result.budgetInput.provenance.kind).toBe("local");
+  });
+
+  it("rejects samples spanning two source revisions", () => {
+    writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }], { provenance: ciProv(1, "abc123") });
+    writeLeg(join(root, "r2"), "ubuntu-latest", [{ cases: GREEN }], { provenance: ciProv(2, "def456") });
+    const result = aggregate({
+      runDirs: run("r1", "r2"),
+      environments: [env("ubuntu-latest")],
+      families: FAMILIES,
+    });
+    expect(result.violations.map((v) => v.kind)).toEqual(["mixed-source-revisions"]);
+    expect(result.violations[0]!.detail).toContain("2 source revisions");
+    expect(result.violations[0]!.detail).toContain("abc123");
+    expect(result.violations[0]!.detail).toContain("def456");
+  });
+
+  it("rejects non-consecutive run numbers", () => {
+    writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }], { provenance: ciProv(10) });
+    writeLeg(join(root, "r2"), "ubuntu-latest", [{ cases: GREEN }], { provenance: ciProv(12) });
+    const result = aggregate({
+      runDirs: run("r1", "r2"),
+      environments: [env("ubuntu-latest")],
+      families: FAMILIES,
+    });
+    expect(result.violations.map((v) => v.kind)).toEqual(["non-consecutive-runs"]);
+    expect(result.violations[0]!.detail).toContain("10 → 12 are not consecutive");
+  });
+
+  it("accepts consecutive run numbers from one source revision", () => {
+    for (const [id, num] of [["r1", 10], ["r2", 11], ["r3", 12]] as const) {
+      writeLeg(join(root, id), "ubuntu-latest", [{ cases: GREEN }], { provenance: ciProv(num) });
+    }
+    const result = aggregate({
+      runDirs: run("r1", "r2", "r3"),
+      environments: [env("ubuntu-latest")],
+      families: FAMILIES,
+    });
+    expect(result.violations).toEqual([]);
+    expect(result.budgetInput.provenance.kind).toBe("ci");
+    expect(result.budgetInput.provenance.runsPerLeg["ubuntu-latest"]).toBe(3);
+  });
+
+  it("rejects a malformed provenance.json", () => {
+    const legDir = join(root, "r1", "ubuntu-latest");
+    mkdirSync(legDir, { recursive: true });
+    writeFileSync(join(legDir, "provenance.json"), "{not json\n", "utf8");
+    writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }]);
+    const result = aggregate({
+      runDirs: run("r1"),
+      environments: [env("ubuntu-latest")],
+      families: FAMILIES,
+    });
+    expect(result.violations.map((v) => v.kind)).toEqual(["malformed-report"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Manifest cardinality — exact one-to-one matching
+// ---------------------------------------------------------------------------
+
+describe("aggregate enforces exact manifest cardinality", () => {
+  it("rejects a duplicate (tier, package) manifest record", () => {
+    const records = [
+      JSON.stringify({ tier: "L1", package: "demo-pkg", xml: "L1/demo-pkg.xml", exit_code: 0, environment: "ubuntu-latest", duration_s: 100, report_present: true }),
+      JSON.stringify({ tier: "L1", package: "demo-pkg", xml: "L1/demo-pkg.xml", exit_code: 0, environment: "ubuntu-latest", duration_s: 100, report_present: true }),
+    ].join("\n") + "\n";
+    writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }], { manifest: records });
+    const result = aggregate({
+      runDirs: run("r1"),
+      environments: [env("ubuntu-latest")],
+      families: FAMILIES,
+    });
+    expect(result.violations.map((v) => v.kind)).toEqual(["duplicate-manifest-cell"]);
+    expect(result.violations[0]!.detail).toContain("L1/demo-pkg");
+    expect(result.violations[0]!.detail).toContain("2 times");
+  });
+
+  it("rejects an unexpected manifest cell not declared by the environment", () => {
+    const records = [
+      JSON.stringify({ tier: "L1", package: "demo-pkg", xml: "L1/demo-pkg.xml", exit_code: 0, environment: "ubuntu-latest", duration_s: 100, report_present: true }),
+      JSON.stringify({ tier: "L2", package: "other-pkg", xml: "L2/other-pkg.xml", exit_code: 0, environment: "ubuntu-latest", duration_s: 100, report_present: true }),
+    ].join("\n") + "\n";
+    writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }], { manifest: records });
+    const result = aggregate({
+      runDirs: run("r1"),
+      environments: [env("ubuntu-latest")],
+      families: FAMILIES,
+    });
+    expect(result.violations.map((v) => v.kind)).toEqual(["unexpected-manifest-cell"]);
+    expect(result.violations[0]!.detail).toContain("L2/other-pkg");
+    expect(result.violations[0]!.detail).toContain("declares no such cell");
+  });
+
+  it("accepts a clean manifest with exact one-to-one matching", () => {
+    writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }]);
+    const result = aggregate({
+      runDirs: run("r1"),
+      environments: [env("ubuntu-latest")],
+      families: FAMILIES,
+    });
+    expect(result.violations).toEqual([]);
+    expect(result.budgetInput.provenance.runsPerLeg["ubuntu-latest"]).toBe(1);
   });
 });
 
@@ -570,13 +755,10 @@ describe("aggregate command surface", () => {
     expect(JSON.parse(readFileSync(outPath, "utf8"))).toEqual(written);
   });
 
-  it("is a usage error without run directories or with an unknown provenance", () => {
+  it("is a usage error without run directories or with invalid headroom", () => {
     const configPath = writeConfig();
     writeLeg(join(root, "r1"), "ubuntu-latest", [{ cases: GREEN }]);
     expect(() => capture(["aggregate", "--config", configPath])).toThrow(UsageError);
-    expect(() =>
-      capture(["aggregate", join(root, "r1"), "--config", configPath, "--provenance", "guess"])
-    ).toThrow(UsageError);
     expect(() =>
       capture(["aggregate", join(root, "r1"), "--config", configPath, "--headroom", "-1"])
     ).toThrow(UsageError);

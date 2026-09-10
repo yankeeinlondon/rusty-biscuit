@@ -123,17 +123,12 @@ describe("Claudine JUnit → family aggregation over the shipped baseline", () =
       "wsl2-ubuntu": 1,
     });
 
+    // The historical baseline has no provenance.json (created before that feature),
+    // so it's classified as 'local' and refused by deriveBudgets before checking run count.
+    expect(result.budgetInput.provenance.kind).toBe("local");
     const { budgets, violations } = deriveBudgets(result.budgetInput);
     expect(budgets).toEqual([]);
-    expect(violations.map((v) => v.kind)).toEqual([
-      "insufficient-runs",
-      "insufficient-runs",
-      "insufficient-runs",
-      "insufficient-runs",
-    ]);
-    for (const violation of violations) {
-      expect(violation.detail).toContain("1 green run(s); 3 consecutive are required");
-    }
+    expect(violations.map((v) => v.kind)).toEqual(["local-derived-budget"]);
   });
 
   it("still refuses when the stored supplementary pull_request run is added", () => {

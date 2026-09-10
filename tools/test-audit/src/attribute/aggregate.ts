@@ -31,6 +31,7 @@ import type { EnvironmentConfig } from "../config.ts";
 import { MalformedInput } from "../errors.ts";
 import { parseJunit } from "../junit/parse.ts";
 import { parseManifest, type ManifestRecord } from "../junit/manifest.ts";
+import { parseProvenance, type Provenance } from "../junit/provenance.ts";
 import type { Family } from "../reconcile/families.ts";
 import type { Invocation } from "../nextest-log.ts";
 import {
@@ -74,8 +75,6 @@ export interface AggregateInput {
   runDirs: string[];
   environments: EnvironmentConfig[];
   families: Family[];
-  /** Provenance stamped on the output; `local` is refused by `deriveBudgets`. */
-  provenanceKind?: "ci" | "local";
   headroom?: number;
 }
 
@@ -94,7 +93,7 @@ function readLeg(
   legDir: string,
   label: string,
   env: EnvironmentConfig
-): { cells: MeasuredCell[]; violations: AttributionViolation[] } {
+): { cells: MeasuredCell[]; violations: AttributionViolation[]; provenance: Provenance } {
   const violations: AttributionViolation[] = [];
   const cells: MeasuredCell[] = [];
 
@@ -104,7 +103,7 @@ function readLeg(
       kind: "missing-artifact",
       detail: `${label}: manifest.jsonl absent; the tree is not a \`_stage_junit\` staging directory`,
     });
-    return { cells, violations };
+    return { cells, violations, provenance: null };
   }
 
   let records: ManifestRecord[];
@@ -112,7 +111,7 @@ function readLeg(
     records = parseManifest(readFileSync(manifestPath, "utf8"), `${label}/manifest.jsonl`);
   } catch (error) {
     violations.push({ kind: "malformed-report", detail: (error as Error).message });
-    return { cells, violations };
+    return { cells, violations, provenance: null };
   }
 
   for (const record of records) {
@@ -124,12 +123,49 @@ function readLeg(
     }
   }
 
+  // Read provenance if present
+  let provenance: Provenance = null;
+  const provenancePath = join(legDir, "provenance.json");
+  if (existsSync(provenancePath)) {
+    try {
+      provenance = parseProvenance(readFileSync(provenancePath, "utf8"), `${label}/provenance.json`);
+    } catch (error) {
+      violations.push({ kind: "malformed-report", detail: (error as Error).message });
+      return { cells, violations, provenance: null };
+    }
+  }
+
   if (env.cells.length === 0) {
     violations.push({
       kind: "missing-leg",
       detail: `${label}: the leg declares no cells, so it measures nothing`,
     });
-    return { cells, violations };
+    return { cells, violations, provenance };
+  }
+
+  // Check for exact one-to-one manifest-cell matching
+  const seen = new Map<string, number>();
+  for (const record of records) {
+    const key = `${record.tier}/${record.package}`;
+    const count = seen.get(key) ?? 0;
+    seen.set(key, count + 1);
+    if (count > 0) {
+      violations.push({
+        kind: "duplicate-manifest-cell",
+        detail: `${label}: manifest lists ${key} ${count + 1} times; each cell must appear exactly once`,
+      });
+    }
+  }
+
+  for (const record of records) {
+    const key = `${record.tier}/${record.package}`;
+    const expected = env.cells.some((c) => c.tier === record.tier && c.package === record.package);
+    if (!expected) {
+      violations.push({
+        kind: "unexpected-manifest-cell",
+        detail: `${label}: manifest lists ${key} but the environment declares no such cell`,
+      });
+    }
   }
 
   for (const cell of env.cells) {
@@ -178,11 +214,15 @@ function readLeg(
     }
   }
 
-  return { cells, violations };
+  return { cells, violations, provenance };
 }
 
 /**
  * Join stored staging trees to families and emit `perLegFamilySummed`.
+ *
+ * Provenance kind is derived from stamped data: a tree with CI provenance on
+ * all counted runs is `ci`, otherwise `local`. All counted samples must share
+ * one source revision and represent ordered consecutive runs.
  *
  * ## Errors
  *
@@ -196,6 +236,7 @@ export function aggregate(input: AggregateInput): AggregateResult {
   const perLegFamilySummed: Record<string, Record<string, number[]>> = {};
   const countedRuns: Record<string, string[]> = {};
   const runs: string[] = [];
+  const allProvenance: Array<{ run: string; leg: string; provenance: Provenance }> = [];
 
   for (const runDir of input.runDirs) {
     const run = basename(runDir);
@@ -255,6 +296,9 @@ export function aggregate(input: AggregateInput): AggregateResult {
         continue;
       }
 
+      // Record provenance from this successful leg
+      allProvenance.push({ run, leg: env.name, provenance: leg.provenance });
+
       const families = (perLegFamilySummed[env.name] ??= {});
       for (const family of attribution.families) {
         (families[family.id] ??= []).push(family.summed);
@@ -273,13 +317,51 @@ export function aggregate(input: AggregateInput): AggregateResult {
     }
   }
 
+  // Derive provenance kind: `ci` only if all counted samples have CI provenance
+  const ciProvenance = allProvenance.filter((p) => p.provenance !== null);
+  const provenanceKind: "ci" | "local" = ciProvenance.length === allProvenance.length ? "ci" : "local";
+
+  // Validate CI provenance consistency
+  if (provenanceKind === "ci") {
+    // All samples must share one source revision
+    const shas = new Set(ciProvenance.map((p) => p.provenance!.sha));
+    if (shas.size > 1) {
+      violations.push({
+        kind: "mixed-source-revisions",
+        detail: `samples span ${shas.size} source revisions: ${[...shas].join(", ")}; all must be from one revision`,
+      });
+    }
+
+    // All samples must be ordered consecutive runs
+    // Group by workflow+ref, then check run numbers are consecutive
+    const byWorkflowRef = new Map<string, Array<{ run: string; leg: string; runNumber: number }>>();
+    for (const { run, leg, provenance } of ciProvenance) {
+      const key = `${provenance!.workflow}/${provenance!.ref}`;
+      const entry = byWorkflowRef.get(key) ?? [];
+      entry.push({ run, leg, runNumber: provenance!.runNumber });
+      byWorkflowRef.set(key, entry);
+    }
+
+    for (const [key, entries] of byWorkflowRef) {
+      const sorted = [...entries].sort((a, b) => a.runNumber - b.runNumber);
+      for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i]!.runNumber !== sorted[i - 1]!.runNumber + 1) {
+          violations.push({
+            kind: "non-consecutive-runs",
+            detail: `${key}: run numbers ${sorted[i - 1]!.runNumber} → ${sorted[i]!.runNumber} are not consecutive`,
+          });
+        }
+      }
+    }
+  }
+
   const runsPerLeg: Record<string, number> = {};
   for (const leg of legs) runsPerLeg[leg] = countedRuns[leg]!.length;
 
   return {
     budgetInput: {
       provenance: {
-        kind: input.provenanceKind ?? "ci",
+        kind: provenanceKind,
         legs,
         runsPerLeg,
         runs,

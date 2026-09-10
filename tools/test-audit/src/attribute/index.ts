@@ -37,7 +37,11 @@ export type AttributionViolationKind =
   | "missing-leg"
   | "invalid-headroom"
   | "missing-artifact"
-  | "provenance-mismatch";
+  | "provenance-mismatch"
+  | "mixed-source-revisions"
+  | "non-consecutive-runs"
+  | "duplicate-manifest-cell"
+  | "unexpected-manifest-cell";
 
 export type AttributionViolation = Violation<AttributionViolationKind>;
 

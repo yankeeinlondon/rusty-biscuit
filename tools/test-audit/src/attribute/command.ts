@@ -18,7 +18,7 @@ import {
 } from "./index.ts";
 
 const USAGE = `usage: test-audit attribute <run.log|report.xml>... --config <cfg> [--families <json>] [--by-binary] [--markdown] [--json]
-       test-audit attribute aggregate <run-dir>... --config <cfg> [--families <json>] [--out <json>] [--provenance ci|local] [--headroom <ratio>] [--json]
+       test-audit attribute aggregate <run-dir>... --config <cfg> [--families <json>] [--out <json>] [--headroom <ratio>] [--json]
        test-audit attribute budgets --config <cfg> --runs <manifest.json> [--headroom <ratio>] [--markdown]`;
 
 export const attributeCommand: Command = {
@@ -112,10 +112,6 @@ function runAggregate(
   const config = loadConfig(configPath);
   const familiesPath = optionalString(parsed, "families") ?? config.familiesPath;
   const headroom = optionalNonNegative(parsed, "headroom");
-  const provenanceKind = optionalString(parsed, "provenance") ?? "ci";
-  if (provenanceKind !== "ci" && provenanceKind !== "local") {
-    throw new UsageError(`--provenance must be 'ci' or 'local', got ${provenanceKind}`);
-  }
 
   if (!existsSync(familiesPath) || !statSync(familiesPath).isFile()) {
     throw new UsageError(`not a readable file: ${familiesPath}`);
@@ -126,7 +122,6 @@ function runAggregate(
     runDirs: positional,
     environments: config.environments,
     families,
-    provenanceKind,
     ...(headroom === undefined ? {} : { headroom }),
   });
 

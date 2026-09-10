@@ -57,7 +57,7 @@ absent routes claiming to execute). Shipped configurations:
 | `sources --config <cfg> [--json\|--markdown]` | Source-side test population via tree-sitter (attributes, cfg gates, module path, ignore reason, macro forms) plus parse diagnostics | 0 |
 | `reconcile --config <cfg>` | Runner universe from captures × `families.json` × `inventory.md` family index × source scan: total, non-overlapping, every difference declared | 0 / 1 |
 | `attribute <log>... --config <cfg>` / `attribute budgets --runs <json>` | Per-family cost from nextest console logs; budgets refuse local provenance and fewer than three CI runs per leg | 0 / 1 |
-| `attribute aggregate <run-dir>... --config <cfg> [--out <json>] [--provenance ci\|local] [--headroom <ratio>] [--json]` | Join stored JUnit staging trees to families and emit the `perLegFamilySummed` that `attribute budgets --runs` reads | 0 / 1 / 2 |
+| `attribute aggregate <run-dir>... --config <cfg> [--out <json>] [--headroom <ratio>] [--json]` | Join stored JUnit staging trees to families and emit the `perLegFamilySummed` that `attribute budgets --runs` reads; derives provenance kind from stamped data | 0 / 1 / 2 |
 | `measure report\|parse\|run` | Local alternating-run report (three costs kept apart, drift bracket, cohorts, ten-execution targets), single-log parse, and the alternating runner (`--plan`) | 0 / 1 |
 | `counters validate\|compare --config <cfg>` | Work-count readings as data; comparisons are rejected across differing compatibility keys or a declared boundary | 0 / 1 |
 
@@ -79,20 +79,32 @@ resolved through `reconcile`'s `familiesMatching`, so the two gates cannot
 drift on family membership. One run yields **one sample per family per leg**,
 and only from a leg whose evidence is clean — a red run (non-zero manifest
 `exit_code` or a failed case), a malformed or missing report, a manifest naming
-another environment, or an identity that zero or two families claim
-disqualifies that leg for that run rather than being averaged in. Legs declared
-`pending` are reported pending and counted for nothing. The aggregator never
-decides whether enough evidence exists: `runsPerLeg` is the count of legs that
-actually measured, and `deriveBudgets` keeps every refusal (local provenance,
-fewer than three green runs, a declared leg with no measurements, a family with
-fewer samples than runs). A clean aggregation followed by a refused derivation
-is the expected end state until three green runs per leg exist.
+another environment, duplicate or unexpected manifest cells, mixed source
+revisions, non-consecutive run numbers, or an identity that zero or two families
+claim disqualifies that leg for that run rather than being averaged in. Legs
+declared `pending` are reported pending and counted for nothing. The aggregator
+derives provenance kind from the stamped data: `ci` only when all counted
+samples carry `provenance.json`, all share one source revision, and run numbers
+are consecutive; otherwise `local`. It never decides whether enough evidence
+exists: `runsPerLeg` is the count of legs that actually measured, and
+`deriveBudgets` keeps every refusal (local provenance, fewer than three green
+runs, a declared leg with no measurements, a family with fewer samples than
+runs). A clean aggregation followed by a refused derivation is the expected end
+state until three green runs per leg exist.
 
 ### Inputs, in order of preference
 
-1. **Nextest JSON listings** (`capture`) and **JUnit XML + `manifest.jsonl`**
-   staging trees (`fetch`, or the local `target/nextest/ci-reports` tree) —
-   structured, the primary inputs.
+1. **Nextest JSON listings** (`capture`) and **JUnit XML + `manifest.jsonl` +
+   `provenance.json`** staging trees (`fetch`, or the local
+   `target/nextest/ci-reports` tree) — structured, the primary inputs. A staging
+   tree holds `<tier>/<package>.xml` JUnit reports per nextest invocation, one
+   `manifest.jsonl` with per-cell metadata (`{tier, package, xml, exit_code,
+   environment, duration_s, report_present}`), and optionally one
+   `provenance.json` with CI source metadata (`{sha, runId, runNumber,
+   runAttempt, ref, event, workflow}`) when `GITHUB_SHA` is present at staging
+   time. Absent provenance records the tree as `local` evidence; present
+   provenance makes the tree `ci` evidence only when all counted samples carry
+   it, all share one source revision, and all represent ordered consecutive runs.
 2. **Nextest console logs** — accepted by `attribute` and `measure` through one
    bounded adapter (`src/nextest-log.ts`: nextest 0.9.x `PASS [ 0.123s] (n/m)
    binary name`, `TRY n`, `Starting N tests across M binaries (K skipped)`,
