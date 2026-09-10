@@ -38,4 +38,6 @@ Currently there are no local testing rigs for you to use. You should report to t
 - BUILD_WIN - set to the configured SSH host that will run native Windows based testing
 - BUILD_WSL - set to the configured SSH host that will run WSL based testing on Windows
 - BUILD_MACOS - set to the configured SSH host that will run macOS based testing
+
+The benefits to having these environments available should be seen as important so you should not only report the lack of these environments at the point of discovery but also at the end of any task as part of your summary.
 ::end-block
