@@ -1,8 +1,11 @@
 ---
 created: 2026-09-10
 status: in_progress
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-5.6-sol
+reviewed_on: 2026-09-10
 implemented: false
+review_iterations: 1
 area: claudine
 areas:
     - biscuit-speaks
@@ -29,9 +32,18 @@ inaudible. Speech fixtures must identify themselves as tests, for example,
 “This is a test message.” This applies to foreground playback, detached workers,
 and fallback providers, including work that continues after the test parent exits.
 
-The initial inventory below comes from source and Git history inspection,
-without replaying potentially audible tests. Implementation was subsequently
-authorized; findings and validation are tracked in [evidence.md](./evidence.md).
+The initial inventory below came from source and Git history inspection,
+without replaying potentially audible tests. Subsequent source tracing
+identified the exact test path for the reported announcement. Implementation
+findings and validation are tracked in [evidence.md](./evidence.md).
+
+> **Reader's note (inline review, 2026-09-10):** Silence is enforced at three
+> different boundaries because no single switch preserves every test contract.
+> Tests unrelated to audio use child-local dry-run and assert that no job was
+> published; publication tests use a private, locked spool whose pending work is
+> removed before worker ownership is released; real-resource tests reach the
+> backend with explicit zero volume. Treating these as interchangeable would
+> either discard meaningful coverage or leave detached work able to escape.
 
 ## Findings
 
@@ -69,10 +81,14 @@ while preserving punctuation, Unicode, argument-boundary, or ordering coverage
 where those properties are part of the test contract.
 
 The exact review-findings announcement also exists as a legitimate lifecycle
-`say` template in `prompts/_implement/implement-suggestions.md`. Inspection has
-not established a test that executes that template. Trace fixture loading and
-composition paths during implementation rather than changing the production
-announcement on the assumption that it is itself defective.
+`say` template in `prompts/_implement/implement-suggestions.md`. Source tracing
+established that two tests in
+`claudine/cli/tests/compose_caller_file_provenance.rs` copy and execute that
+literal template with a fake Goose provider. The fake provider isolates agent
+execution, but it does not suppress the template's independent lifecycle audio.
+Those provenance tests must retain the shipped template, set child-only
+`PLAYA_DRY_RUN=1`, use a private spool, and assert that the spool is never
+created. The production announcement is legitimate and must not be changed.
 
 ### Test provider selection differs from normal Claudine usage
 
@@ -115,20 +131,25 @@ audible content; they are not identified as sources of the reported sound.
 
 ## Required Behavior
 
-1. Every automated test path capable of playing speech or non-silent audio must
-   apply effective zero volume before playback starts. Low or “soft” volume is
-   insufficient. Use existing per-playback configuration where supported;
-   never change the host's global volume or mute setting.
+1. Every automated test that reaches a real speech or audio playback boundary
+   must apply effective zero volume before playback starts. Low or “soft” volume
+   is insufficient. Tests that do not cover audio behavior must instead use a
+   child-scoped dry-run boundary and prove that no durable job was published.
+   Never change the host's global volume or mute setting.
 2. Keep tests of argument construction, routing, serialization, and failures
    isolated from real output. Tests that intentionally inspect nonzero volume
-   values may retain them when their execution is conclusively stubbed or
-   cannot reach playback.
+   values may retain them only when their execution is conclusively stubbed or
+   cannot reach playback. Environment-based dry-run setup must use the
+   repository's guarded, serialized environment-test conventions; do not mutate
+   process-global environment concurrently.
 3. Carry silence through detached publication, preparation, delegation, and
    provider/player fallback. Verify direct streaming speech separately from
    file playback; a file-player volume option does not establish that a speech
-   command is muted. Unsupported volume control must not silently permit
-   audible playback; use a silent fixture or controlled backend as appropriate
-   to the test's purpose.
+   command is muted. Automatic player selection must exclude players that cannot
+   honor a requested volume, while an explicitly selected incapable player must
+   fail with a typed unsupported-volume error before spawning. A test may use a
+   silent fixture or controlled backend instead when volume behavior is not its
+   subject.
 4. Replace work-status speech fixtures with explicit test messages. Include a
    recognizable “test message” phrase even in fixtures that retain extra text
    for escaping, Unicode, or argument-preservation assertions.
@@ -137,8 +158,11 @@ audible content; they are not identified as sources of the reported sound.
    remain exercised where required. Blanket dry-run or skipping is not a
    substitute for muted real playback coverage.
 6. Tests must not leave executable audio jobs or workers that can become audible
-   after completion, failure, panic, or fixture cleanup. Inspect and correct
-   queue cleanup and lock lifetimes where needed.
+   after completion, failure, panic, or fixture cleanup. Publication fixtures
+   must remove runnable records while still holding both the worker-exclusion
+   and queue-mutation locks. Tests that launch fixture-owned helpers must observe
+   normal completion or terminate only those helpers after validating process
+   identity; name-wide process termination is prohibited.
 7. Preserve normal application volume defaults and legitimate lifecycle
    announcements. Do not introduce behavior that mutes ordinary user sessions.
 8. Document intentional test-specific provider/voice selection. Do not change
@@ -153,6 +177,11 @@ audible content; they are not identified as sources of the reported sound.
     provides the public setting; fix provider paths that ignore it rather than
     adding a duplicate API or relying solely on test stubs. Zero must mean mute.
     Preserve configured provider/voice selection when adding volume support.
+11. Any synthesis-to-file route introduced to make volume effective must
+    preserve synthesis cache correctness. Cache identity must include resolved
+    synthesis-affecting settings such as voice and rate, must not conflate an
+    unknown system default with an explicit rate, and must not include volume
+    when volume is applied only during playback.
 
 ## Scope and Implementation Constraints
 
@@ -175,6 +204,35 @@ The solution must work on macOS, Linux, native Windows, and WSL2. Load the `os`
 skill before platform-specific implementation or test planning. Update relevant
 testing documentation and skills if a new shared test convention is introduced.
 
+## Design Decisions and Test Boundaries
+
+The audit is bounded to executable automated-test paths in `biscuit-speaks`,
+`playa`, and `claudine`, plus shared helpers and directly affected callers found
+during tracing. Text matches alone are inventory leads: a speech-like string in
+a serialization-only or fully stubbed test does not require real playback.
+Conversely, a private spool alone is not containment because another scheduler
+can consume a runnable record after the lock is released.
+
+Use the narrowest boundary that retains the behavior under test:
+
+| Test purpose | Required boundary | Required proof |
+|--------------|-------------------|----------------|
+| Composition, provenance, or another non-audio behavior that executes lifecycle actions | Child-only `PLAYA_DRY_RUN=1` and a private spool | The command completes and the spool is never created |
+| Durable publication, ordering, or handoff | Private spool held by the shared locked-spool fixture | Payload assertions pass and pending records are removed under lock, including while unwinding |
+| Provider/player argument construction | Fake executable or injected backend with no path to host playback | Captured arguments preserve the expected zero or intentional nonzero value |
+| Real synthesis/playback completion | Pinned provider and voice with explicit zero volume | Completion plus provider/player-boundary evidence that zero was honored |
+
+Real-resource availability differs by operating system and host. Compatibility
+requires compilation and deterministic tests on macOS, Linux, native Windows,
+and WSL2. Real-backend checks run where the named dependency and audio backend
+are available; an explicit, recorded skip is acceptable elsewhere, but a skip
+must not be reported as playback evidence. Validation records must distinguish
+passes, controlled-backend checks, explicit skips, and infrastructure failures.
+
+No open design question remains for this fix. A future request to make all test
+processes globally dry-run by default would change the real-resource and durable
+publication contracts and therefore requires a separate specification.
+
 ## Acceptance Criteria and Validation
 
 - [x] Record the affected tests and trace any test execution of real lifecycle
@@ -186,6 +244,8 @@ testing documentation and skills if a new shared test convention is introduced.
 - [x] Verify mute propagation at the actual provider/player boundary, including
   detached children and supported fallback routes. Test an unsupported-volume
   route without allowing it to emit sound.
+- [x] Verify automatic selection rejects volume-incapable players and explicit
+  selection returns the typed unsupported-volume failure before spawning.
 - [x] Affected consumers enable native Playa playback, and first-class TTS
   volume is honored in foreground and detached provider paths. Exercise zero
   and representative nonzero levels without changing host-wide audio settings.
@@ -194,12 +254,16 @@ testing documentation and skills if a new shared test convention is introduced.
   remain safely isolated.
 - [x] Exercise teardown and failure paths to establish that no pending job can
   escape containment after its parent test ends.
+- [x] Preserve cache identity across any new synthesis-to-file path, including
+  distinct unknown-default and explicit-rate cases and reuse for equivalent
+  resolved rates.
 - [x] Run the affected areas' canonical `just test` and applicable `just test-l2`
   recipes, plus `just test-real` for the affected real-resource coverage after
   muting is verified. Use nextest through repository recipes, not `cargo test`.
-- [ ] Record platform evidence for macOS, Linux, native Windows, and WSL2,
-  including which real backends were exercised and any explicit skips. L2/L3
-  checks must not give terminal or browser windows focus.
+- [ ] Record compilation and deterministic-test evidence for macOS, Linux,
+  native Windows, and WSL2. Record which real backends were exercised and any
+  explicit skips without treating skips or infrastructure failures as passes.
+  L2/L3 checks must not give terminal or browser windows focus.
 - [x] No application volume defaults, production announcement templates, or
   host-wide audio settings change as a side effect of this fix.
 
