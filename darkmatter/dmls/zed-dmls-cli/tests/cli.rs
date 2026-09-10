@@ -12,6 +12,16 @@ impl ZedDmlsFixture {
         for directory in ["cwd", "home", "config", "cache", "tmp"] {
             std::fs::create_dir(root.path().join(directory)).unwrap();
         }
+        // Windows resolves the per-user known folders beneath `USERPROFILE`
+        // (`AppData\Local`, `AppData\Roaming`) and verifies they exist, so a
+        // bare fixture home makes `dirs::data_local_dir()` return `None` and
+        // the CLI report "unable to determine the required per-user
+        // directory". `LOCALAPPDATA`/`APPDATA` are not consulted for that.
+        if cfg!(windows) {
+            for directory in ["AppData/Local", "AppData/Roaming"] {
+                std::fs::create_dir_all(root.path().join("home").join(directory)).unwrap();
+            }
+        }
         Self { root }
     }
 

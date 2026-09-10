@@ -245,3 +245,24 @@ than removed. Residual 9 was added by that cycle.
   `biscuit-test-harness/just test-l2` on a host where a foreground window is
   acceptable, with a cold tmux server, or CI does — which is the same push
   residual 7 is waiting on.
+
+## 10. The wrapper's `session_end` row never appears under the fixture home on Windows
+
+- **Evidence (2026-09-10):** eight identities in `wrap_incomplete_subagents.rs`
+  and `wrap_watchdog_startup_stall.rs` fail on `windows-latest` (PR #74 run
+  34424533353) and identically on build-win-native (`just cross-check
+  claudine-cli --os windows`) with "no synthetic session_end row" or
+  "session_end must carry duration_ms": the JSONL row the tests read from
+  `<fixture home>/.claudine/logs/<date>.jsonl` is absent. Home resolution is
+  not the cause — `dirs::home_dir()` honors the fixture's `USERPROFILE` (probed
+  on the same host). The leading candidate is the trap already recorded in the
+  `os` skill: the fake provider is a `.cmd` file, and a `.cmd` cannot receive
+  an argument containing a newline, which the wrapper's prompt does. Three
+  sibling identities in the same files pass on Windows.
+- **Why deferred:** isolating it needs the wrapper's own stderr from the
+  Windows run, and the likely fix is a compiled fake provider (as
+  `inline_compose_hash.rs` already does), which is fixture work beyond this
+  cycle. Both files are gated `#![cfg(unix)]` for now, Windows stubs retained.
+- **Closes when:** the cause is isolated on build-win-native, the fake
+  provider is rebuilt accordingly, and the gate comes off both files with a
+  green `windows-latest` run.

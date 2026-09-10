@@ -122,8 +122,12 @@ fn compose_re_resolves_trigger_after_shell_value_becomes_concrete() {
         "docs/.darkmatter-shell-whitelist",
         "exact echo prompt\n",
     );
+    // `$(echo prompt)` is executed as a program, and on Windows `echo` exists
+    // only as Git's echo.exe outside System32, so the host PATH is declared.
     process
-        .command()
+        .command_builder()
+        .host_path()
+        .build()
         .arg("compose")
         .arg(&document)
         .assert()

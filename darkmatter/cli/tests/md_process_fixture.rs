@@ -353,13 +353,14 @@ fn inherited_families_do_not_reach_the_child_and_fixture_defaults_win() {
             .unwrap_or_else(|| panic!("the recording carries no {key} line"));
         assert_eq!(value, "[]", "an inherited {key} reached the child");
     }
-    // TERM gets its own shape of assertion: md normalizes a *missing* TERM to
-    // `dumb` for the processes it spawns, so the stub cannot record `[]` —
-    // but it also cannot record the sentinel unless the scrub failed and the
-    // inherited value passed straight through.
-    assert_eq!(
-        recorded["TERM"], "[dumb]",
-        "an inherited TERM reached the child (md re-adds `dumb` when it is absent)"
+    // TERM gets its own shape of assertion: the fixture removes it, and what
+    // the probe then records depends on the shell it runs under (`bash` sets
+    // `dumb` for an unset TERM; `dash` and `cmd` leave it empty), so the only
+    // stable claim is that the inherited sentinel did not pass through.
+    assert!(
+        matches!(recorded["TERM"].as_str(), "[]" | "[dumb]"),
+        "an inherited TERM reached the child: {}",
+        recorded["TERM"]
     );
     // The home/config/cache defaults replace what was inherited rather than
     // merely removing it, and the Git system-config opt-out is pinned on.
@@ -783,6 +784,7 @@ fn hostile_inherited_environment_leaves_the_fixture_defaults_unchanged() {
         std::env::set_var("HOME", hostile.path().join("hostile-home"));
         std::env::set_var("COLUMNS", "44");
         std::env::set_var("FORCE_COLOR", "1");
+        std::env::set_var("TERM", "sentinel-term");
         std::env::set_var("PATH", &poisoned_path);
         if cfg!(windows) {
             std::env::set_var("TEMP", &ancestor_tmp);
@@ -817,11 +819,13 @@ fn hostile_inherited_environment_leaves_the_fixture_defaults_unchanged() {
     for key in ["GIT_DIR", "COLUMNS", "FORCE_COLOR"] {
         assert_eq!(recorded[key], "[]", "hostile {key} reached the child");
     }
-    // The operator's own terminal shape must not reach the child either; md
-    // re-adds `dumb` when TERM is absent, so anything else here is a leak.
-    assert_eq!(
-        recorded["TERM"], "[dumb]",
-        "the operator's TERM reached the child"
+    // The operator's own terminal shape must not reach the child either. The
+    // probe records `[]` or `[dumb]` depending on its shell (see above); the
+    // sentinel set for this test is the leak being ruled out.
+    assert!(
+        matches!(recorded["TERM"].as_str(), "[]" | "[dumb]"),
+        "the operator's TERM reached the child: {}",
+        recorded["TERM"]
     );
 }
 

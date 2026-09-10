@@ -39,15 +39,23 @@ fn dry_run(
     extra_args: &[&str],
     expect_success: bool,
 ) -> (String, String) {
+    dry_run_command(workspace.command(), file, extra_args, expect_success)
+}
+
+/// [`dry_run`] over a command the caller has already shaped, for the one
+/// case whose subject needs something other than the fixture's default PATH.
+fn dry_run_command(
+    mut command: assert_cmd::Command,
+    file: &Path,
+    extra_args: &[&str],
+    expect_success: bool,
+) -> (String, String) {
     let mut args: Vec<&str> = vec!["sequence", "--dry-run"];
     args.extend_from_slice(extra_args);
     let file_arg = file.to_str().unwrap();
     args.push(file_arg);
 
-    let assert = workspace
-        .command()
-        .args(&args)
-        .assert();
+    let assert = command.args(&args).assert();
     let assert = if expect_success { assert.success() } else { assert.failure() };
     let output = assert.get_output().clone();
 
@@ -278,11 +286,25 @@ fn a_foreign_source_coerces_scalars_and_names_nameless_objects() {
 #[test]
 fn a_shell_expanded_source_becomes_a_classified_list() {
     let workspace = CliProcessFixture::named("sequence-sources-cli");
-    // `echo` is one of the few commands with the same surface on `sh` and
-    // `cmd`, which keeps this case off a platform gate. `--yolo` stands in for
-    // the approval the preflight would otherwise ask for.
+    // The shell source is executed as a program, and `echo` is one of the few
+    // with the same surface everywhere — but on Windows it exists only as
+    // Git's echo.exe outside System32, so this case declares the host PATH
+    // rather than a platform gate. `--yolo` stands in for the approval the
+    // preflight would otherwise ask for.
     let doc = source_doc(&workspace, "shell.md", "\"$(echo alpha,beta)\"");
-    assert_eq!(composed_steps(&workspace, &doc, &["--yolo"]), ["alpha", "beta"]);
+    let (stdout, _) = dry_run_command(
+        workspace.command_builder().host_path().build(),
+        &doc,
+        &["--yolo"],
+        true,
+    );
+    let steps: Vec<String> = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("Step "))
+        .map(|line| line.trim_start_matches("Step ").trim_end_matches('.').to_string())
+        .collect();
+    assert_eq!(steps, ["alpha", "beta"]);
 }
 
 // ============================================================================

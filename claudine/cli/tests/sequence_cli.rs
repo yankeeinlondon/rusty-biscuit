@@ -1093,10 +1093,18 @@ fn sequence_rejects_a_parallel_write_back_collision() {
     .unwrap();
 
     let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
+    // The diagnostic is word-wrapped to the terminal width with a box gutter,
+    // and where the break lands depends on the workspace path length, so the
+    // phrase is asserted on the flattened prose.
+    let flat = stderr
+        .replace('┃', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(
-        stderr.contains("write back")
-            && stderr.contains("racers")
-            && stderr.contains("(`first` and `second`)"),
+        flat.contains("write back")
+            && flat.contains("racers")
+            && flat.contains("(`first` and `second`)"),
         "stderr: {stderr}"
     );
     assert!(!launched);
