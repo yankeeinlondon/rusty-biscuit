@@ -5,8 +5,9 @@
 - The `claudine` library uses `dunce` as a dev dependency so tests that need a
   canonical filesystem identity can remove safely reducible Windows verbatim
   prefixes without converting paths through display text.
-- The `claudine` library and `claudine-cli` use `fs4` as a dev dependency to
-  hold Playa's worker lock while device-free tests inspect durable queued audio.
+- The `claudine` library and `claudine-cli` reach Playa's worker and queue locks
+  through `test-toolkit`'s `LockedAudioSpool` fixture while device-free tests
+  inspect durable queued audio. Neither crate declares `fs4` itself.
 
 ## Audio Handoff
 
@@ -15,8 +16,8 @@
   and macOS uses CoreAudio without additional native packages.
 - Claudine does not reimplement Playa's spool dependencies. Production audio
   handoff reaches `fs4`, `biscuit-hash`, and the private-path rules through the
-  Playa dependency; the local `fs4` declarations are test-only worker-lock
-  fixtures. `biscuit-speaks/playa` carries the same native feature edge for TTS.
+  Playa dependency; test-only worker-lock ownership comes from `test-toolkit`.
+  `biscuit-speaks/playa` carries the same native feature edge for TTS.
 
 ## Executable Lookup
 

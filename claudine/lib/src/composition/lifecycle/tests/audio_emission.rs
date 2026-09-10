@@ -2,10 +2,7 @@
 
 use super::*;
 
-mod audio_spool {
-    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../test-support/locked_audio_spool.rs"));
-}
-use audio_spool::LockedAudioSpool;
+use test_toolkit::LockedAudioSpool;
 
 /// Place an empty executable named `<name>` in `<temp>/bin` so a `PATH` lookup
 /// finds it on every OS. The eSpeak readiness these tests exercise is a

@@ -3,9 +3,11 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use fs4::fs_std::FileExt as _;
+use test_toolkit::LockedAudioSpool;
 
 struct TestRoot(PathBuf);
 
@@ -58,42 +60,6 @@ fn write_original_kokoro_shape(path: &Path) {
     file.set_len(u64::from(44 + data_size)).unwrap();
 }
 
-struct PublicationGuard {
-    root: PathBuf,
-    _lock: File,
-}
-
-impl PublicationGuard {
-    fn clear_pending(&self) -> std::io::Result<()> {
-        for entry in fs::read_dir(&self.root)? {
-            let entry = entry?;
-            if entry.file_name().to_string_lossy().ends_with(".pending.json") {
-                fs::remove_file(entry.path())?;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl Drop for PublicationGuard {
-    fn drop(&mut self) {
-        // The file keeps worker ownership until pending work is removed, even on unwind.
-        let _ = self.clear_pending();
-    }
-}
-
-fn worker_lock(root: &Path) -> PublicationGuard {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(root.join("worker.lock"))
-        .expect("worker lock should open");
-    assert!(file.try_lock_exclusive().expect("worker lock should work"));
-    PublicationGuard { root: root.to_path_buf(), _lock: file }
-}
-
 fn playa_command(root: &Path, cwd: &Path) -> Command {
     // `bin_exe!` reads nextest's run-time binary location, so the archive leg
     // (wsl2-ubuntu) does not launch the compile-time path from another host.
@@ -111,7 +77,7 @@ fn multiprocess_background_publication_preserves_options_and_unique_order() {
     let root = TestRoot::new("multiprocess");
     let audio = root.0.join("kokoro-24khz-mono-5.97s.wav");
     write_original_kokoro_shape(&audio);
-    let lock = worker_lock(&root.0);
+    let spool = LockedAudioSpool::new(&root.0);
     let root_path = Arc::new(root.0.clone());
 
     let mut publishers = Vec::new();
@@ -177,23 +143,72 @@ fn multiprocess_background_publication_preserves_options_and_unique_order() {
     assert!(stdout.contains("Detached audio spool"));
     assert!(stdout.contains("preparing") || stdout.contains("ready"));
 
-    lock.clear_pending().expect("pending work should be removed while owned");
+    spool.clear_pending().expect("pending work should be removed while owned");
     assert!(playa::detached::snapshot().unwrap().pending.is_empty());
-    drop(lock);
+    drop(spool);
 }
+
+/// Longest the queue holder waits for the fixture-owning scope to unwind
+/// before it commits its record and releases `queue.lock`.
+///
+/// Only the passing path pays this. Cleanup that takes `queue.lock` cannot
+/// finish while the holder owns it, so the wait runs to the deadline; cleanup
+/// that skips the lock finishes immediately and the holder proceeds at once.
+const QUEUE_HOLD_BUDGET: Duration = Duration::from_millis(250);
 
 #[test]
 fn publication_unwind_removes_pending_before_releasing_worker_ownership() {
     let root = TestRoot::new("publication-unwind");
     let pending = root.0.join("1.pending.json");
+
+    // A record written with no concurrent queue mutator cannot distinguish
+    // cleanup that takes `queue.lock` from cleanup that does not. This holder
+    // reproduces `enqueue_state_at`'s ordering instead: it owns `queue.lock`
+    // across its commit, and delays that commit until the fixture-owning scope
+    // has unwound — which can only happen first if cleanup skipped the lock.
+    let queue_held = Arc::new(AtomicBool::new(false));
+    let owner_finished = Arc::new(AtomicBool::new(false));
+
+    let publisher = std::thread::spawn({
+        let queue_path = LockedAudioSpool::queue_lock_path(&root.0);
+        let pending = pending.clone();
+        let queue_held = Arc::clone(&queue_held);
+        let owner_finished = Arc::clone(&owner_finished);
+        move || {
+            let queue = LockedAudioSpool::open_lock(&queue_path).expect("queue lock should open");
+            queue
+                .lock_exclusive()
+                .expect("publisher should own the queue");
+            queue_held.store(true, Ordering::SeqCst);
+
+            let deadline = Instant::now() + QUEUE_HOLD_BUDGET;
+            while !owner_finished.load(Ordering::SeqCst) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            fs::write(&pending, b"record committed under the queue lock").unwrap();
+
+            fs4::fs_std::FileExt::unlock(&queue).expect("publisher should release the queue");
+        }
+    });
+    while !queue_held.load(Ordering::SeqCst) {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
     let result = std::panic::catch_unwind(|| {
-        let _lock = worker_lock(&root.0);
-        fs::write(&pending, b"fixture payload").unwrap();
+        let _spool = LockedAudioSpool::new(&root.0);
         panic!("simulated assertion failure");
     });
+
+    owner_finished.store(true, Ordering::SeqCst);
+    publisher.join().expect("publisher should not panic");
+
     assert!(result.is_err());
-    assert!(!pending.exists());
-    let _lock = worker_lock(&root.0);
+    assert!(
+        !pending.exists(),
+        "a record committed under the queue lock survived fixture cleanup"
+    );
+    // Worker ownership is reacquirable only because nothing runnable remains.
+    let _spool = LockedAudioSpool::new(&root.0);
 }
 
 #[test]

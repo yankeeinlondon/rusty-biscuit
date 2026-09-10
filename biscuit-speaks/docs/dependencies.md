@@ -9,8 +9,9 @@ device playback opt-in. On Linux, the resulting `rodio`/`cpal` route links ALSA;
 `[package.metadata.ci.native]`, alongside `espeak-ng`. macOS uses CoreAudio and
 Windows uses WASAPI without additional system packages.
 
-`fs4` provides the test and detached-helper coordination locks shared with the
-Playa spool. `biscuit-hash` supplies xxHash for stable content-addressed audio
+The library's detached publication tests take the Playa spool's worker and queue
+locks through `test-toolkit`'s `LockedAudioSpool` fixture rather than a local
+`fs4` guard. `biscuit-hash` supplies xxHash for stable content-addressed audio
 cache names; the key inputs remain provider, voice, text, format, and
 provider-dependent speed. `sniff` remains the authority for cross-platform
 provider/executable discovery.

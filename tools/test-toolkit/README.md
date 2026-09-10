@@ -4,11 +4,12 @@ Shared test lifecycle helpers for the Rusty Biscuit workspace.
 
 ## What it provides
 
-This crate solves three common pain points when writing tests in a Rust workspace:
+This crate solves four common pain points when writing tests in a Rust workspace:
 
 1. **Tracing output in tests** — `trace_phase!` macro and `init_test_tracing()` to emit structured spans around setup/body/teardown phases.
 2. **Safe environment variable mutation** — `EnvGuard` RAII guard that restores env vars after test completion, even when tests panic.
-3. **Nextest integration** — Works out of the box with the workspace `.config/nextest.toml` for slow-test detection and JUnit reporting.
+3. **Containing detached audio** — `LockedAudioSpool`, the one publication fixture for Playa's detached spool.
+4. **Nextest integration** — Works out of the box with the workspace `.config/nextest.toml` for slow-test detection and JUnit reporting.
 
 ## Usage
 
@@ -96,6 +97,28 @@ fn my_test() {
     // trace_phase! spans will now appear in output
 }
 ```
+
+### `LockedAudioSpool` — detached-audio publication fixture
+
+A test that inspects a durable Playa audio record must not leave that record
+runnable, or it becomes audible after the test ends. Holding `worker.lock`
+stops the scheduler but not a publisher: `playa::detached` commits and replaces
+records under `queue.lock`, so a cleanup scan without that lock can iterate past
+a record another actor is committing.
+
+`LockedAudioSpool` owns a private spool root (`0o700` on Unix), holds
+`worker.lock` for its whole lifetime, and takes `queue.lock` around every scan
+and removal. Cleanup also runs on `Drop`, including while a test is unwinding.
+
+```rust
+let spool = test_toolkit::LockedAudioSpool::new(&root);
+// ... publish and assert on the durable record ...
+spool.clear_pending().expect("pending records removed under the queue lock");
+```
+
+Use it instead of a local worker-lock guard. `tests/audio_spool.rs` carries the
+regression: a publisher committing under `queue.lock` while the fixture-owning
+scope unwinds must not survive cleanup.
 
 ### `require_level!` and `Backend` — per-backend L2 enforcement
 

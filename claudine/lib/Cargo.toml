@@ -113,7 +113,6 @@ proptest = "1.6"
 rstest = "0.25"
 tracing-test = "0.2"
 test-toolkit = { path = "../../tools/test-toolkit" }
-fs4 = "0.13"
 
 [package.metadata.ci.native]
 ubuntu-latest = ["libasound2-dev"]

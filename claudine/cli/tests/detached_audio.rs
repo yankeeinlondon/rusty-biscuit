@@ -1,9 +1,6 @@
 use std::fs;
 
-mod audio_spool {
-    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../test-support/locked_audio_spool.rs"));
-}
-use audio_spool::LockedAudioSpool;
+use test_toolkit::LockedAudioSpool;
 
 mod common;
 use common::{CliProcessFixture, write};

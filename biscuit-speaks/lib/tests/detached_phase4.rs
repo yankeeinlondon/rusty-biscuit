@@ -1,7 +1,6 @@
 #![cfg(feature = "playa")]
 
 use std::ffi::OsString;
-use std::fs::OpenOptions;
 
 use biscuit_speaks::{
     CloudTtsProvider, ESpeakProvider, EchogardenProvider, ElevenLabsProvider, Gender,
@@ -9,7 +8,6 @@ use biscuit_speaks::{
     SpeakResult, SpeedLevel, TtsConfig, TtsError, TtsExecutor, TtsFailoverStrategy, TtsProvider,
     Voice, VolumeLevel, run_if_worker,
 };
-use fs4::fs_std::FileExt as _;
 use playa::detached::{OsValue, SpoolJob};
 use playa::{AudioPlayer, PlaybackReport, PlaybackRoute, PlaybackVerdict};
 
@@ -318,20 +316,6 @@ fn cloud_provider_enum_remains_serializable_in_preparation_config() {
     assert_eq!(value["failover_strategy"]["specific_provider"]["cloud"], "eleven_labs");
 }
 
-struct PendingJobsGuard<'a>(&'a std::path::Path);
-
-impl Drop for PendingJobsGuard<'_> {
-    fn drop(&mut self) {
-        if let Ok(entries) = std::fs::read_dir(self.0) {
-            for entry in entries.filter_map(Result::ok) {
-                if entry.file_name().to_string_lossy().ends_with(".pending.json") {
-                    let _ = std::fs::remove_file(entry.path());
-                }
-            }
-        }
-    }
-}
-
 #[tokio::test]
 #[serial_test::serial]
 async fn play_detached_uses_foreground_specific_provider_selection() {
@@ -350,25 +334,11 @@ async fn play_detached_uses_foreground_specific_provider_selection() {
     .unwrap();
     let _path = test_toolkit::EnvGuard::set_safe("PATH", path);
     let root = temp.path().join("spool");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt as _;
-        std::fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
-    }
-    #[cfg(windows)]
-    std::fs::create_dir(&root).unwrap();
+    // The fixture owns worker exclusion for the rest of the test and removes
+    // every runnable record under `queue.lock`, including on unwind.
+    let locked_spool = test_toolkit::LockedAudioSpool::new(&root);
     std::fs::create_dir(root.join("files")).unwrap();
     std::fs::create_dir(root.join("requests")).unwrap();
-    let worker = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(root.join("worker.lock"))
-        .unwrap();
-    assert!(worker.try_lock_exclusive().unwrap());
-    // Pending jobs are removed on unwind before the worker lock can be released.
-    let pending = PendingJobsGuard(&root);
     let _spool = test_toolkit::EnvGuard::set_safe("PLAYA_SPOOL_DIR", &root);
     let _dry_run = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
     assert_eq!(run_if_worker().await, None);
@@ -393,14 +363,10 @@ async fn play_detached_uses_foreground_specific_provider_selection() {
     assert_eq!(snapshot.pending[0].source_kind, playa::detached::JournalSourceKind::File);
 
     std::fs::remove_file(cache).unwrap();
-    for entry in std::fs::read_dir(&root).unwrap().filter_map(Result::ok) {
-        let name = entry.file_name();
-        if name.to_string_lossy().ends_with(".pending.json") {
-            std::fs::remove_file(entry.path()).unwrap();
-        }
-    }
-    drop(pending);
-    fs4::fs_std::FileExt::unlock(&worker).unwrap();
+    locked_spool
+        .clear_pending()
+        .expect("pending work should be removed while owned");
+    assert!(playa::detached::snapshot().unwrap().pending.is_empty());
 }
 
 #[cfg(target_os = "macos")]

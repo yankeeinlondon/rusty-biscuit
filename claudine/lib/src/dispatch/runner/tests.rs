@@ -1,8 +1,5 @@
-mod audio_spool {
-    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../test-support/locked_audio_spool.rs"));
-}
 #[cfg(unix)]
-use audio_spool::LockedAudioSpool;
+use test_toolkit::LockedAudioSpool;
 
 use std::collections::HashMap;
 

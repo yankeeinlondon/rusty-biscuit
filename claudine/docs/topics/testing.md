@@ -33,8 +33,11 @@ lifecycle TTS or sound effects in a real prompt template.
 For composition/provenance tests that do not test audio, set `PLAYA_DRY_RUN=1`
 on the child command and assert its private `PLAYA_SPOOL_DIR` is never created.
 This preserves normal lifecycle evaluation while suppressing audio publication.
-Publication tests retain real handoff with the test-local
-`claudine/test-support/locked_audio_spool.rs` guard: it removes pending jobs under
-the queue lock before releasing worker ownership, including during unwinding.
+Publication tests retain real handoff with the workspace-shared
+`test_toolkit::LockedAudioSpool` fixture: it holds `worker.lock` for its whole
+lifetime and takes `queue.lock` before scanning and removing pending jobs, so a
+publisher or preparation helper cannot commit behind the scan. Cleanup runs on
+unwinding too, and a cleanup failure panics unless the thread is already
+panicking.
 Tests that execute helpers must release blocked fixtures and observe completion
 before removing their spool. Never use the operator's real queue for test cleanup.
