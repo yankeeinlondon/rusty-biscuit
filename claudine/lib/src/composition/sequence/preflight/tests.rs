@@ -41,9 +41,20 @@ fn write_yaml(dir: &Path, name: &str, value: &Value) {
     .unwrap();
 }
 
+// Fixture loads must not discover the runner's monorepo for every matrix case.
+fn resolve_fixture_source(path: &str) -> Result<ResolvedCompositionSource, CompositionError> {
+    let base = Path::new(path).parent().expect("fixture source has a parent");
+    let resolution = biscuit_file::FileResolutionContext::from_snapshot(
+        base,
+        Some(base.to_path_buf()),
+        std::collections::HashMap::new(),
+    );
+    crate::composition::resolve_composition_source_in_context(path, &resolution)
+}
+
 /// Resolve a written Markdown source and build its preflight graph.
 fn graph_for(path: &str) -> Result<PreflightGraph, CompositionError> {
-    let source = crate::composition::resolve_composition_source(path)?;
+    let source = resolve_fixture_source(path)?;
     let plan = resolve_sequence_plan(&source)?.expect("fixture declares a sequence");
     build_preflight_graph(&plan, &source)
 }
@@ -90,7 +101,7 @@ mod loading {
             &[("sequence", json!([{ "name": "external", "task": task_ref }]))],
             "Sequence body.\n",
         );
-        let source = crate::composition::resolve_composition_source(&source_path).unwrap();
+        let source = resolve_fixture_source(&source_path).unwrap();
         let plan = resolve_sequence_plan(&source)
             .unwrap()
             .expect("fixture declares a sequence");
@@ -189,7 +200,7 @@ mod loading {
             )],
             "Body.\n",
         );
-        let resolved = crate::composition::resolve_composition_source(&source).unwrap();
+        let resolved = resolve_fixture_source(&source).unwrap();
         let plan = resolve_sequence_plan(&resolved)
             .unwrap()
             .expect("fixture declares a sequence");
@@ -666,7 +677,7 @@ mod blocked {
             &[("kind", json!("sequence")), ("sequence", json!(["a"]))],
             "Body.\n",
         );
-        let resolved = crate::composition::resolve_composition_source(&source).unwrap();
+        let resolved = resolve_fixture_source(&source).unwrap();
         assert!(reject_non_sequence_kind(&resolved).is_ok());
     }
 }

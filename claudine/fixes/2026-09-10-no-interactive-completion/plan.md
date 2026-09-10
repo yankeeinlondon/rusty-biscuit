@@ -131,3 +131,27 @@ interfaces; they do not independently start broad builds.
   The new TTY tests reuse the Unix PTY target, so native Windows terminal
   interaction still needs separate proof. Keep the implemented fix active
   until the remaining required OS verification is available.
+
+### Pre-push validation fixes
+
+The first push exposed the sequence-preflight timeout again and a terminal
+capture failure. Both required fixture fixes; reducing concurrency was only a
+diagnostic step, not the resolution.
+
+- The shared sequence-preflight loader called the ambient compatibility
+  resolver, discovering the real monorepo on every fixture load. All four
+  source-loading sites in that module now use a fixture-owned
+  `FileResolutionContext` through the explicit resolver. The original
+  16-case matrix and its assertions remain intact. With the same focused
+  command and default concurrency, its execution fell from 4.241 seconds to
+  0.030 seconds; the 44-test module fell from 4.801 to 0.655 seconds.
+  `just test-library` then passed all 4,116 tests at default concurrency,
+  including the matrix in 0.044 seconds. No timeout or thread limit changed.
+- The dry-run terminal capture drivers accepted old prompts and retained old
+  tables in shared panes. They now clear the viewport and wait for a unique
+  command-completion marker. A same-pane no-agent → not-installed regression
+  checks that only the current Agent row is captured, including its styling.
+  All eight focused dry-run tests and all 244 CLI L2 tests passed using the
+  package area's default parallel terminal mode.
+  `BISCUIT_L2_THREADS=1 just test-l2 level2_dry_run_` also passed all eight
+  tests through the shared-pane broker used by the pre-push hook.
