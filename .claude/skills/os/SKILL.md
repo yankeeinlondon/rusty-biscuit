@@ -42,6 +42,14 @@ CI is the final proof, not the discovery loop. A full-scope run takes hours
 and every push cancels the previous one, so surface an OS's exact failure on
 the matching host first, then push once.
 
+When the repository provides a scope-only pre-push mode, prefer it over
+`git push --no-verify` when intentionally skipping local tests. Scope-only
+preserves exact-tree affected-scope evidence while leaving every OS test cell
+enabled in CI; `--no-verify` prevents the hook from producing any new evidence
+and forces CI to rediscover the scope. Rusty-biscuit has agreed to this design
+but does not implement the mode yet. The `rust-devops` skill owns the general
+scope versus validation evidence contract.
+
 ## Read this first when a test is red on one environment only
 
 - **Red only on `wsl2-ubuntu`:** the guest runs a nextest *archive* built on
