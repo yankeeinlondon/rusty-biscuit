@@ -92,8 +92,11 @@ run_hook() {
     fi
 
     # Use `env -i` so the hook does not inherit the developer's
-    # RUSTY_BISCUIT_PRE_PUSH_* values from the surrounding shell.
-    env -i "${env_args[@]}" "$HOOK" >"$tmpdir/out" 2>"$tmpdir/err"
+    # RUSTY_BISCUIT_PRE_PUSH_* values from the surrounding shell. Stdin is
+    # closed explicitly: the hook reads git's ref list from it, and an
+    # inherited stdin that never reaches EOF (an agent tool, a CI step with an
+    # open pipe) leaves the hook blocked in that read forever.
+    env -i "${env_args[@]}" "$HOOK" </dev/null >"$tmpdir/out" 2>"$tmpdir/err"
     echo $? >"$tmpdir/exit"
 }
 
@@ -240,7 +243,7 @@ test_strict_failing_tests_exits_nonzero_with_no_verify_hint() {
 test_unset_default_is_strict() {
     local tmpdir="$1"
     make_fake_just "$tmpdir" 7
-    env -i "PATH=$tmpdir:/usr/bin:/bin" "$HOOK" >"$tmpdir/out" 2>"$tmpdir/err"
+    env -i "PATH=$tmpdir:/usr/bin:/bin" "$HOOK" </dev/null >"$tmpdir/out" 2>"$tmpdir/err"
     echo $? >"$tmpdir/exit"
     assert_exit "default strict" "$tmpdir" 7 || return 1
 }
