@@ -259,6 +259,123 @@ fn consult_native_backend_seam(
     Some(result)
 }
 
+/// Which device path supplied the mixer a player is connected to.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeOutputPath {
+    /// The process-cached default-device sink.
+    CachedDefault,
+    /// A fresh one-shot open for an explicitly requested output channel.
+    ChannelOneShot,
+}
+
+/// One observation of the parameters handed to the native player.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct AppliedGain {
+    /// Which of the two device paths produced this observation.
+    pub(crate) path: NativeOutputPath,
+    /// `Player::volume()` read back; `1.0` means no gain was applied.
+    pub(crate) volume: f32,
+    /// `Player::speed()` read back; `1.0` means no speed was applied.
+    pub(crate) speed: f32,
+    /// Sources queued on the player when the observation was taken. Zero is
+    /// what proves the gain was applied before anything was submitted.
+    pub(crate) queued: usize,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct GainSeamState {
+    pending_path: Option<NativeOutputPath>,
+    records: Vec<AppliedGain>,
+}
+
+/// Observes the gain the native player actually carries, standing in for the
+/// output device so the boundary is reachable without one.
+///
+/// While installed, both device paths connect a real [`Player`] to a
+/// device-free mixer and stop once volume and speed have been applied but
+/// before any audio is submitted, so a test can prove which value reached the
+/// player and that nothing sounded first.
+///
+/// The seam is process-global; callers must hold
+/// `native_audio::lock_native_audio_test_state`. It is complementary to, and
+/// must not be combined with, [`install_native_backend_seam_for_tests`], which
+/// short-circuits [`play_native`] before the device path observed here.
+#[cfg(test)]
+static NATIVE_GAIN_SEAM: Mutex<Option<GainSeamState>> = Mutex::new(None);
+
+#[cfg(test)]
+fn lock_gain_seam() -> std::sync::MutexGuard<'static, Option<GainSeamState>> {
+    NATIVE_GAIN_SEAM
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Clears the injected gain observer when dropped.
+#[cfg(test)]
+pub(crate) struct NativeGainSeamGuard;
+
+#[cfg(test)]
+impl NativeGainSeamGuard {
+    /// Gain applications observed since installation, oldest first.
+    pub(crate) fn records(&self) -> Vec<AppliedGain> {
+        lock_gain_seam()
+            .as_ref()
+            .map(|state| state.records.clone())
+            .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+impl Drop for NativeGainSeamGuard {
+    fn drop(&mut self) {
+        *lock_gain_seam() = None;
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn install_native_gain_seam_for_tests() -> NativeGainSeamGuard {
+    *lock_gain_seam() = Some(GainSeamState::default());
+    NativeGainSeamGuard
+}
+
+/// A device-free mixer standing in for `path`'s output device.
+///
+/// `None` — the only outcome outside a test that installed the seam — leaves
+/// the caller on its real device path.
+#[cfg(test)]
+fn gain_seam_mixer(
+    path: NativeOutputPath,
+) -> Option<(rodio::mixer::Mixer, rodio::mixer::MixerSource)> {
+    let mut guard = lock_gain_seam();
+    let state = guard.as_mut()?;
+    state.pending_path = Some(path);
+    Some(rodio::mixer::mixer(
+        std::num::NonZero::new(2).expect("channel count is non-zero"),
+        std::num::NonZero::new(44_100).expect("sample rate is non-zero"),
+    ))
+}
+
+/// Record the player's effective gain and stop before submission.
+#[cfg(test)]
+fn observe_applied_gain(player: &Player) -> Option<Result<(), NativePlaybackError>> {
+    let mut guard = lock_gain_seam();
+    let state = guard.as_mut()?;
+    let path = state
+        .pending_path
+        .take()
+        .expect("gain seam observed a player whose mixer it did not supply");
+    state.records.push(AppliedGain {
+        path,
+        volume: player.volume(),
+        speed: player.speed(),
+        queued: player.len(),
+    });
+    Some(Ok(()))
+}
+
 /// Errors from native audio playback.
 #[derive(Debug, Error)]
 pub enum NativePlaybackError {
@@ -412,28 +529,14 @@ fn play_source(
         return play_source_one_shot(source, options);
     }
 
+    #[cfg(test)]
+    if let Some((mixer, _output)) = gain_seam_mixer(NativeOutputPath::CachedDefault) {
+        return submit_to_mixer(&mixer, source, options);
+    }
+
     with_cached_default_mixer(
         || open_default_stream_with_timeout(NATIVE_DEVICE_TIMEOUT),
-        |mixer| {
-            let player = Player::connect_new(mixer);
-
-            if let Some(vol) = options.volume {
-                player.set_volume(vol);
-            }
-            if let Some(speed) = options.speed {
-                player.set_speed(speed);
-            }
-
-            player.append(source);
-            wait_with_progress(
-                &player,
-                PLAYBACK_TIMEOUT,
-                resolved_stall_window(),
-                Duration::from_millis(50),
-            )?;
-
-            Ok(())
-        },
+        |mixer| submit_to_mixer(mixer, source, options),
     )
 }
 
@@ -445,14 +548,38 @@ fn play_source_one_shot(
     source: Decoder<impl std::io::Read + std::io::Seek + Send + Sync + 'static>,
     options: &PlaybackOptions,
 ) -> Result<(), NativePlaybackError> {
+    #[cfg(test)]
+    if let Some((mixer, _output)) = gain_seam_mixer(NativeOutputPath::ChannelOneShot) {
+        return submit_to_mixer(&mixer, source, options);
+    }
+
     let stream = open_stream_with_timeout(NATIVE_DEVICE_TIMEOUT, options)?;
-    let player = Player::connect_new(stream.mixer());
+    submit_to_mixer(stream.mixer(), source, options)
+}
+
+/// Connect a player to `mixer`, apply the requested gain and speed, then
+/// submit the source and wait for it to drain.
+///
+/// Volume and speed are applied before `append`, so no sample can reach the
+/// device at an unrequested level. The test-only gain seam observes the player
+/// in exactly that gap, so the ordering is proven rather than assumed.
+fn submit_to_mixer(
+    mixer: &rodio::mixer::Mixer,
+    source: Decoder<impl std::io::Read + std::io::Seek + Send + Sync + 'static>,
+    options: &PlaybackOptions,
+) -> Result<(), NativePlaybackError> {
+    let player = Player::connect_new(mixer);
 
     if let Some(vol) = options.volume {
         player.set_volume(vol);
     }
     if let Some(speed) = options.speed {
         player.set_speed(speed);
+    }
+
+    #[cfg(test)]
+    if let Some(outcome) = observe_applied_gain(&player) {
+        return outcome;
     }
 
     player.append(source);
@@ -693,6 +820,125 @@ mod tests {
             assert!(r2.is_err());
 
             assert_eq!(opens.load(Ordering::SeqCst), 2);
+        }
+    }
+
+    /// Proof that a requested volume reaches the native player, on both device
+    /// paths, before any audio is submitted.
+    ///
+    /// The device is replaced by a device-free mixer, but the `Player`,
+    /// `set_volume`, and `set_speed` calls are the real ones, and the assertions
+    /// read the value back off the player rather than off `PlaybackOptions`.
+    mod gain_boundary {
+        use super::*;
+
+        /// Mono 16-bit PCM WAV holding eight zero-valued samples.
+        fn silent_wav() -> Vec<u8> {
+            let data_len: u32 = 16;
+            let mut wav = Vec::new();
+            wav.extend_from_slice(b"RIFF");
+            wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+            wav.extend_from_slice(b"WAVE");
+            wav.extend_from_slice(b"fmt ");
+            wav.extend_from_slice(&16u32.to_le_bytes());
+            wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+            wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+            wav.extend_from_slice(&44_100u32.to_le_bytes());
+            wav.extend_from_slice(&88_200u32.to_le_bytes());
+            wav.extend_from_slice(&2u16.to_le_bytes());
+            wav.extend_from_slice(&16u16.to_le_bytes());
+            wav.extend_from_slice(b"data");
+            wav.extend_from_slice(&data_len.to_le_bytes());
+            wav.resize(wav.len() + data_len as usize, 0);
+            wav
+        }
+
+        fn observe(options: &PlaybackOptions) -> AppliedGain {
+            let _native = crate::native_audio::lock_native_audio_test_state();
+            let seam = install_native_gain_seam_for_tests();
+
+            let audio = AudioData::Bytes(std::sync::Arc::new(silent_wav()));
+            let format = AudioFormat::new(AudioFileFormat::Wav, Some(Codec::Pcm));
+            play_native(&audio, format, options).expect("native playback should reach the player");
+
+            let records = seam.records();
+            assert_eq!(
+                records.len(),
+                1,
+                "expected exactly one gain observation, got {records:?}"
+            );
+            records[0]
+        }
+
+        fn muted(channel: Option<&str>) -> PlaybackOptions {
+            let mut options = PlaybackOptions::new().with_volume(0.0);
+            options.channel = channel.map(str::to_string);
+            options
+        }
+
+        #[test]
+        fn cached_default_path_mutes_the_player_before_submission() {
+            let applied = observe(&muted(None));
+
+            assert_eq!(applied.path, NativeOutputPath::CachedDefault);
+            assert_eq!(applied.volume, 0.0, "requested mute must reach the player");
+            assert_eq!(
+                applied.queued, 0,
+                "gain must be applied before any source is submitted"
+            );
+        }
+
+        #[test]
+        fn channel_override_path_mutes_the_player_before_submission() {
+            let applied = observe(&muted(Some("test-output")));
+
+            assert_eq!(applied.path, NativeOutputPath::ChannelOneShot);
+            assert_eq!(applied.volume, 0.0, "requested mute must reach the player");
+            assert_eq!(
+                applied.queued, 0,
+                "gain must be applied before any source is submitted"
+            );
+        }
+
+        #[test]
+        fn cached_default_path_applies_a_nonzero_volume_and_speed() {
+            let applied = observe(&PlaybackOptions::new().with_volume(0.35).with_speed(1.25));
+
+            assert_eq!(applied.path, NativeOutputPath::CachedDefault);
+            assert_eq!(applied.volume, 0.35);
+            assert_eq!(applied.speed, 1.25);
+        }
+
+        #[test]
+        fn channel_override_path_applies_a_nonzero_volume_and_speed() {
+            let applied = observe(
+                &PlaybackOptions::new()
+                    .with_volume(0.35)
+                    .with_speed(1.25)
+                    .with_channel("test-output"),
+            );
+
+            assert_eq!(applied.path, NativeOutputPath::ChannelOneShot);
+            assert_eq!(applied.volume, 0.35);
+            assert_eq!(applied.speed, 1.25);
+        }
+
+        #[test]
+        fn cached_default_path_leaves_unity_gain_when_nothing_is_requested() {
+            let applied = observe(&PlaybackOptions::new());
+
+            assert_eq!(applied.path, NativeOutputPath::CachedDefault);
+            assert_eq!(applied.volume, 1.0, "no volume requested, none applied");
+            assert_eq!(applied.speed, 1.0, "no speed requested, none applied");
+        }
+
+        #[test]
+        fn channel_override_path_leaves_unity_gain_when_nothing_is_requested() {
+            let applied = observe(&PlaybackOptions::new().with_channel("test-output"));
+
+            assert_eq!(applied.path, NativeOutputPath::ChannelOneShot);
+            assert_eq!(applied.volume, 1.0, "no volume requested, none applied");
+            assert_eq!(applied.speed, 1.0, "no speed requested, none applied");
         }
     }
 
