@@ -1,0 +1,32 @@
+planning(claudine): spec silent-audio-tests fix for cross-area review
+
+- add `claudine/fixes/2026-09-10-audio-tests-should-be-silent/spec.md`
+  documenting the cross-area problem: automated tests produce audible
+  speech/effects on the host, fixture wording misidentifies itself as
+  work-status, and provider selection in tests diverges from the user's
+  configured voice/engine (with the Kokoro-pinned `real_default_provider`
+  test as the confirmed real-playback path introduced by `e372ba4e1`)
+- catalog the affected files across `biscuit-speaks`, `playa`, and
+  `claudine` (lifecycle publication, dispatch runner, detached workers,
+  eSpeak detached argument preservation, background cache reservation,
+  preparing-head queue ordering) without running any potentially audible
+  test
+- spell out the required behavior: every real-playback path applies
+  effective zero volume without changing host-wide settings; speech
+  fixtures self-identify as test messages; detached publication keeps
+  silence through preparation, delegation, and fallback; existing
+  `Speak::with_volume` / `VolumeLevel` API is the first-class control
+  rather than a test-only stub; no application defaults, production
+  templates, or host volumes change
+- require first-class TTS volume propagation in foreground and detached
+  provider paths and verify the actual provider/player boundary rather
+  than only the configuration object; flag providers/players that ignore
+  requested volume as in-scope repair targets
+- call out the macOS / Linux / native Windows / WSL2 validation matrix,
+  the `os` skill as the platform evidence authority, and the
+  no-listen-alone rule (muted speakers or absent hardware can hide a
+  regression) for `just test` / `just test-l2` / `just test-real`
+- add `claudine/fixes/2026-09-10-audio-tests-should-be-silent/plan.md`
+  with phase 1 (inventory + safe boundaries) and phase 2 (honor TTS
+  volume, mute real playback) tracking against this spec; no source code
+  is modified by this commit
