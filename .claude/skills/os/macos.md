@@ -33,6 +33,15 @@ conditions that masquerade as repository defects.
 - **Behavioral Windows and WSL2 evidence:** the build hosts
   ([build-hosts.md](build-hosts.md), [wsl.md](wsl.md)).
 
+## The `macos-latest` leg
+
+GitHub's standard `macos-latest` runner has 3 cores and 7 GB, fewer than the
+4-core Linux and Windows runners this public repository gets, and it is the
+slowest leg for Claudine's CLI suite by more than 2x. Tune any concurrency
+cap to this leg, not to Linux. It is also the only leg where Level 3
+focus-stealing tests could run, and they do not run on CI at all. Details in
+[ci-runners.md](ci-runners.md).
+
 ## Host conditions that look like repo failures
 
 - **A shell prompt inside a captured L2 frame.** The L2 WezTerm harness

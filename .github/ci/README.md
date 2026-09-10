@@ -73,6 +73,19 @@ environment capability table so the reusable workflow can never route
 names that *are* runner labels), `l2_environments`, `browser_environments`,
 `node_environments`, and `wsl` (a boolean).
 
+It also derives `gates` — which of `lint`, `check`, and `test` this run selected
+the package for. A package with a source change (or a reverse dependency of
+one) carries all three. A package reached only through a global input carries
+the gates that input can change: `Cargo.toml`, the toolchain, `.cargo/`, and
+the CI workflows widen every gate; `clippy.toml` widens lint alone;
+`.config/nextest.toml` and `_wsl-ci.yml` widen test alone; a just file widens a
+gate only when the recipe that changed is reachable from that gate's CI entry
+recipe (`_lint`, `_test`, `_test_l2`, `_test_browser`; `_ensure-native-libs`
+reaches all three). A gate absent from `gates` schedules no job, and a
+lint-only package declares no test tiers to the rollup, so its unscheduled L1
+is not `MISSING`. `full_scope_gates` on the scope document names the widened
+gates for the run.
+
 A WSL2 guest *is* Linux, so `_ensure-native-libs` keys off `uname -s` and reads
 the package's `ubuntu-latest` list. `native` therefore stays a **runner OS**
 map (keyed by `ubuntu-latest`/`macos-latest`/`windows-latest`) and must not

@@ -208,7 +208,12 @@ For GitHub Actions specifically, the `kunobi-ninja/kache-action@v1` action uses 
 
 ### In this repo (rusty-biscuit)
 
-kache is the compiler cache for **every** build here, on every OS: the tracked `.cargo/config.toml` sets `rustc-wrapper = "kache"` repo-wide, so plain `cargo build` and all `just` recipes go through kache. There is a single version authority, `.github/kache-version` (currently `0.12.0` — 0.7.x was silently write-only, never use it), consumed by both the root `justfile` (`KACHE_VERSION`) and the verifying `.github/actions/enable-kache` composite action. `just init` seeds a default `local_max_size = "100GiB"` store cap on unconfigured hosts (Windows config lives at `%APPDATA%\kache\config.toml`, elsewhere `~/.config/kache/config.toml`). Target hygiene is `just sweep` (`scripts/sweep.sh`: uninstalled toolchains → untouched 14d → 120 GB backstop cap); decisions and sizing evidence are in `docs/kache-strategy.md`. In CI, every leg either installs kache or neutralizes the wrapper: the `enable-kache` composite installs on Linux/macOS (`kache-action@v1`, GitHub-cache-backed) and clears `RUSTC_WRAPPER` on Windows (`kache-action@v1` rejects win32-x64); all other workflows set `RUSTC_WRAPPER: ""`. Windows store persistence (manual install + `actions/cache`, or an S3 remote) is a documented future ambition in `docs/kache-strategy.md`.
+The repository tracks **no** rustc wrapper and CI uses none (removed 2026-07-30 after measuring
+0–6% hit rates). Activation is a host decision under the 2026-09-09 ruling: macOS on when the
+store and `target/` share an APFS volume; Linux on only when a clone probe from the store to
+`target/` passes; Windows and WSL off. `just init` installs the latest kache on macOS and Linux
+(never reinstalling), `.github/kache-min-version` is the version floor, `just kache-status`
+reports the host, and a `target/` is always wrapped or never wrapped. See `docs/kache-strategy.md`.
 
 ### Credential resolution
 

@@ -1,10 +1,18 @@
 #!/bin/sh
 # Rusty Biscuit pre-push hook
 #
+# Runs `just pre-push`, which is `just ci-local --lint-only`: CI's clippy gate
+# (`--all-targets`, no features) for exactly the packages CI would schedule for
+# this branch's changes. Nothing else — L1 tests are CI's job, and a docs-only
+# push gates nothing.
+#
 # Behavior is controlled by the RUSTY_BISCUIT_PRE_PUSH environment variable:
-#   off    - skip tests entirely
-#   warn   - run tests, print failures in red, but allow the push (default)
-#   strict - run tests, block the push on failure
+#   off    - skip the lint entirely
+#   warn   - run the lint, print failures in red, but allow the push (default)
+#   strict - run the lint, block the push on failure
+#
+# RUSTY_BISCUIT_PRE_PUSH_AREAS (space-separated package or area names) replaces
+# the computed scope with a fixed selection.
 #
 # Link this hook into your local git hooks:
 #   ln -s ../../.githooks/pre-push .git/hooks/pre-push
@@ -26,40 +34,31 @@ case "$MODE" in
 esac
 
 # Git exports repo-pinning environment (GIT_DIR and friends) into hook
-# processes. If the test suite inherits it, every `git` a test fixture spawns
-# operates on THIS repository regardless of the fixture's cwd — tests have
-# committed to this repo through that leak (2026-08-31: two fixture commits
-# landed on a feature branch mid-push). The hook's cwd is the worktree root,
-# so plain cwd-based discovery still serves everything below.
+# processes. If the lint inherits it, every `git` the scope calculation spawns
+# operates on THIS repository regardless of cwd — tests have committed to this
+# repo through that leak (2026-08-31: two fixture commits landed on a feature
+# branch mid-push). The hook's cwd is the worktree root, so plain cwd-based
+# discovery still serves everything below.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX
 
-# Areas to test during pre-push
-# Override: set RUSTY_BISCUIT_PRE_PUSH_AREAS to a space-separated list
-AREAS="${RUSTY_BISCUIT_PRE_PUSH_AREAS:-}"
+SELECTION="${RUSTY_BISCUIT_PRE_PUSH_AREAS:-}"
 
-# If not explicitly overridden, try dynamic detection against the upstream branch
-if [ -z "$AREAS" ]; then
-    AREAS=$(just changed-areas 2>/dev/null) || true
-fi
-
-# Final fallback to the historical defaults
-if [ -z "$AREAS" ]; then
-    AREAS="claudine darkmatter"
-fi
-
-# Run tests via just
 echo ""
-echo "Running pre-push tests for: $AREAS"
+if [ -n "$SELECTION" ]; then
+    echo "Running pre-push lint for: $SELECTION"
+else
+    echo "Running pre-push lint for the packages CI would schedule"
+fi
 echo "------------------------------------------------"
 echo ""
 
 # shellcheck disable=SC2086
-just pre-push $AREAS
+just pre-push $SELECTION
 EXIT_CODE=$?
 
 if [ "$EXIT_CODE" -ne 0 ]; then
     echo ""
-    printf "\033[31mPre-push tests failed (exit %d)\033[0m\n" "$EXIT_CODE"
+    printf "\033[31mPre-push lint failed (exit %d)\033[0m\n" "$EXIT_CODE"
     echo ""
     if [ "$MODE" = "warn" ]; then
         echo "Continuing push in warn mode. To bypass this hook entirely, use 'git push --no-verify'." >&2
@@ -73,7 +72,7 @@ if [ "$EXIT_CODE" -ne 0 ]; then
 fi
 
 echo ""
-echo "Pre-push tests passed."
+echo "Pre-push lint passed."
 echo ""
 
 exit 0

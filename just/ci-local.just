@@ -14,10 +14,12 @@
 #
 # Scope comes from `scripts/ci/affected_scope.py`, the same script CI uses, fed
 # the files that differ from the base ref (committed, staged, unstaged, and
-# untracked). A change under `just/`, `.github/`, `Cargo.toml`, ... is global
-# there too — unless its diff against the base touches only comments and blank
-# lines — so a recipe change covers the whole workspace; `--lint-only` keeps
-# that tractable.
+# untracked). Global inputs are scoped per GATE there, as in CI: `Cargo.toml`,
+# the toolchain, `.cargo/`, and the CI workflows widen every gate; `clippy.toml`
+# widens only lint; `.config/nextest.toml` only test; a just file widens a gate
+# only when the recipe that changed is one CI's gate recipes can reach (so a
+# `pre-push` or `plan.just` edit gates nothing). `--lint-only` keeps a genuine
+# full scope tractable.
 #
 # Also replicated: preflight's CI-infra self-test suite
 # (`scripts/ci/test_affected_scope.py`, ~1s on every run). It is what catches
@@ -119,10 +121,11 @@ ci-local *args="":
         packages="$(jq -r '.packages[]' "${scope_file}")"
     fi
 
-    count="$(wc -l <<< "${packages}" | tr -d ' ')"
+    count="$(sed '/^$/d' <<< "${packages}" | wc -l | tr -d ' ')"
     full_scope="$(jq -r '.full_scope' "${scope_file}")"
     change_class="$(jq -r '.change_class' "${scope_file}")"
-    echo "CI scope: ${count} package(s) (class=${change_class}, full_scope=${full_scope})"
+    full_gates="$(jq -rc '.full_scope_gates | join(",")' "${scope_file}")"
+    echo "CI scope: ${count} package(s) (class=${change_class}, full_scope=${full_scope}${full_gates:+ for ${full_gates}})"
     echo "Gates   : $([[ ${run_lint} == 1 ]] && printf 'lint ')$([[ ${run_test} == 1 ]] && printf 'test')"
     echo "------------------------------------------------"
     if (( dry_run == 1 )); then
@@ -152,14 +155,17 @@ ci-local *args="":
     while IFS= read -r package; do
         [[ -n "${package}" ]] || continue
         test_args="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .test_args // ""' "${scope_file}")"
-        if (( run_lint == 1 )); then
+        # The gates this run selected the package for; a package reached only
+        # through a lint-global input runs no test here, exactly as in CI.
+        gates="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .gates // ["lint","check","test"] | join(" ")' "${scope_file}")"
+        if (( run_lint == 1 )) && [[ " ${gates} " == *" lint "* ]]; then
             if just _lint "${package}"; then
                 passed+=("lint ${package}")
             else
                 failed+=("lint ${package}")
             fi
         fi
-        if (( run_test == 1 )); then
+        if (( run_test == 1 )) && [[ " ${gates} " == *" test "* ]]; then
             # shellcheck disable=SC2086
             if just _test "${package}" --no-fail-fast ${test_args}; then
                 passed+=("test ${package}")

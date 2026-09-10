@@ -6,8 +6,10 @@ description: |-
   evidence and how to reach them; how the WSL2 CI leg runs (nextest archives)
   and how to reproduce its failures faithfully; Windows path-spelling,
   handle-inheritance, cross-compile, and console traps; macOS symlinked temp
-  dirs, Docker-for-Linux, and host-diagnosis methods. Load this before
-  claiming "cannot test on X here", before touching `#[cfg(windows)]` or path
+  dirs, Docker-for-Linux, and host-diagnosis methods; hosted CI runner
+  sizes, per-leg timing profiles, and the cross-run comparison rules. Load
+  this before claiming "cannot test on X here", before tuning a CI thread cap
+  or comparing leg timings, before touching `#[cfg(windows)]` or path
   comparison code, and whenever a test is red on exactly one CI environment.
 ---
 
@@ -24,9 +26,9 @@ covers configuring WSL itself; the `rust-testing` skill owns test design.
 
 | Need | Use | Detail |
 |---|---|---|
-| Real Linux run | The host in `$BUILD_LINUX` via `just cross-check <pkg> --host linux`, or Docker Desktop on a macOS host | [build-hosts.md](build-hosts.md), [macos.md](macos.md) |
-| Native Windows run | The host in `$BUILD_WIN` via `just cross-check <pkg> --host windows` | [build-hosts.md](build-hosts.md) |
-| WSL2 run, exactly as CI does it | The guest in `$BUILD_WSL` via `just cross-check <pkg> --host wsl` (nextest archive, builder target dir hidden) | [wsl.md](wsl.md) |
+| Real Linux run | The host in `$BUILD_LINUX` via `just cross-check <pkg> --os linux`, or Docker Desktop on a macOS host | [build-hosts.md](build-hosts.md), [macos.md](macos.md) |
+| Native Windows run | The host in `$BUILD_WIN` via `just cross-check <pkg> --os windows` | [build-hosts.md](build-hosts.md) |
+| WSL2 run, exactly as CI does it | The guest in `$BUILD_WSL` via `just cross-check <pkg> --os wsl` (nextest archive, builder target dir hidden) | [wsl.md](wsl.md) |
 | Another macOS | The host in `$BUILD_MACOS` (reserved; no recipe consumes it yet) | [build-hosts.md](build-hosts.md) |
 
 Build hosts are declared by environment variables (`BUILD_LINUX`, `BUILD_WIN`,
@@ -34,7 +36,7 @@ Build hosts are declared by environment variables (`BUILD_LINUX`, `BUILD_WIN`,
 host is available from this machine; unset means it is not. Never hardcode an
 alias; check `env | grep '^BUILD_'` first and report which hosts you had.
 | Windows compile evidence only | `cargo check --target x86_64-pc-windows-gnu` (never msvc from macOS); an isolated probe crate for `#[cfg(windows)]` code | [windows.md](windows.md) |
-| Authoritative proof | Hosted CI (`ubuntu-latest`, `macos-latest`, `windows-latest`, `wsl2-ubuntu`) | `.github/ci/README.md`, `.github/ci/environments.json` |
+| Authoritative proof | Hosted CI (`ubuntu-latest`, `macos-latest`, `windows-latest`, `wsl2-ubuntu`) | [ci-runners.md](ci-runners.md), `.github/ci/README.md`, `.github/ci/environments.json` |
 
 CI is the final proof, not the discovery loop. A full-scope run takes hours
 and every push cancels the previous one, so surface an OS's exact failure on
@@ -60,6 +62,10 @@ the matching host first, then push once.
 - **Red in the WSL guest at provisioning with a 403:** anonymous GitHub API
   rate limit from a shell-script installer; fixed once, recorded in
   [wsl.md](wsl.md) so it is not re-diagnosed.
+- **Slow on one leg only, or a timing delta under 15%:** read the runner
+  sizes and per-leg profile in [ci-runners.md](ci-runners.md) before calling
+  it a regression. macOS has the fewest cores, Windows the slowest build,
+  WSL2 the slowest execution, and run-to-run noise is 5 to 15% per leg.
 
 ## Standing rules
 
@@ -69,6 +75,10 @@ the matching host first, then push once.
   with provisioning as the required change.
 - A cross-compile is compile evidence, never behavioral evidence. Say which
   one you have.
+- CI legs are compared within one environment only, on matched test
+  identities, with three consecutive green runs as the evidence standard.
+  WSL2 follows Linux code paths and is never evidence for native Windows
+  ([ci-runners.md](ci-runners.md)).
 - `ctx.*` path values and Markdown presentation are portable (`/`); an eager
   `file()`'s effective frontmatter value keeps native spelling. Tests compare
   against the spelling the surface actually emits (`biscuit_file`'s
@@ -86,6 +96,10 @@ the matching host first, then push once.
   remote-process hygiene.
 - [wsl.md](wsl.md) — the archive-mode contract, faithful reproduction on the
   `BUILD_WSL` guest, `bin_exe!`, the guest's GitHub API 403 history.
+- [ci-runners.md](ci-runners.md) — hosted runner sizes (macOS is the
+  tightest), per-leg build and execution profiles, the anonymous API limit,
+  cache-quota and `main`-cancellation behavior, merge-gate bypass, and the
+  cross-run noise and comparison rules.
 - [windows.md](windows.md) — path spelling, home directory lookup, handle
   inheritance, batch-file argument rule, Ctrl+C status, cross-compile targets,
   Markdown backslash escapes.

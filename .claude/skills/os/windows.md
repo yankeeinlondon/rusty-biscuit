@@ -65,6 +65,15 @@ Compare against that, never against `to_string_lossy()`.
   `SetConsoleCtrlHandler` path exists; see the claudine skill's
   `signal-handling.md`, "Windows parity".
 
+## The `windows-latest` leg
+
+Slowest build phase of the four CI legs, fewer test identities because
+`#![cfg(unix)]` binaries are excluded (declare them as platform exclusions,
+not lost coverage), and Sniff runs its L1 group one process at a time there
+because overlapping host-network detections fail-fast the test process
+(`.config/nextest.toml`). Sizes, timings, and the Level 2 gap are in
+[ci-runners.md](ci-runners.md).
+
 ## Compile evidence from macOS
 
 - Use `x86_64-pc-windows-gnu`. `x86_64-pc-windows-msvc` dies inside
@@ -80,7 +89,9 @@ Compare against that, never against `to_string_lossy()`.
   check passes.
 - Two host traps: a `rustc-wrapper = "kache"` setting leaks into `cc-rs` and
   breaks every C build for the cross target (`RUSTC_WRAPPER=""`), and kache's
-  read-only cached artifacts need their own `CARGO_TARGET_DIR`.
+  read-only cached artifacts need their own `CARGO_TARGET_DIR`. Repository
+  ruling (2026-09-09, `docs/kache-strategy.md`): kache is off on Windows and
+  WSL.
 - For a `#[cfg(windows)]` file that cannot be reached through the workspace
   graph, copy it into a throwaway probe crate with `windows` and `tokio`,
   stub the seams, and `cargo check --target x86_64-pc-windows-gnu` there. It
@@ -89,4 +100,4 @@ Compare against that, never against `to_string_lossy()`.
   signatures, not runtime behavior.
 
 A cross-compile is compile evidence. Behavioral evidence comes from
-`just cross-check <pkg> --host windows` or the `windows-latest` CI leg.
+`just cross-check <pkg> --os windows` or the `windows-latest` CI leg.

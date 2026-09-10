@@ -5,7 +5,7 @@ description: |-
   test design, fixture isolation, `require_level!` gating, nextest filtersets,
   suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 7055b0e89017847d-124880c5260474d4
+hash: 7055b0e89017847d-a78f6d00b59ed3ca
 last_updated: 2026-09-07
 ---
 # Rust Testing — Rusty Biscuit Monorepo
@@ -255,8 +255,9 @@ Before running any final build, test, or lint gate:
    exactly what CI's `lint` and `test` gates run for the branch's affected
    packages, use `just ci-local` at the root (`--lint-only` first: the
    no-features clippy build is where incomplete feature gating surfaces;
-   `--dry-run` prints the scope). The pre-push hook runs `just lint` for the
-   changed areas before `just test` for the same reason.
+   `--dry-run` prints the scope). The pre-push hook runs exactly
+   `just ci-local --lint-only` for the same reason, and no tests: L1 is CI's
+   job, and a lint immediately followed by nextest reuses stale test binaries.
 4. Report the selected scope and commands with the gate results.
 
 For durable native CI, declare package policy in the package's own

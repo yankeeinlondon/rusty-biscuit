@@ -90,7 +90,7 @@ Once installed run `just init` from the repo's root which will:
 - ensure you have all necessary build tools for your operating system
 - install some core CLIs from this monorepo to make sure all your `justfile` configurations will work with full fidelity
 
-The optional [kache](https://github.com/kunobi-ninja/kache) compiler cache is a separate, per-host opt-in (`just install-kache`) — whether it pays off depends on your filesystem, not your OS.
+The [kache](https://github.com/kunobi-ninja/kache) compiler cache is installed by `just init` on macOS and Linux but never activated by the repository: it is on for macOS (store and `target/` on one APFS volume), on for Linux only when a clone probe passes, and off for Windows and WSL. `just kache-status` reports where this host stands; the ruling is in `docs/kache-strategy.md`.
 
 See [Development Environment Initialization](./docs/initialization.md) for the
 complete process, platform behavior, and troubleshooting guidance.
@@ -114,9 +114,9 @@ Shell completions help people learn new CLI's as well as navigate a CLI they don
 
 ### Pre-push Hook
 
-A local pre-push hook is available to run fast feedback tests before pushing to remote.
+A local pre-push hook runs CI's clippy gate before pushing to remote. It is `just pre-push`, which is `just ci-local --lint-only`: `cargo clippy --all-targets` with no features, for exactly the packages CI would schedule for the branch's changes (the same `scripts/ci/affected_scope.py` CI uses, diffed against `origin/main` or `CI_LOCAL_BASE`). A docs-only push gates nothing and returns in seconds. The hook deliberately runs no tests: CI runs L1 per package on native runners, and clippy immediately followed by nextest in one target directory reuses stale test binaries.
 
-Link the shared hook into your local git repository:
+Link the shared hook into your local git repository (`just init` does this):
 
 ```sh
 ln -s ../../.githooks/pre-push .git/hooks/pre-push
@@ -126,9 +126,9 @@ The hook's behavior is controlled by the `RUSTY_BISCUIT_PRE_PUSH` environment va
 
 | Value | Behavior |
 | --- | --- |
-| `off` | Skip tests entirely and allow the push |
-| `warn` | Run tests, print failures in red, but still allow the push (default) |
-| `strict` | Run tests and block the push if any test fails |
+| `off` | Skip the lint entirely and allow the push |
+| `warn` | Run the lint, print failures in red, but still allow the push (default) |
+| `strict` | Run the lint and block the push if it fails |
 
 For example, to enable strict mode in your shell:
 
@@ -136,19 +136,11 @@ For example, to enable strict mode in your shell:
 export RUSTY_BISCUIT_PRE_PUSH=strict
 ```
 
-The hook resolves the area list with this priority order:
-
-1. **Explicit override** — `RUSTY_BISCUIT_PRE_PUSH_AREAS` (space-separated area names) is used verbatim if set.
-2. **Top-level-directory heuristic** — `just changed-areas` runs `git diff --name-only` against the configured upstream branch (`@{u}`), then matches the first path segment of each changed file against the curated area list in the root `justfile`. This is a coarse detector: it does not inspect `Cargo.toml` path dependencies, so a change to a workspace member outside one of the curated top-level directories will not be detected.
-3. **Fallback** — when there is no upstream branch (e.g. a first push of a new branch) or when no changed files map to a curated area, the hook falls back to testing `claudine` and `darkmatter`.
-
-Override with:
+`RUSTY_BISCUIT_PRE_PUSH_AREAS` (space-separated package names or area directories) replaces the computed scope with a fixed selection:
 
 ```sh
 export RUSTY_BISCUIT_PRE_PUSH_AREAS="claudine darkmatter"
 ```
-
-Fully dependency-aware detection (mapping changed files to workspace members via `cargo metadata`) is a planned follow-up — see requirement R2 in [`features/2026-05-19-ci-cd/spec.md`](./features/2026-05-19-ci-cd/spec.md).
 
 ## License
 
