@@ -29,13 +29,3 @@ Each of these test rigs allow for SSH access but to make your life easier and to
 ```sh
 just cross-check <package> --os [linux, windows, wsl, macos, all]
 ```
-
-## Worktrees make better Neighbors
-
-Remember that when you're using a shared resource like a test rig you may have other people and agents who are working on the same repo as you at the same time. To avoid any conflicts be sure
-to create you're own worktree to work in:
-
-- start by running `git fetch` to ensure you have the latest from the remote
-- then create worktree where you will do your testing; naming should follow the pattern: `{hostname}-{branch-name}-{epoch-timestamp}`
-- once you've completed your testing on the testing rig make sure that you remove the worktree or these rigs will quickly become low on disk storage!
-    - you should not be modifying code on these platforms but
