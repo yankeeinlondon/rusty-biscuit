@@ -5,7 +5,10 @@ fix: 2026-09-10-audio-tests-should-be-silent/review-1.md
 spec: 2026-09-10-audio-tests-should-be-silent/spec.md
 reviewed_by: codex/gpt-5.6-sol
 created: 2026-09-10T14:33:10-07:00
-implemented: false
+log: claudine/fixes/2026-09-10-audio-tests-should-be-silent/log.md
+implemented: true
+implemented_by: claude/opus
+next: 2026-09-10-audio-tests-should-be-silent/review-2.md
 ready: false
 human_review: false
 findings:

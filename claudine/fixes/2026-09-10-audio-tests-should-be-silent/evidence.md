@@ -85,6 +85,11 @@ These are availability observations, not playback evidence.
 | macOS, `claudine/`: `just lint` | Passed |
 | macOS, headless tmux L2, filter `shipped_implement` | All three selected Claudine CLI tests passed; no focus changes. The area recipe then failed backend proof for `claudine-gen`, where the filter selected zero tests; this is not counted as a passing aggregate recipe |
 | macOS, `BISCUIT_TEST_REQUIRED_BACKENDS=tmux BISCUIT_L2_THREADS=2 just _test_l2 claudine-cli --features terminal-tests shipped_implement` | Three passed; required tmux backend proof passed (`run=3 skip=0 panic=0`) |
+| macOS, `biscuit-speaks/`: `just test -j 2` after review-1 finding 3 | 491 passed; 19 skipped. Up from 487 by the four `test_support` switch-parsing tests; the skipped count is unchanged because the six former `#[ignore]` tests became tier-filtered `real_` tests |
+| macOS, `biscuit-speaks/`: `just lint` after review-1 finding 3 | Passed for library and CLI |
+| macOS, `cargo nextest list -p biscuit-speaks --features playa -E "$(just _tier_filter real)"` | 8 real-tier tests selected, up from 2. Selection only — nothing was executed |
+| Native Windows, `cargo check -p biscuit-speaks --features playa --all-targets --target x86_64-pc-windows-gnu` | Passed. Compile evidence only; not behavioral evidence |
+| Linux, `ssh build-linux` reachability probe | Timed out at 30 s, as in the earlier attempts below; no Linux compile or test evidence for finding 3 |
 | Native Windows, `just cross-check playa --os windows --features native-playback,async` | Compilation stopped on OS error 112 (disk full), before changed-code validation |
 | WSL2 | Not launched after native Windows exhausted the shared physical build drive; no WSL2 behavioral or archive evidence obtained |
 | Linux, initial Playa cross-check | Failed before compilation: global Git config `/home/build/.config/git/config` was inaccessible (`Host is down`) |
@@ -149,3 +154,30 @@ checkout and host configuration. The local launcher and transport were reaped.
 Implementation is complete locally; cross-platform validation remains open.
 The Windows shared-target cleanup approval is still pending, and Linux needs
 working host configuration/session access before the remaining checks can run.
+
+## Real backends exercised, and what is still owed
+
+Review-1 finding 3 moved the EchoGarden and gTTS provider checks out of
+`#[ignore]` and into the `real_` tier, where a canonical recipe can reach them.
+The tier now selects eight biscuit-speaks tests instead of two:
+
+| Test | Backend | Status |
+|------|---------|--------|
+| `providers::host::say::tests::real_say_provider_speaks_muted` | macOS `say` + native Playa | Exercised earlier in this fix; muted, native `Complete` |
+| `real_detached_phase4::real_kokoro_provider_reports_muted_native_complete` | Kokoro `af_heart` + native Playa | Exercised earlier in this fix; muted, native `Complete` |
+| `providers::host::echogarden::tests::real_echogarden_speaks_muted` | `echogarden` (default Kokoro engine) | **Not executed** — deferred |
+| `providers::host::echogarden::tests::real_echogarden_speaks_muted_with_requested_voice` | `echogarden` Kokoro `Heart` | **Not executed** — deferred |
+| `providers::host::echogarden::tests::real_echogarden_lists_installed_voices` | `echogarden` voice enumeration | **Not executed** — deferred |
+| `providers::host::gtts::tests::real_gtts_speaks_muted` | `gtts-cli` + Google TTS | **Not executed** — deferred |
+| `providers::host::gtts::tests::real_gtts_lists_installed_voices` | `gtts-cli` voice enumeration | **Not executed** — deferred |
+| `providers::host::gtts::tests::real_gtts_reports_reachable_network` | Google TTS endpoint | **Not executed** — deferred |
+
+The six new rows are recorded as deferred, not as passes. `just test-real` was
+deliberately not run for EchoGarden or gTTS on this host: it performs real
+synthesis and playback, and the specification forbids using listening as the
+proof of silence, so a local run here would produce no evidence this fix can
+rely on. Their execution belongs on a provisioned host or a CI leg, which can
+set `BISCUIT_SPEAKS_REQUIRED_PROVIDERS=echogarden,gtts` (see the biscuit-speaks
+README, "Silent audio tests") so an absent backend fails the tier instead of
+skipping it. Selection was proved by `cargo nextest list`, which builds the test
+binaries without running any of them.
