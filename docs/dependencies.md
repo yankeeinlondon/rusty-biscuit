@@ -38,7 +38,7 @@
   non-interactive, tool-free agentic-CLI session. It is the one crate that
   depends on **both** `biscuit-contract` and `claudine` (lib); it must not
   depend on `claudine-cli`. Beyond those two it adds `async-trait`, `tokio`,
-  `serde_json`, `jsonschema` (`0.42`, the workspace-wide pin, for adapter-owned
+  `serde_json`, `jsonschema` (`0.55`, the workspace-wide pin, for adapter-owned
   Draft 2020-12 validation), `tempfile` (isolated session CWD), `thiserror`,
   and `tracing`. See
   [`claudine/contract/docs/dependencies.md`](./claudine/contract/docs/dependencies.md).
@@ -47,7 +47,7 @@
   single-turn execution surface and capability-based model resolver. It is the
   one crate that depends on **both** `biscuit-contract` and `unchained-ai`
   (lib); it must not depend on `unchained-ai-cli`. Beyond those two it adds
-  `async-trait`, `tokio`, `serde_json`, `jsonschema` (`0.42`, the workspace-wide
+  `async-trait`, `tokio`, `serde_json`, `jsonschema` (`0.55`, the workspace-wide
   pin, for adapter-owned Draft 2020-12 validation), `thiserror`, and `tracing`.
   See
   [`unchained-ai/contract/docs/dependencies.md`](./unchained-ai/contract/docs/dependencies.md).
@@ -975,7 +975,7 @@ This is a Rust workspace with the following modules:
 
 ### Schema Validation
 
-- [jsonschema](https://github.com/Stranger6667/jsonschema-rs) _v0.28_ [📄](https://docs.rs/jsonschema)
+- [jsonschema](https://github.com/Stranger6667/jsonschema-rs) _v0.55_ [📄](https://docs.rs/jsonschema)
 
     _High-performance JSON Schema validator with reusable validators and fancy-regex support. Optional feature._
 

@@ -5,10 +5,15 @@
 //! [`SchemaStatusReport`] returned by the library rather than the rendered
 //! terminal output.
 
-use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use claudine::composition::{PropertyState, PropertyStatus, SchemaStatusReport};
+use claudine::composition::{SchemaStatusReport, schema_status_report_prose};
+
+pub(super) use claudine::composition::escape_schema_prose as escape_prose;
+#[cfg(test)]
+pub(super) use claudine::composition::{
+    description_suffix, render_optional_line, render_required_line,
+};
 
 use crate::log;
 
@@ -20,6 +25,7 @@ use crate::log;
 /// - required + valid:   `<green>✓</green>`
 /// - required + missing: `<red>⍉</red>`
 /// - required + invalid: `!`
+/// - required + deferred (inline launch only): `<blue>…</blue>`
 /// - optional + valid:   `<green>✓</green>` (dim)
 /// - optional + missing: `<grey>⍉</grey>` (dim)
 /// - optional + invalid: `<yellow>!</yellow>` (dim)
@@ -27,92 +33,5 @@ use crate::log;
 /// When at least one optional property has an invalid value, a trailing
 /// note explains that the value will be dropped from the prompt context.
 pub fn render_status_report(report: &SchemaStatusReport, term: &Terminal) {
-    let path_display = biscuit_file::to_portable_string(&report.source_path);
-    let path_escaped = escape_prose(&path_display);
-    let path_reference = crate::cli_utils::file_url(&report.source_path).map_or_else(
-        || path_escaped.clone(),
-        |path_url| format!("[{path_escaped}]({path_url})"),
-    );
-    let mut body = format!("- The {path_reference} prompt has the following schema:");
-
-    if report.raw_json_schema {
-        body.push_str("\n  <dim><i>(raw JSON Schema — per-property metadata unavailable)</i></dim>");
-        let prose = Prose::new(body);
-        log::message(&prose.render(term));
-        return;
-    }
-
-    for status in &report.required {
-        body.push('\n');
-        body.push_str(&render_required_line(status));
-    }
-    for status in &report.optional {
-        body.push('\n');
-        body.push_str(&render_optional_line(status));
-    }
-
-    if report.has_invalid_optional {
-        body.push_str(
-            "\n- **Note:** _optional properties with invalid values will be dropped and the \
-             prompt will execute without them_",
-        );
-    }
-
-    let prose = Prose::new(body);
-    log::message(&prose.render(term));
-}
-
-pub(super) fn render_required_line(status: &PropertyStatus) -> String {
-    let name = escape_prose(&status.name);
-    let ty = escape_prose(&status.type_label);
-    let desc = description_suffix(status.description.as_deref());
-    match status.state {
-        PropertyState::Valid => format!(
-            "<green>✓</green> <inverse>{name}</inverse>: {ty} <i><dim>- was defined correctly</dim></i>{desc}"
-        ),
-        PropertyState::Invalid => format!(
-            "! <inverse>{name}</inverse>: {ty} <i><dim>- was defined but with the wrong type</dim></i>{desc}"
-        ),
-        PropertyState::Missing => format!(
-            "<red>⍉</red> <inverse>{name}</inverse>: {ty} <i><dim>- was not defined but is required</dim></i>{desc}"
-        ),
-    }
-}
-
-pub(super) fn render_optional_line(status: &PropertyStatus) -> String {
-    let name = escape_prose(&status.name);
-    let ty = escape_prose(&status.type_label);
-    let desc = description_suffix(status.description.as_deref());
-    match status.state {
-        PropertyState::Valid => format!(
-            "<green>✓</green> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}"
-        ),
-        PropertyState::Missing => format!(
-            "<grey>⍉</grey> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}"
-        ),
-        PropertyState::Invalid => format!(
-            "<yellow>!</yellow> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}"
-        ),
-    }
-}
-
-pub(super) fn description_suffix(description: Option<&str>) -> String {
-    match description.filter(|d| !d.trim().is_empty()) {
-        Some(desc) => format!(" <i><dim>— {}</dim></i>", escape_prose(desc)),
-        None => String::new(),
-    }
-}
-
-pub(super) fn escape_prose(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '\\' | '<' | '>' | '{' | '"' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            other => out.push(other),
-        }
-    }
-    out
+    log::message(&schema_status_report_prose(report).render(term));
 }

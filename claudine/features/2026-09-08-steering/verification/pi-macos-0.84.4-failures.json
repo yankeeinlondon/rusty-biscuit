@@ -1,0 +1,59 @@
+{
+  "fixture": "real Pi RPC with deterministic local model and cooperative in-process tools",
+  "limitations": [
+    "stdin EOF is a half-close; stdout remains observable for the experiment",
+    "not waiting for acknowledgment does not prove the provider had not accepted the request",
+    "no cloud model, OS subprocess cleanup, abrupt host failure, or full-duplex transport loss tested",
+    "invalid replacement is a pre-acceptance protocol error, not a post-acceptance model failure"
+  ],
+  "os": "macos",
+  "production_activation": false,
+  "provider": "pi",
+  "provider_version": "0.84.4",
+  "results": [
+    {
+      "abort_acknowledged": true,
+      "invalid_replacement_rejected": true,
+      "persisted_steering_user_messages": 1,
+      "same_session": true,
+      "scenario": "abort_with_queue",
+      "steering_reached_model": false,
+      "steering_reached_model_on_explicit_next_turn": true,
+      "steering_user_messages": 1,
+      "tools_finished_normally": false
+    },
+    {
+      "abort_acknowledged": true,
+      "invalid_replacement_rejected": true,
+      "persisted_steering_user_messages": 0,
+      "same_session": true,
+      "scenario": "clear_then_abort",
+      "steering_reached_model": false,
+      "steering_reached_model_on_explicit_next_turn": false,
+      "steering_user_messages": 0,
+      "tools_finished_normally": false
+    },
+    {
+      "acknowledged_before_disconnect": false,
+      "acknowledgments_observed_after_drain": 1,
+      "exit_code": 0,
+      "persisted_steering_user_messages": 0,
+      "scenario": "stdin_eof_without_waiting_for_ack",
+      "steering_reached_model": false,
+      "tool_a_finished_normally": false,
+      "tool_b_finished_normally": false
+    },
+    {
+      "acknowledged_before_disconnect": true,
+      "acknowledgments_observed_after_drain": 1,
+      "exit_code": 0,
+      "persisted_steering_user_messages": 0,
+      "scenario": "stdin_eof_after_ack",
+      "steering_reached_model": false,
+      "tool_a_finished_normally": false,
+      "tool_b_finished_normally": false
+    }
+  ],
+  "tested_on": "2026-09-08",
+  "nextest_run_id": "1f9371f1-5dae-4ef9-88e5-b892f9b39151"
+}

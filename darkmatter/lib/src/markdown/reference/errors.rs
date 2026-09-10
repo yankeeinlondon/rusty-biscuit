@@ -300,7 +300,7 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
             ReferenceError::FileReference(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "file reference failure"))
                 .body(source.to_string())
-                .hint("Check repository-root (`@/`) or package (`!`) prefix usage."),
+                .hint("Check sigil usage: `@` magic, `&` repository root, `^` repository-scoped."),
 
             ReferenceError::Io(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "I/O failure"))

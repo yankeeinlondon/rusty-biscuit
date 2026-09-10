@@ -272,7 +272,7 @@ fn opencode_stderr_snapshot() {
 }
 
 #[test]
-fn opencode_tool_use_completion_shows_incoming_arrow_only() {
+fn opencode_completed_tool_use_suppresses_synthetic_call_arrow() {
     let lines = replay_to_stderr(
         Provider::OpenCode,
         &[
@@ -289,7 +289,7 @@ fn opencode_tool_use_completion_shows_incoming_arrow_only() {
     );
     assert!(
         !joined.contains('\u{2192}'),
-        "outgoing → arrow must NOT render (no synthesized ToolCall): {joined:?}"
+        "outgoing → arrow must stay hidden for the synthesized ToolCall: {joined:?}"
     );
     assert!(
         joined.contains("Bash"),

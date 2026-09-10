@@ -363,6 +363,36 @@ fn opencode_firecrawl_tool_use_does_not_render_via_info_glyph() {
 }
 
 #[test]
+fn opencode_synthetic_tool_call_renders_only_the_completion_line() {
+    let lines = Arc::new(StdMutex::new(Vec::new()));
+    let dispatched = Arc::new(StdMutex::new(Vec::new()));
+    let mut sink = make_sink_for_provider(
+        Provider::OpenCode,
+        Verbosity::Normal,
+        lines.clone(),
+        dispatched,
+    );
+    sink.on_semantic_event(SemanticEvent::ToolCall {
+        name: Some("bash".into()),
+        id: Some("t1".into()),
+        input: Some(json!({"command": "pwd"})),
+        extra: json!({"synthetic_tool_call": true}),
+    });
+    sink.on_semantic_event(SemanticEvent::ToolResult {
+        name: Some("bash".into()),
+        id: Some("t1".into()),
+        status: Some("completed".into()),
+        exit_code: None,
+        output: Some(json!("/tmp")),
+        extra: json!({"input": {"command": "pwd"}}),
+    });
+
+    let rendered = lines.lock().unwrap().join("\n");
+    assert!(!rendered.contains('→'), "synthetic call must be silent: {rendered}");
+    assert!(rendered.contains('←'), "completion line must render: {rendered}");
+}
+
+#[test]
 fn tool_call_renders_canonical_format_with_humanized_name_and_query_summary() {
     let lines = Arc::new(StdMutex::new(Vec::new()));
     let dispatched = Arc::new(StdMutex::new(Vec::new()));

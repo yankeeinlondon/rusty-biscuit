@@ -167,7 +167,8 @@ fn is_local_anchoring(kind: &ReferenceKind) -> bool {
 
 /// Compute the effective anchoring for a local reference.
 ///
-/// Returns `None` for non-anchoring kinds (magic/package/vault/home/URL), which
+/// Returns `None` for non-anchoring kinds (magic/repository-root/
+/// repository-scoped/vault/home/URL), which
 /// keep their authored classification. Recursive references use the same
 /// post-interpolation anchoring as direct references because recursion is only
 /// a search modifier over the underlying kind.

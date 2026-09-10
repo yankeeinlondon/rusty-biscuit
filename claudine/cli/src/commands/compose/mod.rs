@@ -429,13 +429,13 @@ impl CompositionKind {
     /// resolution.
     ///
     /// For `inline-compose` this enforces the inline/sequence contract and
-    /// the prompt-property contract, returning prompt state for deferred
-    /// reporting. For `compose` this is a no-op.
+    /// the `prompt` *type* contract, returning prompt state for deferred
+    /// reporting; the *missing*-prompt verdict waits for
+    /// [`Self::finalize_inline_prompt_state`]. For `compose` this is a no-op.
     ///
     /// ## Errors
     ///
-    /// Returns [`CompositionError::InlineComposeSequenceMismatch`],
-    /// [`CompositionError::PromptPropertyMissing`], or
+    /// Returns [`CompositionError::InlineComposeSequenceMismatch`] or
     /// [`CompositionError::PromptPropertyWrongType`] for inline-compose
     /// contract violations.
     pub(crate) fn on_source_resolved(
@@ -483,23 +483,23 @@ impl CompositionKind {
                     .and_then(|v| v.as_str())
                     .is_some_and(|s| !s.trim().is_empty());
 
-                // Fail-fast diagnostics (missing / present-but-empty) print before
-                // the header; the success line is deferred to the reporting block
+                // A present-but-empty prompt is reported fail-fast before the
+                // header; the success line is deferred to the reporting block
                 // after the early header so nothing precedes the execution line.
-                if !(shared.silent || (has_prompt && is_non_empty)) {
+                // A *missing* prompt is not judged here: the schema-aware
+                // pre-validation that follows may collect an eager `prompt`
+                // interactively or receive one from the caller, and
+                // [`finalize_inline_prompt_state`] reaches the missing verdict
+                // after that opportunity.
+                if has_prompt && !is_non_empty && !shared.silent {
                     let term = crate::log::terminal();
                     claudine::harness::report::report_prompt_property(
                         has_prompt, is_non_empty, &term,
                     );
                 }
 
-                // Drive the inline-specific contract eagerly so a wrong-type or
-                // missing `prompt` produces the right typed error before any
-                // schema scrubbing kicks in.
-                if !has_prompt {
-                    return Err(CompositionError::PromptPropertyMissing
-                        .enrich_frontmatter(&source, stderr_is_tty));
-                }
+                // A wrong-type `prompt` is a contract error before any schema
+                // scrubbing can drop it as an invalid optional.
                 if let Some(ref value) = prompt_value
                     && !matches!(value, serde_json::Value::String(_))
                 {
@@ -518,6 +518,51 @@ impl CompositionKind {
                 ))
             }
         }
+    }
+
+    /// Reach the inline `prompt` verdict after caller overlays and eager
+    /// collection have had their chance.
+    ///
+    /// The delivered prompt is the effective input layer's `prompt`: the
+    /// caller's `--set`/positional value or an interactively collected eager
+    /// value wins over the authored one, and neither is written to the file.
+    /// Only when no layer supplies a prompt is the run refused.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`CompositionError::PromptPropertyMissing`] (frontmatter
+    /// enriched) for `inline-compose` when no layer supplies a `prompt`.
+    pub(crate) fn finalize_inline_prompt_state(
+        self,
+        state: Option<InlinePromptState>,
+        source: &ResolvedCompositionSource,
+        set_overrides: Option<&serde_json::Value>,
+        shared: &SharedComposeArgs,
+        stderr_is_tty: bool,
+    ) -> Result<Option<InlinePromptState>, CompositionError> {
+        let Self::Inline = self else {
+            return Ok(state);
+        };
+        let mut state = state.unwrap_or(InlinePromptState {
+            has_prompt: false,
+            is_non_empty: false,
+        });
+        if let Some(serde_json::Value::String(prompt)) = set_overrides
+            .and_then(serde_json::Value::as_object)
+            .and_then(|overrides| overrides.get("prompt"))
+        {
+            state.has_prompt = true;
+            state.is_non_empty = !prompt.trim().is_empty();
+        }
+        if !state.has_prompt {
+            if !shared.silent {
+                let term = crate::log::terminal();
+                claudine::harness::report::report_prompt_property(false, false, &term);
+            }
+            return Err(CompositionError::PromptPropertyMissing
+                .enrich_frontmatter(source, stderr_is_tty));
+        }
+        Ok(Some(state))
     }
 
     /// Command-specific reporting that runs after the execution header is

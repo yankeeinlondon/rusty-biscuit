@@ -1148,3 +1148,103 @@ fn level2_unstructured_failure_still_uses_the_generic_fallback_in_tmux() {
         capture.frame.plain
     );
 }
+
+fn stage_inline(name: &str, document: &str, replacement: Option<&str>) -> Staged {
+    let staged = stage(name, document, 0);
+    let write_document = replacement.map_or(String::new(), |_| {
+        "printf '%s' \"$CLAUDINE_AGENT_DOCUMENT\" > \"$CLAUDINE_TEST_DOC\"\n".to_string()
+    });
+    write_executable(
+        &staged.bin_dir.join("claude"),
+        &format!(
+            "#!/bin/sh\n{write_document}\
+             printf '%s\\n' '{{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"typed-error\",\"model\":\"claude-sonnet-4\"}}'\n\
+             printf '%s\\n' '{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"I completed the requested edit.\"}}]}}}}'\n\
+             printf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"stop_reason\":\"end_turn\",\"num_turns\":1,\"duration_ms\":10,\"usage\":{{\"input_tokens\":1,\"output_tokens\":1}}}}'\n"
+        ),
+    );
+    staged
+}
+
+fn run_inline_in_pane(
+    harness: &mut TmuxHarness,
+    staged: &Staged,
+    replacement: Option<&str>,
+) -> Capture {
+    let _ = harness.resize(120, 200);
+    let claudine = cargo_bin("claudine").display().to_string();
+    let home = staged.workspace.path().to_string_lossy().into_owned();
+    let path = augmented_path(&staged.bin_dir).to_string_lossy().into_owned();
+    let document = staged.doc.to_string_lossy().into_owned();
+
+    harness.send_text(b"clear\n").expect("clear pane");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+
+    let command = format!(
+        "{} inline-compose --claude --no-interactive {}; echo {EXIT_MARKER}$?",
+        common::sh_quote(&claudine),
+        common::sh_quote(&document)
+    );
+    let mut env = vec![
+        ("HOME", home.as_str()),
+        ("PATH", path.as_str()),
+        ("NO_COLOR", "1"),
+        ("COLUMNS", "100"),
+        ("CLAUDINE_TEST_DOC", document.as_str()),
+    ];
+    if let Some(replacement) = replacement {
+        env.push(("CLAUDINE_AGENT_DOCUMENT", replacement));
+    }
+    // Multiline YAML and the host PATH must not pass through the interactive
+    // line editor or the terminal's bounded canonical input buffer.
+    let script = staged.workspace.path().join("run-inline.sh");
+    let mut source = format!("cd {} || exit 1\n", common::sh_quote(&home));
+    for (key, value) in env {
+        source.push_str(&format!("export {key}={}\n", common::sh_quote(value)));
+    }
+    source.push_str(&command);
+    std::fs::write(&script, source).expect("stage inline invocation");
+    harness
+        .send_text(
+            format!("/bin/sh {}\n", common::sh_quote(&script.to_string_lossy())).as_bytes(),
+        )
+        .expect("send inline composition");
+    let capture = wait_for_exit_marker(harness, Duration::from_secs(30));
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+    capture
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_completion_schema_failure_renders_the_full_plain_status_report() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let initial = "---\n$schema:\n  prompt: 'string(required; eager)'\n  products: 'string(required)'\nprompt: Write the report.\n---\nOriginal body.\n";
+    let replacement = "---\n$schema:\n  prompt: 'string(required; eager)'\n  products: 'string(required)'\nprompt: Write the report.\n---\nUpdated body.\n";
+    let staged = stage_inline("claudine-l2-completion-schema", initial, Some(replacement));
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let capture = run_inline_in_pane(&mut harness, &staged, Some(replacement));
+
+    assert!(capture.has_status_block(), "{}", capture.frame.plain);
+    assert!(!capture.has_generic_error_line(), "{}", capture.frame.plain);
+    capture.assert_contains("completion schema", "typed error header must survive");
+    capture.assert_contains("prompt", "the satisfied input row must render");
+    capture.assert_contains("was defined correctly", "satisfied rows must remain visible");
+    capture.assert_contains("products", "the missing output row must render");
+    assert_eq!(capture.exit_code, 1, "{}", capture.frame.plain);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_unchanged_inline_body_renders_the_plain_typed_error() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let initial = "---\nprompt: Write the report.\n---\nOriginal body.\n";
+    let staged = stage_inline("claudine-l2-body-unchanged", initial, None);
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let capture = run_inline_in_pane(&mut harness, &staged, None);
+
+    assert!(capture.has_status_block(), "{}", capture.frame.plain);
+    assert!(!capture.has_generic_error_line(), "{}", capture.frame.plain);
+    capture.assert_contains("document not updated", "typed error header must survive");
+    capture.assert_contains("did not change the body", "the rejection reason must render");
+    assert_eq!(capture.exit_code, 1, "{}", capture.frame.plain);
+}

@@ -45,12 +45,35 @@ Arguments:
 
 ## File References
 
-All file references in the CLI use the `FileReference` struct from the `biscuit-file` library (in this monorepo) which allows for:
+All file references in the CLI use the `FileReference` struct from the `biscuit-file` library (in this monorepo). The introducer you write selects a **closed, ordered list of base directories**; resolution joins the path onto each base in turn and takes the first candidate that is an existing regular file. There is no cross-kind fallback — a `./foo.md` that misses is never retried as `@foo.md`.
 
-- relative paths
-- absolute paths
-- magic paths (e.g., starts with `@`) which match on repo relative, package relative, and user home relative paths.
-- more details can be found in the [Biscuit File](../../../biscuit-file/README.md) package area
+| Written as            | Kind                     | Candidate order                                                                       |
+|-----------------------|--------------------------|---------------------------------------------------------------------------------------|
+| `./x.md`, `../x.md`   | explicit relative        | the base directory only                                                               |
+| `x.md`, `docs/x.md`   | implicit relative        | the base directory **first**, then the repository root                                |
+| `/x.md`, `C:\x.md`    | absolute                 | used verbatim                                                                         |
+| `~/x.md`              | home                     | the user's home directory only (`~user` is rejected)                                  |
+| `@x.md`               | magic (multi-homed)      | registered prepends, package, package area, repository root, home, registered appends |
+| `&x.md`               | repository root, exactly | the repository root only                                                              |
+| `^x.md`               | repository scoped        | package, package area, then repository root; never consults home                      |
+| `vault:x.md`          | vault                    | registered vault roots, then the paths in `$VAULT`                                    |
+| `http://`, `https://` | remote                   | a typed remote reference; never a local candidate                                     |
+
+**"Base directory"** means the directory a reference was authored from: for an argument you type at the shell that is the directory you ran `md` in; for a reference written inside a document it is the directory of the document being composed.
+
+Two modifiers compose with every kind above:
+
+- a leading `%` (`%@README.md`) switches from exact-path probing to a recursive search of the same roots
+- any path segment may contain `{{VAR}}` environment interpolation (`@configs/{{APP}}/settings.toml`)
+
+A few things worth knowing before typing one of these at a shell prompt:
+
+- `&` is a shell control operator, so repository-root references have to be quoted: `md render '&docs/plan.md'`
+- `&` and `^` are repository-contained — using either outside a repository, or writing a payload that escapes it (`&../outside.md`), is a typed error rather than a silent miss
+- `@` is the one multi-homed introducer that can leave the repository, because `$HOME` is in its search list; reach for `^` when repository containment is the point
+- the `!` sigil has been removed from the grammar; a reference beginning with `!` is now a parse error that suggests `^`
+
+The canonical reference for the full grammar — including the error vocabulary and the `resolve_detailed()` diagnostics — is [File References in `biscuit-file`](../../../biscuit-file/docs/topics/file-references.md). For how darkmatter injects its own `@` search roots, see [Magic Paths](../topics/magic-paths.md).
 
 All subcommands can consume STDIN as their (first) file reference:
 

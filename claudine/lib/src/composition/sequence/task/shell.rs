@@ -317,8 +317,7 @@ impl TaskShellRunner for SystemTaskShell {
         interrupt: Option<&AtomicBool>,
         live: Option<&Arc<TaskLiveOutput>>,
     ) -> Result<ShellCommandOutput, TaskShellError> {
-        let mut builder = system_shell_command(command);
-        crate::child_environment::contribute_child_environment(&mut builder)
+        let mut builder = system_shell_command(command)
             .map_err(|error| TaskShellError::Io(std::io::Error::other(error)))?;
         builder
             .stdout(Stdio::piped())
@@ -887,23 +886,27 @@ fn isolate_process_tree(command: &mut Command) {
 
 /// Build the platform `Command` that runs `command` through the system shell.
 #[cfg(windows)]
-fn system_shell_command(command: &str) -> Command {
+fn system_shell_command(
+    command: &str,
+) -> Result<Command, crate::child_environment::ChildEnvironmentError> {
     use std::os::windows::process::CommandExt;
 
-    let mut cmd = Command::new("cmd");
+    let mut cmd = crate::child_environment::command("cmd")?;
     // `cmd.exe` parses the command tail itself rather than with the Windows
     // argv rules `Command::arg` targets. Passing the tail as a normal argument
     // escapes its nested quotes, changing the command before the shell sees it.
     cmd.arg("/D").arg("/C").raw_arg(command);
-    cmd
+    Ok(cmd)
 }
 
 /// Build the platform `Command` that runs `command` through the system shell.
 #[cfg(not(windows))]
-fn system_shell_command(command: &str) -> Command {
-    let mut cmd = Command::new("sh");
+fn system_shell_command(
+    command: &str,
+) -> Result<Command, crate::child_environment::ChildEnvironmentError> {
+    let mut cmd = crate::child_environment::command("sh")?;
     cmd.arg("-c").arg(command);
-    cmd
+    Ok(cmd)
 }
 
 #[cfg(test)]

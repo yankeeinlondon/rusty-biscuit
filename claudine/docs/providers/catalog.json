@@ -114,6 +114,7 @@
             "stderr_noise_prefixes": [],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -2458,6 +2459,73 @@
               "notes": "Rendering-only; can reduce terminal output surprises but does not affect print-mode schema."
             }
           ],
+          "execution_interfaces": [
+            {
+              "control_capabilities": [],
+              "documented_exclusions": [
+                "structured lifecycle observation",
+                "mid-turn bidirectional control"
+              ],
+              "evidence": [
+                "https://codelabs.developers.google.com/antigravity-cli-hands-on"
+              ],
+              "feature_preservation": "evidenced_partial",
+              "id": "print",
+              "input_contract": "Prompt supplied as a flag value; stdin prompt support is not evidenced.",
+              "kind": "one_shot_cli",
+              "launch": "agy --print-timeout 5m -p \"<prompt>\"",
+              "launch_conditions": [
+                "Preconfigure authentication, sandbox, and permission behavior"
+              ],
+              "notes": "Ordinary one-shot interface and a weak supervision fit.",
+              "observation_contract": "Plain final text on stdout with no parser-grade lifecycle stream.",
+              "preserved_features": [
+                "skills",
+                "extensions",
+                "project context",
+                "session resume"
+              ],
+              "unattended_obligations": [
+                "Apply a wall-clock timeout",
+                "Treat ambiguous plain-text errors conservatively"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "idle prompt submission"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "../steering/antigravity.md"
+              ],
+              "feature_preservation": "unknown",
+              "id": "stream-json-control",
+              "input_contract": "Candidate NDJSON control messages.",
+              "kind": "retained_subprocess",
+              "launch": "Antigravity retained NDJSON profile inferred in the sibling steering report",
+              "launch_conditions": [
+                "Confirm the installed version exposes the candidate transport",
+                "Retain stdin/stdout and correlation"
+              ],
+              "notes": "Proposed managed candidate only; no activated or live-verified support is claimed.",
+              "observation_contract": "Candidate correlated NDJSON lifecycle.",
+              "preserved_features": [],
+              "unattended_obligations": [
+                "Refuse activation without a readiness probe",
+                "Do not replay ambiguous input"
+              ]
+            }
+          ],
+          "execution_selection": {
+            "fallback": "",
+            "fallback_conditions": [],
+            "feature_parity": "Managed-interface feature parity is unknown.",
+            "notes": "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed.",
+            "preferred": "print",
+            "rationale": "It is the only established non-interactive execution surface, although its plain output is insufficient for strong supervision.",
+            "readiness_check": "No parser-grade readiness signal exists; selection readiness for the managed candidate remains unresolved.",
+            "replay_policy": "Do not replay after process acceptance is ambiguous."
+          },
           "gaps": [
             "No formal JSON Schema, OpenAPI, protobuf, TypeScript type, Rust type, or Go type for print-mode output was found.",
             "No verified stdin prompt support for `agy -p` was found.",
@@ -2621,6 +2689,30 @@
             "session_id": "Not emitted in print-mode stdout/stderr; --conversation can consume an existing ID.",
             "version": "agy --version prints the CLI version outside a run; not emitted in print mode."
           },
+          "settlement": [
+            {
+              "acceptance_signal": "unknown",
+              "input_handling": "Prompt is supplied at launch with no separate receipt.",
+              "interface": "print",
+              "notes": "Success and failure cannot be classified reliably from structured evidence.",
+              "operation": "one-shot prompt",
+              "process_lifecycle": "Print is one-shot.",
+              "settled_signal": "process exit after final plain output or timeout",
+              "turn_scheduling": "No structured turn-start evidence is available.",
+              "turn_terminal_signal": "No structured terminal event exists."
+            }
+          ],
+          "steering_mechanisms": [
+            {
+              "interface": "stream-json-control",
+              "mechanism": "retained-ndjson-idle",
+              "notes": "Candidate only; installed-version readiness and feature parity must be established before activation.",
+              "operations": [
+                "idle prompt submission"
+              ],
+              "reference": "../steering/antigravity.md"
+            }
+          ],
           "stream_contract": {
             "correlation_fields": [],
             "discriminator": "none",
@@ -2700,6 +2792,17 @@
               "name": "MCP tools",
               "notes": "MCP servers are configurable, including URL-based servers, but MCP calls are not distinguishable in print-mode output.",
               "result_visible": false
+            }
+          ],
+          "unattended_requests": [
+            {
+              "interface": "print",
+              "notes": "Do not disable skills, extensions, or project context to avoid the request.",
+              "observed_behavior": "Permissions are configurable; questions can hang according to existing evidence.",
+              "policy": "Never use dangerously-skip-permissions automatically or fabricate input.",
+              "request": "tool permission or human question",
+              "required_response": "Preconfigure explicit policy and terminate on an unresolved request.",
+              "timeout_behavior": "Use --print-timeout as a process-level bound; request-specific behavior is unknown."
             }
           ],
           "use_cases": [
@@ -3479,6 +3582,7 @@
             "stderr_noise_prefixes": [],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": true,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -7577,6 +7681,78 @@
               "notes": "Provider-specific auth and rate-limit behavior may differ."
             }
           ],
+          "execution_interfaces": [
+            {
+              "control_capabilities": [
+                "stream-json input",
+                "permission-prompt-tool"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "https://code.claude.com/docs/en/headless",
+                "https://code.claude.com/docs/en/agent-sdk/typescript"
+              ],
+              "feature_preservation": "evidenced_partial",
+              "id": "print-stream-json",
+              "input_contract": "Initial prompt by argv or text stdin; stream-json input can retain stdin for further protocol messages.",
+              "kind": "one_shot_cli",
+              "launch": "claude -p \"PROMPT\" --output-format stream-json --verbose",
+              "launch_conditions": [
+                "Preconfigure authentication and an explicit unattended permission policy"
+              ],
+              "notes": "Ordinary supported execution surface.",
+              "observation_contract": "SDKMessage-compatible NDJSON on stdout and diagnostics on stderr.",
+              "preserved_features": [
+                "skills",
+                "plugins",
+                "hooks",
+                "project context",
+                "MCP configuration",
+                "session persistence"
+              ],
+              "unattended_obligations": [
+                "Handle permission requests through explicit policy",
+                "Consume through the terminal result record"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "active-turn steering",
+                "idle prompt submission"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "../steering/claude.md"
+              ],
+              "feature_preservation": "unknown",
+              "id": "peer-control",
+              "input_contract": "Provider peer protocol described in the sibling steering report.",
+              "kind": "retained_subprocess",
+              "launch": "Claude Code with its discovered peer-control endpoint retained by a managed launcher",
+              "launch_conditions": [
+                "Register the exact process-owned endpoint",
+                "Preserve endpoint credentials and session correlation",
+                "Revalidate platform-specific transport support"
+              ],
+              "notes": "Candidate managed interface from existing steering evidence; feature parity and Claudine activation remain unresolved.",
+              "observation_contract": "Peer responses plus the ordinary stream-json lifecycle when launched in non-interactive mode.",
+              "preserved_features": [],
+              "unattended_obligations": [
+                "Do not treat endpoint discovery as activated Claudine support",
+                "Do not replay ambiguous submissions"
+              ]
+            }
+          ],
+          "execution_selection": {
+            "fallback": "",
+            "fallback_conditions": [],
+            "feature_parity": "Peer-control may add bidirectional control, but parity with normal skills, plugins, hooks, templates, and context is unresolved.",
+            "notes": "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed.",
+            "preferred": "print-stream-json",
+            "rationale": "It is the established parser-grade one-shot interface; the richer peer-control candidate is not yet established as an activated Claudine launch profile.",
+            "readiness_check": "Require system/init before relying on session metadata and consume a terminal result.",
+            "replay_policy": "Do not replay after user-message acceptance is ambiguous."
+          },
           "gaps": [
             "No official JSON Schema, OpenAPI document, or explicit stream schema version was found for CLI stream-json.",
             "No documented guarantee was found that every CLI stream-json event is exactly the same union as the TypeScript SDKMessage in every release, though docs and package declarations strongly align.",
@@ -7745,6 +7921,61 @@
             "session_id": "system/init.session_id and result.session_id; most SDKMessage records also carry session_id.",
             "version": "Not consistently emitted in stream-json; use `claude --version` outside the run."
           },
+          "settlement": [
+            {
+              "acceptance_signal": "system/init and optional replayed user message",
+              "input_handling": "Argv or stdin supplies the initial prompt; stream-json input acknowledgments are optional.",
+              "interface": "print-stream-json",
+              "notes": "Result subtype and is_error determine the run verdict.",
+              "operation": "one-shot prompt",
+              "process_lifecycle": "The one-shot process exits after the result; exit status refines success or failure.",
+              "settled_signal": "type=result",
+              "turn_scheduling": "Assistant/tool lifecycle records evidence model work after initialization.",
+              "turn_terminal_signal": "assistant/tool lifecycle completion"
+            }
+          ],
+          "steering_mechanisms": [
+            {
+              "interface": "peer-control",
+              "mechanism": "peer-unix-active",
+              "notes": "Candidate managed control only; the steering report owns transport, delivery, and platform caveats.",
+              "operations": [
+                "active-turn steering",
+                "idle prompt submission"
+              ],
+              "reference": "../steering/claude.md"
+            },
+            {
+              "interface": "peer-control",
+              "mechanism": "peer-unix-idle",
+              "notes": "Candidate managed control only; the steering report owns transport, delivery, and platform caveats.",
+              "operations": [
+                "active-turn steering",
+                "idle prompt submission"
+              ],
+              "reference": "../steering/claude.md"
+            },
+            {
+              "interface": "peer-control",
+              "mechanism": "peer-windows-pipe-active",
+              "notes": "Candidate managed control only; the steering report owns transport, delivery, and platform caveats.",
+              "operations": [
+                "active-turn steering",
+                "idle prompt submission"
+              ],
+              "reference": "../steering/claude.md"
+            },
+            {
+              "interface": "peer-control",
+              "mechanism": "peer-windows-pipe-idle",
+              "notes": "Candidate managed control only; the steering report owns transport, delivery, and platform caveats.",
+              "operations": [
+                "active-turn steering",
+                "idle prompt submission"
+              ],
+              "reference": "../steering/claude.md"
+            }
+          ],
           "stream_contract": {
             "correlation_fields": [
               "session_id",
@@ -8182,6 +8413,17 @@
               "name": "Agent/subagent tool",
               "notes": "Parent stream can show subagent-produced assistant messages and hook events, but subagent-private transcript detail is not guaranteed without extra surfaces.",
               "result_visible": true
+            }
+          ],
+          "unattended_requests": [
+            {
+              "interface": "print-stream-json",
+              "notes": "Do not disable skills, plugins, hooks, or context merely to avoid request handling.",
+              "observed_behavior": "Permission behavior is configurable and can be routed to a permission-prompt MCP tool.",
+              "policy": "Never fabricate approval or a human answer.",
+              "request": "tool permission or human question",
+              "required_response": "Apply an explicit caller policy or fail the run.",
+              "timeout_behavior": "Provider-specific; no universal timeout was established."
             }
           ],
           "use_cases": [
@@ -9155,6 +9397,7 @@
             ],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "prefer_body"
           }
         },
@@ -13083,6 +13326,79 @@
               "notes": "Variable names are user-defined; record effective provider config rather than assuming OPENAI_API_KEY."
             }
           ],
+          "execution_interfaces": [
+            {
+              "control_capabilities": [],
+              "documented_exclusions": [
+                "mid-turn bidirectional control"
+              ],
+              "evidence": [
+                "https://developers.openai.com/codex/noninteractive"
+              ],
+              "feature_preservation": "evidenced_partial",
+              "id": "exec-json",
+              "input_contract": "Prompt by argv or stdin.",
+              "kind": "one_shot_cli",
+              "launch": "codex exec --json \"PROMPT\"",
+              "launch_conditions": [
+                "Select sandbox and approval policy explicitly",
+                "Preconfigure authentication"
+              ],
+              "notes": "Ordinary supported one-shot execution surface.",
+              "observation_contract": "Exec JSONL events on stdout; diagnostics and final process status remain separate evidence.",
+              "preserved_features": [
+                "skills",
+                "configuration",
+                "project context",
+                "MCP configuration",
+                "session persistence"
+              ],
+              "unattended_obligations": [
+                "Preserve stderr and exit status",
+                "Do not replay ambiguous submissions"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "turn/start",
+                "turn/steer",
+                "turn/interrupt",
+                "thread resume"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "../steering/codex.md"
+              ],
+              "feature_preservation": "unknown",
+              "id": "app-server",
+              "input_contract": "JSON-RPC request lines on stdin.",
+              "kind": "retained_subprocess",
+              "launch": "codex app-server --listen stdio://",
+              "launch_conditions": [
+                "Complete initialize/initialized",
+                "Retain exact thread and turn identities",
+                "Gate experimental methods by installed protocol capability"
+              ],
+              "notes": "Proposed managed interface; this backfill does not claim Claudine activation or full feature parity.",
+              "observation_contract": "Correlated JSON-RPC responses and lifecycle notifications on stdout.",
+              "preserved_features": [],
+              "unattended_obligations": [
+                "Track exact expectedTurnId",
+                "Do not retry ambiguous input",
+                "Observe matching turn completion"
+              ]
+            }
+          ],
+          "execution_selection": {
+            "fallback": "",
+            "fallback_conditions": [],
+            "feature_parity": "App-server retains bidirectional control, but parity with ordinary CLI skills, configuration, templates, context, and MCP loading is not fully evidenced.",
+            "notes": "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed.",
+            "preferred": "exec-json",
+            "rationale": "It is the established one-shot wrapper interface; app-server is the richer managed candidate but readiness and feature parity remain unresolved.",
+            "readiness_check": "Require thread.started and a terminal turn.completed or turn.failed, plus process exit.",
+            "replay_policy": "Never replay after acceptance is ambiguous."
+          },
           "gaps": [
             "No official, versioned JSON Schema for codex exec --json was found.",
             "Exact stderr text and exit codes for every auth, quota, rate-limit, and billing failure were not exhaustively fixture-tested.",
@@ -13310,6 +13626,59 @@
             "session_id": "thread.started.thread_id, first event for new exec threads and usable with codex exec resume <SESSION_ID>",
             "version": "Not emitted in exec JSONL; wrapper must capture `codex --version` separately if needed."
           },
+          "settlement": [
+            {
+              "acceptance_signal": "thread.started followed by turn.started",
+              "input_handling": "Prompt is accepted during process startup; no separate acceptance receipt is exposed.",
+              "interface": "exec-json",
+              "notes": "Top-level error and stderr refine failure classification.",
+              "operation": "one-shot prompt",
+              "process_lifecycle": "Exec is one-shot and exits after the turn.",
+              "settled_signal": "terminal turn event followed by process exit",
+              "turn_scheduling": "turn.started establishes scheduled model work.",
+              "turn_terminal_signal": "turn.completed or turn.failed"
+            },
+            {
+              "acceptance_signal": "successful turn/start response",
+              "input_handling": "A correlated JSON-RPC response establishes request handling, while notifications establish later execution.",
+              "interface": "app-server",
+              "notes": "Post-turn extension settlement beyond turn/completed is not established.",
+              "operation": "managed turn/start",
+              "process_lifecycle": "The app-server remains alive after turn settlement.",
+              "settled_signal": "matching turn/completed for the submitted turn",
+              "turn_scheduling": "turn/started identifies the scheduled turn.",
+              "turn_terminal_signal": "matching turn/completed"
+            }
+          ],
+          "steering_mechanisms": [
+            {
+              "interface": "app-server",
+              "mechanism": "app-server-steer",
+              "notes": "Activation remains a separate implementation decision; use the steering report's exact guards.",
+              "operations": [
+                "active-turn steering"
+              ],
+              "reference": "../steering/codex.md"
+            },
+            {
+              "interface": "app-server",
+              "mechanism": "app-server-turn-start",
+              "notes": "Activation remains a separate implementation decision; use the steering report's exact guards.",
+              "operations": [
+                "idle turn start"
+              ],
+              "reference": "../steering/codex.md"
+            },
+            {
+              "interface": "app-server",
+              "mechanism": "app-server-interrupt-then-start",
+              "notes": "Activation remains a separate implementation decision; use the steering report's exact guards.",
+              "operations": [
+                "cancel then replace"
+              ],
+              "reference": "../steering/codex.md"
+            }
+          ],
           "stream_contract": {
             "correlation_fields": [
               "thread_id",
@@ -13595,6 +13964,17 @@
               "name": "collab_tool_call / subagents",
               "notes": "Covers spawn_agent, send_input, wait, and close_agent orchestration.",
               "result_visible": true
+            }
+          ],
+          "unattended_requests": [
+            {
+              "interface": "app-server",
+              "notes": "Ordinary exec fails unavailable interactive requests rather than providing a general response channel.",
+              "observed_behavior": "The managed protocol can expose approval and user-input request state; exact eligible request families depend on protocol version.",
+              "policy": "Never fabricate approval or human input.",
+              "request": "tool approval, elicitation, or user-input request",
+              "required_response": "Answer only from explicit caller policy; otherwise cancel or fail with the unresolved request.",
+              "timeout_behavior": "Unknown from the retained evidence."
             }
           ],
           "use_cases": [
@@ -14622,6 +15002,7 @@
               "[LocalAgentExecutor]"
             ],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -18137,6 +18518,75 @@
               "notes": "Programmatic stream-json already strips ANSI in projected messages."
             }
           ],
+          "execution_interfaces": [
+            {
+              "control_capabilities": [],
+              "documented_exclusions": [
+                "mid-turn bidirectional control"
+              ],
+              "evidence": [
+                "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/headless.md"
+              ],
+              "feature_preservation": "evidenced_partial",
+              "id": "headless-stream-json",
+              "input_contract": "Initial prompt from --prompt or stdin.",
+              "kind": "one_shot_cli",
+              "launch": "gemini --output-format stream-json --prompt \"<prompt>\"",
+              "launch_conditions": [
+                "Preconfigure authentication, trust, and approval behavior"
+              ],
+              "notes": "Ordinary one-shot interface.",
+              "observation_contract": "JSONL lifecycle on stdout and diagnostics on stderr.",
+              "preserved_features": [
+                "skills",
+                "extensions",
+                "project context",
+                "MCP configuration",
+                "session persistence"
+              ],
+              "unattended_obligations": [
+                "Handle or reject approvals by policy",
+                "Consume through result"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "session/prompt",
+                "session/cancel"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "../steering/gemini.md"
+              ],
+              "feature_preservation": "unknown",
+              "id": "acp",
+              "input_contract": "ACP JSON-RPC over stdio.",
+              "kind": "retained_subprocess",
+              "launch": "gemini --experimental-acp",
+              "launch_conditions": [
+                "Complete ACP initialization",
+                "Register the exact session",
+                "Confirm installed-version support"
+              ],
+              "notes": "Proposed managed candidate; activation and full feature parity are unresolved.",
+              "observation_contract": "Correlated ACP responses and session notifications.",
+              "preserved_features": [],
+              "unattended_obligations": [
+                "Observe cancellation settlement before replacement",
+                "Do not retry ambiguous requests"
+              ]
+            }
+          ],
+          "execution_selection": {
+            "fallback": "",
+            "fallback_conditions": [],
+            "feature_parity": "ACP resource and extension parity with ordinary headless execution is unknown.",
+            "notes": "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed.",
+            "preferred": "headless-stream-json",
+            "rationale": "It is the established parser-grade wrapper surface; ACP offers managed control but remains a candidate pending readiness and parity verification.",
+            "readiness_check": "Require an init record and terminal result from stream-json.",
+            "replay_policy": "Do not replay after prompt acceptance is ambiguous."
+          },
           "gaps": [
             "No local authenticated agent run was executed, so real provider auth/quota errors were not captured.",
             "Exact non-TTY behavior for ask_user, MCP OAuth, and approval prompts was not verified beyond docs/source.",
@@ -18297,6 +18747,41 @@
             "session_id": "init.session_id; json.session_id for single JSON",
             "version": "Not emitted in stream-json; collect with gemini --version before launch if needed."
           },
+          "settlement": [
+            {
+              "acceptance_signal": "init followed by model activity",
+              "input_handling": "Prompt is supplied at launch without a distinct receipt.",
+              "interface": "headless-stream-json",
+              "notes": "If result is absent, stderr and exit status provide fallback failure evidence.",
+              "operation": "one-shot prompt",
+              "process_lifecycle": "The headless process exits after completion.",
+              "settled_signal": "result with status success or error, followed by process exit",
+              "turn_scheduling": "Model and assistant events evidence work after init.",
+              "turn_terminal_signal": "result"
+            }
+          ],
+          "steering_mechanisms": [
+            {
+              "interface": "acp",
+              "mechanism": "acp-idle-prompt",
+              "notes": "The steering report defines the operation and multi-phase cancellation boundary.",
+              "operations": [
+                "idle prompt submission",
+                "cancel then replace"
+              ],
+              "reference": "../steering/gemini.md"
+            },
+            {
+              "interface": "acp",
+              "mechanism": "acp-cancel-then-prompt",
+              "notes": "The steering report defines the operation and multi-phase cancellation boundary.",
+              "operations": [
+                "idle prompt submission",
+                "cancel then replace"
+              ],
+              "reference": "../steering/gemini.md"
+            }
+          ],
           "stream_contract": {
             "correlation_fields": [
               "session_id",
@@ -18584,6 +19069,17 @@
               "name": "subagent tools",
               "notes": "Subagents are exposed as tools, so parent stream shows only the parent tool call/result, not nested subagent lifecycle.",
               "result_visible": true
+            }
+          ],
+          "unattended_requests": [
+            {
+              "interface": "headless-stream-json",
+              "notes": "Preserve skills, extensions, templates, and project context.",
+              "observed_behavior": "Approval behavior is configurable; question behavior is unresolved in existing evidence.",
+              "policy": "Never fabricate an approval or human answer.",
+              "request": "tool approval or human question",
+              "required_response": "Apply explicit policy or fail when no supported response channel exists.",
+              "timeout_behavior": "Unknown."
             }
           ],
           "use_cases": [
@@ -19453,6 +19949,7 @@
             "stderr_noise_prefixes": [],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -23078,6 +23575,75 @@
               "notes": "Prefer --quiet plus stream-json instead of relying on color suppression."
             }
           ],
+          "execution_interfaces": [
+            {
+              "control_capabilities": [],
+              "documented_exclusions": [
+                "mid-turn bidirectional control"
+              ],
+              "evidence": [
+                "https://block.github.io/goose/docs/guides/goose-cli-commands/"
+              ],
+              "feature_preservation": "evidenced_partial",
+              "id": "run-stream-json",
+              "input_contract": "Initial instructions from argv, file, or stdin.",
+              "kind": "one_shot_cli",
+              "launch": "goose run --quiet --output-format stream-json -i -",
+              "launch_conditions": [
+                "Preconfigure provider, authentication, and permission policy"
+              ],
+              "notes": "Ordinary one-shot interface.",
+              "observation_contract": "Structured JSONL records on stdout; wrapper-owned metadata and exit status remain separate.",
+              "preserved_features": [
+                "extensions",
+                "recipes",
+                "project context",
+                "session persistence"
+              ],
+              "unattended_obligations": [
+                "Preserve wrapper metadata",
+                "Treat missing terminal evidence conservatively"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "steer",
+                "session/prompt",
+                "session/cancel"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "../steering/goose.md"
+              ],
+              "feature_preservation": "unknown",
+              "id": "acp-server",
+              "input_contract": "ACP JSON-RPC requests.",
+              "kind": "network_server",
+              "launch": "goose acp",
+              "launch_conditions": [
+                "Start and register the ACP server",
+                "Retain exact session and active run IDs",
+                "Secure the reachable endpoint"
+              ],
+              "notes": "Proposed managed interface; no Claudine activation or full parity is claimed.",
+              "observation_contract": "Correlated responses and session/run lifecycle evidence.",
+              "preserved_features": [],
+              "unattended_obligations": [
+                "Observe old-run settlement before replacement",
+                "Never retry ambiguous submission"
+              ]
+            }
+          ],
+          "execution_selection": {
+            "fallback": "",
+            "fallback_conditions": [],
+            "feature_parity": "ACP parity for extensions, recipes, templates, and project context is unknown.",
+            "notes": "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed.",
+            "preferred": "run-stream-json",
+            "rationale": "It is the current wrapper-grade one-shot surface; ACP is the bidirectional candidate but its readiness and feature parity remain unresolved.",
+            "readiness_check": "Require parseable stream records and terminal complete or error evidence.",
+            "replay_policy": "Do not replay when submission acceptance is ambiguous."
+          },
           "gaps": [
             "No local Goose binary was available in this environment, so no live fixture was captured.",
             "No formal JSON Schema for goose run --output-format stream-json was found.",
@@ -23245,6 +23811,54 @@
             "session_id": "Not emitted in stream-json; human banner shows it when --quiet is omitted; wrapper should provide --name and use session list/storage for recovery.",
             "version": "Not emitted in stream-json; available from goose --version outside the run."
           },
+          "settlement": [
+            {
+              "acceptance_signal": "first session/message record",
+              "input_handling": "Instructions are supplied at launch without a distinct acceptance receipt.",
+              "interface": "run-stream-json",
+              "notes": "Exit code alone is not reliable according to existing evidence.",
+              "operation": "one-shot instructions",
+              "process_lifecycle": "The run process is one-shot.",
+              "settled_signal": "complete or error followed by process termination",
+              "turn_scheduling": "Message and tool records evidence work.",
+              "turn_terminal_signal": "complete or error"
+            }
+          ],
+          "steering_mechanisms": [
+            {
+              "interface": "acp-server",
+              "mechanism": "acp-steer",
+              "notes": "Use the steering report's exact session/run guards and settlement sequencing.",
+              "operations": [
+                "active-run steering",
+                "idle prompt submission",
+                "cancel then replace"
+              ],
+              "reference": "../steering/goose.md"
+            },
+            {
+              "interface": "acp-server",
+              "mechanism": "acp-idle-prompt",
+              "notes": "Use the steering report's exact session/run guards and settlement sequencing.",
+              "operations": [
+                "active-run steering",
+                "idle prompt submission",
+                "cancel then replace"
+              ],
+              "reference": "../steering/goose.md"
+            },
+            {
+              "interface": "acp-server",
+              "mechanism": "acp-cancel-submit",
+              "notes": "Use the steering report's exact session/run guards and settlement sequencing.",
+              "operations": [
+                "active-run steering",
+                "idle prompt submission",
+                "cancel then replace"
+              ],
+              "reference": "../steering/goose.md"
+            }
+          ],
           "stream_contract": {
             "correlation_fields": [
               "message.id",
@@ -23446,6 +24060,17 @@
               "name": "prompt/elicitation tools",
               "notes": "MCP elicitation is not collected in headless mode; it fails rather than reading stdin mid-run.",
               "result_visible": false
+            }
+          ],
+          "unattended_requests": [
+            {
+              "interface": "run-stream-json",
+              "notes": "Do not disable extensions or context automatically.",
+              "observed_behavior": "Permission behavior is configurable; human questions fail in the existing headless evidence.",
+              "policy": "Never fabricate approval or human input.",
+              "request": "tool approval or human question",
+              "required_response": "Use explicit preconfigured policy or fail.",
+              "timeout_behavior": "Unknown."
             }
           ],
           "use_cases": [
@@ -24380,6 +25005,7 @@
             ],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -28026,6 +28652,102 @@
               "notes": "Secondary telemetry stream, not stdout."
             }
           ],
+          "execution_interfaces": [
+            {
+              "control_capabilities": [],
+              "documented_exclusions": [
+                "mid-turn bidirectional control"
+              ],
+              "evidence": [
+                "https://kilo.ai/docs/code-with-ai/platforms/cli"
+              ],
+              "feature_preservation": "evidenced_partial",
+              "id": "run-json",
+              "input_contract": "Prompt words plus optional non-TTY stdin and file attachments.",
+              "kind": "one_shot_cli",
+              "launch": "kilo run --auto --format json --dir <cwd> \"<prompt>\"",
+              "launch_conditions": [
+                "Caller explicitly selects the permission posture",
+                "Preconfigure authentication"
+              ],
+              "notes": "Ordinary one-shot interface; --auto remains an explicit caller policy choice.",
+              "observation_contract": "NDJSON event stream on stdout and diagnostics on stderr.",
+              "preserved_features": [
+                "agents",
+                "skills",
+                "commands",
+                "plugins",
+                "project configuration",
+                "session persistence"
+              ],
+              "unattended_obligations": [
+                "Do not infer success from exit code alone",
+                "Preserve stderr"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "prompt_async",
+                "idle prompt",
+                "abort"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "../steering/kilo.md"
+              ],
+              "feature_preservation": "unknown",
+              "id": "http-server",
+              "input_contract": "Directory-routed HTTP session prompt requests.",
+              "kind": "local_server",
+              "launch": "kilo serve --port <port>",
+              "launch_conditions": [
+                "Require authentication",
+                "Retain exact directory/session registration and server identity"
+              ],
+              "notes": "Proposed managed interface; activation and full feature parity remain unresolved.",
+              "observation_contract": "HTTP responses plus SSE/session status and history.",
+              "preserved_features": [],
+              "unattended_obligations": [
+                "Observe settlement after abort",
+                "Do not retry ambiguous submission",
+                "Track directory routing"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "session prompt",
+                "session cancel"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "https://kilo.ai/docs/code-with-ai/platforms/cli"
+              ],
+              "feature_preservation": "unknown",
+              "id": "acp",
+              "input_contract": "ACP protocol.",
+              "kind": "retained_subprocess",
+              "launch": "kilo acp --cwd <dir>",
+              "launch_conditions": [
+                "Complete ACP initialization"
+              ],
+              "notes": "Candidate interface; this evidence does not establish readiness.",
+              "observation_contract": "ACP responses and notifications.",
+              "preserved_features": [],
+              "unattended_obligations": [
+                "Resolve requests through explicit policy"
+              ]
+            }
+          ],
+          "execution_selection": {
+            "fallback": "",
+            "fallback_conditions": [],
+            "feature_parity": "HTTP and ACP parity for agents, skills, commands, plugins, templates, and project context is unresolved.",
+            "notes": "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed.",
+            "preferred": "run-json",
+            "rationale": "It is the current wrapper-grade surface; HTTP server is the richer managed candidate but needs lifecycle, auth, and parity work.",
+            "readiness_check": "Require parseable events and conservative terminal classification.",
+            "replay_policy": "Never retry an ambiguously acknowledged request."
+          },
           "gaps": [
             "No formal JSON Schema/OpenAPI definition was found for kilo run --format json.",
             "Could not verify a real installed kilo binary run with live credentials in this workspace.",
@@ -28219,6 +28941,59 @@
             "session_id": "sessionID on every emitted JSON record; available on the first emitted event, not as a separate start event.",
             "version": "Not emitted in stream; use kilo --version out of band."
           },
+          "settlement": [
+            {
+              "acceptance_signal": "first session event",
+              "input_handling": "Prompt is supplied at launch without a distinct acceptance receipt.",
+              "interface": "run-json",
+              "notes": "Exit code alone is not reliable.",
+              "operation": "one-shot prompt",
+              "process_lifecycle": "Run is one-shot.",
+              "settled_signal": "process exit after stream drain, interpreted with error events and stderr",
+              "turn_scheduling": "step_start and content/tool events evidence work.",
+              "turn_terminal_signal": "No explicit successful terminal event is evidenced."
+            },
+            {
+              "acceptance_signal": "HTTP 204",
+              "input_handling": "HTTP 204 is an initial receipt only.",
+              "interface": "http-server",
+              "notes": "No operation ID guard or dedicated full-settlement event is evidenced.",
+              "operation": "managed prompt_async",
+              "process_lifecycle": "Server remains alive.",
+              "settled_signal": "same session is observed idle after the submitted work reaches terminal state",
+              "turn_scheduling": "SSE/status/history evidence later execution.",
+              "turn_terminal_signal": "session leaves busy state after terminal message/error"
+            }
+          ],
+          "steering_mechanisms": [
+            {
+              "interface": "http-server",
+              "mechanism": "http-prompt-async-active",
+              "notes": "Use exact directory/session guards; cancel and replacement are separate operations.",
+              "operations": [
+                "managed prompt control"
+              ],
+              "reference": "../steering/kilo.md"
+            },
+            {
+              "interface": "http-server",
+              "mechanism": "http-prompt-async-idle",
+              "notes": "Use exact directory/session guards; cancel and replacement are separate operations.",
+              "operations": [
+                "managed prompt control"
+              ],
+              "reference": "../steering/kilo.md"
+            },
+            {
+              "interface": "http-server",
+              "mechanism": "http-abort-then-prompt",
+              "notes": "Use exact directory/session guards; cancel and replacement are separate operations.",
+              "operations": [
+                "managed prompt control"
+              ],
+              "reference": "../steering/kilo.md"
+            }
+          ],
           "stream_contract": {
             "correlation_fields": [
               "sessionID",
@@ -28469,6 +29244,17 @@
               "name": "webfetch/websearch/mcp",
               "notes": "MCP tools use the same tool part envelope in run NDJSON.",
               "result_visible": true
+            }
+          ],
+          "unattended_requests": [
+            {
+              "interface": "run-json",
+              "notes": "Do not disable project configuration or plugins automatically.",
+              "observed_behavior": "Both are configurable; the ordinary documented invocation uses autonomous mode.",
+              "policy": "Never silently select --auto or fabricate approval or human input.",
+              "request": "permission or question",
+              "required_response": "Require an explicit caller-selected policy or fail.",
+              "timeout_behavior": "Unknown."
             }
           ],
           "use_cases": [
@@ -29521,6 +30307,7 @@
             "stderr_noise_prefixes": [],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -32492,6 +33279,133 @@
               "notes": "Affects config, metadata, credentials, MCP OAuth tokens, sessions, plans, history, and logs."
             }
           ],
+          "execution_interfaces": [
+            {
+              "control_capabilities": [],
+              "documented_exclusions": [
+                "Wire JSON-RPC control"
+              ],
+              "evidence": [
+                "https://moonshotai.github.io/kimi-cli/en/guides/print-mode.html"
+              ],
+              "feature_preservation": "evidenced_partial",
+              "id": "print-stream-json",
+              "input_contract": "Prompt from argv, or user-role JSONL on stdin with stream-json input.",
+              "kind": "one_shot_cli",
+              "launch": "kimi --print -p <prompt> --output-format stream-json",
+              "launch_conditions": [
+                "Preconfigure authentication and unattended approval policy"
+              ],
+              "notes": "Ordinary one-shot interface and reduced-control fallback candidate.",
+              "observation_contract": "JSONL message projection on stdout and diagnostics on stderr.",
+              "preserved_features": [
+                "skills",
+                "extensions",
+                "project context",
+                "MCP configuration",
+                "session state"
+              ],
+              "unattended_obligations": [
+                "Preserve stderr and exit status",
+                "Consume the terminal result"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "prompt",
+                "cancel"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "https://moonshotai.github.io/kimi-cli/en/guides/wire-mode.html"
+              ],
+              "feature_preservation": "evidenced_partial",
+              "id": "wire",
+              "input_contract": "JSON-RPC requests over stdio.",
+              "kind": "retained_subprocess",
+              "launch": "kimi --wire --work-dir <repo> --afk",
+              "launch_conditions": [
+                "Preconfigure authentication and unattended approval policy",
+                "Retain stdin/stdout"
+              ],
+              "notes": "Existing preferred managed subprocess interface.",
+              "observation_contract": "Correlated JSON-RPC responses and notifications; stderr/logs carry diagnostics.",
+              "preserved_features": [
+                "skills",
+                "extensions",
+                "project context",
+                "MCP configuration",
+                "session state"
+              ],
+              "unattended_obligations": [
+                "Answer supported requests only through explicit policy",
+                "Correlate prompt completion"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "steer",
+                "submit"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "../steering/kimi.md"
+              ],
+              "feature_preservation": "unknown",
+              "id": "web-server",
+              "input_contract": "HTTP request API with optional authenticated WebSocket events.",
+              "kind": "local_server",
+              "launch": "kimi --web",
+              "launch_conditions": [
+                "Retain authenticated endpoint and native session identity"
+              ],
+              "notes": "Candidate managed server surface; activation and full parity remain unresolved.",
+              "observation_contract": "HTTP responses plus WebSocket lifecycle evidence.",
+              "preserved_features": [],
+              "unattended_obligations": [
+                "Correlate later lifecycle separately from initial receipt",
+                "Do not retry ambiguous submission"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "session/prompt",
+                "session/cancel"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "../steering/kimi.md"
+              ],
+              "feature_preservation": "unknown",
+              "id": "acp",
+              "input_contract": "ACP JSON-RPC over stdio.",
+              "kind": "retained_subprocess",
+              "launch": "kimi --acp",
+              "launch_conditions": [
+                "Complete ACP initialization and retain exact session identity"
+              ],
+              "notes": "Alternative candidate managed protocol.",
+              "observation_contract": "Correlated responses and session notifications.",
+              "preserved_features": [],
+              "unattended_obligations": [
+                "Wait for cancellation settlement before replacement"
+              ]
+            }
+          ],
+          "execution_selection": {
+            "fallback": "print-stream-json",
+            "fallback_conditions": [
+              "Wire launch or initialization fails before prompt submission",
+              "Caller accepts loss of retained control",
+              "Enabled feature profile remains usable in print mode"
+            ],
+            "feature_parity": "Wire preserves the evidenced normal resource surface; parity of web and ACP remains unknown.",
+            "notes": "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed.",
+            "preferred": "wire",
+            "rationale": "Wire already combines retained structured execution and control; web and ACP remain alternate managed candidates.",
+            "readiness_check": "Require a successful initialize exchange and advertised protocol capability before prompt submission.",
+            "replay_policy": "Never replay an ambiguously accepted prompt."
+          },
           "gaps": [
             "No official JSON Schema, OpenAPI, AsyncAPI, or versioned schema artifact was found for Wire.",
             "No captured local fixture was produced because exercising Kimi would require auth and could run tools.",
@@ -32650,6 +33564,57 @@
             "session_id": "Not emitted by `initialize`; capture from launch/resume args and the session directory.",
             "version": "`initialize.result.server.version`; `kimi info` is also documented for version/protocol information."
           },
+          "settlement": [
+            {
+              "acceptance_signal": "successful JSON-RPC handling of prompt",
+              "input_handling": "A correlated prompt request initiates the operation.",
+              "interface": "wire",
+              "notes": "StepInterrupted and JSON-RPC errors refine failure.",
+              "operation": "prompt request",
+              "process_lifecycle": "Wire remains alive for later requests; teardown is separate.",
+              "settled_signal": "correlated prompt response with status finished, cancelled, or max_steps_reached",
+              "turn_scheduling": "Step notifications evidence model work.",
+              "turn_terminal_signal": "prompt result status"
+            }
+          ],
+          "steering_mechanisms": [
+            {
+              "interface": "web-server",
+              "mechanism": "web_steer",
+              "notes": "Initial HTTP receipt and later processing are distinct.",
+              "operations": [
+                "active-turn steering"
+              ],
+              "reference": "../steering/kimi.md"
+            },
+            {
+              "interface": "web-server",
+              "mechanism": "web_submit",
+              "notes": "Initial HTTP receipt and later processing are distinct.",
+              "operations": [
+                "idle submission"
+              ],
+              "reference": "../steering/kimi.md"
+            },
+            {
+              "interface": "acp",
+              "mechanism": "acp_cancel_submit",
+              "notes": "Cancellation settlement must precede replacement.",
+              "operations": [
+                "cancel then replace"
+              ],
+              "reference": "../steering/kimi.md"
+            },
+            {
+              "interface": "acp",
+              "mechanism": "acp_prompt",
+              "notes": "Use the steering report's acceptance boundary.",
+              "operations": [
+                "idle prompt submission"
+              ],
+              "reference": "../steering/kimi.md"
+            }
+          ],
           "stream_contract": {
             "correlation_fields": [
               "id",
@@ -33125,6 +34090,17 @@
               "name": "External tools",
               "notes": "Wire client registers tools during initialize and must answer tool-call requests.",
               "result_visible": true
+            }
+          ],
+          "unattended_requests": [
+            {
+              "interface": "wire",
+              "notes": "AFK is a declared provider mode, not proof that every request is safely resolved.",
+              "observed_behavior": "Requests are configurable and AFK mode affects unattended handling.",
+              "policy": "Never fabricate approval or a human answer.",
+              "request": "approval or human question",
+              "required_response": "Use explicit caller policy or fail the run.",
+              "timeout_behavior": "Unknown."
             }
           ],
           "use_cases": [
@@ -34100,6 +35076,7 @@
             ],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": true,
             "tool_result_summary": "show"
           }
         },
@@ -38621,6 +39598,104 @@
               "notes": "May appear in logs/telemetry and affect client-specific behavior."
             }
           ],
+          "execution_interfaces": [
+            {
+              "control_capabilities": [],
+              "documented_exclusions": [
+                "mid-turn bidirectional control"
+              ],
+              "evidence": [
+                "https://opencode.ai/docs/cli/"
+              ],
+              "feature_preservation": "evidenced_partial",
+              "id": "run-json",
+              "input_contract": "Initial prompt from argv; non-TTY stdin may supplement input.",
+              "kind": "one_shot_cli",
+              "launch": "opencode run --format json --print-logs --log-level INFO -- \"<prompt>\"",
+              "launch_conditions": [
+                "Preconfigure authentication and explicit permission policy"
+              ],
+              "notes": "Ordinary one-shot surface.",
+              "observation_contract": "NDJSON on stdout plus structured lifecycle diagnostics on stderr.",
+              "preserved_features": [
+                "agents",
+                "skills",
+                "commands",
+                "plugins",
+                "project context",
+                "MCP configuration",
+                "session persistence"
+              ],
+              "unattended_obligations": [
+                "Parse both output channels",
+                "Do not infer success from exit code alone"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "prompt_async",
+                "prompt",
+                "abort"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "https://opencode.ai/docs/server/",
+                "../steering/opencode.md"
+              ],
+              "feature_preservation": "unknown",
+              "id": "http-server",
+              "input_contract": "HTTP session/message requests.",
+              "kind": "local_server",
+              "launch": "opencode serve",
+              "launch_conditions": [
+                "Use a stable authenticated endpoint",
+                "Retain directory/workspace and native session correlation"
+              ],
+              "notes": "Proposed managed interface; Claudine activation and complete parity are unresolved.",
+              "observation_contract": "HTTP responses, session reads, and SSE event streams.",
+              "preserved_features": [],
+              "unattended_obligations": [
+                "Correlate later events separately from 204 receipt",
+                "Revalidate session state",
+                "Do not retry ambiguous submissions"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "session/prompt",
+                "session/cancel"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/cli/cmd/acp.ts"
+              ],
+              "feature_preservation": "unknown",
+              "id": "acp",
+              "input_contract": "ACP JSON-RPC over stdin.",
+              "kind": "retained_subprocess",
+              "launch": "opencode acp",
+              "launch_conditions": [
+                "Complete ACP initialization and retain exact session identity"
+              ],
+              "notes": "Candidate protocol; selection readiness is unresolved.",
+              "observation_contract": "ACP responses and notifications on stdout.",
+              "preserved_features": [],
+              "unattended_obligations": [
+                "Correlate requests",
+                "Resolve unattended requests explicitly"
+              ]
+            }
+          ],
+          "execution_selection": {
+            "fallback": "",
+            "fallback_conditions": [],
+            "feature_parity": "HTTP and ACP parity with normal agents, skills, commands, plugins, templates, and context is not fully evidenced.",
+            "notes": "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed.",
+            "preferred": "run-json",
+            "rationale": "It is the currently established wrapper surface; HTTP server offers richer control but needs managed launch, authentication, correlation, and parity verification.",
+            "readiness_check": "Require parseable stdout and stderr streams and classify terminal state conservatively.",
+            "replay_policy": "Never retry a submission after an ambiguous HTTP or process boundary."
+          },
           "gaps": [
             "No provider-published formal schema was found for the exact `opencode run --format json` line envelope.",
             "No verified machine-readable final success event exists in CLI stdout.",
@@ -38833,6 +39908,77 @@
             "session_id": "stdout `sessionID` on every emitted JSON line; stderr `service=session id=... created`; server `Session.id`.",
             "version": "Not in stdout NDJSON. `opencode --version` prints version; `--print-logs` boot banner includes `version`; server health returns version."
           },
+          "settlement": [
+            {
+              "acceptance_signal": "first session/message event",
+              "input_handling": "Prompt is supplied at launch; no distinct acceptance receipt is exposed.",
+              "interface": "run-json",
+              "notes": "Exit code alone is not reliable.",
+              "operation": "one-shot prompt",
+              "process_lifecycle": "Run is one-shot.",
+              "settled_signal": "process exit after stream drain, interpreted with stdout error and classified stderr evidence",
+              "turn_scheduling": "step and message events evidence work.",
+              "turn_terminal_signal": "No explicit terminal success event is evidenced."
+            },
+            {
+              "acceptance_signal": "HTTP response",
+              "input_handling": "HTTP 204 acknowledges request handling, not delivery or completion.",
+              "interface": "http-server",
+              "notes": "No exact operation guard or dedicated full-settlement event is established.",
+              "operation": "managed prompt",
+              "process_lifecycle": "Server remains alive after session settlement.",
+              "settled_signal": "correlated session becomes idle after the submitted message reaches terminal state",
+              "turn_scheduling": "SSE/session status and message reads evidence later execution.",
+              "turn_terminal_signal": "session idle or terminal message/error evidence"
+            }
+          ],
+          "steering_mechanisms": [
+            {
+              "interface": "http-server",
+              "mechanism": "http-prompt-async-active",
+              "notes": "The steering report owns race, correlation, and delivery limitations.",
+              "operations": [
+                "managed prompt control"
+              ],
+              "reference": "../steering/opencode.md"
+            },
+            {
+              "interface": "http-server",
+              "mechanism": "http-prompt-sync-active",
+              "notes": "The steering report owns race, correlation, and delivery limitations.",
+              "operations": [
+                "managed prompt control"
+              ],
+              "reference": "../steering/opencode.md"
+            },
+            {
+              "interface": "http-server",
+              "mechanism": "http-prompt-async-idle",
+              "notes": "The steering report owns race, correlation, and delivery limitations.",
+              "operations": [
+                "managed prompt control"
+              ],
+              "reference": "../steering/opencode.md"
+            },
+            {
+              "interface": "http-server",
+              "mechanism": "http-prompt-sync-idle",
+              "notes": "The steering report owns race, correlation, and delivery limitations.",
+              "operations": [
+                "managed prompt control"
+              ],
+              "reference": "../steering/opencode.md"
+            },
+            {
+              "interface": "http-server",
+              "mechanism": "http-abort-then-prompt",
+              "notes": "The steering report owns race, correlation, and delivery limitations.",
+              "operations": [
+                "managed prompt control"
+              ],
+              "reference": "../steering/opencode.md"
+            }
+          ],
           "stream_contract": {
             "correlation_fields": [
               "sessionID",
@@ -39289,6 +40435,17 @@
               "name": "MCP tools",
               "notes": "MCP calls appear as normal tool parts; MCP server status is available through config/server surfaces, not stdout NDJSON.",
               "result_visible": true
+            }
+          ],
+          "unattended_requests": [
+            {
+              "interface": "run-json",
+              "notes": "Do not add --auto or resource-disabling flags automatically.",
+              "observed_behavior": "Permission behavior is configurable; questions fail in the ordinary run evidence.",
+              "policy": "Never fabricate approval or a human answer.",
+              "request": "permission or question",
+              "required_response": "Use explicit policy; otherwise fail and surface the unresolved request.",
+              "timeout_behavior": "Unknown."
             }
           ],
           "use_cases": [
@@ -40289,6 +41446,7 @@
             "stderr_noise_prefixes": [],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -40746,7 +41904,9 @@
             "path": "claudine_strategy.conflicting_flags",
             "topic": "non-interactive-sessions"
           },
-          "value": []
+          "value": [
+            "-p/text"
+          ]
         },
         "offering_sources": {
           "source": {
@@ -43185,18 +44345,21 @@
             "questions": "configurable",
             "tool_approvals": "configurable"
           },
-          "changes": [],
+          "changes": [
+            "2026-09-08: Changed the preferred target from one-way JSON mode to a managed RPC child, with a pre-submission JSON fallback and explicit broker lifecycle/resource-preservation requirements."
+          ],
           "claudine_strategy": {
             "conflicting_flags": [
-              "--mode rpc unless Claudine implements the RPC command/UI-response protocol",
-              "-p/text when live events are required"
+              "-p/text",
+              "--mode json except as a pre-submission launch fallback",
+              "automatic --no-extensions/--no-skills/--no-prompt-templates/--no-context-files resource suppression"
             ],
-            "parser_notes": "Parse stdout as JSONL split only on LF. Use top-level type as the discriminator and assistantMessageEvent.type as the nested delta discriminator. Join tool lifecycle by toolCallId. Treat agent_end as terminal, but inspect final assistant stopReason/errorMessage and auto_retry events for success/failure classification.",
-            "preferred_invocation": "pi --mode json --no-approve --no-extensions --no-skills --no-prompt-templates --no-context-files \"PROMPT\"",
+            "parser_notes": "Parse stdout as strict LF-delimited JSONL. Correlate response records by id; process asynchronous top-level events and nested assistantMessageEvent.type records; join tools by toolCallId. Treat agent_settled as completion after any agent_end continuation, independently of child exit.",
+            "preferred_invocation": "managed child: pi --mode rpc; probe with correlated get_state, then send one correlated prompt command",
             "required_flags": [
-              "--mode json"
+              "--mode rpc"
             ],
-            "wrapper_notes": "For deterministic automation, decide project trust explicitly with --approve or --no-approve and disable project resources unless they are intentionally part of the run. Preserve stderr for diagnostics when no terminal event appears."
+            "wrapper_notes": "Own and retain the child's stdin/stdout pipes through agent_settled. Probe RPC before sending user work; if launch or probe proves RPC unavailable, use --mode json only after verifying profile compatibility and warning about accepted capability losses. Do not fall back when enabled extensions require RPC UI mediation. Never replay a prompt after an ambiguous submission. Keep extensions, skills, prompt templates, and context discovery enabled. Decide --approve versus --no-approve through separate trust policy."
           },
           "cli_params": [
             {
@@ -43377,16 +44540,16 @@
               "message.usage.cost.total",
               "RPC get_session_stats.data.cost"
             ],
-            "exit_code_reliable": true,
-            "failure_event": "message_end/turn_end/agent_end containing final assistant message.stopReason error or aborted; auto_retry_end success false; process exits non-zero for print-mode catch/final text error path",
-            "notes": "The terminal stream event is agent_end. Process exit catches startup/runtime exceptions, but Claudine should still parse final assistant stopReason and auto-retry events for classification.",
+            "exit_code_reliable": false,
+            "failure_event": "agent_settled after message_end/turn_end/agent_end containing final assistant message.stopReason error or aborted; auto_retry_end success false; early process exit before settlement",
+            "notes": "In preferred RPC mode, agent_end can precede retry, compaction, or queued continuation. agent_settled is the externally observable completion barrier after post-run work and extension settlement. Keep stdin open through agent_settled; process exit is separate broker teardown.",
             "result_fields": [
               "message.content[].text",
               "message.stopReason",
               "message.errorMessage",
               "agent_end.messages"
             ],
-            "success_event": "agent_end with final assistant message.stopReason not error or aborted",
+            "success_event": "agent_settled after the final agent_end, with final assistant message.stopReason not error or aborted",
             "usage_fields": [
               "message.usage.input",
               "message.usage.output",
@@ -43544,7 +44707,7 @@
           ],
           "created": "2026-07-02",
           "data_format": "jsonl",
-          "docs": "https://pi.dev/docs/latest/json",
+          "docs": "https://pi.dev/docs/latest/rpc",
           "env_vars": [
             {
               "effect": "Overrides the user config directory, including settings, auth, models, trust, and resources.",
@@ -43617,18 +44780,152 @@
               "notes": "Can also be set through settings.httpProxy."
             }
           ],
+          "execution_interfaces": [
+            {
+              "control_capabilities": [
+                "prompt",
+                "steer",
+                "follow_up",
+                "abort",
+                "get_state",
+                "get_session_stats",
+                "extension_ui_response"
+              ],
+              "documented_exclusions": [
+                "TUI-only custom components and editor/theme interactions"
+              ],
+              "evidence": [
+                "https://pi.dev/docs/latest/rpc",
+                "https://github.com/earendil-works/pi/blob/v0.84.4/packages/coding-agent/src/modes/rpc/rpc-mode.ts",
+                "https://github.com/earendil-works/pi/blob/v0.84.4/packages/coding-agent/src/modes/rpc/rpc-types.ts"
+              ],
+              "feature_preservation": "evidenced_partial",
+              "id": "rpc",
+              "input_contract": "LF-delimited JSON commands on stdin with optional correlation ids.",
+              "kind": "retained_subprocess",
+              "launch": "pi --mode rpc",
+              "launch_conditions": [
+                "Retain binary-safe stdin/stdout for the child lifetime",
+                "Complete a correlated get_state readiness probe before submitting user work",
+                "Resolve project trust separately"
+              ],
+              "notes": "Preferred interface for one-shot and retained managed execution.",
+              "observation_contract": "LF-delimited command responses, AgentSessionEvent records, and extension UI requests on stdout; diagnostics on stderr.",
+              "preserved_features": [
+                "extensions",
+                "skills",
+                "prompt templates",
+                "context files",
+                "custom tools",
+                "session persistence"
+              ],
+              "unattended_obligations": [
+                "Correlate responses",
+                "Answer or fail extension UI requests under explicit policy",
+                "Continue through agent_settled",
+                "Avoid ambiguous replay"
+              ]
+            },
+            {
+              "control_capabilities": [],
+              "documented_exclusions": [
+                "RPC state queries",
+                "RPC steering and follow-up",
+                "RPC abort",
+                "extension UI response channel"
+              ],
+              "evidence": [
+                "https://pi.dev/docs/latest/json",
+                "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/print-mode.ts"
+              ],
+              "feature_preservation": "evidenced_partial",
+              "id": "json",
+              "input_contract": "Initial prompt from argv and merged piped stdin.",
+              "kind": "one_shot_cli",
+              "launch": "pi --mode json \"PROMPT\"",
+              "launch_conditions": [
+                "Use only before any ambiguous RPC submission",
+                "Verify enabled extensions do not require RPC UI mediation",
+                "Accept loss of bidirectional control"
+              ],
+              "notes": "Source-backed reduced-control fallback candidate, not the preferred interface.",
+              "observation_contract": "Session header and AgentSessionEvent JSONL on stdout; diagnostics on stderr.",
+              "preserved_features": [
+                "extensions",
+                "skills",
+                "prompt templates",
+                "context files",
+                "custom tools",
+                "session persistence"
+              ],
+              "unattended_obligations": [
+                "Treat extension context as hasUI false",
+                "Preserve stderr for pre-stream failure"
+              ]
+            },
+            {
+              "control_capabilities": [],
+              "documented_exclusions": [
+                "structured live events",
+                "state queries",
+                "steering",
+                "extension UI response channel"
+              ],
+              "evidence": [
+                "https://pi.dev/docs/latest/usage",
+                "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/print-mode.ts"
+              ],
+              "feature_preservation": "evidenced_partial",
+              "id": "text",
+              "input_contract": "Prompt from argv and merged piped stdin.",
+              "kind": "one_shot_cli",
+              "launch": "pi -p \"PROMPT\"",
+              "launch_conditions": [
+                "Caller needs only final assistant text"
+              ],
+              "notes": "Excluded from Claudine's live wrapper strategy because it hides lifecycle state.",
+              "observation_contract": "Buffered final text on stdout and failures on stderr.",
+              "preserved_features": [
+                "extensions",
+                "skills",
+                "prompt templates",
+                "context files",
+                "custom tools",
+                "session persistence"
+              ],
+              "unattended_obligations": [
+                "Treat extension context as hasUI false"
+              ]
+            }
+          ],
+          "execution_selection": {
+            "fallback": "json",
+            "fallback_conditions": [
+              "RPC launch or readiness fails before prompt submission",
+              "Enabled feature profile remains usable with hasUI false",
+              "Caller accepts loss of RPC control and receives a capability warning"
+            ],
+            "feature_parity": "JSON preserves ordinary resource loading but loses RPC commands, steering, state queries, abort, and extension UI mediation.",
+            "notes": "Trust flags and tool restrictions are separate policy choices, not interface-selection shortcuts.",
+            "preferred": "rpc",
+            "rationale": "It is the only evidenced candidate combining live structured observation, correlated control, cancellation, state/statistics queries, steering, and an extension UI response channel.",
+            "readiness_check": "Start pi --mode rpc and require a successful response with the same id to get_state before prompt submission.",
+            "replay_policy": "Never replay after prompt acceptance is ambiguous; RPC ids correlate responses but do not document duplicate suppression."
+          },
           "gaps": [
             "No formal JSON Schema or versioned event schema was found for JSON mode or RPC mode.",
             "Exact stderr behavior for every startup/auth/config failure was not exhaustively captured with live executions.",
             "Whether package-install/update paths can ever write non-JSON to stdout during --mode json was not re-tested locally; issue history indicates stdout purity has been a concern.",
             "No normalized rate-limit, quota reset, plan cap, or no-funds fields were found beyond provider error strings.",
             "No direct MCP metadata was found in Pi's JSON/RPC stream.",
-            "Exact Windows packaged-binary config path expansion was inferred from source using os.homedir() and path.join."
+            "Exact Windows packaged-binary config path expansion was inferred from source using os.homedir() and path.join.",
+            "No live probe was run in this update; RPC remains a researched target whose production activation still requires the steering specification's disposable-session gate.",
+            "The protocol defines extension_ui_response shapes but no universally safe unattended answer. Behavior for a dialog request without a timeout remains pending until a response or shutdown; Claudine policy is not yet defined."
           ],
           "headless_constraints": [
             {
               "constraint": "Project-local settings/resources are not prompted for in non-interactive modes.",
-              "mitigation": "Use --approve to load trusted project resources, or --no-approve/--no-context-files/--no-extensions/--no-skills for deterministic locked-down runs.",
+              "mitigation": "Choose --approve or --no-approve as a separate project-trust policy. Do not disable extensions, skills, prompt templates, or context files merely to simplify the wrapper.",
               "notes": "defaultProjectTrust ask and never ignore project resources without saved trust."
             },
             {
@@ -43638,8 +44935,8 @@
             },
             {
               "constraint": "RPC mode is bidirectional and can block on extension dialog methods.",
-              "mitigation": "Use JSON mode for one-shot Claudine runs; if using RPC, implement extension_ui_request handling and timeout/cancel policy.",
-              "notes": "Dialog methods include select, confirm, input, and editor."
+              "mitigation": "The managed broker must handle extension_ui_request according to explicit policy. No safe default human answer is established; without applicable policy, report the unresolved request and terminate through the broker's defined failure path.",
+              "notes": "Dialog methods include select, confirm, input, and editor. Other TUI-dependent extension APIs are degraded or unavailable in RPC mode."
             },
             {
               "constraint": "No dedicated file_change event.",
@@ -43654,8 +44951,14 @@
           ],
           "invocation": [
             {
+              "command": "pi --mode rpc",
+              "notes": "Preferred managed launch. Claudine owns the child and retains stdin/stdout through agent_settled. Normal extensions, skills, prompt templates, and context-file discovery stay enabled subject to project trust.",
+              "prompt_arg": "Retained stdin carries JSONL commands. For one-shot work, send {\"id\":\"prompt-1\",\"type\":\"prompt\",\"message\":\"PROMPT\"} only after a correlated get_state launch probe succeeds.",
+              "stdin_support": true
+            },
+            {
               "command": "pi --mode json \"PROMPT\"",
-              "notes": "Fresh non-interactive session unless --continue, --session, --session-id, or --fork is supplied. Emits live JSONL AgentSessionEvent records to stdout.",
+              "notes": "Source-established one-way fallback candidate when an RPC launch/probe fails before prompt submission. Use only after verifying the launch profile and that losing RPC control, state queries, extension UI handling, and steering is acceptable for the enabled feature set.",
               "prompt_arg": "Prompt text from argv; file and image references use @path arguments; piped stdin is merged into the initial prompt in print/json mode.",
               "stdin_support": true
             },
@@ -43673,7 +44976,7 @@
             },
             {
               "command": "pi --mode rpc --no-session",
-              "notes": "Starts a long-running headless RPC server over stdin/stdout. Responses and events are JSONL; extension dialog UI requests may require JSONL responses.",
+              "notes": "Ephemeral variant of the preferred managed RPC launch. Responses and events are JSONL; extension dialog UI requests require policy-aware JSONL responses.",
               "prompt_arg": "JSONL commands on stdin, for example {\"type\":\"prompt\",\"message\":\"...\"}.",
               "stdin_support": true
             }
@@ -43681,13 +44984,13 @@
           "io_contract": {
             "framing": "jsonl",
             "noise_handling": "For --mode json, parse stdout as JSONL only. Treat stderr as human diagnostics and startup/auth errors. In RPC mode, stdout is mixed protocol records and stdin is bidirectional JSONL.",
-            "notes": "JSON mode writes the session header before subscription, then writes JSON.stringify(event) plus LF for each event. Text mode stdout is final text, not parseable events.",
+            "notes": "The preferred RPC mode requires retained binary-safe stdin/stdout pipes for the child's lifetime. JSON mode writes the session header before subscription; text mode stdout is final text.",
             "stderr": "diagnostics_only",
-            "stdin": "prompt",
+            "stdin": "stream_protocol",
             "stdout": "structured_only"
           },
-          "last_updated": "2026-07-03",
-          "model": "default",
+          "last_updated": "2026-09-08",
+          "model": "gpt-5.6-sol",
           "output_formats": [
             {
               "cli_value": "text or -p",
@@ -43702,7 +45005,7 @@
               "description": "One JSON object per line on stdout. First line is the session header, followed by live AgentSessionEvent records.",
               "format": "jsonl",
               "name": "json event stream",
-              "side_effects": "Runs print-mode internals with extension mode json and no UI. Claudine should prefer this for one-shot automation.",
+              "side_effects": "Runs print-mode internals with extension mode json and no UI. It is only a fallback candidate after pre-submission RPC failure and a source-backed profile/feature compatibility check.",
               "stream": true
             },
             {
@@ -43710,20 +45013,23 @@
               "description": "Bidirectional JSONL protocol. Commands and extension UI responses go to stdin; command responses, events, and extension UI requests come from stdout.",
               "format": "jsonl",
               "name": "rpc protocol",
-              "side_effects": "More controllable than json mode, but wrappers must drive a protocol and answer extension_ui_request records to avoid blocking.",
+              "side_effects": "Claudine should prefer this even for one-shot work. The broker must retain stdin, correlate responses, consume asynchronous events, and apply an unattended extension-UI policy.",
               "stream": true
             }
           ],
           "quirks": [
             "JSON mode is implemented by print mode with mode=json, not a separate command; it writes the session header before subscribing to later events.",
             "RPC responses include request id correlation, but ordinary agent events do not include an id.",
+            "A successful prompt response proves accepted, queued, or handled, not completion; agent_end may precede continuation, agent_settled is the completion barrier, and process exit is a separate broker lifecycle event.",
+            "Prompt input is interpreted by Pi: skill commands and prompt templates expand, while extension commands sent through prompt can execute immediately. The broker must not assume all message text becomes a literal user message.",
             "tool_execution_update.partialResult is documented as accumulated output, so displaying it as a delta will duplicate text.",
-            "agent_end is the terminal event for the run, but Agent.subscribe listeners for agent_end are still part of settlement.",
+            "agent_end carries willRetry and is not the session completion barrier; agent_settled follows retries, compaction, queued continuation, and extension settlement.",
             "Project trust affects whether repo-local extensions, skills, prompts, themes, and settings are loaded; this can materially change event shape.",
             "Assistant usage and cost live on assistant messages, not as a standalone usage event in JSON mode.",
             "The official JSON docs lag the source union: source includes entry_appended, session_info_changed, and thinking_level_changed beyond the shorter docs excerpt."
           ],
-          "reason": "Pi is researched but not yet one of Claudine's compiled providers. Adding support would require a Pi provider adapter for JSONL AgentSessionEvent parsing and metadata/config defaults.",
+          "reason": "Claudine's existing Pi adapter uses one-way JSON mode. The preferred target requires an RPC broker that retains stdin, correlates responses, handles extension UI policy, and separates run completion from child exit.",
+          "reasoning_effort": "low",
           "requires_claudine_update": true,
           "schema_sources": [
             {
@@ -43746,7 +45052,7 @@
             },
             {
               "formal": false,
-              "notes": "Official RPC protocol documentation; useful context but broader than the one-shot JSON stream.",
+              "notes": "Official protocol documentation for the preferred managed RPC interface, including commands, streamed events, and extension UI responses.",
               "schema_type": "typescript",
               "url": "https://pi.dev/docs/latest/rpc"
             },
@@ -43768,6 +45074,70 @@
             "session_id": "session.id in the first JSON-mode header; RPC get_state.data.sessionId; session files also include header.id.",
             "version": "CLI --version exists; JSON/RPC event stream does not include package version."
           },
+          "settlement": [
+            {
+              "acceptance_signal": "Successful response matching the prompt command id.",
+              "input_handling": "A correlated prompt response means accepted, queued, or handled. An input extension may handle the request without starting a model turn.",
+              "interface": "rpc",
+              "notes": "The event definition and v0.84.4 RPC forwarding path both expose agent_settled; final success still depends on the final assistant stopReason and error/retry evidence.",
+              "operation": "prompt",
+              "process_lifecycle": "The retained RPC process remains alive after settlement; EOF/disposal is separate broker teardown.",
+              "settled_signal": "agent_settled after continuation and agent_settled extension handlers complete.",
+              "turn_scheduling": "A model turn is evidenced by agent_start/turn_start, but accepted input is not itself proof that a turn was scheduled.",
+              "turn_terminal_signal": "agent_end ends one pass and carries willRetry; it may be followed by retry, compaction, or queued continuation."
+            },
+            {
+              "acceptance_signal": "No separate early acceptance response exists on the one-way JSON interface.",
+              "input_handling": "Print-mode startup combines argv prompt text, file references, and piped stdin before invoking the session.",
+              "interface": "json",
+              "notes": "There is no safe replay boundary after launch because this interface has no separate submission receipt.",
+              "operation": "initial prompt",
+              "process_lifecycle": "The one-shot process exits after print-mode settlement and cleanup; startup/runtime failure may appear on stderr with non-zero exit.",
+              "settled_signal": "agent_settled is forwarded in the AgentSessionEvent JSONL stream.",
+              "turn_scheduling": "AgentSessionEvent records expose agent_start and turn_start when model work begins.",
+              "turn_terminal_signal": "agent_end ends one pass and can precede retry, compaction, or queued continuation."
+            },
+            {
+              "acceptance_signal": "No separate early acceptance signal is exposed.",
+              "input_handling": "Print-mode startup combines argv prompt text, file references, and piped stdin before invoking the session.",
+              "interface": "text",
+              "notes": "This buffered interface is unsuitable when Claudine needs independently observable turn and settlement events.",
+              "operation": "initial prompt",
+              "process_lifecycle": "The one-shot process exits after printing final text or an error.",
+              "settled_signal": "Final assistant text is written only after the internal run finishes; failure text and exit code 1 cover error/aborted stop reasons.",
+              "turn_scheduling": "No structured turn-scheduled signal is exposed to the caller.",
+              "turn_terminal_signal": "No structured turn-terminal signal is exposed."
+            }
+          ],
+          "steering_mechanisms": [
+            {
+              "interface": "rpc",
+              "mechanism": "rpc-steer",
+              "notes": "The steering report owns its end-of-tool-batch delivery boundary, acknowledgment timing, and rescue suitability.",
+              "operations": [
+                "steer_active_turn"
+              ],
+              "reference": "../steering/pi.md"
+            },
+            {
+              "interface": "rpc",
+              "mechanism": "rpc-idle-prompt",
+              "notes": "The steering report owns prompt acceptance, extension handling, scheduling uncertainty, and delivery evidence.",
+              "operations": [
+                "start_idle_turn"
+              ],
+              "reference": "../steering/pi.md"
+            },
+            {
+              "interface": "rpc",
+              "mechanism": "rpc-abort-submit",
+              "notes": "The steering report defines this as a manually approved multi-phase operation with partial-failure risk.",
+              "operations": [
+                "interrupt_then_submit"
+              ],
+              "reference": "../steering/pi.md"
+            }
+          ],
           "stream_contract": {
             "correlation_fields": [
               "toolCallId",
@@ -43777,10 +45147,10 @@
               "rpc.id"
             ],
             "discriminator": "type",
-            "event_ordering": "session header first when present; agent_start before turn/message/tool events; message_update deltas precede message_end; turn_end precedes agent_end; agent_end is the final event for a run, though subscriber settlement may continue briefly.",
+            "event_ordering": "session header first when present; agent_start before turn/message/tool events; message_update deltas precede message_end; turn_end precedes agent_end; retry, compaction, or queued continuation may start after agent_end; agent_settled follows all post-run continuation and extension settlement.",
             "notes": "Nested assistant deltas use assistantMessageEvent.type. tool_execution_update.partialResult is accumulated progress, not necessarily a delta.",
             "partial_message_events": true,
-            "terminal_event": "agent_end",
+            "terminal_event": "agent_settled",
             "unknown_event_policy": "Skip unknown type values, preserve raw record for logs, and continue parsing; TypeScript unions are informal and can drift."
           },
           "stream_events": [
@@ -43906,7 +45276,15 @@
                 "messages",
                 "willRetry"
               ],
-              "notes": "Terminal event for a run. AgentSession adds willRetry to the base AgentEvent."
+              "notes": "End of one agent pass. AgentSession adds willRetry; retry, compaction, or queued continuation may follow."
+            },
+            {
+              "category": "session",
+              "event": "agent_settled",
+              "fields": [
+                "type"
+              ],
+              "notes": "Completion barrier emitted after post-run continuation and agent_settled extension handlers finish."
             },
             {
               "category": "other",
@@ -44153,6 +45531,71 @@
               "name": "extension tools",
               "notes": "Extensions can register tools; stream shape is the same, but result.details is extension-defined.",
               "result_visible": true
+            }
+          ],
+          "unattended_requests": [
+            {
+              "interface": "rpc",
+              "notes": "Dialog UI is an extension channel and remains separate from native tool execution policy.",
+              "observed_behavior": "Pi emits extension_ui_request and waits for a matching extension_ui_response unless the request's own timeout resolves it.",
+              "policy": "Never fabricate a human response or approval.",
+              "request": "extension dialog UI",
+              "required_response": "Return the method-appropriate value only when explicit policy supplies it; otherwise report the unresolved request and terminate through the broker failure path.",
+              "timeout_behavior": "Request-specific; a request without a timeout can remain pending."
+            },
+            {
+              "interface": "rpc",
+              "notes": "Project resources include extensions, skills, prompt templates, and context files.",
+              "observed_behavior": "Non-interactive modes do not show the trust prompt; saved trust, defaultProjectTrust, --approve, or --no-approve determines whether project resources load.",
+              "policy": "Do not equate trust with tool approval and do not add resource-disabling flags merely to avoid the decision.",
+              "request": "project trust",
+              "required_response": "Choose trust explicitly through wrapper policy before launch.",
+              "timeout_behavior": "No mid-run prompt is expected."
+            },
+            {
+              "interface": "json",
+              "notes": "Project resources include extensions, skills, prompt templates, and context files.",
+              "observed_behavior": "Non-interactive modes do not show the trust prompt; saved trust, defaultProjectTrust, --approve, or --no-approve determines whether project resources load.",
+              "policy": "Do not equate trust with tool approval and do not add resource-disabling flags merely to avoid the decision.",
+              "request": "project trust",
+              "required_response": "Choose trust explicitly through wrapper policy before launch.",
+              "timeout_behavior": "No mid-run prompt is expected."
+            },
+            {
+              "interface": "text",
+              "notes": "Project resources include extensions, skills, prompt templates, and context files.",
+              "observed_behavior": "Non-interactive modes do not show the trust prompt; saved trust, defaultProjectTrust, --approve, or --no-approve determines whether project resources load.",
+              "policy": "Do not equate trust with tool approval and do not add resource-disabling flags merely to avoid the decision.",
+              "request": "project trust",
+              "required_response": "Choose trust explicitly through wrapper policy before launch.",
+              "timeout_behavior": "No mid-run prompt is expected."
+            },
+            {
+              "interface": "rpc",
+              "notes": "Incoming extension holds and post-delivery tool policy are distinct concerns.",
+              "observed_behavior": "No native approval request protocol was found; enabled built-in or extension tools execute according to the configured tool/resource surface.",
+              "policy": "Do not fabricate approvals; extension-defined UI requests remain governed by their own explicit policy.",
+              "request": "tool permission or approval",
+              "required_response": "Constrain tools or sandbox externally before launch when side effects are unacceptable.",
+              "timeout_behavior": "Not applicable to a native approval request because none was evidenced."
+            },
+            {
+              "interface": "json",
+              "notes": "Incoming extension holds and post-delivery tool policy are distinct concerns.",
+              "observed_behavior": "No native approval request protocol was found; enabled built-in or extension tools execute according to the configured tool/resource surface.",
+              "policy": "Do not fabricate approvals; extension-defined UI requests remain governed by their own explicit policy.",
+              "request": "tool permission or approval",
+              "required_response": "Constrain tools or sandbox externally before launch when side effects are unacceptable.",
+              "timeout_behavior": "Not applicable to a native approval request because none was evidenced."
+            },
+            {
+              "interface": "text",
+              "notes": "Incoming extension holds and post-delivery tool policy are distinct concerns.",
+              "observed_behavior": "No native approval request protocol was found; enabled built-in or extension tools execute according to the configured tool/resource surface.",
+              "policy": "Do not fabricate approvals; extension-defined UI requests remain governed by their own explicit policy.",
+              "request": "tool permission or approval",
+              "required_response": "Constrain tools or sandbox externally before launch when side effects are unacceptable.",
+              "timeout_behavior": "Not applicable to a native approval request because none was evidenced."
             }
           ],
           "use_cases": [
@@ -45157,6 +46600,7 @@
             "stderr_noise_prefixes": [],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -48882,6 +50326,100 @@
               "notes": "Docs say SDK/non-interactive emission of the summary message is not yet wired."
             }
           ],
+          "execution_interfaces": [
+            {
+              "control_capabilities": [],
+              "documented_exclusions": [
+                "mid-turn bidirectional control in text-input mode"
+              ],
+              "evidence": [
+                "https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/"
+              ],
+              "feature_preservation": "evidenced_partial",
+              "id": "headless-stream-json",
+              "input_contract": "Initial prompt from argv or text stdin.",
+              "kind": "one_shot_cli",
+              "launch": "qwen -p \"prompt\" --output-format stream-json --include-partial-messages",
+              "launch_conditions": [
+                "Preconfigure authentication, trust, sandbox, and approval policy"
+              ],
+              "notes": "Ordinary one-shot interface.",
+              "observation_contract": "JSONL on stdout and diagnostics on stderr.",
+              "preserved_features": [
+                "skills",
+                "extensions",
+                "project context",
+                "MCP configuration",
+                "session persistence"
+              ],
+              "unattended_obligations": [
+                "Consume through result",
+                "Preserve stderr and exit status"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "stream input",
+                "control responses"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/types.ts"
+              ],
+              "feature_preservation": "unknown",
+              "id": "stream-json-control",
+              "input_contract": "Bidirectional JSON-line protocol.",
+              "kind": "retained_subprocess",
+              "launch": "qwen --input-format stream-json --output-format stream-json",
+              "launch_conditions": [
+                "Retain stdin/stdout",
+                "Implement correlated control_request responses",
+                "Confirm installed protocol readiness"
+              ],
+              "notes": "Managed candidate described upstream as under construction; activation is unresolved.",
+              "observation_contract": "JSONL messages including control_request/control_response.",
+              "preserved_features": [],
+              "unattended_obligations": [
+                "Answer requests only through explicit policy",
+                "Do not replay ambiguous messages"
+              ]
+            },
+            {
+              "control_capabilities": [
+                "follow-up",
+                "idle prompt",
+                "cancel"
+              ],
+              "documented_exclusions": [],
+              "evidence": [
+                "../steering/qwen.md"
+              ],
+              "feature_preservation": "unknown",
+              "id": "http-daemon",
+              "input_contract": "HTTP requests.",
+              "kind": "local_server",
+              "launch": "Qwen managed HTTP daemon profile from the sibling steering report",
+              "launch_conditions": [
+                "Retain authenticated endpoint, session identity, and process ownership"
+              ],
+              "notes": "Proposed managed interface; no activated Claudine support is claimed.",
+              "observation_contract": "HTTP responses plus SSE lifecycle.",
+              "preserved_features": [],
+              "unattended_obligations": [
+                "Separate initial receipt from processing and settlement"
+              ]
+            }
+          ],
+          "execution_selection": {
+            "fallback": "",
+            "fallback_conditions": [],
+            "feature_parity": "Feature parity for both managed candidates is unknown.",
+            "notes": "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed.",
+            "preferred": "headless-stream-json",
+            "rationale": "It is the established parser-grade wrapper surface; retained control and daemon candidates lack resolved readiness and feature parity.",
+            "readiness_check": "Require init and terminal result records.",
+            "replay_policy": "Never replay after ambiguous acceptance."
+          },
           "gaps": [
             "No formal JSON Schema or protocol version for CLI stream-json was found.",
             "Exact package version tested at runtime was not captured; findings are from official docs and main-branch source on 2026-07-03.",
@@ -49064,6 +50602,48 @@
             "session_id": "system.session_id and every message.session_id; emitted early in normal structured runs",
             "version": "system.qwen_code_version in CLI-local init message"
           },
+          "settlement": [
+            {
+              "acceptance_signal": "init followed by assistant activity",
+              "input_handling": "Prompt is supplied at launch without a separate acceptance receipt.",
+              "interface": "headless-stream-json",
+              "notes": "stderr and nonzero exit cover failures without a result.",
+              "operation": "one-shot prompt",
+              "process_lifecycle": "The headless process exits after completion.",
+              "settled_signal": "type=result followed by process exit",
+              "turn_scheduling": "assistant and stream events evidence work after init.",
+              "turn_terminal_signal": "result"
+            }
+          ],
+          "steering_mechanisms": [
+            {
+              "interface": "http-daemon",
+              "mechanism": "daemon-follow-up",
+              "notes": "Candidate interface only; use the steering report's delivery and settlement boundaries.",
+              "operations": [
+                "managed prompt control"
+              ],
+              "reference": "../steering/qwen.md"
+            },
+            {
+              "interface": "http-daemon",
+              "mechanism": "daemon-idle-prompt",
+              "notes": "Candidate interface only; use the steering report's delivery and settlement boundaries.",
+              "operations": [
+                "managed prompt control"
+              ],
+              "reference": "../steering/qwen.md"
+            },
+            {
+              "interface": "http-daemon",
+              "mechanism": "daemon-cancel-then-prompt",
+              "notes": "Candidate interface only; use the steering report's delivery and settlement boundaries.",
+              "operations": [
+                "managed prompt control"
+              ],
+              "reference": "../steering/qwen.md"
+            }
+          ],
           "stream_contract": {
             "correlation_fields": [
               "session_id",
@@ -49468,6 +51048,17 @@
               "name": "cron/loop/team experimental tools",
               "notes": "Availability depends on settings/env. Team approvals can auto-cancel outside stream-json control mode unless YOLO is active.",
               "result_visible": true
+            }
+          ],
+          "unattended_requests": [
+            {
+              "interface": "stream-json-control",
+              "notes": "Do not force approval-mode auto merely to avoid mediation.",
+              "observed_behavior": "The protocol can emit control_request records such as can_use_tool; question behavior is unresolved.",
+              "policy": "Never fabricate approval or human input.",
+              "request": "can_use_tool or human question",
+              "required_response": "Respond only from explicit policy or fail.",
+              "timeout_behavior": "Unknown."
             }
           ],
           "use_cases": [

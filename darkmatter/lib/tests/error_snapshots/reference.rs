@@ -100,8 +100,9 @@ fn file_reference_shows_hint() {
             "ReferenceError",
             "file reference failure",
             "unclosed brace",
-            "@/",
-            "!",
+            "@",
+            "&",
+            "^",
         ],
     );
     insta::assert_snapshot!("file_reference", out);

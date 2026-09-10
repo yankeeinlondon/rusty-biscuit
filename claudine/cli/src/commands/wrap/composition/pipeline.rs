@@ -818,6 +818,44 @@ fn construct_argv_and_system_prompt(
             profile.apply_non_interactive_flags(&mut child_args)?;
         }
 
+        // -- Inline write grant -------------------------------------------------
+        //
+        // The agent edits the document itself, so the provider is launched in
+        // the narrowest posture that can write it (see `wrap::write_grant`).
+        // A pinned deny or a missing capability is a typed refusal here, before
+        // any spawn. The same planner runs again in every per-attempt rebuild,
+        // against the same recorded inputs, so a retry cannot silently widen or
+        // lose the grant.
+        let mut write_posture: Option<String> = None;
+        if is_inline {
+            let grant = crate::commands::wrap::write_grant::plan_write_grant(
+                &crate::commands::wrap::write_grant::WriteGrantRequest {
+                    provider,
+                    document: &request.prepared.resolved_path,
+                    workspace: &env_plan.child_cwd,
+                    non_interactive: effective_non_interactive,
+                    yolo_applied: effective_yolo,
+                    args: &child_args,
+                    env: &env_plan.env,
+                },
+            )
+            .map_err(crate::commands::wrap::launch_plan::LaunchPlanError::WriteCapability)?;
+            child_args.extend(grant.args);
+            for (key, value) in grant.env {
+                env_plan.env.insert(key.clone().into(), value.clone().into());
+                match env_plan.added.iter_mut().find(|(k, _)| *k == key) {
+                    Some(entry) => entry.1 = value,
+                    None => env_plan.added.push((key, value)),
+                }
+            }
+            if let Some(overlay) = grant.opencode_permission {
+                crate::commands::wrap::wrapper_stages::apply_opencode_config_overlay(
+                    env_plan, overlay,
+                )?;
+            }
+            write_posture = Some(grant.posture);
+        }
+
         // Model resolution, universal --model, and non-interactive validation —
         // shared prep stage (see `commands::exec_prep`). Unlike the direct
         // wrapper, composition propagates every failure (including OpenCode
@@ -1105,6 +1143,15 @@ fn construct_argv_and_system_prompt(
                 provider_env_baseline,
                 codex_sqlite_home: codex_sqlite_home.clone(),
                 credential_policy: credential_policy.clone(),
+                workspace_cwd: env_plan.child_cwd.clone(),
+                write_grant_env: ["GOOSE_MODE", "OPENCODE_PERMISSION"]
+                    .into_iter()
+                    .filter_map(|key| {
+                        pre_provider_env
+                            .get(std::ffi::OsStr::new(key))
+                            .map(|value| (std::ffi::OsString::from(key), value.clone()))
+                    })
+                    .collect(),
                 has_model_env: env_plan
                     .env
                     .contains_key(&std::ffi::OsString::from("MODEL")),
@@ -1127,10 +1174,13 @@ fn construct_argv_and_system_prompt(
                         is_inline,
                         model: target.model.clone(),
                         mcp_body_tags,
+                        writable_document: is_inline
+                            .then(|| request.prepared.resolved_path.clone()),
                     },
                     args: recorded_args,
                     env_overlay,
                     structured_codex: structured_codex_output.is_some(),
+                    write_posture: write_posture.clone(),
                 },
                 replay_supported: true,
             }

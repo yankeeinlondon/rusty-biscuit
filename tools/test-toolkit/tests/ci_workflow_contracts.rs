@@ -137,39 +137,53 @@ fn repository_tracks_no_rustc_wrapper() {
 }
 
 #[test]
-fn kache_has_a_single_version_authority() {
-    let version = read(".github/kache-version");
+fn kache_has_a_single_version_floor() {
+    let version = read(".github/kache-min-version");
     assert!(
         !version.trim().is_empty(),
-        ".github/kache-version must hold the single pinned kache version"
+        ".github/kache-min-version must hold the single minimum kache version"
     );
 
     let justfile = read("justfile");
     assert!(
-        justfile.contains(".github/kache-version"),
-        "root justfile must read KACHE_VERSION from the single authority file"
+        justfile.contains(".github/kache-min-version"),
+        "root justfile must read KACHE_MIN_VERSION from the single authority file"
     );
     assert!(
-        !justfile.contains(r#"KACHE_VERSION := """#),
+        !justfile.contains(r#"KACHE_MIN_VERSION := ""#),
         "root justfile must not hard-code a second kache version literal"
+    );
+    assert!(
+        !justfile.contains("--version \"{{ KACHE_MIN_VERSION }}\""),
+        "install-kache installs the latest release; the floor is a check, not a pin"
     );
 }
 
+// Ruling 2026-09-09: `just init` installs kache on macOS and Linux (never on
+// Windows or WSL) but activation stays a host decision, so no recipe may wire
+// the wrapper.
 #[test]
-fn installing_the_compiler_cache_is_not_a_dependency_of_init() {
+fn init_installs_the_compiler_cache_without_activating_it() {
     let justfile = read("justfile");
-    let init_line = justfile
-        .lines()
-        .find(|line| line.starts_with("init:"))
-        .expect("root justfile must declare an `init` recipe");
     assert!(
-        !init_line.contains("kache"),
-        "`just init` must not depend on a kache recipe; it is an explicit opt-in \
-         (`just install-kache`)"
+        justfile.contains("    just _ensure-kache\n"),
+        "`just init` must run the `_ensure-kache` step"
+    );
+    assert!(
+        justfile.contains("_ensure-kache:"),
+        "the `_ensure-kache` step must exist"
     );
     assert!(
         justfile.contains("install-kache:"),
-        "the pinned installer must remain available as an explicit recipe"
+        "the installer must remain available as an explicit recipe"
+    );
+    let activates = justfile.lines().any(|line| {
+        let cmd = line.trim_start();
+        cmd.starts_with("kache init") || cmd.starts_with("export RUSTC_WRAPPER=kache")
+    });
+    assert!(
+        !activates,
+        "no recipe may activate kache; that is host policy (docs/kache-strategy.md)"
     );
 }
 
@@ -776,7 +790,7 @@ fn retired_packages_reach_verdict_through_package_evidence() {
             missing.push(format!("ci-verdict still depends on {retired_job}"));
         }
     }
-    if !verdict.contains("uses: actions/download-artifact@v4")
+    if !verdict.contains("uses: actions/download-artifact@")
         || !verdict.contains("ci-rollup rollup")
         || !verdict.contains("ci-rollup verdict")
     {
@@ -1030,7 +1044,7 @@ fn maintenance_audit_reports_without_changing_anything() {
             "the maintenance audit must not change the repository (found `{forbidden}`)"
         );
     }
-    for authority in ["rust-toolchain.toml", ".github/kache-version", "nextest"] {
+    for authority in ["rust-toolchain.toml", ".github/kache-min-version", "nextest"] {
         assert!(
             audit.contains(authority),
             "the audit must cover the pinned authority `{authority}`"
@@ -1577,6 +1591,49 @@ fn ci_verdict_is_the_single_required_check() {
         !ci.contains("baseline-failures.txt"),
         "the retired display-name baseline must have no consumers"
     );
+}
+
+#[test]
+fn post_merge_reuse_preserves_the_verdict_and_normal_ci_fallback() {
+    let validation = job_block("ci.yml", "  validation:");
+    assert!(
+        validation.contains("reuse_validation.py check")
+            && validation.contains("steps.reuse.outcome == 'success'")
+            && validation.contains("continue-on-error: true")
+            && validation.contains("actions: read")
+            && validation.contains("pull-requests: read"),
+        "reuse must verify GitHub evidence and discard outputs from failed lookups"
+    );
+    let scope = job_block("ci.yml", "  scope:");
+    assert!(
+        scope.contains("needs: validation")
+            && scope.contains("!cancelled() && needs.validation.outputs.reuse != 'true'")
+            && scope.contains("reuse_validation.py record")
+            && scope.contains("name: ${{ steps.receipt.outputs.receipt }}")
+            && scope.contains("if: github.event_name == 'pull_request'"),
+        "scope must run on lookup failure and publish receipts for PR validation"
+    );
+    let verdict = job_block("ci.yml", "  ci-verdict:");
+    assert!(
+        verdict.contains("      - validation\n")
+            && verdict.contains("if: always()")
+            && verdict.contains("needs.validation.result == 'success'")
+            && verdict.contains("actions/runs/$VALIDATED_RUN"),
+        "the existing required verdict must link reused evidence on main"
+    );
+    let steps = verdict.split_once("    steps:\n").unwrap().1;
+    for step in steps.split("      - ").skip(2) {
+        assert!(
+            step.contains("needs.validation.outputs.reuse != 'true'"),
+            "normal verdict steps must not build Rust or judge an empty grid on reuse: {step}"
+        );
+    }
+    for job in ["  preflight:", "  ci-tooling:"] {
+        assert!(
+            job_block("ci.yml", job).contains("python3 scripts/ci/test_reuse_validation.py"),
+            "the reuse decision tests must run in {job}"
+        );
+    }
 }
 
 #[test]

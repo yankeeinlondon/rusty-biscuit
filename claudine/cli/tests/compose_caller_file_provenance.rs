@@ -8,11 +8,25 @@ use common::{CliProcessFixture, strip_ansi, write};
 #[cfg(unix)]
 use common::write_executable;
 
+/// A Goose stub that records its delivered prompt and, when
+/// `CLAUDINE_INLINE_TARGET` names a document, edits that document's body the
+/// way a file-aware inline agent does.
 fn install_goose(fixture: &CliProcessFixture) {
     #[cfg(unix)]
     write_executable(
         &fixture.bin_dir().join("goose"),
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$HOME/provider-prompt\"\nprintf 'provider reached\\n'\n",
+        &format!(
+            "#!/bin/sh\n\
+             printf '%s\\n' \"$*\" > \"$HOME/provider-prompt\"\n\
+             if [ -n \"$CLAUDINE_INLINE_TARGET\" ]; then\n\
+             CLAUDINE_DOC=\"$CLAUDINE_INLINE_TARGET\"\n\
+             CLAUDINE_ADD=''\n\
+             CLAUDINE_BODY='provider reached\n'\n\
+             {rewrite}\
+             fi\n\
+             printf 'provider reached\\n'\n",
+            rewrite = common::INLINE_BODY_REWRITE
+        ),
     );
     // A `.cmd` stub cannot receive the multi-line shipped prompts: Rust refuses
     // to spawn a batch file whose arguments contain newlines. Compile a tiny
@@ -32,6 +46,22 @@ fn install_goose(fixture: &CliProcessFixture) {
         format!("{}\n", args.join(" ")),
     )
     .expect("write provider prompt");
+    if let Ok(target) = std::env::var("CLAUDINE_INLINE_TARGET") {
+        let current = std::fs::read_to_string(&target).expect("read the inline target");
+        let mut delimiters = 0;
+        let mut head = String::new();
+        for line in current.split_inclusive('\n') {
+            if delimiters >= 2 {
+                break;
+            }
+            if line.trim_end_matches(['\r', '\n']) == "---" {
+                delimiters += 1;
+            }
+            head.push_str(line);
+        }
+        std::fs::write(&target, format!("{head}provider reached\n"))
+            .expect("write the inline target");
+    }
     println!("provider reached");
 }
 "##,
@@ -739,6 +769,8 @@ fn inline_compose_proxy_uses_the_caller_origin_and_closes_over_the_target() {
     let assertion = fixture
         .command()
         .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        // The adopted target is the document the agent must edit.
+        .env("CLAUDINE_INLINE_TARGET", &target)
         .args([
             "inline-compose",
             "--goose",

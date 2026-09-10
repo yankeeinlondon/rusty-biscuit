@@ -13,25 +13,35 @@ use common::{CliProcessFixture, init_git_repo, write, write_executable};
 // Phase 1: convergence between non-harness and harness-enabled inline compose
 // ============================================================================
 
-/// Build a fake `opencode` binary that emits interstitial narration, a tool
-/// call, and then final body content after the last tool call. The final body
-/// must be used for inline write-back, not the interstitial narration.
-fn stage_opencode_inline_body_writer(path_dir: &std::path::Path) {
+/// Build a fake `opencode` binary that narrates, calls a tool, edits the
+/// document, and then reports a final summary. The document is the deliverable;
+/// the narration must reach neither the file nor the summary.
+fn stage_opencode_inline_body_writer(path_dir: &std::path::Path, document: &std::path::Path) {
     write_executable(
         &path_dir.join("opencode"),
-        r##"#!/bin/sh
+        &format!(
+            r##"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
   exit 0
 fi
-printf '%s\n' '{"type":"init","session_id":"conv","model":"test-model"}'
-printf '%s\n' '{"type":"step_start","sessionID":"conv"}'
-printf '%s\n' '{"type":"text","text":"Let me look up the answer."}'
-printf '%s\n' '{"type":"tool_start","part":{"id":"t1","tool":"bash"}}'
-printf '%s\n' '{"type":"text","text":"# Final Body\n\nThis is the replacement body."}'
-printf '%s\n' '{"type":"finish","sessionID":"conv"}'
+printf '%s\n' '{{"type":"init","session_id":"conv","model":"test-model"}}'
+printf '%s\n' '{{"type":"step_start","sessionID":"conv"}}'
+printf '%s\n' '{{"type":"text","text":"Let me look up the answer."}}'
+printf '%s\n' '{{"type":"tool_start","part":{{"id":"t1","tool":"bash"}}}}'
+CLAUDINE_DOC={document}
+CLAUDINE_ADD=''
+CLAUDINE_BODY='# Final Body
+
+This is the replacement body.
+'
+{rewrite}printf '%s\n' '{{"type":"text","text":"Wrote the replacement body."}}'
+printf '%s\n' '{{"type":"finish","sessionID":"conv"}}'
 exit 0
 "##,
+            document = common::sh_quote(&document.display().to_string()),
+            rewrite = common::INLINE_BODY_REWRITE,
+        ),
     );
 }
 
@@ -40,13 +50,12 @@ exit 0
 fn inline_compose_writes_expected_final_body() {
     let fixture = CliProcessFixture::named("inline-compose-cli");
 
-    stage_opencode_inline_body_writer(fixture.bin_dir());
-
     let source = fixture.cwd().join("bare.md");
     write(
         &source,
         "---\nprompt: Generate the body\n---\nOriginal body.\n",
     );
+    stage_opencode_inline_body_writer(fixture.bin_dir(), &source);
 
     fixture
         .command()
@@ -56,8 +65,8 @@ fn inline_compose_writes_expected_final_body() {
         .success();
 
     let doc = fs::read_to_string(&source).unwrap();
-    // The inline closure must use the final response (text after the last
-    // tool call), not the interstitial narration.
+    // The agent's file is the deliverable; the narration it emitted around the
+    // tool call must not appear in it.
     assert!(
         doc.contains("# Final Body"),
         "inline body must contain final response heading; doc:\n{doc}"

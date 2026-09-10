@@ -11,7 +11,7 @@ set positional-arguments
 #
 # It must reach bash through the environment rather than just's `export`, which
 # covers recipe shells but NOT the shells just spawns to evaluate backtick
-# assignments — `KACHE_VERSION` below is one.
+# assignments — `KACHE_MIN_VERSION` below is one.
 set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
 
 import "./just/lifecycle.just"
@@ -25,8 +25,8 @@ import "./just/spec.just"
 
 # Every package area in this monorepo that owns tests.
 #
-# This list is what `check-canonical` validates and what `_orchestrate`,
-# `changed-areas`, and `install` iterate. An area is listed here because it has
+# This list is what `check-canonical` validates and what `_orchestrate` and
+# `install` iterate. An area is listed here because it has
 # tests worth gating, NOT because it is already promoted to CI; promotion is a
 # separate, deliberate decision in the package's own manifest
 # (`[package.metadata.ci] gates`).
@@ -38,7 +38,7 @@ import "./just/spec.just"
 areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract biscuit-icon renderable worktree tools biscuit-test-harness biscuit-browser-harness messenger biscuit-visualized biscuit-clipboard"
 
 # The `areas :=` list above is a LOCAL convenience (canonical-recipe validation
-# and `changed-areas` iteration). CI does not read it: CI selects and records
+# and `_orchestrate` iteration). CI does not read it: CI selects and records
 # work by package, with package policy in each manifest's `[package.metadata.ci]`.
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -47,10 +47,10 @@ RESET := '\033[0m'
 RED := '\033[31m'
 GREEN := '\033[32m'
 YELLOW := '\033[33m'
-# Single kache version authority, shared with GitHub Actions via
-# `.github/kache-version` (D2). Both sides read the same file, so they cannot
-# drift to different versions.
-KACHE_VERSION := trim(`cat .github/kache-version`)
+# Single kache version FLOOR (D2). Hosts run the latest kache; the repository
+# only states the minimum it has verified against (0.7.x was silently
+# write-only). Read here and by the maintenance audit, so the two cannot drift.
+KACHE_MIN_VERSION := trim(`cat .github/kache-min-version`)
 
 default:
     #!/usr/bin/env bash
@@ -95,45 +95,27 @@ check-tier-coverage *args="":
 test-leaks *args="":
     @cargo run -q -p test-toolkit --features leak-sweep --bin leak-sweep -- just test {{ args }}
 
-# detect which monorepo areas have changed files compared to the upstream branch
+# pre-push hook entry point: CI's clippy gate for CI's scope, nothing more
 #
-# `[no-cd]` lets callers (and Level 1 tests) invoke this recipe inside a
-# different git working tree without `just` resetting the shell cwd back
-# to the justfile's directory. In production the pre-push hook already
-# runs at the repo root, so the attribute is a no-op there.
-[no-cd]
-changed-areas:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    upstream=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)
-    if [[ -z "${upstream:-}" ]]; then
-        # No upstream branch; return empty so caller can fall back
-        exit 0
-    fi
-    changed=$(git diff --name-only "$upstream..HEAD" | cut -d/ -f1 | sort -u)
-    matched=""
-    for area in {{ areas }}; do
-        if echo "$changed" | grep -qx "$area"; then
-            matched="$matched $area"
-        fi
-    done
-    # Trim leading space
-    echo "${matched# }"
+# Lint only: CI's clippy job (`--all-targets`, no features) is where incomplete
+# feature gating surfaces, it is minutes rather than tens of minutes, and a red
+# clippy cell costs a whole CI round because every push cancels the run in
+# flight. L1 tests are deliberately NOT run here — CI runs them per package on
+# native runners, and a lint-then-test sequence in one target directory reuses
+# stale test binaries. Optional selectors (package names or areas) replace the
+# computed scope, as they do for `just ci-local`.
+pre-push *selectors="":
+    @just ci-local --lint-only {{ selectors }}
 
-# pre-push hook entry point (default areas: claudine darkmatter)
-#
-# Lint first: CI's clippy job (`--all-targets`, no features) is where
-# incomplete feature gating surfaces, and it is far cheaper than the tests.
-# `just ci-local` is the package-precise equivalent for manual use.
-pre-push *areas="claudine darkmatter":
-    @just _orchestrate lint {{ areas }}
-    @just test {{ areas }}
-
-# run one package's L1 suite on the standing build-host clones (real Linux +
-# native Windows) against the LOCAL tree — no commit or push needed. The
-# expected pre-push step for changes touching path semantics, process
-# spawning, or terminal behavior, which macOS L1 cannot exercise.
-# Usage: just cross-check <package> [--host linux|windows|all] [nextest args]
+# run one package's L1 suite on the standing build-host clones (real Linux,
+# native Windows, WSL2 in CI's nextest-archive mode, and macOS) against the
+# LOCAL tree — no commit or push needed. Hosts come from BUILD_LINUX,
+# BUILD_WIN, BUILD_WSL, and BUILD_MACOS (SSH destinations); an unset variable
+# means that host is not available here. `--os all` (the default) runs every
+# declared OS except the local one. Runs on a host queue behind a per-host
+# lock. The expected pre-push step for changes touching path semantics,
+# process spawning, or terminal behavior, which the local L1 cannot exercise.
+# Usage: just cross-check <package> [--os linux|windows|wsl|macos|all] [nextest args]
 cross-check *args:
     @./scripts/cross-check.sh {{ args }}
 
@@ -141,12 +123,8 @@ cross-check *args:
 test-pre-push-hook:
     @./.githooks/tests/test-pre-push.sh
 
-# run Level 1 tests for the `changed-areas` recipe heuristic itself
-test-changed-areas:
-    @./.githooks/tests/test-changed-areas.sh
-
-# run Level 1 tests for both the pre-push hook and the changed-areas recipe
-test-githooks: test-pre-push-hook test-changed-areas
+# run Level 1 tests for every versioned git hook
+test-githooks: test-pre-push-hook
 
 # run doctests (all workspace crates, or specific areas: just doctest claudine playa)
 doctest *args="": _storage_preflight
@@ -524,6 +502,7 @@ init: _ensure-native-bash
 
     echo -e "{{ BOLD }}Repository and developer tools{{ RESET }}"
     just _ensure-cargo-sweep
+    just _ensure-kache
     just _ensure-gitnexus
     just _ensure-git-hooks
     echo
@@ -874,15 +853,44 @@ _ensure-native-libs *packages="":
     install_packages "${packages[@]}"
     echo "Native libraries installed."
 
-# Deliberately not a dependency of `init`. kache's economics are decided by the
-# filesystem, not the OS: APFS/btrfs/XFS-reflink and ReFS clone blocks, while
-# ext4 and NTFS fall back to hardlink or copy, so the store becomes a second
-# copy of every artifact. Installing for everyone and activating for everyone
-# are different decisions; this recipe only does the first. See
-# `docs/initialization.md` for how to activate, and `docs/kache-strategy.md`
-# for the measured evidence.
+# `just init` step: on macOS and Linux install kache when it is absent, and
+# never reinstall one that is present (a below-floor install is reported, not
+# replaced — `just install-kache` upgrades it). Windows and WSL skip: the
+# 2026-09-09 ruling keeps kache off there (docs/kache-strategy.md). Installing
+# activates nothing.
+_ensure-kache:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/cargo-path.sh
+    case "$(uname -s)" in
+        Darwin) ;;
+        Linux)
+            if grep -qi microsoft /proc/version 2> /dev/null; then
+                echo "kache: skipped on WSL (repository policy keeps it off here)"
+                exit 0
+            fi
+            ;;
+        *)
+            echo "kache: skipped on Windows (repository policy keeps it off here)"
+            exit 0
+            ;;
+    esac
+    if command -v kache &> /dev/null; then
+        installed="$(kache --version | cut -d' ' -f2)"
+        if [[ "$(printf '%s\n%s\n' "{{ KACHE_MIN_VERSION }}" "$installed" | sort -V | head -1)" == "{{ KACHE_MIN_VERSION }}" ]]; then
+            echo "kache: $installed already installed (floor {{ KACHE_MIN_VERSION }})"
+        else
+            echo "kache: $installed is below the floor {{ KACHE_MIN_VERSION }} — run 'just install-kache' to upgrade"
+        fi
+    else
+        just install-kache
+    fi
 
-# install the repository-pinned Rust compiler cache (does NOT activate it)
+# Activation stays a host decision: the filesystem, not the OS, decides whether
+# a restore is a clone, a hard link, or a copy, and only clone mode is worth it.
+# This recipe installs; `just kache-status` answers whether THIS host earns it.
+
+# install or upgrade the Rust compiler cache to the latest release (does NOT activate it)
 install-kache:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -893,7 +901,14 @@ install-kache:
         installed_version=$(kache --version | cut -d' ' -f2)
     fi
 
-    if [[ "$installed_version" != "{{ KACHE_VERSION }}" ]]; then
+    meets_floor=0
+    if [[ -n "$installed_version" ]] && [[ "$(printf '%s\n%s\n' "{{ KACHE_MIN_VERSION }}" "$installed_version" | sort -V | head -1)" == "{{ KACHE_MIN_VERSION }}" ]]; then
+        meets_floor=1
+    fi
+
+    if (( meets_floor )); then
+        echo "kache $installed_version already installed (floor {{ KACHE_MIN_VERSION }}); not reinstalling."
+    else
         # cargo-binstall is the install path on every OS: it fetches a prebuilt
         # kache binary instead of compiling from source. Install it first when
         # absent (that one install is from source).
@@ -902,36 +917,41 @@ install-kache:
             RUSTC_WRAPPER="" cargo install --locked cargo-binstall
         fi
 
-        RUSTC_WRAPPER="" cargo binstall \
-            --no-confirm \
-            --force \
-            --version "{{ KACHE_VERSION }}" \
-            kache
+        # Latest release, not a pin: hosts track upstream and the repository
+        # only guarantees the floor.
+        RUSTC_WRAPPER="" cargo binstall --no-confirm --force kache
     fi
 
     # Seed a default store config when the host has none. An uncapped store
     # thrashes: LRU can evict fresh entries before they score a hit. 100 GiB is
     # the agreed starting point (docs/kache-strategy.md); never overwrite an
-    # existing config — hosts size against their own volume.
+    # existing config — hosts size against their own volume. A read-only
+    # config directory (build-linux mounts ~/.config over CIFS) is reported,
+    # not fatal, so `just init` still completes there.
     case "$(uname -s)" in
         MINGW*|MSYS*|CYGWIN*) kache_config_dir="$(cygpath "${APPDATA:?}")/kache" ;;
         *)                    kache_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/kache" ;;
     esac
     if [[ ! -f "$kache_config_dir/config.toml" ]]; then
-        mkdir -p "$kache_config_dir"
-        printf '[cache]\nlocal_max_size = "100GiB"\n' > "$kache_config_dir/config.toml"
-        echo "Wrote default kache store cap (100GiB) to $kache_config_dir/config.toml"
+        if mkdir -p "$kache_config_dir" 2> /dev/null \
+            && printf '[cache]\nlocal_max_size = "100GiB"\n' > "$kache_config_dir/config.toml" 2> /dev/null; then
+            echo "Wrote default kache store cap (100GiB) to $kache_config_dir/config.toml"
+        else
+            echo "WARNING: could not write $kache_config_dir/config.toml; the store cap defaults to kache's own (50GiB)."
+        fi
     fi
 
     kache --version
     echo
     echo "Installed, NOT activated. Nothing uses kache until you set RUSTC_WRAPPER."
-    echo "  probe first : kache doctor   (confirm the store filesystem clones blocks)"
+    echo "  ruling      : just kache-status   (macOS: on, same APFS volume as the store;"
+    echo "                                     Linux: on only when the clone probe passes;"
+    echo "                                     Windows and WSL: off)"
     echo "  this shell  : export RUSTC_WRAPPER=kache"
     echo "  host-wide   : kache init     (writes \$CARGO_HOME/config.toml — affects every repo)"
     echo "  undo        : unset RUSTC_WRAPPER, or remove the wrapper from Cargo home"
-    echo
-    echo "  Windows/NTFS: repository policy says leave it OFF (just kache-status)."
+    echo "  never mix   : a target/ is always wrapped or never wrapped; standing"
+    echo "                ci-verification clones are never wrapped"
 
 # Exists because activation is HOST policy and the repository therefore cannot
 # see it: `kache init` writes `$CARGO_HOME/config.toml` and affects every Rust
@@ -948,7 +968,12 @@ kache-status:
     echo "=== kache status — policy: docs/kache-strategy.md ==="
 
     if command -v kache &> /dev/null; then
-        say "installed" "$(kache --version 2>/dev/null | cut -d' ' -f2) (pinned {{ KACHE_VERSION }})"
+        installed="$(kache --version 2>/dev/null | cut -d' ' -f2)"
+        if [[ "$(printf '%s\n%s\n' "{{ KACHE_MIN_VERSION }}" "$installed" | sort -V | head -1)" == "{{ KACHE_MIN_VERSION }}" ]]; then
+            say "installed" "$installed (floor {{ KACHE_MIN_VERSION }})"
+        else
+            say "installed" "$installed — BELOW the floor {{ KACHE_MIN_VERSION }}; 'just install-kache' upgrades"
+        fi
     else
         say "installed" "no — 'just install-kache' installs it (does not activate it)"
     fi
@@ -974,21 +999,40 @@ kache-status:
     [[ -z "$active" ]] && say "active" "no — nothing sets a rustc wrapper"
 
     # Never inferred from the OS: the restore mode is a property of the
-    # FILESYSTEM, and one host can have several. Probe where target/ actually is.
+    # FILESYSTEM, and one host can have several. Clones do not cross volumes,
+    # so the probe runs from the STORE to target/ — a probe inside target/
+    # alone said "clone" for a checkout on a second APFS volume that kache
+    # restores by copy (2026-09-09).
     probe_dir="target"; [[ -d "$probe_dir" ]] || probe_dir="."
     cow="unknown"
     case "$(uname -s)" in
+        Darwin) store_dir="${KACHE_DIR:-$HOME/Library/Caches/kache}" ;;
+        *)      store_dir="${KACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/kache}" ;;
+    esac
+    src_dir="$probe_dir"; from="target/ (store dir absent)"
+    if [[ -d "$store_dir" ]]; then src_dir="$store_dir"; from="store"; fi
+    case "$(uname -s)" in
         Darwin)
-            src="$(mktemp "$probe_dir/.kache-probe.XXXXXX")"
-            cp -c "$src" "$src.clone" &> /dev/null && cow="yes" || cow="no"
-            rm -f "$src" "$src.clone"
-            say "target/ fs" "clone-on-write: $cow (cp -c probe)"
+            # `cp -c` falls back to a plain copy across volumes and still exits
+            # 0, so success alone proves nothing: the store and target/ must
+            # also be on the same device (APFS clones never cross volumes).
+            src="$(mktemp "$src_dir/.kache-probe.XXXXXX")"
+            dst="$(mktemp "$probe_dir/.kache-probe.XXXXXX")"; rm -f "$dst"
+            if [[ "$(stat -f %d "$src_dir")" == "$(stat -f %d "$probe_dir")" ]] \
+                && cp -c "$src" "$dst" &> /dev/null; then cow="yes"; else cow="no"; fi
+            rm -f "$src" "$dst"
+            if [[ "$cow" == "yes" ]]; then
+                say "target/ fs" "clone-on-write from $from: yes (same APFS volume, cp -c probe)"
+            else
+                say "target/ fs" "clone-on-write from $from: no — $probe_dir is on a different volume than $src_dir; restores are copies"
+            fi
             ;;
         Linux)
-            src="$(mktemp "$probe_dir/.kache-probe.XXXXXX")"
-            cp --reflink=always "$src" "$src.clone" &> /dev/null && cow="yes" || cow="no"
-            rm -f "$src" "$src.clone"
-            say "target/ fs" "$(df -PT "$probe_dir" | awk 'NR==2{print $2}') — reflink: $cow"
+            src="$(mktemp "$src_dir/.kache-probe.XXXXXX")"
+            dst="$(mktemp "$probe_dir/.kache-probe.XXXXXX")"; rm -f "$dst"
+            cp --reflink=always "$src" "$dst" &> /dev/null && cow="yes" || cow="no"
+            rm -f "$src" "$dst"
+            say "target/ fs" "$(df -PT "$probe_dir" | awk 'NR==2{print $2}') — reflink from $from: $cow"
             ;;
         MINGW*|MSYS*|CYGWIN*)
             # No userspace reflink probe exists on Windows, so the filesystem
@@ -1011,10 +1055,12 @@ kache-status:
     elif [[ "$cow" == "yes" ]]; then
         echo "  VERDICT: active on a filesystem that clones blocks — this is the case kache is for."
     else
-        echo "  VERDICT: active WITHOUT copy-on-write. The store is a real second copy of every"
-        echo "           cached artifact, so disk roughly doubles for cached content."
-        echo "           Repository policy (docs/kache-strategy.md): on NTFS/ext4 leave it OFF"
-        echo "           unless a ReFS Dev Drive or reflink volume holds the store AND target/."
+        echo "  VERDICT: active WITHOUT copy-on-write. Restores are hard links or copies: the store"
+        echo "           is a real second copy, and a read-only hard link breaks the next unwrapped"
+        echo "           rebuild (\"output file ... is not writeable\")."
+        echo "           Ruling 2026-09-09 (docs/kache-strategy.md): Windows and WSL OFF; Linux ON"
+        echo "           only when this probe passes; macOS ON only with store and target/ on the"
+        echo "           same APFS volume. A target/ is always wrapped or never wrapped."
         echo
         echo "           Do NOT take kache's own first two suggestions here:"
         echo "             windows_hardlink = true        unsafe — Cargo DOES rewrite object outputs"
@@ -1338,4 +1384,4 @@ _ensure-git-hooks:
         cp "${source}" "${target}"
     fi
     chmod +x "${target}"
-    echo "Git hooks: installed .githooks/pre-push -> ${target} (lint + tests for changed areas; RUSTY_BISCUIT_PRE_PUSH=off|warn|strict)"
+    echo "Git hooks: installed .githooks/pre-push -> ${target} (CI's clippy gate for CI's scope; RUSTY_BISCUIT_PRE_PUSH=off|warn|strict)"

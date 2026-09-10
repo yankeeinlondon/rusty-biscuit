@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-7ba4e8bda2fc74df
-last_updated: 2026-07-22
+hash: ef46db3751d8e999-10a14b29d87ac832
+last_updated: 2026-09-08
 ---
 # Claudine CLI Reference
 
@@ -217,6 +217,14 @@ claudine providers
 
 **`claudine providers agent-errors check <slug> [--findings <path>]`** runs the deterministic `agent-errors` research gate through the same generator-binary boundary. The command writes an explicit `clean`, `findings`, or `gate_error` outcome report and is safe to reference from a lifecycle shell action; the shell policy continues to blacklist direct `cargo` invocations.
 
+**`claudine providers steering check [slug] [--json]`** forwards to
+`claudine-gen steering check`. Omit the slug to check every active research roster
+provider. The gate validates schema, identity, coverage, evidence references,
+delivery operations, receipt records, and discovery relationships. Findings exit
+nonzero. JSON output supports automation; a clean report does not prove live
+delivery or activate an adapter. Fleet hooks require a build containing this
+command and must fail if it is unavailable.
+
 ---
 
 ## `claudine sync`
@@ -305,7 +313,7 @@ claudine compose @prompts/review.md review=review.md
 
 ### `claudine inline-compose <file-ref> [key=value ...]`
 
-Use frontmatter `prompt` to generate content and replace the document body. Preserves frontmatter, updates `last_updated`.
+Compose the frontmatter `prompt` and launch the agent **on the document itself**: it is told the file's native absolute path (plus its `$schema` property table, when declared) and writes the body and any requested frontmatter directly. Its final response is a short summary for the caller and never enters the file. Claudine reads the document back, restores `prompt`/`hash`/`last_updated` from the pre-run snapshot (warning once per property the agent touched), sets `last_updated` to today's date, stamps a Darkmatter `Simple` `hash:`, and writes once atomically. A run is accepted only when the body changed meaningfully and the document satisfies its `$schema` at completion; a provider failure, interrupt, or refused body atomically restores the captured document.
 
 ```bash
 claudine inline-compose @notes/update.md draft=false

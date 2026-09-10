@@ -5,7 +5,7 @@ description: |-
   test design, fixture isolation, `require_level!` / `expect_level!` gating,
   nextest filtersets, suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 61d07be7e22c9f45-945e512a1a896fe4
+hash: 61d07be7e22c9f45-4f18f6dd156d5643
 last_updated: 2026-09-09
 ---
 # Rust Testing — Rusty Biscuit Monorepo
@@ -300,11 +300,13 @@ Before running any final build, test, or lint gate:
    exactly what CI's `lint` and `test` gates run for the branch's affected
    packages, use `just ci-local` at the root (`--lint-only` first: the
    no-features clippy build is where incomplete feature gating surfaces;
-   `--dry-run` prints the scope). The pre-push hook runs `just lint` for the
-   changed areas before `just test` for the same reason. A non-comment change
-   to a global path such as `.config/nextest.toml` selects the **whole**
-   workspace in `ci-local` and CI alike (73 packages, ~45 minutes locally on
-   2026-09-08); budget for it before touching runner configuration.
+   `--dry-run` prints the scope). The pre-push hook runs exactly
+   `just ci-local --lint-only` for the same reason, and no tests: L1 is CI's
+   job, and a lint immediately followed by nextest reuses stale test binaries.
+   A non-comment change to a global path such as `.config/nextest.toml`
+   selects the **whole** workspace in `ci-local` and CI alike (73 packages,
+   ~45 minutes locally on 2026-09-08); budget for it before touching runner
+   configuration.
 4. Report the selected scope and commands with the gate results.
 
 For durable native CI, declare package policy in the package's own

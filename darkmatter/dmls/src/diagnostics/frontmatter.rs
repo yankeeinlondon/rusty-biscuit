@@ -132,14 +132,48 @@ fn schema_prepare_diagnostic(
     error: &SchemaError,
     out: &mut Vec<Diagnostic>,
 ) {
+    schema_prepare_diagnostic_with_origin(ctx, ast, error, None, out);
+}
+
+fn schema_prepare_diagnostic_with_origin(
+    ctx: &DocumentContext,
+    ast: Option<&FrontmatterAst>,
+    error: &SchemaError,
+    referenced_origin: Option<&std::path::Path>,
+    out: &mut Vec<Diagnostic>,
+) {
+    if let SchemaError::Aggregate { errors } = error {
+        for error in errors {
+            schema_prepare_diagnostic_with_origin(ctx, ast, error, referenced_origin, out);
+        }
+        return;
+    }
+    if let SchemaError::ReferencedSchema { path, source } = error {
+        schema_prepare_diagnostic_with_origin(ctx, ast, source, Some(path), out);
+        return;
+    }
+
     let fallback_span = ast
         .and_then(|ast| ast.schema_entry().map(|entry| entry.value_span.clone()))
         .or_else(|| ast.map(FrontmatterAst::block_span));
     let (code_value, message, span) = match error {
-        SchemaError::Grammar { property, .. } if property != "<root>" => {
-            let span = ast
-                .and_then(|ast| ast.entry_by_key_path(&["$schema", property]))
-                .map(|entry| entry.value_span.clone())
+        SchemaError::Grammar { property, .. } | SchemaError::Convert { property, .. }
+            if property != "<root>" =>
+        {
+            let span = referenced_origin
+                .is_none()
+                .then(|| {
+                    ast.and_then(|ast| {
+                        ast.entry_by_key_path(&["$schema", property])
+                            .or_else(|| {
+                                let mut path = vec!["$schema"];
+                                path.extend(property.split('.'));
+                                ast.entry_by_key_path(&path)
+                            })
+                    })
+                    .map(|entry| entry.value_span.clone())
+                })
+                .flatten()
                 .or_else(|| fallback_span.clone());
             (code::SCHEMA_INVALID_TYPE_DEFINITION, error.to_string(), span)
         }
@@ -149,7 +183,7 @@ fn schema_prepare_diagnostic(
         SchemaError::RemoteUnsupported { .. } => {
             (code::SCHEMA_INVALID_SHAPE, error.to_string(), fallback_span.clone())
         }
-        SchemaError::Grammar { .. } => {
+        SchemaError::Grammar { .. } | SchemaError::Convert { .. } => {
             (code::SCHEMA_INVALID_SHAPE, error.to_string(), fallback_span.clone())
         }
         other => (code::SCHEMA_PREPARE, other.to_string(), fallback_span.clone()),
@@ -157,7 +191,22 @@ fn schema_prepare_diagnostic(
     let range = span
         .and_then(|span| ctx.source_map.byte_range_to_lsp(span))
         .unwrap_or_else(zero_range);
-    out.push(diagnostic(range, DiagnosticSeverity::ERROR, source::SCHEMA, code_value, message));
+    let mut diagnostic = diagnostic(
+        range,
+        DiagnosticSeverity::ERROR,
+        source::SCHEMA,
+        code_value,
+        message,
+    );
+    if let Some(path) = referenced_origin
+        && let Some(uri) = file_path_to_uri(path)
+    {
+        diagnostic.related_information = Some(vec![DiagnosticRelatedInformation {
+            location: Location::new(uri, zero_range()),
+            message: "schema definition is authored in this file".to_string(),
+        }]);
+    }
+    out.push(diagnostic);
 }
 
 /// Instance-validation problems mapped onto concrete ranges.
@@ -1082,6 +1131,55 @@ mod tests {
             assert!(
                 range.start.character > quote_pos.character,
                 "range must start past the opening quote"
+            );
+        });
+    }
+
+    #[test]
+    fn nested_schema_conversion_error_points_to_the_nested_value() {
+        let text = "---\n$schema:\n  meta:\n    prompt: string(integer)\n---\n\nbody\n";
+        diagnostics_for(text, |diagnostics| {
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| {
+                    code_of(diagnostic) == Some(code::SCHEMA_INVALID_TYPE_DEFINITION)
+                })
+                .expect("nested schema diagnostic");
+            assert_eq!(diagnostic.range.start.line, 3, "{diagnostics:#?}");
+            assert_eq!(diagnostic.range.end.line, 3, "{diagnostics:#?}");
+        });
+    }
+
+    /// Anchoring resolves a property *name*, so a nested leaf that shares its
+    /// name with a valid top-level property is the case where an unqualified
+    /// name would squiggle correct authoring.
+    #[test]
+    fn nested_conversion_error_does_not_anchor_on_a_same_named_top_level_property() {
+        let text = concat!(
+            "---\n",
+            "$schema:\n",
+            "  prompt: string(required)\n",
+            "  meta:\n",
+            "    prompt: string(integer)\n",
+            "prompt: hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        );
+        diagnostics_for(text, |diagnostics| {
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| {
+                    code_of(diagnostic) == Some(code::SCHEMA_INVALID_TYPE_DEFINITION)
+                })
+                .expect("nested schema diagnostic");
+            assert_eq!(diagnostic.range.start.line, 4, "{diagnostics:#?}");
+            assert_eq!(diagnostic.range.end.line, 4, "{diagnostics:#?}");
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|other| other.range.start.line == 4 && other.range.end.line == 4),
+                "the valid top-level `prompt` must stay clean: {diagnostics:#?}"
             );
         });
     }

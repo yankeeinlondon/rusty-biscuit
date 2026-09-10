@@ -126,6 +126,12 @@ install-dmls:
     #!/usr/bin/env bash
     set -euo pipefail
     cargo install --locked --path ./dmls --force
+    # Staging copies `extension.wasm`; compile it first so a `src/lib.rs` edit
+    # cannot reach Zed as a stale bundled module. A machine without the wasm
+    # target still gets the binary and the last committed extension.
+    if ! just zed-wasm; then
+        echo "warning: could not rebuild the Zed extension; staging the committed extension.wasm instead" >&2
+    fi
     if ! cargo run --quiet -p {{ DMLS_ZED_CLI }} -- stage --if-zed-present; then
         echo "warning: dmls was installed, but its Zed extension needs attention (see above)" >&2
     fi
@@ -301,6 +307,25 @@ check-zed:
     echo -e "Checking the {{ BOLD }}Zed WASM extension{{ RESET }} (zed-dmls) against $target"
     cargo check --locked --manifest-path ./dmls/zed-dmls/Cargo.toml --target "$target"
     echo -e "✅ {{ GREEN }}zed-dmls compiles for $target{{ RESET }}"
+
+# Rebuild the bundled zed-dmls/extension.wasm from src/lib.rs.
+#
+# The checked-in module is the artifact `zed-dmls stage` copies into Zed, so it
+# is a tracked build output: commit it alongside any `src/lib.rs` change.
+# `install-dmls` runs this, so it is only needed on its own to refresh the
+# committed module without touching the local install.
+zed-wasm:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target="wasm32-wasip2"
+    if ! rustup target list --installed 2>/dev/null | grep -qx "$target"; then
+        echo -e "{{ RED }}error{{ RESET }} zed-wasm: rust target {{ BOLD }}$target{{ RESET }} is not installed" >&2
+        echo "Install it with: rustup target add $target" >&2
+        exit 1
+    fi
+    cargo build --locked --release --manifest-path ./dmls/zed-dmls/Cargo.toml --target "$target"
+    cp "./dmls/zed-dmls/target/$target/release/zed_dmls.wasm" ./dmls/zed-dmls/extension.wasm
+    echo -e "✅ {{ GREEN }}rebuilt dmls/zed-dmls/extension.wasm{{ RESET }}"
 
 # Package the Zed extension with an already-provisioned official packager.
 zed-package output_dir="./dmls/zed-dmls/dist" scratch_dir="./dmls/zed-dmls/target/packager-scratch":

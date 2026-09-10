@@ -388,6 +388,31 @@ fn event_lines(staged: &Staged) -> Vec<String> {
         .collect()
 }
 
+/// The environment prefix every row's staged invocation carries: color off,
+/// `HOME` and `PATH` pinned to the row's own workspace, and `MODEL` emptied.
+///
+/// `MODEL` is pinned for the same reason `HOME` and `PATH` are — the host must
+/// not decide the outcome. Model resolution consults the generic `MODEL`
+/// environment variable *before* frontmatter (`select.rs` precedence step 3),
+/// and a Claudine-wrapped agent session exports one, so an ambient value would
+/// outrank a fixture's authored `model:` and hard-fail (not skip) any row that
+/// asserts on the resolved model. The resolver skips empty values, so `MODEL=''`
+/// restores frontmatter precedence without needing `env -u`.
+///
+/// A row that wants an ambient `MODEL` appends its own assignment after this
+/// prefix, where it wins.
+fn staged_env_prefix(staged: &Staged, path: &str) -> String {
+    format!(
+        "NO_COLOR='1' MODEL='' HOME='{home}' PATH='{path}' ",
+        home = staged.workspace.path().display(),
+    )
+}
+
+/// [`staged_env_prefix`] on the row's fakes plus the developer's own `PATH`.
+fn staged_env_prefix_augmented(staged: &Staged) -> String {
+    staged_env_prefix(staged, &augmented_path(&staged.bin_dir).to_string_lossy())
+}
+
 /// Run `claudine compose --goose <doc>` in a real tmux pane and block until the
 /// terminal `finalize` marker lands (run finished) or the deadline elapses.
 /// Returns the captured pane (for typed-error assertions).
@@ -415,15 +440,14 @@ fn run_provider_in_tmux_for(staged: &Staged, provider_flag: &str, done_marker: &
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_DONE_{seq}");
     let env_prefix = format!(
-        "NO_COLOR='1' HOME='{home}' PATH='{path}'{rendezvous} ",
-        home = staged.workspace.path().display(),
-        path = augmented_path(&staged.bin_dir).to_string_lossy(),
+        "{base}{rendezvous}",
+        base = staged_env_prefix_augmented(staged),
         rendezvous = staged
             .rendezvous_endpoint
             .as_ref()
             .map_or_else(String::new, |endpoint| {
                 format!(
-                    " RENDEZVOUS_ENDPOINT='{}'",
+                    "RENDEZVOUS_ENDPOINT='{}' ",
                     endpoint_env_value(endpoint).to_string_lossy()
                 )
             }),
@@ -488,11 +512,7 @@ fn run_provider_with_ambient_env(
 
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_DONE_{seq}");
-    let mut env_prefix = format!(
-        "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
-        home = staged.workspace.path().display(),
-        path = augmented_path(&staged.bin_dir).to_string_lossy(),
-    );
+    let mut env_prefix = staged_env_prefix_augmented(staged);
     for (key, value) in ambient {
         env_prefix.push_str(&format!("{key}='{value}' "));
     }
@@ -534,11 +554,7 @@ fn run_proxy_in_tmux_with_set(staged: &Staged, setters: &str, done_marker: &str)
 
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_DONE_{seq}");
-    let env_prefix = format!(
-        "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
-        home = staged.workspace.path().display(),
-        path = augmented_path(&staged.bin_dir).to_string_lossy(),
-    );
+    let env_prefix = staged_env_prefix_augmented(staged);
     let invocation_path = staged
         .md_file
         .strip_prefix(staged.workspace.path())
@@ -574,15 +590,7 @@ fn run_compose_await_exit(staged: &Staged) -> String {
     run_provider_await_exit(staged, "--goose")
 }
 
-/// Like [`run_compose_await_exit`] but for an arbitrary provider flag, and with
-/// `MODEL` explicitly emptied.
-///
-/// Emptying `MODEL` matters for the resume-compatibility rows: model resolution
-/// consults the generic `MODEL` environment variable *before* frontmatter
-/// (`select.rs` precedence step 3), so an ambient `MODEL` in the developer's
-/// shell would outrank the document's `model:` and silently neutralize a test
-/// that refreshes it. The resolver skips empty values, so `MODEL=''` restores
-/// frontmatter precedence without needing `env -u`.
+/// Like [`run_compose_await_exit`] but for an arbitrary provider flag.
 fn run_provider_await_exit(staged: &Staged, provider_flag: &str) -> String {
     run_compose_await_exit_with_args(staged, provider_flag)
 }
@@ -649,10 +657,7 @@ fn run_compose_await_exit_redirected(
 
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_EXIT_{seq}");
-    let env_prefix = format!(
-        "NO_COLOR='1' MODEL='' HOME='{home}' PATH='{path}' ",
-        home = staged.workspace.path().display(),
-    );
+    let env_prefix = staged_env_prefix(staged, path);
     let cmd = format!(
         "cd {ws} && {env_prefix}{claudine} compose {provider_flag} {md}{redirect} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
@@ -3453,11 +3458,7 @@ fn run_compose_settle(staged: &Staged, marker: &str, expected: usize) -> String 
 
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_SETTLE_{seq}");
-    let env_prefix = format!(
-        "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
-        home = staged.workspace.path().display(),
-        path = augmented_path(&staged.bin_dir).to_string_lossy(),
-    );
+    let env_prefix = staged_env_prefix_augmented(staged);
     let cmd = format!(
         "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
@@ -4584,11 +4585,7 @@ fn run_until_settled_with_params(
 
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_EQUIV_DONE_{seq}");
-    let mut env_prefix = format!(
-        "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
-        home = staged.workspace.path().display(),
-        path = augmented_path(&staged.bin_dir).to_string_lossy(),
-    );
+    let mut env_prefix = staged_env_prefix_augmented(staged);
     for (key, value) in ambient {
         env_prefix.push_str(&format!("{key}='{}' ", value.replace('\'', "'\\''")));
     }
@@ -5050,6 +5047,10 @@ exit 0
         "---\ntotal_phases: 1\nstart_phase: 1\n---\n\n# Plan\n",
     )
     .unwrap();
+    // Deliberately no sibling `feature/spec.md`. The shipped prompt derives
+    // `spec` from one and yields `null` when there is none, so these rows also
+    // stand as the end-to-end guard that an optional `spec` survives the
+    // completion verdict of a real shipped document.
 
     // File-change evidence requires a HEAD tree. Establish a disposable
     // baseline inside this isolated fixture, then make the tracked plan dirty
@@ -5319,11 +5320,10 @@ fn run_in_tmux_until_exit(staged: &Staged) -> String {
 
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_EXIT_{seq}");
+    let env_prefix = staged_env_prefix_augmented(staged);
     let cmd = format!(
-        "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' {claudine} compose --goose {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
-        home = staged.workspace.path().display(),
-        path = augmented_path(&staged.bin_dir).to_string_lossy(),
         md = staged.md_file.display(),
     );
     harness
@@ -6185,11 +6185,10 @@ fn run_capturing_stdout(staged: &Staged, done_marker: &str) -> (String, String) 
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_OUT_DONE_{seq}");
     let stdout_path = staged.workspace.path().join("stdout.txt");
+    let env_prefix = staged_env_prefix_augmented(staged);
     let cmd = format!(
-        "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' {claudine} compose --goose {md} > {out} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose --goose {md} > {out} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
-        home = staged.workspace.path().display(),
-        path = augmented_path(&staged.bin_dir).to_string_lossy(),
         md = staged.md_file.display(),
         out = stdout_path.display(),
     );
@@ -6315,11 +6314,10 @@ fn run_sequence_until_target_runs(staged: &Staged, expected_runs: usize) -> Stri
 
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_SEQ_DONE_{seq}");
+    let env_prefix = staged_env_prefix_augmented(staged);
     let cmd = format!(
-        "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' {claudine} sequence --goose {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} sequence --goose {md} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
-        home = staged.workspace.path().display(),
-        path = augmented_path(&staged.bin_dir).to_string_lossy(),
         md = staged.md_file.display(),
     );
     harness
@@ -6381,11 +6379,10 @@ fn run_sequence_until_settled(staged: &Staged, expected_lines: usize) -> String 
 
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_SEQSET_DONE_{seq}");
+    let env_prefix = staged_env_prefix_augmented(staged);
     let cmd = format!(
-        "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' {claudine} sequence --goose {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} sequence --goose {md} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
-        home = staged.workspace.path().display(),
-        path = augmented_path(&staged.bin_dir).to_string_lossy(),
         md = staged.md_file.display(),
     );
     harness
@@ -6552,12 +6549,22 @@ fn level2_lifecycle_sequence_step_proxy_rebuilds_target_launch_bundle() {
 /// the *active* document's body. The body is deliberately distinct from every
 /// fixture's authored body so the "unchanged body" closure guard cannot trip.
 fn write_inline_body_goose(bin_dir: &Path, events_log: &Path, new_body: &str) {
+    // File-aware: the agent is the writer, so it learns the active document
+    // from the delivered prompt header and edits it in place. A stub that only
+    // printed to stdout would be an agent that did no work, and the completion
+    // verdict would refuse the run as unchanged.
     write_executable(
         &bin_dir.join("goose"),
         &format!(
-            "#!/bin/sh\ncat > /dev/null 2>&1\nprintf 'provider-ran\\n' >> {log}\n\
-             printf '%s\\n' '{body}'\nexit 0\n",
+            "#!/bin/sh\nprintf 'provider-ran\\n' >> {log}\n\
+             {doc_from_prompt}\
+             CLAUDINE_ADD=''\n\
+             CLAUDINE_BODY='{body}\n'\n\
+             {rewrite}\
+             printf 'wrote the document\\n'\nexit 0\n",
             log = events_log.display(),
+            doc_from_prompt = common::INLINE_DOC_FROM_PROMPT,
+            rewrite = common::INLINE_BODY_REWRITE,
             body = new_body,
         ),
     );
@@ -6579,11 +6586,7 @@ fn run_inline_compose_await_exit(staged: &Staged) -> String {
 
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_INLINE_DONE_{seq}");
-    let env_prefix = format!(
-        "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
-        home = staged.workspace.path().display(),
-        path = augmented_path(&staged.bin_dir).to_string_lossy(),
-    );
+    let env_prefix = staged_env_prefix_augmented(staged);
     let cmd = format!(
         "cd {ws} && {env_prefix}{claudine} inline-compose --goose {md} ; echo {sentinel}",
         ws = staged.workspace.path().display(),
@@ -8450,12 +8453,11 @@ fn run_wrapper_in_tmux(staged: &Staged, done_marker: &str) -> String {
 
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_DONE_{seq}");
+    let env_prefix = staged_env_prefix_augmented(staged);
     let cmd = format!(
-        "cd {ws} && NO_COLOR='1' HOME='{home}' PATH='{path}' \
+        "cd {ws} && {env_prefix}\
          {claudine} claude --no-interactive 'do the thing' ; echo {sentinel}",
         ws = staged.workspace.path().display(),
-        home = staged.workspace.path().display(),
-        path = augmented_path(&staged.bin_dir).to_string_lossy(),
     );
     harness
         .send_command_with_env(&cmd, &[])

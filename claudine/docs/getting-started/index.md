@@ -24,6 +24,7 @@
 
 **Claudine** currently covers the following agent providers:
 
+
 - Claude Code
 - Codex
 - Gemini CLI
@@ -31,43 +32,108 @@
 - Kimi Code CLI
 - Qwen CLI*
 - Goose CLI*
-- Roo Code (_deprecated_)
-
-> **Note:** Roo Code was a great plugin solution for VSCode and an innovator during 2025 but their direction has changed and they will not be updating the VSCode plugin going forward. We will be removing support for this at some point but for now it's still there for those who continue to use **Roo Code**.
->
-> **Note:** Qwen CLI and Goose CLI have received less testing then others, they pass all the automated tests but I have focused more attention on the others to start.
-
-We are expecting to add the following providers soon:
-
 - Pi
 - Kilo Code
 - Antigravity CLI
+- ~~Roo Code~~ (_deprecated_)
 
-## Creating a Level Playing Field
+## Functionality
 
-**Claudine**'s original purpose was to create a platform that allows _use_ of many of the most popular agentic CLI's without requiring a mastery of each one. Let's break down how **Claudine** achieves this goal:
+Claudine initially started out as a way to ensure -- _regardless of which CLI you used_ -- that the same resources would be available in all, including:
 
-1. **Agent Skills**
+- Agent Skills
+- Prompts / Slash Commands
+- Agent / Subagent definitions
+- MCP configuration
 
-    - the new champion of providing _expertise_ to your Agent is the **agent skill**
-    - introduced by Claude Code and very quickly adopted by everyone as a pseudo standard is a nice way of giving your agent contextual super powers
-    - Claudine makes sure that your agent skills (both user-scoped and repo-scoped) are available to all of the agent platforms we support (and are installed on your system)
+This still exists as core functionality but has evolved to include much more, including:
 
-    **Usage:**
+- A canonical **Hooks** based implementation that makes user handling of _events_ such as pre-tool calls, post-tool calls, human-in-the-loop requests, and more consistent across CLI Agents
+    - Note: some platforms may receive only a subset of the functionality due to their limited support for hooks/events
+- A canonical **Permissions** model that allows for:
+    - consistent CLI parameters to allow or deny permissions regardless of the Agent being used
+    - a formal grammar for declaring the 
+- A canonical **Sandboxing** methodology that (FUTURE):
+    - some but not all Agents support "sandboxing" and each one that does supports it differently
+    - Claudine provides a consistent way of running any Agentic CLI inside a secure sandbox across macOS, Linux, and Windows OS's
+    - Note: should you want to use a particular vendor's sandboxing approach over Claudine's canonical approach you can specify this in the configuration once or use the `--native-sandbox` flag instead of the `--sandbox` flag on a per use basis
 
-    ```sh
-    # Dashboard for Agentic Skills
-    claudine skills
-    # Synchronize Skills across all Agent providers
-    claudine skills --fix
-    ```
+However, beyond all that **Claudine** has added to really important dimensions not found in other agentic CLIs:
+
+1. Meta-Agentic Functionality
+
+    The ability to convert a normal Markdown document -- _with it's structured Frontmatter data alongside it's unstructured prose body_ -- into a fully formed meta-agentic platform is likely the most important feature that **Claudine** provides today. 
+
+    Claudine provides:
+
+    - a powerful **composition** engine which leverages ideas like _interpolation_ and _transclusion_ 
+    - a **lifecycle model** that allows taking action at various stages of any agentic process
+    - an **expression engine** which provides logical, mathematical, and formatting primitives to mutate state
+    - an ergonomic **schema grammar** which can be ignored for simple use cases but leveraged in more complicated ones to help ensure correct data types and structure are being brought through the meta-agentic transform pipeline
+    - a multi-channel set of **communication** tools that allow for:
+        - **TTS** spoken communication
+        - play **sound effects** to indicate events or state (also includes a small effects library)
+        - send messages to popular **chat** applications like Discord, Slack, WhatsApp
+        - send messages to the host's desktop notification system
+    
+    The end result is that a Markdown document because a highly flexible and portable "executable document" that can adaptively adjust to a host's environment to perform multi-agent workflows.
+
+2. Out-of-Band and Distributed System Functionality
+
+    We have added a _daemon_ process called **rendezvous** that acts as a long-running helper to Claudine's CLI. Because it is _long-running_ it is able to handle a whole new set of functionality that compliments and extends what Claudine can do and because it is able to leverage a fully decentralized _mesh_ of nodes it can go even further. 
+
+    Functionality enabled by **rendezvous** includes:
+
+    - robust **log reporting** across agentic platforms
+    - the ability to **queue** work to be run _after_ another job has completed
+    - the ability to **schedule** work to be run on an interval or at a specified time\
+    - the ability to **deploy** work to external systems rather than running everything locally on the host you're working on
+
+The rest of this document will provide an overview of the functionality providing by Claudine along with links to greater details.
+
+## Shared Skills, MCP, Prompts, and Agent Definitions
+
+**Claudine**'s original purpose was to create a platform that allows _consistent_ use of the key building blocks that agentic CLI's give their users (agent skills, prompts, agent definitions, MCP services). For instance if you have an agent skill called `do-it`, then Claudine makes sure that regardless of the agentic CLI vendor you are using, that the `do-it` skill is available.
+
+> **Note:** 
+>
+> All of these resource types can be defined in one of two **scopes**:
+> 
+> - a **User Scope** where the skill is available anywhere on the host computer (_for the given logged in user_)
+> - a **Repo Scope** which defines a skill that can be used anywhere in a given repo but is _unknown_ outside of the repo
+
+
+### Agent Skills
+
+Claudine's primary role is to make sure that an agent skill defined for a particular Agent CLI is available to _all_ Agent CLI's (_that are installed on the given host_). 
+
+To operationalize the synchronization of agent skills so that every skill is available to the installed agentic CLI's you will run either of the two commands:
+
+::file claudine/docs/shared-resources/agent-skills/cli-sync.md
+
+In addition to synchronizing skills across platforms, Claudine also provides useful reporting on the skills you already have:
+
+::file claudine/docs/shared-resources/agent-skills/cli-report.md 
+
+
+
+
+
+
+
+How you _use_ agent skills in **Claudine** no different than how you'd use it any agentic CLI ... you specify a prompt and the agent will then lookup all the names/descriptions of the skills which are "in scope" (e.g., all )
+
+
+
+structuring an Agent Skill as a tree of Markdown documents where the _lead/head_ document is always `SKILL.md` 
+    
 
     You can also dig into the details of a particular skill's structure with:
-
+    
     ```sh
     claudine skills rust-testing
     ```
-
+    
     ![skill structure](./skill-structure.png)
 
 1. **Agent Definitions** _and_ **Slash Commands**
@@ -93,6 +159,19 @@ We are expecting to add the following providers soon:
     ```
 
 1. **MCP Services**
+
+    **MCP** provides a way of providing an agent with skills or knowledge that compliments the model's more general trained knowledge. It is similar to **Agent Skills** in intent but it's implementation varies in a few important ways. Technically the biggest difference is:
+
+    - the knowledge contained in an **Agent Skill** is a file based tree of Markdown documents,
+    - in contrast a **MCP** service provides it's knowledge via a set of API calls
+
+    Because an **MCP** service is implemented as an API this has some natural advantages:
+
+    - there is an abstraction between the host and _where_ this knowledge is being served from
+        - this allows companies to keep their data/knowledge on the server side and instead simply "answer client questions" from their knowledge resource 
+        - who have important knowledge or data who's full corpus being exposed as an Agent Skill would be considered a 
+
+    - unlike Agent Skills 
 
     - MCP is a key way to provide skills to your Agent and it was in some ways a precursor to "Agent Skills" (which is not much more popular)
     - However, MCP is still relevant for a number of reasons and the ability to add MCP servers is again something that all Agent providers provide
@@ -146,6 +225,7 @@ Ok so now you know _what_ you're supposed to do and if you're good at "instructi
 
 - **Consistent CLI interface**
   
+
 Instead of dealing with the variations in CLI parameters/switches you now have a _standardized_ set of CLI switch
 which do the same thing regardless of the agent you are using:
 

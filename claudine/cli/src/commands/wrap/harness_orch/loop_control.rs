@@ -236,6 +236,68 @@ struct HarnessLoopState<'a, 'guard> {
     /// here. A proxy discards it wholesale (see [`ActiveDocumentCoordinator::adopt`]).
     active: claudine::composition::ActiveDocumentState,
     coordinator: ActiveDocumentCoordinator,
+    /// The active document's inline guard, when it is an `inline-compose`
+    /// document. `None` for direct compose and wrapper passthrough.
+    inline: Option<InlineOperation>,
+}
+
+/// The operation-level inline guard for whichever document is active.
+///
+/// Captured once, from the read the provider will actually run against, and
+/// retained across every `retry`/`resume` of that document. A proxy never
+/// reaches here: a hand-off ends this loop and the target's own run captures
+/// its own baseline, which is exactly the "discard on proxy" rule (spec §D4).
+#[derive(Clone)]
+struct InlineOperation {
+    /// The document exactly as it stood before the provider was launched.
+    guard: claudine::composition::InlineClosurePlan,
+    /// Whether an earlier attempt of this operation already wrote a
+    /// meaningfully changed body, so a metadata-only recovery is not refused as
+    /// unchanged (AC18).
+    body_changed: bool,
+}
+
+/// Which completion policy this run's prompt mode is judged under.
+///
+/// `None` for the direct provider wrappers: a passthrough run prepares no
+/// active document, so there is no instance to validate and no artifact to
+/// reconcile.
+const fn completion_mode(
+    mode: HarnessPromptMode,
+) -> Option<claudine::composition::CompositionMode> {
+    match mode {
+        HarnessPromptMode::Inline => {
+            Some(claudine::composition::CompositionMode::InlineFrontmatterPrompt)
+        }
+        HarnessPromptMode::Compose => {
+            Some(claudine::composition::CompositionMode::ChainedDocument)
+        }
+        HarnessPromptMode::Passthrough => None,
+    }
+}
+
+/// Restore the active document to its captured baseline before failure handling.
+///
+/// A successful restore is silent by contract and clears the operation's
+/// body-change evidence: the document is the baseline again, so recovery starts
+/// where the first attempt did. When restoration itself fails the initiating
+/// diagnostic is untouched — it still decides the terminal signal, the `err.*`,
+/// and the exit code — and the typed rollback cause is rendered beside it,
+/// naming the path and the I/O detail, because a caller about to read "the
+/// agent did not update X" needs to know the file is not what it was.
+fn rollback_inline_document(inline: Option<&mut InlineOperation>, term: &Terminal) {
+    let Some(operation) = inline else {
+        return;
+    };
+    match claudine::composition::restore_inline_baseline(&operation.guard) {
+        Ok(()) => operation.body_changed = false,
+        Err(rollback) => {
+            use biscuit_terminal::errors::BlockError;
+            crate::log::message("");
+            crate::log::message(&rollback.report_block_error(term));
+            crate::log::message("");
+        }
+    }
 }
 
 impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
@@ -318,6 +380,7 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
             loop_start: std::time::Instant::now(),
             active,
             coordinator,
+            inline: None,
         })
     }
 }
@@ -419,6 +482,19 @@ fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
             PhaseResult::Transition(step) if matches!(*step, LoopStep::NextAttempt) => continue,
             PhaseResult::Transition(step) => return Ok(*step),
         };
+        // The baseline is captured from the read the provider is about to run
+        // against — after the staged boot, so an `initialize`-time rewrite is
+        // part of the baseline rather than something a rollback would undo. A
+        // later attempt of the same document keeps the first capture: that is
+        // what makes the guard operation-level rather than attempt-level.
+        if state.inline.is_none()
+            && let Some(guard) = prepared.document.materialized.inline_closure_plan.as_ref()
+        {
+            state.inline = Some(InlineOperation {
+                guard: guard.clone(),
+                body_changed: false,
+            });
+        }
         let executed = execute_attempt_phase(&mut state, prepared)?;
         match classify_attempt_phase(&mut state, executed)? {
             LoopStep::NextAttempt => continue,
@@ -1227,6 +1303,7 @@ fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
         env_overrides: Vec::new(),
         selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
+        launch_schema: None,
         file_resolution_context: None,
         compose_context: None,
         document_epoch: None,
@@ -1637,6 +1714,11 @@ fn execute_attempt_phase(
         .attempt()
         .session_id()
         .map(str::to_string);
+    // Cloned out of the loop state so the post-`start` failure arms below can
+    // roll the document back while `state`'s other fields are mutably borrowed.
+    // The clone is write-only: both arms that touch it propagate `Err` and end
+    // the run, so the cleared evidence has no later attempt to reach.
+    let mut inline = state.inline.clone();
     let prompt_state = &mut *state.run.prompt_state;
     let lifecycle_guard = &mut *state.run.lifecycle_guard;
     let effect_engine = &state.effect_engine;
@@ -1684,6 +1766,10 @@ fn execute_attempt_phase(
     )
     .map_err(|e| {
         let err_info = LifecycleErrorInfo::from_error_or_action("harness_launch", e.as_ref());
+        // Post-`start` launch construction can fail after the provider may
+        // already have been given the document, so the guard is restored before
+        // failure handling (spec §D4).
+        rollback_inline_document(inline.as_mut(), term);
         // A lifecycle evaluation error raised by the failure/finalize
         // stack takes precedence over the original harness-launch error —
         // the lifecycle raise is the more actionable diagnosis and must
@@ -1741,6 +1827,7 @@ fn execute_attempt_phase(
         base_args,
         &rebuilt.mcp_tags,
         &launch,
+        rebuilt.write_posture.as_deref(),
     );
     // A resume carries the key of the session-producing attempt forward with the
     // live session. If the canonical refresh changed a launch property the
@@ -1837,6 +1924,7 @@ fn execute_attempt_phase(
     let (outcome, perf, iteration_signals) = attempt_result
     .map_err(|e| {
         let err_info = LifecycleErrorInfo::from_error_or_action("harness_attempt", e.as_ref());
+        rollback_inline_document(inline.as_mut(), term);
         // A lifecycle evaluation error raised by the failure/finalize
         // stack takes precedence over the original harness-attempt error —
         // the lifecycle raise is the more actionable diagnosis and must
@@ -1908,6 +1996,7 @@ fn classify_attempt_phase(
     let effect_engine = &state.effect_engine;
     let active = &mut state.active;
     let coordinator = &mut state.coordinator;
+    let inline = &mut state.inline;
     let loop_start = state.loop_start;
     // R8 — the executed attempt's own provider/profile, never `state.run`'s.
     // Every recovery decision below negotiates over the session this attempt
@@ -1924,6 +2013,9 @@ fn classify_attempt_phase(
         // close: without this the wrapper would silently return 130
         // and the operator has no feedback that Claudine noticed.
         eprintln!("{}", crate::output::format_user_interrupt_status());
+        // An interrupted agent may have left half a document behind, so the
+        // baseline goes back before any terminal event observes the file.
+        rollback_inline_document(inline.as_mut(), term);
         let err_info = LifecycleErrorInfo::from_action_failure(
             "interrupted",
             "user interrupted the run",
@@ -2005,6 +2097,9 @@ fn classify_attempt_phase(
             outcome.error_kind.as_deref().unwrap_or("agent_failure"),
             message.as_str(),
         );
+        // A non-zero provider exit is the first rollback case: whatever the
+        // agent wrote is unattested, so recovery starts from the baseline.
+        rollback_inline_document(inline.as_mut(), term);
         let recovery = {
             let shared_guard = handoff_ledger.as_ref().map(|l| l.lock().unwrap());
             let ledger_ref: &RunLedger =
@@ -2078,29 +2173,94 @@ fn classify_attempt_phase(
         )));
     }
 
-    // For inline mode, apply closure after a successful provider run.
-    if let Some(closure_plan) = materialized.inline_closure_plan.as_ref()
-        && outcome.exit_code == 0
-        && let Err(failures) = super::super::inline::try_inline_closure(
-            closure_plan,
-            &outcome.final_response,
-            &prompt_state.source_path,
-            child_cwd,
-            show_checks,
-            term,
-        )
-    {
-        let fail_msg = format!(
-            "inline closure failed ({} {}): {}",
-            failures.len(),
-            if failures.len() == 1 { "failure" } else { "failures" },
-            failures.join("; "),
-        );
-        if show_checks {
-            claudine::harness::report::report_unhandled_failure(&fail_msg, term);
+    // The provider produced its summary, so it joins `outputs` now — before any
+    // terminal lifecycle handling, so `success`, `failure`, and `finalize` alike
+    // observe it and a later iteration, step, or standalone
+    // `{{ last(outputs) }}` reads it back. It is the agent's report on the work;
+    // the document never receives it (spec §D3).
+    //
+    // A task-driven run withholds the commit: its executor publishes the entry
+    // only after `teardown`, because a failing teardown owes no output. The
+    // captured text still travels out through `last_final_output`.
+    prompt_state.last_final_output = Some(
+        claudine::composition::trim_transport_newline(&outcome.final_response).to_string(),
+    );
+    if !prompt_state.suppress_output_commit {
+        commit_run_output(&materialized, &outcome.final_response);
+    }
+
+    // The completion verdict — the one seam both composition modes reach, and
+    // the last check in the producing slice. `inline-compose` reconciles and
+    // writes the agent's artifact here; `compose` judges its live effective
+    // frontmatter and touches no file. Whatever it decides chooses between
+    // `success` and `failure`; the hooks those states run are unrestricted.
+    let verdict_error = match completion_mode(prompt_state.mode) {
+        None => None,
+        Some(mode) => {
+            let instance = serde_json::Value::Object(
+                materialized
+                    .live_frontmatter
+                    .lock()
+                    .expect("live frontmatter mutex poisoned by a panicking lifecycle action")
+                    .clone(),
+            );
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let completed = claudine::composition::complete_active_document(
+                claudine::composition::CompletionContext {
+                    mode,
+                    active_path: &prompt_state.source_path,
+                    launch_schema: materialized.launch_schema.as_ref(),
+                    live_frontmatter: &instance,
+                    inline_guard: inline.as_ref().map(|operation| &operation.guard),
+                    prior_body_change: inline
+                        .as_ref()
+                        .is_some_and(|operation| operation.body_changed),
+                    today: &today,
+                },
+            );
+            match completed {
+                Ok(completion) => {
+                    if let Some(artifact) = completion.artifact.as_deref() {
+                        if let Some(operation) = inline.as_mut() {
+                            operation.body_changed = true;
+                        }
+                        super::super::inline::report_inline_artifact(
+                            artifact,
+                            &prompt_state.source_path,
+                            child_cwd,
+                            show_checks,
+                            term,
+                        );
+                    }
+                    let error = completion.verdict.into_error();
+                    // A refused body wrote nothing, so the file on disk is
+                    // whatever the agent left — restore it. A *schema* failure
+                    // is the opposite case: the artifact is valid work and is
+                    // kept, and only the run's terminal signal changes (D5).
+                    if matches!(error, Some(CompositionError::CompletionBodyUnchanged { .. })) {
+                        rollback_inline_document(inline.as_mut(), term);
+                    }
+                    error
+                }
+                Err(error) => {
+                    // A read, parse, duplicate-owned-key, or hash failure means
+                    // the document on disk cannot be trusted; the baseline goes
+                    // back before failure handling.
+                    rollback_inline_document(inline.as_mut(), term);
+                    Some(error)
+                }
+            }
         }
-        let err_info =
-            LifecycleErrorInfo::from_action_failure("inline_closure", fail_msg.as_str());
+    };
+
+    if let Some(error) = verdict_error {
+        if show_checks {
+            claudine::harness::report::report_unhandled_failure(&error.to_string(), term);
+        }
+        let err_info = LifecycleErrorInfo::from_composition_error(&error);
+        // Ordinary `failure` recovery: `retry`, `resume`, and `proxy` recover a
+        // failed verdict exactly as they recover a provider failure, and
+        // `success` never fires because the verdict is taken first.
         let recovery = {
             let shared_guard = handoff_ledger.as_ref().map(|l| l.lock().unwrap());
             let ledger_ref: &RunLedger =
@@ -2147,24 +2307,13 @@ fn classify_attempt_phase(
             }
             TerminalRecovery::Completed => {}
         }
-        return Err(eyre!("{fail_msg}"));
+        // Nothing recovered, so the verdict is the run's outcome: propagate the
+        // typed diagnostic so the walker renders its per-property status block
+        // and the process exits non-zero.
+        return Err(error.into());
     }
 
-    // The run succeeded, so its output joins `outputs` now — before the
-    // success event fires, so `success`/`finalize` observe it and a later
-    // iteration, step, or standalone `{{ last(outputs) }}` reads it back.
-    //
-    // A task-driven run withholds the commit: its executor publishes the entry
-    // only after `teardown`, because a failing teardown owes no output. The
-    // captured text still travels out through `last_final_output`.
-    prompt_state.last_final_output = Some(
-        claudine::composition::trim_transport_newline(&outcome.final_response).to_string(),
-    );
-    if !prompt_state.suppress_output_commit {
-        commit_run_output(&materialized, &outcome.final_response);
-    }
-
-    // A successful provider run proceeds to the success lifecycle event.
+    // The verdict passed, so the run proceeds to the success lifecycle event.
     // The `success.stack` may end in a flow-control action — either a direct
     // `resume`/`retry`/`proxy`/`requeue` (e.g. the agent finished but an
     // expected artifact is missing, so `resume` it), or an `error()` that

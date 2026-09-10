@@ -235,13 +235,17 @@ fn provider_stderr_is_excluded_from_the_captured_entry() {
 #[test]
 fn inline_compose_success_sees_this_runs_output() {
     let fixture = CliProcessFixture::named("composition-outputs");
-    fake_goose(&fixture, "generated body", 0);
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
         "---\ntitle: t\nprompt: Write something.\nsuccess:\n  info: 'inline-last={{ last(outputs) }}'\n---\nold body\n",
     )
     .unwrap();
+    // Inline mode's output is the agent's summary, and the agent is the writer.
+    common::InlineAgentStub::new(&md)
+        .body("agent-written body\n")
+        .summary("generated body")
+        .install(fixture.bin_dir(), "goose");
 
     let (_, stderr) = run(
         &fixture,

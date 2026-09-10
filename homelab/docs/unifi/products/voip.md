@@ -1,9 +1,9 @@
 ---
 $schema: 
     prompt: string(required;eager)
-    last_updated: string(required)
+    last_updated: date(required)
     researched_by: string(required)
-    products: object(required)
+    products: object[](required)
 prompt: |-
     [Unifi](https://ui.com)'s **Talk** service offering surrounds IP-based telephony and Unifi sells a number of VOIP based telephones.
 

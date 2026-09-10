@@ -83,6 +83,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
         env_overrides: Vec::new(),
         selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
+        launch_schema: None,
         file_resolution_context: Some(source_context.file_resolution_context().clone()),
         compose_context: Some(context),
         document_epoch: Some(document_epoch),

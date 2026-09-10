@@ -615,7 +615,10 @@ fn drive_inline_compose_collection(cmd: Command, marker: &Path) {
 #[test]
 fn level1_pty_inline_compose_interactive_flag_collects_before_launch() {
     // `inline-compose -i --codex` requests an interactive session via flag.
-    // The missing required `topic` must be collected before Codex launches.
+    // The missing `topic` must be collected before Codex launches. It is
+    // declared `eager` because that is the half of the split inline mode
+    // collects at launch; a plain `required` property is deferred to the
+    // completion verdict and is deliberately never prompted for here.
     expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("level1-schema-prompt-pty");
@@ -627,7 +630,7 @@ fn level1_pty_inline_compose_interactive_flag_collects_before_launch() {
         concat!(
             "---\n",
             "$schema:\n",
-            "  topic: 'string(required)'\n",
+            "  topic: 'string(required;eager)'\n",
             "prompt: Generate notes about {{topic}}.\n",
             "---\n",
             "Original body.\n",
@@ -645,7 +648,7 @@ fn level1_pty_inline_compose_interactive_flag_collects_before_launch() {
 #[test]
 fn level1_pty_inline_compose_frontmatter_interactive_collects_before_launch() {
     // `interactive: true` frontmatter selects an interactive session for
-    // `inline-compose` with no CLI flag. The missing required `topic` must
+    // `inline-compose` with no CLI flag. The missing `eager` `topic` must
     // still be collected before Codex launches.
     expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
@@ -658,7 +661,7 @@ fn level1_pty_inline_compose_frontmatter_interactive_collects_before_launch() {
         concat!(
             "---\n",
             "$schema:\n",
-            "  topic: 'string(required)'\n",
+            "  topic: 'string(required;eager)'\n",
             "interactive: true\n",
             "prompt: Generate notes about {{topic}}.\n",
             "---\n",

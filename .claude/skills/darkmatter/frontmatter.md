@@ -71,6 +71,26 @@ parse and serialize frontmatter rather than editing YAML as text. When a
 document carries a managed `hash:` property, use the command's normal write
 path so Darkmatter can keep the stored hash consistent.
 
+## Text-Preserving Property Restoration
+
+`restore_properties_text(current, snapshot, properties)` sits beside
+`apply_hash_save_text` and is the only sanctioned way to put a named set of
+frontmatter properties back to their snapshot spelling. A consumer that wants
+to overwrite specific keys without reformatting the document must call this
+rather than build a second YAML node editor.
+
+It returns `RestoredDocument { text, restored_properties, frontmatter_delta }`.
+Every untouched byte survives — block scalars, trailing spaces, four-space
+indentation, LF/CRLF, property order, and platform-native paths. Parse
+failures, a non-mapping root, and duplicate keys are typed errors and nothing
+is written. The `FrontmatterDelta` distinguishes addition, replacement, and
+deletion; value-preserving reformatting is **not** a semantic change, and the
+restored properties are excluded from the delta.
+
+For "did the body meaningfully change", use the non-strict `Simple` body hash
+comparison: leading/trailing whitespace and blank lines are ignored, internal
+whitespace stays significant.
+
 ## `style:` Frontmatter
 
 `darkmatter::style` owns the document-level `style:` schema and applicators.

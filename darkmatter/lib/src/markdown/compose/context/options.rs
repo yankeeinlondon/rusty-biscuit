@@ -354,6 +354,11 @@ pub struct ComposeOptions {
     /// and reports the verdict. Default: `false`.
     pub(crate) defer_schema_verdict: bool,
 
+    /// The runtime schema phase the compose-time verdict is judged at, when the
+    /// caller is preparing a launch rather than validating an authored
+    /// document. `None` keeps the unphased authoring verdict. Default: `None`.
+    pub(crate) schema_phase: Option<crate::markdown::schemas::SchemaPhase>,
+
     // ── Deferred frontmatter keys (DM1) ────────────────────────────
     /// Top-level frontmatter keys deferred from every compose-time value
     /// resolution pass (`{{ }}` interpolation, whole-value expansion,
@@ -623,6 +628,7 @@ impl ComposeOptions {
             remote_read_config: RemoteReadConfig::default(),
             defer_shell_pending_schema_problems: false,
             defer_schema_verdict: false,
+            schema_phase: None,
             preflight_graph: None,
             remote_fetch: None,
             exclude_keys: std::collections::HashSet::new(),
@@ -1438,6 +1444,38 @@ impl ComposeOptions {
         self
     }
 
+    /// Judges the compose-time schema verdict at a runtime phase instead of
+    /// the unphased authoring contract.
+    ///
+    /// `Some(SchemaPhase::Launch)` lets a required-but-not-eager property stay
+    /// absent (a later actor is expected to supply it) while still requiring
+    /// every `required; eager` property and type-checking every present value.
+    /// An eager-only property stays optional: `eager` decides when a supplied
+    /// value is validated, not whether it must exist. `None` (the default)
+    /// keeps the existing unphased verdict.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::compose::ComposeOptions;
+    /// use darkmatter::markdown::schemas::SchemaPhase;
+    ///
+    /// let options = ComposeOptions::new().with_schema_phase(Some(SchemaPhase::Launch));
+    /// ```
+    #[must_use]
+    pub fn with_schema_phase(
+        mut self,
+        phase: Option<crate::markdown::schemas::SchemaPhase>,
+    ) -> Self {
+        self.schema_phase = phase;
+        self
+    }
+
+    /// The runtime schema phase the compose-time verdict is judged at, if any.
+    pub fn schema_phase(&self) -> Option<crate::markdown::schemas::SchemaPhase> {
+        self.schema_phase
+    }
+
     /// Sets the explicit fallback directory for caller-supplied file references
     /// (typically the captured launch area).
     ///
@@ -1979,6 +2017,7 @@ impl ComposeOptions {
             remote_read_config,
             defer_shell_pending_schema_problems,
             defer_schema_verdict,
+            schema_phase,
             exclude_keys,
             name_coercion_keys,
             env_path_whitelist,
@@ -2299,6 +2338,8 @@ impl ComposeOptions {
         enc.bool(*defer_shell_pending_schema_problems);
         enc.field("defer_schema_verdict");
         enc.bool(*defer_schema_verdict);
+        enc.field("schema_phase");
+        enc.tag(schema_phase_tag(*schema_phase));
 
         // Unordered set: sort for canonical order.
         enc.field("exclude_keys");
@@ -2448,6 +2489,8 @@ impl ComposeOptions {
         cenc.bool(*trigger_schemas);
         cenc.field("defer_schema_verdict");
         cenc.bool(*defer_schema_verdict);
+        cenc.field("schema_phase");
+        cenc.tag(schema_phase_tag(*schema_phase));
         cenc.field("name_coercion_keys");
         cenc.count(name_coercion_keys.len());
         for key in name_coercion_keys {
@@ -2581,6 +2624,16 @@ fn remote_fetch_opt_same_instance(
         (None, None) => true,
         (Some(a), Some(b)) => a.same_instance(b),
         _ => false,
+    }
+}
+
+/// Stable identity tag for the compose-time schema phase: `0` unphased,
+/// `1` launch, `2` completion.
+fn schema_phase_tag(phase: Option<crate::markdown::schemas::SchemaPhase>) -> u8 {
+    match phase {
+        None => 0,
+        Some(crate::markdown::schemas::SchemaPhase::Launch) => 1,
+        Some(crate::markdown::schemas::SchemaPhase::Completion) => 2,
     }
 }
 

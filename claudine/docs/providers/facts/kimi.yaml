@@ -255,6 +255,7 @@ display_policy:
   tool_result_summary: show
   info_event_suppression: []
   collapse_task_progress: false
+  suppress_synthetic_tool_calls: false
   suppress_subscription_rate_limit: false
   # High-volume wire envelope kinds that the Kimi semantic parser already
   # maps to first-class semantic events. If a future Kimi protocol revision

@@ -132,6 +132,7 @@ fn materialized(frontmatter: serde_json::Value) -> MaterializedHarnessPrompt {
         env_overrides: Vec::new(),
         selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
+        launch_schema: None,
         file_resolution_context: None,
         compose_context: None,
         document_epoch: None,

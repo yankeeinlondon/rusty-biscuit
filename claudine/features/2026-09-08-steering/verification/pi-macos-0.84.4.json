@@ -1,0 +1,631 @@
+{
+  "assertions": [
+    "correlated acceptance before tool completion",
+    "full tool batch preserved",
+    "steering present in subsequent model input",
+    "same conversation after delivery",
+    "agent_settled observed",
+    "duplicate request ID does not deduplicate user text",
+    "context loaded",
+    "template expanded",
+    "skill expanded",
+    "extension-handled prompt does not invoke model",
+    "session identity changes on new_session",
+    "unanswered extension confirmation remains pending"
+  ],
+  "elapsed_ms": 296,
+  "events": [
+    {
+      "command": "get_state",
+      "id": "initial-state",
+      "method": null,
+      "success": true,
+      "type": "response"
+    },
+    {
+      "command": "prompt",
+      "id": "batch",
+      "method": null,
+      "success": true,
+      "type": "response"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "agent_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "turn_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "tool_execution_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "tool_execution_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "queue_update"
+    },
+    {
+      "command": "steer",
+      "id": "steer",
+      "method": null,
+      "success": true,
+      "type": "response"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "queue_update"
+    },
+    {
+      "command": "steer",
+      "id": "steer",
+      "method": null,
+      "success": true,
+      "type": "response"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "tool_execution_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "tool_execution_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "turn_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "turn_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "queue_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "turn_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "turn_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "queue_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "turn_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "agent_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "agent_settled"
+    },
+    {
+      "command": "get_state",
+      "id": "after-batch",
+      "method": null,
+      "success": true,
+      "type": "response"
+    },
+    {
+      "command": "get_messages",
+      "id": "messages",
+      "method": null,
+      "success": true,
+      "type": "response"
+    },
+    {
+      "command": "prompt",
+      "id": "template",
+      "method": null,
+      "success": true,
+      "type": "response"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "agent_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "turn_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "turn_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "agent_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "agent_settled"
+    },
+    {
+      "command": "get_state",
+      "id": "state-template",
+      "method": null,
+      "success": true,
+      "type": "response"
+    },
+    {
+      "command": "prompt",
+      "id": "skill",
+      "method": null,
+      "success": true,
+      "type": "response"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "agent_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "turn_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_start"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_update"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "message_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "turn_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "agent_end"
+    },
+    {
+      "command": null,
+      "id": null,
+      "method": null,
+      "success": null,
+      "type": "agent_settled"
+    },
+    {
+      "command": "get_state",
+      "id": "state-skill",
+      "method": null,
+      "success": true,
+      "type": "response"
+    },
+    {
+      "command": null,
+      "id": "748982ee-db17-411b-8dbf-aa9553a055cf",
+      "method": "notify",
+      "success": null,
+      "type": "extension_ui_request"
+    },
+    {
+      "command": "prompt",
+      "id": "handled",
+      "method": null,
+      "success": true,
+      "type": "response"
+    },
+    {
+      "command": "new_session",
+      "id": "new-session",
+      "method": null,
+      "success": true,
+      "type": "response"
+    },
+    {
+      "command": "get_state",
+      "id": "new-state",
+      "method": null,
+      "success": true,
+      "type": "response"
+    },
+    {
+      "command": null,
+      "id": "aa4c3af7-cefd-4ad6-b85c-204fdafdc4a0",
+      "method": "confirm",
+      "success": null,
+      "type": "extension_ui_request"
+    },
+    {
+      "command": "get_state",
+      "id": "ui-state",
+      "method": null,
+      "success": true,
+      "type": "response"
+    }
+  ],
+  "fixture": "deterministic local model through real Pi RPC",
+  "limitations": [
+    "deterministic local model, not cloud inference",
+    "isolated fixture resources, not arbitrary user extensions",
+    "no production adapter tested",
+    "no concurrent writer or switch race tested",
+    "no disconnect or abort cleanup tested"
+  ],
+  "os": "macos",
+  "production_activation": false,
+  "provider": "pi",
+  "provider_version": "0.84.4",
+  "tested_on": "2026-09-08",
+  "nextest_run_id": "93f3ef43-26ef-40d5-8bf1-f34653f85571",
+  "launch_profile": "retained-rpc",
+  "origin": "native",
+  "launch_mode": "non_interactive"
+}

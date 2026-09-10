@@ -1,3 +1,7 @@
+// Production builds may not construct or clear a child command directly; see
+// `child_environment` and `clippy.toml`. Tests keep the plain constructors.
+#![cfg_attr(not(test), deny(clippy::disallowed_methods))]
+
 use std::ffi::OsString;
 
 use claudine::provider::Provider;

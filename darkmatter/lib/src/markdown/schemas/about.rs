@@ -24,55 +24,55 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     SchemaTypeDescriptor {
         keyword: "string",
         description: "Text.",
-        accepted_constraints: "min, max, not-empty, pattern, suggest, default, required",
+        accepted_constraints: "eager, min, max, not-empty, pattern, suggest, default, required",
         json_schema_effect: "{ \"type\": \"string\" } plus minLength / maxLength / pattern / default",
     },
     SchemaTypeDescriptor {
         keyword: "date",
         description: "ISO-8601 date (`YYYY-MM-DD`).",
-        accepted_constraints: "default, required",
+        accepted_constraints: "eager, default, required",
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"date\" }",
     },
     SchemaTypeDescriptor {
         keyword: "datetime",
         description: "ISO-8601 datetime; the timezone offset is optional.",
-        accepted_constraints: "default, required",
+        accepted_constraints: "eager, default, required",
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-datetime\" }",
     },
     SchemaTypeDescriptor {
         keyword: "time",
         description: "Time of day with optional timezone.",
-        accepted_constraints: "default, required",
+        accepted_constraints: "eager, default, required",
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-time\" }",
     },
     SchemaTypeDescriptor {
         keyword: "number",
         description: "A numeric value.",
-        accepted_constraints: "min, max, integer, suggest, default, required",
+        accepted_constraints: "eager, min, max, integer, suggest, default, required",
         json_schema_effect: "{ \"type\": \"number\" } (or `integer` when `integer` is set) with optional minimum / maximum",
     },
     SchemaTypeDescriptor {
         keyword: "numberlike",
         description: "A number, or a string that can be coerced to a number during compose.",
-        accepted_constraints: "default, required",
+        accepted_constraints: "eager, default, required",
         json_schema_effect: "anyOf: [ { \"type\": \"number\" }, { \"type\": \"string\", \"pattern\": \"^-?\\d+(\\.\\d+)?$\" } ]",
     },
     SchemaTypeDescriptor {
         keyword: "boolean",
         description: "A true or false value.",
-        accepted_constraints: "default, required",
+        accepted_constraints: "eager, default, required",
         json_schema_effect: "{ \"type\": \"boolean\" } with optional default",
     },
     SchemaTypeDescriptor {
         keyword: "boolish",
         description: "A boolean, or a `true` / `false` string that can be coerced during compose.",
-        accepted_constraints: "default, required",
+        accepted_constraints: "eager, default, required",
         json_schema_effect: "anyOf: [ { \"type\": \"boolean\" }, { \"enum\": [\"true\", \"false\", \"True\", \"False\", \"TRUE\", \"FALSE\"] } ]",
     },
     SchemaTypeDescriptor {
         keyword: "object",
         description: "Any object shape. Use an inline object literal when you want to validate nested fields.",
-        accepted_constraints: "default, required",
+        accepted_constraints: "eager, default, required",
         json_schema_effect: "{ \"type\": \"object\" } with no `additionalProperties: false` (root-schema behavior preserved)",
     },
     SchemaTypeDescriptor {
@@ -84,49 +84,49 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     SchemaTypeDescriptor {
         keyword: "enum",
         description: "Value must be one of the constraint-supplied members.",
-        accepted_constraints: "<members>; default; required",
+        accepted_constraints: "<members>; eager; default; required",
         json_schema_effect: "{ \"enum\": [ ... ] } with optional default",
     },
     SchemaTypeDescriptor {
         keyword: "url",
         description: "Absolute URL.",
-        accepted_constraints: "scheme(http, https, ...), default, required",
+        accepted_constraints: "eager, scheme(http, https, ...), default, required",
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"uri\" } plus x-darkmatter-url-scheme when `scheme(...)` is set",
     },
     SchemaTypeDescriptor {
         keyword: "email",
         description: "RFC 5322 addr-spec.",
-        accepted_constraints: "default, required",
+        accepted_constraints: "eager, default, required",
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"email\" }",
     },
     SchemaTypeDescriptor {
         keyword: "literal",
         description: "The value must equal exactly one scalar of any scalar type. Bare `true`/`false` types as boolean, a bare numberlike token as number, and quoted or any other bare token as string. Replaces the single-member enum and makes discriminated unions first-class. Coerces a document value to the literal's scalar type (`\"2\"` against `literal(2)` → `2`); string literals never coerce.",
-        accepted_constraints: "<value>; default; required",
+        accepted_constraints: "<value>; eager; default; required",
         json_schema_effect: "{ \"const\": <value> } with the value's lexed type, wrapped by the optional-nullable wrapper; `literal(x)[]` places the `const` under `items`",
     },
     SchemaTypeDescriptor {
         keyword: "expression",
         description: "A string that must parse under the Darkmatter expression grammar. Parse-only and never evaluated — the third content-format string type alongside `yaml` and `json`. Native boolean/number values coerce to their string forms (`true` → `\"true\"`); mappings and sequences are type mismatches.",
-        accepted_constraints: "default, required, generated",
+        accepted_constraints: "eager, default, required, generated",
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-expression\" }",
     },
     SchemaTypeDescriptor {
         keyword: "type-definition",
         description: "One complete SimplifiedSchema property definition carried by a YAML string, mapping, or sequence. Parse-only and side-effect-free; DMLS uses it for schema-language completion, hover, and diagnostics.",
-        accepted_constraints: "default, required, generated",
+        accepted_constraints: "eager, default, required, generated",
         json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-type-definition\": true }",
     },
     SchemaTypeDescriptor {
         keyword: "schema",
         description: "One complete `$schema` declaration carried by a YAML string, mapping, or sequence. Parse-only and side-effect-free; DMLS uses it for declaration completion, hover, and diagnostics.",
-        accepted_constraints: "default, required, generated",
+        accepted_constraints: "eager, default, required, generated",
         json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-schema\": true }",
     },
     SchemaTypeDescriptor {
         keyword: "any",
         description: "Anything. Useful when you only care that a property exists.",
-        accepted_constraints: "required",
+        accepted_constraints: "eager, required",
         json_schema_effect: "{} (empty schema)",
     },
 ];
@@ -169,6 +169,15 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         argument_arity: "0",
         description: "The value is supplied by the host runtime (e.g. Darkmatter context capture), not authored in static frontmatter. Orthogonal to `required`, which controls type/nullability.",
         json_schema_effect: "emits `x-darkmatter-generated: true`; suppresses the property's static-`required` entry so authored documents validate cleanly when the host has not yet supplied the value",
+    },
+    SchemaConstraintDescriptor {
+        name: "eager",
+        keyword: "eager",
+        form: "eager",
+        target_types: "all types",
+        argument_arity: "0",
+        description: "Validates a supplied value at stabilized launch. Eager alone does not require the property: absence is allowed unless `required` is also declared. `required; eager` makes presence mandatory at launch. An eager file value or item must resolve to an existing file.",
+        json_schema_effect: "does not add the property to the parent's `required` list; `file(eager)` selects the existing eager file format",
     },
     // ── shared scalar / array bounds ───────────────────────────────────
     SchemaConstraintDescriptor {
@@ -239,15 +248,6 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         json_schema_effect: "const set to the typed value",
     },
     // ── file ───────────────────────────────────────────────────────────
-    SchemaConstraintDescriptor {
-        name: "eager",
-        keyword: "eager",
-        form: "eager",
-        target_types: "file",
-        argument_arity: "0",
-        description: "Require the referenced file to exist at validation time. Without it, `file` is lazy (syntax-only).",
-        json_schema_effect: "emits `format: darkmatter-file` (eager) instead of the lazy `darkmatter-file-reference`",
-    },
     SchemaConstraintDescriptor {
         name: "match",
         keyword: "match",
@@ -703,7 +703,7 @@ mod tests {
             .collect();
         assert_eq!(
             accepted,
-            HashSet::from(["required", "default", "generated", "min", "max", "unique"]),
+            HashSet::from(["required", "default", "generated", "eager", "min", "max", "unique"]),
         );
         for keyword in accepted {
             let form = match keyword {

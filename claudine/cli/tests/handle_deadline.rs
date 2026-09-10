@@ -11,6 +11,8 @@ use common::CliProcessFixture;
 #[test]
 #[serial]
 fn handle_turn_complete_fast_path_completes_under_3s() {
+    // The no-config fast path excludes host config (USERPROFILE on Windows)
+    // and best-effort rendezvous reporting, neither of which is timed here.
     let fixture = CliProcessFixture::named("claudine-handle-deadline-it");
 
     let payload = serde_json::json!({
@@ -21,14 +23,14 @@ fn handle_turn_complete_fast_path_completes_under_3s() {
     })
     .to_string();
 
-    let start = Instant::now();
-    let assertion = fixture
-        .command()
+    let mut command = fixture.command();
+    command
         .env("CLAUDINE_HANDLE_DEADLINE_SECONDS", "5")
-        .args(["handle", "turn_complete", "--provider", "gemini"])
+        .args(["handle", "turn_complete", "--provider", "gemini", "--json"])
         .write_stdin(payload)
-        .assert()
-        .success();
+        .timeout(Duration::from_secs(5));
+    let start = Instant::now();
+    let assertion = command.assert().success();
     let elapsed = start.elapsed();
 
     assert!(
@@ -36,7 +38,10 @@ fn handle_turn_complete_fast_path_completes_under_3s() {
         "fast-path turn_complete should finish in <3s; took {elapsed:?}"
     );
 
-    drop(assertion);
+    let output: serde_json::Value = serde_json::from_slice(&assertion.get_output().stdout).unwrap();
+    assert_eq!(output["provider"], "gemini");
+    assert_eq!(output["event"], "turn_complete");
+    assert!(output["response"].is_null());
 }
 
 /// Verify the deadline itself fires: with a 1s deadline and stdin left open

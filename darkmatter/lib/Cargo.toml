@@ -109,13 +109,13 @@ serde_yaml_ng = "0.10"
 unicode-script = "0.5"
 
 # JSON Schema validation
-jsonschema = { version = "0.42", default-features = false }
+jsonschema = { version = "0.55", default-features = false }
 # Backtracking regex engine for SimplifiedSchema pattern-key literal precedence
 # (Feature C emits negative-lookahead `patternProperties`, which the linear
 # `regex` engine rejects). Already compiled transitively via `jsonschema`, so no
 # added build cost; used both to select `jsonschema`'s fancy-regex pattern engine
 # for such schemas and to validate emitted patterns at conversion time.
-fancy-regex = "0.17"
+fancy-regex = "0.19"
 
 # Cargo has no optional dev-dependencies. Required-feature targets below keep
 # these tier-only dependencies out of production and ordinary L1 builds.

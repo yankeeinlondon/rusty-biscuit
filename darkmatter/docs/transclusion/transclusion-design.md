@@ -276,7 +276,9 @@ Implementation strategy:
 2. `relative/path.md` (no leading `./`): implicit relative — resolved from the current document directory first, then the repository root
 3. `/absolute/path.md`: absolute path
 4. `~/path.md`: home expansion via `HOME`
-5. `@/path.md` or `@path.md`: repo-root relative
+5. `@/path.md` or `@path.md`: magic — registered prepend roots, then package, package area, repository root, and home, then registered append roots
+6. `&/path.md` or `&path.md`: the repository root exactly; repository-contained
+7. `^/path.md` or `^path.md`: repository-scoped — package root, then package area, then repository root; repository-contained
 
 ### Resolution algorithm
 
@@ -288,14 +290,14 @@ Implementation strategy:
 Special handling:
 
 - `ComposeSource::Unknown` cannot resolve `./` or `@` references
-- repo-root resolution walks ancestors from current file until `.git` is found
+- repository-root discovery walks ancestors from current file until `.git` is found
 - directive-specific content constraints:
   - `::file`: only markdown extensions (`.md`, `.markdown`) in first implementation
   - `::code`: any UTF-8 text file is allowed; binary/non-text files are rejected
 
 Security boundary:
 
-- repo-root (`@`) references must remain under canonical repo root after canonicalization
+- repository-contained (`&`, `^`) references must remain under the canonical repository root after canonicalization
 - invalid escape attempts fail with explicit error
 
 ## Code Transclusion Strategy (`::code`)

@@ -15,6 +15,44 @@ There is no per-directory policy store and no concept of a "package area" in
 CI. `just test` in a directory still runs that directory's packages for local
 use (R8); CI does not read that list.
 
+## Reusing PR validation after a merge
+
+PRs always run dependency-aware CI. A push to `main` first runs a lightweight
+verification job (`scripts/ci/reuse_validation.py`). It skips the expensive
+grid only when all of these conditions hold:
+
+- GitHub associates the pushed commit with a merged PR targeting this
+  repository's `main`, and the PR's merge commit is the pushed commit.
+- The latest matching `pull_request` run of this repository's `ci.yml` has
+  completed successfully. An older green run cannot override a newer failed,
+  canceled, or in-progress run.
+- That run has an unexpired `ci-validation-v1-<tree>-<base>-<head>` artifact
+  matching the pushed Git tree, pre-push `main` commit, and PR head.
+
+The scope job records the receipt from its actual synthetic merge checkout
+and verifies both parents against the PR event. The entire Git tree must
+match, including workflows, toolchain, lockfiles, package policies, and test
+configuration. The base comparison prevents a stale PR validation from
+covering a different integration base or an untested batch of pushes. Merge,
+squash, and rebase commits can have different commit IDs; reuse depends on
+their file content and recorded integration base.
+
+Receipts are retained for seven days. Searches are bounded, and absent,
+expired, malformed, or inaccessible evidence schedules normal CI. Direct
+pushes without a matching merged PR also run normal CI. `workflow_dispatch`
+always runs the full grid and is the way to force fresh validation, including
+when investigating changes to external dependencies or hosted runners.
+
+On reuse, `ci-verdict` succeeds with a link to the original PR run. Scope,
+preflight, package jobs, and rollup compilation are skipped. The `ci` workflow
+still completes on `main`, preserving Release-plz's existing successful-CI
+trigger. Runs predating receipt publication cannot be reused.
+
+Validate this boundary with `python3 scripts/ci/test_reuse_validation.py`,
+`actionlint .github/workflows/ci.yml`, and the `ci_workflow_contracts` nextest
+suite. The Python suite also runs in preflight on every selected OS and in
+the CI-tooling job.
+
 ## `environment` is not `os`
 
 Windows, macOS, and Linux are operating systems. **WSL2 is a distinct supported
@@ -34,6 +72,19 @@ environment capability table so the reusable workflow can never route
 `wsl2-ubuntu` into a `runs-on` matrix: `native_environments` (the environment
 names that *are* runner labels), `l2_environments`, `browser_environments`,
 `node_environments`, and `wsl` (a boolean).
+
+It also derives `gates` — which of `lint`, `check`, and `test` this run selected
+the package for. A package with a source change (or a reverse dependency of
+one) carries all three. A package reached only through a global input carries
+the gates that input can change: `Cargo.toml`, the toolchain, `.cargo/`, and
+the CI workflows widen every gate; `clippy.toml` widens lint alone;
+`.config/nextest.toml` and `_wsl-ci.yml` widen test alone; a just file widens a
+gate only when the recipe that changed is reachable from that gate's CI entry
+recipe (`_lint`, `_test`, `_test_l2`, `_test_browser`; `_ensure-native-libs`
+reaches all three). A gate absent from `gates` schedules no job, and a
+lint-only package declares no test tiers to the rollup, so its unscheduled L1
+is not `MISSING`. `full_scope_gates` on the scope document names the widened
+gates for the run.
 
 A WSL2 guest *is* Linux, so `_ensure-native-libs` keys off `uname -s` and reads
 the package's `ubuntu-latest` list. `native` therefore stays a **runner OS**

@@ -42,13 +42,6 @@ fn make_workspace_with_goose_inline() -> (CliProcessFixture, PathBuf) {
     // injected into the agent invocation. The plain compose flow has no
     // such requirement.
     let fixture = CliProcessFixture::named("inline-compose-header-first");
-    write_executable(
-        &fixture.bin_dir().join("goose"),
-        r#"#!/bin/sh
-echo "Agent response"
-exit 0
-"#,
-    );
 
     let md_file = fixture.cwd().join("prompt.md");
     fs::write(
@@ -56,6 +49,11 @@ exit 0
         "---\nprompt: |\n  Hello from inline compose.\n---\n# Body\n",
     )
     .unwrap();
+    // The inline agent edits the document; a stub that only prints would be
+    // refused as a run that did no work.
+    common::InlineAgentStub::new(&md_file)
+        .body("# Body\n\nAgent response\n")
+        .install(fixture.bin_dir(), "goose");
     (fixture, md_file)
 }
 

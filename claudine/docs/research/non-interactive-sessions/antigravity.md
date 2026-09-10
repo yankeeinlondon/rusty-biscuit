@@ -30,6 +30,66 @@ invocation:
     stdin_support: false
     prompt_arg: "Initial prompt string."
     notes: "Starts the TUI after sending the initial prompt; not a non-interactive wrapper mode."
+execution_interfaces:
+  - id: "print"
+    kind: one_shot_cli
+    launch: 'agy --print-timeout 5m -p "<prompt>"'
+    launch_conditions: ["Preconfigure authentication, sandbox, and permission behavior"]
+    input_contract: "Prompt supplied as a flag value; stdin prompt support is not evidenced."
+    observation_contract: "Plain final text on stdout with no parser-grade lifecycle stream."
+    control_capabilities: []
+    feature_preservation: evidenced_partial
+    preserved_features: ["skills", "extensions", "project context", "session resume"]
+    documented_exclusions: ["structured lifecycle observation", "mid-turn bidirectional control"]
+    unattended_obligations: ["Apply a wall-clock timeout", "Treat ambiguous plain-text errors conservatively"]
+    evidence: ["https://codelabs.developers.google.com/antigravity-cli-hands-on"]
+    notes: "Ordinary one-shot interface and a weak supervision fit."
+  - id: "stream-json-control"
+    kind: retained_subprocess
+    launch: "Antigravity retained NDJSON profile inferred in the sibling steering report"
+    launch_conditions: ["Confirm the installed version exposes the candidate transport", "Retain stdin/stdout and correlation"]
+    input_contract: "Candidate NDJSON control messages."
+    observation_contract: "Candidate correlated NDJSON lifecycle."
+    control_capabilities: ["idle prompt submission"]
+    feature_preservation: unknown
+    preserved_features: []
+    documented_exclusions: []
+    unattended_obligations: ["Refuse activation without a readiness probe", "Do not replay ambiguous input"]
+    evidence: ["../steering/antigravity.md"]
+    notes: "Proposed managed candidate only; no activated or live-verified support is claimed."
+execution_selection:
+  preferred: "print"
+  rationale: "It is the only established non-interactive execution surface, although its plain output is insufficient for strong supervision."
+  readiness_check: "No parser-grade readiness signal exists; selection readiness for the managed candidate remains unresolved."
+  fallback: ""
+  fallback_conditions: []
+  replay_policy: "Do not replay after process acceptance is ambiguous."
+  feature_parity: "Managed-interface feature parity is unknown."
+  notes: "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed."
+unattended_requests:
+  - request: "tool permission or human question"
+    interface: "print"
+    observed_behavior: "Permissions are configurable; questions can hang according to existing evidence."
+    required_response: "Preconfigure explicit policy and terminate on an unresolved request."
+    timeout_behavior: "Use --print-timeout as a process-level bound; request-specific behavior is unknown."
+    policy: "Never use dangerously-skip-permissions automatically or fabricate input."
+    notes: "Do not disable skills, extensions, or project context to avoid the request."
+settlement:
+  - interface: "print"
+    operation: "one-shot prompt"
+    input_handling: "Prompt is supplied at launch with no separate receipt."
+    turn_scheduling: "No structured turn-start evidence is available."
+    acceptance_signal: "unknown"
+    turn_terminal_signal: "No structured terminal event exists."
+    settled_signal: "process exit after final plain output or timeout"
+    process_lifecycle: "Print is one-shot."
+    notes: "Success and failure cannot be classified reliably from structured evidence."
+steering_mechanisms:
+  - mechanism: "retained-ndjson-idle"
+    operations: ["idle prompt submission"]
+    interface: "stream-json-control"
+    reference: "../steering/antigravity.md"
+    notes: "Candidate only; installed-version readiness and feature parity must be established before activation."
 output_formats:
   - name: "plain print"
     cli_value: "-p / --print / --prompt"

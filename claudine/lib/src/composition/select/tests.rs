@@ -24,6 +24,7 @@ fn make_prepared_composition(
             agent_was_list: matches!(agent_hint, Some(AgentHint::List(_))),
         },
         closure: CompositionClosurePlan::Direct,
+        launch_schema: None,
         lifecycle: LifecycleConfig::default(),
         compose_perf: None,
         dropped_optionals: Vec::new(),

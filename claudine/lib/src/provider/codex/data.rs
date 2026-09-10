@@ -275,6 +275,7 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
         tool_result_summary: ToolResultSummary::PreferBody,
         info_event_suppression: &[],
         collapse_task_progress: false,
+        suppress_synthetic_tool_calls: false,
         suppress_subscription_rate_limit: false,
         silent_extension_kinds: &["item.started", "item.completed"],
         stdout_noise_prefixes: &[],

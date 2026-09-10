@@ -10,13 +10,39 @@ Seven frontmatter properties control lifecycle behavior. Each accepts an object 
 |----------|-------------|
 | `initialize` | Prompt file has been identified and frontmatter has parsed, before schema validation and shell pre-flight |
 | `start` | Pre-flight checks have passed; immediately before provider invocation |
-| `success` | The provider session completed without error |
-| `blocked` | Composition exited before the provider child was spawned (e.g., pre-flight denial, schema validation failure) |
-| `failure` | The provider session exited with an error |
+| `success` | The provider session completed without error **and** the composition satisfied its completion verdict |
+| `blocked` | Composition exited before the provider child was spawned (e.g., pre-flight denial, launch schema validation failure) |
+| `failure` | The provider session exited with an error, or the completion verdict failed |
 | `finalize` | Once per iteration, immediately after `success`/`blocked`/`failure` |
 | `loop` | Post-`finalize` gate that evaluates the loop's `while`/`until` condition and can run additional lifecycle concerns |
 
 Legacy prompts that only configure `start`, `success`, `blocked`, and `failure` continue to work unchanged.
+
+### The completion verdict decides which terminal event fires
+
+A **completion verdict** sits between the last producing actor and the terminal
+event, for `compose` and `inline-compose` alike:
+
+```
+initialize → launch validation → start → provider → inline closure → verdict → success | failure → finalize
+```
+
+The verdict asks two questions — did the body change meaningfully (inline only),
+and does the document satisfy the `$schema` that was resolved at launch? A
+failed verdict fires `failure` with a typed `err`
+(`composition.body_unchanged` or `composition.completion_schema`, the latter
+carrying `err.detail.properties[]`), so `success` cannot have fired first. It
+then enters ordinary `failure` recovery: `retry`, `resume`, and `proxy` recover
+it exactly as they recover a provider failure, and the process exits non-zero
+only when none of them does. It runs once per composition — once per sequence
+step and once per loop iteration.
+
+**The verdict routes the flow; it does not police the hooks.** What a `success`,
+`failure`, or `finalize` stack may do is unchanged: it may still write to the
+active document, including its frontmatter. If it does so after the inline
+closure's stamp, keeping that stamp coherent is the author's responsibility, as
+it always was. See
+[Composition — Completion Verdict](composition.md#completion-verdict).
 
 ## Binding Time: Early vs Late
 

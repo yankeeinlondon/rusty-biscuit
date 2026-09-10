@@ -10,6 +10,13 @@
     - most of the package areas consist of a library and CLI pairing though there is some variance to that pattern
 - you can run `sniff repo packages` to get the full list of packages in this monorepo
 
+## Operating Systems
+
+- every package must compile and work on macOS, Linux, native Windows, and WSL2
+- the `os` agent skill (`.claude/skills/os/`) records the non-obvious, repo-specific facts: which hosts can produce evidence for each OS and how to reach them, how the WSL2 CI leg runs nextest archives and how to reproduce its failures, and the Windows and macOS traps that have already cost time
+    - load it before claiming an OS cannot be tested from the current host, before touching `#[cfg(windows)]` or path-comparison code, and whenever a test is red on exactly one CI environment
+    - when you learn a new OS-specific fact the hard way, add it to that skill in the same change
+
 ## Just Runner
 
 - we use the `just` runner extensively throughout this monorepo. 

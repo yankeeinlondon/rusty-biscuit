@@ -130,7 +130,7 @@ hand-maintained list, check that the list is not derived from the same fact the
 lint is supposed to police.
 
 `areas` is also consumed by `_orchestrate` (root `lint`/`sanity`/`build`/
-`bench`/`coverage`/`fuzz`/`all`), `changed-areas`, and `install` — widening it
+`bench`/`coverage`/`fuzz`/`all`) and `install` — widening it
 widens those too. `install` degrades safely (falls back to `build --release`,
 then skips), so a library-only area needs no `install` recipe.
 

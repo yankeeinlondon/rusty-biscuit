@@ -3,6 +3,45 @@
 use super::*;
 use claudine::composition::{EffectiveSelectionHints, ModelHint};
 
+/// Scrub an ambient `MODEL` for the duration of one rebuild.
+///
+/// Model resolution consults the generic `MODEL` environment variable *before*
+/// frontmatter (`composition::select` precedence step 3), and a Claudine-wrapped
+/// agent session exports one — so on such a host the ambient value silently
+/// replaces every fixture's model and these rows hard-fail. Same host-dependence
+/// class as [`FIXTURE_MODEL`]'s: the rebuild must be decided by the fixture, not
+/// by the developer's shell.
+fn without_ambient_model() -> test_toolkit::EnvGuard {
+    test_toolkit::EnvGuard::remove_safe("MODEL")
+}
+
+/// [`super::rebuild_launch_identity`] with [`without_ambient_model`] applied.
+///
+/// Deliberately shadows the glob-imported production function so every row in
+/// this module is hardened by construction — a new test cannot forget the guard.
+fn rebuild_launch_identity(
+    intent: &LaunchRebuildIntent,
+    cli_model: Option<&str>,
+    repo_root: Option<&Path>,
+    document: &MaterializedHarnessPrompt,
+    source_path: Option<&Path>,
+) -> Result<RebuiltLaunchIdentity, crate::commands::wrap::launch_plan::LaunchPlanError> {
+    let _no_model = without_ambient_model();
+    super::rebuild_launch_identity(intent, cli_model, repo_root, document, source_path)
+}
+
+/// [`super::rebuild_target_launch`] with [`without_ambient_model`] applied.
+fn rebuild_target_launch(
+    intent: &LaunchRebuildIntent,
+    cli_model: Option<&str>,
+    repo_root: Option<&Path>,
+    launch_area: &Path,
+    target: &MaterializedHarnessPrompt,
+) -> Result<TargetLaunchRebuild, crate::commands::wrap::launch_plan::LaunchPlanError> {
+    let _no_model = without_ambient_model();
+    super::rebuild_target_launch(intent, cli_model, repo_root, launch_area, target)
+}
+
 /// The argv the fixture's invocation recorded. Distinctive so a test can tell
 /// the verbatim shortcut from a replay at a glance.
 const RECORDED_ARGV: &str = "recorded-invocation-argv";
@@ -56,7 +95,10 @@ fn plan_inputs() -> launch_plan::LaunchPlanInputs {
             ),
         ]),
         codex_sqlite_home: None,
+        workspace_cwd: PathBuf::from("/repo"),
+        write_grant_env: HashMap::new(),
         invocation: launch_plan::RecordedLaunch {
+            write_posture: None,
             facets: launch_plan::DocumentLaunchFacets {
                 provider: Provider::Goose,
                 non_interactive: true,
@@ -64,6 +106,7 @@ fn plan_inputs() -> launch_plan::LaunchPlanInputs {
                 is_inline: false,
                 model: None,
                 mcp_body_tags: Vec::new(),
+                writable_document: None,
             },
             args: vec![RECORDED_ARGV.to_string()],
             env_overlay: vec![("YOLO".into(), "false".into())],
@@ -208,6 +251,7 @@ fn document_with_tags(
         env_overrides: Vec::new(),
         selection_hints,
         inline_closure_plan: None,
+        launch_schema: None,
         file_resolution_context: None,
         compose_context: None,
         document_epoch: None,
@@ -1403,4 +1447,76 @@ fn a_vanished_or_rewritten_source_cannot_erase_the_prepared_mcp_tags() {
         vec!["calendar".to_string()],
         "an unreadable source must not silently empty the prepared set",
     );
+}
+
+/// AC19 / R8: the inline write posture is part of every attempt's rebuild, not
+/// a value snapshotted at invocation.
+///
+/// A retry, resume, or proxy re-derives it from *this* attempt's active
+/// document, so a target outside the workspace acquires its own additional
+/// writable root — and because the posture is a session-compatibility facet,
+/// that movement is what a `resume` compares against. Freezing it would let a
+/// resumed session launch under a grant its document never earned.
+#[test]
+fn the_write_posture_is_rebuilt_from_the_active_document() {
+    let mut intent = intent();
+    intent.is_inline = true;
+    // The write grant is provider-shaped; Claude's is the one whose posture
+    // names the additional root, so it is what makes the movement observable.
+    let document = with_hints(EffectiveSelectionHints {
+        agent: Some(claudine::composition::AgentHint::Single(
+            claudine::provider::Provider::Claude,
+        )),
+        ..EffectiveSelectionHints::default()
+    });
+
+    let inside = rebuild_launch_identity(
+        &intent,
+        None,
+        None,
+        &document,
+        Some(Path::new("/repo/nested/doc.md")),
+    )
+    .unwrap();
+    let outside = rebuild_launch_identity(
+        &intent,
+        None,
+        None,
+        &document,
+        Some(Path::new("/elsewhere/doc.md")),
+    )
+    .unwrap();
+
+    let inside_posture = inside.write_posture.as_deref().expect("inline grants a posture");
+    let outside_posture = outside
+        .write_posture
+        .as_deref()
+        .expect("inline grants a posture");
+    assert!(
+        !inside_posture.contains("add-dir"),
+        "a document inside the workspace needs no additional root: {inside_posture}"
+    );
+    assert!(
+        outside_posture.contains("add-dir=/elsewhere"),
+        "a document outside the workspace grants exactly its own root: {outside_posture}"
+    );
+    assert!(
+        outside.args.iter().any(|arg| arg == "/elsewhere"),
+        "the granted root must also reach the argv: {:?}",
+        outside.args
+    );
+}
+
+/// A direct (non-inline) run grants nothing: there is no document the agent is
+/// expected to write, so no posture is recorded and the compatibility facet
+/// stays at the invocation's own permission state.
+#[test]
+fn a_direct_run_records_no_write_posture() {
+    let document = with_hints(EffectiveSelectionHints::default());
+
+    let rebuilt =
+        rebuild_launch_identity(&intent(), None, None, &document, Some(Path::new("/repo/doc.md")))
+            .unwrap();
+
+    assert!(rebuilt.write_posture.is_none());
 }

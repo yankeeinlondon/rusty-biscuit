@@ -948,14 +948,21 @@ fn parallel_prompt_task_splits_data_and_status_across_channels() {
     // the semantic spawn where the task decorator is installed.
     write_executable(
         &fixture.bin_dir().join("claude"),
-        r#"#!/bin/sh
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"stub-1","model":"stub-model"}'
-printf '%s\n' '{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"weighing-options"}}'
-printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"body-payload"}]}}'
-printf '%s\n' '{"type":"tool_use","name":"Bash","input":{"command":"stub-tool-call"}}'
-printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"done"}'
+        &format!(
+            r#"#!/bin/sh
+{find_doc}printf '%s\n' '{{"type":"system","subtype":"init","session_id":"stub-1","model":"stub-model"}}'
+printf '%s\n' '{{"type":"content_block_delta","delta":{{"type":"thinking_delta","thinking":"weighing-options"}}}}'
+printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"body-payload"}}]}}}}'
+printf '%s\n' '{{"type":"tool_use","name":"Bash","input":{{"command":"stub-tool-call"}}}}'
+CLAUDINE_ADD=''
+CLAUDINE_BODY='Agent-written body.
+'
+{rewrite}printf '%s\n' '{{"type":"result","subtype":"success","is_error":false,"result":"done"}}'
 exit 0
 "#,
+            find_doc = common::INLINE_DOC_FROM_PROMPT,
+            rewrite = common::INLINE_BODY_REWRITE,
+        ),
     );
 
     fs::write(fixture.cwd().join("one.md"), "---\nprompt: hi\n---\n\nOne.\n").unwrap();

@@ -29,9 +29,10 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::{
-    CompositionError, DroppedOptional, FileDetail, InteractiveSchemaOptions, InteractiveShape,
-    MissingProperty, PreValidatedSchema, ResolvedCompositionSource, TextFormat,
-    build_schema_status_report, extract_markdown_detail, pre_validate_schema,
+    CompositionError, CompositionMode, DroppedOptional, FileDetail, InteractiveSchemaOptions,
+    InteractiveShape, MissingProperty, PreValidatedSchema, ResolvedCompositionSource, TextFormat,
+    build_schema_status_report_for_mode, extract_markdown_detail, pre_validate_schema,
+    pre_validate_schema_for_mode,
 };
 use biscuit_tui::prelude::*;
 
@@ -76,7 +77,8 @@ pub fn resolve_interactive_options(silent: bool) -> InteractiveSchemaOptions {
 /// 1. Properties with no [`InteractiveShape`] short-circuit to
 ///    [`CompositionError::UnsupportedInteractiveSchema`] — matching the
 ///    direct `compose` path.
-/// 2. The schema status report is rendered to `term`.
+/// 2. The schema status report is rendered to `term`, judged at `mode`'s
+///    launch phase (an inline run defers required-but-not-eager gaps).
 /// 3. [`collect_missing_values`] drives a `biscuit-tui` prompt per
 ///    missing property.
 /// 4. Collected values are merged into `set_overrides` and validation
@@ -100,8 +102,9 @@ pub fn pre_validate_with_interactive_collection(
     term: &Terminal,
     file_ref_fallback_dir: Option<&std::path::Path>,
     defer_schema_verdict: bool,
+    mode: CompositionMode,
 ) -> Result<PreValidatedSchema, CompositionError> {
-    let first = pre_validate_schema(source, set_overrides, file_ref_fallback_dir);
+    let first = pre_validate_schema_for_mode(source, set_overrides, file_ref_fallback_dir, mode);
     let Err(err) = first else {
         return first;
     };
@@ -157,7 +160,9 @@ pub fn pre_validate_with_interactive_collection(
         });
     }
 
-    if let Ok(Some(report)) = build_schema_status_report(source, set_overrides, file_ref_fallback_dir) {
+    if let Ok(Some(report)) =
+        build_schema_status_report_for_mode(source, set_overrides, file_ref_fallback_dir, mode)
+    {
         render_status_report(&report, term);
     }
 
@@ -170,7 +175,12 @@ pub fn pre_validate_with_interactive_collection(
     }
 
     let merged = merge_overrides(set_overrides, collected);
-    pre_validate_schema(source, Some(&serde_json::Value::Object(merged)), file_ref_fallback_dir)
+    pre_validate_schema_for_mode(
+        source,
+        Some(&serde_json::Value::Object(merged)),
+        file_ref_fallback_dir,
+        mode,
+    )
 }
 
 /// Resolve a [`CompositionError::UnresolvedFileReference`] by treating the

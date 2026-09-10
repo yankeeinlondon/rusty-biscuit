@@ -310,6 +310,28 @@ pub const CODES: &[CodeSpec] = &[
         detail: &["command", "source_path", "line", "reason"],
     },
     CodeSpec {
+        code: "composition.body_unchanged",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        // The agent was asked to write the document and did not, so the run's
+        // producer is what has to change — not the author's document.
+        origin: Origin::Provider,
+        severity_override: None,
+        detail: &["source_path", "reason"],
+    },
+    CodeSpec {
+        code: "composition.completion_schema",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        severity_override: None,
+        // `properties` is the ordered per-property failure list — one object
+        // per problem carrying `property`, `message`, and `kind` — so a
+        // `failure.stack` can branch on which property was not satisfied
+        // without parsing the rendered status block.
+        detail: &["source_path", "properties"],
+    },
+    CodeSpec {
         code: "composition.failed",
         category: Category::Composition,
         disposition: Disposition::Correctable,
@@ -639,8 +661,10 @@ mod tests {
         // additive `composition.schema_parse` (finding #6) → 43, plus the
         // additive `composition.shell_approval` (error-propagation §D-14) → 44,
         // plus the additive `provider.incomplete_subagents`
-        // (silent-success-and-startup-stall §4) → 45.
+        // (silent-success-and-startup-stall §4) → 45, plus the completion
+        // verdict's `composition.body_unchanged` and
+        // `composition.completion_schema` (inline-flow-and-validations §D5) → 47.
         // This pins the count so an accidental drop or duplicate is caught.
-        assert_eq!(CODES.len(), 45);
+        assert_eq!(CODES.len(), 47);
     }
 }

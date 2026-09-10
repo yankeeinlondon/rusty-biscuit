@@ -36,6 +36,7 @@ impl BlockError for CompositionError {
             CompositionError::ComposeFailed(md)
             | CompositionError::FrontmatterParse(md)
             | CompositionError::InlineHashMalformed(md)
+            | CompositionError::InlineArtifactEditFailed(md)
             | CompositionError::PreFlightDiscoveryFailed(md) => md.status_block(term),
 
             // Lifecycle authoring / evaluation family.
@@ -78,6 +79,8 @@ impl BlockError for CompositionError {
             | CompositionError::SchemaParse { .. }
             | CompositionError::SchemaValidation { .. }
             | CompositionError::MissingProperties { .. }
+            | CompositionError::CompletionBodyUnchanged { .. }
+            | CompositionError::CompletionSchemaFailed { .. }
             | CompositionError::UnsupportedInteractiveSchema { .. } => schema::status_block(self),
 
             // Selection / target family.
@@ -372,6 +375,10 @@ impl Diagnostic for CompositionError {
             | CompositionError::InvalidFileReference { .. } => {
                 "composition.invalid_file_reference"
             }
+            CompositionError::CompletionBodyUnchanged { .. } => "composition.body_unchanged",
+            CompositionError::CompletionSchemaFailed { .. } => "composition.completion_schema",
+            CompositionError::InlineArtifactUnreadable { .. } => "io.read_failed",
+            CompositionError::InlineGuardMissing { .. } => "usage.invalid_argument",
             CompositionError::SchemaLoad { .. } => "composition.schema_load",
             CompositionError::SchemaParse { .. } => "composition.schema_parse",
             CompositionError::SchemaValidation { .. }
@@ -387,7 +394,11 @@ impl Diagnostic for CompositionError {
             // would mean parsing its `Display` to find its reason.
             CompositionError::ShellCommandDenied { .. }
             | CompositionError::ShellApprovalUnavailable { .. } => "composition.shell_approval",
-            CompositionError::AtomicWriteFailed { .. } => "io.write_failed",
+            // A failed rollback *is* a failed write, and its remediation is the
+            // same one `io.write_failed` names; the variant facet is what tells
+            // a handler the write was a restoration.
+            CompositionError::AtomicWriteFailed { .. }
+            | CompositionError::InlineRollbackFailed { .. } => "io.write_failed",
             // The lifecycle-stack family shares one authoring-error code; the
             // `variant` facet still distinguishes them for finer handlers.
             CompositionError::LifecycleInvalid { .. }
@@ -592,8 +603,45 @@ impl Diagnostic for CompositionError {
                 }
             }
             // `io.write_failed` declares `path`.
-            CompositionError::AtomicWriteFailed { path, .. } => {
+            CompositionError::AtomicWriteFailed { path, .. }
+            | CompositionError::InlineRollbackFailed { path, .. } => {
                 base["path"] = json!(biscuit_file::to_portable_string(path));
+            }
+            // `io.read_failed` declares `path`.
+            CompositionError::InlineArtifactUnreadable { path, .. } => {
+                base["path"] = json!(biscuit_file::to_portable_string(path));
+            }
+            // `usage.invalid_argument` declares `argument`, `expected`.
+            CompositionError::InlineGuardMissing { .. } => {
+                base["argument"] = json!("inline_guard");
+                base["expected"] = json!("the active document's captured inline guard");
+            }
+            // `composition.body_unchanged` declares `source_path`, `reason`.
+            CompositionError::CompletionBodyUnchanged {
+                source_path,
+                reason,
+            } => {
+                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
+                base["reason"] = json!(reason.as_str());
+            }
+            // `composition.completion_schema` declares `source_path`,
+            // `properties`.
+            CompositionError::CompletionSchemaFailed {
+                source_path,
+                problems,
+                ..
+            } => {
+                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
+                base["properties"] = json!(
+                    problems
+                        .iter()
+                        .map(|problem| json!({
+                            "property": problem.property,
+                            "message": problem.message,
+                            "kind": problem.kind.as_str(),
+                        }))
+                        .collect::<Vec<_>>()
+                );
             }
             // `composition.shell_approval` declares `command`, `source_path`,
             // `line`, `reason`. A `line` of 0 means the source carried none, so

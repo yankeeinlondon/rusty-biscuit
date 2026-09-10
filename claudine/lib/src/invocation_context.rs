@@ -14,7 +14,7 @@ use sniff::filesystem::LanguageBreakdown;
 use sniff::hardware::{GpuInfo, HardwareInfo};
 use sniff::os::OsInfo;
 use sniff::request::{
-    DetectionPlan, FilesystemRequest, GitRequest, HardwareRequest, OsRequest, RepoRequest,
+    DetectionPlan, FilesystemRequest, GitMetadataRequest, GitRequest, HardwareRequest, OsRequest, RepoRequest,
 };
 
 use crate::composition::{
@@ -940,6 +940,8 @@ impl InvocationContext {
     /// `extend_launch_context` (launch projection) share this walk so both pay
     /// the same caches and record the same per-group work counters; only the
     /// entry and base differ.
+    /// Repository-dependent groups also receive retained Git identity and
+    /// topology evidence, even without an explicit Git or Repo group request.
     #[allow(clippy::too_many_lines)]
     fn project_evidence(
         &self,
@@ -951,6 +953,26 @@ impl InvocationContext {
         use darkmatter::markdown::compose::{ContextCaptureEvidence, ContextGroup};
 
         let mut evidence = ContextCaptureEvidence::new(self.inner.environment.clone());
+        let needs_repository = requirements.iter().any(|group| {
+            matches!(
+                group,
+                ContextGroup::Repo
+                    | ContextGroup::FileChanges
+                    | ContextGroup::Languages
+                    | ContextGroup::Documents
+            )
+        });
+        if repository.failure().is_none() {
+            if needs_repository || requirements.contains(ContextGroup::Git) {
+                evidence = evidence.with_git(repository.git_info.clone());
+            }
+            if needs_repository && !matches!(repository.topology.get(), Some(Err(_))) {
+                evidence = evidence.with_repository(
+                    repository_root.map(Path::to_path_buf),
+                    repository.repo_info().cloned(),
+                );
+            }
+        }
         let source_evidence = {
             let mut cache = repository
                 .source_evidence
@@ -971,22 +993,10 @@ impl InvocationContext {
                 ContextGroup::Invocation => {
                     evidence = evidence.with_invocation_cwd(Some(self.inner.launch_cwd.clone()));
                 }
-                ContextGroup::DateTime | ContextGroup::Agent => {}
-                ContextGroup::Git => {
-                    if repository.failure().is_none() {
-                        evidence = evidence.with_git(repository.git_info.clone());
-                    }
-                }
-                ContextGroup::Repo => {
-                    if repository.failure().is_none()
-                        && !matches!(repository.topology.get(), Some(Err(_)))
-                    {
-                        evidence = evidence.with_repository(
-                            repository_root.map(Path::to_path_buf),
-                            repository.repo_info().cloned(),
-                        );
-                    }
-                }
+                ContextGroup::DateTime
+                | ContextGroup::Agent
+                | ContextGroup::Git
+                | ContextGroup::Repo => {}
                 ContextGroup::FileChanges => {
                     if let Ok(changes) = source_evidence
                         .file_changes
@@ -1155,7 +1165,9 @@ impl InvocationContext {
             return entry.clone();
         }
 
-        let git_info = match observation.detect_git(&GitRequest::summary()) {
+        // Summary omits remotes by default, but ctx.repo needs their identity.
+        let git_request = GitRequest::summary().metadata(GitMetadataRequest::none().remotes(true));
+        let git_info = match observation.detect_git(&git_request) {
             Ok(git_info) => git_info,
             Err(error) => {
                 let mut entry = RepositoryEntry::failed(observation, error);
@@ -1294,8 +1306,9 @@ fn observe_repository(
         }
     };
 
+    // Keep repository identity in summary captures without branch/tracking scans.
     let filesystem = FilesystemRequest::new()
-        .git(git_request)
+        .git(git_request.metadata(GitMetadataRequest::none().remotes(true)))
         .without_file_inventory()
         .without_docs()
         .without_formatting();

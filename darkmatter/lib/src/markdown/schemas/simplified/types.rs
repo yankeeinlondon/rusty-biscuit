@@ -464,8 +464,8 @@ pub enum Constraint {
     /// exclude.
     Match(Vec<String>),
 
-    /// Opt in to eager existence validation: a present `file` value must
-    /// resolve to an existing file. `file`-only; bare `file` is lazy.
+    /// Require the containing property at stabilized launch and completion.
+    /// On `file` values this also requires each present reference to exist.
     Eager,
 
     // ── url ──────────────────────────────────────────────────────────────

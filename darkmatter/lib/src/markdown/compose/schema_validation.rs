@@ -286,7 +286,14 @@ pub(crate) fn run_with_registry(
         return Ok(());
     }
 
-    let report = schemas.validate(markdown).map_err(|err| {
+    // A launch-preparing caller judges the instance at its runtime phase so a
+    // required-but-not-eager property may still be absent; every other caller
+    // keeps the unphased authoring verdict.
+    let report = match options.schema_phase {
+        Some(phase) => schemas.validate_for_phase(markdown, phase),
+        None => schemas.validate(markdown),
+    }
+    .map_err(|err| {
         MarkdownError::SchemaValidationFailed {
             path: path.clone(),
             problems: Vec::new(),

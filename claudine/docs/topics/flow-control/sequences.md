@@ -613,6 +613,16 @@ just-in-time validation still finds a required property missing, the normal
 behavior applies: interactive collection in a serial TTY context, a typed error
 otherwise. Arrange for earlier tasks to `set` what later tasks require.
 
+**Each step is its own composition, so each step reaches its own completion
+verdict.** A step that ends with a `required` property missing or a value of the
+wrong type fails at that step under the existing `fail_fast` rules — the schema
+describes the document and its lifecycle, not the sequence as a whole. A
+property that is only meant to accumulate across steps must therefore not be
+declared `required`. Values supplied transiently — a caller `key=value`, step
+state, or a `proxy.with` overlay — count toward the verdict exactly as they
+count everywhere else, and are still never written to the source. See
+[Composition — Completion Verdict](../composition.md#completion-verdict).
+
 ## Operations
 
 Any step may define `operation`, whose value becomes the `OPERATION`

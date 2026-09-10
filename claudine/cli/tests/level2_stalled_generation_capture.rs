@@ -309,3 +309,60 @@ done
          semantic border.\nraw:\n{last_raw}",
     );
 }
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_opencode_completion_only_tool_use_renders_one_tool_line() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    common::wrap::seed_minimal_config(workspace.path());
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"ses_l2_tool","model":"test-model"}'
+printf '%s\n' '{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"pwd"},"output":"/tmp"}}}'
+"#,
+    );
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let _ = harness.resize(100, 60);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+    let claudine = common::claudine_bin();
+    let home = workspace.path().to_string_lossy().into_owned();
+    let path = augmented_path(&path_dir).to_string_lossy().into_owned();
+    let command = format!("{claudine} opencode 'run one tool'; echo claudine_tool_rc:$?");
+    harness
+        .send_command_with_env(
+            &command,
+            &[
+                ("HOME", home.as_str()),
+                ("PATH", path.as_str()),
+                ("NO_COLOR", "1"),
+                ("OPENCODE_MODEL", "test-model"),
+            ],
+        )
+        .expect("send OpenCode wrapper command");
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let plain = loop {
+        let frame = harness.capture().expect("capture pane");
+        if frame.plain.contains("claudine_tool_rc:0") {
+            break frame.plain;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "OpenCode fixture timed out:\n{}",
+            frame.plain
+        );
+        harness.settle();
+    };
+    assert_eq!(plain.matches('←').count(), 1, "{plain}");
+    assert_eq!(plain.matches('→').count(), 0, "{plain}");
+}

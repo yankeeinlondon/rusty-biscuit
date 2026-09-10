@@ -165,14 +165,6 @@ The signature is infallible by design (`-> HookDispatchResult`; hook dispatch fa
 
 [[allow]]
 shape = "format_context"
-file = "cli/src/commands/wrap/inline.rs"
-symbol = "try_inline_closure"
-tag = "d10-routing-change"
-reason = """
-A typed `CompositionError` is in hand, but typing it here is a routing/matching-surface change spec D10 and decisions D-2/D-12 defer to a separate spec — not a burn-down. The flattened string is joined into `fail_msg` and fed to `LifecycleErrorInfo::from_action_failure("inline_closure", fail_msg)` (`harness_orch/loop_control.rs`), which projects `err.msg`/`err.kind`/`err.variant` into the lifecycle expression context that author-written `when:` rules match on. Threading the typed cause so `err.code`/`err.category`/`err.detail.*` populate would flip which aliases `to_value()` projects (`lifecycle/context.rs`): a classifiable error projects `category`/`code` under `err.kind`/`err.variant` instead of the action-failure spellings, so a rule matching `err.variant == "inline_closure"` would silently stop matching. That is the authored-matching-surface change D10 reserves for a versioned migration, so this defers rather than fixes. Do not retag `retained`: a typed error is genuinely in hand."""
-
-[[allow]]
-shape = "format_context"
 file = "contract/src/structured.rs"
 symbol = "compile_schema"
 tag = "retained"

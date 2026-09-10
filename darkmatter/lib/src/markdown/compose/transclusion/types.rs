@@ -508,7 +508,10 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                         "The reference <cyan>{}</cyan> uses an unsupported scheme or syntax.",
                         Prose::escape_text(reference)
                     ))
-                    .hint("Supported: <dim>./relative, @/repo, !package, vault:, %, {{ENV}}</dim>")
+                    .hint(
+                        "Supported: <dim>./relative, implicit, @magic, &repo-root, \
+                         ^repo-scoped, ~/home, vault:, %, {{ENV}}</dim>",
+                    )
             }
 
             TransclusionError::UnsupportedFileType { path } => StatusBlock::new(StatusState::Error)
@@ -674,7 +677,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                     "file reference failure",
                 ))
                 .body(source.to_string())
-                .hint("Check repository-root (`@/`) or package (`!`) prefix usage."),
+                .hint("Check sigil usage: `@` magic, `&` repository root, `^` repository-scoped."),
 
             TransclusionError::Json(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(

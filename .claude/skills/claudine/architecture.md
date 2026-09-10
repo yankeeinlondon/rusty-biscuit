@@ -31,7 +31,9 @@ claudine/lib/src/
 │   ├── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and the pure transition core shared by composition preflight and the harness loop
 │   ├── looping/   → Loop configuration, action DSL, condition evaluation, and execution orchestration (looping/{engine,types,seed,config,dsl,actions,expression}.rs — engine holds only execution/routing/gate logic; types holds the option/context/output/result value types; seed holds loop-seed construction)
 │   ├── prepare/   → The canonical preparation service (prepare/service.rs) and the entry-reason stage matrix as data (prepare/entry.rs); prepare.rs holds the two sanctioned composers prepare_direct/prepare_inline
-│   └── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting
+│   ├── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting
+│   ├── closure.rs → The inline artifact reconciler: reads the agent-written document back, restores the three closure-owned nodes textually, judges the body under Darkmatter's non-strict Simple hash, stamps, writes once atomically, and owns baseline rollback
+│   └── completion.rs → The one completion verdict for both modes: pure evaluate_completion + the complete_active_document orchestration entry point
 ├── config/       → Agent detection, hook registration, atomic writes, backups
 ├── diagnostics/  → Typed facets, discovery, effective selection, and snapshots
 ├── dispatch/     → Event processing pipeline
@@ -70,11 +72,16 @@ The per-provider modules under `lib/src/provider/<slug>/` split into two halves:
 **Child-process environment guard.** `child_environment` captures one absolute
 process-entry launch directory. Ordinary invocations ignore inherited
 `AGENT_CWD`; `claudine handle` retains an absolute wrapper-supplied value and
-rejects a relative one. Every production std/Tokio child receives the snapshot
-through `contribute_child_environment`, including complete provider environment
-maps. `claudine-cli/tests/spawn_inventory.rs` scans both production source trees
-and byte-compares `docs/providers/spawn-seam-inventory.json`; regenerate with
-the command stored in that artifact after an intentional spawn change.
+rejects a relative one. Production code builds every std/Tokio child through
+`child_environment::command`, `tokio_command`, or `command_with_environment`
+(the provider seam, which replaces the inherited environment with the complete
+sanitized map); each contributes the snapshot before returning. Enforcement is
+compiler-resolved, not a source scan: `std::process::Command::new`,
+`tokio::process::Command::new`, and both `env_clear` methods are
+`disallowed-methods` in `lib/clippy.toml` and `cli/clippy.toml`, allowed by
+default via each crate's `[lints.clippy]` and denied at the crate root under
+`cfg(not(test))`, so tests keep the plain constructors while an ungoverned
+production spawn fails `just lint`.
 
 ## Event Support Matrix
 
@@ -439,6 +446,13 @@ So when rendered prompt output shows wrong wrapping, spurious newlines, lines bl
 
 Goose exposes no native structured stream protocol, so it is the only compiled
 provider identity without a dedicated parser path.
+
+The live semantic sink treats both `ToolCall` and `ToolResult` as final-response
+boundaries, but records a tool name only from `ToolCall`. This accommodates
+providers that expose either half of the lifecycle without double-counting
+tools. OpenCode's completion-only `tool_use` envelope is normalized to one
+paired `ToolCall` followed immediately by `ToolResult`; Kilo inherits that
+wire-compatible behavior.
 
 ### Infrastructure
 

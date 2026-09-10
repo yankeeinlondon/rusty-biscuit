@@ -274,12 +274,9 @@ pub struct SystemShellRunner;
 
 impl ShellRunner for SystemShellRunner {
     fn run(&self, command: &str) -> Result<i32, ShellRunError> {
-        let mut cmd = system_shell_command(command);
-        crate::child_environment::contribute_child_environment(&mut cmd).map_err(|error| {
-            ShellRunError::Spawn {
-                command: command.to_string(),
-                source: std::io::Error::other(error),
-            }
+        let mut cmd = system_shell_command(command).map_err(|error| ShellRunError::Spawn {
+            command: command.to_string(),
+            source: std::io::Error::other(error),
         })?;
         let status = cmd.status().map_err(|source| ShellRunError::Spawn {
             command: command.to_string(),
@@ -291,22 +288,26 @@ impl ShellRunner for SystemShellRunner {
 
 /// Build the platform `Command` that runs `command` through the system shell.
 #[cfg(windows)]
-fn system_shell_command(command: &str) -> std::process::Command {
+fn system_shell_command(
+    command: &str,
+) -> Result<std::process::Command, crate::child_environment::ChildEnvironmentError> {
     use std::os::windows::process::CommandExt;
 
-    let mut cmd = std::process::Command::new("cmd");
+    let mut cmd = crate::child_environment::command("cmd")?;
     // `cmd.exe` owns the command-tail grammar. Passing it through the Windows
     // argv encoder changes nested quotes before the shell can parse them.
     cmd.arg("/D").arg("/C").raw_arg(command);
-    cmd
+    Ok(cmd)
 }
 
 /// Build the platform `Command` that runs `command` through the system shell.
 #[cfg(not(windows))]
-fn system_shell_command(command: &str) -> std::process::Command {
-    let mut cmd = std::process::Command::new("sh");
+fn system_shell_command(
+    command: &str,
+) -> Result<std::process::Command, crate::child_environment::ChildEnvironmentError> {
+    let mut cmd = crate::child_environment::command("sh")?;
     cmd.arg("-c").arg(command);
-    cmd
+    Ok(cmd)
 }
 
 /// Everything the executor needs to run one lifecycle event.

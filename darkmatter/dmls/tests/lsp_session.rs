@@ -304,7 +304,16 @@ fn bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema() 
 /// Markdown body (empty string on a null hover). Collapses the request +
 /// `contents.value` extraction that hover assertions would otherwise repeat.
 fn hover_markup(fixture: &mut LspFixture<'_>, uri: &str, line: u32, character: u32) -> String {
-    let hover = fixture
+    hover_value(fixture, uri, line, character)["contents"]["value"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The whole `textDocument/hover` result, for assertions that also pin the
+/// response `range` (the source span the hover was anchored to).
+fn hover_value(fixture: &mut LspFixture<'_>, uri: &str, line: u32, character: u32) -> Value {
+    fixture
         .request(
             "textDocument/hover",
             json!({
@@ -313,11 +322,7 @@ fn hover_markup(fixture: &mut LspFixture<'_>, uri: &str, line: u32, character: u
             }),
         )
         .result
-        .expect("hover result");
-    hover["contents"]["value"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string()
+        .expect("hover result")
 }
 
 #[test]
@@ -3622,6 +3627,769 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
     assert_eq!(
         specialized[0]["range"]["end"],
         json!({ "line": 3, "character": 24 })
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn schema_definition_errors_are_independent_and_property_ranged() {
+    let workspace = LspWorkspace::new();
+    let text = concat!(
+        "---\n",
+        "$schema:\n",
+        "  bad_string: string(integer)\n",
+        "  valid_neighbor: string(required;eager)\n",
+        "  bad_boolean: boolean(min(1))\n",
+        "valid_neighbor: ready\n",
+        "---\n\nbody\n",
+    );
+    let path = workspace.path().join("aggregate-errors.md");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let mut definition_errors: Vec<&Value> = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.invalid_type_definition")
+        })
+        .collect();
+    definition_errors.sort_by_key(|diagnostic| {
+        diagnostic["range"]["start"]["line"].as_u64().unwrap()
+    });
+    assert_eq!(definition_errors.len(), 2, "{diagnostics:#?}");
+    assert_eq!(
+        definition_errors[0]["range"],
+        json!({
+            "start": { "line": 2, "character": 14 },
+            "end": { "line": 2, "character": 29 }
+        })
+    );
+    assert_eq!(
+        definition_errors[1]["range"],
+        json!({
+            "start": { "line": 4, "character": 15 },
+            "end": { "line": 4, "character": 30 }
+        })
+    );
+
+    let hover = hover_markup(&mut fixture, uri.as_str(), 3, 20);
+    assert!(hover.contains("Type: **type-definition**"), "{hover}");
+    assert!(hover.contains("Declares: **string**"), "{hover}");
+    assert!(hover.contains("Eager"), "{hover}");
+    assert!(!hover.contains("bad_string"), "{hover}");
+    assert!(!hover.contains("bad_boolean"), "{hover}");
+
+    fixture.shutdown();
+}
+
+/// Darkmatter's single authority for `eager` wording. Every DMLS surface
+/// (completion detail, both hover bodies) must reproduce this string; a
+/// DMLS-local paraphrase is the drift this fixture group exists to catch.
+fn eager_catalog_description() -> &'static str {
+    darkmatter::markdown::schemas::schema_constraint_descriptors()
+        .iter()
+        .find(|descriptor| descriptor.keyword == "eager")
+        .expect("the Darkmatter catalog declares `eager`")
+        .description
+}
+
+#[test]
+fn eager_schema_fixture_is_clean_and_catalog_driven() {
+    let workspace = LspWorkspace::new();
+    // `spec` is declared `file(eager)` and deliberately omitted: eager alone
+    // never obliges presence, so an absent eager-only property is clean.
+    let text = concat!(
+        "---\n",
+        "$schema:\n",
+        "  prompt: string(required;eager)\n",
+        "  attempts: number(eager)\n",
+        "  metadata: object(eager)\n",
+        "  researched_on: datetime(eager)\n",
+        "  spec: file(eager)\n",
+        "prompt: Research the products\n",
+        "attempts: 1\n",
+        "metadata: {}\n",
+        "researched_on: '2026-09-05T00:00:00Z'\n",
+        "---\n\nbody\n",
+    );
+    let path = workspace.path().join("eager-types.md");
+    std::fs::write(&path, text).unwrap();
+
+    let partial = "---\n$schema:\n  prompt: string(ea\n---\n\nbody\n";
+    let partial_path = workspace.path().join("eager-completion.md");
+    std::fs::write(&partial_path, partial).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics.is_empty(),
+        "valid eager declarations must produce no diagnostics: {diagnostics:#?}"
+    );
+
+    let partial_uri = url::Url::from_file_path(partial_path).unwrap();
+    open(&fixture, partial_uri.as_str(), partial);
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": partial_uri.as_str() },
+                "position": { "line": 2, "character": 19 }
+            }),
+        )
+        .result
+        .expect("eager constraint completion");
+    let eager = completion
+        .as_array()
+        .expect("completion array")
+        .iter()
+        .find(|item| item["label"] == json!("eager"))
+        .expect("Darkmatter's eager descriptor reaches DMLS completion");
+    // Catalog-driven: byte-identical to `schema_constraint_descriptors()`.
+    assert_eq!(eager["detail"], json!(eager_catalog_description()));
+    // …and the wording states the independent-axis contract rather than the
+    // retired "eager requires the containing property" claim.
+    let detail = eager["detail"].as_str().expect("string detail");
+    assert!(
+        detail.contains("absence is allowed unless `required` is also declared"),
+        "the eager completion must say absence is allowed: {detail}"
+    );
+    assert!(
+        !detail.contains("Requires the containing property"),
+        "the retired presence claim must not return: {detail}"
+    );
+
+    fixture.shutdown();
+}
+
+/// Strict mode is the only mode that can discriminate `eager` from `required`:
+/// outside it DMLS suppresses *every* `missing_required`, so a default-mode
+/// fixture would stay green even if eager were compiled as a presence rule.
+///
+/// Every property here is omitted. Four must stay clean: `spec` (eager-only
+/// scalar), `items` (`file(eager)[]`, eager owned by the items), `refs`
+/// (`file[](eager)`, eager owned by the array property), and `notes` (plain
+/// optional, the no-constraint control). `plan` (`required; eager`) is the sole
+/// permitted diagnosed absence.
+const STRICT_EAGER_ABSENCE_DOC: &str = concat!(
+    "---\n",
+    "$schema:\n",
+    "  spec: string(eager)\n",
+    "  items: file(eager)[]\n",
+    "  refs: file[](eager)\n",
+    "  notes: string\n",
+    "  plan: string(required; eager)\n",
+    "title: Hello\n",
+    "---\n",
+    "\n",
+    "body\n",
+);
+
+#[test]
+fn strict_mode_diagnoses_absent_required_eager_but_never_absent_eager_only() {
+    let workspace = LspWorkspace::new();
+    std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
+    let path = workspace.path().join("absence.md");
+    std::fs::write(&path, STRICT_EAGER_ABSENCE_DOC).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(&path).unwrap();
+    open(&fixture, uri.as_str(), STRICT_EAGER_ABSENCE_DOC);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let missing: Vec<&Value> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.missing_required"))
+        .collect();
+    assert_eq!(
+        missing.len(),
+        1,
+        "only the `required; eager` control may be diagnosed absent: {diagnostics:#?}"
+    );
+    let message = missing[0]["message"].as_str().expect("message");
+    assert!(message.contains("plan"), "{message}");
+    for eager_only in ["spec", "items", "refs", "notes"] {
+        assert!(
+            !message.contains(eager_only),
+            "`{eager_only}` is optional and must not be diagnosed absent: {message}"
+        );
+    }
+    assert_eq!(missing[0]["severity"], json!(1), "{:#?}", missing[0]);
+    assert_eq!(missing[0]["source"], json!("darkmatter.schema"));
+    // Ranged on the frontmatter mapping that should have carried the key —
+    // a missing key has no value node of its own.
+    assert_eq!(
+        missing[0]["range"],
+        json!({
+            "start": { "line": 1, "character": 0 },
+            "end": { "line": 8, "character": 0 }
+        }),
+        "{:#?}",
+        missing[0]
+    );
+
+    fixture.shutdown();
+}
+
+/// How many required properties a document declares must not change *whether*
+/// their absence is reported.
+///
+/// `jsonschema` 0.42 compiled no `required` validator at all when a `required`
+/// array held exactly two names and its parent object also carried
+/// `properties`, on the assumption that the `properties` compiler would emit a
+/// fused properties-plus-required validator — which it only did below an
+/// internal 15-property threshold. Every Darkmatter document is merged against
+/// a 16-property baseline, so every strict-mode document with exactly two
+/// required properties published a false-clean verdict while one, three, and
+/// four all diagnosed correctly. Upstream fixed the shape in 0.46.1; this
+/// workspace runs 0.55.
+///
+/// Each case is `(file stem, document, diagnosed property names, closing
+/// `---` line)`. A missing key has no value node, so the diagnostic ranges the
+/// frontmatter mapping: line 1 through the closing fence. That end line moves
+/// with each fixture, so pinning it per case is a real range assertion rather
+/// than a restatement of the document.
+#[allow(clippy::type_complexity)]
+const STRICT_REQUIRED_COUNT_CASES: &[(&str, &str, &[&str], u32)] = &[
+    (
+        "one",
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  alpha: string(required)\n",
+            "title: Hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        ),
+        &["alpha"],
+        4,
+    ),
+    // The regressing case: exactly two, required-only. Also the review's
+    // "two required-only properties" control.
+    (
+        "two",
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  alpha: string(required)\n",
+            "  bravo: string(required)\n",
+            "title: Hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        ),
+        &["alpha", "bravo"],
+        5,
+    ),
+    (
+        "three",
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  alpha: string(required)\n",
+            "  bravo: string(required)\n",
+            "  charlie: string(required)\n",
+            "title: Hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        ),
+        &["alpha", "bravo", "charlie"],
+        6,
+    ),
+    (
+        "four",
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  alpha: string(required)\n",
+            "  bravo: string(required)\n",
+            "  charlie: string(required)\n",
+            "  delta: string(required)\n",
+            "title: Hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        ),
+        &["alpha", "bravo", "charlie", "delta"],
+        7,
+    ),
+    // Two `required; eager`: presence is owned by `required`, so adding
+    // `eager` must neither add nor remove a diagnosis.
+    (
+        "two_required_eager",
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  alpha: string(required; eager)\n",
+            "  bravo: string(required; eager)\n",
+            "title: Hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        ),
+        &["alpha", "bravo"],
+        5,
+    ),
+    // One of the pair supplied: exactly the omitted one is diagnosed. Under
+    // the upstream defect this case was silent too.
+    (
+        "two_one_supplied",
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  alpha: string(required)\n",
+            "  bravo: string(required)\n",
+            "alpha: supplied\n",
+            "title: Hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        ),
+        &["bravo"],
+        6,
+    ),
+];
+
+#[test]
+fn strict_mode_reports_every_absent_required_property_at_any_required_count() {
+    let workspace = LspWorkspace::new();
+    std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    for (stem, document, expected, fence_line) in STRICT_REQUIRED_COUNT_CASES {
+        let path = workspace.path().join(format!("{stem}.md"));
+        std::fs::write(&path, document).unwrap();
+        let uri = url::Url::from_file_path(&path).unwrap();
+        open(&fixture, uri.as_str(), document);
+
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+        let missing: Vec<&Value> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.missing_required"))
+            .collect();
+
+        assert_eq!(
+            missing.len(),
+            expected.len(),
+            "[{stem}] expected {} missing-required diagnostics: {diagnostics:#?}",
+            expected.len(),
+        );
+
+        // Matched by name rather than by position: publish order is not part
+        // of the contract, one diagnostic per omitted property is.
+        for property in *expected {
+            let named: Vec<&&Value> = missing
+                .iter()
+                .filter(|diagnostic| {
+                    diagnostic["message"]
+                        .as_str()
+                        .is_some_and(|message| message.contains(property))
+                })
+                .collect();
+            assert_eq!(
+                named.len(),
+                1,
+                "[{stem}] exactly one diagnostic must name `{property}`: {missing:#?}"
+            );
+            let diagnostic = named[0];
+            assert_eq!(diagnostic["severity"], json!(1), "[{stem}] {diagnostic:#?}");
+            assert_eq!(diagnostic["source"], json!("darkmatter.schema"));
+            assert_eq!(
+                diagnostic["range"],
+                json!({
+                    "start": { "line": 1, "character": 0 },
+                    "end": { "line": fence_line, "character": 0 }
+                }),
+                "[{stem}] {diagnostic:#?}"
+            );
+        }
+    }
+
+    fixture.shutdown();
+}
+
+/// `attempts` is eager-only and supplied with a non-numeric scalar; `spec` is
+/// eager-only and supplied with a mapping where a file reference belongs. Both
+/// must be diagnosed by the shared Darkmatter validator at the *value* range.
+/// `notes` (eager-only, valid) and `plan` (eager-only, absent) are the controls
+/// that must stay clean.
+const SUPPLIED_EAGER_VALUE_DOC: &str = concat!(
+    "---\n",
+    "$schema:\n",
+    "  attempts: number(eager)\n",
+    "  spec: file(eager)\n",
+    "  notes: string(eager)\n",
+    "  plan: file(eager)\n",
+    "attempts: not-a-number\n",
+    "spec:\n",
+    "  nested: 1\n",
+    "notes: fine\n",
+    "---\n",
+    "\n",
+    "body\n",
+);
+
+#[test]
+fn supplied_invalid_eager_values_are_diagnosed_on_the_value_range() {
+    let workspace = LspWorkspace::new();
+    let path = workspace.path().join("supplied.md");
+    std::fs::write(&path, SUPPLIED_EAGER_VALUE_DOC).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(&path).unwrap();
+    open(&fixture, uri.as_str(), SUPPLIED_EAGER_VALUE_DOC);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let attempts = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.type_mismatch")
+                && diagnostic["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("not-a-number"))
+        })
+        .unwrap_or_else(|| panic!("a supplied eager scalar must still be typed: {diagnostics:#?}"));
+    assert_eq!(attempts["source"], json!("darkmatter.schema"));
+    assert_eq!(attempts["severity"], json!(1));
+    // Exactly the scalar on line 6, not the `$schema` block and not the
+    // property definition on line 2.
+    assert_eq!(
+        attempts["range"],
+        json!({
+            "start": { "line": 6, "character": 10 },
+            "end": { "line": 6, "character": 22 }
+        }),
+        "{attempts:#?}"
+    );
+
+    // A mapping where a `file(eager)` reference belongs is rejected on the
+    // supplied value, whose span covers the nested mapping only.
+    let spec = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            matches!(
+                diagnostic["code"].as_str(),
+                Some("dm.schema.type_mismatch" | "dm.schema.constraint")
+            ) && diagnostic["range"]["start"]["line"] == json!(8)
+        })
+        .unwrap_or_else(|| panic!("a supplied eager file value must be typed: {diagnostics:#?}"));
+    assert_eq!(
+        spec["range"],
+        json!({
+            "start": { "line": 8, "character": 2 },
+            "end": { "line": 9, "character": 0 }
+        }),
+        "{spec:#?}"
+    );
+
+    // Controls: the valid eager sibling and the absent eager sibling are clean.
+    for control in ["notes", "plan"] {
+        assert!(
+            diagnostics.iter().all(|diagnostic| {
+                diagnostic["message"]
+                    .as_str()
+                    .is_none_or(|message| !message.contains(control))
+            }),
+            "`{control}` must not be diagnosed: {diagnostics:#?}"
+        );
+    }
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic["code"] != json!("dm.schema.missing_required")),
+        "eager alone never obliges presence: {diagnostics:#?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// One `$schema` property `p` declared as `declaration` and supplied as
+/// `value`, so both hover surfaces can be requested from the same document.
+///
+/// Line 2 is always the definition (`  p: …`) and line 3 the instance (`p: …`),
+/// which keeps every fixture's expected hover ranges identical.
+fn single_property_document(declaration: &str, value: &str) -> String {
+    format!("---\n$schema:\n  p: {declaration}\np: {value}\n---\n\nbody\n")
+}
+
+/// The `$schema` definition key `p` on line 2.
+const DEFINITION_KEY: (u32, u32) = (2, 2);
+/// The frontmatter instance key `p` on line 3.
+const INSTANCE_KEY: (u32, u32) = (3, 0);
+
+/// Opens a fresh single-property document and returns
+/// `(definition_hover, instance_hover)` — the two hover responses AC4 and AC8
+/// contrast. Each declaration gets its own file so an earlier fixture's
+/// diagnostics or overlay state cannot leak into the next.
+fn hover_surfaces(
+    fixture: &mut LspFixture<'_>,
+    workspace: &std::path::Path,
+    name: &str,
+    declaration: &str,
+    value: &str,
+) -> (Value, Value) {
+    let text = single_property_document(declaration, value);
+    let path = workspace.join(name);
+    std::fs::write(&path, &text).unwrap();
+    let uri = url::Url::from_file_path(&path).unwrap();
+    open(fixture, uri.as_str(), &text);
+    let definition = hover_value(fixture, uri.as_str(), DEFINITION_KEY.0, DEFINITION_KEY.1);
+    let instance = hover_value(fixture, uri.as_str(), INSTANCE_KEY.0, INSTANCE_KEY.1);
+    (definition, instance)
+}
+
+fn hover_body(hover: &Value) -> &str {
+    hover["contents"]["value"].as_str().unwrap_or_default()
+}
+
+/// The four `required`/`eager` cells, on both hover surfaces, through a real
+/// LSP session: `(declaration, instance value, shows Required, shows eager)`.
+const HOVER_MATRIX: &[(&str, &str, bool, bool)] = &[
+    ("string", "alpha", false, false),
+    ("string(eager)", "alpha", false, true),
+    ("string(required)", "alpha", true, false),
+    ("string(required; eager)", "alpha", true, true),
+    // Array placement: `file(eager)[]` owns the items, `file[](eager)` owns the
+    // property. Neither spelling makes the property present.
+    ("file(eager)[]", "[]", false, true),
+    ("file[](eager)", "[]", false, true),
+    // Array-level `required` is a presence rule and must keep its marker.
+    ("file[](required)", "[]", true, false),
+    ("file[](required; eager)", "[]", true, true),
+];
+
+#[test]
+fn eager_and_required_hover_independently_on_both_surfaces() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let description = eager_catalog_description();
+
+    for (index, (declaration, value, shows_required, shows_eager)) in
+        HOVER_MATRIX.iter().enumerate()
+    {
+        let (definition, instance) = hover_surfaces(
+            &mut fixture,
+            workspace.path(),
+            &format!("matrix-{index}.md"),
+            declaration,
+            value,
+        );
+        for (surface, hover) in [("definition", &definition), ("instance", &instance)] {
+            let body = hover_body(hover);
+            assert!(
+                body.starts_with("**`p`**"),
+                "`{declaration}` {surface} hover must describe `p`: {body}"
+            );
+            assert_eq!(
+                body.contains("Required"),
+                *shows_required,
+                "`{declaration}` {surface} hover presence marker: {body}"
+            );
+            assert_eq!(
+                body.contains(description),
+                *shows_eager,
+                "`{declaration}` {surface} hover eager wording: {body}"
+            );
+        }
+
+        // Ranges stay on the hovered key: the property definition inside
+        // `$schema`, and the supplied instance key — never the `$schema` block.
+        assert_eq!(
+            definition["range"],
+            json!({
+                "start": { "line": 2, "character": 2 },
+                "end": { "line": 2, "character": 3 }
+            }),
+            "`{declaration}` definition range"
+        );
+        assert_eq!(
+            instance["range"],
+            json!({
+                "start": { "line": 3, "character": 0 },
+                "end": { "line": 3, "character": 1 }
+            }),
+            "`{declaration}` instance range"
+        );
+    }
+
+    fixture.shutdown();
+}
+
+/// A property-level union whose *first* arm is eager, and a nested inline
+/// object whose child is eager. Both must reach the same catalog wording that
+/// the flat matrix above proves, without gaining a presence marker.
+#[test]
+fn union_arms_and_nested_properties_disclose_eager_without_presence() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let description = eager_catalog_description();
+
+    // Union: `p` is `string(eager) | number`. The union key stays on line 2, so
+    // both hover ranges match the flat matrix exactly.
+    let union_text = concat!(
+        "---\n",
+        "$schema:\n",
+        "  p:\n",
+        "    - string(eager)\n",
+        "    - number\n",
+        "p: alpha\n",
+        "---\n",
+        "\n",
+        "body\n",
+    );
+    let union_path = workspace.path().join("union.md");
+    std::fs::write(&union_path, union_text).unwrap();
+    let union_uri = url::Url::from_file_path(&union_path).unwrap();
+    open(&fixture, union_uri.as_str(), union_text);
+
+    let definition = hover_value(&mut fixture, union_uri.as_str(), 2, 2);
+    assert!(hover_body(&definition).contains("Declares: **string | number**"), "{definition}");
+    assert_eq!(
+        definition["range"],
+        json!({
+            "start": { "line": 2, "character": 2 },
+            "end": { "line": 2, "character": 3 }
+        })
+    );
+    let instance = hover_value(&mut fixture, union_uri.as_str(), 5, 0);
+    assert_eq!(
+        instance["range"],
+        json!({
+            "start": { "line": 5, "character": 0 },
+            "end": { "line": 5, "character": 1 }
+        })
+    );
+    for (surface, hover) in [("definition", &definition), ("instance", &instance)] {
+        let body = hover_body(hover);
+        assert!(
+            body.contains(description),
+            "an eager union arm must disclose timing on {surface} hover: {body}"
+        );
+        assert!(
+            !body.contains("Required"),
+            "an eager union arm must not claim presence on {surface} hover: {body}"
+        );
+    }
+
+    // Nested inline object: the eager child is described on its own instance
+    // key, and its parent object — which carries no constraint — is not.
+    let nested_text = concat!(
+        "---\n",
+        "$schema:\n",
+        "  outer:\n",
+        "    inner: string(eager)\n",
+        "outer:\n",
+        "  inner: delta\n",
+        "---\n",
+        "\n",
+        "body\n",
+    );
+    let nested_path = workspace.path().join("nested.md");
+    std::fs::write(&nested_path, nested_text).unwrap();
+    let nested_uri = url::Url::from_file_path(&nested_path).unwrap();
+    open(&fixture, nested_uri.as_str(), nested_text);
+
+    let inner = hover_value(&mut fixture, nested_uri.as_str(), 5, 2);
+    let inner_body = hover_body(&inner);
+    assert!(inner_body.starts_with("**`inner`**"), "{inner_body}");
+    assert!(inner_body.contains(description), "{inner_body}");
+    assert!(!inner_body.contains("Required"), "{inner_body}");
+    assert_eq!(
+        inner["range"],
+        json!({
+            "start": { "line": 5, "character": 2 },
+            "end": { "line": 5, "character": 7 }
+        })
+    );
+
+    let outer_body = hover_body(&hover_value(&mut fixture, nested_uri.as_str(), 4, 0)).to_string();
+    assert!(outer_body.starts_with("**`outer`**"), "{outer_body}");
+    assert!(
+        !outer_body.contains(description),
+        "an unconstrained parent must not inherit its child's eager timing: {outer_body}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn original_voip_schema_definitions_are_clean() {
+    let workspace = LspWorkspace::new();
+    let text = concat!(
+        "$schema: \n",
+        "    prompt: string(required;eager)\n",
+        "    last_updated: date(required)\n",
+        "    researched_by: string(required)\n",
+        "    products: object[](required)\n",
+    );
+    let path = workspace.path().join("voip-schema.yaml");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic["source"] != json!("darkmatter.schema")),
+        "the original voip.md schema block must have no schema diagnostics: {diagnostics:#?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn referenced_schema_conversion_error_keeps_origin_and_reference_fallback() {
+    let workspace = LspWorkspace::new();
+    let schema = "$schema:\n  bad_string: string(integer)\n";
+    let schema_path = workspace.path().join("schema.yaml");
+    std::fs::write(&schema_path, schema).unwrap();
+
+    let text = "---\n$schema: ./schema.yaml\n---\n\nbody\n";
+    let path = workspace.path().join("document.md");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    let schema_uri = url::Url::from_file_path(schema_path.canonicalize().unwrap()).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let error = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.invalid_type_definition")
+        })
+        .unwrap_or_else(|| panic!("referenced conversion diagnostic: {diagnostics:#?}"));
+    assert_eq!(
+        error["range"],
+        json!({
+            "start": { "line": 1, "character": 9 },
+            "end": { "line": 1, "character": 22 }
+        })
+    );
+    assert_eq!(
+        error["relatedInformation"][0]["location"]["uri"],
+        json!(schema_uri.as_str())
     );
 
     fixture.shutdown();

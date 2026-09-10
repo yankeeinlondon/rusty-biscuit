@@ -16,8 +16,9 @@ cargo binstall --no-confirm --version <pinned> kache
 Prefer it over the per-OS package managers below, which are fallbacks: each resolves its own
 version, so a team using several of them drifts apart.
 
-In **rusty-biscuit**, do not run this by hand — use the recipe, which reads the single version
-authority at `.github/kache-version`:
+In **rusty-biscuit**, do not run this by hand. `just init` installs the latest release on macOS
+and Linux when kache is absent (never on Windows or WSL, never reinstalling); the explicit recipe
+below also upgrades an install below the floor in `.github/kache-min-version`:
 
 ```bash
 just install-kache

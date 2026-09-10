@@ -2090,21 +2090,16 @@ fn insufficient_file_permissions_keeps_its_io_error_and_display() {
     assert_eq!(io.kind(), std::io::ErrorKind::PermissionDenied);
 }
 
-/// `InlineRewriteFailed` carries the prose its `InvalidInlineResponse(format!(…))`
-/// predecessor rendered, so the twins must agree on every projection.
+/// The inline closure reads the agent's file rather than transcribing provider
+/// output, so its reconciliation failure must publish the typed Darkmatter
+/// cause the CLI walker renders from.
 #[test]
-fn inline_rewrite_failed_twins_agree_and_publish_the_markdown_error() {
-    let plain = CompositionError::InvalidInlineResponse(format!(
-        "failed to update last_updated: {}",
-        markdown_error()
-    ));
-    let sourced = CompositionError::InlineRewriteFailed(markdown_error());
+fn inline_artifact_edit_failed_publishes_the_markdown_error() {
+    let err = CompositionError::InlineArtifactEditFailed(markdown_error());
 
-    assert_eq!(plain.to_string(), sourced.to_string());
-    assert_eq!(plain.code(), sourced.code());
-    assert_eq!(plain.detail(), sourced.detail());
+    assert_eq!(err.code(), "composition.failed");
     assert!(
-        (&sourced as &(dyn std::error::Error + 'static))
+        (&err as &(dyn std::error::Error + 'static))
             .source()
             .and_then(|c| c.downcast_ref::<MarkdownError>())
             .is_some()
@@ -2306,7 +2301,37 @@ fn every_batch_3_variant_projects_a_catalog_shaped_detail() {
             path: PathBuf::from("/repo/run.md"),
             source: std::io::Error::other("denied"),
         },
-        CompositionError::InlineRewriteFailed(markdown_error()),
+        CompositionError::InlineArtifactEditFailed(markdown_error()),
+        CompositionError::InlineArtifactUnreadable {
+            path: PathBuf::from("/repo/run.md"),
+            source: std::io::Error::other("gone"),
+        },
+        CompositionError::InlineGuardMissing {
+            source_path: PathBuf::from("/repo/run.md"),
+        },
+        CompositionError::InlineRollbackFailed {
+            path: PathBuf::from("/repo/run.md"),
+            source: std::io::Error::other("read-only file system"),
+        },
+        CompositionError::CompletionBodyUnchanged {
+            source_path: PathBuf::from("/repo/run.md"),
+            reason: crate::composition::BodyRejection::Unchanged,
+        },
+        CompositionError::CompletionSchemaFailed {
+            source_path: PathBuf::from("/repo/run.md"),
+            problems: vec![crate::composition::CompletionProblem {
+                property: "products".to_string(),
+                message: "required property is missing".to_string(),
+                kind: crate::composition::CompletionProblemKind::Missing,
+            }],
+            status: crate::composition::SchemaStatusReport {
+                source_path: PathBuf::from("/repo/run.md"),
+                required: Vec::new(),
+                optional: Vec::new(),
+                has_invalid_optional: false,
+                raw_json_schema: true,
+            },
+        },
         CompositionError::LifecycleShellResolution {
             source_path: PathBuf::from("run.md"),
             property: "start.stack[0].action.command".to_string(),

@@ -30,6 +30,81 @@ invocation:
     stdin_support: true
     prompt_arg: "Prompt may be argv or stdin text."
     notes: "Continues the most recent session for the current project or worktree."
+execution_interfaces:
+  - id: "print-stream-json"
+    kind: one_shot_cli
+    launch: 'claude -p "PROMPT" --output-format stream-json --verbose'
+    launch_conditions: ["Preconfigure authentication and an explicit unattended permission policy"]
+    input_contract: "Initial prompt by argv or text stdin; stream-json input can retain stdin for further protocol messages."
+    observation_contract: "SDKMessage-compatible NDJSON on stdout and diagnostics on stderr."
+    control_capabilities: ["stream-json input", "permission-prompt-tool"]
+    feature_preservation: evidenced_partial
+    preserved_features: ["skills", "plugins", "hooks", "project context", "MCP configuration", "session persistence"]
+    documented_exclusions: []
+    unattended_obligations: ["Handle permission requests through explicit policy", "Consume through the terminal result record"]
+    evidence: ["https://code.claude.com/docs/en/headless", "https://code.claude.com/docs/en/agent-sdk/typescript"]
+    notes: "Ordinary supported execution surface."
+  - id: "peer-control"
+    kind: retained_subprocess
+    launch: "Claude Code with its discovered peer-control endpoint retained by a managed launcher"
+    launch_conditions: ["Register the exact process-owned endpoint", "Preserve endpoint credentials and session correlation", "Revalidate platform-specific transport support"]
+    input_contract: "Provider peer protocol described in the sibling steering report."
+    observation_contract: "Peer responses plus the ordinary stream-json lifecycle when launched in non-interactive mode."
+    control_capabilities: ["active-turn steering", "idle prompt submission"]
+    feature_preservation: unknown
+    preserved_features: []
+    documented_exclusions: []
+    unattended_obligations: ["Do not treat endpoint discovery as activated Claudine support", "Do not replay ambiguous submissions"]
+    evidence: ["../steering/claude.md"]
+    notes: "Candidate managed interface from existing steering evidence; feature parity and Claudine activation remain unresolved."
+execution_selection:
+  preferred: "print-stream-json"
+  rationale: "It is the established parser-grade one-shot interface; the richer peer-control candidate is not yet established as an activated Claudine launch profile."
+  readiness_check: "Require system/init before relying on session metadata and consume a terminal result."
+  fallback: ""
+  fallback_conditions: []
+  replay_policy: "Do not replay after user-message acceptance is ambiguous."
+  feature_parity: "Peer-control may add bidirectional control, but parity with normal skills, plugins, hooks, templates, and context is unresolved."
+  notes: "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed."
+unattended_requests:
+  - request: "tool permission or human question"
+    interface: "print-stream-json"
+    observed_behavior: "Permission behavior is configurable and can be routed to a permission-prompt MCP tool."
+    required_response: "Apply an explicit caller policy or fail the run."
+    timeout_behavior: "Provider-specific; no universal timeout was established."
+    policy: "Never fabricate approval or a human answer."
+    notes: "Do not disable skills, plugins, hooks, or context merely to avoid request handling."
+settlement:
+  - interface: "print-stream-json"
+    operation: "one-shot prompt"
+    input_handling: "Argv or stdin supplies the initial prompt; stream-json input acknowledgments are optional."
+    turn_scheduling: "Assistant/tool lifecycle records evidence model work after initialization."
+    acceptance_signal: "system/init and optional replayed user message"
+    turn_terminal_signal: "assistant/tool lifecycle completion"
+    settled_signal: "type=result"
+    process_lifecycle: "The one-shot process exits after the result; exit status refines success or failure."
+    notes: "Result subtype and is_error determine the run verdict."
+steering_mechanisms:
+  - mechanism: "peer-unix-active"
+    operations: ["active-turn steering", "idle prompt submission"]
+    interface: "peer-control"
+    reference: "../steering/claude.md"
+    notes: "Candidate managed control only; the steering report owns transport, delivery, and platform caveats."
+  - mechanism: "peer-unix-idle"
+    operations: ["active-turn steering", "idle prompt submission"]
+    interface: "peer-control"
+    reference: "../steering/claude.md"
+    notes: "Candidate managed control only; the steering report owns transport, delivery, and platform caveats."
+  - mechanism: "peer-windows-pipe-active"
+    operations: ["active-turn steering", "idle prompt submission"]
+    interface: "peer-control"
+    reference: "../steering/claude.md"
+    notes: "Candidate managed control only; the steering report owns transport, delivery, and platform caveats."
+  - mechanism: "peer-windows-pipe-idle"
+    operations: ["active-turn steering", "idle prompt submission"]
+    interface: "peer-control"
+    reference: "../steering/claude.md"
+    notes: "Candidate managed control only; the steering report owns transport, delivery, and platform caveats."
 output_formats:
   - name: "text"
     cli_value: "text"

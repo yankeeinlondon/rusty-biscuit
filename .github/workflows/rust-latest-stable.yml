@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Install latest stable toolchain
@@ -38,7 +38,7 @@ jobs:
           components: clippy, rustfmt
           targets: wasm32-wasip2
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v4
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       - name: Report the toolchain under test
@@ -55,7 +55,7 @@ jobs:
             printf '%s=%s\n' "$field" "$value" >>"$GITHUB_OUTPUT"
           done
       - name: Cache the pinned Zed extension packager
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ runner.tool_cache }}/zed-extension/${{ steps.zed-extension-pin.outputs.zed_commit }}/zed-extension
           key: zed-extension-${{ steps.zed-extension-pin.outputs.zed_commit }}-${{ steps.zed-extension-pin.outputs.linux_x86_64_sha256 }}

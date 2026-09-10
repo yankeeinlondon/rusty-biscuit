@@ -9,8 +9,9 @@
 #   - invalid mode rejection
 #   - warn-mode failure exits 0 and mentions --no-verify
 #   - strict-mode failure exits non-zero and mentions --no-verify
-#   - RUSTY_BISCUIT_PRE_PUSH_AREAS override is honored verbatim
-#   - changed-areas empty result falls back to "claudine darkmatter"
+#   - the default path delegates to `just pre-push` with no selection, so the
+#     scope is computed there (by `just ci-local --lint-only`), never here
+#   - RUSTY_BISCUIT_PRE_PUSH_AREAS override is forwarded verbatim
 #
 # Run directly: ./.githooks/tests/test-pre-push.sh
 
@@ -44,25 +45,20 @@ fi
 
 # Create a fake `just` shim in a fresh temp dir for each test case.
 #
-# Usage: make_fake_just <tmpdir> <pre_push_exit_code> [changed_areas_output]
+# Usage: make_fake_just <tmpdir> <pre_push_exit_code>
 #
 # The fake records every invocation (one per line) to "$tmpdir/just.log"
-# with the arguments space-joined. It exits 0 for `changed-areas` and the
-# requested exit code for `pre-push`. Any other subcommand exits 99 so
-# unexpected calls show up as test failures.
+# with the arguments space-joined. It exits with the requested code for
+# `pre-push`. Any other subcommand exits 99 so unexpected calls show up as
+# test failures.
 make_fake_just() {
     local tmpdir="$1"
     local pre_push_exit="$2"
-    local changed_areas_out="${3:-}"
 
     cat >"$tmpdir/just" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >>"$tmpdir/just.log"
 case "\$1" in
-    changed-areas)
-        printf '%s' "$changed_areas_out"
-        exit 0
-        ;;
     pre-push)
         exit $pre_push_exit
         ;;
@@ -204,7 +200,7 @@ test_warn_passing_tests_exits_zero() {
     make_fake_just "$tmpdir" 0
     run_hook "$tmpdir" "warn"
     assert_exit "warn pass" "$tmpdir" 0 || return 1
-    assert_contains "warn pass message" "$tmpdir/out" "Pre-push tests passed." || return 1
+    assert_contains "warn pass message" "$tmpdir/out" "Pre-push lint passed." || return 1
 }
 
 test_warn_failing_tests_exits_zero_with_no_verify_hint() {
@@ -212,12 +208,12 @@ test_warn_failing_tests_exits_zero_with_no_verify_hint() {
     make_fake_just "$tmpdir" 1
     run_hook "$tmpdir" "warn"
     assert_exit "warn fail" "$tmpdir" 0 || return 1
-    assert_contains "warn failure header" "$tmpdir/out" "Pre-push tests failed" || return 1
+    assert_contains "warn failure header" "$tmpdir/out" "Pre-push lint failed" || return 1
     # R3 requires warn-mode failures to print prominently in red. The hook
     # emits a literal ANSI SGR red prefix (\033[31m) and reset (\033[0m)
     # regardless of TTY status, so a byte-level check on the captured
     # stdout is the contract under test here.
-    assert_contains "warn failure red SGR prefix" "$tmpdir/out" $'\033[31mPre-push tests failed' || return 1
+    assert_contains "warn failure red SGR prefix" "$tmpdir/out" $'\033[31mPre-push lint failed' || return 1
     assert_contains "warn failure SGR reset" "$tmpdir/out" $'\033[0m' || return 1
     assert_contains "warn no-verify hint" "$tmpdir/err" "--no-verify" || return 1
 }
@@ -234,11 +230,26 @@ test_strict_failing_tests_exits_nonzero_with_no_verify_hint() {
     make_fake_just "$tmpdir" 7
     run_hook "$tmpdir" "strict"
     assert_exit "strict fail" "$tmpdir" 7 || return 1
-    assert_contains "strict failure header" "$tmpdir/out" "Pre-push tests failed" || return 1
+    assert_contains "strict failure header" "$tmpdir/out" "Pre-push lint failed" || return 1
     # Same red-styling contract as warn mode (see test above for rationale).
-    assert_contains "strict failure red SGR prefix" "$tmpdir/out" $'\033[31mPre-push tests failed' || return 1
+    assert_contains "strict failure red SGR prefix" "$tmpdir/out" $'\033[31mPre-push lint failed' || return 1
     assert_contains "strict failure SGR reset" "$tmpdir/out" $'\033[0m' || return 1
     assert_contains "strict no-verify hint" "$tmpdir/err" "--no-verify" || return 1
+}
+
+test_default_delegates_scope_to_pre_push() {
+    local tmpdir="$1"
+    make_fake_just "$tmpdir" 0
+    run_hook "$tmpdir" "warn"
+    assert_exit "default" "$tmpdir" 0 || return 1
+    # The hook computes no scope of its own: exactly one `just` call, and it
+    # is `pre-push` with no arguments.
+    assert_log_has "pre-push called" "$tmpdir" "pre-push" || return 1
+    if [ "$(wc -l <"$tmpdir/just.log" | tr -d ' ')" != "1" ] || [ "$(cat "$tmpdir/just.log")" != "pre-push" ]; then
+        echo "  expected exactly one call 'pre-push', got:" >&2
+        sed 's/^/  /' "$tmpdir/just.log" >&2
+        return 1
+    fi
 }
 
 test_areas_override_is_passed_through() {
@@ -246,28 +257,8 @@ test_areas_override_is_passed_through() {
     make_fake_just "$tmpdir" 0
     run_hook "$tmpdir" "warn" "biscuit-file sniff"
     assert_exit "override" "$tmpdir" 0 || return 1
-    # Override path must skip `just changed-areas` entirely and pass the
-    # override straight to `just pre-push`.
-    assert_not_contains "no changed-areas call" "$tmpdir/just.log" "changed-areas" || return 1
     assert_log_has "override forwarded" "$tmpdir" "pre-push biscuit-file sniff" || return 1
-}
-
-test_no_upstream_falls_back_to_curated_defaults() {
-    local tmpdir="$1"
-    # changed-areas produces empty output (simulates no upstream)
-    make_fake_just "$tmpdir" 0 ""
-    run_hook "$tmpdir" "warn"
-    assert_exit "fallback" "$tmpdir" 0 || return 1
-    assert_log_has "changed-areas attempted" "$tmpdir" "changed-areas" || return 1
-    assert_log_has "fallback to claudine darkmatter" "$tmpdir" "pre-push claudine darkmatter" || return 1
-}
-
-test_changed_areas_result_is_used() {
-    local tmpdir="$1"
-    make_fake_just "$tmpdir" 0 "darkmatter sniff"
-    run_hook "$tmpdir" "warn"
-    assert_exit "changed-areas used" "$tmpdir" 0 || return 1
-    assert_log_has "changed-areas piped to pre-push" "$tmpdir" "pre-push darkmatter sniff" || return 1
+    assert_contains "override announced" "$tmpdir/out" "biscuit-file sniff" || return 1
 }
 
 # ---------- runner ----------
@@ -282,9 +273,8 @@ run_test "warn + passing → exit 0"                                    test_war
 run_test "warn + failing → exit 0 and mentions --no-verify"           test_warn_failing_tests_exits_zero_with_no_verify_hint
 run_test "strict + passing → exit 0"                                  test_strict_passing_tests_exits_zero
 run_test "strict + failing → propagate exit and mention --no-verify"  test_strict_failing_tests_exits_nonzero_with_no_verify_hint
-run_test "RUSTY_BISCUIT_PRE_PUSH_AREAS override is honored verbatim"  test_areas_override_is_passed_through
-run_test "empty changed-areas falls back to claudine darkmatter"      test_no_upstream_falls_back_to_curated_defaults
-run_test "non-empty changed-areas output is forwarded to pre-push"    test_changed_areas_result_is_used
+run_test "default path calls 'just pre-push' with no selection"       test_default_delegates_scope_to_pre_push
+run_test "RUSTY_BISCUIT_PRE_PUSH_AREAS override is forwarded verbatim" test_areas_override_is_passed_through
 
 echo ""
 echo "================================================"

@@ -139,7 +139,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | Command | Description |
 |---------|-------------|
 | `claudine compose <file> [key=value ...]` | Compose a Markdown file and send the result as a prompt (no file mutation) |
-| `claudine inline-compose <file> [key=value ...]` | Use frontmatter `prompt` to generate content and replace the body; preserves frontmatter, updates `last_updated`, stamps a Darkmatter `Simple` `hash:` |
+| `claudine inline-compose <file> [key=value ...]` | Launch the agent **on the document itself** using frontmatter `prompt`; the agent writes the body and any requested frontmatter, Claudine restores `prompt`/`hash`/`last_updated`, updates `last_updated`, and stamps a Darkmatter `Simple` `hash:` |
 | `claudine sequence <file> [key=value ...]` | Run an ordered list of steps — static preflight over the whole task graph, then just-in-time composition at each step's turn; tasks, groups (serial/parallel), and the `outputs` accumulator |
 
 **Administration**
@@ -150,7 +150,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | `claudine config` | TUI for managing configuration, including messenger routes |
 | `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
 | `claudine uninstall [--keep-config]` | Remove hooks from all agents |
-| `claudine providers` | Provider capability matrix, catalog generation, and deterministic `agent-errors` research checks |
+| `claudine providers` | Provider capability matrix, catalog generation, and deterministic `agent-errors` and `steering` research checks |
 | `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|drift\|sync]` | Reporting and sync for Claudine JSONL logs |
 | `claudine dashboard [--local]` | Mesh NOW view: live sessions across rendezvous hosts, with per-host staleness and the needs-human-intervention signal (reads the rendezvous daemon) |
 | `claudine completions <shell>` | Generate shell completions |
@@ -158,6 +158,11 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | `claudine` *(no subcommand)* | Render rich grouped help |
 
 **Context command:** `claudine context` renders from Darkmatter's public typed descriptor catalogs, not from parsed Markdown. The default report shows every context variable grouped by category with `Property` (`ctx.NAME`), `Type`, and `Description` columns. `--values` replaces `Description` with live captured values (nulls shown, not dropped). `--expressions` shows the expression-language overview — precedence, truthiness, unary/comparison/arithmetic operators, variable access, parse modes, null propagation, and the complete function catalog grouped by category — with an `Example` column where layout permits. `--side-effects` shows the capability catalog with `Capability`, `Description`, `Safety`, and `Example` columns; the `Example` column is hidden below 70 characters to preserve the minimum-supported-width floor. It is documentation-only and does not invoke, probe, or check availability of any capability. All reports share a 140ch-inclusive width contract, inverse-styled inline code, and `UnorderedList` bullet formatting. Every report table fills to the right margin (`configure_shared_table` sets `width: 100%` via the shared `Table`'s `Width::Fixed(Length::Percent(100))`; the last column absorbs the slack) so tables with and without wrapped cells share one right edge — and the `Example` column carries a per-table `min_width` floor so a long `Description` cannot starve it.
+
+For composed prompts, `ctx.repo` must resolve without requesting `ctx.branch`
+or `ctx.worktree`. `InvocationContext::project_evidence` supplies cached Git
+identity and repository topology to every repository-dependent context group.
+An empty `ctx.area` at the repository root is expected.
 
 **Wrapper & composition subsystems** — each row is a pointer; depth lives in the linked doc:
 
@@ -169,9 +174,11 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | Runaway content guards | Three volume backstops — `exit_expressions`, `runaway_repetition` (≥30 cycles), `runaway_volume` (50k lines / 32 MiB) — mapping to `Aborted`/`AgentFailure`, never a retry | [Timeouts § Content guards](timeouts.md#content-guards-runaway-output) |
 | OpenCode stalled-generation | Live-but-dead backstop: trips only on retry churn **and** progress silence (`stall_timeout`, default `10m`); not a third timeout | [Timeouts § Stall](timeouts.md#opencode-stalled-generation-backstop) · [OpenCode Event Sources](opencode-event-sources.md) |
 | Signals | One signal-aware wait loop across every spawn path; per-press stderr feedback, `SIGTERM → SIGKILL` ladder, `_exit(130)` second-press guard, Windows parity | [Signal Handling](signal-handling.md) |
-| Child environments | One process-entry launch snapshot contributes absolute `AGENT_CWD` to every std/Tokio child; ordinary invocations overwrite inherited state, while `handle` retains only an absolute wrapper value; a committed spawn inventory guards both source trees | [Architecture](architecture.md#library-module-structure) |
+| Child environments | One process-entry launch snapshot contributes absolute `AGENT_CWD` to every std/Tokio child; ordinary invocations overwrite inherited state, while `handle` retains only an absolute wrapper value; a clippy `disallowed-methods` deny on the raw constructors (test builds exempt) keeps every production spawn on the `child_environment` constructors | [Architecture](architecture.md#library-module-structure) |
 | Transient overlays | Written under `<repo_root>/.claudine/tmp/` (or `<launch_cwd>/.claudine-tmp/`), cleaned up on `Drop` | [System Prompt](system-prompt.md) |
-| Schema validation | `$schema` runs Darkmatter `SimplifiedSchema`; typed errors, `null`-as-absent, a biscuit-tui prompt loop for required-missing values | [Composition § Schema](composition.md#schema-validation) |
+| Schema validation | `$schema` runs Darkmatter `SimplifiedSchema`; typed errors, `null`-as-absent, a biscuit-tui prompt loop for required-missing values. `inline-compose` judges launch at `SchemaPhase::Launch` (`eager` controls validation timing, `required` controls presence); `compose` keeps the authoring verdict | [Composition § Schema](composition.md#schema-validation) |
+| Inline write grant | An inline agent edits the file itself, so `wrap::write_grant` launches the provider in the narrowest posture that can write the document (edit-accepting mode, writable sandbox, additional root); explicit denies and missing capabilities refuse before spawn; the posture rides in the resume `permission_mode` facet | [Composition § Inline](composition.md#inline-composition) |
+| Completion verdict | One passive check (`composition::completion::complete_active_document`) decides `success` vs `failure` for **both** modes, after the provider and the inline closure: body changed meaningfully (inline only) and the launch-resolved `$schema` satisfied at `SchemaPhase::Completion`. Typed `composition.body_unchanged` / `composition.completion_schema`; a failed verdict is ordinary `failure` recovery and a successfully written artifact is kept | [Lifecycle § Completion verdict](lifecycle.md#the-completion-verdict-decides-which-terminal-event-fires) · [Composition § Completion](composition.md#completion-verdict) |
 | Error architecture | One discovery seam (`as_diagnostic`) + one role-based selection walk; rendering, `err.*`, and machine output all project the **same** effective diagnostic. Read before adding an error type or a catalog code | [Error Architecture](error-architecture.md) |
 | Composition diagnostics | Prepare-time did-you-mean warnings (unknown function / `ctx.*`, `--silent`-suppressed); frontmatter-rooted errors append a highlighted, line-numbered YAML block (TTY-gated) | [Composition](composition.md#prepare-time-warnings) |
 | Whole-value frontmatter | A value that is *exactly one* `{{ … }}` / `$(…)` span is executable state — it must resolve and must never leak as raw syntax | [Composition § Whole-value](composition.md#whole-value-frontmatter-expansion-is-executable-state) |

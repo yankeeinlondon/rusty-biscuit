@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-73a61069b34c48bd
-last_updated: 2026-09-08
+hash: ef46db3751d8e999-f0d28688305cdfb1
+last_updated: 2026-09-09
 ---
 # Claudine Composition
 
@@ -226,7 +226,12 @@ The composed prompt is sent to the provider. Output streams to the terminal with
 
 ## Inline Composition
 
-Inline composition uses the `prompt` frontmatter property as input and replaces the document's body with the provider's output.
+Inline composition uses the `prompt` frontmatter property as the request and
+launches the agent **on the document itself**: the agent is told the file's
+native absolute path, writes the requested body (and any requested
+frontmatter) into that file, and returns a short summary as its final
+response. This restores the 2026-03-17 file-aware flow
+(`fixes/2026-09-05-inline-flow-and-validations/spec.md`, D3).
 
 ```sh
 claudine inline-compose @research.md
@@ -237,19 +242,148 @@ Steps:
 
 1. **Resolve** — resolve the file reference
 2. **Validate permissions** — confirm read + write access to the file
-3. **Compose** — extract the `prompt` property, compose through Darkmatter, append inline guardrails
-4. **Prepare** — extract effective frontmatter, capture pre-execution hashes for closure
-5. **Select provider** — choose the agentic CLI
-6. **Execute** — run the provider session
-7. **Closure** — Claudine rewrites the file:
-   - The replacement body is the agent's **final response only** — the output text emitted after the agent's last tool call. Interstitial narration between tool calls (e.g. "Let me read the docs…") is dropped, so process commentary never leaks into the artifact. Providers that recover their final message post-hoc (e.g. Codex's `--output-last-message`) supply that message directly.
-   - When the prompt asks for frontmatter properties, the provider returns them in a leading YAML frontmatter block (`---` fenced) at the top of its response. The guardrails teach this channel; no declaration in the document is required, and the prompt author is responsible for checking that requested properties arrived.
-   - Every returned property is merged: new keys are inserted in response order immediately before `last_updated`, and existing keys are replaced in place as whole YAML nodes on later runs. Each insertion and update is reported. The only exceptions are the closure-owned keys: a returned `prompt` is ignored with a warning because it is immutable, and returned `hash` and `last_updated` are ignored silently because the closure stamps them.
-   - A delimited metadata attempt with malformed YAML, duplicate keys, a non-mapping root, or no replacement body fails without modifying the source.
-   - Authored frontmatter bytes remain authoritative. If the source changes while the provider runs, Claudine completes the run, restores the pre-run frontmatter snapshot byte-for-byte, and reports each added, removed, or value-changed property without attributing a writer. Structurally invalid frontmatter gets a generic restoration warning because property-level comparison is impossible. Value-preserving reformatting remains silent. Mid-run body drift is compared independently, then replaced and reported.
-   - `last_updated` is set to today's date (local time, `YYYY-MM-DD`)
-   - The file is written atomically
-   - A cleanup pass normalizes the body markdown without touching authored frontmatter
+3. **Launch validation** — schema pre-validation judged at
+   `SchemaPhase::Launch`: a missing `required; eager` property is collected or
+   fails exactly as for `compose`; an eager-only property remains optional,
+   while a required-but-not-eager property may stay absent
+   (the agent supplies it, the completion verdict enforces it) and renders as
+   *deferred* in the launch report. A present value is always type-checked.
+   The intrinsic `prompt` verdict comes **after** this step, so a `--set`,
+   positional `prompt=…`, or interactively collected eager `prompt` satisfies
+   the gate and becomes the delivered prompt without being written to the file.
+4. **Compose** — compose the effective `prompt` through Darkmatter, then wrap
+   it: a header naming the document (`**Document:** \`{native absolute path}\``,
+   never JSON-escaped, plus a property table — type expression, present/absent
+   at launch, required/optional at completion — when a `$schema` is declared),
+   the composed prompt, and the guardrails from `.claudine/inline-compose.md`
+   (a shipped default migrates to the current text; a customized file is kept
+   and may use `{document_path}`). A customization that still says not to edit
+   the source produces a warning naming the file and migration, but the run
+   continues and Claudine never overwrites it. The guardrails name the three
+   closure-owned properties (`prompt`, `hash`, `last_updated`), the direct
+   write-and-re-read duty, the schema type duty, and the two-to-three-paragraph
+   summary contract.
+5. **Prepare** — retain the launch-resolved schema and launch report
+   (`PreparedComposition::launch_schema`) and the inline guard (native path,
+   pre-run text, pre-run `Simple` hash) so the completion verdict never
+   resolves the schema again.
+6. **Select provider** — choose the agentic CLI
+7. **Write grant** — launch in the narrowest posture that can write the
+   document (`cli/src/commands/wrap/write_grant.rs`): Claude
+   `--permission-mode acceptEdits`, Codex `--sandbox workspace-write`, Gemini /
+   Qwen `--approval-mode auto_edit`/`auto-edit`, Antigravity
+   `--mode accept-edits`, Goose `GOOSE_MODE=auto`, OpenCode an
+   `external_directory` allow overlay, Kimi / Pi nothing beyond scope. A
+   document outside the workspace adds the provider's additional root
+   (`--add-dir` / `--include-directories`); Kilo has none and refuses. An
+   explicit deny (`--permission-mode plan`, `--sandbox read-only`,
+   `GOOSE_MODE=chat`, `OPENCODE_PERMISSION` edit deny, …) refuses before spawn
+   and is never widened to bypass. The effective posture is part of the
+   `permission_mode` facet the retry/resume compatibility key compares.
+8. **Execute** — run the provider session
+9. **Closure** — the agent is the writer, so Claudine reads the file back and
+   reconciles it (`composition::closure::reconcile_inline_artifact`). No
+   provider output is parsed:
+   - The document on disk is the deliverable. Its body is cleaned in memory,
+     then compared with the guard's baseline under Darkmatter's **non-strict**
+     `Simple` body hash (leading/trailing whitespace and blank lines ignored,
+     internal whitespace significant). A trimmed-empty or unchanged body is
+     refused — `BodyRejection::Empty` / `BodyRejection::Unchanged` — and nothing
+     is stamped or written.
+   - The three closure-owned nodes (`prompt`, `hash`, `last_updated`) are
+     restored textually from the pre-run snapshot with Darkmatter's
+     `restore_properties_text`. One warning is printed per property the agent
+     touched; this is never an error. Every other frontmatter byte the agent
+     wrote is the deliverable and is kept — the 2026-09-01 drift-restoration
+     semantics are inverted.
+   - The agent's semantic top-level changes (addition, replacement, deletion;
+     value-preserving reformatting is not a change) travel out as a
+     `FrontmatterDelta` for the completion instance. Owned properties are
+     excluded from it.
+   - Malformed YAML, a non-mapping root, or a duplicate owned key fails with
+     `CompositionError::InlineArtifactEditFailed` without modifying the source.
+   - `last_updated` is set to today's date (local time, `YYYY-MM-DD`), `hash` is
+     stamped, and the file is written atomically exactly once.
+   - The agent's final response is a summary for the caller; it never reaches
+     the document.
+10. **Completion verdict** — see [Completion Verdict](#completion-verdict).
+
+### The inline guard and rollback
+
+The guard captured at step 5 is **operation-level**: it is taken once from the
+read the provider actually runs against (after the staged boot, so an
+`initialize`-time rewrite is part of the baseline), retained across every
+`retry`/`resume` of that document, and never carried across a `proxy` — a
+hand-off ends the run, and the target's own run captures its own baseline.
+
+It restores the captured text atomically, before failure handling, on a
+non-zero provider exit, an interrupt/exit 130, a post-`start` launch failure, a
+closure parse/edit failure, a duplicate owned key, and an empty or unchanged
+body. A rollback stamps nothing — the document goes back with the `hash` and
+`last_updated` it had before the run. A *completion-schema* failure is the
+deliberate exception: the artifact stands (D5/AC9b).
+
+Restoration is silent when it works; the run never claims it put the document
+back. When it fails, the initiating diagnostic still decides the terminal
+signal, the `err.*`, and the exit code, and a typed
+`CompositionError::InlineRollbackFailed` (code `io.write_failed`) renders
+beside it naming the path and the I/O detail.
+
+Body-change evidence is operation-level for the same reason. Once an attempt
+writes a meaningfully changed body, a later metadata-only `retry`/`resume` of
+the same document is judged on its schema rather than refused as unchanged
+(AC18) — a rollback clears the evidence, because the document is the baseline
+again. An empty body is refused regardless of evidence.
+
+### Completion Verdict
+
+One passive check (`composition::completion::complete_active_document`) decides
+`success` versus `failure` for **both** composition modes. It is the last check
+in the producing slice: caller inputs, `initialize`, `start`, the provider, and
+the inline closure have all had their opportunity.
+
+```
+initialize → launch validation → start → provider → inline closure → verdict → success | failure → finalize
+```
+
+| Check | `inline-compose` | `compose` |
+|---|---|---|
+| Body changed meaningfully and is non-empty (non-strict `Simple` body hash) | required | not applicable |
+| Owned-property restore warnings | reported | not applicable |
+| Retained `$schema` at `SchemaPhase::Completion` | live effective frontmatter **plus** the agent's on-disk delta and closure stamps | live effective frontmatter, unchanged |
+
+- `evaluate_completion(schema, instance, body_evidence, path)` is pure: no
+  composition, coercion, expression or shell execution, schema re-resolution,
+  or filesystem work. The schema it judges is the one retained at stabilized
+  launch, so a run cannot weaken its own contract by editing `$schema` mid-run;
+  the edited declaration governs the next run.
+- Transient `--set`, positional `key=value`, sequence state, and `proxy.with`
+  inputs satisfy the schema exactly as they do everywhere else in Claudine, and
+  are still never written to the source. An owned property the file does not
+  carry is *not* an absence: a caller-supplied `prompt` that was deliberately
+  never persisted still satisfies completion.
+- `compose` performs no source read or write at completion. The only way a
+  `compose` run reaches an unsatisfied requirement is a producing lifecycle
+  effect that invalidated a value, since launch collection guarantees the
+  property was satisfied when the provider started.
+- Problems render through the same `SchemaStatusReport` the launch report uses,
+  in schema declaration order, so both ends of a run look alike. A property that
+  is present and valid prints as satisfied, so the author sees the whole schema
+  and not only the failures.
+- A failed verdict carries `composition.body_unchanged` (with
+  `err.detail.reason` = `empty` / `unchanged`) or
+  `composition.completion_schema` (with `err.detail.properties[]` carrying
+  `property`, `message`, and `kind`), fires `failure` **before** `success` can
+  run, and enters ordinary recovery: `retry`, `resume`, and `proxy` recover it
+  exactly as they recover a provider failure. The process exits non-zero only
+  when none of them does.
+- The verdict routes the flow; it does not police the hooks. A `success` or
+  `finalize` stack may still write to the document, including its frontmatter,
+  exactly as before — and keeping the closure stamp coherent afterwards remains
+  the author's responsibility.
+- A schema is validated **per composition**: once per sequence step and once per
+  loop iteration. A document that needs a property to accumulate across steps
+  must not declare it `required`.
 
 ### `hash` property (auto-stamped)
 
@@ -274,11 +408,11 @@ that persists the body.
   `hash:` value, the closure fails with `CompositionError::InlineHashMalformed`
   before any write occurs, leaving the file on disk untouched.
 
-This behavior is implemented by [`apply_inline_closure`] in the closure module,
-using `inline_hash_options`, `parse_inline_stored_hash`, `plan_hash_save`, and
-`apply_hash_save_text`.
+This behavior is implemented by [`reconcile_inline_artifact`] in the closure
+module, using `inline_hash_options`, `plan_hash_save`, `restore_properties_text`,
+and `apply_hash_save_text`.
 
-[`apply_inline_closure`]: ../../lib/src/composition/closure.rs
+[`reconcile_inline_artifact`]: ../../lib/src/composition/closure.rs
 
 ### Inline Conventions
 
@@ -582,7 +716,7 @@ initialize → start → (success | blocked | failure) → finalize → loop
 
 - **`initialize`** fires after the prompt file is resolved and frontmatter has parsed, but before schema validation and shell pre-flight. A `skip` control action here opts the whole document out cleanly.
 - **`start`** fires after schema validation and the lifecycle shell-audit pass succeed, immediately before provider invocation.
-- **`success`/`blocked`/`failure`** are the terminal events. Schema-validation failures and shell-audit denials produce `blocked`; provider errors produce `failure`.
+- **`success`/`blocked`/`failure`** are the terminal events. Schema-validation failures and shell-audit denials produce `blocked`; provider errors produce `failure`. The **completion verdict** sits immediately before them (`… → provider → inline closure → verdict → success | failure → finalize`), so it — not the provider's exit code alone — chooses which one fires. It runs once per composition: once per sequence step and once per loop iteration.
 - **`finalize`** fires once per iteration, immediately after the terminal event.
 - **`loop`** is the post-`finalize` gate. Lifecycle concerns authored inside the `loop:` block run first, then the `while`/`until` condition is evaluated, then per-iteration mutations are applied only when continuing.
 
@@ -712,7 +846,7 @@ For every flavor (`compose`, `inline-compose`, `sequence`):
 6. If required values are missing and Interactive Mode is allowed: collect, apply as overrides, re-compose, re-validate.
 7. Proceed to provider/model resolution only after validation succeeds.
 
-`inline-compose` keeps its existing `prompt` checks: a missing or non-string `prompt` still surfaces as `PromptPropertyMissing` / `PromptPropertyWrongType` before schema validation runs. The original `$schema` declaration is preserved byte-for-byte during the inline rewrite — interactive values collected for one run are never written back to the source file.
+`inline-compose` validates at `SchemaPhase::Launch` (see [Inline Composition](#inline-composition)); `compose` keeps the unphased authoring verdict. A required property whose own expression resolved to `null` after composition is a `MissingProperties` gap for `compose` (collected interactively once, or a launch error when Interactive Mode is denied), never a wrong-type failure. A non-string `prompt` still surfaces as `PromptPropertyWrongType` before schema scrubbing; a *missing* `prompt` is judged only after eager collection and caller overlays, so it surfaces as `PromptPropertyMissing` only when no layer supplies one. The original `$schema` declaration is preserved byte-for-byte during the inline rewrite — interactive values collected for one run are never written back to the source file.
 
 Source loading (shared by all three commands) parses frontmatter strictly. A document whose `---` block contains malformed YAML — e.g. inconsistent block-scalar indentation — surfaces as a `FrontmatterParse` error that renders Darkmatter's rich frontmatter-parse block (file link, YAML location, offending-line excerpt), not as a misleading `PromptPropertyMissing`.
 
@@ -1032,7 +1166,7 @@ Resolve → Initialize → Pre-Flight → Prepare → Start → Select Provider 
 - **Terminal**: `LifecycleRunGuard::emit_terminal()` fires `success`, `blocked`, or `failure`
 - **Finalize**: `LifecycleRunGuard::emit_finalize_once()` fires `finalize` once per iteration
 - **Loop**: the post-`finalize` gate evaluates `loop:` lifecycle concerns, the `while`/`until` condition, and applies per-iteration mutations when continuing
-- **Closure**: `composition::closure::rewrite_inline_document()` reconstructs the document for inline mode; direct mode outputs to stdout
+- **Closure**: `composition::closure::reconcile_inline_artifact()` reads back and reconciles the agent's document for inline mode; direct mode outputs to stdout
 
 The original six-stage summary (`Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure`) describes the functional pipeline; lifecycle events are the hooks that run at the boundaries between those stages.
 

@@ -1076,6 +1076,38 @@ mod corpus {
                     pointer_paths: Vec::new(),
                 }),
             ),
+            // The completion verdict's two halves.
+            (
+                "CompositionError::CompletionBodyUnchanged",
+                Box::new(CompositionError::CompletionBodyUnchanged {
+                    source_path: PathBuf::from("run.md"),
+                    reason: claudine::composition::BodyRejection::Unchanged,
+                }),
+            ),
+            (
+                "CompositionError::CompletionSchemaFailed",
+                Box::new(CompositionError::CompletionSchemaFailed {
+                    source_path: PathBuf::from("run.md"),
+                    problems: vec![claudine::composition::CompletionProblem {
+                        property: "products".to_string(),
+                        message: "required property is missing".to_string(),
+                        kind: claudine::composition::CompletionProblemKind::Missing,
+                    }],
+                    status: claudine::composition::SchemaStatusReport {
+                        source_path: PathBuf::from("run.md"),
+                        required: Vec::new(),
+                        optional: Vec::new(),
+                        has_invalid_optional: false,
+                        raw_json_schema: true,
+                    },
+                }),
+            ),
+            (
+                "CompositionError::InlineGuardMissing",
+                Box::new(CompositionError::InlineGuardMissing {
+                    source_path: PathBuf::from("run.md"),
+                }),
+            ),
             // `compose_failed_code` routes a Darkmatter interpolation failure to a
             // finer code than `ComposeFailed`'s own arm does, so these three are the
             // only way to reach `unknown_function` / `expression_invalid` and the

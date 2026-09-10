@@ -10,6 +10,7 @@ pub(super) struct CategorizedProblems {
 pub(super) fn categorize_problems(
     problems: &[ValidationProblem],
     effective: Option<&EffectiveSchema>,
+    phase: Option<SchemaPhase>,
 ) -> CategorizedProblems {
     let mut missing_required = Vec::new();
     let mut invalid_required = Vec::new();
@@ -47,11 +48,14 @@ pub(super) fn categorize_problems(
             }
             ValidationProblemKind::Type | ValidationProblemKind::Invalid => {
                 let top = top_level_pointer_segment(&problem.path);
-                let required = top
+                let hard_at_this_phase = top
                     .as_deref()
-                    .map(|name| is_required(shape, name))
+                    .map(|name| {
+                        is_required(shape, name)
+                            || (phase == Some(SchemaPhase::Launch) && is_eager(shape, name))
+                    })
                     .unwrap_or(true);
-                if required {
+                if hard_at_this_phase {
                     invalid_required.push(problem.clone());
                 } else {
                     invalid_optional.push(problem.clone());
@@ -79,6 +83,92 @@ pub(super) fn atom_for_property<'s>(shape: &'s SchemaShape, name: &str) -> Optio
     }
 }
 
+/// Whether any arm of `name` carries `eager` (on the value or, for an array
+/// property, on the array itself). A present eager value is validated at
+/// launch; `required` independently controls presence.
+pub(super) fn is_eager(shape: Option<&SchemaShape>, name: &str) -> bool {
+    let Some(def) = shape.and_then(|shape| shape.properties.get(name)) else {
+        return false;
+    };
+    let atoms: Vec<&PropertyAtom> = match def {
+        PropertyDef::Single(a) => vec![a],
+        PropertyDef::Union(items) => items.iter().collect(),
+    };
+    atoms.iter().any(|atom| {
+        atom.constraints
+            .iter()
+            .chain(atom.array_constraints.iter())
+            .any(|c| matches!(c, Constraint::Eager))
+    })
+}
+
+/// Reclassify a required top-level property whose effective value is `null`
+/// from "invalid" to "missing".
+///
+/// A direct-compose document commonly authors
+/// `foo: {{ spec ? parent_dir(spec) + '/bar.md' : null }}`; when the
+/// expression resolves to `null` the caller must supply `foo` at launch, which
+/// is the interactive-collection path, not a wrong-type failure.
+///
+/// `instance` is the judged effective frontmatter when the caller has it;
+/// the compose-time failure path has no instance and recognizes the null
+/// verdict from the validator's own `null is not of type …` message.
+pub(super) fn promote_null_required_to_missing(
+    categorized: &mut CategorizedProblems,
+    effective: Option<&EffectiveSchema>,
+    instance: Option<&serde_json::Value>,
+) {
+    let shape: Option<&SchemaShape> = effective.and_then(|e| match e.simplified.as_ref() {
+        Some(SimplifiedSchema::Single(s)) => Some(s),
+        Some(SimplifiedSchema::Union(_)) | None => None,
+    });
+    let Some(shape) = shape else {
+        return;
+    };
+    let map = instance.and_then(serde_json::Value::as_object);
+    let mut promoted: Vec<String> = Vec::new();
+    categorized.invalid_required.retain(|problem| {
+        let Some(name) = top_level_pointer_segment(&problem.path) else {
+            return true;
+        };
+        let is_null = match map {
+            Some(map) => map.get(&name).is_some_and(serde_json::Value::is_null),
+            None => problem.message.starts_with("null is not of type"),
+        };
+        if !is_null || !is_required(Some(shape), &name) {
+            return true;
+        }
+        if !promoted.contains(&name) {
+            promoted.push(name);
+        }
+        false
+    });
+    for name in promoted {
+        if categorized
+            .missing_required
+            .iter()
+            .any(|missing| missing.name == name)
+        {
+            continue;
+        }
+        let atom = atom_for_property(shape, &name);
+        let (type_label, description, interactive_shape) = match atom {
+            Some(a) => (
+                Some(type_label_for_atom(a)),
+                a.description.clone(),
+                interactive_shape_for_atom(a),
+            ),
+            None => (None, None, None),
+        };
+        categorized.missing_required.push(MissingProperty {
+            name,
+            type_label,
+            description,
+            interactive_shape,
+        });
+    }
+}
+
 pub(super) fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
     let Some(shape) = shape else {
         // Without typed metadata we can't distinguish optional from required.
@@ -99,6 +189,7 @@ pub(super) fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
     atoms.iter().any(|atom| {
         atom.constraints
             .iter()
+            .chain(atom.array_constraints.iter())
             .any(|c| matches!(c, Constraint::Required))
     })
 }
@@ -191,32 +282,6 @@ pub(super) fn provided_partial_value(value: Option<&serde_json::Value>) -> Optio
             }),
         _ => None,
     }
-}
-
-pub(super) fn is_eager_file_problem(shape: Option<&SchemaShape>, problem: &ValidationProblem) -> bool {
-    if !matches!(problem.kind, ValidationProblemKind::Invalid | ValidationProblemKind::Type) {
-        return false;
-    }
-    let Some(name) = top_level_pointer_segment(&problem.path) else {
-        return false;
-    };
-    let Some(shape) = shape else {
-        return false;
-    };
-    let Some(def) = shape.properties.get(&name) else {
-        return false;
-    };
-    let atoms: Vec<&PropertyAtom> = match def {
-        PropertyDef::Single(atom) => vec![atom],
-        PropertyDef::Union(items) => items.iter().collect(),
-    };
-    atoms.iter().any(|atom| {
-        matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File))
-            && atom
-                .constraints
-                .iter()
-                .any(|constraint| matches!(constraint, Constraint::Eager))
-    })
 }
 
 /// Map a [`PropertyAtom`] to an [`InteractiveShape`] for CLI prompting.
@@ -413,6 +478,11 @@ pub enum PropertyState {
     Invalid,
     /// The property is absent from the (effective) frontmatter.
     Missing,
+    /// The property is required by completion but not at launch, and is
+    /// absent: a later actor (the inline agent, or the closure for
+    /// `last_updated`) is expected to supply it. Only reported when the
+    /// report was judged at [`SchemaPhase::Launch`] for `inline-compose`.
+    Deferred,
 }
 
 /// Build a [`SchemaStatusReport`] for `source` under the supplied
@@ -434,6 +504,29 @@ pub fn build_schema_status_report(
     set_overrides: Option<&serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
 ) -> Result<Option<SchemaStatusReport>, CompositionError> {
+    build_schema_status_report_for_mode(
+        source,
+        set_overrides,
+        file_ref_fallback_dir,
+        CompositionMode::ChainedDocument,
+    )
+}
+
+/// [`build_schema_status_report`] judged at the launch phase of `mode`.
+///
+/// For `inline-compose` a required-but-not-eager property that is absent is
+/// reported as [`PropertyState::Deferred`] rather than [`PropertyState::Missing`].
+///
+/// ## Errors
+///
+/// See [`build_schema_status_report`].
+pub fn build_schema_status_report_for_mode(
+    source: &ResolvedCompositionSource,
+    set_overrides: Option<&serde_json::Value>,
+    file_ref_fallback_dir: Option<&std::path::Path>,
+    mode: CompositionMode,
+) -> Result<Option<SchemaStatusReport>, CompositionError> {
+    let phase = launch_phase_for_mode(mode);
     // Skip when the document has no `$schema`.
     if source
         .markdown
@@ -475,8 +568,56 @@ pub fn build_schema_status_report(
         }
     }
 
+    status_report_for_instance(
+        &effective,
+        phase,
+        &source.resolved_path,
+        fm_map,
+    )
+    .map_err(|error| {
+        schema_error_to_composition_error(
+            &source.resolved_path,
+            error.to_string(),
+            Some(&error),
+        )
+    })
+}
+
+/// Build the per-property status of `instance` against an already-resolved
+/// effective schema, judged at `phase` (`None` = unphased).
+///
+/// Shared by the pre-prepare launch report and the retained launch report on
+/// a prepared composition; the completion verdict renders through the same
+/// shape so both ends of a run look alike.
+pub(in crate::composition) fn status_report_for_instance(
+    effective: &EffectiveSchema,
+    phase: Option<SchemaPhase>,
+    source_path: &std::path::Path,
+    fm_map: serde_json::Map<String, serde_json::Value>,
+) -> Result<Option<SchemaStatusReport>, SchemaError> {
     let instance = serde_json::Value::Object(fm_map.clone());
-    let report = effective.validate(&instance);
+    let report = match phase {
+        Some(phase) => effective.validate_for_phase(&instance, phase)?,
+        None => effective.validate(&instance),
+    };
+    Ok(status_report_from_validation(
+        effective,
+        phase,
+        source_path,
+        fm_map,
+        &report,
+    ))
+}
+
+/// Build a status report from the validation pass that judged the same
+/// effective schema and instance.
+pub(in crate::composition) fn status_report_from_validation(
+    effective: &EffectiveSchema,
+    phase: Option<SchemaPhase>,
+    source_path: &std::path::Path,
+    fm_map: serde_json::Map<String, serde_json::Value>,
+    report: &ValidationReport,
+) -> Option<SchemaStatusReport> {
 
     // Walk problems and build a per-property index keyed by top-level
     // segment / property name.
@@ -518,13 +659,13 @@ pub fn build_schema_status_report(
         // Root-level unions don't expose a single property table; report
         // as raw so the CLI falls back to a minimal listing.
         _ => {
-            return Ok(Some(SchemaStatusReport {
-                source_path: source.resolved_path.clone(),
+            return Some(SchemaStatusReport {
+                source_path: source_path.to_path_buf(),
                 required: Vec::new(),
                 optional: Vec::new(),
                 has_invalid_optional: false,
                 raw_json_schema: true,
-            }));
+            });
         }
     };
 
@@ -534,10 +675,19 @@ pub fn build_schema_status_report(
 
     for (name, def) in &shape.properties {
         let is_present = fm_map.contains_key(name);
+        let is_null = fm_map.get(name).is_some_and(serde_json::Value::is_null);
         let is_missing = missing_by_name.contains(name);
         let is_invalid = invalid_by_name.contains(name);
+        // At launch an inline run may leave a required-but-not-eager property
+        // for the agent; it is deferred, not missing.
+        let deferred = phase == Some(SchemaPhase::Launch)
+            && is_required(Some(shape), name)
+            && !is_eager(Some(shape), name)
+            && (!is_present || is_null);
         let state = if is_invalid {
             PropertyState::Invalid
+        } else if deferred {
+            PropertyState::Deferred
         } else if is_missing || !is_present {
             PropertyState::Missing
         } else {
@@ -569,13 +719,13 @@ pub fn build_schema_status_report(
         }
     }
 
-    Ok(Some(SchemaStatusReport {
-        source_path: source.resolved_path.clone(),
+    Some(SchemaStatusReport {
+        source_path: source_path.to_path_buf(),
         required,
         optional,
         has_invalid_optional,
         raw_json_schema: false,
-    }))
+    })
 }
 
 #[cfg(test)]
