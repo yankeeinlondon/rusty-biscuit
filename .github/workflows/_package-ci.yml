@@ -589,7 +589,7 @@ jobs:
     # evidence. Absence of evidence must never be a side effect of a failure
     # elsewhere.
     needs: test
-    if: ${{ !cancelled() && contains(fromJSON(inputs.gates), 'test') && inputs.l2-environments != '[]' }}
+    if: ${{ !cancelled() && inputs.l2-environments != '[]' && contains(fromJSON(inputs.gates), 'test') }}
     strategy:
       fail-fast: false
       matrix:
@@ -762,7 +762,7 @@ jobs:
     # evidence. Absence of evidence must never be a side effect of a failure
     # elsewhere.
     needs: test
-    if: ${{ !cancelled() && contains(fromJSON(inputs.gates), 'test') && inputs.browser-environments != '[]' }}
+    if: ${{ !cancelled() && inputs.browser-environments != '[]' && contains(fromJSON(inputs.gates), 'test') }}
     strategy:
       fail-fast: false
       matrix:

@@ -95,17 +95,13 @@ check-tier-coverage *args="":
 test-leaks *args="":
     @cargo run -q -p test-toolkit --features leak-sweep --bin leak-sweep -- just test {{ args }}
 
-# pre-push hook entry point: CI's clippy gate for CI's scope, nothing more
+# pre-push hook entry point: full local evidence for source-changed packages
 #
-# Lint only: CI's clippy job (`--all-targets`, no features) is where incomplete
-# feature gating surfaces, it is minutes rather than tens of minutes, and a red
-# clippy cell costs a whole CI round because every push cancels the run in
-# flight. L1 tests are deliberately NOT run here — CI runs them per package on
-# native runners, and a lint-then-test sequence in one target directory reuses
-# stale test binaries. Optional selectors (package names or areas) replace the
-# computed scope, as they do for `just ci-local`.
+# Runs lint and L1 plus hostable L2 for source packages, and compile-checks
+# direct reverse dependencies. A successful hook can let CI omit this host's
+# environment for the exact outgoing tree.
 pre-push *selectors="":
-    @just ci-local --lint-only {{ selectors }}
+    @just ci-local --l2 {{ selectors }}
 
 # run one package's L1 suite on the standing build-host clones (real Linux,
 # native Windows, WSL2 in CI's nextest-archive mode, and macOS) against the
@@ -1384,4 +1380,4 @@ _ensure-git-hooks:
         cp "${source}" "${target}"
     fi
     chmod +x "${target}"
-    echo "Git hooks: installed .githooks/pre-push -> ${target} (CI's clippy gate for CI's scope; RUSTY_BISCUIT_PRE_PUSH=off|warn|strict)"
+    echo "Git hooks: installed .githooks/pre-push -> ${target} (host L1/L2 evidence for source changes; RUSTY_BISCUIT_PRE_PUSH=off|warn|strict)"

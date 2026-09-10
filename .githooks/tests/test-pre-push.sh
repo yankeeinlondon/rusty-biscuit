@@ -9,8 +9,8 @@
 #   - invalid mode rejection
 #   - warn-mode failure exits 0 and mentions --no-verify
 #   - strict-mode failure exits non-zero and mentions --no-verify
-#   - the default path delegates to `just pre-push` with no selection, so the
-#     scope is computed there (by `just ci-local --lint-only`), never here
+#   - the unset default is strict
+#   - the default path delegates to `just pre-push` with no selection
 #   - RUSTY_BISCUIT_PRE_PUSH_AREAS override is forwarded verbatim
 #
 # Run directly: ./.githooks/tests/test-pre-push.sh
@@ -200,7 +200,7 @@ test_warn_passing_tests_exits_zero() {
     make_fake_just "$tmpdir" 0
     run_hook "$tmpdir" "warn"
     assert_exit "warn pass" "$tmpdir" 0 || return 1
-    assert_contains "warn pass message" "$tmpdir/out" "Pre-push lint passed." || return 1
+    assert_contains "warn pass message" "$tmpdir/out" "Pre-push validation passed." || return 1
 }
 
 test_warn_failing_tests_exits_zero_with_no_verify_hint() {
@@ -208,12 +208,12 @@ test_warn_failing_tests_exits_zero_with_no_verify_hint() {
     make_fake_just "$tmpdir" 1
     run_hook "$tmpdir" "warn"
     assert_exit "warn fail" "$tmpdir" 0 || return 1
-    assert_contains "warn failure header" "$tmpdir/out" "Pre-push lint failed" || return 1
+    assert_contains "warn failure header" "$tmpdir/out" "Pre-push validation failed" || return 1
     # R3 requires warn-mode failures to print prominently in red. The hook
     # emits a literal ANSI SGR red prefix (\033[31m) and reset (\033[0m)
     # regardless of TTY status, so a byte-level check on the captured
     # stdout is the contract under test here.
-    assert_contains "warn failure red SGR prefix" "$tmpdir/out" $'\033[31mPre-push lint failed' || return 1
+    assert_contains "warn failure red SGR prefix" "$tmpdir/out" $'\033[31mPre-push validation failed' || return 1
     assert_contains "warn failure SGR reset" "$tmpdir/out" $'\033[0m' || return 1
     assert_contains "warn no-verify hint" "$tmpdir/err" "--no-verify" || return 1
 }
@@ -230,11 +230,19 @@ test_strict_failing_tests_exits_nonzero_with_no_verify_hint() {
     make_fake_just "$tmpdir" 7
     run_hook "$tmpdir" "strict"
     assert_exit "strict fail" "$tmpdir" 7 || return 1
-    assert_contains "strict failure header" "$tmpdir/out" "Pre-push lint failed" || return 1
+    assert_contains "strict failure header" "$tmpdir/out" "Pre-push validation failed" || return 1
     # Same red-styling contract as warn mode (see test above for rationale).
-    assert_contains "strict failure red SGR prefix" "$tmpdir/out" $'\033[31mPre-push lint failed' || return 1
+    assert_contains "strict failure red SGR prefix" "$tmpdir/out" $'\033[31mPre-push validation failed' || return 1
     assert_contains "strict failure SGR reset" "$tmpdir/out" $'\033[0m' || return 1
     assert_contains "strict no-verify hint" "$tmpdir/err" "--no-verify" || return 1
+}
+
+test_unset_default_is_strict() {
+    local tmpdir="$1"
+    make_fake_just "$tmpdir" 7
+    env -i "PATH=$tmpdir:/usr/bin:/bin" "$HOOK" >"$tmpdir/out" 2>"$tmpdir/err"
+    echo $? >"$tmpdir/exit"
+    assert_exit "default strict" "$tmpdir" 7 || return 1
 }
 
 test_default_delegates_scope_to_pre_push() {
@@ -273,6 +281,7 @@ run_test "warn + passing → exit 0"                                    test_war
 run_test "warn + failing → exit 0 and mentions --no-verify"           test_warn_failing_tests_exits_zero_with_no_verify_hint
 run_test "strict + passing → exit 0"                                  test_strict_passing_tests_exits_zero
 run_test "strict + failing → propagate exit and mention --no-verify"  test_strict_failing_tests_exits_nonzero_with_no_verify_hint
+run_test "unset default is strict"                                    test_unset_default_is_strict
 run_test "default path calls 'just pre-push' with no selection"       test_default_delegates_scope_to_pre_push
 run_test "RUSTY_BISCUIT_PRE_PUSH_AREAS override is forwarded verbatim" test_areas_override_is_passed_through
 

@@ -192,22 +192,15 @@ exclusively.
 ## Platform Coverage (CI)
 
 The tier taxonomy above decides *what* runs; this section decides *where* (which
-OS). `.github/workflows/ci.yml` calculates changed workspace packages and their
-reverse Cargo dependencies, reads each package's policy from its
-`[package.metadata.ci]`, and fans the resulting matrix into the reusable
-`.github/workflows/_package-ci.yml`. Platform behavior is uniform without starting
-jobs for unrelated packages. Global inputs select the whole workspace for the
-*gate* whose verdict they can change, and only that gate: `Cargo.toml`, the
-toolchain, `.cargo/`, and the CI workflows widen lint, check, and test alike;
-`clippy.toml` widens only lint; `.config/nextest.toml` and `_wsl-ci.yml` only
-test. A just file widens a gate only when the recipe that changed is one CI's
-gate recipes (`_lint`, `_test`, `_test_l2`, `_test_browser`,
-`_ensure-native-libs`) reach through dependencies or `just <name>` calls at
-command position; every other recipe gates nothing, and text outside a recipe
-(settings, imports, assignments) widens every gate. All of it is decided by
-*content*: the scope step passes `--base-ref`, a global file whose diff touches
-only `#` comments and blank lines is scoped like documentation, and an
-unobtainable diff or base content keeps the trigger (widened, never narrowed).
+OS). `.github/workflows/ci.yml` selects packages owning changed source files
+for lint, check, L1, and their declared higher tiers. Their direct reverse
+Cargo dependencies receive compile-check only; dependencies and transitive
+reverse dependencies are omitted. The workflow reads each selected package's
+`[package.metadata.ci]` policy and fans the matrix into
+`.github/workflows/_package-ci.yml`. Documentation, manifests, lockfiles,
+Just recipes, and CI configuration do not schedule package jobs. CI tooling
+has a compact contract-test leg, and `workflow_dispatch` is the explicit
+full-workspace escape hatch.
 
 **Lost runners.** A job whose hosted runner dies mid-step ("The hosted runner
 lost communication with the server") is terminated by GitHub after ~45 minutes
@@ -224,8 +217,8 @@ steps in `_wsl-ci.yml` also carry a 10-minute step timeout for the other hang
 shape (a wedged `wsl.exe` on a live runner), which falls through to the
 existing second attempt.
 
-A bootstrap `preflight` job runs first (3 OSes for global CI/tooling changes, a
-scoped OS set for package-local changes) and gates the package fan-out via
+A bootstrap `preflight` job runs first (the Linux scope host for changes with
+no package work, and a scoped OS set for source changes) and gates package fan-out via
 `needs: [scope, preflight]`. For each package, `check` (compile), `lint`
 (build + clippy), and `test` (L1) are **independent** gates; only the
 expensive `l2`/`browser` tiers stage behind `test`. Lint deliberately does not
@@ -235,22 +228,23 @@ Independent packages run in parallel (`fail-fast: false`).
 
 ### Running the CI gates locally
 
-`just ci-local` runs, on this host, the same two gates CI runs for every
-package CI would schedule — `just _lint <pkg>` (clippy, `--all-targets`, **no
-features**) and `just _test <pkg> --no-fail-fast <declared CI features>` —
-with the scope computed by the same `scripts/ci/affected_scope.py` from the
-files that differ from `origin/main` (`--base <ref>` to change it). Use it as the
-discovery loop before pushing; CI remains the proof. `--lint-only` is the cheap
-first pass: the no-features clippy build is where incomplete `terminal-tests` /
-`daemon-tests` gating surfaces, and it is what caught four of the seven CI
-rounds on 2026-08-27. `--dry-run` prints the scope without building; named
-packages or areas skip the scope calculation. L2/L3/browser tiers, WSL
-archives, and the Windows runner are not replicated.
+`just ci-local` calculates the source-changed packages relative to
+`origin/main`, runs lint and L1 for those packages, and compile-checks only
+their direct reverse dependencies. `--l2` adds every declared L2 suite that
+the detected host can run through detached tmux, background WezTerm, or
+keep-focus Kitty. Apple Terminal and Level 3 remain excluded because the hook
+must not take window focus. The
+versioned pre-push hook runs this complete `just ci-local --l2` validation in
+strict mode by default.
 
-The versioned pre-push hook (`.githooks/pre-push`, installed by `just init`
-into `.git/hooks`) runs `just ci-local --lint-only` for the same reason, and
-nothing else: L1 is CI's job, and clippy immediately followed by nextest in one
-target directory reuses stale test binaries.
+For a clean outgoing `HEAD`, the hook publishes an exact-tree Git-note receipt
+for the environment reported by `sniff`: macOS, Linux, native Windows, or
+WSL2. CI verifies the receipt against its independently calculated scope and
+then removes that environment's duplicate L1/L2/check work. CI keeps browser
+and companion-suite work because the receipt does not claim it. If validation
+is bypassed, overridden, dirty, incomplete, or cannot be published, CI simply
+runs the environment as usual. Configuration and documentation changes select
+no package jobs; an explicit manual full-scope run remains available.
 
 ### Toolchain
 

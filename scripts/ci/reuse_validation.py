@@ -73,9 +73,7 @@ def find_validation(
                       if run.get("event") == "pull_request"
                       and run.get("path") == ".github/workflows/ci.yml"
                       and run.get("head_sha") == head
-                      and run["repository"]["full_name"] == repo
-                      and any(p["number"] == pr["number"]
-                              for p in run.get("pull_requests", []))]
+                      and run["repository"]["full_name"] == repo]
         if not candidates:
             continue
         # Do not resurrect an older green run after a newer failure or rerun.

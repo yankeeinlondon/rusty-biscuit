@@ -114,7 +114,7 @@ Shell completions help people learn new CLI's as well as navigate a CLI they don
 
 ### Pre-push Hook
 
-A local pre-push hook runs CI's clippy gate before pushing to remote. It is `just pre-push`, which is `just ci-local --lint-only`: `cargo clippy --all-targets` with no features, for exactly the packages CI would schedule for the branch's changes (the same `scripts/ci/affected_scope.py` CI uses, diffed against `origin/main` or `CI_LOCAL_BASE`). A docs-only push gates nothing and returns in seconds. The hook deliberately runs no tests: CI runs L1 per package on native runners, and clippy immediately followed by nextest in one target directory reuses stale test binaries.
+A local pre-push hook runs `just ci-local --l2`: lint plus L1 and hostable non-focusing L2 for source-changed packages, and compile-check for their direct reverse dependencies. It detects macOS, Linux, native Windows, or WSL2 with `sniff`. For a clean outgoing `HEAD`, successful validation publishes exact-tree evidence that lets CI omit the same environment. A docs-only push gates nothing and returns in seconds.
 
 Link the shared hook into your local git repository (`just init` does this):
 
@@ -126,9 +126,9 @@ The hook's behavior is controlled by the `RUSTY_BISCUIT_PRE_PUSH` environment va
 
 | Value | Behavior |
 | --- | --- |
-| `off` | Skip the lint entirely and allow the push |
-| `warn` | Run the lint, print failures in red, but still allow the push (default) |
-| `strict` | Run the lint and block the push if it fails |
+| `off` | Skip validation entirely and allow the push |
+| `warn` | Run validation, print failures in red, but still allow the push |
+| `strict` | Run validation and block the push if it fails (default) |
 
 For example, to enable strict mode in your shell:
 

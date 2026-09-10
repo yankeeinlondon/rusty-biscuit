@@ -9,8 +9,8 @@ nightly/advisory work. Releases are automated through [release-plz](https://rele
 distribution channel today.
 
 Package-area gates use the same `just` recipes developers run locally. Scope selection is handled
-by `scripts/ci/affected_scope.py`, which uses Cargo metadata to expand changed workspace packages
-through reverse dependencies before platform jobs start.
+by `scripts/ci/affected_scope.py`: changed source files select their owning package for full
+validation and its direct reverse dependencies for compile-check only.
 
 ## Pipeline Layers
 
@@ -18,23 +18,23 @@ The pipeline has four conceptual layers. Each layer answers a different question
 
 | Layer                     | Question it answers                                               | Blocking?                      |
 |---------------------------|-------------------------------------------------------------------|--------------------------------|
-| **Local pre-push hook**   | Did I obviously break the areas I touched?                        | Opt-in (`warn`/`strict`/`off`) |
-| **Dependency-scoped CI**  | Do changed packages and their consumers pass on native runners?   | Yes                            |
+| **Local pre-push hook**   | Do source-changed packages pass L1/L2 on this host?                | Strict by default              |
+| **Dependency-scoped CI**  | Do changed packages compile and test on the remaining runners?    | Yes                            |
 | **Affected coverage**     | Did the changed package closure lose exercised behavior?          | Report-only                    |
 | **Nightly / advisory**    | Did anything drift since yesterday?                               | No                             |
 
 ### Layer 1 — Local pre-push hook
 
 `.githooks/pre-push` runs `just pre-push` before `git push` completes. That is
-`just ci-local --lint-only`: CI's clippy gate (`--all-targets`, no features) for the packages CI
-would schedule for the branch's changes, and nothing else — a docs-only push gates nothing. Tests
-are left to CI: it runs L1 per package on native runners, and a lint immediately followed by
-nextest in one target directory reuses stale test binaries. The hook is controlled by
+`just ci-local --l2`: lint and L1 plus every hostable non-focusing L2 suite for source-changed
+packages, and compile-check for their direct reverse dependencies. A docs-only push gates
+nothing. The hook uses `sniff` to identify macOS, Linux, native Windows, or WSL2 and publishes an
+exact-tree Git-note receipt; CI verifies it before omitting the same environment. The hook is controlled by
 `RUSTY_BISCUIT_PRE_PUSH`:
 
 - `off` — skip entirely
-- `warn` — run, report, but never block the push (the default)
-- `strict` — run and block the push on failure
+- `warn` — run and report, but never block the push
+- `strict` — run and block the push on failure (the default)
 
 `RUSTY_BISCUIT_PRE_PUSH_AREAS` (package names or area directories) replaces the computed scope with
 a fixed selection. Install the hook once with:
@@ -51,26 +51,21 @@ The hook itself is regression-tested in CI by `hooks-tests.yml`, so changes to `
 `ci.yml` runs on pull requests and pushes to `main`. Its first job validates the canonical recipe
 surface, obtains the changed file set from the event's exact base and head SHAs, and calculates:
 
-- workspace packages containing those files,
-- their direct reverse Cargo dependencies (transitive dependents are
-  deliberately not selected — decided 2026-08-13 to cap run cost; a
-  regression observable only through an intermediate package surfaces when
-  that intermediate is next touched or on a manual full run),
+- workspace packages owning changed source files,
+- their direct reverse Cargo dependencies for compile-check only (unchanged
+  consumers are not linted or tested, and transitive dependents are omitted),
 - curated package areas owning those packages.
 
-The selected package matrix calls `_package-ci.yml`, which compile-checks
-Windows, runs L1 on Linux, Windows, and macOS (plus WSL2), and runs each
-package's lint/documentation guards. Per-package policy — L2/browser tier
+The selected package matrix calls `_package-ci.yml`. Source-changed packages
+receive lint, check, L1 across their environments, and declared higher tiers;
+direct reverse dependencies receive only the Windows compile-check. Per-package policy — L2/browser tier
 ownership, native libraries, Cargo features, runner tools, and companion
 suites — lives in each package's `[package.metadata.ci]`; environment
 capabilities live in `.github/ci/environments.json`.
-Changes to global build/test configuration select every package for the *gate*
-they can change and no other: `clippy.toml` widens lint alone, `nextest.toml`
-widens test alone, and a just file widens a gate only when the recipe that
-changed is one CI's gate recipes reach (see
-[testing-strategy.md](../testing-strategy.md)). The rollup records which legs
-policy scheduled, so a baselined leg a gate-scoped run did not schedule is a
-note (`baseline-unscheduled`), not a block.
+Documentation, manifests, lockfiles, Just recipes, and workflow configuration
+select no package jobs. CI tooling runs its own compact contract suites, and
+`workflow_dispatch` remains the explicit full-workspace path. See
+[testing-strategy.md](../testing-strategy.md).
 
 ### Layer 3 — Affected coverage and specialized workflows
 
