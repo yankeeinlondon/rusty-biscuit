@@ -2,11 +2,11 @@
 name: rust-testing
 description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
-  test design, fixture isolation, `require_level!` gating, nextest filtersets,
-  suite audits, and fuzzing. Load this
+  test design, fixture isolation, `require_level!` / `expect_level!` gating,
+  nextest filtersets, suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 7055b0e89017847d-f6070688a5c714d7
-last_updated: 2026-09-08
+hash: 61d07be7e22c9f45-945e512a1a896fe4
+last_updated: 2026-09-09
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -235,6 +235,24 @@ Where the gate lives in a helper that cannot `return` — an `-> Option<T>`
 fixture builder, say — use `decide_harness!`, which records evidence and yields
 the `LevelDecision`. Calling `evaluate_harness` directly skips the recording and
 leaves the backend unproven even though its tests ran.
+
+**Level 1 gates use `expect_level!`, not `require_level!`.** The clean skip is
+right for L2/L3, where the harness is genuinely optional. L1 is the mandatory
+suite and has no optional-harness contract, so a skip there is
+indistinguishable from a pass: an unprovisioned runner reports green while
+proving nothing. `expect_level!` takes the same arguments and panics — naming
+the missing requirement, so the skip's diagnostic survives as the failure
+message. Keep such a test off a platform with a compile-time exclusion
+(`#![cfg(unix)]` at the top of the binary), never a runtime probe. An
+operator-selected exclusion (`BISCUIT_TEST_LEVEL`, `RUN_LEVEL3`) still skips.
+
+```rust
+expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+```
+
+Claudine's 32 L1 PTY gates were `require_level!` until review-3 of
+`fixes/2026-09-07-faster-claudine-tests`; a host without `/dev/ptmx` skipped all
+seven binaries and the run stayed green.
 
 For browser tests:
 
@@ -640,7 +658,7 @@ Fuzz is **not** part of `sanity`, `test`, or PR gates. It runs nightly in CI.
 
 | Crate                     | Purpose                                                                                                                                                         |
 |---------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `test_toolkit`            | `require_level!`, `EnvGuard`, `trace_phase!`                                                                                                                    |
+| `test_toolkit`            | `require_level!` / `expect_level!`, `EnvGuard`, `trace_phase!`                                                                                                                    |
 | `biscuit_test_harness`    | Terminal harnesses (WezTerm, Kitty, tmux, Apple Terminal); `SharedHarness` + per-backend `shared_or_spawn()`; `biscuit-harness-broker` binary used by `test-l2`. For backend selection and API, load the `biscuit-test-harness` skill via the Skill tool. |
 | `biscuit_browser_harness` | Headless Chrome harness (`ChromeHarness`, `require_browser`)                                                                                                    |
 | `criterion`               | Benchmarking                                                                                                                                                    |
