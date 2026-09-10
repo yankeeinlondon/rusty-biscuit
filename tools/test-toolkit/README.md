@@ -116,6 +116,31 @@ A `&str` still works and is the right choice for requirements with no backend
 identity (`"PTY (/dev/ptmx)"`, `"WezTerm + cliclick"`), but such a test can
 never be demanded by CI and contributes no execution evidence.
 
+### `expect_level!` — mandatory tiers, where a skip is not an option
+
+`require_level!`'s clean skip is the right default for L2/L3, where the harness
+is genuinely optional. Level 1 is the mandatory suite and has no such contract:
+a gate that skips there is indistinguishable from a pass, so an unprovisioned
+runner reports green while proving nothing.
+
+`expect_level!` takes the same arguments and behaves identically, except that an
+unavailable harness **panics** — naming the missing requirement, so the
+diagnostic the skip used to print survives as the failure message:
+
+```rust
+use test_toolkit::{Level, expect_level};
+
+#[test]
+fn pty_prompt_accepts_a_keystroke() {
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+}
+```
+
+Keeping such a test off a platform is a compile-time exclusion (`#![cfg(unix)]`
+at the top of the binary), never a runtime probe. An operator-selected
+exclusion (`BISCUIT_TEST_LEVEL`, `RUN_LEVEL3`) still skips: that is a
+deliberate range choice, not absent infrastructure.
+
 `Backend::as_str()` returns the stable identifier — `tmux`, `wezterm`, `kitty`,
 `apple-terminal` — shared verbatim with `scripts/ci/affected_scope.py`'s
 `KNOWN_L2_BACKENDS` and the `l2-backends` arrays in each package's
