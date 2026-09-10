@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-c44f94c5db13c41f
-last_updated: 2026-09-05
+hash: ef46db3751d8e999-753e052e9691edc2
+last_updated: 2026-09-10
 ---
 # Claudine Composition
 
@@ -730,16 +730,32 @@ A `file`/`file[]` property declared with a `match(...)` glob accepts more than a
 
 ```yaml
 $schema:
-  spec: 'file(required; match(**/*spec*.md))'
+  spec: 'file(required;eager;match(**/*spec*.md))'
 ```
 
 `claudine compose plan spec=everywhere` (with no literal `everywhere` file) now:
 
 1. walks the `match(**/*spec*.md)` glob from the **launch area** (the same `property_value_root` anchor completion uses, so *offered == accepted*),
 2. filters candidates whose path contains `everywhere` (case-insensitive), and
-3. drives a **confirmation dialog** on a single match, a **chooser** on multiple, then rewrites the property override to the chosen path and re-validates once — mirroring the missing-property collection loop above.
+3. drives a **confirmation dialog** on a single match or a **chooser** on multiple, then records the selected path in the effective override and caller provenance before continuing preparation. Each unresolved supplied input is handled, including individual file-array elements.
 
-The `match(...)` glob is consulted **only after** literal path resolution fails, so valid explicit paths keep their existing behavior. Both required and `eager`-optional file properties reach this resolution. Zero glob+substring matches, a declined confirmation, or a cancelled chooser fall back to the original `no existing file matched reference` schema-validation error unchanged. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The glob compile and walk live in `claudine-cli`; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, patterns }` signal and never gains a `globset`/`ignore` dependency.
+The `match(...)` glob is consulted **only after** literal path resolution fails, so valid explicit paths keep their existing behavior. Both required-eager and optional-eager file properties reach this resolution. Lazy file properties may name future output files and do not enter this early completion pass. Zero glob+substring matches, a declined confirmation, or a cancelled chooser fall back to the original `no existing file matched reference` schema-validation error unchanged. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The glob compile and walk live in `claudine-cli`; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, patterns }` signal and never gains a `globset`/`ignore` dependency.
+
+Supplied eager file inputs are resolved **before `initialize` consumes them**,
+including on a proxy target that first declares their file schema. Candidate
+search uses the frozen caller launch origin. The selected identity survives
+proxy handoff and fresh preparation without another dialog for that resolved
+input. This pass does not collect absent required values or issue the full
+schema verdict: a review router can complete `spec` and proxy without asking
+for unrelated `plan` or `review` inputs. `-y` does not suppress confirmation or
+choose a file automatically; the usual TTY, configuration, and `--silent`
+gates still apply.
+
+For a root-level schema union, completion requires exactly one alternative to
+match after deferring existence checks on caller-supplied files. If other
+constraints leave no matching alternative, or several alternatives match,
+completion defers to canonical preparation without guessing a file type or
+issuing an early schema verdict.
 
 ### Schema Collection Independence
 
@@ -747,7 +763,7 @@ The decision to prompt for missing required values depends **only** on the six s
 
 ### Documents That Declare `initialize`
 
-A document declaring an `initialize` lifecycle stack is exempt from both the invocation-boundary verdict and the collection prompt above. `initialize` runs before schema validation (R4), and it can add or repair the very property a verdict would reject — writing frontmatter with `set_frontmatter`, or producing a file a `file`-typed property points at. Judging first would fail the document for a violation the next stage is about to fix, and prompting the caller would ask a question the document is about to answer itself.
+A document declaring an `initialize` lifecycle stack defers the full invocation-boundary verdict and missing-value collection. Explicitly supplied eager file partials are still completed before initialization, as described above. `initialize` runs before schema validation (R4), and it can add or repair the very property a verdict would reject — writing frontmatter with `set_frontmatter`, or producing a file a `file`-typed property points at. Judging first would fail the document for a violation the next stage is about to fix, and prompting the caller would ask a question the document is about to answer itself.
 
 The verdict is instead reached by the **stabilized reread**: canonical preparation re-reads the document after `initialize` returns and validates that read. A violation that survives `initialize` is therefore reported *after* the document's own `initialize` has run and *through* its own `blocked`/`finalize` stacks, as the same typed `CompositionError` a directly-invoked document reports. A proxied target follows the identical order through its staged bootstrap, which is what makes the diagnostic route-independent.
 

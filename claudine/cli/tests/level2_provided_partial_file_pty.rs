@@ -310,3 +310,168 @@ fn level2_pty_provided_partial_file_array_array_confirms_and_launches() {
         common::strip_ansi(&transcript)
     );
 }
+
+fn review_router_fixture(multiple: bool) -> (common::CliProcessFixture, std::path::PathBuf) {
+    let fixture = common::CliProcessFixture::named("review-router-partial");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    let router = fixture.cwd().join("prompts/review.md");
+    common::write(&router, include_str!("../../../prompts/review.md"));
+    common::write(
+        &fixture.cwd().join("prompts/_reviews/feature-review.md"),
+        "---\n$schema:\n  spec: file(required;eager;match(**/*spec*.md))\nselected: \"{{ frontmatter(spec, 'marker') }}\"\n---\nSELECTED={{ selected }}\nSPEC={{ spec }}\nTOKEN={{ token }}\n",
+    );
+    common::write(
+        &fixture.cwd().join("packages/example/fixes/2026-09-10-local-a/spec.md"),
+        "---\nreviewed: true\nmarker: alpha\n---\nAlpha specification.\n",
+    );
+    if multiple {
+        common::write(
+            &fixture.cwd().join("packages/example/fixes/2026-09-10-local-b/spec.md"),
+            "---\nreviewed: true\nmarker: beta\n---\nBeta specification.\n",
+        );
+    }
+    common::write_executable(
+        &fixture.bin_dir().join("goose"),
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$HOME/provider-prompt\"\nprintf 'provider reached\\n'\n",
+    );
+    (fixture, router)
+}
+
+fn review_router_session(
+    fixture: &common::CliProcessFixture,
+    router: &std::path::Path,
+) -> OsSession {
+    let package = fixture.cwd().join("packages/example");
+    let mut cmd = compose_command(
+        &package,
+        fixture.bin_dir(),
+        router,
+        "spec",
+        "fixes/2026-09-10-local",
+    );
+    let paths = std::iter::once(fixture.bin_dir().to_path_buf())
+        .chain(common::minimal_system_path());
+    cmd.env("PATH", std::env::join_paths(paths).unwrap());
+    cmd.env("HOME", fixture.home());
+    cmd.env("CLAUDINE_RENDEZVOUS_REPORT", "false");
+    cmd.args(["-y", "token=retained"]);
+    Session::spawn(cmd).expect("spawn headless review router PTY")
+}
+
+fn assert_review_router_completed(
+    session: &mut OsSession,
+    fixture: &common::CliProcessFixture,
+    mut transcript: String,
+    selected: &str,
+    directory: &str,
+) {
+    transcript.push_str(&wait_for_marker(session, "provider reached", Duration::from_secs(20)));
+    let prompt = fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
+    assert!(prompt.contains(&format!("SELECTED={selected}")), "prompt: {prompt}");
+    assert!(prompt.contains(directory), "prompt: {prompt}");
+    assert!(prompt.contains("TOKEN=retained"), "prompt: {prompt}");
+    let plain = common::strip_ansi(&transcript);
+    assert_eq!(plain.matches("did not match a file directly").count(), 1, "{plain}");
+    assert!(!plain.contains("lifecycle evaluation error"), "{plain}");
+    assert!(!plain.contains("MissingProperties"), "{plain}");
+}
+
+fn wait_for_confirmation_input(session: &OsSession) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    // Confirmation flushes its text before enabling raw mode; disabled echo
+    // proves the terminal is ready without depending on a fixed settle delay.
+    while session.get_process().get_echo().expect("read PTY echo state") {
+        assert!(Instant::now() < deadline, "confirmation never enabled raw mode");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+#[serial_test::serial(pty)]
+fn level2_review_router_partial_yolo_confirms_before_initialize_and_survives_proxy() {
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    let (fixture, router) = review_router_fixture(false);
+    let mut session = review_router_session(&fixture, &router);
+    let transcript = wait_for_marker(&mut session, "Use this file", Duration::from_secs(15));
+    assert!(!fixture.home().join("provider-prompt").exists());
+    wait_for_confirmation_input(&session);
+    session.write_all(b"y").unwrap();
+    session.flush().unwrap();
+    assert_review_router_completed(
+        &mut session,
+        &fixture,
+        transcript,
+        "alpha",
+        "2026-09-10-local-a/spec.md",
+    );
+}
+
+#[test]
+#[serial_test::serial(pty)]
+fn level2_review_router_partial_chooser_keeps_selected_identity_in_proxy() {
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    let (fixture, router) = review_router_fixture(true);
+    let mut session = review_router_session(&fixture, &router);
+    let transcript = wait_for_marker(&mut session, "did not match a file directly", Duration::from_secs(15));
+    let transcript = wait_for_raw_mode(&mut session, transcript, Duration::from_secs(10));
+    assert!(!fixture.home().join("provider-prompt").exists());
+    session.write_all(b"\x1b[B\r").unwrap();
+    session.flush().unwrap();
+    assert_review_router_completed(
+        &mut session,
+        &fixture,
+        transcript,
+        "beta",
+        "2026-09-10-local-b/spec.md",
+    );
+}
+
+#[test]
+#[serial_test::serial(pty)]
+fn level2_review_router_partial_decline_and_cancel_stop_before_initialize() {
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    for multiple in [false, true] {
+        let (fixture, router) = review_router_fixture(multiple);
+        let mut session = review_router_session(&fixture, &router);
+        let transcript = if multiple {
+            let pre = wait_for_marker(&mut session, "did not match a file directly", Duration::from_secs(15));
+            wait_for_raw_mode(&mut session, pre, Duration::from_secs(10))
+        } else {
+            let pre = wait_for_marker(&mut session, "Use this file", Duration::from_secs(15));
+            wait_for_confirmation_input(&session);
+            pre
+        };
+        session.write_all(if multiple { b"\x1b" } else { b"n" }).unwrap();
+        session.flush().unwrap();
+        let error = wait_for_marker(&mut session, "no existing file matched reference", Duration::from_secs(10));
+        let plain = common::strip_ansi(&(transcript + &error));
+        assert!(!plain.contains("lifecycle evaluation error"), "{plain}");
+        assert!(!fixture.home().join("provider-prompt").exists(), "{plain}");
+    }
+}
+
+#[test]
+#[serial_test::serial(pty)]
+fn level2_proxy_target_schema_resolves_partial_once_before_its_initialize() {
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    let (fixture, _) = review_router_fixture(false);
+    let entry = fixture.cwd().join("prompts/entry.md");
+    common::write(
+        &entry,
+        "---\ninitialize:\n  stack:\n    - action:\n        - proxy: ./review.md\n---\nEntry without a schema.\n",
+    );
+    let mut session = review_router_session(&fixture, &entry);
+    let transcript = wait_for_marker(&mut session, "Use this file", Duration::from_secs(15));
+    assert!(!fixture.home().join("provider-prompt").exists());
+    wait_for_confirmation_input(&session);
+    session.write_all(b"y").unwrap();
+    session.flush().unwrap();
+    assert_review_router_completed(
+        &mut session,
+        &fixture,
+        transcript,
+        "alpha",
+        "2026-09-10-local-a/spec.md",
+    );
+}

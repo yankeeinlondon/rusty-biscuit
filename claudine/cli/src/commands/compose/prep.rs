@@ -43,6 +43,7 @@ use super::{CompositionKind, SharedComposeArgs};
 use crate::commands::schema_interactive::{
     collect_missing_values, emit_dropped_optional_warnings,
     pre_validate_with_interactive_collection, resolve_interactive_options,
+    resolve_supplied_file_inputs,
 };
 use crate::commands::wrap::composition::{
     CompositionPrepContext, eagerly_resolve_target, execute_composition_request_inner,
@@ -142,7 +143,7 @@ pub(crate) fn run_composition_inner(
     validate_timeout_flags(&shared)?;
     shared.step_timeout_secs()?;
     shared.stall_timeout_secs()?;
-    let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
+    let mut set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
 
     let frontmatter_load_t = std::time::Instant::now();
@@ -198,34 +199,27 @@ pub(crate) fn run_composition_inner(
     let stderr_is_tty = std::io::stderr().is_terminal()
         || std::env::var_os("FORCE_COLOR").is_some();
 
-    // Schema-aware pre-prepare validation. Runs BEFORE the preflight
-    // compose pass so the user-visible error surface is Claudine's
-    // typed `CompositionError` rather than Darkmatter's raw
-    // `MarkdownError::SchemaValidationFailed`. Drives interactive
-    // collection of missing required values when allowed and merges the
-    // collected values into `set_overrides`. Invalid optional values are
-    // dropped in place. Schema-load failures, invalid required values,
-    // and missing required values (non-interactive) surface as typed
-    // errors here, never as Darkmatter raw errors.
+    // Supplied eager files must be usable before initialize can dereference
+    // them. Missing-value collection and the full verdict still wait for a
+    // document's initialize to create, repair, or route its inputs.
     let schema_t = std::time::Instant::now();
     // Use the owner's frozen launch CWD as the `file`-typed property fallback
     // anchor so caller-supplied area-relative
     // paths resolve here exactly as they will at prepare time and event time,
     // rather than depending on the soon-to-be-mutated process CWD.
     let launch_area_fallback = Some(invocation.launch_cwd().to_path_buf());
-    // A document whose own `initialize` may supply or repair a schema property
-    // is not judged here: R4 puts `initialize` first, and the post-`initialize`
-    // stabilized reread reaches the verdict instead. Interactive collection goes
-    // with it — prompting the caller for a value the document is about to write
-    // itself would be a question with a wrong answer.
-    // The pre-validator always runs because it owns interactive collection;
-    // with caller records present only its plain schema verdict is deferred to
-    // canonical preparation, which alone can carry their authoring context
-    // into a failure.
-    let (source, set_overrides) = if defers_schema_verdict_to_initialize(&source) {
+    let interactive_opts = resolve_interactive_options(shared.silent);
+    resolve_supplied_file_inputs(
+        &source,
+        &mut set_overrides,
+        &mut caller_input_records,
+        &file_resolution_context,
+        interactive_opts,
+    )
+    .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
+    let (source, mut set_overrides) = if defers_schema_verdict_to_initialize(&source) {
         (source, set_overrides)
     } else {
-        let interactive_opts = resolve_interactive_options(shared.silent);
         let term = crate::log::terminal();
         let pre = pre_validate_with_interactive_collection(
             &source,
@@ -300,9 +294,9 @@ pub(crate) fn run_composition_inner(
     // The active document. `compose`/`inline-compose` begin at the caller's
     // document; an `initialize` proxy replaces it with the target and loop
     // recognition reruns for that target, so a proxied target acquires the same
-    // document loop it would receive when invoked directly (R7). Immutable
-    // caller `--set` overrides survive every handoff as the highest-precedence
-    // input layer.
+    // document loop it would receive when invoked directly (R7). Caller
+    // overrides, including selected file identities, survive every handoff as
+    // the highest-precedence input layer.
     let mut source = source;
     let mut current_file = file;
     let mut inline_state = inline_state;
@@ -334,8 +328,9 @@ pub(crate) fn run_composition_inner(
             first,
             &mut inline_state,
             &system_prompt_args,
-            set_overrides.clone(),
-            caller_input_records.clone(),
+            &mut set_overrides,
+            &mut caller_input_records,
+            interactive_opts,
             &launch_area_fallback,
             &shared_approval_cache,
             &ledger,
@@ -431,8 +426,9 @@ pub(crate) fn prepare_and_run_active_document(
     first: bool,
     inline_state: &mut Option<crate::commands::compose::InlinePromptState>,
     system_prompt_args: &SystemPromptArgs,
-    set_overrides: Option<serde_json::Value>,
-    caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
+    set_overrides: &mut Option<serde_json::Value>,
+    caller_input_records: &mut darkmatter::markdown::compose::CallerInputRecords,
+    interactive: claudine::composition::InteractiveSchemaOptions,
     launch_area_fallback: &Option<std::path::PathBuf>,
     shared_approval_cache: &SharedApprovalCache,
     ledger: &SharedRunLedger,
@@ -450,6 +446,20 @@ pub(crate) fn prepare_and_run_active_document(
         std::io::stderr().is_terminal() || std::env::var_os("FORCE_COLOR").is_some();
 
     let file_resolution_context = source_context.file_resolution_context().clone();
+
+    // A target can be the first document to declare a caller input's file
+    // schema. Persist its selection in the coordinator's caller layer so a
+    // later handoff or fresh preparation cannot revive the original partial.
+    resolve_supplied_file_inputs(
+        &source,
+        set_overrides,
+        caller_input_records,
+        &file_resolution_context,
+        interactive,
+    )
+    .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
+    let set_overrides = set_overrides.clone();
+    let caller_input_records = caller_input_records.clone();
 
     // Running a document switches the process CWD to that document's child
     // CWD (the repo root). Restore the launch area before preparing the next
@@ -1294,11 +1304,8 @@ fn execute_loop_or_single(
         }
     }
 
-    // ── Single execution path (no loop) ──────────────────────────────────
-    // Pre-validation (with interactive collection) has already run, so
-    // schema requirements are satisfied. Call the schema-aware prepare
-    // directly — typed errors still surface for any residual issues
-    // (e.g. drop-and-retry on a latent optional).
+    // Canonical preparation owns the schema verdict; documents with initialize
+    // defer it until their stabilized reread, after lifecycle repair or routing.
     let prepared = {
         let _span = match kind {
             CompositionKind::Direct => info_span!("compose_prep.prepare_direct").entered(),

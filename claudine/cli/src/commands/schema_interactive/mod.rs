@@ -42,8 +42,10 @@ use crate::completion::scopes::{self, ScopeContext};
 use crate::log;
 
 mod status;
+mod supplied;
 
 pub use status::render_status_report;
+pub(crate) use supplied::resolve_supplied_file_inputs;
 use status::escape_prose;
 
 /// Resolve [`InteractiveSchemaOptions`] from the user config plus
@@ -275,7 +277,24 @@ fn resolve_provided_file_reference(
     is_array: bool,
 ) -> io::Result<Option<serde_json::Value>> {
     let ctx = ScopeContext::discover();
-    let candidates = provided_partial_candidates(patterns, provided, &ctx);
+    let Some(path) = choose_provided_file_reference(property, provided, patterns, &ctx)? else {
+        return Ok(None);
+    };
+    let value = resolve_file_value(&path)?;
+    if is_array {
+        Ok(Some(serde_json::Value::Array(vec![value])))
+    } else {
+        Ok(Some(value))
+    }
+}
+
+fn choose_provided_file_reference(
+    property: &str,
+    provided: &str,
+    patterns: &[String],
+    ctx: &ScopeContext,
+) -> io::Result<Option<std::path::PathBuf>> {
+    let candidates = provided_partial_candidates(patterns, provided, ctx);
     if candidates.is_empty() {
         return Ok(None);
     }
@@ -286,7 +305,7 @@ fn resolve_provided_file_reference(
             let detail = extract_file_detail(path);
             // As in `collect_file`: `match(...)` candidates routinely share a
             // basename, so the visible label is the cwd/repo-relative path.
-            let label = path_label(path, &ctx);
+            let label = path_label(path, ctx);
             ChoiceOption::new(label.clone(), label, detail)
         })
         .collect();
@@ -310,15 +329,7 @@ fn resolve_provided_file_reference(
         _ => choose_one_file(options)?,
     };
 
-    let Some(detail) = selected else {
-        return Ok(None);
-    };
-    let value = resolve_file_value(&detail.path)?;
-    if is_array {
-        Ok(Some(serde_json::Value::Array(vec![value])))
-    } else {
-        Ok(Some(value))
-    }
+    Ok(selected.map(|detail| detail.path))
 }
 
 /// Glob candidates filtered by the provided partial substring.
