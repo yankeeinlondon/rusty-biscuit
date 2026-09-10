@@ -469,12 +469,42 @@ pub(crate) fn login_shell_script(shell: &str, augment_path: bool) -> String {
 /// With rc files suppressed the prompt falls back to the shell's stock `PS1`
 /// (`bash-5.3$`, `host%`), which [`looks_like_prompt`] already recognizes.
 pub(crate) fn configure_login_shell(cmd: &mut Command, shell: &str, bin_dir: Option<&Path>) {
-    let script = login_shell_script(shell, bin_dir.is_some());
-    cmd.arg(shell);
-    cmd.args(["-l", "-c", script.as_str(), shell]);
+    cmd.args(login_shell_argv(shell, bin_dir.is_some()));
     if let Some(bin_dir) = bin_dir {
         cmd.env("BISCUIT_TEST_BIN_DIR", bin_dir);
     }
+}
+
+/// The two-stage invocation as an argv, for backends that hand tmux-style
+/// argument vectors to their pane rather than a [`Command`].
+///
+/// The trailing repeat of `shell` is the script's `$0`, which is what the
+/// `exec` in [`login_shell_script`] re-runs.
+pub(crate) fn login_shell_argv(shell: &str, augment_path: bool) -> Vec<String> {
+    vec![
+        shell.to_string(),
+        "-l".to_string(),
+        "-c".to_string(),
+        login_shell_script(shell, augment_path),
+        shell.to_string(),
+    ]
+}
+
+/// The two-stage invocation as one POSIX command line, for backends whose only
+/// channel into the pane is a line of shell text (Terminal.app's `do script`).
+///
+/// `exec` is part of the line: the shell that receives it is the one the
+/// terminal started for its own reasons, and the harness must drive the shell
+/// *it* configured, not that one.
+pub(crate) fn login_shell_command_line(shell: &str, augment_path: bool) -> String {
+    let script = single_quoted(&login_shell_script(shell, augment_path));
+    format!("exec {shell} -l -c {script} {shell}")
+}
+
+/// Wraps `s` in single quotes, escaping embedded ones with the POSIX `'\''`
+/// trick.
+fn single_quoted(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// Sets the conventional color-forcing env vars on `cmd` so the
@@ -988,6 +1018,43 @@ mod tests {
         );
         assert_eq!(interactive_rc_suppression_flags("/bin/zsh"), ["-f"]);
         assert!(interactive_rc_suppression_flags("/bin/sh").is_empty());
+    }
+
+    /// Both spellings of the invocation must stay the same invocation: the
+    /// backends that take an argv and the ones that take a command line are
+    /// covered by the same policy only if neither can drift from it.
+    #[test]
+    fn login_shell_argv_and_command_line_carry_the_same_script() {
+        let argv = login_shell_argv("bash", true);
+        assert_eq!(argv[0], "bash", "argv[0] is the outer shell");
+        assert_eq!(&argv[1..3], ["-l", "-c"]);
+        assert_eq!(argv[3], login_shell_script("bash", true));
+        assert_eq!(argv[4], "bash", "the trailing repeat is the script's $0");
+
+        let line = login_shell_command_line("bash", true);
+        assert_eq!(
+            line,
+            format!(
+                "exec bash -l -c '{}' bash",
+                login_shell_script("bash", true)
+            ),
+        );
+    }
+
+    /// A script that reached the `do script` line unquoted would be split on
+    /// its spaces and semicolons by the shell receiving it.
+    #[test]
+    fn login_shell_command_line_single_quotes_the_script() {
+        let line = login_shell_command_line("sh", false);
+        assert!(
+            line.contains("-c 'unset ENV BASH_ENV; exec \"$0\" -i'"),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn single_quoted_escapes_embedded_single_quotes() {
+        assert_eq!(single_quoted("it's"), r"'it'\''s'");
     }
 
     /// `PATH` augmentation belongs to the outer *login* shell: profile files

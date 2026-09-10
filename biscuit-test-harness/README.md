@@ -107,7 +107,7 @@ Every backend implements one **shell-model-first** contract:
 
 #### The pane's shell reads login files, not interactive ones
 
-WezTerm and Kitty spawn two shells: an outer `-l` login shell that runs
+**Every** backend spawns two shells: an outer `-l` login shell that runs
 the host's *profile* files (where `PATH` is assembled), which then
 `exec`s an interactive shell with its **rc files suppressed**
 (`bash --norc -i`, `zsh -f -i`, `unset ENV` for POSIX `sh`).
@@ -120,14 +120,29 @@ swallowed the command line sent by
 exit marker timed out. Consequences for test authors:
 
 - The pane's `PATH` comes from the **login profile only**. A host that
-  edits `PATH` in `~/.bashrc` will not see those entries in a WezTerm or
-  Kitty pane. Pass an absolute path or an explicit `PATH` env pair for
-  anything outside `/etc/profile`'s reach.
+  edits `PATH` in `~/.bashrc` will not see those entries in the pane.
+  Pass an absolute path or an explicit `PATH` env pair for anything
+  outside `/etc/profile`'s reach.
 - The prompt is the shell's stock `PS1` (`bash-5.3$`, `host%`), not the
   developer's theme. Never grep a captured frame for a literal that the
   stock prompt contains.
-- tmux and Terminal.app still run a single login shell and therefore
-  still inherit whatever a host's profile chain pulls in.
+- The *outer* shell still runs the login profile, so an rc file that a
+  profile sources unconditionally still executes there — it just runs in
+  a non-interactive shell that is replaced a moment later. Anything an
+  rc file guards behind `$-` containing `i` (which is how prompt hooks
+  and pickers guard themselves) never reaches the pane.
+  `level2_tmux_pane_shell_skips_the_interactive_rc` holds this line.
+- Terminal.app has a third shell in front of both: macOS starts the
+  window's own login shell before AppleScript can say anything, and
+  `do script` is delivered to *that* shell. The harness's line `exec`s it
+  away, so the shell it drives is still the rc-suppressed one.
+
+The invocation is built once — `login_shell_script`, `login_shell_argv`,
+and `login_shell_command_line` in `lib.rs` — so no backend can drift from
+the policy. Backends differ only in how the words reach the pane: an argv
+for WezTerm, Kitty, and tmux (which needs `-e` for environment, because a
+variable set on the `tmux` *client* does not reach a session created
+against an already-running server), a shell command line for Terminal.app.
 
 ### Sending input — pick the right channel
 
