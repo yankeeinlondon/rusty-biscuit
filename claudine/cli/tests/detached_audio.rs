@@ -1,6 +1,9 @@
-use std::fs::{self, OpenOptions};
+use std::fs;
 
-use fs4::fs_std::FileExt as _;
+mod audio_spool {
+    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../test-support/locked_audio_spool.rs"));
+}
+use audio_spool::LockedAudioSpool;
 
 mod common;
 use common::{CliProcessFixture, write};
@@ -10,12 +13,7 @@ fn handle_human_in_the_loop_leaves_durable_doorbell_job_after_exit() {
     let fixture = CliProcessFixture::named("claudine-handle-detached-audio");
     let home = fixture.home();
     let spool = fixture.workspace_path().join("spool");
-    fs::create_dir(&spool).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        fs::set_permissions(&spool, fs::Permissions::from_mode(0o700)).unwrap();
-    }
+
 
     let config = serde_json::json!({
         "preferred_agent": "claude",
@@ -25,7 +23,8 @@ fn handle_human_in_the_loop_leaves_durable_doorbell_job_after_exit() {
         "actions": {
             "human_in_the_loop": [{
                 "type": "sound_effect",
-                "effect": "doorbell-2"
+                "effect": "doorbell-2",
+                "volume": 0.0
             }]
         }
     });
@@ -34,14 +33,7 @@ fn handle_human_in_the_loop_leaves_durable_doorbell_job_after_exit() {
         &serde_json::to_string_pretty(&config).unwrap(),
     );
 
-    let worker = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(spool.join("worker.lock"))
-        .unwrap();
-    worker.lock_exclusive().unwrap();
+    let _audio_spool = LockedAudioSpool::new(&spool);
 
     let payload = serde_json::json!({
         "hook_event_name": "PreToolUse",
@@ -73,4 +65,6 @@ fn handle_human_in_the_loop_leaves_durable_doorbell_job_after_exit() {
     assert_eq!(envelope["payload"]["state"], "ready");
     assert_eq!(envelope["payload"]["kind"], "play_file");
     assert_eq!(envelope["sequence"], 1);
+    assert_eq!(envelope["payload"]["playback"]["volume"], 0.0);
+    _audio_spool.clear_pending().unwrap();
 }

@@ -117,11 +117,16 @@ fn run_compose(
 ) -> String {
     // Escape: caller-relative references must resolve from this fixture directory.
     let mut command = fixture.command_builder().ambient_context(cwd).build();
+    let audio_spool = fixture.cwd().join("provenance-audio-spool");
+    // Shipped templates retain their lifecycle actions; provenance tests must not play them.
     command
+        .env("PLAYA_DRY_RUN", "1")
+        .env("PLAYA_SPOOL_DIR", &audio_spool)
         .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
         .args(["compose", "--goose", document.to_str().unwrap()]);
     command.args(setters);
     let assertion = command.assert().success();
+    assert!(!audio_spool.exists(), "provenance tests must not publish audio");
     strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr))
 }
 
@@ -136,12 +141,17 @@ fn run_compose_failure(
         .join(format!("diagnostic-{}.json", document.file_stem().unwrap().to_string_lossy()));
     // Escape: caller-relative references must resolve from this fixture directory.
     let mut command = fixture.command_builder().ambient_context(cwd).build();
+    let audio_spool = fixture.cwd().join("provenance-audio-spool");
+    // Shipped templates retain their lifecycle actions; provenance tests must not play them.
     command
+        .env("PLAYA_DRY_RUN", "1")
+        .env("PLAYA_SPOOL_DIR", &audio_spool)
         .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
         .env("CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT", &snapshot)
         .args(["compose", "--goose", document.to_str().unwrap()]);
     command.args(setters);
     let assertion = command.assert().failure();
+    assert!(!audio_spool.exists(), "provenance tests must not publish audio");
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
     let diagnostic = serde_json::from_str(
         &std::fs::read_to_string(&snapshot)

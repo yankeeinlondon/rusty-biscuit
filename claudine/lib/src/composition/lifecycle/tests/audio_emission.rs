@@ -2,7 +2,10 @@
 
 use super::*;
 
-use fs4::fs_std::FileExt as _;
+mod audio_spool {
+    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../test-support/locked_audio_spool.rs"));
+}
+use audio_spool::LockedAudioSpool;
 
 /// Place an empty executable named `<name>` in `<temp>/bin` so a `PATH` lookup
 /// finds it on every OS. The eSpeak readiness these tests exercise is a
@@ -82,7 +85,6 @@ fn audio_order_no_audio() {
 #[tokio::test]
 #[serial_test::serial]
 async fn default_emitter_publishes_audio_in_phase_order_without_waiting_for_playback() {
-    use std::fs::{self, OpenOptions};
     use std::time::{Duration, Instant};
 
     let temp = tempfile::tempdir().unwrap();
@@ -100,20 +102,8 @@ async fn default_emitter_publishes_audio_in_phase_order_without_waiting_for_play
     let _dry_run = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
     assert_eq!(biscuit_speaks::run_if_worker().await, None);
 
-    fs::create_dir(&spool).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        fs::set_permissions(&spool, fs::Permissions::from_mode(0o700)).unwrap();
-    }
-    let worker = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(spool.join("worker.lock"))
-        .unwrap();
-    worker.lock_exclusive().unwrap();
+
+    let _audio_spool = LockedAudioSpool::new(&spool);
 
     let settings = GlobalSettings {
         tts: Some(TtsSettings {
@@ -138,8 +128,8 @@ async fn default_emitter_publishes_audio_in_phase_order_without_waiting_for_play
     let start = Instant::now();
 
     for frontmatter in [
-        json!({"start": {"say": "Phase 1 of the plan in the claudine package area, was implemented successfully", "effect": "doorbell-2"}}),
-        json!({"start": {"say_first": "Phase 1 of the plan in the claudine package area, was implemented successfully", "effect": "doorbell-2"}}),
+        json!({"start": {"say": "This is a test message.", "effect": "doorbell-2"}}),
+        json!({"start": {"say_first": "This is a test message.", "effect": "doorbell-2"}}),
     ] {
         let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
         let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
@@ -223,7 +213,7 @@ async fn default_emitter_warns_once_when_speech_handoff_fails() {
         biscuit_speaks::TtsProvider::Host(biscuit_speaks::HostTtsProvider::ESpeak),
     ));
     DefaultLifecycleEmitter.emit_speech(
-        "Phase 1 of the plan in the claudine package area, was implemented successfully",
+        "This is a test message.",
         config,
     );
 

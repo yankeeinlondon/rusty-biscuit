@@ -22,3 +22,19 @@ Additional expectations for the Claudine test suite:
 - Benchmarks are opt-in and non-gating: `cargo bench -p claudine --bench runtime_hot_paths`
 - CLI integration helpers live under `claudine/cli/tests/common/mod.rs`
 - Inline unit tests are preferred for private library logic such as harness, sequence, dispatch, and TUI reducers
+
+## Silent audio fixtures
+
+Use clear speech such as “This is a test message.” and explicit zero volume for
+real playback. Pin test providers and voices; these tests do not validate the
+operator's personal Claudine speech configuration. A fake agent does not disable
+lifecycle TTS or sound effects in a real prompt template.
+
+For composition/provenance tests that do not test audio, set `PLAYA_DRY_RUN=1`
+on the child command and assert its private `PLAYA_SPOOL_DIR` is never created.
+This preserves normal lifecycle evaluation while suppressing audio publication.
+Publication tests retain real handoff with the test-local
+`claudine/test-support/locked_audio_spool.rs` guard: it removes pending jobs under
+the queue lock before releasing worker ownership, including during unwinding.
+Tests that execute helpers must release blocked fixtures and observe completion
+before removing their spool. Never use the operator's real queue for test cleanup.
