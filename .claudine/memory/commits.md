@@ -192,6 +192,21 @@ belong here.
   prose siblings. The placeholders are intentional scaffolding, not missing
   content — commit them together with the prose; do not omit them as "empty
   files" or split them into a follow-up.
+- Docs consolidation across multiple deleted sources plus a single new file is
+  not a rename. When two `docs/topics/*.md` files are deleted and replaced by
+  one heavily synthesized `docs/<topic>.md` (similarity below `git diff -M50%`
+  threshold), the index holds an independent `D + D + A + M(sibling link-fix)`
+  set. Splitting the A from the D pair ships a 1200-line file with no
+  antecedent; splitting a D from the A loses the "what was consolidated"
+  evidence. Commit all of them in one `--only` invocation so reviewers see
+  the replacement as one change.
+- A sibling skill that introduces a contract (e.g. rust-devops rewrites its
+  CI/CD section) and a referencing skill (e.g. `os` adds a cross-reference to
+  the new contract) are disjoint paths and commit safely in parallel, but the
+  cross-reference is stale between the two commits and the reflog shows it.
+  Either ship them in the same commit when paths allow, or document the
+  ordering in the second commit's body so reviewers know the cross-reference
+  resolves against an earlier sibling.
 - Use `git show --pretty=format: --name-only <hash>` when diffing the committed
   path list against a pathspec file.
 - A workspace-wide version-pin refresh that swaps the version number in a
