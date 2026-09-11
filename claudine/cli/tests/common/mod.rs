@@ -669,6 +669,50 @@ pub fn clear_no_color<H: biscuit_test_harness::TerminalHarness>(harness: &mut H)
     let _ = biscuit_test_harness::wait_for_prompt(harness);
 }
 
+/// Poll the pane until `expected` is drawn, returning that frame.
+pub fn wait_for_pane_text(
+    harness: &mut impl biscuit_test_harness::TerminalHarness,
+    expected: &str,
+    timeout: std::time::Duration,
+) -> biscuit_test_harness::CapturedFrame {
+    let deadline = std::time::Instant::now() + timeout;
+    let mut frame = harness.capture().expect("initial capture");
+    while std::time::Instant::now() < deadline {
+        if frame.plain.contains(expected) {
+            return frame;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        frame = harness.capture().expect("poll terminal content");
+    }
+    panic!("expected terminal content {expected:?} never rendered; plain:\n{}", frame.plain);
+}
+
+/// Poll the pane until a row starting with `<marker>:` is drawn, returning
+/// that frame and whatever followed the colon (the exit status the command's
+/// trailer echoed).
+pub fn wait_for_exit_marker(
+    harness: &mut impl biscuit_test_harness::TerminalHarness,
+    marker: &str,
+    timeout: std::time::Duration,
+) -> (biscuit_test_harness::CapturedFrame, String) {
+    let prefix = format!("{marker}:");
+    let deadline = std::time::Instant::now() + timeout;
+    let mut frame = harness.capture().expect("initial capture");
+    while std::time::Instant::now() < deadline {
+        if let Some(status) = frame
+            .plain
+            .lines()
+            .find_map(|line| line.trim().strip_prefix(&prefix))
+        {
+            let status = status.trim().to_string();
+            return (frame, status);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        frame = harness.capture().expect("poll for exit marker");
+    }
+    panic!("command exit marker {marker:?} never rendered; plain:\n{}", frame.plain);
+}
+
 /// Assert that the captured pane row carrying `needle` is itself styled.
 ///
 /// The weaker `frame.raw.contains('\u{1b}')` this replaces is satisfied by *any*

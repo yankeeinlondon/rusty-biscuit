@@ -199,6 +199,10 @@ name = "level2_provided_partial_file_pty"
 required-features = ["terminal-tests"]
 
 [[test]]
+name = "level2_windows_provided_partial_file_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
 name = "level2_pty_tests"
 required-features = ["terminal-tests"]
 

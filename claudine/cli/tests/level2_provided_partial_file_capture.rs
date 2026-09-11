@@ -34,19 +34,23 @@
 use std::fs;
 use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, wait_for_prompt};
+use biscuit_test_harness::{TerminalHarness, wait_for_prompt};
 use serial_test::serial;
 use test_toolkit::{Backend, Level, require_level};
 
 mod common;
 use common::review_router::{
-    PARTIAL, assert_provider_received, launch_area, provider_prompt, review_router_fixture,
+    PARTIAL, assert_provider_received, launch_area, names_selected_spec, provider_prompt,
+    review_router_fixture,
 };
-use common::{assert_row_is_styled, claudine_bin, clear_no_color, minimal_system_path, sh_quote};
+use common::{
+    assert_row_is_styled, claudine_bin, clear_no_color, minimal_system_path, sh_quote,
+    wait_for_exit_marker, wait_for_pane_text,
+};
 
 const CONFIRMATION_PROMPT: &str = "Use this file? (Y/n)";
 const PARTIAL_NOTICE: &str = "did not match a file directly";
@@ -69,44 +73,6 @@ impl KeySender for WezTermHarness {
     fn send_yes(&mut self) -> io::Result<()> {
         self.send_text(b"y")
     }
-}
-
-/// Poll the pane until `expected` is drawn, returning that frame.
-fn wait_for_text(harness: &mut impl TerminalHarness, expected: &str, timeout: Duration) -> CapturedFrame {
-    let deadline = Instant::now() + timeout;
-    let mut frame = harness.capture().expect("initial capture");
-    while Instant::now() < deadline {
-        if frame.plain.contains(expected) {
-            return frame;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-        frame = harness.capture().expect("poll terminal content");
-    }
-    panic!("expected terminal content {expected:?} never rendered; plain:\n{}", frame.plain);
-}
-
-/// Poll the pane until the command's exit marker is drawn, returning the frame
-/// and the exit status the marker carried.
-fn wait_for_exit_marker(
-    harness: &mut impl TerminalHarness,
-    marker: &str,
-    timeout: Duration,
-) -> (CapturedFrame, String) {
-    let prefix = format!("{marker}:");
-    let deadline = Instant::now() + timeout;
-    let mut frame = harness.capture().expect("initial capture");
-    while Instant::now() < deadline {
-        if let Some(status) = frame
-            .plain
-            .lines()
-            .find_map(|line| line.trim().strip_prefix(&prefix))
-        {
-            return (frame.clone(), status.to_string());
-        }
-        std::thread::sleep(Duration::from_millis(50));
-        frame = harness.capture().expect("poll for exit marker");
-    }
-    panic!("command exit marker {marker:?} never rendered; plain:\n{}", frame.plain);
 }
 
 fn run_accept_path<H: KeySender>(harness: &mut H) {
@@ -161,7 +127,7 @@ fn run_accept_path<H: KeySender>(harness: &mut H) {
         )
         .expect("send review router command");
 
-    let dialog = wait_for_text(harness, CONFIRMATION_PROMPT, Duration::from_secs(20));
+    let dialog = wait_for_pane_text(harness, CONFIRMATION_PROMPT, Duration::from_secs(20));
     assert!(
         !provider_prompt(&fixture).exists(),
         "provider was reached before the confirmation was drawn; plain:\n{}",
@@ -186,7 +152,7 @@ fn run_accept_path<H: KeySender>(harness: &mut H) {
     // the emulator's column count puts the break, so match it unwrapped.
     let unwrapped: String = dialog.plain.lines().collect();
     assert!(
-        unwrapped.contains(SELECTED_SPEC) && !unwrapped.contains("local-decoy"),
+        names_selected_spec(&unwrapped, SELECTED_SPEC) && !unwrapped.contains("local-decoy"),
         "the confirmation must name the launch-area candidate only; plain:\n{}",
         dialog.plain
     );

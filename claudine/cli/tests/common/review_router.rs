@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use super::{CliProcessFixture, write, write_executable};
+use super::{CliProcessFixture, write};
 
 /// The partial the report supplied, matching one spec inside the launch area.
 pub const PARTIAL: &str = "fixes/2026-09-10-local";
@@ -53,11 +53,55 @@ pub fn review_router_fixture(multiple: bool) -> (CliProcessFixture, PathBuf) {
         &fixture.cwd().join("fixes/2026-09-10-local-decoy/spec.md"),
         "---\nreviewed: true\nmarker: decoy\n---\nDecoy specification outside the launch area.\n",
     );
-    write_executable(
+    install_goose(&fixture);
+    (fixture, router)
+}
+
+/// The `goose` stub: records its delivered prompt at `<home>/provider-prompt`
+/// and prints `provider reached`.
+#[cfg(unix)]
+fn install_goose(fixture: &CliProcessFixture) {
+    super::write_executable(
         &fixture.bin_dir().join("goose"),
         "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$HOME/provider-prompt\"\nprintf 'provider reached\\n'\n",
     );
-    (fixture, router)
+}
+
+/// Same stub, compiled: a `.cmd` cannot receive the multi-line prompt the
+/// proxy target renders (Rust refuses to spawn a batch file whose arguments
+/// contain newlines), so mirror `compose_caller_file_provenance.rs` and build
+/// a tiny native provider with the host's `rustc`.
+#[cfg(windows)]
+fn install_goose(fixture: &CliProcessFixture) {
+    let source = fixture.bin_dir().join("goose-fixture.rs");
+    write(
+        &source,
+        r##"fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .expect("a home directory for the provider prompt");
+    std::fs::write(
+        std::path::Path::new(&home).join("provider-prompt"),
+        format!("{}\n", args.join(" ")),
+    )
+    .expect("write provider prompt");
+    println!("provider reached");
+}
+"##,
+    );
+    let output = std::process::Command::new("rustc")
+        .arg("--edition=2024")
+        .arg(&source)
+        .arg("-o")
+        .arg(fixture.bin_dir().join("goose.exe"))
+        .output()
+        .expect("rustc must build the Windows provider fixture");
+    assert!(
+        output.status.success(),
+        "provider fixture compilation failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// The launch area the report ran from: a package directory, not the root.
@@ -71,9 +115,20 @@ pub fn provider_prompt(fixture: &CliProcessFixture) -> PathBuf {
 }
 
 /// Assert the prompt the provider received names exactly the selected spec.
+///
+/// `directory` is spelled with `/`; an eager `file()` value keeps the native
+/// spelling of the host it resolved on, so the prompt is compared with its
+/// separators normalized rather than by exact substring.
 pub fn assert_provider_received(prompt: &str, selected: &str, directory: &str) {
+    let portable = prompt.replace('\\', "/");
     assert!(prompt.contains(&format!("SELECTED={selected}")), "prompt: {prompt}");
-    assert!(prompt.contains(directory), "prompt: {prompt}");
+    assert!(portable.contains(directory), "prompt: {prompt}");
     assert!(prompt.contains("TOKEN=retained"), "prompt: {prompt}");
     assert!(!prompt.contains("local-decoy"), "prompt: {prompt}");
+}
+
+/// True when `plain` — a captured frame with its rows joined back together —
+/// names the selected spec in either separator spelling.
+pub fn names_selected_spec(unwrapped: &str, directory: &str) -> bool {
+    unwrapped.contains(directory) || unwrapped.contains(&directory.replace('/', "\\"))
 }
