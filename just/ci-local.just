@@ -23,12 +23,22 @@
 # `pre-push` or `plan.just` edit gates nothing). `--lint-only` keeps a genuine
 # full scope tractable.
 #
-# Also replicated: preflight's CI-infra self-test suite
-# (scope calculation and local concurrency/routing). These catch a stale scope
-# fixture or a serial L2 regression locally before publishing validation evidence.
+# Also replicated: preflight's CI-infra self-test suite (the contract schemas,
+# scope calculation, the resolved plan, local concurrency/routing, and the
+# execution-constraint store). These catch a stale scope fixture, a serial L2
+# regression, or an unenforced constraint locally, before validation evidence is
+# published.
 #
 # Not replicated: L3/browser tiers, WSL archives, companion suites, and other
 # operating systems. `--l2` adds the source packages' hostable L2 tier.
+#
+# `--plan` is the pre-trigger review surface (spec section 4). It resolves the
+# canonical plan — every `{package, environment, gate}` cell with its execution,
+# origin, and state — prints it, and exits non-zero when a recorded execution
+# constraint would still be violated. It runs no gate and builds nothing, so it
+# is safe to run before every push. `BISCUIT_CI_CONSTRAINTS_DIR` names the
+# constraint store; `--plan-out` keeps the canonical JSON as the machine
+# interface alongside the rendered table.
 #
 # Usage:
 #   just ci-local                       affected packages vs origin/main
@@ -38,6 +48,8 @@
 #   just ci-local --base <ref>          diff against another ref (or CI_LOCAL_BASE)
 #   just ci-local --all                 every workspace package
 #   just ci-local --dry-run             print the scope and gates, run nothing
+#   just ci-local --plan                review every resolved cell, run nothing
+#   just ci-local --plan-out <path>     also write the canonical plan JSON
 #   just ci-local claudine-cli darkmatter   named packages or areas, no scope calc
 ci-local *args="":
     #!/usr/bin/env bash
@@ -50,7 +62,10 @@ ci-local *args="":
     run_l2=0
     select_all=0
     dry_run=0
+    show_plan=0
     scope_out="${BISCUIT_CI_SCOPE_OUT:-}"
+    plan_out="${BISCUIT_CI_PLAN_OUT:-}"
+    constraints_dir="${BISCUIT_CI_CONSTRAINTS_DIR:-}"
     selectors=()
     set -- {{ args }}
     while (( $# > 0 )); do
@@ -60,8 +75,13 @@ ci-local *args="":
             --l2) run_l2=1 ;;
             --scope-out) shift; scope_out="${1:?--scope-out needs a path}" ;;
             --scope-out=*) scope_out="${1#--scope-out=}" ;;
+            --plan-out) shift; plan_out="${1:?--plan-out needs a path}" ;;
+            --plan-out=*) plan_out="${1#--plan-out=}" ;;
+            --constraints) shift; constraints_dir="${1:?--constraints needs a path}" ;;
+            --constraints=*) constraints_dir="${1#--constraints=}" ;;
             --all) select_all=1 ;;
             --dry-run) dry_run=1 ;;
+            --plan) show_plan=1 ;;
             --base) shift; base="${1:?--base needs a ref}" ;;
             --base=*) base="${1#--base=}" ;;
             -h|--help) just --list | grep -A1 '^\s*ci-local'; exit 0 ;;
@@ -76,10 +96,30 @@ ci-local *args="":
     fi
 
     scope_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-scope.XXXXXX")"
-    trap 'rm -f "${scope_file}"' EXIT
+    plan_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-plan.XXXXXX")"
+    accepted_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-accepted.XXXXXX")"
+    rejected_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-rejected.XXXXXX")"
+    trap 'rm -f "${scope_file}" "${plan_file}" "${accepted_file}" "${rejected_file}"' EXIT
 
+    # One calculation serves both documents: `--plan-out` writes the canonical
+    # resolved plan while stdout stays the legacy scope shape the gate loop and
+    # `ci.yml` still read. They cannot disagree about what CI will run.
+    scope_args=(--plan-out "${plan_file}")
+    if [[ -n "${constraints_dir}" ]]; then
+        scope_args+=(--constraints "${constraints_dir}")
+    fi
+    # `--plan` needs no legacy projection: it runs no gate, so the canonical
+    # plan is both what it renders and what `--plan-out` writes.
+    if (( show_plan == 1 )); then
+        scope_args+=(--resolved-plan)
+        plan_view="${scope_file}"
+    else
+        plan_view="${plan_file}"
+    fi
+
+    merge_base=""
     if (( select_all == 1 )) || (( ${#selectors[@]} > 0 )); then
-        python3 scripts/ci/affected_scope.py --all > "${scope_file}"
+        python3 scripts/ci/affected_scope.py "${scope_args[@]}" --all > "${scope_file}"
     else
         if ! merge_base="$(git merge-base "${base}" HEAD 2>/dev/null)"; then
             echo "ci-local: cannot resolve base ref '${base}' (set --base or CI_LOCAL_BASE)." >&2
@@ -90,10 +130,31 @@ ci-local *args="":
             echo "ci-local: no changes relative to ${base} (${merge_base:0:9}); nothing to gate."
             exit 0
         fi
+        # The revision pair is part of the plan: a receipt records the head it
+        # tested, and a reviewer reconciles the plan against the outgoing work.
+        scope_args+=(--base "${merge_base}" --head "$(git rev-parse HEAD)")
         # shellcheck disable=SC2086
-        python3 scripts/ci/affected_scope.py ${changed} > "${scope_file}"
+        python3 scripts/ci/affected_scope.py "${scope_args[@]}" ${changed} > "${scope_file}"
         echo
         echo "Changed vs ${base} (${merge_base:0:9}): $(wc -l <<< "${changed}" | tr -d ' ') file(s)"
+    fi
+
+    # `--plan` resolves published evidence first, so a reviewer sees the cells
+    # that are already satisfied rather than the cells that would run without
+    # them. A second pass is what turns the accepted set into plan state; it is
+    # confined to `--plan` because an ordinary run PRODUCES evidence and has no
+    # reason to consume it.
+    if (( show_plan == 1 )) && [[ -n "${merge_base}" ]] && [[ -f scripts/ci/local_evidence.py ]]; then
+        head_sha="$(git rev-parse HEAD)"
+        if python3 scripts/ci/local_evidence.py verify --cells \
+            --plan "${plan_view}" --base "${merge_base}" --head "${head_sha}" \
+            --rejections "${rejected_file}" > "${accepted_file}" 2>/dev/null; then
+            # shellcheck disable=SC2086
+            python3 scripts/ci/affected_scope.py "${scope_args[@]}" \
+                --accepted-cells "${accepted_file}" \
+                --evidence-rejections "${rejected_file}" \
+                ${changed} > "${scope_file}"
+        fi
     fi
 
     # Resolve explicit selectors (package names or area directories) against
@@ -129,6 +190,42 @@ ci-local *args="":
     if [[ -n "${scope_out}" ]]; then
         cp "${scope_file}" "${scope_out}"
     fi
+    if [[ -n "${plan_out}" ]]; then
+        cp "${plan_view}" "${plan_out}"
+    fi
+
+    if (( show_plan == 1 )); then
+        # The rich surface is `ci-plan`, a TerminalRenderable Table/Prose
+        # renderer. It is a `local-tools` bin rather than something `--plan`
+        # compiles on demand: a pre-trigger review must not start a build.
+        # Without the prebuilt binary the same cells render as plain lines.
+        plan_bin="${BISCUIT_CI_PLAN_BIN:-scripts/target/release/ci-plan}"
+        if [[ -x "${plan_bin}" ]] && "${plan_bin}" "${plan_view}"; then
+            :
+        else
+            echo
+            echo "Resolved plan (cell / execution / origin / state)"
+            echo "------------------------------------------------"
+            jq -r '.cells[] | "  \(.package)/\(.environment)/\(.gate)  \(.execution)  \(.origin)  \(.state)  — \(.selection_reason)"' "${plan_view}"
+            if [[ "$(jq -r '(.evidence_rejections // []) | length' "${plan_view}")" != "0" ]]; then
+                echo
+                echo "Rejected evidence"
+                jq -r '(.evidence_rejections // [])[] | "  ✗ \(.)"' "${plan_view}"
+            fi
+        fi
+        prohibited="$(jq -r '.prohibited_cells | length' "${plan_view}")"
+        if [[ "${prohibited}" != "0" ]]; then
+            echo
+            echo -e "{{ red }}${prohibited} cell(s) are prohibited by a recorded execution constraint and have no qualifying evidence:{{ reset }}"
+            jq -r '.prohibited_cells[] | "  ⛔ \(.)"' "${plan_view}"
+            jq -r '[.cells[] | select(.state == "prohibited") | .prohibition] | unique[] | "     \(.reason) (set by \(.owner), expires \(.expiry))"' "${plan_view}"
+            echo
+            echo "Triggering CI now would violate that constraint. Reuse qualifying evidence for those cells, or withdraw the constraint." >&2
+            exit 1
+        fi
+        exit 0
+    fi
+
     echo "CI scope: ${count} package(s) (class=${change_class}, full_scope=${full_scope}${full_gates:+ for ${full_gates}})"
     echo "Gates   : $([[ ${run_lint} == 1 ]] && printf 'lint ')$([[ ${run_check} == 1 ]] && printf 'reverse-check ')$([[ ${run_test} == 1 ]] && printf 'L1 ')$([[ ${run_l2} == 1 ]] && printf 'L2')"
     echo "------------------------------------------------"
@@ -144,6 +241,21 @@ ci-local *args="":
     passed=()
     failed=()
     SECONDS=0
+
+    # Per-gate reports for the validation receipt (spec section 3). The canonical
+    # tier recipes already stage a JUnit report and a manifest record per
+    # invocation; pointing them at a directory this run owns is what makes the
+    # manifest describe THIS run. The default staging path accumulates across
+    # runs locally — publishing from it would credit a passing cell to a tree
+    # that never ran it.
+    reports_dir="${BISCUIT_CI_REPORTS_OUT:-}"
+    if [[ -z "${reports_dir}" ]]; then
+        reports_dir="$(mktemp -d "${TMPDIR:-/tmp}/biscuit-ci-local-reports.XXXXXX")"
+        trap 'rm -f "${scope_file}" "${plan_file}" "${accepted_file}" "${rejected_file}"; rm -rf "${reports_dir}"' EXIT
+    fi
+    mkdir -p "${reports_dir}"
+    rm -f "${reports_dir}/manifest.jsonl"
+    export BISCUIT_JUNIT_STAGE_DIR="${reports_dir}"
 
     local_environment=""
     if (( run_l2 == 1 )); then
@@ -168,7 +280,10 @@ ci-local *args="":
 
     # Validate scheduling before treating package results as reusable evidence.
     selftest_log="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-selftest.XXXXXX")"
-    for suite in test_affected_scope.py test_ci_local.py; do
+    # `test_resolved_plan.py` carries the sniff area-drift contract (AC15),
+    # which only runs where sniff is installed — a developer host, not a
+    # hosted runner.
+    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py; do
         if python3 "scripts/ci/${suite}" > "${selftest_log}" 2>&1; then
             passed+=("ci-infra ${suite}")
         else
@@ -233,10 +348,18 @@ ci-local *args="":
                     if [[ "${l2_here}" == "true" ]]; then
                         failed+=("L2 ${package} (no non-focusing backend available)")
                     fi
-                elif BISCUIT_L2_THREADS="${l2_threads}" BISCUIT_TEST_REQUIRED_BACKENDS="${required_csv}" just _test_l2 "${package}" ${test_args}; then
-                    passed+=("L2 ${package} (${required_csv})")
                 else
-                    failed+=("L2 ${package} (${required_csv})")
+                    # Which backends THIS invocation required. `test-toolkit`
+                    # records which of them actually drove a test, but its
+                    # records name a test, not a package; the receipt needs
+                    # both halves to say a cell was backend-proven.
+                    jq -c -n --arg p "${package}" --args '{package: $p, gate: "L2", backends: $ARGS.positional}' \
+                        "${required[@]}" >> "${reports_dir}/gate-backends.jsonl"
+                    if BISCUIT_L2_THREADS="${l2_threads}" BISCUIT_TEST_REQUIRED_BACKENDS="${required_csv}" just _test_l2 "${package}" ${test_args}; then
+                        passed+=("L2 ${package} (${required_csv})")
+                    else
+                        failed+=("L2 ${package} (${required_csv})")
+                    fi
                 fi
             fi
         fi

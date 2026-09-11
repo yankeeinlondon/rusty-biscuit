@@ -112,18 +112,25 @@ jobs:
             fi
           fi
 
+          scope_args+=(--plan-out resolved-plan.json --base "$base" --head "$head")
           scope_json="$(python3 scripts/ci/affected_scope.py "${scope_args[@]}")"
           if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
-            excluded_environment="$(
-              python3 scripts/ci/local_evidence.py verify \
-                --scope <(printf '%s' "$scope_json") \
-                --base "$base" \
-                --head "$head"
-            )"
-            if [[ -n "$excluded_environment" ]]; then
+            # Per CELL, across every environment's notes ref at once: a macOS
+            # receipt and a prior WSL cross-check receipt both contribute.
+            # Each accepted cell has its EXECUTION omitted while staying a
+            # cell, so the rollup expects a local-origin result for it rather
+            # than reporting MISSING (the PR #76 regression). Every refusal
+            # carries a coded reason and is published with the plan.
+            python3 scripts/ci/local_evidence.py verify --cells \
+              --plan resolved-plan.json \
+              --base "$base" \
+              --head "$head" \
+              --rejections evidence-rejections.json > accepted-cells.json
+            if [[ "$(jq -r 'length' accepted-cells.json)" != "0" ]]; then
               scope_json="$(
                 python3 scripts/ci/affected_scope.py \
-                  --exclude-environment "$excluded_environment" \
+                  --accepted-cells accepted-cells.json \
+                  --evidence-rejections evidence-rejections.json \
                   "${scope_args[@]}"
               )"
             fi
@@ -173,10 +180,10 @@ jobs:
             echo "| full-scope gates | $(jq -rc '.full_scope_gates | join(", ")' <<<"$scope_json") |"
             echo "| reason | $(jq -r '.preflight_reason' <<<"$scope_json") |"
             echo "| preflight OS | $(jq -rc '.preflight_os | join(", ")' <<<"$scope_json") |"
+            echo "| selected areas | $(jq -rc '[.areas[].area] | join(", ")' <<<"$scope_json") |"
             echo "| affected packages | $(jq -r '.packages | length' <<<"$scope_json") |"
             echo "| source-changed packages | $(jq -rc '.source_packages | join(", ")' <<<"$scope_json") |"
-            echo "| compile-only reverse dependencies | $(jq -rc '.reverse_dependencies | join(", ")' <<<"$scope_json") |"
-            echo "| locally validated environment | $(jq -r '.excluded_environment // "none"' <<<"$scope_json") |"
+            echo "| reported (unselected) reverse dependencies | $(jq -rc '.reverse_dependencies | join(", ")' <<<"$scope_json") |"
             echo "| gating packages (matrix) | $(jq -r '.matrix | length' <<<"$scope_json") |"
             echo "| expanded job estimate | $(jq -r '.job_estimate' <<<"$scope_json") |"
             echo "| toolchain | $(grep '^channel' rust-toolchain.toml | cut -d'"' -f2) |"
@@ -190,6 +197,17 @@ jobs:
           path: scope.json
           retention-days: 3
           if-no-files-found: error
+
+      # The canonical plan, beside the legacy projection it was projected from.
+      # Phases 5 and 6 move the consumers onto it; until then it is what a
+      # reviewer reads to see which cells were reused and which were refused.
+      - name: Upload the resolved execution plan
+        uses: actions/upload-artifact@v6
+        with:
+          name: ci-resolved-plan
+          path: resolved-plan.json
+          retention-days: 3
+          if-no-files-found: warn
 
       - name: Record the tested PR merge
         id: receipt
@@ -249,10 +267,18 @@ jobs:
         run: cargo metadata --no-deps --format-version 1 >/dev/null
       - name: Validate canonical area recipes
         run: just check-canonical
+      - name: Test the CI contract schemas
+        run: python3 scripts/ci/test_schema.py
       - name: Test affected-scope calculation
         run: python3 scripts/ci/test_affected_scope.py
+      - name: Test the resolved execution plan
+        run: python3 scripts/ci/test_resolved_plan.py
       - name: Test local validation evidence
         run: python3 scripts/ci/test_local_evidence.py
+      - name: Test multi-environment evidence reuse
+        run: python3 scripts/ci/test_evidence_reuse.py
+      - name: Test the execution-constraint store
+        run: python3 scripts/ci/test_constraints.py
       - name: Test PR validation reuse
         run: python3 scripts/ci/test_reuse_validation.py
       - name: Test runner-loss attribution and retry decision
@@ -333,12 +359,20 @@ jobs:
       - uses: taiki-e/install-action@just
       - name: Test PR validation reuse
         run: python3 scripts/ci/test_reuse_validation.py
+      - name: Test the CI contract schemas
+        run: python3 scripts/ci/test_schema.py
       - name: Test the scope calculator
         run: python3 scripts/ci/test_affected_scope.py
+      - name: Test the resolved execution plan
+        run: python3 scripts/ci/test_resolved_plan.py
       - name: Test concurrency policy and local L2 routing
         run: python3 scripts/ci/test_ci_local.py
       - name: Test local validation evidence
         run: python3 scripts/ci/test_local_evidence.py
+      - name: Test multi-environment evidence reuse
+        run: python3 scripts/ci/test_evidence_reuse.py
+      - name: Test the execution-constraint store
+        run: python3 scripts/ci/test_constraints.py
       # `--no-default-features` deselects the crates the other two bins in
       # `scripts/` need and this one does not. Same shape as ci-verdict's build.
       - name: Test the rollup and verdict
@@ -347,6 +381,13 @@ jobs:
           cargo nextest run \
             --manifest-path scripts/Cargo.toml \
             --no-default-features --bin ci-rollup
+      # The plan renderer is `local-tools`-gated, so this one DOES link
+      # biscuit-terminal and sniff. It runs here, in the leg that only fires
+      # when CI tooling changed, and never in the always-runs rollup build.
+      - name: Test the resolved-plan renderer
+        run: |
+          export NEXTEST_TEST_THREADS="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
+          cargo nextest run --manifest-path scripts/Cargo.toml --bin ci-plan
 
   # THE single required branch-protection check (plan 1.3).
   #
