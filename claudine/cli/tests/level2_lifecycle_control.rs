@@ -4963,6 +4963,8 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
 /// Stage the repository's real `implement-plan.md` with every external effect
 /// replaced by a PATH-local recorder. The prompt itself is copied byte-for-byte;
 /// only the provider, TTS executable, and lifecycle shell commands are doubled.
+/// Recorders assemble each line before appending so concurrent TTS output cannot
+/// split a command's argument record.
 fn stage_shipped_optional_commit_message() -> Staged {
     let workspace = tempdir().unwrap();
     let root = workspace.path().to_path_buf();
@@ -5003,17 +5005,11 @@ fn stage_shipped_optional_commit_message() -> Staged {
         &format!(
             r#"#!/bin/sh
 case "$1" in
-  add)
-    printf 'git-add' >> {log}
+  add|commit)
+    record="git-$1"
     shift
-    for arg in "$@"; do printf '|%s' "$arg" >> {log}; done
-    printf '\n' >> {log}
-    ;;
-  commit)
-    printf 'git-commit' >> {log}
-    shift
-    for arg in "$@"; do printf '|%s' "$arg" >> {log}; done
-    printf '\n' >> {log}
+    for arg in "$@"; do record="$record|$arg"; done
+    printf '%s\n' "$record" >> {log}
     ;;
   *)
     exec '{real_git}' "$@"
@@ -5028,14 +5024,14 @@ exit 0
     write_executable(
         &bin_dir.join("just"),
         &format!(
-            "#!/bin/sh\nprintf 'just' >> {log}\nfor arg in \"$@\"; do printf '|%s' \"$arg\" >> {log}; done\nprintf '\\n' >> {log}\nexit 0\n",
+            "#!/bin/sh\nrecord=just\nfor arg in \"$@\"; do record=\"$record|$arg\"; done\nprintf '%s\\n' \"$record\" >> {log}\nexit 0\n",
             log = events_log.display(),
         ),
     );
     write_executable(
         &bin_dir.join("gitnexus"),
         &format!(
-            "#!/bin/sh\nprintf 'gitnexus' >> {log}\nfor arg in \"$@\"; do printf '|%s' \"$arg\" >> {log}; done\nprintf '\\n' >> {log}\nexit 0\n",
+            "#!/bin/sh\nrecord=gitnexus\nfor arg in \"$@\"; do record=\"$record|$arg\"; done\nprintf '%s\\n' \"$record\" >> {log}\nexit 0\n",
             log = events_log.display(),
         ),
     );
