@@ -22,8 +22,23 @@
 //!
 //! The default command pins `current_dir` to the fixture `cwd`, points
 //! `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA` at the fixture `home`,
-//! removes `HOMEDRIVE`/`HOMEPATH`/`XDG_CONFIG_HOME`, and sets
-//! `CLAUDINE_RENDEZVOUS_REPORT=false` and `NO_COLOR=1`.
+//! removes `HOMEDRIVE`/`HOMEPATH`/`XDG_CONFIG_HOME`, sets
+//! `CLAUDINE_RENDEZVOUS_REPORT=false` and `NO_COLOR=1`, and silences lifecycle
+//! audio (below).
+//!
+//! ### The audio contract
+//!
+//! Shipped prompts carry live `say:`/`effect:` lifecycle actions, and a test
+//! that executes one through a fake provider still reaches the real speech
+//! and playback boundary — `feature-review.md` cheered aloud from
+//! `shipped_prompt_contract.rs` on 2026-09-10 that way. The default command
+//! therefore sets child-local `PLAYA_DRY_RUN=1` and points `PLAYA_SPOOL_DIR` at
+//! [`CliProcessFixture::audio_spool`], a directory inside the fixture workspace
+//! that dry-run never creates; a test that executes a shipped document proves
+//! its silence by asserting that directory is still absent afterwards. The
+//! one L1 file whose subject *is* durable audio publication
+//! (`detached_audio.rs`) opts out per key on the built command and holds the
+//! worker lock on its own private spool instead.
 //!
 //! ### The inheritance contract
 //!
@@ -325,6 +340,15 @@ impl CliProcessFixture {
         self.workspace.path()
     }
 
+    /// Where the default command sends detached audio jobs.
+    ///
+    /// The default `PLAYA_DRY_RUN=1` publishes nothing, so this directory is
+    /// created only if a child escaped the dry run; its absence after a run is
+    /// the proof that no lifecycle audio was published.
+    pub fn audio_spool(&self) -> PathBuf {
+        self.workspace.path().join("audio-spool")
+    }
+
     /// A `claudine` command with the hermetic defaults described in the module
     /// docs.
     pub fn command(&self) -> assert_cmd::Command {
@@ -474,7 +498,9 @@ impl<'fixture> ClaudineCommandBuilder<'fixture> {
             .env("LOCALAPPDATA", self.fixture.home())
             .env("PATH", self.path_value())
             .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-            .env("NO_COLOR", "1");
+            .env("NO_COLOR", "1")
+            .env("PLAYA_DRY_RUN", "1")
+            .env("PLAYA_SPOOL_DIR", self.fixture.audio_spool());
         command
     }
 

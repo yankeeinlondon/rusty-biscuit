@@ -54,6 +54,8 @@ fn write_probe_stub(bin_dir: &Path) {
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PATHEXT=[%PATHEXT%]\r\n",
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo COMSPEC=[%COMSPEC%]\r\n",
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo SYSTEMROOT=[%SystemRoot%]\r\n",
+                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PLAYA_DRY_RUN=[%PLAYA_DRY_RUN%]\r\n",
+                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PLAYA_SPOOL_DIR=[%PLAYA_SPOOL_DIR%]\r\n",
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo STUB=fixture-probe\r\n",
                 "exit /b 0\r\n",
             ),
@@ -81,6 +83,8 @@ fn write_probe_stub(bin_dir: &Path) {
   printf 'PATHEXT=[%s]\n' "$PATHEXT"
   printf 'COMSPEC=[%s]\n' "$COMSPEC"
   printf 'SYSTEMROOT=[%s]\n' "$SystemRoot"
+  printf 'PLAYA_DRY_RUN=[%s]\n' "$PLAYA_DRY_RUN"
+  printf 'PLAYA_SPOOL_DIR=[%s]\n' "$PLAYA_SPOOL_DIR"
   printf 'STUB=fixture-probe\n'
 } > "$CLAUDINE_PROBE_CAPTURE"
 exit 0
@@ -550,5 +554,30 @@ fn a_workspace_inside_the_checkout_is_rejected_by_naming_the_temp_dir_variable()
     assert!(
         common::checkout_containment_error(&sibling, &checkout).is_none(),
         "a sibling sharing a textual prefix must not read as containment"
+    );
+}
+
+/// The audio contract: a child sees `PLAYA_DRY_RUN=1` and a spool inside the
+/// fixture workspace, whatever the developer's shell exported, and the spool
+/// is not created by a run that publishes nothing.
+#[test]
+fn default_command_silences_lifecycle_audio_in_the_child() {
+    let (fixture, capture) = probe_fixture("fixture-audio-defaults");
+
+    let recorded = run_probe(fixture.command(), &capture);
+
+    assert_eq!(recorded["PLAYA_DRY_RUN"], "[1]", "the child must run audio in dry-run mode");
+    assert_same_dir(
+        recorded["PLAYA_SPOOL_DIR"].trim_matches(|c| c == '[' || c == ']'),
+        &fixture.audio_spool(),
+        "the child's spool must be the fixture's private one",
+    );
+    assert!(
+        fixture.audio_spool().starts_with(fixture.workspace_path()),
+        "the private spool must live inside the fixture workspace"
+    );
+    assert!(
+        !fixture.audio_spool().exists(),
+        "a dry run must not create the spool"
     );
 }
