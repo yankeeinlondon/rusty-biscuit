@@ -32,9 +32,17 @@ as one environment ([ci-runners.md](ci-runners.md)).
 
 ## Faithful reproduction on the WSL host
 
-A test that is green natively but red only on `wsl2-ubuntu` is almost always
-an archive-mode failure. Reproduce it on the guest declared by `BUILD_WSL`
-(if unset, this machine has no WSL host; say so and use CI):
+First identify the failing step and read the test summary. A red WSL job can
+mean provisioning, test execution, or artifact publication failed. Passing
+tests followed by an upload/finalization error are not evidence of a test
+regression; do not rerun the suite just to diagnose that upload failure.
+
+For an actual WSL-only test failure, archive-mode path and toolchain assumptions
+are useful first checks. Reproduce it on the guest declared by `BUILD_WSL`
+within the user's authorized test scope. An instruction not to rerun WSL
+applies to cross-check commands and CI jobs triggered by pushes alike. If the
+host is unset or the evidence is insufficient, explain the gap before launching
+another run. When reproduction is authorized:
 
 ```bash
 just cross-check <package> --os wsl <test-name-substring>

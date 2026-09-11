@@ -42,13 +42,17 @@ CI is the final proof, not the discovery loop. A full-scope run takes hours
 and every push cancels the previous one, so surface an OS's exact failure on
 the matching host first, then push once.
 
-When the repository provides a scope-only pre-push mode, prefer it over
-`git push --no-verify` when intentionally skipping local tests. Scope-only
-preserves exact-tree affected-scope evidence while leaving every OS test cell
-enabled in CI; `--no-verify` prevents the hook from producing any new evidence
-and forces CI to rediscover the scope. Rusty-biscuit has agreed to this design
-but does not implement the mode yet. The `rust-devops` skill owns the general
-scope versus validation evidence contract.
+A user's instruction not to rerun an environment also constrains CI triggered
+by a push. Verify every requested exclusion before pushing; a successful macOS
+receipt alone does not suppress WSL. The current verifier/calculator supports
+only one excluded environment per run. If that cannot satisfy the instruction,
+explain the gap before triggering CI; do not treat automatic jobs as exempt.
+
+The proposed scope-only mode publishes scope without new test outcomes, but
+is not implemented yet. `git push --no-verify` also produces no new evidence;
+already-published matching receipts remain usable by CI. See the `rust-devops`
+skill's [evidence and execution contract](../rust-devops/ci-cd.md) before
+selecting a push mode.
 
 ## Read this first when a test is red on one environment only
 
