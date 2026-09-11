@@ -189,8 +189,8 @@ harness coverage is required alongside the PTY suite, not instead of it.
   chooser is drawn instead of the confirmation. The mutation was reverted and
   the file is byte-identical to HEAD.
 - Linux: CI's claudine L2 leg runs on tmux; the WezTerm test skips there by
-  the backend gate. WSL2: **unmet** — it needs the Unix file run inside the
-  guest, which the archive-mode leg does not do for L2.
+  the backend gate. WSL2: met, by running the same suites inside the guest in
+  archive mode — see the end of the next section.
 
 ### Native Windows interactive coverage — met
 
@@ -255,6 +255,20 @@ Evidence, final state:
   Ken was working in. And `just cross-check --os windows` reports a WezTerm L2
   test **passing when it is skipping** (no `WEZTERM_UNIX_SOCKET` in that SSH
   session; ~0.02 s) — read the duration, or set the required-backend variable.
-- WSL2 interactive coverage remains unmet: the Unix suites need to run inside
-  the guest, which the archive-mode leg does not do for L2. Native Windows
-  and WSL2 CI legs remain the tracked provisioning gap.
+- WSL2: **met.** The Unix suites run unchanged inside the guest in archive
+  mode — the shape of CI's `wsl2-ubuntu` leg, with `terminal-tests` enabled
+  and `BISCUIT_TEST_REQUIRED_BACKENDS=tmux` so a skip could not print as a
+  pass: 17 of 17 pass. The tmux capture test executed (22.3 s; the guest's
+  login shell was slow while its `~/.config` share was down, see below), all
+  nine PTY tests executed (0.3–0.7 s), and the predicate unit test and both
+  shipped-router tests pass. The WezTerm capture line is a 0.037 s skip — no
+  WezTerm in the guest — recorded as such. `just cross-check --os wsl` itself
+  could not run this: the guest's `~/.config` is a CIFS mount of the
+  `192.168.100.97` `config` share, unreachable at the time, so `git` died on
+  its global config and cargo's package-file listing (gitoxide, honoring the
+  global excludes at `$XDG_CONFIG_HOME/git/ignore`) died with "Host is down".
+  The run used cross-check's exact sequence by hand with
+  `GIT_CONFIG_GLOBAL=/dev/null` and `XDG_CONFIG_HOME` pointed at an empty
+  local directory — nothing the tests do reads that share. Native Windows and
+  WSL2 CI legs remain the tracked provisioning gap; the behavioral evidence
+  for both now exists.

@@ -248,5 +248,7 @@ active directory while the remaining OS evidence is pending.
   sides) with a unit test pinning both spellings. The CI Level 2 gap for
   Windows and WSL2 (`.github/ci/environments.json`, owner and expiry recorded
   there) remains a provisioning item, never an authorization to narrow this
-  specification's OS matrix; WSL2 interactive coverage is still unmet. Record:
+  specification's OS matrix. WSL2 interactive coverage is also met: the Unix
+  suites pass unchanged inside the guest in archive mode with tmux mandatory
+  (17 of 17). Record:
   [plan.md](./plan.md#native-windows-interactive-coverage--met).
