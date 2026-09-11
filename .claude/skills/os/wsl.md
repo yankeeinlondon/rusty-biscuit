@@ -127,8 +127,13 @@ guest), two things fail before any test runs:
   `XDG_CONFIG_HOME` at an empty local directory for the build.
 
 Nothing the tests read lives on that share, so both bypasses are safe for a
-run. A login shell in the guest is also slow while the share is down
-(profile tooling stats paths under `~/.config`), which shows up as a
-20-second-plus first tmux capture; that is the host, not the test.
-`scripts/cross-check.sh` does not yet export either variable in its
-`unix_prelude`; doing so would let the recipe survive the share being down.
+run, and since 2026-09-11 `scripts/cross-check.sh` sets both in its Unix
+preamble — the recipe survives the NAS being down. A login shell in the
+guest is still slow while the share is down (profile tooling stats paths
+under `~/.config`), which shows up as a 20-second-plus first tmux capture;
+that is the host, not the test.
+
+`cross-check` also forwards `BISCUIT_TEST_REQUIRED_BACKENDS` from your shell
+to every remote run, so `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just cross-check
+claudine-cli --os wsl --features terminal-tests level2_` cannot pass by
+skipping.
