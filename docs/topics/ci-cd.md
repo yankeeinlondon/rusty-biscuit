@@ -39,6 +39,26 @@ scope to match, including when the PR target has advanced. The hook is controlle
 - `warn` — run and report, but never block the push
 - `strict` — run and block the push on failure (the default)
 
+Parallel test workers default to `max(1, logical_cores - 2)` locally. CI uses
+all logical cores when there are four or fewer, and `logical_cores - 2` on
+larger runners. This preserves capacity on developer and larger shared hosts
+without crippling small CI runners. It is a concurrency setting, not CPU
+affinity or a guarantee that cores stay reserved. Shared-resource L2 suites
+remain at one worker; `l2-parallel-self-spawn` opts isolated suites into the
+parallel policy, and an explicit `BISCUIT_L2_THREADS` takes precedence.
+
+`_test_threads` in `just/devops.just` calculates the shared worker default.
+It recognizes CI through `CI=true`, `GITHUB_ACTIONS=true`, or a nonempty
+`BISCUIT_CI_ENVIRONMENT`; selecting the `ci` Nextest profile alone does not
+change a local host's budget. L1, sanity, and real-resource recipes export
+`NEXTEST_TEST_THREADS` while preserving an explicit value. Direct local Nextest
+runs inherit `test-threads = -2` from `.config/nextest.toml`. Cargo build-job
+limits are unchanged.
+
+Existing CI-profile test groups remain narrower limits: Claudine L1 allows
+four concurrent tests, Claudine CLI L1 allows one, and Sniff L1 on Windows
+allows one. These caps still apply when the overall worker budget is larger.
+
 `RUSTY_BISCUIT_PRE_PUSH_AREAS` (package names or area directories) replaces the computed scope with
 a fixed selection. Install the hook once with:
 
@@ -46,8 +66,8 @@ a fixed selection. Install the hook once with:
 ln -s ../../.githooks/pre-push .git/hooks/pre-push
 ```
 
-The hook itself is regression-tested in CI by `hooks-tests.yml`, so changes to `.githooks/**`,
-`justfile`, or `just/**` re-validate the contract.
+Run the hook's local regression suite with
+`bash .githooks/tests/test-pre-push.sh` when changing its contract.
 
 ### Layer 2 — Dependency-scoped CI
 

@@ -5,8 +5,8 @@ description: |-
   test design, fixture isolation, `require_level!` gating, nextest filtersets,
   suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 7055b0e89017847d-b54d26bf688ff20f
-last_updated: 2026-09-10
+hash: 7055b0e89017847d-64136b866276f54b
+last_updated: 2026-09-11
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -373,8 +373,14 @@ A test that (a) spawns its **own** uniquely-named session/PTY (e.g.
 tests and pay the `-j 1` tax purely as collateral. This is what
 `BISCUIT_L2_THREADS=N` exploits: with no `BISCUIT_SHARED_*` exported,
 `shared_or_spawn()` itself falls back to an **owned, `Drop`-cleaned** pane, so the
-whole tier self-isolates and runs at `-j N`. claudine wires this in its
-`test-l2` at `min(cores, 8)` (~6× faster); other areas keep the serial default.
+whole tier self-isolates and runs at `-j N`. The
+`l2-parallel-self-spawn` runner marker enables this for isolated suites such as
+claudine-cli. Local runs default to `max(1, logical_cores - 2)` workers. CI uses
+all logical cores on runners with four or fewer, otherwise `logical_cores - 2`.
+This leaves capacity for developer work and larger shared hosts without
+crippling small CI runners. Worker count does not set CPU affinity or guarantee
+reserved capacity. Explicit `BISCUIT_L2_THREADS` takes precedence;
+shared-resource suites retain the serial default.
 
 **Backend parallel-safety:** **tmux** = headless, immune to the host gotcha,
 cleanup reaps only dead-pid sessions → fully parallel-safe (validated).

@@ -82,6 +82,18 @@ none are recorded here (see "Noise" below).
 
 ## Cross-cutting
 
+- **Test worker budgets follow the shared policy.** `_test_threads` in
+  `just/devops.just` uses `max(1, logical_cores - 2)` locally; CI uses all cores
+  through four and subtracts two above four. CI means `CI=true`,
+  `GITHUB_ACTIONS=true`, or nonempty `BISCUIT_CI_ENVIRONMENT`, not merely the
+  Nextest `ci` profile. Worker counts do not set CPU affinity, reserve cores,
+  or change Cargo build jobs. Explicit thread settings and narrower CI-profile
+  groups remain effective: Claudine L1 is capped at four, Claudine CLI L1 at
+  one, and Sniff Windows L1 at one. Shared-resource L2 stays serial; isolated
+  suites use the `l2-parallel-self-spawn` marker. See the
+  [central policy](../../../docs/topics/ci-cd.md#layer-1--local-pre-push-hook)
+  for override and direct Nextest behavior.
+
 - **A clean pre-push can replace one hosted environment.** The hook uses
   `sniff os --json` to distinguish macOS, Linux, native Windows, and WSL2, then
   records the exact source-package L1/L2 scope in an OS-specific Git note. CI

@@ -233,8 +233,13 @@ command surface:
 - **`node-22` / `pnpm-10`** — the JavaScript toolchain a companion suite runs
   under (homelab-frontend, owned by homelab-server).
 - **`l2-parallel-self-spawn`** — run the L2 tier in `_test_l2`'s parallel
-  self-spawn mode (`min(cores, 8)`), for suites dominated by self-isolating
-  tests (claudine-cli).
+  self-spawn mode for suites dominated by self-isolating tests (claudine-cli).
+  The default worker count is `max(1, logical_cores - 2)` locally. CI uses all
+  logical cores when there are four or fewer, otherwise `logical_cores - 2`.
+  This preserves capacity on developer and larger shared hosts without
+  crippling small CI runners. It sets test concurrency, not CPU affinity or a
+  guaranteed reservation. An explicit `BISCUIT_L2_THREADS` takes precedence;
+  shared-resource L2 suites retain one worker.
 - **`neovim`** — provisions Neovim for packages whose L2 contract exercises
   the editor backend.
 - **`zed-extension`** — provisions the digest-verified official Zed extension

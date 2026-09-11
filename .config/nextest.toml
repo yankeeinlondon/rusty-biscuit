@@ -32,6 +32,10 @@ claudine-cli-ci-l1 = { max-threads = 1 }
 sniff-windows-l1 = { max-threads = 1 }
 
 [profile.default]
+# Direct local nextest invocations also leave capacity for other host work.
+# Canonical just recipes calculate the CI <=4-core exception and export
+# NEXTEST_TEST_THREADS; explicit CLI settings retain Nextest's precedence.
+test-threads = -2
 # A test that passes only on retry is still a failed test run. Keep retries
 # disabled so timing and resource-contention defects remain visible locally.
 retries = 0

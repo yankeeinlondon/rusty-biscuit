@@ -22,6 +22,27 @@ underline := '\033[4m'
 _storage_preflight:
     @repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"; if [[ -n "$repo_root" && -f "$repo_root/scripts/storage-preflight.sh" ]]; then bash "$repo_root/scripts/storage-preflight.sh"; fi
 
+# Worker budget: keep two slots for other host work, except on small CI
+# runners where reserving them would discard half or more of the capacity.
+# This limits test processes, not CPU affinity or Cargo build jobs.
+_test_threads:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cores=""
+    if command -v sniff >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+        cores="$(sniff cpu --json 2>/dev/null | jq -er '.logical_cores | select(type == "number" and . > 0)' 2>/dev/null)" || cores=""
+    fi
+    # Bootstrap and archive-only CI environments may not have Sniff installed.
+    if [[ ! "$cores" =~ ^[1-9][0-9]*$ ]]; then
+        cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-1}")"
+    fi
+    [[ "$cores" =~ ^[1-9][0-9]*$ ]] || cores=1
+    if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]] && (( cores <= 4 )); then
+        echo "$cores"
+    else
+        echo "$(( cores > 2 ? cores - 2 : 1 ))"
+    fi
+
 # Build the package
 _build package pkg_name *args="": _storage_preflight
     #!/usr/bin/env bash
@@ -502,6 +523,8 @@ _test_local_all specs *args="": _storage_preflight
     set -euo pipefail
 
     read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    test_threads="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
+    export NEXTEST_TEST_THREADS="$test_threads"
     forwarded=({{ args }})
 
     specs='{{ specs }}'
@@ -821,6 +844,8 @@ _test pkg *args="": _storage_preflight
 
     # One overridable nextest invocation for both the probe and the run.
     read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    test_threads="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
+    export NEXTEST_TEST_THREADS="$test_threads"
 
     forwarded=({{ args }})
     archive_mode=0
@@ -1416,6 +1441,8 @@ _sanity pkg *args="": _storage_preflight
     SECONDS=0
     just _stage_junit_reset
     read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    test_threads="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
+    export NEXTEST_TEST_THREADS="$test_threads"
     exit_code=0
     "${nextest_bin[@]}" run -p {{ pkg }} "${targets[@]}" \
         -E "$(just _tier_filter sanity '{{ pkg }}')" \
@@ -1478,6 +1505,8 @@ _test_l2 pkg *args="": _storage_preflight
     echo
 
     read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    test_threads="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
+    export NEXTEST_TEST_THREADS="$test_threads"
 
     # Every nextest invocation below is bracketed so its JUnit report is staged
     # before the next one can overwrite it — including a failing invocation.
@@ -1679,6 +1708,8 @@ _test_real pkg *args="": _storage_preflight
     just _stage_junit_reset
     exit_code=0
     read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    test_threads="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
+    export NEXTEST_TEST_THREADS="$test_threads"
     "${nextest_bin[@]}" run -p {{ pkg }} -E "$(just _tier_filter real)" --no-tests=pass {{ args }} || exit_code=$?
     just _stage_junit real "{{ pkg }}" "${exit_code}" "${SECONDS}"
     exit "${exit_code}"

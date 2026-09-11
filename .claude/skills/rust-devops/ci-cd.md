@@ -25,6 +25,24 @@ document. Downstream jobs consume that output rather than rediscovering scope.
 
 ## Local scope and validation evidence
 
+Parallel test workers default to `max(1, logical_cores - 2)` locally. CI uses
+all logical cores on runners with four or fewer, otherwise `logical_cores - 2`.
+The policy preserves capacity on developer and larger shared hosts without
+crippling small CI runners. It controls test concurrency, not CPU affinity or a
+guaranteed reservation. Shared-resource L2 stays serial; isolated suites opt in
+through `l2-parallel-self-spawn`, with explicit `BISCUIT_L2_THREADS` overriding
+the default.
+
+`_test_threads` in `just/devops.just` detects CI using `CI=true`,
+`GITHUB_ACTIONS=true`, or nonempty `BISCUIT_CI_ENVIRONMENT`; the `ci` Nextest
+profile alone leaves the local budget in effect. L1, sanity, and real-resource
+recipes preserve explicit `NEXTEST_TEST_THREADS` and otherwise export this
+default. Direct local Nextest runs use `.config/nextest.toml`'s
+`test-threads = -2`. Cargo build-job limits are unchanged. Existing CI-profile
+groups still cap Claudine L1 at four, Claudine CLI L1 at one, and Sniff L1 on
+Windows at one, even when the overall budget is larger. See the
+[central policy](../../../docs/topics/ci-cd.md#layer-1--local-pre-push-hook).
+
 Keep two claims distinct:
 
 - **Scope evidence** identifies what the deterministic calculator selected for

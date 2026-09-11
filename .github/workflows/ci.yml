@@ -330,16 +330,20 @@ jobs:
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@just
       - name: Test PR validation reuse
         run: python3 scripts/ci/test_reuse_validation.py
       - name: Test the scope calculator
         run: python3 scripts/ci/test_affected_scope.py
+      - name: Test concurrency policy and local L2 routing
+        run: python3 scripts/ci/test_ci_local.py
       - name: Test local validation evidence
         run: python3 scripts/ci/test_local_evidence.py
       # `--no-default-features` deselects the crates the other two bins in
       # `scripts/` need and this one does not. Same shape as ci-verdict's build.
       - name: Test the rollup and verdict
         run: |
+          export NEXTEST_TEST_THREADS="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
           cargo nextest run \
             --manifest-path scripts/Cargo.toml \
             --no-default-features --bin ci-rollup

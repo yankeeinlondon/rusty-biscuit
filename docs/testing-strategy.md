@@ -3,7 +3,7 @@ title: Testing Strategy
 status: living
 audience: technical person but with no knowledge of this monorepo
 created: 2026-05-24
-updated: 2026-09-10
+updated: 2026-09-11
 ---
 
 # Rusty Biscuit Testing Strategy
@@ -338,6 +338,15 @@ when the variable is set and otherwise spawn their own background pane. The
 recipe tears the panes down when nextest exits. A backend whose tooling is
 missing on the host is silently skipped at spawn time, and its tests then skip
 through `require_level!`.
+
+Suites marked `l2-parallel-self-spawn` use isolated per-test resources instead
+of shared panes and can run concurrently. Their default worker count is
+`max(1, logical_cores - 2)` locally. CI uses all logical cores on runners with
+four or fewer, and `logical_cores - 2` on larger runners. This leaves capacity
+for developer work and larger shared hosts without crippling small CI runners;
+it controls test workers, not CPU affinity or a guaranteed reservation.
+`BISCUIT_L2_THREADS` can override the default. Suites that share terminal or
+other global resources remain serial.
 
 ## Linting and formatting
 

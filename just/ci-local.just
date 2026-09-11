@@ -24,9 +24,8 @@
 # full scope tractable.
 #
 # Also replicated: preflight's CI-infra self-test suite
-# (`scripts/ci/test_affected_scope.py`, ~1s on every run). It is what catches
-# a stale scope fixture — e.g. a new workspace dependency edge — locally
-# instead of on three preflight cells.
+# (scope calculation and local concurrency/routing). These catch a stale scope
+# fixture or a serial L2 regression locally before publishing validation evidence.
 #
 # Not replicated: L3/browser tiers, WSL archives, companion suites, and other
 # operating systems. `--l2` adds the source packages' hostable L2 tier.
@@ -167,15 +166,16 @@ ci-local *args="":
         esac
     fi
 
-    # Preflight parity: CI runs this exact suite on every OS before any
-    # package gate. Quiet on success; full unittest output on failure.
+    # Validate scheduling before treating package results as reusable evidence.
     selftest_log="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-selftest.XXXXXX")"
-    if python3 scripts/ci/test_affected_scope.py > "${selftest_log}" 2>&1; then
-        passed+=("preflight ci-infra self-test")
-    else
-        cat "${selftest_log}"
-        failed+=("preflight ci-infra self-test")
-    fi
+    for suite in test_affected_scope.py test_ci_local.py; do
+        if python3 "scripts/ci/${suite}" > "${selftest_log}" 2>&1; then
+            passed+=("ci-infra ${suite}")
+        else
+            cat "${selftest_log}"
+            failed+=("ci-infra ${suite}")
+        fi
+    done
     rm -f "${selftest_log}"
 
     while IFS= read -r package; do
@@ -223,12 +223,17 @@ ci-local *args="":
                 if [[ " ${backends} " == *" kitty "* ]] && command -v kitty > /dev/null 2>&1 && [[ -n "${KITTY_LISTEN_ON:-}" ]]; then
                     required+=(kitty)
                 fi
+                l2_threads="${BISCUIT_L2_THREADS:-1}"
+                parallel_l2="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | (.runner_tools // []) | index("l2-parallel-self-spawn") != null' "${scope_file}")"
+                if [[ "${parallel_l2}" == "true" ]]; then
+                    l2_threads="${BISCUIT_L2_THREADS:-${NEXTEST_TEST_THREADS:-$(just _test_threads)}}"
+                fi
                 required_csv="$(IFS=,; echo "${required[*]}")"
                 if (( ${#required[@]} == 0 )); then
                     if [[ "${l2_here}" == "true" ]]; then
                         failed+=("L2 ${package} (no non-focusing backend available)")
                     fi
-                elif BISCUIT_TEST_REQUIRED_BACKENDS="${required_csv}" just _test_l2 "${package}" ${test_args}; then
+                elif BISCUIT_L2_THREADS="${l2_threads}" BISCUIT_TEST_REQUIRED_BACKENDS="${required_csv}" just _test_l2 "${package}" ${test_args}; then
                     passed+=("L2 ${package} (${required_csv})")
                 else
                     failed+=("L2 ${package} (${required_csv})")
