@@ -1,0 +1,110 @@
+# CI contract schemas
+
+Two documents carry every decision this repository's CI makes. Both are defined
+once in [`scripts/ci/schema.py`](../../../scripts/ci/schema.py), which is also
+their validator.
+
+| Document | Version | Written by | Read by |
+|---|---|---|---|
+| Resolved plan | 1 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
+| Validation receipt | 2 | the pre-push hook, `scripts/cross-check.sh` | `scripts/ci/local_evidence.py`, the planner, `ci-rollup` |
+
+`contract.json` in this directory is the field contract dumped from that module
+so Rust tooling can assert against it without running Python. Regenerate it with
+`python3 scripts/ci/schema.py`; `scripts/ci/test_schema.py` fails when it drifts.
+
+> **Status.** `affected_scope.py` emits the resolved plan as of Phase 3
+> (`--resolved-plan`, or `--plan-out` alongside the legacy scope document that
+> `ci.yml`, `just/ci-local.just`, and `ci-rollup` still read, projected from the
+> same cells). As of Phase 4 both receipt producers — the pre-push hook and
+> `scripts/cross-check.sh` — write version 2, and version 1 is read-only.
+> Phases 5 and 6 move the remaining consumers onto `cells` and delete the
+> legacy projection.
+>
+> The version-1 field list has been amended twice, both times additively and
+> both times without a version bump because no consumer had read the document
+> yet. Phase 3 added `source_packages` and `reverse_dependencies`; Phase 4 added
+> the optional `input_paths` (a package's build closure, which the gate-input
+> identity is defined over) and `evidence_rejections`.
+
+## Resolved plan
+
+One document describing everything a run will do, consumed identically by local
+validation and hosted CI. It replaces the unversioned scope document, whose
+`excluded_environment` field could suppress a *matrix* entry while leaving the
+*policy* expecting a CI result for it — the PR #76 seven-cell regression.
+
+Identity and grouping are deliberately separate. **Package is the stored
+identity** of every cell, artifact, baseline entry, and receipt. **Area is a
+derived grouping field** carried alongside it for presentation and outcome
+ownership. A cell whose `area` disagrees with its package record is invalid.
+
+- `areas[]` — one entry per selected area, with the reason it was selected and
+  the packages contributing to it. Nested areas such as `claudine/rendezvous`
+  are their own entries, never folded into a parent.
+- `packages[]` — the package records: gates, explicit Cargo `targets`, tiers,
+  features, backends, native dependencies, and an optional `dependent_seam`
+  describing downstream packages compiled inside this package's own check.
+  A `gates = false` package holds a record with an empty gate list and no
+  cells: a governed absence stays visible without demanding a result.
+- `source_packages[]` and `reverse_dependencies[]` — which packages *changed*,
+  and which direct reverse dependents were reported but selected nowhere. An
+  unchanged dependent receives no area, package record, or cell (AC1); whether
+  its seam is compiled at all is Open Question 1.
+- `input_paths[]` on a package record — the manifest directories of its build
+  closure, dev-dependencies included. The gate-input identity of a cell is
+  computed over these plus that gate's global inputs; a plan that omits them
+  makes its cells exact-tree-only for reuse. Optional, because only a verifier
+  needs them.
+- `evidence_rejections[]` — one coded reason per receipt cell that was refused,
+  so a reviewer can tell a missing receipt from a rejected one. Optional.
+- `cells[]` — one record per `{package, environment, gate}`, carrying
+  `execution` (what will happen), `origin` (where the result comes from),
+  `state` (what is true now), the target kinds covered, which gate supplied the
+  compile coverage, and a selection reason.
+- `accepted_evidence[]`, `policy_gaps[]`, `prohibited_cells[]` — the three
+  reasons a cell is not executed, kept as separate lists so none can be
+  silently read as another.
+
+`execution`, `origin`, and `state` are independent axes. The cross-field rules
+that make a combination meaningful — a reused cell must name its evidence, an
+accepted gap must name its governing policy entry, a prohibited cell can never
+be scheduled — are enforced by `validate_resolved_plan`.
+
+## Validation receipt
+
+Version 2 keys evidence per `{package, environment, gate}` instead of per
+environment, so results from several hosts combine without overwriting one
+another. Each cell carries its outcome, exit code, completion, counts, duration,
+bounded failure detail, backend proof, report path, and its **gate-input
+identity** — the hash of the build closure's tree entries plus the global inputs
+that gate depends on. Two heads with equal gate-input identity for a cell may
+share that cell's result; nothing else makes an older result reusable.
+
+Verification *recomputes* that identity over both trees rather than trusting the
+one the receipt stored: a stored identity is an unverified claim by the host
+that wrote it, and both trees are present locally, so the comparison can be made
+instead of believed. The stored value remains as provenance.
+
+A gate that produced no report is recorded `partial`. It has an exit code and
+nothing to attribute it to, so it is published (the run happened) and refused
+for reuse (`incomplete-run`), rather than being made unpublishable or silently
+credited as a tested cell.
+
+A `complete` failing run is reusable evidence and stays a failure. An
+`interrupted` run contributes nothing; an interrupted *cell* inside a complete
+run is rejected alone and leaves its siblings reusable.
+
+### Version-1 receipts
+
+Version 1 has no per-cell outcome: presence in a package list *is* the pass
+claim. It is accepted only on exact tree identity, only as pass-only
+whole-environment evidence, never through gate-input equivalence, and is never
+upgraded in place. Its measurements render as the exact string
+`not recorded (v1 receipt)`.
+
+## Rejection vocabulary
+
+Every refusal to accept evidence names one code from `schema.REJECTIONS`, so the
+planner, the verifier, and `just ci-local --plan` describe the same refusal the
+same way. Adding a code is a contract change.

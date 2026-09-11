@@ -1,0 +1,170 @@
+{
+  "resolved_plan": {
+    "schema_version": 1,
+    "document": {
+      "schema_version": true,
+      "base": true,
+      "head": true,
+      "change_class": true,
+      "full_scope": true,
+      "full_scope_gates": true,
+      "areas": true,
+      "packages": true,
+      "source_packages": true,
+      "reverse_dependencies": true,
+      "cells": true,
+      "accepted_evidence": true,
+      "evidence_rejections": false,
+      "policy_gaps": true,
+      "prohibited_cells": true,
+      "job_estimate": true,
+      "preflight_os": true,
+      "preflight_reason": true,
+      "flags": true
+    },
+    "area": {
+      "area": true,
+      "selection_reason": true,
+      "packages": true
+    },
+    "package": {
+      "package": true,
+      "area": true,
+      "selection_reason": true,
+      "gates": true,
+      "targets": true,
+      "tiers": true,
+      "test_args": true,
+      "check_args": true,
+      "l2_backends": true,
+      "runner_tools": true,
+      "companion_suites": true,
+      "native": true,
+      "input_paths": false,
+      "dependent_seam": false
+    },
+    "cell": {
+      "package": true,
+      "area": true,
+      "environment": true,
+      "gate": true,
+      "execution": true,
+      "origin": true,
+      "state": true,
+      "target_kinds": true,
+      "compile_coverage_from": true,
+      "selection_reason": true,
+      "evidence": false,
+      "gap": false,
+      "prohibition": false
+    }
+  },
+  "receipt": {
+    "schema_version": 2,
+    "legacy_schema_version": 1,
+    "document": {
+      "schema_version": true,
+      "environment": true,
+      "base": true,
+      "head": true,
+      "tree": true,
+      "scope_identity": true,
+      "completion": true,
+      "host": true,
+      "cells": true
+    },
+    "cell": {
+      "package": true,
+      "gate": true,
+      "outcome": true,
+      "exit_code": true,
+      "completion": true,
+      "counts": true,
+      "duration_s": true,
+      "gate_input_identity": true,
+      "backends": true,
+      "report": true,
+      "failed_tests": false,
+      "failure_detail_truncated": false
+    },
+    "host": {
+      "os": true,
+      "kernel": true,
+      "report_dir": true
+    },
+    "counts": [
+      "total",
+      "passed",
+      "failed",
+      "skipped",
+      "errored"
+    ],
+    "failure_detail_limit": 20,
+    "unrecorded_measurement": "not recorded (v1 receipt)"
+  },
+  "vocabulary": {
+    "environments": [
+      "ubuntu-latest",
+      "windows-latest",
+      "macos-latest",
+      "wsl2-ubuntu"
+    ],
+    "gates": [
+      "lint",
+      "check",
+      "L1",
+      "L2",
+      "browser"
+    ],
+    "target_kinds": [
+      "lib",
+      "bin",
+      "test",
+      "example",
+      "bench"
+    ],
+    "executions": [
+      "execute",
+      "reuse",
+      "omit"
+    ],
+    "origins": [
+      "ci",
+      "local",
+      "prior-local",
+      "none"
+    ],
+    "cell_states": [
+      "pending",
+      "reused",
+      "accepted-gap",
+      "prohibited"
+    ],
+    "accepted_gap_state": "ACCEPTED GAP",
+    "completions": [
+      "complete",
+      "interrupted",
+      "partial"
+    ],
+    "outcomes": [
+      "pass",
+      "fail"
+    ],
+    "rejections": [
+      "missing-receipt",
+      "malformed-receipt",
+      "unknown-schema-version",
+      "unknown-environment",
+      "unknown-gate",
+      "unknown-package",
+      "tree-mismatch",
+      "gate-inputs-changed",
+      "incomplete-run",
+      "conflicting-evidence",
+      "dirty-tree",
+      "v1-requires-exact-tree",
+      "v1-not-equivalence-eligible",
+      "v1-is-pass-only"
+    ]
+  }
+}
