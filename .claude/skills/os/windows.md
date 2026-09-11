@@ -37,6 +37,42 @@ Contract to test against: `ctx.repo_root`, `package_root`,
 without verbatim prefixes on every OS (`biscuit_file::to_portable_string`).
 Compare against that, never against `to_string_lossy()`.
 
+6. **A user-typed path fragment never matches walker output by raw text.**
+   `ignore::Walk` yields native `\` paths; the fragment is whatever was typed,
+   `/` on every platform. Claudine's partial-file and operation-file
+   autocomplete compared them raw and found zero candidates on Windows for
+   every `/`-spelled partial, so the typed "no existing file matched" failure
+   fired where macOS offered the confirmation (found 2026-09-10 by the first
+   native-Windows Level 2 run; `claudine/cli/src/completion/scopes.rs`
+   `path_matches_query`). Compare both sides through `to_portable_string`
+   and normalize `\` in the fragment. The non-interactive Windows tests had
+   passed the whole time — the zero-candidate path and the interaction-denied
+   path produce the same diagnostic — which is why only a real-terminal run
+   on Windows could see it.
+
+## WezTerm on `build-win`
+
+- `~/.wezterm.lua` there `dofile`s the shared config from `X:` and then a UNC
+  path. `X:` is a per-logon mapped drive that no SSH, nextest, or mux-server
+  process has, so every config *evaluation* from those contexts blocks for
+  the SMB connect timeout — measured at 21.2–21.3 s, deterministic, on each
+  `wezterm cli spawn`; Windows negative-caches the failure for well under a
+  minute, so a second spawn seconds later is 0.1 s. `wezterm cli list` does
+  not evaluate the config at all, which is why the harness's availability
+  gate passes and only the spawn times out (15 s `SPAWN_TIMEOUT`).
+  `biscuit-test-harness` now runs every `wezterm` client under an empty
+  `WEZTERM_CONFIG_FILE` unless the caller set one; the mux server keeps its
+  own config. Do not "fix" this by raising the timeout.
+- A headless `wezterm-mux-server` reachable through `WEZTERM_UNIX_SOCKET`
+  (`C:\Users\ken\.local\share\wezterm\sock`) is all the Level 2 tier needs
+  there; the twin in `level2_windows_provided_partial_file_capture.rs` passes
+  against it in ~4 s. Never blanket-stop mux servers on that host — one of
+  them may be carrying the session the developer is working in.
+- `cross-check --os windows` runs in an SSH session with no
+  `WEZTERM_UNIX_SOCKET`, so a WezTerm Level 2 test **skips there and nextest
+  prints PASS in ~0.02 s**. Read the duration, or set
+  `BISCUIT_TEST_REQUIRED_BACKENDS=wezterm` so a missing backend fails.
+
 ## Environment and processes
 
 - **Environment variable names are case-insensitive.** Iterating
