@@ -99,7 +99,10 @@ before doing anything. The harness only ever talks to the mux named by
 do — but it can stall them (a `dofile` of an unreachable network path blocked
 `spawn` for 21 s on the Windows build host, against a 15 s `SPAWN_TIMEOUT`),
 fail them, or add log lines to stderr. `WezTermHarness` therefore runs its
-clients under an empty `WEZTERM_CONFIG_FILE` unless the caller has set one. A
+clients under an empty `WEZTERM_CONFIG_FILE` unless the caller has set one.
+Each client owns a private temporary config until it exits, then removes it;
+concurrent clients never rewrite a shared path. Config preparation errors are
+reported through the operation's normal error path. A
 test that shells out to `wezterm cli` on its own should do the same, or go
 through the harness.
 

@@ -62,7 +62,10 @@ Compare against that, never against `to_string_lossy()`.
   gate passes and only the spawn times out (15 s `SPAWN_TIMEOUT`).
   `biscuit-test-harness` now runs every `wezterm` client under an empty
   `WEZTERM_CONFIG_FILE` unless the caller set one; the mux server keeps its
-  own config. Do not "fix" this by raising the timeout.
+  own config. The empty config is a private, uniquely created temporary file
+  retained until that client exits and then removed; creation/write errors
+  propagate rather than selecting an existing shared pathname. Do not "fix"
+  this by raising the timeout.
 - A headless `wezterm-mux-server` reachable through `WEZTERM_UNIX_SOCKET`
   (`C:\Users\ken\.local\share\wezterm\sock`) is all the Level 2 tier needs
   there; the twin in `level2_windows_provided_partial_file_capture.rs` passes
@@ -102,6 +105,14 @@ Compare against that, never against `to_string_lossy()`.
   `signal-handling.md`, "Windows parity".
 
 ## The `windows-latest` leg
+
+- **Malformed bytes with an audio extension still reach host playback.**
+  Playa's format detector accepts a recognized extension when header detection
+  fails; native decode failure then falls back to installed host players. The
+  detached CLI journal test's invalid `.wav` therefore depended on the Windows
+  runner's players; a CI journal timeout exposed this mismatch. Worker-failure fixtures
+  use an unrecognized extension and assert source rejection before any backend
+  is reached; deterministic library tests cover playback-error classification.
 
 Slowest build phase of the four CI legs, fewer test identities because
 `#![cfg(unix)]` binaries are excluded (declare them as platform exclusions,

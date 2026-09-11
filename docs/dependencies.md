@@ -2,6 +2,9 @@
 
 ## Recent Dependency Notes
 
+- `biscuit-test-harness` uses `tempfile` as a regular dependency to retain private
+  WezTerm client configuration files through subprocess completion and remove
+  them afterward.
 - `playa/lib` uses `fs4` for its private cross-process spool locks,
   `biscuit-hash` for stable user/cache fingerprints, `chrono` for protocol
   deadlines, and `windows-sys` for atomic replacement on Windows. `playa-cli`

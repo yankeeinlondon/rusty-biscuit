@@ -330,23 +330,36 @@ fn cleanup_holds_queue_ownership_across_the_release_of_worker_ownership() {
 #[serial_test::serial]
 fn requester_exit_is_followed_by_worker_failure_journal_and_clean_exit() {
     let root = TestRoot::new("requester-exit");
-    let invalid = root.0.join("not-really-audio.wav");
+    // A recognized extension would pass format detection and reach real native
+    // decoding and host-player fallback. This fixture tests worker journaling,
+    // so rejection must happen before either audio backend is consulted.
+    let invalid = root.0.join("not-really-audio.invalid");
     fs::write(&invalid, b"not audio").expect("invalid fixture should write");
+    assert!(playa::Audio::from_path(&invalid).is_err());
 
     let status = playa_command(&root.0, &root.0)
-        .args(["play", "not-really-audio.wav", "--background"])
+        .args(["play", "not-really-audio.invalid", "--background"])
         .status()
         .expect("requester should launch");
     assert!(status.success(), "requester returns after durable publication");
 
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     let journal = root.0.join("journal.jsonl");
-    while !journal.exists() && std::time::Instant::now() < deadline {
+    let contents = loop {
+        if let Ok(contents) = fs::read_to_string(&journal)
+            && contents.ends_with('\n')
+        {
+            break contents;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "detached worker should finish its journal record: {}",
+            journal.display(),
+        );
         std::thread::sleep(Duration::from_millis(20));
-    }
-    let contents = fs::read_to_string(&journal).expect("detached worker should journal");
-    assert!(contents.contains("playback_failed"));
-    assert!(!contents.contains("not-really-audio.wav"));
+    };
+    assert!(contents.contains("protocol_failure"));
+    assert!(!contents.contains("not-really-audio.invalid"));
 
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
