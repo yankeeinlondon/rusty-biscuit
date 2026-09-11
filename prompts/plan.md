@@ -8,15 +8,14 @@ $schema:
     
 description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"
 underlying: {{ spec || review }}
-underlying_name: '{{ spec ? "spec" : "review" }}'
 plan: "{{ dirname(spec || review) + '/plan.md' }}"
 start:
-    message: "🖊️ creating a plan for the `{{underlying}}` {{underlying_name}}"
+    message: "🖊️ creating a plan for the `{{ parent_dir(underlying) }}` (**repo:** {{ctx.repo}}, {{ctx.area ? '**area:** ' + ctx.area : ''}}, **when:** {{current.time}})"
 success:
     stderr: "The `{{link(plan)}}` _plan_ has been created"
-    message: "✅  the _plan_ for the spec `{{parent_dir(plan)}}` was created _at_ {{ctx.time}}"
+    message: "✅  the _plan_ for the spec `{{parent_dir(underlying)}}` was created (**repo:** {{ctx.repo}}, {{ctx.area ? '**area:** ' + ctx.area : ''}}, **when:** {{current.time}})"
 failure:
-    message: "❌️  the _plan_ for the {{underlying_name}} `{{underlying}}` failed to complete!"
+    message: "❌️  failed to create a _plan_ for `{{parent_dir(underlying)}}` (**repo:** {{ctx.repo}}, {{ctx.area ? '**area:** ' + ctx.area : ''}}, **when:** {{current.time}})!"
 ---
 
 You are a planning agent. Convert the following documents into a high confidence execution plan:

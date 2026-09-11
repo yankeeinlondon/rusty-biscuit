@@ -14,8 +14,20 @@ plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
-total_phases: "{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 0 : 0 }}"
-spec: "{{ file_exists(plan) ? file_exists(dirname(plan) + '/spec.md') ? dirname(plan) + '/spec.md'  :  null : null }}"
+total_phases: |-
+    {{ 
+        file_exists(plan) 
+            ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 0 
+            : 0 
+    }}
+spec: |-
+    {{ 
+        file_exists(plan) 
+            ? file_exists(dirname(plan) + '/spec.md') 
+                ? dirname(plan) + '/spec.md'  
+                :  null 
+            : null 
+    }}
 initialize:
     stack:
         - when: "!total_phases || total_phases <= 0"
