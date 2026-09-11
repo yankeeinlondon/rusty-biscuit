@@ -11,6 +11,8 @@ from pathlib import Path
 
 from affected_scope import (
     calculate_scope,
+    legacy_scope_document,
+    package_area,
     diff_changes_more_than_comments,
     global_trigger,
     just_recipe_closure,
@@ -18,6 +20,7 @@ from affected_scope import (
     lockfile_impacted_names,
     parse_lockfile,
     matrix_record,
+    package_cells,
     capability,
     load_environments,
     package_ci_policy,
@@ -34,6 +37,27 @@ from affected_scope import (
 
 # Pinned so an expiry test asserts the rule, not today's date.
 TODAY = date(2026, 7, 27)
+
+
+def scope_document(
+    files: list[str],
+    root: Path,
+    metadata: dict[str, object],
+    environments: list[dict[str, object]],
+    policy: dict[str, dict[str, object]],
+    force_all: bool = False,
+    **kwargs: object,
+) -> dict[str, object]:
+    """The legacy `scope.json` shape the workflow still reads.
+
+    `calculate_scope` now returns the resolved plan; the cases below that
+    assert the package matrix and the rollup policy list go through this
+    projection until Phases 5 and 6 move their consumers onto cells.
+    """
+    plan = calculate_scope(
+        files, root, metadata, environments, policy, force_all, **kwargs  # type: ignore[arg-type]
+    )
+    return legacy_scope_document(plan, policy, environments)
 
 
 def package(root: Path, name: str, relative_manifest: str, ci: object | None = None) -> dict[str, object]:
@@ -87,7 +111,7 @@ class AffectedScopeTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def scope(self, files: list[str], **kwargs: object) -> dict[str, object]:
-        return calculate_scope(
+        return scope_document(
             files,
             self.root,
             self.metadata,
@@ -96,18 +120,41 @@ class AffectedScopeTests(unittest.TestCase):
             **kwargs,  # type: ignore[arg-type]
         )
 
-    def test_source_change_tests_source_and_checks_direct_downstream(self) -> None:
+    def test_source_change_selects_the_source_package_alone(self) -> None:
+        # AC1: an unchanged direct reverse dependent is reported and selected
+        # nowhere. It used to receive a compile-check entry, which presented an
+        # untested area as a green top-level result (PR #76).
         scope = self.scope(["alpha/lib/src/lib.rs"])
-        self.assertEqual(["alpha-core", "beta-app"], scope["packages"])
+        self.assertEqual(["alpha-core"], scope["packages"])
+        self.assertEqual(["beta-app"], scope["reverse_dependencies"])
+        # No `check` gate: alpha-core declares only a library target, which the
+        # L1 build already compiles (spec section 1.7).
         gates = {entry["package"]: entry["gates"] for entry in scope["matrix"]}
-        self.assertEqual(["lint", "check", "test"], gates["alpha-core"])
-        self.assertEqual(["check"], gates["beta-app"])
+        self.assertEqual(["lint", "test"], gates["alpha-core"])
+        self.assertNotIn("beta-app", gates)
 
-    def test_shared_dependency_change_selects_direct_consumers_only(self) -> None:
+    def test_an_unchanged_reverse_dependent_gets_no_area_job_or_cell(self) -> None:
+        plan = calculate_scope(
+            ["alpha/lib/src/lib.rs"],
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+        )
+        self.assertEqual(["beta-app"], plan["reverse_dependencies"])
+        self.assertEqual([], [entry for entry in plan["areas"] if entry["area"] == "beta"])
+        self.assertEqual(
+            [], [entry for entry in plan["packages"] if entry["package"] == "beta-app"]
+        )
+        self.assertEqual([], [cell for cell in plan["cells"] if cell["package"] == "beta-app"])
+
+    def test_shared_dependency_change_selects_the_changed_package_only(self) -> None:
         # beta-app reaches shared-tests only through alpha-core; direct-only
-        # scoping (2026-08-13) deliberately leaves it out.
+        # scoping (2026-08-13) deliberately leaves it out. alpha-core is a
+        # direct dependent and is now reported rather than scheduled.
         scope = self.scope(["tools/shared-tests/src/lib.rs"])
-        self.assertEqual(["alpha-core", "shared-tests"], scope["packages"])
+        self.assertEqual(["shared-tests"], scope["packages"])
+        self.assertEqual(["alpha-core"], scope["reverse_dependencies"])
 
     def test_unrelated_documentation_change_has_empty_scope(self) -> None:
         scope = self.scope(["docs/architecture.md"])
@@ -122,23 +169,99 @@ class AffectedScopeTests(unittest.TestCase):
         for path in ("alpha/lib/build.rs", "alpha/lib/scripts/check.py", "alpha/lib/ui/app.tsx"):
             with self.subTest(path=path):
                 scope = self.scope([path])
-                self.assertEqual(["alpha-core", "beta-app"], scope["packages"])
+                self.assertEqual(["alpha-core"], scope["packages"])
 
-    def test_local_macos_evidence_removes_macos_l1(self) -> None:
-        scope = self.scope(
-            ["alpha/lib/src/lib.rs"], excluded_environment="macos-latest"
+    def accepted(self, *cells: tuple[str, str, str]) -> list[dict[str, object]]:
+        return [
+            {
+                "package": package,
+                "environment": environment,
+                "gate": gate,
+                "origin": "local",
+                "evidence": f"refs/notes/ci-local/{environment}",
+            }
+            for package, environment, gate in cells
+        ]
+
+    def test_a_verified_macos_cell_is_reused_not_dropped(self) -> None:
+        # AC4 and AC6, the PR #76 shape: the macOS L1 execution is omitted, but
+        # the CELL survives with local origin. Dropping the cell is what made
+        # seven proven-passing cells roll up as MISSING.
+        plan = calculate_scope(
+            ["alpha/lib/src/lib.rs"],
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            accepted_cells=self.accepted(("alpha-core", "macos-latest", "L1")),
         )
+        macos = [
+            cell
+            for cell in plan["cells"]
+            if cell["environment"] == "macos-latest" and cell["gate"] == "L1"
+        ]
+        self.assertEqual(1, len(macos))
+        self.assertEqual("reuse", macos[0]["execution"])
+        self.assertEqual("local", macos[0]["origin"])
+        self.assertEqual("reused", macos[0]["state"])
+        self.assertEqual(
+            [
+                {
+                    "package": "alpha-core",
+                    "environment": "macos-latest",
+                    "gate": "L1",
+                    "origin": "local",
+                    "evidence": "refs/notes/ci-local/macos-latest",
+                }
+            ],
+            plan["accepted_evidence"],
+            "the plan must carry the evidence it scheduled against, so the "
+            "rollup expects the same set it consumed",
+        )
+        scope = legacy_scope_document(plan, self.policy, environments_for_tests())
         records = {entry["package"]: entry for entry in scope["matrix"]}
         self.assertNotIn("macos-latest", records["alpha-core"]["native_environments"])
-        self.assertEqual(["check"], records["beta-app"]["gates"])
 
-    def test_local_windows_evidence_removes_completed_reverse_checks(self) -> None:
-        scope = self.scope(
-            ["alpha/lib/src/lib.rs"], excluded_environment="windows-latest"
+    def test_evidence_from_two_environments_combines(self) -> None:
+        # AC5: the retired single `excluded_environment` could express one host.
+        plan = calculate_scope(
+            ["alpha/lib/src/lib.rs"],
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            accepted_cells=self.accepted(
+                ("alpha-core", "macos-latest", "L1"),
+                ("alpha-core", "wsl2-ubuntu", "L1"),
+            ),
         )
-        self.assertEqual(["alpha-core"], scope["packages"])
-        self.assertEqual(["beta-app"], scope["reverse_dependencies"])
-        self.assertEqual([], scope["matrix"][0]["check_os"])
+        reused = {
+            cell["environment"] for cell in plan["cells"] if cell["execution"] == "reuse"
+        }
+        self.assertEqual({"macos-latest", "wsl2-ubuntu"}, reused)
+        executing = {
+            cell["environment"]
+            for cell in plan["cells"]
+            if cell["execution"] == "execute"
+        }
+        self.assertEqual({"ubuntu-latest", "windows-latest"}, executing)
+
+    def test_reusing_macos_keeps_linux_and_windows_compile_coverage(self) -> None:
+        # AC3 and Phase 3's task 3.
+        plan = calculate_scope(
+            ["alpha/lib/src/lib.rs"],
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            accepted_cells=self.accepted(("alpha-core", "macos-latest", "L1")),
+        )
+        compiled = {
+            cell["environment"]
+            for cell in plan["cells"]
+            if cell["gate"] in ("check", "L1") and cell["execution"] == "execute"
+        }
+        self.assertLessEqual({"ubuntu-latest", "windows-latest"}, compiled)
 
     def test_force_all_selects_every_package(self) -> None:
         scope = self.scope([], force_all=True)
@@ -172,8 +295,8 @@ class AffectedScopeTests(unittest.TestCase):
     def test_non_source_input_does_not_widen_a_source_change(self) -> None:
         scope = self.scope(["clippy.toml", "alpha/lib/src/lib.rs"])
         gates = {entry["package"]: entry["gates"] for entry in scope["matrix"]}
-        self.assertEqual(["lint", "check", "test"], gates["alpha-core"])
-        self.assertEqual(["check"], gates["beta-app"])
+        self.assertEqual(["lint", "test"], gates["alpha-core"])
+        self.assertNotIn("beta-app", gates)
         self.assertNotIn("shared-tests", gates)
 
     def test_compile_inputs_select_no_packages(self) -> None:
@@ -220,7 +343,7 @@ class AffectedScopeTests(unittest.TestCase):
         differ = lambda base, path: self.COMMENT_ONLY_DIFF  # noqa: E731
         scope = self.scope(["justfile", "alpha/lib/src/lib.rs"], base_ref="base", differ=differ)
         self.assertFalse(scope["full_scope"])
-        self.assertEqual(["alpha-core", "beta-app"], scope["packages"])
+        self.assertEqual(["alpha-core"], scope["packages"])
 
     # -- just files are global by recipe, not by path (2026-09-09) ----------
     #
@@ -452,7 +575,7 @@ class ClosureTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def test_biscuit_speaks_selects_direct_dependents_only(self) -> None:
-        scope = calculate_scope(
+        scope = scope_document(
             ["biscuit-speaks/lib/src/lib.rs"],
             self.root,
             self.metadata,
@@ -461,14 +584,15 @@ class ClosureTests(unittest.TestCase):
         )
         # claudine-cli, claudine-contract, and research-cli reach the seed
         # only through an intermediate package and are deliberately excluded.
+        # The direct dependents are reported and, since AC1, selected nowhere.
+        self.assertEqual(["biscuit-speaks"], scope["packages"])
         self.assertEqual(
             [
-                "biscuit-speaks",
                 "biscuit-speaks-cli",
                 "claudine",
                 "research",
             ],
-            scope["packages"],
+            scope["reverse_dependencies"],
         )
 
 
@@ -512,7 +636,7 @@ class NativeClosureTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def test_a_dependent_job_receives_its_dependencies_native(self) -> None:
-        scope = calculate_scope(
+        scope = scope_document(
             ["consumer/src/lib.rs"],
             self.root,
             self.metadata,
@@ -789,7 +913,10 @@ class MatrixRecordTests(unittest.TestCase):
             environments=environments_for_tests(),
         )
         self.assertEqual(record["node_environments"], ["ubuntu-latest"])
-        retained = matrix_record(
+    def test_a_companion_suite_host_is_never_satisfied_by_local_evidence(self) -> None:
+        # A companion suite is not in any local receipt, so its CI host must
+        # still run even when the package's Rust half was validated locally.
+        cells = package_cells(
             {
                 "package": "homelab-server",
                 "tiers": ["L1"],
@@ -800,11 +927,20 @@ class MatrixRecordTests(unittest.TestCase):
                 "runner_tools": ["node-22", "pnpm-10"],
                 "companion_suites": ["homelab-frontend"],
             },
-            native={},
+            area="homelab",
+            target_kinds=["lib"],
             environments=environments_for_tests(),
-            excluded_environment="ubuntu-latest",
+            accepted={
+                ("homelab-server", "ubuntu-latest", "L1"): {"evidence": "note"},
+                ("homelab-server", "macos-latest", "L1"): {"evidence": "note"},
+            },
         )
-        self.assertIn("ubuntu-latest", retained["native_environments"])
+        states = {
+            (cell["environment"], cell["gate"]): cell["execution"]
+            for cell in cells
+        }
+        self.assertEqual("execute", states[("ubuntu-latest", "L1")])
+        self.assertEqual("reuse", states[("macos-latest", "L1")])
 
 
 class EnvironmentsTests(unittest.TestCase):
@@ -945,7 +1081,7 @@ class GatesFalseScopeTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def test_excluded_from_the_matrix_but_present_in_policy(self) -> None:
-        scope = calculate_scope(
+        scope = scope_document(
             ["excluded/src/lib.rs"],
             self.root,
             self.metadata,
@@ -1014,7 +1150,7 @@ class NonPropagationTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def test_a_dependent_keeps_its_own_tiers_tools_and_companions(self) -> None:
-        scope = calculate_scope(
+        scope = scope_document(
             ["consumer/src/lib.rs"],
             self.root,
             self.metadata,
@@ -1115,7 +1251,7 @@ class LockfileScopeBranchTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def scope(self, files: list[str], **kwargs: object) -> dict[str, object]:
-        return calculate_scope(
+        return scope_document(
             files,
             self.root,
             self.metadata,
@@ -1190,7 +1326,7 @@ class TopLevelDirectoryFallbackTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def test_a_directory_level_justfile_selects_no_packages(self) -> None:
-        scope = calculate_scope(
+        scope = scope_document(
             ["alpha/justfile"],
             self.root,
             self.metadata,
@@ -1200,7 +1336,7 @@ class TopLevelDirectoryFallbackTests(unittest.TestCase):
         self.assertEqual([], scope["packages"])
 
     def test_a_root_level_file_outside_any_directory_selects_nothing(self) -> None:
-        scope = calculate_scope(
+        scope = scope_document(
             ["README.md"],
             self.root,
             self.metadata,
@@ -1229,7 +1365,7 @@ class MatrixLimitTests(unittest.TestCase):
             today=TODAY,
         )
         with self.assertRaises(RuntimeError) as raised:
-            calculate_scope(
+            scope_document(
                 [], root, metadata, environments_for_tests(), policy, force_all=True
             )
         self.assertIn(str(MATRIX_LIMIT), str(raised.exception))
@@ -1237,7 +1373,7 @@ class MatrixLimitTests(unittest.TestCase):
 
 class EstimateJobsTests(unittest.TestCase):
     def test_wsl_counts_two_jobs_and_the_rest_count_one(self) -> None:
-        record = matrix_record(
+        cells = package_cells(
             {
                 "package": "a",
                 "tiers": ["L1", "L2"],
@@ -1248,12 +1384,43 @@ class EstimateJobsTests(unittest.TestCase):
                 "runner_tools": [],
                 "companion_suites": [],
             },
-            native={},
+            area="a",
+            target_kinds=["lib", "bench"],
             environments=environments_for_tests(),
+            accepted={},
         )
-        # check (1) + native environments (3) + wsl (2: archive + guest)
-        # + lint (1) + L2 environments (2: ubuntu, macOS) + browser (0).
-        self.assertEqual(estimate_jobs([record]), 1 + 3 + 2 + 1 + 2)
+        # lint (1) + check for the bench target (1) + L1 on three native
+        # environments (3) + L1 on wsl2-ubuntu (2: archive builder + guest)
+        # + L2 where a backend is hostable (2: ubuntu, macOS). The Windows and
+        # WSL L2 cells are governed policy gaps and launch nothing.
+        self.assertEqual(
+            estimate_jobs(cells, environments_for_tests()), 1 + 1 + 3 + 2 + 2
+        )
+
+    def test_a_reused_cell_costs_no_job(self) -> None:
+        arguments = {
+            "package": "a",
+            "tiers": ["L1"],
+            "l2_backends": [],
+            "features": [],
+            "all_features": False,
+            "l1_include_slow": False,
+            "runner_tools": [],
+            "companion_suites": [],
+        }
+        environments = environments_for_tests()
+        scheduled = package_cells(arguments, "a", ["lib"], environments, {})
+        reused = package_cells(
+            arguments,
+            "a",
+            ["lib"],
+            environments,
+            {("a", "macos-latest", "L1"): {"evidence": "refs/notes/ci-local/macos-latest"}},
+        )
+        self.assertEqual(
+            estimate_jobs(scheduled, environments) - 1,
+            estimate_jobs(reused, environments),
+        )
 
 
 class CiToolingFlagTests(unittest.TestCase):
@@ -1279,7 +1446,7 @@ class CiToolingFlagTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def scope(self, files: list[str]) -> dict[str, object]:
-        return calculate_scope(
+        return scope_document(
             files, self.root, self.metadata, environments_for_tests(), self.policy
         )
 
@@ -1427,7 +1594,7 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
         )
 
     def scope(self, path: str) -> dict[str, object]:
-        return calculate_scope(
+        return scope_document(
             [path],
             ROOT,
             self.metadata,
@@ -1562,7 +1729,8 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
         # change to sniff's direct dependents. On mismatch, the message below
         # hands back the computed list ready to paste into this fixture.
         scope = self.scope("sniff/lib/src/lib.rs")
-        computed = scope["packages"]
+        self.assertEqual(["sniff"], scope["packages"])
+        computed = scope["reverse_dependencies"]
         paste_ready = "\n".join(f'                "{name}",' for name in computed)
         hint = (
             "\nsniff's direct dependents changed (a workspace dependency edge "
@@ -1587,7 +1755,6 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
                 "rendezvous-core",
                 "rendezvous-daemon",
                 "research",
-                "sniff",
                 "sniff-cli",
                 "unchained-ai",
                 "worktree",
