@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-753e052e9691edc2
+hash: ef46db3751d8e999-b22aaffcd8604405
 last_updated: 2026-09-10
 ---
 # Claudine Composition
@@ -726,7 +726,7 @@ Numeric inputs reprompt with an inline error on parse failure instead of abortin
 
 ### Provided Partial File References
 
-A `file`/`file[]` property declared with a `match(...)` glob accepts more than a literal path. When the user **provides** a value (via `key=value` or `--set`) that does not resolve to an existing file, that value is treated as a **partial** — a substring to match against the property's `match(...)` glob candidates — rather than an immediate hard abort.
+A `file`/`file[]` property declared with a `match(...)` glob accepts more than a literal path. When the user **provides** a value (via `key=value` or `--set`) that does not resolve to an existing file, that value is treated as a **partial** — a substring to match against the property's `match(...)` glob candidates — rather than an immediate hard abort. The comparison is case-insensitive and made in portable (`/`-separated) spelling on every platform, so `spec=fixes/2026-09-10-local` finds the same file on Windows as on macOS, and a partial typed with `\` is accepted as well.
 
 ```yaml
 $schema:
