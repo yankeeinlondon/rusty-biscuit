@@ -2695,3 +2695,277 @@ fn a_cell_present_in_only_one_document_is_not_comparable() {
     assert!(!result.regressed());
     assert_eq!(result.incomparable.len(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// Frozen contracts for the area-owned result model
+//
+// Phase 2 of `fixes/2026-09-11-cicd-cleanup/plan.md` freezes these before
+// Phase 5 implements them. Each `pending_contract` fixture asserts the target
+// behavior and checks that it currently fails for its recorded reason; see
+// `scripts/ci/pending_contracts.py` for the Python twin of this mechanism.
+// ---------------------------------------------------------------------------
+
+/// Run `body`, requiring it to fail with a message containing `oracle`.
+///
+/// ## Panics
+///
+/// When the body passes — the contract landed and the fixture must be promoted
+/// by deleting this wrapper — or when it fails for some other reason, which
+/// means the fixture itself broke rather than the contract being unbuilt.
+fn pending_contract(criterion: &str, reason: &str, oracle: &str, body: impl FnOnce()) {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+    std::panic::set_hook(previous);
+
+    match outcome {
+        Ok(()) => panic!(
+            "pending contract {criterion} now holds: {reason}. Remove the \
+             pending_contract wrapper so a later regression can fail this suite."
+        ),
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+                .unwrap_or_else(|| "<non-string panic payload>".to_owned());
+            assert!(
+                message.contains(oracle),
+                "pending contract {criterion} failed, but not for the recorded \
+                 reason. Expected the failure to mention {oracle:?}; the fixture \
+                 itself is probably broken.\n\nRecorded reason: {reason}\n\
+                 Actual failure: {message}"
+            );
+        }
+    }
+}
+
+/// The six packages and seven cells PR #76 filed as `MISSING`, from
+/// `fixes/2026-09-11-cicd-cleanup/baseline-2026-09-11.md` section 4.
+const PR76_L1_PACKAGES: [&str; 6] = [
+    "biscuit-speaks",
+    "biscuit-speaks-cli",
+    "claudine",
+    "claudine-cli",
+    "playa",
+    "playa-cli",
+];
+
+/// The run as it actually happened: every hosted environment reported, macOS
+/// reported nothing because a local receipt suppressed its execution.
+fn pr76_cells() -> Vec<Cell> {
+    let mut policies: Vec<PackagePolicy> = PR76_L1_PACKAGES.iter().map(|p| policy(p)).collect();
+    // `claudine-cli` is the one package with an L2 tier, giving the seventh cell.
+    let cli = policies
+        .iter_mut()
+        .find(|p| p.package == "claudine-cli")
+        .expect("claudine-cli is in the fixture");
+    cli.tiers = vec![Tier::L1, Tier::L2];
+    cli.l2_backends = vec!["tmux".to_owned()];
+
+    let scope = scope_of(&PR76_L1_PACKAGES);
+    let expected = expected_cells(&policies, &scope, &test_environments());
+
+    let mut records = Vec::new();
+    for package in PR76_L1_PACKAGES {
+        for environment in ["ubuntu-latest", "windows-latest", "wsl2-ubuntu"] {
+            records.push(passing_record(package, environment, Tier::L1));
+        }
+    }
+    records.push(passing_record("claudine-cli", "ubuntu-latest", Tier::L2));
+
+    classify_simple(&expected, &records)
+}
+
+#[test]
+fn the_pr_76_macos_cells_must_not_resolve_to_missing() {
+    pending_contract(
+        "AC6",
+        "the rollup has no concept of a local-origin cell: `ci-rollup.rs` \
+         contains no occurrence of `excluded`, `local_evidence`, `local-origin`, \
+         or `LOCAL`, so a cell whose execution a receipt suppressed produces no \
+         evidence and resolves to MISSING",
+        "resolved to MISSING",
+        || {
+            let cells = pr76_cells();
+            let macos: Vec<&Cell> = cells
+                .iter()
+                .filter(|cell| cell.key.environment == "macos-latest")
+                .collect();
+
+            assert_eq!(
+                7,
+                macos.len(),
+                "the regression is exactly seven macOS cells: six L1 and one L2"
+            );
+            for cell in macos {
+                assert_ne!(
+                    cell.state,
+                    CellState::Missing,
+                    "{} resolved to MISSING although local evidence proved it passed",
+                    cell.key
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn the_pr_76_fixture_reproduces_the_regression_exactly() {
+    // Non-pending: pins the defect itself, so a Phase 5 change that makes the
+    // contract above pass by changing what the fixture *builds* is caught here.
+    let cells = pr76_cells();
+    let missing: Vec<String> = cells
+        .iter()
+        .filter(|cell| cell.key.environment == "macos-latest" && cell.state == CellState::Missing)
+        .map(|cell| cell.key.to_string())
+        .collect();
+
+    assert_eq!(
+        vec![
+            "biscuit-speaks-cli/macos-latest/L1",
+            "biscuit-speaks/macos-latest/L1",
+            "claudine-cli/macos-latest/L1",
+            "claudine-cli/macos-latest/L2",
+            "claudine/macos-latest/L1",
+            "playa-cli/macos-latest/L1",
+            "playa/macos-latest/L1",
+        ],
+        {
+            let mut sorted = missing;
+            sorted.sort();
+            sorted
+        }
+    );
+}
+
+#[test]
+fn the_pr_76_hosted_cells_still_pass() {
+    // The other half of the regression: everything that ran was green, so a
+    // Phase 5 fix must not make the macOS cells pass by degrading these. The two
+    // exceptions are the governed L2 gaps the baseline records as POLICY GAP,
+    // which did not block that run and must not start to.
+    let cells = pr76_cells();
+    let not_passing: Vec<String> = cells
+        .iter()
+        .filter(|cell| cell.key.environment != "macos-latest" && cell.state != CellState::Pass)
+        .map(|cell| format!("{} = {}", cell.key, cell.state))
+        .collect();
+    assert_eq!(
+        vec![
+            "claudine-cli/windows-latest/L2 = POLICY GAP",
+            "claudine-cli/wsl2-ubuntu/L2 = POLICY GAP",
+        ],
+        not_passing
+    );
+}
+
+#[test]
+fn a_result_cell_reports_where_its_result_came_from() {
+    pending_contract(
+        "AC4",
+        "the result cell has no origin field, so a reused local result cannot be \
+         told from one CI produced",
+        "carries no `origin`",
+        || {
+            let cell = &pr76_cells()[0];
+            let json = serde_json::to_value(cell).expect("a cell serializes");
+            assert!(
+                json.get("origin").is_some(),
+                "the result cell carries no `origin`; local, prior-local, and CI \
+                 results are indistinguishable in {json}"
+            );
+        },
+    );
+}
+
+#[test]
+fn a_result_cell_carries_its_area_alongside_its_package() {
+    pending_contract(
+        "AC2",
+        "the result document knows only packages; area grouping does not exist",
+        "carries no `area`",
+        || {
+            let cell = &pr76_cells()[0];
+            let json = serde_json::to_value(cell).expect("a cell serializes");
+            assert!(
+                json.get("area").is_some(),
+                "the result cell carries no `area`; there is nothing to group \
+                 a top-level identity by in {json}"
+            );
+        },
+    );
+}
+
+#[test]
+fn package_stays_the_stored_identity_of_every_cell() {
+    // Non-pending, and deliberately the inverse of the fixture above: Design
+    // Decision 1 forbids re-keying results by area. Adding `area` is required;
+    // replacing `package` with it is not.
+    let cell = &pr76_cells()[0];
+    let json = serde_json::to_value(cell).expect("a cell serializes");
+    assert!(json.get("package").is_some(), "package is the stored identity");
+    assert!(json.get("environment").is_some());
+    assert!(json.get("tier").is_some());
+}
+
+#[test]
+fn accepted_gap_is_a_distinct_machine_readable_state() {
+    pending_contract(
+        "AC9",
+        "the only non-executing governed state is POLICY GAP, which is also what \
+         an ungoverned absence renders as",
+        "no ACCEPTED GAP variant",
+        || {
+            let parsed = serde_json::from_str::<CellState>("\"ACCEPTED GAP\"");
+            assert!(
+                parsed.is_ok(),
+                "CellState has no ACCEPTED GAP variant, so an accepted gap cannot \
+                 be distinguished from an interruption in machine-readable results"
+            );
+        },
+    );
+}
+
+#[test]
+fn the_rollup_document_records_the_evidence_it_was_scheduled_against() {
+    pending_contract(
+        "AC4",
+        "the rollup document records `scope` and `scheduled` but no accepted \
+         local evidence, so the reporting path cannot know which cells a \
+         receipt already satisfied",
+        "records no accepted evidence",
+        || {
+            let rollup = rollup_of(pr76_cells(), &PR76_L1_PACKAGES);
+            let json = serde_json::to_value(&rollup).expect("a rollup serializes");
+            assert!(
+                json.get("accepted_evidence").is_some(),
+                "the rollup document records no accepted evidence; evidence \
+                 accepted for scheduling cannot satisfy its result cell"
+            );
+        },
+    );
+}
+
+#[test]
+fn the_rollup_and_verdict_commands_accept_an_area_scope() {
+    pending_contract(
+        "AC11",
+        "`--scope` narrows to packages only; there is no area narrowing, so one \
+         global verdict still judges every area together",
+        "does not document `--area`",
+        || {
+            assert!(
+                USAGE.contains("--area"),
+                "the usage text does not document `--area`, so no area can apply \
+                 its own baseline, gaps, and missing-cell rule"
+            );
+        },
+    );
+}
+
+// Accepted-gap governance itself — an ungoverned gap blocking, and a governed
+// gap blocking once expired — is already covered by
+// `an_ungoverned_policy_gap_still_blocks` and the `policy-gap-expired` cases
+// above. Phase 5 must keep those green while adding the distinct
+// `ACCEPTED GAP` state; it does not get to relax them.

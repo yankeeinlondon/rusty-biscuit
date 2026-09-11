@@ -2069,3 +2069,339 @@ fn the_wsl_leg_provisions_jq_and_forwards_the_slow_test_contract() {
         "the WSL leg must receive the package's declared L1 slow-test policy"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Frozen contracts for the area-owned CI presentation
+//
+// Phase 2 of `fixes/2026-09-11-cicd-cleanup/plan.md` freezes these before
+// Phase 6 restructures scheduling. `pending_workflow_contract` asserts that a
+// target behavior currently fails for its recorded reason and keeps the failure
+// message as the implementation oracle; the Python twin is
+// `scripts/ci/pending_contracts.py`.
+// ---------------------------------------------------------------------------
+
+/// Run `body`, requiring it to fail with a message containing `oracle`.
+///
+/// ## Panics
+///
+/// When the body passes — the contract landed, so delete this wrapper — or
+/// when it fails for an unrecorded reason, which means the fixture broke.
+fn pending_workflow_contract(criterion: &str, reason: &str, oracle: &str, body: impl FnOnce()) {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+    std::panic::set_hook(previous);
+
+    match outcome {
+        Ok(()) => panic!(
+            "pending contract {criterion} now holds: {reason}. Remove the \
+             pending_workflow_contract wrapper so a later regression can fail \
+             this suite."
+        ),
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+                .unwrap_or_else(|| "<non-string panic payload>".to_owned());
+            assert!(
+                message.contains(oracle),
+                "pending contract {criterion} failed, but not for the recorded \
+                 reason. Expected the failure to mention {oracle:?}; the fixture \
+                 itself is probably broken.\n\nRecorded reason: {reason}\n\
+                 Actual failure: {message}"
+            );
+        }
+    }
+}
+
+/// The workflows whose job names reach a reader through the Actions graph and
+/// the PR Checks tab.
+const READER_FACING_WORKFLOWS: [&str; 3] = ["ci.yml", "_package-ci.yml", "_wsl-ci.yml"];
+
+/// A job's declared `name:`, when it has one.
+fn job_name(block: &str) -> Option<String> {
+    block
+        .lines()
+        .find(|line| line.starts_with("    name:"))
+        .map(|line| line.trim_start_matches("    name:").trim().to_owned())
+}
+
+/// Jobs that can be skipped as a whole *and* carry an expression in their name.
+///
+/// GitHub never evaluates the matrix context for a job skipped through `if:` or
+/// `needs:`, so the whole matrix collapses into one skipped job labelled with
+/// the raw expression. Run 34638047631 produced 63 such entries.
+fn skippable_jobs_with_expression_names() -> Vec<String> {
+    let mut offenders = Vec::new();
+    for file in READER_FACING_WORKFLOWS {
+        let source = workflow(file);
+        for block in jobs(&source) {
+            let header = block.lines().next().unwrap_or("").trim().to_owned();
+            let skippable = block.contains("\n    if:") || block.contains("\n    needs:");
+            match job_name(&block) {
+                Some(name) if skippable && name.contains("${{") => {
+                    offenders.push(format!("{file}:{header} name: {name}"));
+                }
+                _ => {}
+            }
+        }
+    }
+    offenders
+}
+
+#[test]
+fn no_skippable_job_is_labelled_with_an_unresolved_expression() {
+    pending_workflow_contract(
+        "AC10",
+        "tier selection is decided inside the reusable workflows with `if:`, so \
+         every matrix job that is not scheduled collapses into one skipped job \
+         named with its raw expression",
+        "labelled with an unresolved expression",
+        || {
+            let offenders = skippable_jobs_with_expression_names();
+            assert!(
+                offenders.is_empty(),
+                "{} job(s) are skippable and labelled with an unresolved \
+                 expression:\n  {}",
+                offenders.len(),
+                offenders.join("\n  ")
+            );
+        },
+    );
+}
+
+#[test]
+fn the_unresolved_label_defect_is_present_and_measured() {
+    // Non-pending: pins the defect so the contract above cannot be satisfied by
+    // a fixture that stopped looking at the right workflows.
+    let offenders = skippable_jobs_with_expression_names();
+    assert!(
+        offenders.len() >= 5,
+        "expected the known unresolved-label defect across the reader-facing \
+         workflows, found {}: {offenders:#?}",
+        offenders.len()
+    );
+}
+
+#[test]
+fn lint_and_check_labels_identify_their_environment() {
+    pending_workflow_contract(
+        "AC10",
+        "the lint job runs on a single hard-coded runner and its name says \
+         nothing about which environment produced the result",
+        "does not identify its environment",
+        || {
+            let lint = job_block("_package-ci.yml", "  lint:");
+            let name = job_name(&lint).unwrap_or_default();
+            assert!(
+                ["ubuntu", "linux", "macos", "windows", "environment"]
+                    .iter()
+                    .any(|marker| name.to_lowercase().contains(marker)),
+                "the lint job name {name:?} does not identify its environment"
+            );
+        },
+    );
+}
+
+#[test]
+fn the_area_is_the_top_level_identity_of_the_package_fan_out() {
+    pending_workflow_contract(
+        "AC2",
+        "`package-ci` fans out one caller identity per PACKAGE \
+         (`name: ${{ matrix.package }}`), so a library and its CLI appear as two \
+         unrelated top-level entries",
+        "fans out per package, not per area",
+        || {
+            let ci = workflow("ci.yml");
+            let fan_out = job_block("ci.yml", "  package-ci:");
+            assert!(
+                fan_out.contains("matrix.area") || ci.contains("area_matrix"),
+                "the package fan-out fans out per package, not per area: the \
+                 caller job's name is {:?}",
+                job_name(&fan_out).unwrap_or_default()
+            );
+        },
+    );
+}
+
+#[test]
+fn every_selected_area_owns_an_always_rollup_job() {
+    pending_workflow_contract(
+        "AC11",
+        "one standalone `ci-verdict` job judges every area together; there is no \
+         per-area rollup",
+        "no per-area rollup job",
+        || {
+            let ci = workflow("ci.yml");
+            assert!(
+                ci.contains("area-rollup") || ci.contains("area_rollup"),
+                "ci.yml declares no per-area rollup job, so no area can own its \
+                 own outcome"
+            );
+        },
+    );
+}
+
+#[test]
+fn no_standalone_global_verdict_job_remains() {
+    pending_workflow_contract(
+        "AC11",
+        "`ci-verdict` is still the single required check and the only merge \
+         authority",
+        "still declares a standalone `ci-verdict` job",
+        || {
+            let ci = workflow("ci.yml");
+            assert!(
+                !jobs(&ci).iter().any(|block| block.starts_with("  ci-verdict:")),
+                "ci.yml still declares a standalone `ci-verdict` job"
+            );
+        },
+    );
+}
+
+#[test]
+fn the_reusable_workflow_chain_stays_within_githubs_four_levels() {
+    // Non-pending, and the tightest constraint Phase 6 has. The chain is
+    // already ci.yml -> _package-ci.yml -> _wsl-ci.yml, which is three levels
+    // including the caller. An area-level workflow makes four, GitHub's
+    // maximum, leaving no margin for a later insertion.
+    let ci = workflow("ci.yml");
+    let package_ci = workflow("_package-ci.yml");
+    let wsl_ci = workflow("_wsl-ci.yml");
+
+    assert!(ci.contains("uses: ./.github/workflows/_package-ci.yml"));
+    assert!(package_ci.contains("uses: ./.github/workflows/_wsl-ci.yml"));
+    assert!(
+        !wsl_ci.contains("uses: ./.github/workflows/"),
+        "_wsl-ci.yml is the last level the chain can afford; it must call no \
+         further reusable workflow"
+    );
+}
+
+#[test]
+fn the_gap_publishing_job_holds_the_checks_write_permission_it_needs() {
+    pending_workflow_contract(
+        "AC9",
+        "no job in ci.yml holds `checks: write`; the top-level grant is \
+         `contents: read` and the two widened jobs take read scopes only",
+        "no job holds `checks: write`",
+        || {
+            let ci = workflow("ci.yml");
+            assert!(
+                ci.contains("checks: write"),
+                "no job holds `checks: write`, which the Checks API needs to \
+                 publish an accepted-gap check run"
+            );
+        },
+    );
+}
+
+#[test]
+fn the_rollup_binary_is_still_built_without_the_monorepo_crates() {
+    // Non-pending. `scripts/Cargo.toml`'s `local-tools` feature exists so the
+    // always-runs required check does not pay for gix, duckdb, and the terminal
+    // renderer. Phase 4's `--plan` renderer and Phase 5's per-area rollup must
+    // both stay out of this invocation.
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("--no-default-features") && ci.contains("--bin ci-rollup"),
+        "ci.yml must build ci-rollup with --no-default-features"
+    );
+    let rollup = read("scripts/ci-rollup.rs");
+    assert!(
+        !rollup.contains("biscuit_terminal"),
+        "ci-rollup must link none of the monorepo crates"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — per-cell evidence and the pre-trigger plan
+// ---------------------------------------------------------------------------
+
+/// AC5: the scope job consumes a per-CELL verified set, not one environment.
+///
+/// One environment name can never combine a macOS receipt with a prior WSL
+/// cross-check receipt, which is the whole of spec section 3.
+#[test]
+fn the_scope_job_consumes_verified_cells_not_one_environment() {
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("verify --cells") && ci.contains("--accepted-cells"),
+        "the scope job must verify per cell and pass the accepted set to the planner"
+    );
+    assert!(
+        !ci.contains("--accepted-environment") && !ci.contains("--exclude-environment"),
+        "no whole-environment exclusion may remain: it cannot express two hosts, \
+         and the retired form omitted the cell along with its execution"
+    );
+}
+
+/// AC7: a refused receipt is reported, never silently dropped.
+#[test]
+fn refused_evidence_is_carried_into_the_plan() {
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("--rejections") && ci.contains("--evidence-rejections"),
+        "the coded rejection reasons must reach the plan, or a reviewer cannot \
+         tell a missing receipt from a rejected one"
+    );
+}
+
+/// The canonical plan is published beside the legacy projection it produced.
+#[test]
+fn the_resolved_plan_is_uploaded_for_review() {
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("--plan-out resolved-plan.json"),
+        "one calculation must serve both documents"
+    );
+    assert!(
+        ci.contains("name: ci-resolved-plan"),
+        "the resolved plan must be uploaded for the rollup and for reviewers"
+    );
+}
+
+/// AC17: the constraint store is a trigger-boundary concern only.
+///
+/// Design Decision 8. A constraint CI could read would let it silently skip
+/// required coverage; a constraint only the hook reads can only ever stop a
+/// push.
+#[test]
+fn ci_never_reads_the_execution_constraint_store() {
+    for name in ["ci.yml", "_package-ci.yml", "_wsl-ci.yml"] {
+        let text = workflow(name);
+        // `scripts/ci/constraints.py`, not `test_constraints.py`: the tooling
+        // leg runs the store's own suite, which is not the store being read.
+        assert!(
+            !text.contains("BISCUIT_CI_CONSTRAINTS_DIR")
+                && !text.contains("ci/constraints.py"),
+            "{name} reads the execution-constraint store; constraints bind the \
+             trigger, never CI scheduling"
+        );
+    }
+    let hook = read(".githooks/pre-push");
+    assert!(
+        hook.contains("ci/constraints.py"),
+        "the pre-push hook is where a recorded constraint is enforced"
+    );
+}
+
+/// The plan renderer stays out of the always-runs rollup build.
+#[test]
+fn the_plan_renderer_is_local_tools_gated() {
+    let manifest = read("scripts/Cargo.toml");
+    let ci_plan = manifest
+        .split("[[bin]]")
+        .find(|block| block.contains("name = \"ci-plan\""))
+        .expect("scripts/Cargo.toml must declare the ci-plan bin");
+    assert!(
+        ci_plan.contains("required-features = [\"local-tools\"]"),
+        "ci-plan links biscuit-terminal and must be local-tools gated"
+    );
+    let recipe = read("just/ci-local.just");
+    assert!(
+        !recipe.contains("cargo build") && !recipe.contains("cargo run"),
+        "`--plan` is a pre-trigger review and must not start a build"
+    );
+}
