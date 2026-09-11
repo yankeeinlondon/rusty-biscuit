@@ -95,6 +95,7 @@
 pub(crate) mod completion;
 #[cfg(unix)]
 pub(crate) mod pty;
+pub(crate) mod review_router;
 pub(crate) mod source_scan;
 pub(crate) mod wrap;
 

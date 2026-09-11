@@ -21,10 +21,12 @@
 //! A second group, from `fixes/2026-09-10-no-interactive-completion`, covers
 //! the same resolution happening before a document's `initialize` can
 //! dereference the value, and surviving a proxy handoff. Those tests share
-//! `review_router_fixture`, which seeds the shipped `prompts/review.md`
+//! `common::review_router`, which seeds the shipped `prompts/review.md`
 //! router, its proxy target, spec candidates under the `packages/example`
 //! launch area, and a same-substring decoy at the repository root that only a
-//! mis-anchored candidate scope would find.
+//! mis-anchored candidate scope would find. They prove ordering and data flow
+//! through manufactured bytes; what a terminal emulator draws for the same
+//! flow is `level2_provided_partial_file_capture.rs`'s job.
 //!
 //! Gating mirrors `level2_schema_prompt_pty.rs`: `#![cfg(unix)]` plus
 //! `require_level!(Level::L2, pty_available(), ...)` so the test skips
@@ -51,6 +53,7 @@ use test_toolkit::{Level, require_level};
 
 mod common;
 use common::pty::*;
+use common::review_router::review_router_fixture;
 use common::{augmented_path, pty_available};
 
 /// Seed a workspace whose only `**/*spec*.md` files are two specs, exactly
@@ -319,48 +322,11 @@ fn level2_pty_provided_partial_file_array_array_confirms_and_launches() {
     );
 }
 
-fn review_router_fixture(multiple: bool) -> (common::CliProcessFixture, std::path::PathBuf) {
-    let fixture = common::CliProcessFixture::named("review-router-partial");
-    fixture.initialize_repository();
-    fixture.seed_user_config();
-    let router = fixture.cwd().join("prompts/review.md");
-    common::write(&router, include_str!("../../../prompts/review.md"));
-    common::write(
-        &fixture.cwd().join("prompts/_reviews/feature-review.md"),
-        "---\n$schema:\n  spec: file(required;eager;match(**/*spec*.md))\nselected: \"{{ frontmatter(spec, 'marker') }}\"\n---\nSELECTED={{ selected }}\nSPEC={{ spec }}\nTOKEN={{ token }}\n",
-    );
-    common::write(
-        &fixture.cwd().join("packages/example/fixes/2026-09-10-local-a/spec.md"),
-        "---\nreviewed: true\nmarker: alpha\n---\nAlpha specification.\n",
-    );
-    if multiple {
-        common::write(
-            &fixture.cwd().join("packages/example/fixes/2026-09-10-local-b/spec.md"),
-            "---\nreviewed: true\nmarker: beta\n---\nBeta specification.\n",
-        );
-    }
-    // Decoy outside the launch area (`packages/example`) that matches the same
-    // `fixes/2026-09-10-local` substring. Candidate discovery must walk from the
-    // frozen launch origin, so this file is invisible to a package-area launch;
-    // a scope anchored at the repository root — or recaptured from the ambient
-    // CWD after the wrapper switches there — would pull it in and turn the
-    // single-match confirmation into a chooser.
-    common::write(
-        &fixture.cwd().join("fixes/2026-09-10-local-decoy/spec.md"),
-        "---\nreviewed: true\nmarker: decoy\n---\nDecoy specification outside the launch area.\n",
-    );
-    common::write_executable(
-        &fixture.bin_dir().join("goose"),
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$HOME/provider-prompt\"\nprintf 'provider reached\\n'\n",
-    );
-    (fixture, router)
-}
-
 fn review_router_session(
     fixture: &common::CliProcessFixture,
     router: &std::path::Path,
 ) -> OsSession {
-    review_router_session_in(fixture, router, &fixture.cwd().join("packages/example"))
+    review_router_session_in(fixture, router, &common::review_router::launch_area(fixture))
 }
 
 /// Launch the router from `launch_dir`, which is the origin candidate discovery
@@ -375,7 +341,7 @@ fn review_router_session_in(
         fixture.bin_dir(),
         router,
         "spec",
-        "fixes/2026-09-10-local",
+        common::review_router::PARTIAL,
     );
     let paths = std::iter::once(fixture.bin_dir().to_path_buf())
         .chain(common::minimal_system_path());
