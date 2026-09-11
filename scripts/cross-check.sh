@@ -32,6 +32,21 @@
 # --all-features, --no-default-features) go to the archive build; every other
 # extra arg goes to the run.
 #
+# The remote run never reads the developer's `~/.config`. On the WSL guest
+# that directory is a CIFS mount of the Synology NAS, and when the NAS is down
+# `git` dies on its global config and cargo's package-file listing (gitoxide,
+# honoring the global excludes at `$XDG_CONFIG_HOME/git/ignore`) dies with
+# "Host is down" — before a single test runs (2026-09-10). The Unix preamble
+# therefore sets GIT_CONFIG_GLOBAL=/dev/null (fetch/reset/clean/checkout/apply
+# need no identity) and points XDG_CONFIG_HOME at an empty local directory.
+#
+# BISCUIT_TEST_REQUIRED_BACKENDS is forwarded from the caller's environment to
+# every remote run when set. Without it a Level 2 test whose backend is absent
+# on the host skips, and nextest prints PASS in ~0.02 s — indistinguishable
+# from evidence unless you read the duration. Name the backend you expect
+# (e.g. `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just cross-check --os wsl …
+# --features terminal-tests level2_`) and the skip becomes a failure.
+#
 # The standing clones and their target dirs persist between runs so compile
 # caches are warm:
 #   $BUILD_LINUX   ~/ci-verification/rusty-biscuit
@@ -139,6 +154,14 @@ for arg in "${extra_args[@]}"; do
     esac
 done
 
+# Forwarded verbatim into each remote script, so it is validated here rather
+# than quoted for two shells: comma-separated backend identifiers only.
+required_backends="${BISCUIT_TEST_REQUIRED_BACKENDS:-}"
+if [[ -n "${required_backends}" && ! "${required_backends}" =~ ^[A-Za-z0-9_,-]+$ ]]; then
+    echo "cross-check: BISCUIT_TEST_REQUIRED_BACKENDS must be comma-separated backend names, got: ${required_backends}" >&2
+    exit 2
+fi
+
 cd "$(git rev-parse --show-toplevel)"
 origin_url="$(git remote get-url origin)"
 branch="$(git rev-parse --abbrev-ref HEAD)"
@@ -187,6 +210,11 @@ unix_prelude() {
 set -euo pipefail
 base="\$HOME/ci-verification"
 repo="\$HOME/${UNIX_DIR}"
+# Never touch the developer's ~/.config (a network mount on the WSL guest).
+export GIT_CONFIG_GLOBAL=/dev/null
+export XDG_CONFIG_HOME="\$base/.xdg-empty"
+mkdir -p "\$XDG_CONFIG_HOME"
+${required_backends:+export BISCUIT_TEST_REQUIRED_BACKENDS='${required_backends}'}
 lock="\$base/.cross-check.lock"
 patch="\$base/cross-check-${run_id}.patch"
 self="\$base/cross-check-${run_id}.sh"
@@ -275,6 +303,7 @@ run_windows() {
     cat > "${script}" <<EOF
 \$base = '${WIN_BASE}'
 \$repo = '${WIN_DIR}'
+${required_backends:+\$env:BISCUIT_TEST_REQUIRED_BACKENDS = '${required_backends}'}
 \$lock = "\$base\\.cross-check.lock"
 \$patch = "\$base\\cross-check-${run_id}.patch"
 \$self = "\$base\\cross-check-${run_id}.ps1"
