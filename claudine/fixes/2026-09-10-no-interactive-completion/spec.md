@@ -215,8 +215,13 @@ variants. The shared terminal harness (`level2_provided_partial_file_capture.rs`
 runs the same router and partial inside tmux and WezTerm and reads back what the
 emulator drew: the styled candidate card and confirmation are on screen before
 any provider is reached or lifecycle error printed, and accepting through the
-emulator's own key path carries the selected spec to the provider. Both suites
-share the fixture in `cli/tests/common/review_router.rs`.
+emulator's own key path carries the selected spec to the provider. A
+`#![cfg(windows)]` twin (`level2_windows_provided_partial_file_capture.rs`)
+makes the same claim on native Windows through a `cmd.exe` pane and a compiled
+provider fixture. All three share the fixture in
+`cli/tests/common/review_router.rs`. The Windows run exposed and fixed a
+pre-existing defect in the shared partial-matching predicate, which compared
+the typed partial against native path spelling; see the Rulings below.
 
 See [plan.md](./plan.md#validation-record) for the regression baseline, completed
 macOS checks, and cross-platform verification status. This fix remains in the
@@ -230,13 +235,18 @@ active directory while the remaining OS evidence is pending.
   deferred the decision. Ruling: the harness coverage is required and was added as
   the rendering complement to the PTY suite (option 2 of review 2), not as a
   replacement for it. The specification's wording stands; it is not loosened to
-  treat a pseudo-terminal test as harness coverage. Native Windows interactive
-  proof is **unmet, not excluded**: both interactive suites are `#![cfg(unix)]`,
-  and CI has no Windows L2 leg — a temporary provisioning gap
-  (`.github/ci/environments.json`, owner and expiry recorded there), not an
-  authorization to narrow this specification's OS matrix. The required change
-  is a Windows-capable interactive test (the WezTerm harness already drives
-  `cmd.exe` on the Windows build host in `level3_windows_sequence_ctrl_c.rs`)
-  run locally through `just cross-check --os windows`, plus the CI provisioning
-  that gap tracks. Until then only the non-interactive tests in
-  `compose_caller_file_provenance.rs` reach native Windows.
+  treat a pseudo-terminal test as harness coverage.
+- **2026-09-10 — native Windows interactive coverage is required, and is now
+  met.** Ken declined to accept the missing Windows proof as a deferral. The
+  `#![cfg(windows)]` twin (`cli/tests/level2_windows_provided_partial_file_capture.rs`)
+  passes on the Windows build host against a headless WezTerm mux server, and
+  on its way there found a real defect the non-interactive Windows tests could
+  not see: the partial-file substring predicate compared the typed `/`-spelled
+  partial against native `\` candidate paths, so every `/`-spelled partial
+  missed on Windows and the typed failure fired where macOS offered the
+  confirmation. Fixed in `completion/scopes.rs` (portable spelling on both
+  sides) with a unit test pinning both spellings. The CI Level 2 gap for
+  Windows and WSL2 (`.github/ci/environments.json`, owner and expiry recorded
+  there) remains a provisioning item, never an authorization to narrow this
+  specification's OS matrix; WSL2 interactive coverage is still unmet. Record:
+  [plan.md](./plan.md#native-windows-interactive-coverage--met).

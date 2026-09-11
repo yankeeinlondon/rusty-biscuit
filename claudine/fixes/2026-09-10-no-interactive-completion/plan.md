@@ -189,11 +189,72 @@ harness coverage is required alongside the PTY suite, not instead of it.
   chooser is drawn instead of the confirmation. The mutation was reverted and
   the file is byte-identical to HEAD.
 - Linux: CI's claudine L2 leg runs on tmux; the WezTerm test skips there by
-  the backend gate. Native Windows and WSL2: **unmet.** The file is
-  `#![cfg(unix)]` (POSIX shell, `printf`, `#!/bin/sh` stub, `:`-joined PATH),
-  so no interactive evidence exists for either, and CI has no L2 leg for
-  either (temporary gap, `.github/ci/environments.json`). Required change: a
-  `#![cfg(windows)]` twin driving `cmd.exe` through the WezTerm harness with a
-  native `goose.exe` fixture, run on the Windows build host; WSL2 needs the
-  same Unix file run inside the guest, which the archive-mode leg does not do
-  for L2. Neither is a reason to amend the specification's OS matrix.
+  the backend gate. WSL2: **unmet** — it needs the Unix file run inside the
+  guest, which the archive-mode leg does not do for L2.
+
+### Native Windows interactive coverage — met
+
+The `#![cfg(windows)]` twin
+(`cli/tests/level2_windows_provided_partial_file_capture.rs`) — same claim,
+same shipped router, `cmd.exe` pane through the WezTerm harness, a compiled
+`goose.exe` provider, `%M%`-indirected exit marker — **passes on the Windows
+build host**: `level2_wezterm_windows_review_router_partial_confirms_before_initialize`
+PASS in 4.247 s against a headless `wezterm-mux-server`, with
+`BISCUIT_TEST_REQUIRED_BACKENDS=wezterm` set so a skip could not have printed
+as a pass. Getting there took three findings, each measured rather than argued:
+
+1. **Retracted — the `--cwd` harness change.** The first matrix that showed
+   `spawn --new-window --workspace <ws>` hanging without `--cwd` ran its
+   no-`--cwd` variants first and its `--cwd` variants later; the difference was
+   cold-versus-warm, not the flag. `push_workspace_args` no longer adds
+   `--cwd`; the helper stays as the shared workspace routing.
+2. **Fixed in the harness — the client evaluates the developer's config.** On
+   `build-win`, `~/.wezterm.lua` `dofile`s the shared config from a UNC path
+   that no SSH, nextest, or mux-server process can reach, and each evaluation
+   blocks for the SMB connect timeout: 21.2–21.3 s on every `wezterm cli spawn`
+   from a test (deterministic; a second spawn seconds later is 0.1 s while
+   Windows negative-caches the failure; `cli list` never evaluates the config,
+   which is why the availability gate passed). The client's config cannot change
+   anything the harness does — it only ever addresses `WEZTERM_UNIX_SOCKET` —
+   so `WezTermHarness` now runs every client under an empty
+   `WEZTERM_CONFIG_FILE` unless the caller set one (`wezterm_command`,
+   `biscuit-test-harness/src/wezterm.rs`). Spawn under that: 0.1 s cold.
+3. **Fixed in production — the partial-file predicate compared native text.**
+   With the spawn working, the run reached the resolution and reported
+   `/spec: no existing file matched reference 'fixes/2026-09-10-local'`.
+   `file_candidate_paths` yields the walker's native `\` paths;
+   `path_matches_query` did a raw lowercase `contains` of the `/`-spelled
+   partial, so every candidate missed on Windows and the typed failure fired
+   where macOS offered the confirmation. Pre-existing and shared with the
+   operation-file autocomplete (`claudine compose plan`), so not specific to
+   this fix. Both sides are now compared in portable spelling
+   (`to_portable_string`, `\` normalized in the query);
+   `completion::scopes::tests::path_matches_query_ignores_separator_spelling`
+   pins it, and its `\` arm fails against the pre-fix predicate on macOS
+   (mutation checked) while its `/` arm is the one that failed on Windows.
+   The Windows-reachable non-interactive tests had passed throughout: the
+   zero-candidate path and the interaction-denied path produce the same
+   diagnostic, which is why only a real-terminal run on Windows could see it.
+
+Evidence, final state:
+
+- Windows: L2 twin PASS 4.247 s (executed; required-backend gate);
+  `path_matches_query_ignores_separator_spelling`,
+  `shipped_review_router_non_tty_partial_fails_before_initialize`, and
+  `shipped_review_router_literal_does_not_collect_absent_route_inputs` pass
+  via `just cross-check --os windows`.
+- macOS after the predicate change: 115 L1 tests across the completion,
+  operation-file, provided-partial, supplied, shipped-router, and autocomplete
+  families; 17 L2 tests across the PTY, capture, and operation-file suites;
+  four WezTerm L2 tests after the harness change (the `level2_dry_run_…osc8…`
+  failure is the pre-existing Atuin `?` wedge recorded above, reconfirmed by
+  its frame); harness and area `just lint` clean.
+- Two corrections to earlier versions of this record. It once claimed
+  Windows has no long-lived mux server: wrong — the servers observed dying were
+  killed by this session's own scripts, which also twice killed the session
+  Ken was working in. And `just cross-check --os windows` reports a WezTerm L2
+  test **passing when it is skipping** (no `WEZTERM_UNIX_SOCKET` in that SSH
+  session; ~0.02 s) — read the duration, or set the required-backend variable.
+- WSL2 interactive coverage remains unmet: the Unix suites need to run inside
+  the guest, which the archive-mode leg does not do for L2. Native Windows
+  and WSL2 CI legs remain the tracked provisioning gap.
