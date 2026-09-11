@@ -95,12 +95,17 @@ belong here.
 ## Commit Messages
 
 - Conventional Commits, lowercase after the colon, subject < 72 chars.
-- `planning` covers moves into `_completed` / out of `_unscheduled` AND
+- `planning` covers moves into `_completed` / out of `_unscheduled`, **new
+  spec files added to `features/_unscheduled/`** (a pure `A` for the spec —
+  `planning(<area>): schedule <name> for implementation`), AND
   review-cycle doc edits inside a fix/feature directory (`log.md` entry,
   `review-N.md` flipping `implemented: true`, new `review-(N+1).md`, `spec.md`
   bumping `review_iterations`): `planning(<area>): close <fix> cycle N, open
   cycle N+1` (see `4c903c586`, `152ea6b84`, `690b2ecc3`). Such commits may
-  have zero source diff; they are valid cycle iterations, not no-ops.
+  have zero source diff; they are valid cycle iterations, not no-ops. The
+  unscheduled-add case is not a `feat` because no code ships, and not `docs`
+  because `_unscheduled/` is a planning surface (the frontmatter `area`
+  is the scope — `area: repo` → `planning(repo)` even for CI-leg specs).
 - In cycle-close bodies quote what the diff says; do not paraphrase into
   claims the staged text did not make ("smoke test failed" vs. "smoke attempt
   interrupted by host load").
