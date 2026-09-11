@@ -696,9 +696,7 @@ impl TerminalHarness for WezTermHarness {
         let shell = super::detect_shell();
         let mut cmd = Command::new("wezterm");
         cmd.args(["cli", "spawn", "--new-window"]);
-        if self.spawn_visibility == SpawnVisibility::Background {
-            cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
-        }
+        push_workspace_args(&mut cmd, self.spawn_visibility == SpawnVisibility::Background);
         cmd.arg("--");
         let bin_dir = super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"));
         super::configure_login_shell(&mut cmd, &shell, bin_dir.as_deref());
@@ -739,9 +737,7 @@ impl TerminalHarness for WezTermHarness {
         }
         let mut cmd = Command::new("wezterm");
         cmd.args(["cli", "spawn", "--new-window"]);
-        if self.spawn_visibility == SpawnVisibility::Background {
-            cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
-        }
+        push_workspace_args(&mut cmd, self.spawn_visibility == SpawnVisibility::Background);
         cmd.arg("--");
         cmd.arg(program);
         for a in args {
@@ -802,6 +798,25 @@ impl TerminalHarness for WezTermHarness {
 /// not tag background panes; when the background workspace has grown past a
 /// conservative limit, this function also removes untagged panes from that
 /// workspace to recover from historical leaks.
+/// Route a background spawn into the off-screen workspace.
+///
+/// On Windows the spawn also names the client's own directory as `--cwd`.
+/// Against a headless `wezterm-mux-server` — the only WezTerm reachable from
+/// an SSH session on the Windows build host — `spawn --new-window --workspace
+/// <name>` with no `--cwd` takes 9 s or never returns and creates no pane
+/// (2026-09-10; the same spawn with `--cwd`, or with no workspace, answers in
+/// 0.1 s). Unix hosts drive a GUI mux, where the flag changes nothing the
+/// tests rely on, so it stays Windows-only.
+fn push_workspace_args(cmd: &mut Command, background: bool) {
+    if background {
+        cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
+    }
+    #[cfg(windows)]
+    if let Ok(cwd) = env::current_dir() {
+        cmd.arg("--cwd").arg(cwd);
+    }
+}
+
 pub fn cleanup_stale_wezterm_panes() {
     if !WezTermHarness::available() {
         return;
