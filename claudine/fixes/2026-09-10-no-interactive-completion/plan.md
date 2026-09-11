@@ -108,6 +108,9 @@ interfaces; they do not independently start broad builds.
   proxy_target_schema initialize_precedes_schema` ran 14 CLI tests, all passing.
   This includes eight partial-file tests and six existing initialization-order
   tests. The generator phase selected no tests, as expected for this filter.
+  All eight partial-file tests here are pseudo-terminal tests selected by the
+  `level2_` prefix; the shared-harness coverage the plan's phase 3 named was
+  added later under "Real-terminal capture" below.
 - The initial full `just test` run passed 3,026 tests before an existing
   sequence-preflight matrix test exceeded its 30-second timeout. Its unchanged
   path does not invoke the new completion code. Running
@@ -155,3 +158,36 @@ diagnostic step, not the resolution.
   package area's default parallel terminal mode.
   `BISCUIT_L2_THREADS=1 just test-l2 level2_dry_run_` also passed all eight
   tests through the shared-pane broker used by the pre-push hook.
+
+### Real-terminal capture
+
+Ruling of 2026-09-10 (see the specification's Rulings): the shared terminal
+harness coverage is required alongside the PTY suite, not instead of it.
+
+- Added `cli/tests/level2_provided_partial_file_capture.rs`, one accept-path
+  test per backend (tmux, WezTerm), driving the shipped router with the reported
+  partial inside a real emulator. It asserts the confirmation and styled
+  candidate card are drawn before any provider is reached or lifecycle error
+  printed, that the launch-area candidate alone is named, and that accepting
+  through the emulator's key path lands `SELECTED=alpha` and the chosen path at
+  the provider stub with exit status 0. The review-router fixture moved to
+  `cli/tests/common/review_router.rs` so both suites seed identical topology.
+- Two host facts the test had to absorb, both recorded in its comments: a `?`
+  typed into the pane's interactive shell is Atuin AI's trigger key on a host
+  that loads it, so the exit marker uses `&&`/`||` instead of `"$?"` (this is
+  also why the two dry-run WezTerm captures noted under host-environment in
+  `log.md` wedge on this host); and the candidate path wraps at whatever column
+  the emulator has, so the path is matched against the frame's lines joined.
+- macOS: `just test-l2 review_router_partial_confirms_before_initialize` —
+  2 passed (tmux 3.6 s, WezTerm 2.3 s); `BISCUIT_L2_THREADS=1` broker mode —
+  2 passed (tmux 1.7 s, WezTerm 2.7 s). The PTY suite still passes after the
+  fixture move: `just test-l2 provided_partial review_router
+  proxy_target_schema` — 9 passed. `just lint` clean across all five packages.
+- Mutation check: with the candidate scope in
+  `schema_interactive/supplied.rs` anchored at `repository_root()` instead of
+  `base_dir()`, both capture tests fail — the decoy widens the match and the
+  chooser is drawn instead of the confirmation. The mutation was reverted and
+  the file is byte-identical to HEAD.
+- Linux: CI's claudine L2 leg runs on tmux; the WezTerm test skips there by
+  the backend gate. Native Windows and WSL2: the file is `#![cfg(unix)]`, and
+  the L2 tier has no Windows leg by policy.

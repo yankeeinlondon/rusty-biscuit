@@ -3,7 +3,7 @@ created: 2026-09-10
 status: implemented
 reviewed: true
 implemented: true
-review_iterations: 1
+review_iterations: 2
 area: claudine
 packages:
     - claudine
@@ -206,6 +206,31 @@ Root-union applicability defers file existence for caller-owned inputs while
 retaining other constraints. Exactly one matching alternative supplies file
 metadata; zero or multiple alternatives remain deferred without guessing.
 
+Interactive coverage is split by what each level can observe. The PTY suite
+(`level2_provided_partial_file_pty.rs`) drives the shipped router with bytes the
+test process manufactures and proves ordering and data flow: the dialog precedes
+`initialize`, the chosen file is the file the guard reads, and the choice survives
+the proxy hop, across the accept, chooser, decline, cancel, and proxy-target
+variants. The shared terminal harness (`level2_provided_partial_file_capture.rs`)
+runs the same router and partial inside tmux and WezTerm and reads back what the
+emulator drew: the styled candidate card and confirmation are on screen before
+any provider is reached or lifecycle error printed, and accepting through the
+emulator's own key path carries the selected spec to the provider. Both suites
+share the fixture in `cli/tests/common/review_router.rs`.
+
 See [plan.md](./plan.md#validation-record) for the regression baseline, completed
 macOS checks, and cross-platform verification status. This fix remains in the
 active directory while the remaining OS evidence is pending.
+
+## Rulings
+
+- **2026-09-10 — real-terminal coverage (review 1 finding 4, review 2 human-review
+  item).** Both reviews recorded that the delivered interactive tests used a
+  pseudo-terminal where this specification named the shared terminal harness, and
+  deferred the decision. Ruling: the harness coverage is required and was added as
+  the rendering complement to the PTY suite (option 2 of review 2), not as a
+  replacement for it. The specification's wording stands; it is not loosened to
+  treat a pseudo-terminal test as harness coverage. Native Windows interactive
+  proof remains out of scope: the L2 tier has no Windows CI leg by policy, and
+  the Windows-reachable non-interactive tests in
+  `compose_caller_file_provenance.rs` continue to pin the typed failure.

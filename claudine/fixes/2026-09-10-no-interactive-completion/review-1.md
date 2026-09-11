@@ -8,6 +8,7 @@ created: 2026-09-10T14:02:57-07:00
 log: claudine/fixes/2026-09-10-no-interactive-completion/log.md
 implemented: true
 implemented_by: claude/opus
+next: 2026-09-10-no-interactive-completion/review-2.md
 ready: false
 human_review: false
 ---
