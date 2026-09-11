@@ -17,6 +17,20 @@
     - load it before claiming an OS cannot be tested from the current host, before touching `#[cfg(windows)]` or path-comparison code, and whenever a test is red on exactly one CI environment
     - when you learn a new OS-specific fact the hard way, add it to that skill in the same change
 
+## Test Execution Constraints
+
+- A user's instruction not to run or rerun a test environment applies to both
+  direct commands and jobs triggered indirectly by a push, dispatch, or retry.
+  Do not narrow it to manual reruns unless the user explicitly does so.
+- Before pushing, compare the resolved CI matrix with every active execution
+  constraint, including environment exclusions and previously supplied evidence.
+  Verifying one exclusion does not establish that the others are satisfied.
+- If current CI cannot honor a constraint or accept the prior evidence, explain
+  that specific gap before triggering the workflow. Do not silently rerun tests,
+  invent a receipt, or describe an unimplemented reuse mechanism as available.
+- Classify a failed job by its failing step. Passing tests followed by failed
+  artifact upload are not failed tests and do not alone justify rerunning them.
+
 ## Just Runner
 
 - we use the `just` runner extensively throughout this monorepo. 
