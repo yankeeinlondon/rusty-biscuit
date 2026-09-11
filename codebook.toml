@@ -122,6 +122,7 @@ words = [
     "initialisation",
     "introducer",
     "ipc",
+    "ipv",
     "json5",
     "jsonschema",
     "justext",
