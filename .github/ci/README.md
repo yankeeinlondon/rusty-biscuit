@@ -110,6 +110,18 @@ reason to skip work. The receipt covers L1 and L2 only: browser work stays in
 CI, and an environment needed by a companion suite is retained even if that
 duplicates its Rust L1 run. Manual full-scope runs ignore local receipts.
 
+The current verifier returns the first matching environment, and the scope
+calculator accepts one `--exclude-environment`. Receipts for multiple hosts are
+not combined: accepting macOS evidence does not also suppress WSL. Prior
+cross-check output is not automatically published as an exact-head receipt.
+Before pushing under a "do not rerun WSL" instruction, verify that the resolved
+matrix schedules no WSL jobs; if the evidence mechanism cannot express all
+requested exclusions, resolve that gap before triggering CI. Automatic jobs
+remain subject to the same execution constraints as direct test commands.
+
+Skipping the local hook with `--no-verify` creates no new evidence but does not
+disable previously published matching notes. CI still verifies those notes.
+
 A WSL2 guest *is* Linux, so `_ensure-native-libs` keys off `uname -s` and reads
 the package's `ubuntu-latest` list. `native` therefore stays a **runner OS**
 map (keyed by `ubuntu-latest`/`macos-latest`/`windows-latest`) and must not
