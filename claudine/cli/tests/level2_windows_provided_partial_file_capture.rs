@@ -32,20 +32,29 @@
 //!
 //! ## Where this runs
 //!
-//! Locally on the Windows build host, against a headless
-//! `wezterm-mux-server` (started once with `Start-Process`, addressed through
-//! `WEZTERM_UNIX_SOCKET`). CI has no Windows Level 2 leg — a temporary
-//! provisioning gap recorded in `.github/ci/environments.json`, not a reason
-//! to exclude the platform.
+//! Locally on the Windows build host, against a `wezterm-mux-server` addressed
+//! through `WEZTERM_UNIX_SOCKET` (see the `os` skill's Windows page for the
+//! host facts). CI has no Windows Level 2 leg — a temporary provisioning gap
+//! recorded in `.github/ci/environments.json`, not a reason to exclude the
+//! platform. Run with `BISCUIT_TEST_REQUIRED_BACKENDS=wezterm` so a missing
+//! backend fails instead of printing a 0.02 s skip as PASS.
+//!
+//! Its first passing run (2026-09-10, ~4 s) came after it found a defect the
+//! non-interactive Windows tests could not see: the partial-file substring
+//! predicate compared the typed `/`-spelled partial against native `\` paths,
+//! so every candidate missed and the typed failure fired where macOS offered
+//! the confirmation. The zero-candidate path and the interaction-denied path
+//! produce the same diagnostic, which is exactly why only a real-terminal run
+//! on this platform could tell them apart.
 
 #![cfg(windows)]
 
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::TerminalHarness;
+use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use test_toolkit::{Backend, Level, require_level};
 
@@ -54,16 +63,36 @@ use common::review_router::{
     PARTIAL, assert_provider_received, launch_area, names_selected_spec, provider_prompt,
     review_router_fixture,
 };
-use common::{
-    assert_row_is_styled, claudine_bin, minimal_system_path, wait_for_exit_marker,
-    wait_for_pane_text,
-};
+use common::{assert_row_is_styled, claudine_bin, minimal_system_path, wait_for_exit_marker};
 
 const CONFIRMATION_PROMPT: &str = "Use this file? (Y/n)";
 const PARTIAL_NOTICE: &str = "did not match a file directly";
 const CANDIDATE_BADGE: &str = " FILE ";
 const LIFECYCLE_ERROR: &str = "lifecycle evaluation error";
 const SELECTED_SPEC: &str = "2026-09-10-local-a/spec.md";
+
+/// Poll the pane until `expected` is drawn, returning that frame.
+///
+/// On timeout the panic carries the scrollback, not just the viewport: a
+/// diagnostic taller than the pane scrolls its own headline out of `capture()`
+/// and leaves only the source excerpt on screen.
+fn wait_for_dialog(harness: &mut WezTermHarness, expected: &str, timeout: Duration) -> CapturedFrame {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let frame = harness.capture().expect("capture pane");
+        if frame.plain.contains(expected) {
+            return frame;
+        }
+        if Instant::now() >= deadline {
+            let history = harness
+                .capture_scrollback(200)
+                .map(|frame| frame.plain)
+                .unwrap_or(frame.plain);
+            panic!("expected terminal content {expected:?} never rendered; pane with scrollback:\n{history}");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
 
 /// Types one line into the pane. `cmd.exe` needs CRLF to accept it.
 fn send_line(harness: &mut WezTermHarness, line: &str) {
@@ -125,7 +154,7 @@ fn level2_wezterm_windows_review_router_partial_confirms_before_initialize() {
         ),
     );
 
-    let dialog = wait_for_pane_text(&mut harness, CONFIRMATION_PROMPT, Duration::from_secs(30));
+    let dialog = wait_for_dialog(&mut harness, CONFIRMATION_PROMPT, Duration::from_secs(30));
     assert!(
         !provider_prompt(&fixture).exists(),
         "provider was reached before the confirmation was drawn; plain:\n{}",
@@ -155,7 +184,6 @@ fn level2_wezterm_windows_review_router_partial_confirms_before_initialize() {
         "the confirmation must name the launch-area candidate only; plain:\n{}",
         dialog.plain
     );
-    eprintln!("RAWDUMP {:?}", dialog.raw);
     assert_row_is_styled(&dialog.raw, CANDIDATE_BADGE, "candidate file badge");
 
     harness.send_text(b"y").expect("accept the candidate");
