@@ -258,17 +258,22 @@ Evidence, final state:
 - WSL2: **met.** The Unix suites run unchanged inside the guest in archive
   mode — the shape of CI's `wsl2-ubuntu` leg, with `terminal-tests` enabled
   and `BISCUIT_TEST_REQUIRED_BACKENDS=tmux` so a skip could not print as a
-  pass: 17 of 17 pass. The tmux capture test executed (22.3 s; the guest's
-  login shell was slow while its `~/.config` share was down, see below), all
-  nine PTY tests executed (0.3–0.7 s), and the predicate unit test and both
-  shipped-router tests pass. The WezTerm capture line is a 0.037 s skip — no
-  WezTerm in the guest — recorded as such. `just cross-check --os wsl` itself
-  could not run this: the guest's `~/.config` is a CIFS mount of the
-  `192.168.100.97` `config` share, unreachable at the time, so `git` died on
-  its global config and cargo's package-file listing (gitoxide, honoring the
-  global excludes at `$XDG_CONFIG_HOME/git/ignore`) died with "Host is down".
-  The run used cross-check's exact sequence by hand with
-  `GIT_CONFIG_GLOBAL=/dev/null` and `XDG_CONFIG_HOME` pointed at an empty
-  local directory — nothing the tests do reads that share. Native Windows and
-  WSL2 CI legs remain the tracked provisioning gap; the behavioral evidence
-  for both now exists.
+  pass: 17 of 17 pass. Recipe-driven on 2026-09-11 —
+  `just cross-check claudine-cli --os wsl --features terminal-tests
+  provided_partial review_router proxy_target_schema path_matches_query
+  shipped_review_router` — the tmux capture executed in 3.96 s, all nine PTY
+  tests executed (0.1–0.6 s), and the predicate unit test and both
+  shipped-router tests pass. The WezTerm capture line is a 0.013 s skip — no
+  WezTerm in the guest — recorded as such. The first run, on 2026-09-10, used
+  cross-check's exact sequence by hand because the guest's `~/.config` (a
+  CIFS mount of the Synology NAS's `config` share) was down: `git` died on its
+  global config and cargo's package-file listing (gitoxide, honoring the
+  global excludes at `$XDG_CONFIG_HOME/git/ignore`) died with "Host is down";
+  `GIT_CONFIG_GLOBAL=/dev/null` plus an empty `XDG_CONFIG_HOME` bypassed both,
+  and the same 17 passed (tmux capture 22.3 s then — the guest's login shell
+  waiting on the dead share, as the 3.96 s recipe run confirms). Native
+  Windows was re-run the same morning with the NAS reachable: the L2 twin
+  passes in 4.42 s, matching 4.25 s with it down, so the harness's
+  empty-config isolation is what keeps the spawn fast, independent of NAS
+  state. Native Windows and WSL2 CI legs remain the tracked provisioning gap;
+  the behavioral evidence for both exists.
