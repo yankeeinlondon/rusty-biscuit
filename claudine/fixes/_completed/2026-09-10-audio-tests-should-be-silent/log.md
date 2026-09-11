@@ -7,6 +7,7 @@ areas:
         - claudine
 deferred_perf_measurement: false
 implementation_1: "2026-09-10T14:54:19-07:00"
+implementation_2: "2026-09-10T16:22:15-07:00"
 ---
 
 # Log: Audio Tests Should Be Silent
@@ -234,3 +235,153 @@ repaired in `native_player.rs`, and the same unreachable-`#[ignore]` defect that
 finding 3 repaired for EchoGarden and gTTS still exists in `espeak.rs`,
 `kokoro.rs`, and `elevenlabs.rs`.
 
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-09-10T16:22:15-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Users/ken/.claudine/worktrees/rusty-biscuit/feat-unifi/claudine/fixes/2026-09-10-audio-tests-should-be-silent/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- review 2 records a single finding, rated **High**:
+        - finding 1 — cleanup releases queue ownership before worker ownership (`tools/test-toolkit/src/spool.rs`)
+- review 2 also closed both remaining review-1 findings (native gain boundary, EchoGarden/gTTS real-tier reachability), so no work is carried forward from iteration 1
+- affected package areas: the defect lives in the shared `tools/test-toolkit` fixture; the required new regression lands in the `playa` area, and `claudine` plus `biscuit-speaks` are consumers of the same fixture
+- starting the work on 'finding-1: cleanup releases queue ownership before worker ownership' at 16:29:32-0700
+        - **what the defect actually was.** `LockedAudioSpool` held `worker.lock` in a plain
+          `_worker: File` field, so worker ownership was released by that field's drop — after
+          `clear_pending` had already released `queue.lock` and after `Drop::drop` returned. The
+          scheduler's own final-empty handoff (`playa/lib/src/detached/mod.rs:745-759`) does the
+          opposite: it holds `queue.lock`, releases `worker.lock`, then releases `queue.lock`,
+          precisely so a publisher that commits under `queue.lock` and probes `worker.lock`
+          (`enqueue_state_at`, same file, lines 241-291) cannot both commit a record and see a
+          worker that is about to disappear.
+        - **the ordering fix.** `worker` is now `Option<File>` and destruction runs one critical
+          section (`clear_pending_and_release_worker`): open + `lock_exclusive` on `queue.lock`,
+          remove every `*.pending.json`, `FileExt::unlock` the worker **while `queue.lock` is
+          still held**, then unlock `queue.lock`. `clear_pending(&self)` keeps its old signature
+          and old behavior (mid-test cleanup that retains worker ownership), so the existing call
+          site in `playa/cli/tests/detached_cli.rs` and every `new`/`root`/`*_lock_path`/`open_lock`
+          consumer in `claudine`, `biscuit-speaks`, `playa`, and `tools` is untouched.
+        - **the unwind-reporting fix, and the doc drift the review flagged.** The old `///` said
+          the error was discarded while iteration 1's log claimed it was reported; the code
+          discarded it. Resolved in favor of reporting: the error now always goes to `eprintln!`
+          (nextest attributes stderr to the failing test), and only a thread that is *not* already
+          unwinding additionally panics — a second panic during unwind aborts the process and
+          destroys the original failure.
+        - **a failed cleanup no longer releases ownership at all.** Advisory locks die with the
+          descriptor, so "do not release worker ownership over a record we could not remove" cannot
+          be expressed by declining to call `unlock`; the `File` would just be dropped. The failure
+          branch therefore `std::mem::forget`s the worker handle, holding `worker.lock` for the
+          rest of the process so no publisher will spawn a scheduler over the survivor. Documented
+          at the line, including its one cost: on Windows the retained handle blocks deletion of
+          the lock file, so an already-failing test may leave its spool directory behind.
+        - **why a fixture seam was unavoidable.** The window under test is two adjacent unlock
+          calls. A publisher blocked in `flock`/`LockFileEx` is granted `queue.lock` at the unlock
+          instant but resumes in userspace microseconds-to-milliseconds later, so it observes the
+          wrong order only occasionally — the review's own note that "with only advisory locks there
+          is no way to pause the fixture inside its scan without a test hook". Five hook-free
+          constructions were considered and rejected as racy: probe-on-grant, two blocking waiters
+          compared by arrival order, hold-queue-and-poll-worker, worker-then-queue probing, and a
+          publisher that mimics `enqueue_state_at` end to end. The seam is
+          `LockedAudioSpool::observe_handoff`, a `Fn` run inside the critical section after the
+          final scan and before the worker release; it is in test-support code only (not `playa`),
+          not `#[doc(hidden)]`, and its docs state both hazards (do not block on either lock, and
+          it must return).
+        - **new regression, CI-reachable tier.** `playa/cli/tests/detached_cli.rs::cleanup_holds_queue_ownership_across_the_release_of_worker_ownership`
+          is Level 1 in the Playa CLI target (`tools/test-toolkit` itself is
+          `[package.metadata.ci] gates = false`, so its own suite is not CI-reachable). A publisher
+          thread waits for the handoff signal, then attempts `try_lock_exclusive` on `queue.lock`
+          exactly at the moment the scan has finished and worker ownership has not yet been
+          released. It must fail; if it succeeds it commits a record and probes `worker.lock`, and
+          the test reports which of the two broken outcomes it saw. The test then asserts the spool
+          is empty and both locks are free — the "a new scheduler may take it, and finds nothing"
+          branch the review asked for.
+        - **mirrored and extended unit coverage** in `tools/test-toolkit/tests/audio_spool.rs`:
+          the same handoff test, plus `a_failed_cleanup_retains_worker_ownership` and
+          `a_failed_cleanup_while_unwinding_reports_without_a_second_panic`. Both drive the failure
+          branch with a *directory* named `unremovable.pending.json`, which makes `remove_file`
+          fail on every OS while leaving the root and both lock files intact. Deleting the lock
+          files was tried first and is wrong: `flock` binds to the inode, so a recreated
+          `worker.lock` is a different inode and would never show the retained lock.
+        - **non-vacuity, ordering.** Temporarily restored the pre-fix ordering (destruction calls
+          `clear_pending`, which releases `queue.lock`, then releases the worker) with the observer
+          left at the same semantic point. Both new handoff tests failed, with the exact defect
+          text: `a publisher acquired queue ownership after the cleanup scan; it then saw the
+          fixture as the worker owning its record`. Ran the Playa one **10 times: 10/10 failed**, so
+          the detection is deterministic rather than flaky. Restored the fix; both pass.
+        - **non-vacuity, failure branch.** Temporarily restored the pre-fix failure behavior
+          (`drop(worker)` instead of retain, no `eprintln!`). Both failure-path tests failed on
+          `worker ownership was released over a record cleanup could not remove`. Restored; both
+          pass.
+        - **cross-OS reasoning (only macOS was executed here).** Explicit `unlock` followed by the
+          `File`'s drop is sound on both families: `flock(LOCK_UN)` then `close`, and `UnlockFile`
+          then `CloseHandle`. `Option::take` guarantees exactly one unlock per handle — there is no
+          double-unlock path, and the early-`?` returns leave the handle in the field so the failure
+          branch, not a silent drop, decides its fate. The tests rely on same-process,
+          cross-descriptor lock conflict, which holds for `flock` (per open file description) and
+          for `LockFileEx` (per handle); the pre-existing `publication_unwind_…` test already
+          depends on the same property in CI. No `#[cfg]` was added. Windows/Linux/WSL2 evidence is
+          CI work.
+        - **verification run** (all in the impacted areas, via `just`; `just test-real` deliberately
+          not run — the review already executed that tier, and it plays real audio on the host):
+                - `cd tools && just test` → **129 passed, 2 skipped** (the area's `test` recipe lives
+                  at `tools/`, not `tools/test-toolkit/`; `audio_spool` went from 2 to 5 tests)
+                - `cd tools && just lint` → exit 0; `cd tools && just doctest` → exit 0 (the
+                  `LockedAudioSpool` example still compiles)
+                - `cd playa && just test` → **195 passed, 8 tier-filtered**; `cd playa && just lint`
+                  → exit 0
+                - `cd claudine && just test audio` → **22 passed, 6,849 name-filtered**;
+                  `cd claudine && just lint` → exit 0
+                - `cd biscuit-speaks && just test -j 2` → **491 passed, 19 tier-filtered** (includes
+                  `lib/tests/detached_phase4.rs`, a consumer of the changed fixture)
+        - **documentation pass.** Module `//!` docs, the `LockedAudioSpool` `///` docs and its
+          `## Panics` section, `tools/test-toolkit/README.md`, and `claudine/docs/topics/testing.md`
+          now describe the handoff ordering, the retained-ownership failure branch, and the new
+          seam. `.claude/skills/rust-testing/SKILL.md` makes no claim about this fixture, so there
+          was nothing to correct there; `.claude/skills/claudine/SKILL.md`'s existing sentence
+          ("remove pending work under `queue.lock` before releasing the scheduler lock") is already
+          accurate under the new ordering and was left alone.
+        - **left out on purpose.** `playa/cli/tests/detached_cli.rs` carries four pre-existing
+          rustfmt diffs from iteration 1 (lines 101, 129, 143, 337). The area's `lint` recipe runs
+          clippy only, so they are not failing anything; reformatting them would be unrelated churn
+          in a behavior commit. Every line this iteration added is rustfmt-clean.
+- work completed for 'finding-1: cleanup releases queue ownership before worker ownership' at 16:42:53-0700
+
+### Successful Completion
+
+The implementation of review cycle 2 has completed successfully in 22 minutes.
+During this implementation all 1 review findings were evaluated to see if they
+could be fixed as a part of this implementation cycle: 1 were fixed, 0 were
+deferred.
+
+No finding was deferred, and no performance measurement was required by the
+review, so `deferred_perf_measurement` remains `false`.
+
+One piece of *evidence* remains owed, unchanged from cycle 1 and unchanged by
+this cycle's work: only macOS executed here. The Linux, native-Windows, and WSL2
+legs are CI work, and the real-resource tier was deliberately not re-run because
+review 2 already executed it and running it here would play audio on the user's
+machine. This matches the single acceptance criterion the specification still
+leaves unchecked.
+
+The files changed by this implementation cycle are:
+
+- **Sources and tests**
+        - `tools/test-toolkit/src/spool.rs` — destruction is now one `queue.lock`
+          critical section that releases `worker.lock` from inside it; a failed
+          cleanup reports on stderr and retains worker ownership; new
+          `observe_handoff` seam
+        - `tools/test-toolkit/tests/audio_spool.rs` — mirrored handoff regression plus
+          two failure-branch regressions
+        - `playa/cli/tests/detached_cli.rs` — the CI-reachable Level 1 handoff
+          regression the review required
+- **Documentation**
+        - `tools/test-toolkit/README.md`, `claudine/docs/topics/testing.md`
+
+No manifest, no public API signature, and no consumer call site changed, so
+`claudine`, `biscuit-speaks`, and the rest of `playa` compile and pass unmodified.
+
+Adjacent gaps recorded in cycle 1 remain open for a future cycle and were not
+touched here: `playa/lib/src/sfx_player.rs` applies volume through the same
+unobserved `Player::set_volume` shape, and the unreachable-`#[ignore]` defect
+still exists in `espeak.rs`, `kokoro.rs`, and `elevenlabs.rs`.
