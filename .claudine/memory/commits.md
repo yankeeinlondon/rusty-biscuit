@@ -97,15 +97,24 @@ belong here.
 - Conventional Commits, lowercase after the colon, subject < 72 chars.
 - `planning` covers moves into `_completed` / out of `_unscheduled`, **new
   spec files added to `features/_unscheduled/`** (a pure `A` for the spec —
-  `planning(<area>): schedule <name> for implementation`), AND
-  review-cycle doc edits inside a fix/feature directory (`log.md` entry,
-  `review-N.md` flipping `implemented: true`, new `review-(N+1).md`, `spec.md`
-  bumping `review_iterations`): `planning(<area>): close <fix> cycle N, open
+  `planning(<area>): schedule <name> for implementation`), **new spec files
+  added to an active `fixes/YYYY-MM-DD-<name>/` directory** (a new dated fix
+  being scheduled for implementation, distinct from `_unscheduled/`; same
+  `planning(<area>): schedule <name>` shape — see `97f12132c` adding
+  `fixes/2026-09-10-local-affected-scope/spec.md`, `aedeeb46d` adding
+  `fixes/2026-09-11-cicd-cleanup/spec.md`), AND review-cycle doc edits
+  inside a fix/feature directory (`log.md` entry, `review-N.md` flipping
+  `implemented: true`, new `review-(N+1).md`, `spec.md` bumping
+  `review_iterations`): `planning(<area>): close <fix> cycle N, open
   cycle N+1` (see `4c903c586`, `152ea6b84`, `690b2ecc3`). Such commits may
   have zero source diff; they are valid cycle iterations, not no-ops. The
   unscheduled-add case is not a `feat` because no code ships, and not `docs`
   because `_unscheduled/` is a planning surface (the frontmatter `area`
   is the scope — `area: repo` → `planning(repo)` even for CI-leg specs).
+  The active-fix-spec case uses the same rationale: no code ships, the
+  dated directory is a planning surface, the frontmatter `area` is the
+  scope (e.g. `area: repository-ci` for a repo-wide CI fix still becomes
+  `planning(repo):` per the analogous `97f12132c` precedent).
 - In cycle-close bodies quote what the diff says; do not paraphrase into
   claims the staged text did not make ("smoke test failed" vs. "smoke attempt
   interrupted by host load").
