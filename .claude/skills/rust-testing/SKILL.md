@@ -5,7 +5,7 @@ description: |-
   test design, fixture isolation, `require_level!` gating, nextest filtersets,
   suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 7055b0e89017847d-717a77c3a2341172
+hash: 7055b0e89017847d-b54d26bf688ff20f
 last_updated: 2026-09-10
 ---
 # Rust Testing — Rusty Biscuit Monorepo
@@ -500,7 +500,7 @@ reference implementation:
 | Piece | Where | Contract |
 |---|---|---|
 | Fixture | `claudine/cli/tests/common/mod.rs` — `CliProcessFixture` | Temp `cwd`/`home`/`bin`; `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA` → fixture home, `HOMEDRIVE`/`HOMEPATH`/`XDG_CONFIG_HOME` removed |
-| Builder | `CliProcessFixture::command()` / `command_builder()` | The one supported spawn. `current_dir` pinned to the fixture `cwd` |
+| Builder | `CliProcessFixture::command()` / `command_builder()` | The one supported spawn. `current_dir` pinned to the fixture `cwd`; child-local `PLAYA_DRY_RUN=1` and a private `PLAYA_SPOOL_DIR` so shipped `say:`/`effect:` lifecycle actions stay silent (`detached_audio.rs` opts out per key) |
 | Guard | `claudine/cli/tests/spawn_site_guard.rs` | Source scan; a raw `Command::cargo_bin("<bin>")` outside the builder fails the suite |
 
 **Default `PATH` is the fixture `bin` plus a minimal system set** — `/usr/bin:/bin`

@@ -30,9 +30,11 @@ real playback. Pin test providers and voices; these tests do not validate the
 operator's personal Claudine speech configuration. A fake agent does not disable
 lifecycle TTS or sound effects in a real prompt template.
 
-For composition/provenance tests that do not test audio, set `PLAYA_DRY_RUN=1`
-on the child command and assert its private `PLAYA_SPOOL_DIR` is never created.
-This preserves normal lifecycle evaluation while suppressing audio publication.
+`CliProcessFixture::command()` already sets child-only `PLAYA_DRY_RUN=1` and a
+private `PLAYA_SPOOL_DIR` (`fixture.audio_spool()`); a test that executes a
+shipped prompt asserts that directory is never created. This preserves normal
+lifecycle evaluation while suppressing audio publication. `detached_audio.rs`,
+whose subject is publication, removes the dry-run key on its built command.
 Publication tests retain real handoff with the workspace-shared
 `test_toolkit::LockedAudioSpool` fixture: it holds `worker.lock` for its whole
 lifetime and takes `queue.lock` before scanning and removing pending jobs, so a

@@ -38,8 +38,10 @@ features; explicit tier recipes enable the corresponding local targets.
 `CliProcessFixture` in `claudine/cli/tests/common/mod.rs` — `command()` for the
 hermetic default, `command_builder()` when it needs a named escape. The default
 pins `current_dir` to the fixture `cwd`, points the home variables at the
-fixture home, sets `CLAUDINE_RENDEZVOUS_REPORT=false` and `NO_COLOR=1`, and
-composes `PATH` as the fixture `bin` plus a minimal system set (`/usr/bin:/bin`;
+fixture home, sets `CLAUDINE_RENDEZVOUS_REPORT=false` and `NO_COLOR=1`, silences
+lifecycle audio with a child-local `PLAYA_DRY_RUN=1` plus a private
+`PLAYA_SPOOL_DIR` (assert `fixture.audio_spool()` is still absent after running a
+shipped prompt), and composes `PATH` as the fixture `bin` plus a minimal system set (`/usr/bin:/bin`;
 `%SystemRoot%\System32` on Windows) — enough for the `sh`/`cmd`/`git` claudine
 itself spawns by bare name, and short of every prefix an agentic CLI installs
 into. Three escapes exist, each requiring a call-site comment: `fake_only_path()`
