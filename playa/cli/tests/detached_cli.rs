@@ -211,6 +211,121 @@ fn publication_unwind_removes_pending_before_releasing_worker_ownership() {
     let _spool = LockedAudioSpool::new(&root.0);
 }
 
+/// Longest the publisher waits for the fixture's cleanup scan to finish, and
+/// the fixture's handoff waits for the publisher's probe.
+///
+/// Neither side pays this on the passing path: the handoff observer signals the
+/// publisher, and the publisher's `try_lock_exclusive` answers without blocking.
+/// The budget only bounds a thread whose partner never arrives.
+const HANDOFF_BUDGET: Duration = Duration::from_secs(10);
+
+fn wait_for(flag: &AtomicBool, deadline: Instant) {
+    while !flag.load(Ordering::SeqCst) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// The publisher window `publication_unwind_…` above cannot reach: a commit
+/// attempted *after* the cleanup scan rather than before it.
+///
+/// `enqueue_state_at` commits under `queue.lock` and then probes `worker.lock`
+/// to decide whether an active worker will pick the record up. If cleanup
+/// released `queue.lock` before `worker.lock`, a publisher in that interval
+/// would commit, see the fixture as that worker, decline to spawn a scheduler,
+/// and leave a runnable record behind. The interval is two adjacent unlock
+/// calls wide, so a thread waiting on `queue.lock` would report it only
+/// occasionally — hence the fixture's handoff observer, which asks from inside
+/// the critical section instead.
+#[test]
+fn cleanup_holds_queue_ownership_across_the_release_of_worker_ownership() {
+    let root = TestRoot::new("handoff");
+    let pending = root.0.join("2.pending.json");
+
+    let scan_finished = Arc::new(AtomicBool::new(false));
+    let probe_finished = Arc::new(AtomicBool::new(false));
+    let committed = Arc::new(AtomicBool::new(false));
+    let deferred_to_fixture = Arc::new(AtomicBool::new(false));
+
+    let publisher = std::thread::spawn({
+        let root_path = root.0.clone();
+        let pending = pending.clone();
+        let scan_finished = Arc::clone(&scan_finished);
+        let probe_finished = Arc::clone(&probe_finished);
+        let committed = Arc::clone(&committed);
+        let deferred_to_fixture = Arc::clone(&deferred_to_fixture);
+        move || {
+            wait_for(&scan_finished, Instant::now() + HANDOFF_BUDGET);
+
+            let queue = LockedAudioSpool::open_lock(&LockedAudioSpool::queue_lock_path(&root_path))
+                .expect("queue lock should open");
+            if queue.try_lock_exclusive().expect("queue lock should probe") {
+                fs::write(&pending, b"record committed after the cleanup scan").unwrap();
+                let worker =
+                    LockedAudioSpool::open_lock(&LockedAudioSpool::worker_lock_path(&root_path))
+                        .expect("worker lock should open");
+                let worker_free = worker
+                    .try_lock_exclusive()
+                    .expect("worker lock should probe");
+                if worker_free {
+                    fs4::fs_std::FileExt::unlock(&worker).expect("probe should release");
+                }
+                committed.store(true, Ordering::SeqCst);
+                deferred_to_fixture.store(!worker_free, Ordering::SeqCst);
+                fs4::fs_std::FileExt::unlock(&queue).expect("publisher should release the queue");
+            }
+            probe_finished.store(true, Ordering::SeqCst);
+        }
+    });
+
+    let mut spool = LockedAudioSpool::new(&root.0);
+    spool.observe_handoff({
+        let scan_finished = Arc::clone(&scan_finished);
+        let probe_finished = Arc::clone(&probe_finished);
+        move || {
+            scan_finished.store(true, Ordering::SeqCst);
+            wait_for(&probe_finished, Instant::now() + HANDOFF_BUDGET);
+        }
+    });
+    drop(spool);
+
+    publisher.join().expect("publisher should not panic");
+
+    assert!(
+        !committed.load(Ordering::SeqCst),
+        "a publisher acquired queue ownership after the cleanup scan; it {}",
+        if deferred_to_fixture.load(Ordering::SeqCst) {
+            "then saw the fixture as the worker owning its record"
+        } else {
+            "then saw worker ownership already released"
+        }
+    );
+    assert!(
+        !pending.exists(),
+        "a record committed after the cleanup scan survived the handoff"
+    );
+
+    // The admissible outcome: worker ownership becomes observable as free only
+    // over an empty spool, so a publisher arriving now spawns a scheduler that
+    // has nothing to play.
+    let queue = LockedAudioSpool::open_lock(&LockedAudioSpool::queue_lock_path(&root.0))
+        .expect("queue lock should open");
+    assert!(
+        queue.try_lock_exclusive().expect("queue lock should probe"),
+        "cleanup must release queue ownership"
+    );
+    let worker = LockedAudioSpool::open_lock(&LockedAudioSpool::worker_lock_path(&root.0))
+        .expect("worker lock should open");
+    assert!(
+        worker
+            .try_lock_exclusive()
+            .expect("worker lock should probe"),
+        "cleanup must release worker ownership"
+    );
+    assert!(!pending.exists());
+    fs4::fs_std::FileExt::unlock(&worker).expect("probe should release");
+    fs4::fs_std::FileExt::unlock(&queue).expect("probe should release");
+}
+
 #[test]
 #[serial_test::serial]
 fn requester_exit_is_followed_by_worker_failure_journal_and_clean_exit() {

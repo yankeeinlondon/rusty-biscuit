@@ -108,7 +108,7 @@ a record another actor is committing.
 
 `LockedAudioSpool` owns a private spool root (`0o700` on Unix), holds
 `worker.lock` for its whole lifetime, and takes `queue.lock` around every scan
-and removal. Cleanup also runs on `Drop`, including while a test is unwinding.
+and removal.
 
 ```rust
 let spool = test_toolkit::LockedAudioSpool::new(&root);
@@ -116,9 +116,22 @@ let spool = test_toolkit::LockedAudioSpool::new(&root);
 spool.clear_pending().expect("pending records removed under the queue lock");
 ```
 
+`Drop` repeats the cleanup — including while a test is unwinding — as a single
+`queue.lock` critical section that ends by releasing `worker.lock` and only then
+releases `queue.lock`. That is the order `playa::detached::run_scheduler_with`
+uses for its own final-empty handoff, and it is what stops a publisher from
+committing a record, probing `worker.lock`, seeing the fixture as the worker
+responsible for it, and leaving it runnable. A cleanup failure is reported on
+stderr and keeps worker ownership rather than releasing it over a record it
+could not remove; when the thread is not already unwinding it also panics.
+
 Use it instead of a local worker-lock guard. `tests/audio_spool.rs` carries the
-regression: a publisher committing under `queue.lock` while the fixture-owning
-scope unwinds must not survive cleanup.
+regressions: a publisher committing under `queue.lock` while the fixture-owning
+scope unwinds, a publisher arriving after the final scan, and a cleanup failure
+that must not hand the spool on. The publisher-after-the-scan case needs
+`observe_handoff`, which runs a callback inside the destruction critical section
+— the interval it proves is two adjacent unlock calls wide, so an outside thread
+would report the wrong order only occasionally.
 
 ### `require_level!` and `Backend` — per-backend L2 enforcement
 

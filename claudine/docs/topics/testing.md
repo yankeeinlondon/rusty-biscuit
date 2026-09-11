@@ -36,8 +36,11 @@ This preserves normal lifecycle evaluation while suppressing audio publication.
 Publication tests retain real handoff with the workspace-shared
 `test_toolkit::LockedAudioSpool` fixture: it holds `worker.lock` for its whole
 lifetime and takes `queue.lock` before scanning and removing pending jobs, so a
-publisher or preparation helper cannot commit behind the scan. Cleanup runs on
-unwinding too, and a cleanup failure panics unless the thread is already
-panicking.
+publisher or preparation helper cannot commit behind the scan. Destruction runs
+the same cleanup while unwinding, and releases `worker.lock` while still holding
+`queue.lock` — the order `run_scheduler_with` uses — so no publisher can commit
+between the final scan and the release of worker ownership. A cleanup failure is
+reported on stderr and retains worker ownership instead of exposing what it
+could not remove; it also panics unless the thread is already panicking.
 Tests that execute helpers must release blocked fixtures and observe completion
 before removing their spool. Never use the operator's real queue for test cleanup.
