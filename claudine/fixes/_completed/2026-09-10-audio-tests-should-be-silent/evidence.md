@@ -181,3 +181,23 @@ set `BISCUIT_SPEAKS_REQUIRED_PROVIDERS=echogarden,gtts` (see the biscuit-speaks
 README, "Silent audio tests") so an absent backend fails the tier instead of
 skipping it. Selection was proved by `cargo nextest list`, which builds the test
 binaries without running any of them.
+
+## Post-completion correction (2026-09-10, evening)
+
+The user still heard `small-group-cheer` after this fix closed. The inventory
+above missed `claudine/cli/tests/shipped_prompt_contract.rs`
+(`feature_review_cli_preserves_numeric_iteration_and_dependent_paths`): it copies
+the shipped corpus, its `codex` stub writes `ready: true` into the review, and
+the shipped `success` stack then publishes `effect: small-group-cheer` to the
+host's default spool. The host journal recorded a 10,597 ms file job (the
+clip's exact length) at 20:28 local.
+
+Correction: `CliProcessFixture::command()` now sets child-local
+`PLAYA_DRY_RUN=1` and `PLAYA_SPOOL_DIR=<workspace>/audio-spool` for every L1
+spawn; the contract test asserts that spool is never created, and
+`cli_process_fixture.rs` proves both keys reach the child. `detached_audio.rs`
+keeps its per-key opt-out. Verified silently by re-running the full
+`claudine-cli` suite with an ambient `PLAYA_SPOOL_DIR` whose `worker.lock` was
+held by a `perl flock` process: with the default, nothing was published; with
+the default removed, the contract test left one pending job from the debug
+`claudine` binary.
