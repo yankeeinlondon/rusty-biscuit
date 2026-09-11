@@ -67,12 +67,14 @@ it always was. See
 
 ## Binding Time: Early vs Late
 
-Every frontmatter property of a lifecycle event interpolates **when that event fires**, not during the initial compose. This is what lets a lifecycle message report the state at the moment it runs — including the runtime globals (`err`, `timing`, `current`) that do not exist at compose time. So `failure.message: "❌️  {{err.code}}"` renders the real error's code, and a `failure` stack `message: "❌️  {{err.code}}"` does too.
+Every frontmatter property of a lifecycle event interpolates **when that event fires**, not during the initial compose. This is what lets a lifecycle message report the state at the moment it runs — including the runtime globals (`err`, `timing`, `current`, `current_env`) that do not exist at compose time. So `failure.message: "❌️  {{err.code}}"` renders the real error's code, and a `failure` stack `message: "❌️  {{err.code}}"` does too.
 
 The variables a lifecycle `{{{ … }}}` span can read fall into two groups:
 
-- **Early-binding** (resolvable before the run): `doc.*` (frontmatter), `ctx.*`, `env.*`, and read-side functions (`parent_dir`, `dirname`, `frontmatter`, `file_exists`, …).
-- **Late-binding** (only exists at event-time): `err` (in `blocked`/`failure`/optional-error `finalize`), `timing`, `current`.
+- **Early-binding** (resolvable before the run): `doc.*` (frontmatter), `ctx.*`, `env.*`, and read-side functions (`parent_dir`, `dirname`, `frontmatter`, `file_exists`, …), all evaluated at compose/preflight.
+- **Late-binding** (only exists at event-time): `err` (in `blocked`/`failure`/optional-error `finalize`), `timing`, `current`, `current_env`.
+
+`current` is the same data structure as `ctx`, evaluated lazily: `ctx` is captured once at the start of the run and shared by the whole run, while each `current.<key>` is evaluated when it is referenced — so `ctx.repo_name == current.repo_name` unless the repository was renamed while the prompt ran. `current_env` is the same lazy mirror of `env` (`current_env.<key>` for every `env.<key>`, re-read at reference time). The spelling is a direct mirror — there is no `current.ctx.*` / `current.env.*` nesting (ratified 2026-09-11 in the more-context spec, rulings R29–R33; implementation pending — until it lands, lifecycle handlers still see the old `current.ctx.*` / `current.env.*` shape).
 
 A lifecycle property's interpolation resolves against the union of both, at event-time. Bare frontmatter references (`{{phase}}`, `{{artifact.path}}`) read the **current** effective document state at the moment the event fires — not a copy captured at the initial compose — so a `set_frontmatter` side effect that mutates `phase` between loop iterations is visible to the next iteration's lifecycle message.
 
@@ -88,7 +90,7 @@ Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare st
 
 ### The `shell` exception
 
-`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception. They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, read-side functions). The approved command is byte-identical to the executed command. A late-binding reference (`err`/`timing`/`current`) inside a shell command is rejected at prepare time with a typed error naming the property path — those values do not exist yet at pre-flight.
+`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception. They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, read-side functions). The approved command is byte-identical to the executed command. A late-binding reference (`err`/`timing`/`current`/`current_env`) inside a shell command is rejected at prepare time with a typed error naming the property path — those values do not exist yet at pre-flight.
 
 ## Notification Fields
 
@@ -315,7 +317,7 @@ Arrays and objects here are **data**, not positional action arguments — this i
 
 #### Source-time evaluation
 
-The whole mapping resolves **once, at the source**, when the event fires — through the same Darkmatter DM2 subtree composition the rest of the lifecycle surface uses, in strict mode, against the source document's live frontmatter plus the globals in scope for that event (`err`, `timing`, `current`). A `set_frontmatter` run earlier in the same stack is visible to `with:`.
+The whole mapping resolves **once, at the source**, when the event fires — through the same Darkmatter DM2 subtree composition the rest of the lifecycle surface uses, in strict mode, against the source document's live frontmatter plus the globals in scope for that event (`err`, `timing`, `current`, `current_env`). A `set_frontmatter` run earlier in the same stack is visible to `with:`.
 
 What lands on the target is therefore resolved data, not a template. A raw `{{ … }}` span can never survive into the overlay and be re-evaluated at target time — that would make the binding ambiguous, so it is rejected instead.
 
@@ -449,13 +451,16 @@ start:
 
 ## Lifecycle Context
 
-Stack expressions have access to three lifecycle-only globals in addition to frontmatter, `ctx.*`, `env.*`, and `doc.*`:
+Stack expressions have access to four lifecycle-only globals in addition to frontmatter, `ctx.*`, `env.*`, and `doc.*`:
 
 | Global | Available in | Fields |
 |--------|--------------|--------|
 | `err` | `blocked`, `failure`, `finalize` | faceted fields below (`code`, `category`, `disposition`, `origin`, `detail.*`, plus promoted conveniences) |
 | `timing` | every event | `document_ms`, `total_ms`, `step_ms` (all optional) |
-| `current` | every event | `current.ctx.*`, `current.env.*` (lazy snapshots at event time) |
+| `current` | every event | `current.<key>` — every `ctx` key, evaluated lazily at reference time |
+| `current_env` | every event | `current_env.<key>` — every `env` key, re-read at reference time |
+
+The `current` / `current_env` rows describe the ratified shape (ratified 2026-09-11 in the more-context spec, rulings R29–R33; implementation pending — until it lands, lifecycle handlers still see the old `current.ctx.*` / `current.env.*` shape).
 
 `err` is only meaningful in events that can carry an error. Using bare `err` (or `err.*`) in `initialize`, `start`, `success`, or `loop` is rejected at parse time.
 
@@ -831,7 +836,7 @@ success:
 
 ### `LifecycleErrNotAvailable`
 
-`err` is referenced in an event that never carries an error (`initialize`, `start`, `success`, `loop`). The scan walks the `{{{ … }}}` spans inside communication/action strings **and** the whole `when:` expression, and rejects at parse time (`validate_no_err_in_no_error_events`, using `literal_spans_reference_err` for the interpolation spans). `timing`/`current` are allowed everywhere — via the shared `LATE_BINDING_ROOTS` known-root authority, also consulted by `resolves_outside_frontmatter`; `doc.err` remains the escape hatch.
+`err` is referenced in an event that never carries an error (`initialize`, `start`, `success`, `loop`). The scan walks the `{{{ … }}}` spans inside communication/action strings **and** the whole `when:` expression, and rejects at parse time (`validate_no_err_in_no_error_events`, using `literal_spans_reference_err` for the interpolation spans). `timing`/`current`/`current_env` are allowed everywhere — via the shared `LATE_BINDING_ROOTS` known-root authority, also consulted by `resolves_outside_frontmatter`; `doc.err` remains the escape hatch.
 
 ```yaml
 start:
