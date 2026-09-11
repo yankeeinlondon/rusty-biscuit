@@ -11,9 +11,21 @@ cell — is keyed on `{package, environment, tier}`.
   versioned, schema-validated table.
 - **Known-red legs** live in `ci-baseline.toml`, keyed by package.
 
-There is no per-directory policy store and no concept of a "package area" in
-CI. `just test` in a directory still runs that directory's packages for local
-use (R8); CI does not read that list.
+There is no per-directory policy store. **Package is the stored identity** of
+every artifact, JUnit record, baseline entry, and receipt cell. **Area is a
+derived grouping**: `affected_scope.py` computes it from each member's manifest
+directory using the same rule as `sniff repo package-area`, emits it on every
+matrix and policy record, and a drift contract in
+`scripts/ci/test_resolved_plan.py` compares the two wherever sniff is installed.
+No mapping file exists, because a second policy store would be free to drift.
+Nested areas such as `claudine/rendezvous` are their own areas, never folded
+into a parent. `just test` in a directory still runs that directory's packages
+for local use (R8); CI does not read that list.
+
+An unchanged direct reverse dependent is reported in the plan's
+`reverse_dependencies` and selected nowhere — no area, no job, no result cell.
+It used to receive a compile-check entry, which presented an untested area as a
+green top-level result (PR #76).
 
 ## Reusing PR validation after a merge
 
@@ -76,10 +88,11 @@ names that *are* runner labels), `l2_environments`, `browser_environments`,
 `node_environments`, and `wsl` (a boolean).
 
 It also derives `gates` — which of `lint`, `check`, and `test` this run selected
-the package for. A package owning a changed source file carries all three.
-Each unchanged package that directly depends on it carries `check` only, which
-compiles that seam without running the unchanged consumer's lint or tests.
-Dependencies of the changed package and transitive reverse dependencies are
+the package for. A package owning a changed source file carries `lint` and
+`test` always, and `check` only when it declares example or bench targets: the
+L1 build already compiles the library, binary, and test targets, so a separate
+compile job is scheduled solely for the kinds no test gate produces. Unchanged
+reverse dependents, their dependencies, and transitive reverse dependencies are
 not selected. Documentation, manifests, lockfiles, Just recipes, workflows,
 and other CI configuration select no package jobs; CI tooling has its own
 small contract-test leg. Only an explicit `workflow_dispatch` full-scope run
@@ -87,37 +100,77 @@ selects every package.
 
 Source classification is path based: `build.rs` and package-owned files with a
 known programming or web-source extension select their owning package. A gate
-absent from `gates` schedules no job, and a check-only reverse dependency
-declares no test tiers to the rollup, so its unscheduled L1 is not `MISSING`.
+absent from `gates` schedules no job.
 
 ## Local environment evidence
 
-The strict pre-push hook runs lint plus L1 and hostable L2 for source-changed
-packages, and compile-checks their direct reverse dependencies. It uses
-`sniff os --json` to identify macOS, Linux, native Windows, or WSL2. For a
-clean outgoing `HEAD`, it publishes a receipt under
-`refs/notes/ci-local/<environment>` containing the exact merge base, head, tree,
-and package/tier scope. CI normalizes the event's base to its merge base with
-the tested head before comparing the receipt. A PR target advancing does not
-invalidate identical local coverage; CI's independently calculated scope must
-still match exactly.
+The pre-push hook runs lint plus L1 and hostable L2 for source-changed
+packages. It uses `sniff os --json` to identify macOS, Linux, native Windows,
+or WSL2. For a clean outgoing `HEAD` it publishes a **validation receipt** under
+`refs/notes/ci-local/<environment>`: schema version 2, carrying the merge base,
+head, tree, scope identity, and one record per `{package, gate}` cell with its
+outcome, exit code, completion, test counts, duration, gate-input identity,
+backend proof, and bounded failure detail. Those records come from the JUnit
+report each canonical tier recipe already stages, so a receipt reports what the
+run measured rather than what it claimed.
+
+A **complete** run is evidence whether it passed or failed. `strict` and `warn`
+both record one; a gate that produced no report is recorded `partial` and is
+not reusable, so a compile failure cannot pass for a tested cell. An override
+(`RUSTY_BISCUIT_PRE_PUSH_AREAS`) or a dirty tree publishes nothing.
 
 L2 uses every available non-focusing backend declared by the package: detached
 tmux, background WezTerm, or keep-focus Kitty. Apple Terminal and Level 3 are
-excluded because a push hook must never take window focus. CI independently recalculates the scope and omits that environment only when
-the note matches exactly. Missing or invalid evidence is a cache miss, never a
-reason to skip work. The receipt covers L1 and L2 only: browser work stays in
-CI, and an environment needed by a companion suite is retained even if that
-duplicates its Rust L1 run. Manual full-scope runs ignore local receipts.
+excluded because a push hook must never take window focus. An L2 cell is
+recorded `partial` — published, and refused for reuse — unless a backend it
+required actually drove a test: an absent backend makes a Level 2 suite *skip*,
+and nextest prints PASS in about 0.02 s, which is indistinguishable from
+evidence unless the proof is read. The receipt covers
+L1, L2, and browser only: `lint` and `check` stage no report and are always
+CI-origin, and an environment needed by a companion suite is retained even if
+that duplicates its Rust L1 run. Manual full-scope runs ignore local receipts.
 
-The current verifier returns the first matching environment, and the scope
-calculator accepts one `--exclude-environment`. Receipts for multiple hosts are
-not combined: accepting macOS evidence does not also suppress WSL. Prior
-cross-check output is not automatically published as an exact-head receipt.
-Before pushing under a "do not rerun WSL" instruction, verify that the resolved
-matrix schedules no WSL jobs; if the evidence mechanism cannot express all
-requested exclusions, resolve that gap before triggering CI. Automatic jobs
-remain subject to the same execution constraints as direct test commands.
+`local_evidence.py verify --cells` reads **every** environment's notes ref
+reachable from the outgoing head and returns the accepted cells from all of
+them, plus a coded reason per refusal. A macOS receipt from this push and a
+prior WSL receipt from `cross-check` therefore combine in one run. The scope
+calculator takes that set (`--accepted-cells`); an accepted cell has its
+*execution* omitted and stays a *cell* with local origin, so the rollup expects
+a local-origin result for it rather than reporting MISSING — the PR #76
+regression.
+
+A receipt from an **older head** is accepted only when the cell's *gate-input
+identity* is unchanged: the `git ls-tree` entries of the tested package's build
+closure (dev-dependencies included) plus that gate's global inputs. Both trees
+are present locally, so the comparison is made rather than read out of the
+receipt. `schema_version: 1` notes predate per-cell outcomes; they are accepted
+on exact tree identity only, pass-only, whole-environment, are never upgraded
+in place, and render their measurements as `not recorded (v1 receipt)`.
+
+`scripts/cross-check.sh` publishes a `wsl2-ubuntu` receipt when its WSL leg ran
+the outgoing head's exact tree on a clean remote worktree with no test filter.
+Any other run prints why it published nothing — it ships the developer's local
+tree, uncommitted work included, so most of its runs test a tree no head names.
+
+### Execution constraints
+
+A restriction such as "do not rerun WSL" is recorded in a constraint store, not
+remembered: each record names an environment, an optional gate, a reason, an
+owner, an expiry, and optionally a repository and branch. `just ci-local --plan`
+and the pre-push hook read it; **CI never does**, so a constraint can only stop
+a push and can never make CI silently skip required coverage. An expired record
+is announced and ignored; a malformed one blocks, because an instruction that
+cannot be read is not one that can be ignored.
+
+The store is named by `BISCUIT_CI_CONSTRAINTS_DIR`. Its default location is
+still Open Question 2 of `fixes/2026-09-11-cicd-cleanup/spec.md` and is
+deliberately empty until Ken rules; `constraints.default_directory()` is the one
+line that fills it.
+
+`just ci-local --plan` is the review surface: it resolves the plan, prints every
+cell with its execution, origin, state, evidence, and governance, and exits
+non-zero when a prohibited cell has no qualifying evidence. It runs no gate and
+starts no build.
 
 Skipping the local hook with `--no-verify` creates no new evidence but does not
 disable previously published matching notes. CI still verifies those notes.
@@ -390,11 +443,19 @@ quota) and records the selected strategy.
 
 ## Compile-check
 
-A package's compile-check stays `cargo check --all-targets -p <package>` (plus
-its declared feature flags), because there is no per-package canonical check
-recipe. `--all-targets` compiles benches and examples here and nowhere else.
-It deliberately does **not** deny warnings; `lint` does, through clippy, where
-`just lint` enforces the same bar locally.
+A compile-check job exists only for the target kinds no test gate produces.
+The planner reads each package's declared Cargo targets from `cargo metadata`
+and records them on its plan record; the L1 build is credited with `lib`, `bin`,
+and `test`, so a check job is scheduled solely where `example` or `bench`
+targets exist. Every cell states which gate its compile coverage came from, and
+an archive-only environment names the runner that built its archive rather than
+claiming to have compiled anything.
+
+The check job's command is still `cargo check --all-targets -p <package>` (plus
+the declared feature flags), because there is no per-package canonical check
+recipe — but it now runs only where the extra target kinds justify it, instead
+of on every selected package. It deliberately does **not** deny warnings;
+`lint` does, through clippy, where `just lint` enforces the same bar locally.
 
 ## Adding or changing a package's CI
 
@@ -404,6 +465,13 @@ It deliberately does **not** deny warnings; `lint` does, through clippy, where
    guesses.
 3. `python3 scripts/ci/test_affected_scope.py` and
    `cargo nextest run -p test-toolkit --test ci_workflow_contracts` must pass.
+
+## Contract schemas
+
+The resolved plan and the validation receipt are defined and validated in
+`scripts/ci/schema.py` and documented in [`schemas/README.md`](schemas/README.md).
+`schemas/contract.json` is the field contract dumped from that module for Rust
+tooling; regenerate it with `python3 scripts/ci/schema.py`.
 
 ## CI's own tooling
 

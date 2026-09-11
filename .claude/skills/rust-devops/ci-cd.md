@@ -66,18 +66,27 @@ semantics:
   environment. It never stands in for another OS, browser work, Level 3, or a
   companion suite it did not execute.
 
-The repository does not yet implement all of these semantics: the current
-receipt is verified by recalculating scope in CI, and a failed `warn` run
-publishes no validation receipt. The current `off` mode exits before calculating
-scope; the target design makes it a deprecated `scope-only` alias. Do not
-describe that contract as live behavior until the hook, evidence schema,
-workflow, rollup, tests, and human documentation land together.
+These semantics are live as of 2026-09-11. The receipt is version 2, keyed per
+`{package, environment, gate}`; `strict` and `warn` both publish a complete run,
+passing or failing; `off` is a deprecated alias of `scope-only`. The rollup half
+is not: Phases 5 and 6 of `fixes/2026-09-11-cicd-cleanup/plan.md` still owe the
+per-area result model that consumes a local-origin cell.
 
-The current receipt's `base` is the branch's merge base. Verification normalizes
-the event base with `git merge-base <base> <head>` before comparing identities,
-because a PR target may have advanced. The independently computed scope must
-still match exactly; normalization never extends a receipt to untested packages
-or tiers. Recording continues to require an ancestor base.
+A receipt's `base` is the branch's merge base, and verification normalizes the
+event base with `git merge-base <base> <head>` before comparing, because a PR
+target may have advanced. Recording still requires an ancestor base.
+
+A receipt from an **older head** is reusable only when the cell's gate-input
+identity is unchanged — the `git ls-tree` entries of the tested package's build
+closure (dev-dependencies included, and the lockfile) plus that gate's global
+inputs. Verification recomputes that over both trees rather than trusting the
+identity the receipt stored. `schema_version: 1` notes are exact-tree,
+pass-only, whole-environment, never upgraded in place, and render their
+measurements as `not recorded (v1 receipt)`.
+
+A gate that staged no JUnit report is recorded `partial`: it has an exit code
+and nothing to attribute it to, so it is published and refused for reuse rather
+than credited as a tested cell. That is how a compile failure stays a CI job.
 
 ## Execution constraints before a push
 
@@ -87,13 +96,29 @@ constraint. Check the final resolved matrix, including each package's `wsl`
 flag, against every active constraint before triggering CI. Checking only that
 macOS disappeared is insufficient when WSL must also be excluded.
 
-The current implementation accepts only one environment exclusion per run:
-`verified_environment()` returns the first matching note, the workflow passes
-one `--exclude-environment`, and the calculator stores one
-`excluded_environment`. Multiple OS-specific notes do not currently combine.
-A macOS receipt therefore does not also exclude WSL, even if WSL was tested
-previously. A cross-check log is not automatically a published receipt, and a
-receipt for another head does not satisfy the exact-head check.
+The planner takes a verified **per-cell** result set (`--accepted-cells`). An
+accepted cell has its execution omitted and stays a cell with local origin, so
+the rollup expects a local-origin result for it instead of reporting `MISSING`;
+suppressing the matrix entry while leaving the policy expecting a CI result was
+the PR #76 seven-cell regression.
+
+`local_evidence.py verify --cells` produces that set by reading **every**
+environment's notes ref reachable from the outgoing head, so a macOS receipt
+from this push and a prior WSL receipt combine in one run. Each refusal carries
+a code from `schema.REJECTIONS` and is published with the plan.
+
+`scripts/cross-check.sh` publishes a `wsl2-ubuntu` receipt only when its WSL leg
+ran the outgoing head's exact tree on a clean remote worktree with no test
+filter; every other run prints why it published nothing. It ships the
+developer's local tree, uncommitted work included, so most of its runs test a
+tree no head names.
+
+**Record the restriction, do not remember it.** `BISCUIT_CI_CONSTRAINTS_DIR`
+names a store of `{environment, gate?, reason, owner, expiry, repository?,
+branch?}` records. `just ci-local --plan` and the pre-push hook enforce them;
+CI never reads them, so a constraint can only stop a push. Where the store lives
+by default is Open Question 2 and is unruled — `constraints.default_directory()`
+is empty until it is.
 
 If prior evidence cannot be reused or CI cannot express the requested
 exclusions, resolve that limitation before pushing. Preserve the restriction
@@ -105,8 +130,11 @@ whether a package must support the environment.
 
 Prefer a repository-provided **scope-only** mode over `git push --no-verify`
 when the goal is to skip local tests and let CI exercise every supported
-environment. Scope-only still calculates and publishes exact-tree scope, but
-publishes no validation outcomes and excludes no CI cells.
+environment. Scope-only resolves and prints the plan — so a recorded execution
+constraint is still enforced and the run is still reviewable — but runs no gate,
+publishes no validation outcomes, and excludes no CI cells. It publishes no
+standalone *scope* document either: the note ref carries a validation receipt,
+and CI recalculates scope.
 
 `git push --no-verify` prevents the pre-push hook from executing and produces
 no new evidence. It does not invalidate already-published matching receipts:
@@ -122,7 +150,7 @@ Mode intent is:
 |---|---:|---:|---:|---|
 | `strict` | No | Yes after a successful run | Passing outcomes | Omit proven cells |
 | `warn` | Yes | Yes | Pass or fail | Omit proven cells; roll up their outcomes |
-| `scope-only` | No tests run | Yes | No | Run all |
+| `scope-only` | No tests run | Plan resolved and printed | No | Run all |
 | `--no-verify` | Yes; hook does not run | No new evidence | No new evidence | Existing valid receipts still apply |
 
 Do not implement a failing local-evidence job as an upstream dependency that
