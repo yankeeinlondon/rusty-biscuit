@@ -2,33 +2,45 @@
 # Rusty Biscuit pre-push hook
 #
 # Runs lint, L1, and hostable L2 for source-changed packages, plus a compile
-# check for their direct reverse dependencies. Successful exact-tree evidence
-# is attached to the outgoing commit through an OS-specific Git notes ref; CI
-# then omits that environment's duplicate L1/L2/check work.
+# check for their direct reverse dependencies. A COMPLETE run — passing or
+# failing — is attached to the outgoing commit as a per-cell validation receipt
+# on an OS-specific Git notes ref; CI then omits the execution of each proven
+# cell while still expecting a result for it.
 #
 # Behavior is controlled by the RUSTY_BISCUIT_PRE_PUSH environment variable:
-#   off    - skip validation entirely
-#   warn   - run the gates, print failures in red, but allow the push
-#   strict - run the gates, block the push on failure (default)
+#   scope-only - calculate scope, run no gate, publish no validation evidence
+#   off        - deprecated alias of scope-only
+#   warn       - run the gates, print failures in red, but allow the push
+#   strict     - run the gates, block the push on failure (default)
 #
 # RUSTY_BISCUIT_PRE_PUSH_AREAS (space-separated package or area names) replaces
 # the computed scope with a fixed selection.
 #
+# BISCUIT_CI_CONSTRAINTS_DIR names the persisted execution-constraint store. An
+# unexpired constraint blocks the push before any gate runs unless the resolved
+# plan proves the environment it forbids is not scheduled; `just ci-local --plan`
+# is the surface that can prove it.
+#
 # Link this hook into your local git hooks:
 #   ln -s ../../.githooks/pre-push .git/hooks/pre-push
 
-# Mode selection — resolved first so `off` short-circuits before any work.
+# Mode selection — resolved first so the no-gate modes short-circuit early.
 MODE="${RUSTY_BISCUIT_PRE_PUSH:-strict}"
 
 case "$MODE" in
     off)
-        exit 0
+        # Deprecated spelling. `off` never meant "publish nothing and run
+        # nothing" — it meant "do not run the gates" — so it now names the mode
+        # that says exactly that.
+        printf "RUSTY_BISCUIT_PRE_PUSH=off is deprecated; it now means scope-only.\n" >&2
+        MODE="scope-only"
         ;;
-    warn|strict)
+    scope-only|warn|strict)
         ;;
     *)
         printf "\033[31mUnknown RUSTY_BISCUIT_PRE_PUSH value: %s\033[0m\n" "$MODE" >&2
         printf "Expected: off, warn, or strict\n" >&2
+        printf "(off is a deprecated alias of scope-only)\n" >&2
         exit 1
         ;;
 esac
@@ -51,12 +63,36 @@ while read -r _local_ref local_sha _remote_ref _remote_sha; do
     fi
 done
 
+# Execution constraints bind the trigger, not the gates, so they are checked
+# before any work: a push that would violate one must not first spend twenty
+# minutes proving it. CI never reads this store (Design Decision 8).
+if [ -n "${BISCUIT_CI_CONSTRAINTS_DIR:-}" ] && command -v python3 > /dev/null 2>&1; then
+    if ! python3 "$REPO_ROOT/scripts/ci/constraints.py" check \
+        --directory "$BISCUIT_CI_CONSTRAINTS_DIR" \
+        --branch "$(git rev-parse --abbrev-ref HEAD)"; then
+        exit 1
+    fi
+fi
+
 SCOPE_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope.XXXXXX")"
+PLAN_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-plan.XXXXXX")"
 RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-receipt.XXXXXX")"
-trap 'rm -f "$SCOPE_FILE" "$RECEIPT_FILE"' EXIT
+REPORTS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/biscuit-pre-push-reports.XXXXXX")"
+trap 'rm -f "$SCOPE_FILE" "$PLAN_FILE" "$RECEIPT_FILE"; rm -rf "$REPORTS_DIR"' EXIT
 export BISCUIT_CI_SCOPE_OUT="$SCOPE_FILE"
+export BISCUIT_CI_PLAN_OUT="$PLAN_FILE"
+export BISCUIT_CI_REPORTS_OUT="$REPORTS_DIR"
 
 echo ""
+if [ "$MODE" = "scope-only" ]; then
+    echo "Calculating pre-push scope only; no gate will run."
+    echo "------------------------------------------------"
+    echo ""
+    # shellcheck disable=SC2086
+    just ci-local --plan $SELECTION
+    exit $?
+fi
+
 if [ -n "$SELECTION" ]; then
     echo "Running pre-push validation for: $SELECTION"
 else
@@ -69,31 +105,15 @@ echo ""
 just pre-push $SELECTION
 EXIT_CODE=$?
 
-if [ "$EXIT_CODE" -ne 0 ]; then
-    echo ""
-    printf "\033[31mPre-push validation failed (exit %d)\033[0m\n" "$EXIT_CODE"
-    echo ""
-    if [ "$MODE" = "warn" ]; then
-        echo "Continuing push in warn mode. To bypass this hook entirely, use 'git push --no-verify'." >&2
-        echo ""
-        exit 0
-    else
-        echo "Push blocked by strict mode. To bypass this hook, use 'git push --no-verify'." >&2
-        echo ""
-        exit "$EXIT_CODE"
-    fi
-fi
-
-echo ""
-echo "Pre-push validation passed."
-echo ""
-
-# An override proves only the explicitly named packages. Dirty state means the
-# test process did not necessarily execute the outgoing tree. Both cases remain
-# useful local checks but cannot suppress CI evidence.
+# Publish before returning, whichever way the run went. A COMPLETE failing run
+# is evidence: CI omits its execution and rolls the failure up, instead of
+# re-running a suite this host already proved red (spec section 3.5). An
+# override proves only the named packages, and a dirty tree means the test
+# process did not necessarily execute the outgoing tree; neither is exact-tree
+# evidence.
 if [ "$PUSHES_HEAD" -eq 1 ] && [ -z "$SELECTION" ] \
     && [ -z "$(git status --porcelain)" ] \
-    && [ -s "$SCOPE_FILE" ] \
+    && [ -s "$PLAN_FILE" ] \
     && command -v sniff >/dev/null 2>&1 \
     && command -v jq >/dev/null 2>&1 \
     && BASE_SHA="$(git merge-base origin/main "$HEAD_SHA" 2>/dev/null)"; then
@@ -112,20 +132,42 @@ if [ "$PUSHES_HEAD" -eq 1 ] && [ -z "$SELECTION" ] \
         *) ENVIRONMENT="" ;;
     esac
 
-    if [ -n "$ENVIRONMENT" ] && python3 "$REPO_ROOT/scripts/ci/local_evidence.py" record \
-        --scope "$SCOPE_FILE" --base "$BASE_SHA" --head "$HEAD_SHA" \
-        --environment "$ENVIRONMENT" >"$RECEIPT_FILE"; then
+    if [ -n "$ENVIRONMENT" ] && python3 "$REPO_ROOT/scripts/ci/local_evidence.py" record-cells \
+        --plan "$PLAN_FILE" --stage "$REPORTS_DIR" --base "$BASE_SHA" \
+        --head "$HEAD_SHA" --environment "$ENVIRONMENT" >"$RECEIPT_FILE"; then
         NOTES_REF="refs/notes/ci-local/$ENVIRONMENT"
         REMOTE_NAME="${1:-origin}"
         git fetch --no-tags "$REMOTE_NAME" "+$NOTES_REF:$NOTES_REF" >/dev/null 2>&1 || true
         git notes --ref "$NOTES_REF" add -f -F "$RECEIPT_FILE" "$HEAD_SHA"
-        if git push --no-verify "$REMOTE_NAME" "$NOTES_REF:$NOTES_REF" >/dev/null; then
-            SHORT_SHA="$(git rev-parse --short=9 "$HEAD_SHA")"
-            echo "Published $ENVIRONMENT evidence for $SHORT_SHA."
+        SHORT_SHA="$(git rev-parse --short=9 "$HEAD_SHA")"
+        CELLS="$(jq -r '.cells | length' "$RECEIPT_FILE")"
+        if [ "$EXIT_CODE" -ne 0 ] && [ "$MODE" = "strict" ]; then
+            # The branch is not going anywhere, so neither is the notes ref;
+            # the local note still stands if the same head is pushed later.
+            echo "Recorded $CELLS $ENVIRONMENT cell(s) for $SHORT_SHA locally; not published while the push is blocked."
+        elif git push --no-verify "$REMOTE_NAME" "$NOTES_REF:$NOTES_REF" >/dev/null; then
+            echo "Published $CELLS $ENVIRONMENT cell(s) of evidence for $SHORT_SHA."
         else
-            echo "Local evidence passed but could not be published; CI will retain $ENVIRONMENT." >&2
+            echo "Local evidence recorded but could not be published; CI will retain $ENVIRONMENT." >&2
         fi
     fi
 fi
 
+if [ "$EXIT_CODE" -ne 0 ]; then
+    echo ""
+    printf "\033[31mPre-push validation failed (exit %d)\033[0m\n" "$EXIT_CODE"
+    echo ""
+    if [ "$MODE" = "warn" ]; then
+        echo "Continuing push in warn mode. To bypass this hook entirely, use 'git push --no-verify'." >&2
+        echo ""
+        exit 0
+    fi
+    echo "Push blocked by strict mode. To bypass this hook, use 'git push --no-verify'." >&2
+    echo ""
+    exit "$EXIT_CODE"
+fi
+
+echo ""
+echo "Pre-push validation passed."
+echo ""
 exit 0
