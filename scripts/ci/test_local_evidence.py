@@ -99,6 +99,34 @@ class LocalEvidenceTests(unittest.TestCase):
         self.scope.write_text(json.dumps(document), encoding="utf-8")
         self.assertEqual("", verified_environment(str(self.scope), self.base, self.head))
 
+    def test_advanced_pr_base_reuses_only_matching_scope(self) -> None:
+        contents = record(str(self.scope), self.base, self.head, "macos-latest")
+        self.add_note("macos-latest", contents)
+        self.git("checkout", "-q", "-b", "advanced-base", self.base)
+        (self.root / "file").write_text("upstream\n", encoding="utf-8")
+        self.git("commit", "-q", "-am", "advance PR base")
+        pr_base = self.git("rev-parse", "HEAD")
+        self.assertNotEqual(pr_base, self.git("merge-base", pr_base, self.head))
+        self.assertEqual(
+            "macos-latest", verified_environment(str(self.scope), pr_base, self.head)
+        )
+
+        document = json.loads(self.scope.read_text(encoding="utf-8"))
+        document["source_packages"].append("upstream-package")
+        self.scope.write_text(json.dumps(document), encoding="utf-8")
+        self.assertEqual("", verified_environment(str(self.scope), pr_base, self.head))
+        with self.assertRaisesRegex(ValueError, "must be an ancestor"):
+            record(str(self.scope), pr_base, self.head, "macos-latest")
+
+    def test_invalid_or_unrelated_base_is_a_cache_miss(self) -> None:
+        contents = record(str(self.scope), self.base, self.head, "macos-latest")
+        self.add_note("macos-latest", contents)
+        self.assertEqual("", verified_environment(str(self.scope), "missing-ref", self.head))
+        self.git("checkout", "-q", "--orphan", "unrelated")
+        self.git("commit", "-q", "-am", "unrelated history")
+        unrelated = self.git("rev-parse", "HEAD")
+        self.assertEqual("", verified_environment(str(self.scope), unrelated, self.head))
+
 
 if __name__ == "__main__":
     unittest.main()

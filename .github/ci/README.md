@@ -96,8 +96,11 @@ The strict pre-push hook runs lint plus L1 and hostable L2 for source-changed
 packages, and compile-checks their direct reverse dependencies. It uses
 `sniff os --json` to identify macOS, Linux, native Windows, or WSL2. For a
 clean outgoing `HEAD`, it publishes a receipt under
-`refs/notes/ci-local/<environment>` containing the exact base, head, tree, and
-package/tier scope.
+`refs/notes/ci-local/<environment>` containing the exact merge base, head, tree,
+and package/tier scope. CI normalizes the event's base to its merge base with
+the tested head before comparing the receipt. A PR target advancing does not
+invalidate identical local coverage; CI's independently calculated scope must
+still match exactly.
 
 L2 uses every available non-focusing backend declared by the package: detached
 tmux, background WezTerm, or keep-focus Kitty. Apple Terminal and Level 3 are

@@ -55,6 +55,12 @@ scope; the target design makes it a deprecated `scope-only` alias. Do not
 describe that contract as live behavior until the hook, evidence schema,
 workflow, rollup, tests, and human documentation land together.
 
+The current receipt's `base` is the branch's merge base. Verification normalizes
+the event base with `git merge-base <base> <head>` before comparing identities,
+because a PR target may have advanced. The independently computed scope must
+still match exactly; normalization never extends a receipt to untested packages
+or tiers. Recording continues to require an ancestor base.
+
 ## Intentional bypass modes
 
 Prefer a repository-provided **scope-only** mode over `git push --no-verify`

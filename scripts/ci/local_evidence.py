@@ -86,6 +86,13 @@ def record(scope_path: str, base: str, head: str, environment: str) -> str:
 
 def verified_environment(scope_path: str, base: str, head: str) -> str:
     scope = load_scope(scope_path)
+    # PR base.sha may have advanced since the branch diverged. The hook tests
+    # from that divergence point; CI still compares its independently computed
+    # package/tier scope, so additional upstream changes cannot widen coverage.
+    try:
+        base = git("merge-base", base, head)
+    except (OSError, subprocess.SubprocessError):
+        return ""
     for environment in ENVIRONMENTS:
         try:
             note = git(

@@ -29,7 +29,10 @@ The pipeline has four conceptual layers. Each layer answers a different question
 `just ci-local --l2`: lint and L1 plus every hostable non-focusing L2 suite for source-changed
 packages, and compile-check for their direct reverse dependencies. A docs-only push gates
 nothing. The hook uses `sniff` to identify macOS, Linux, native Windows, or WSL2 and publishes an
-exact-tree Git-note receipt; CI verifies it before omitting the same environment. The hook is controlled by
+exact-tree Git-note receipt; CI verifies it before omitting the same environment.
+The receipt identifies the branch's merge base. CI normalizes the event base to
+that common ancestor and still requires its independently calculated package/tier
+scope to match, including when the PR target has advanced. The hook is controlled by
 `RUSTY_BISCUIT_PRE_PUSH`:
 
 - `off` — skip entirely
