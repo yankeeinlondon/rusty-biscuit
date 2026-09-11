@@ -99,4 +99,36 @@ There is no Level 2 terminal backend in the WSL2 CI environment (recorded as a
 policy gap with owner and expiry in `.github/ci/environments.json`). This is
 temporary. Do not write it into a spec as an authorized exclusion; record the
 criterion as unmet and name provisioning as the required change. Locally,
-the guest can run tmux-backed L2 suites when tmux is installed.
+the guest can run tmux-backed L2 suites when tmux is installed — and it does:
+on 2026-09-10 the claudine partial-file family (tmux capture, the `expectrl`
+PTY suite, and its L1 neighbors) passed 17/17 inside the guest in archive
+mode with `--features terminal-tests`. The recipe is
+`just cross-check claudine-cli --os wsl --features terminal-tests <filters>`;
+add `BISCUIT_TEST_REQUIRED_BACKENDS=tmux` when running by hand so a skip
+cannot print as a pass (a WezTerm test skips in the guest in ~0.03 s and
+nextest still says PASS).
+
+## The guest's `~/.config` is a network share
+
+`~/.config` in the guest is a CIFS mount of `//192.168.100.97/config`, a
+share on the Synology NAS — the same share the Windows side's `wezterm.lua`
+reaches for. When the NAS is down (`ping -c1 -W2 192.168.100.97` from the
+guest), two things fail before any test runs:
+
+- **Every `git` command** dies with `fatal: unable to access
+  '/home/ken/.config/git/config': Host is down`, so `cross-check --os wsl`
+  fails at its first `git fetch`. `GIT_CONFIG_GLOBAL=/dev/null` bypasses it;
+  fetch/reset/clean/checkout/apply need no identity.
+- **`cargo nextest archive` (any cargo build)** dies with `failed to determine
+  package fingerprint for build script for playa` → `Could not read
+  repository exclude` → `Host is down`. Cargo lists package files through
+  gitoxide, which honors the global excludes at `$XDG_CONFIG_HOME/git/ignore`
+  — on the dead mount — and `GIT_CONFIG_GLOBAL` does not reach it. Point
+  `XDG_CONFIG_HOME` at an empty local directory for the build.
+
+Nothing the tests read lives on that share, so both bypasses are safe for a
+run. A login shell in the guest is also slow while the share is down
+(profile tooling stats paths under `~/.config`), which shows up as a
+20-second-plus first tmux capture; that is the host, not the test.
+`scripts/cross-check.sh` does not yet export either variable in its
+`unix_prelude`; doing so would let the recipe survive the share being down.
