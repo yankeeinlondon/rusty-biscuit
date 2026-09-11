@@ -207,3 +207,26 @@ The files changed by this implementation cycle are:
 - `claudine/cli/tests/common/pty.rs` — `KBD_ENHANCEMENT_PUSH` raised to `pub(crate)` (finding 1)
 - `claudine/cli/tests/compose_caller_file_provenance.rs` — new cross-platform L1 test `proxy_target_partial_is_resolved_before_the_target_initialize` (finding 3)
 - `claudine/cli/tests/sequence_schema.rs` — new L1 test `sequence_proxy_target_partial_fails_typed_before_the_target_initialize` (finding 7)
+
+## Ruling: shared terminal harness coverage (review 2 human-review item)
+
+- Ken ruled at 2026-09-10 for option 2 — add the real-terminal capture — and asked that any documentation contradicting the outcome be corrected. Option 1 was declined; option 3 was dropped rather than deferred because `fix/cli-slow-tests` already ratifies the rule it would have written (pseudo-terminal tests are Level 1 by definition there; Level 2 means a real emulator), and the review's proposed wording would have contradicted it
+- work started for 'real-terminal-capture' at 16:31:00-07:00
+        - `claudine/cli/tests/common/review_router.rs` — the shipped-review-router fixture moved out of the PTY binary so the capture binary seeds byte-identical topology; exports the partial, launch area, provider-prompt path, and a selected-identity assertion
+        - `claudine/cli/tests/level2_provided_partial_file_capture.rs` — one accept-path test per backend (tmux, WezTerm) through `shared_or_spawn()`, viewport cleared and a unique exit marker awaited so shared broker panes cannot satisfy the capture with a previous test's output
+        - `claudine/cli/tests/level2_provided_partial_file_pty.rs` — imports the shared fixture; module doc now names the capture binary as its rendering complement
+        - `claudine/cli/Cargo.toml` — `[[test]]` entry behind `terminal-tests`
+        - two host facts absorbed on the way, both documented at the line
+                - first WezTerm run wedged on the `Atuin AI is not yet configured` overlay while the sibling `level2_wezterm_operation_file_single_match_shows_confirmation` passed on the same host, so the trap was in the command, not the host: the overlay's own menu names `?` as the trigger key, and `"$?"` in the exit marker typed one into the pane's interactive bash. The marker now uses `&&`/`||`. This is also the mechanism behind the two dry-run WezTerm captures recorded under host-environment above — they carry the same `"$?"`
+                - second WezTerm run failed matching `2026-09-10-local-a/spec.md`: the candidate path wraps at the emulator's column count, and tmux and WezTerm broke it at different places. The path is now matched against the frame's lines joined
+        - the first styling anchor was wrong: the "did not match a file directly" notice is plain prose. The frame's styling lives in the candidate card beneath it (bold `FILE` badge, OSC 8 hyperlink on the path, truecolor gutter, dim-italic schema note); the assertion anchors on the badge row, which is SGR and survives both backends, rather than the hyperlink, which the L2 inventory records as WezTerm-only
+        - verification (run from `claudine/`)
+                - `just test-l2 review_router_partial_confirms_before_initialize` — 2 run, **2 passed** (tmux 3.6 s, WezTerm 2.3 s)
+                - `BISCUIT_L2_THREADS=1 just test-l2 review_router_partial_confirms_before_initialize` — shared-pane broker mode, 2 run, **2 passed** (tmux 1.7 s, WezTerm 2.7 s)
+                - `just test-l2 provided_partial review_router proxy_target_schema` — 9 PTY tests still **pass** after the fixture move
+                - `just lint` — clean across all five packages
+                - mutation: `schema_interactive/supplied.rs` scope anchored at `repository_root()` instead of `base_dir()` → both capture tests **fail** (chooser drawn instead of the confirmation). Reverted; `git diff` on the file is empty
+                - `cargo fmt` was **not** run
+        - records: spec `## Rulings` and Implementation Record, plan `### Real-terminal capture`; review-1 finding 4 and review-2's human-review item are left as written, since they are the history this ruling closes
+- work completed for 'real-terminal-capture' at 17:00:07-07:00
+- correction: the ruling and plan text first described the missing native-Windows interactive proof as "out of scope by policy". That cites the CI comment as an authorized exclusion, which Ken's 2026-09-08 ruling forbids; the Windows and WSL2 L2 cells are a temporary provisioning gap. Both records now say **unmet** and name the required change — a `#![cfg(windows)]` twin of the capture test on the Windows build host, plus the tracked CI provisioning

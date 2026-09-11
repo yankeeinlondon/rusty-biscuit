@@ -189,5 +189,11 @@ harness coverage is required alongside the PTY suite, not instead of it.
   chooser is drawn instead of the confirmation. The mutation was reverted and
   the file is byte-identical to HEAD.
 - Linux: CI's claudine L2 leg runs on tmux; the WezTerm test skips there by
-  the backend gate. Native Windows and WSL2: the file is `#![cfg(unix)]`, and
-  the L2 tier has no Windows leg by policy.
+  the backend gate. Native Windows and WSL2: **unmet.** The file is
+  `#![cfg(unix)]` (POSIX shell, `printf`, `#!/bin/sh` stub, `:`-joined PATH),
+  so no interactive evidence exists for either, and CI has no L2 leg for
+  either (temporary gap, `.github/ci/environments.json`). Required change: a
+  `#![cfg(windows)]` twin driving `cmd.exe` through the WezTerm harness with a
+  native `goose.exe` fixture, run on the Windows build host; WSL2 needs the
+  same Unix file run inside the guest, which the archive-mode leg does not do
+  for L2. Neither is a reason to amend the specification's OS matrix.

@@ -231,6 +231,12 @@ active directory while the remaining OS evidence is pending.
   the rendering complement to the PTY suite (option 2 of review 2), not as a
   replacement for it. The specification's wording stands; it is not loosened to
   treat a pseudo-terminal test as harness coverage. Native Windows interactive
-  proof remains out of scope: the L2 tier has no Windows CI leg by policy, and
-  the Windows-reachable non-interactive tests in
-  `compose_caller_file_provenance.rs` continue to pin the typed failure.
+  proof is **unmet, not excluded**: both interactive suites are `#![cfg(unix)]`,
+  and CI has no Windows L2 leg — a temporary provisioning gap
+  (`.github/ci/environments.json`, owner and expiry recorded there), not an
+  authorization to narrow this specification's OS matrix. The required change
+  is a Windows-capable interactive test (the WezTerm harness already drives
+  `cmd.exe` on the Windows build host in `level3_windows_sequence_ctrl_c.rs`)
+  run locally through `just cross-check --os windows`, plus the CI provisioning
+  that gap tracks. Until then only the non-interactive tests in
+  `compose_caller_file_provenance.rs` reach native Windows.
