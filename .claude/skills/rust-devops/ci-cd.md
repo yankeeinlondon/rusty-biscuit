@@ -79,6 +79,28 @@ because a PR target may have advanced. The independently computed scope must
 still match exactly; normalization never extends a receipt to untested packages
 or tiers. Recording continues to require an ancestor base.
 
+## Execution constraints before a push
+
+An instruction such as "WSL was already run; do not run it again" also applies
+when a push would automatically schedule WSL. A request to repush retains that
+constraint. Check the final resolved matrix, including each package's `wsl`
+flag, against every active constraint before triggering CI. Checking only that
+macOS disappeared is insufficient when WSL must also be excluded.
+
+The current implementation accepts only one environment exclusion per run:
+`verified_environment()` returns the first matching note, the workflow passes
+one `--exclude-environment`, and the calculator stores one
+`excluded_environment`. Multiple OS-specific notes do not currently combine.
+A macOS receipt therefore does not also exclude WSL, even if WSL was tested
+previously. A cross-check log is not automatically a published receipt, and a
+receipt for another head does not satisfy the exact-head check.
+
+If prior evidence cannot be reused or CI cannot express the requested
+exclusions, resolve that limitation before pushing. Preserve the restriction
+while explaining what is missing; do not silently substitute a new test run or
+fabricate current-head evidence. These are execution constraints, distinct from
+whether a package must support the environment.
+
 ## Intentional bypass modes
 
 Prefer a repository-provided **scope-only** mode over `git push --no-verify`
@@ -86,9 +108,13 @@ when the goal is to skip local tests and let CI exercise every supported
 environment. Scope-only still calculates and publishes exact-tree scope, but
 publishes no validation outcomes and excludes no CI cells.
 
-`git push --no-verify` prevents the pre-push hook from executing. It cannot
-produce new local scope or validation evidence, so CI must calculate scope and
-run every required cell. Reserve it for cases where the hook itself cannot run.
+`git push --no-verify` prevents the pre-push hook from executing and produces
+no new evidence. It does not invalidate already-published matching receipts:
+CI still verifies them and can omit their covered environment. If strict
+validation was run separately on the exact clean outgoing head and its receipt
+was published and verified, the branch transfer can use `--no-verify` without
+repeating that validation. Otherwise, the absence of qualifying evidence leaves
+the corresponding CI cells scheduled. The flag itself excludes no environment.
 
 Mode intent is:
 
@@ -97,7 +123,7 @@ Mode intent is:
 | `strict` | No | Yes after a successful run | Passing outcomes | Omit proven cells |
 | `warn` | Yes | Yes | Pass or fail | Omit proven cells; roll up their outcomes |
 | `scope-only` | No tests run | Yes | No | Run all |
-| `--no-verify` | Yes; hook does not run | No new evidence | No new evidence | Run all |
+| `--no-verify` | Yes; hook does not run | No new evidence | No new evidence | Existing valid receipts still apply |
 
 Do not implement a failing local-evidence job as an upstream dependency that
 causes the remaining matrix to skip. Represent local outcomes through the same
