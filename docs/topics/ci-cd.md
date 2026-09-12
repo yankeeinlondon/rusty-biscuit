@@ -9,8 +9,18 @@ nightly/advisory work. Releases are automated through [release-plz](https://rele
 distribution channel today.
 
 Package-area gates use the same `just` recipes developers run locally. Scope selection is handled
-by `scripts/ci/affected_scope.py`: changed source files select their owning package for full
-validation and its direct reverse dependencies for compile-check only.
+by `scripts/ci/affected_scope.py`, which emits **one canonical resolved plan**: the selected
+package areas with a reason each, the packages contributing to each area, and one
+`{package, environment, gate}` **cell** per unit of work carrying its execution, origin, state,
+evidence, and governance. A changed source file selects its owning package; an unchanged reverse
+dependency is reported by name and selected nowhere.
+
+**Area groups; package identifies.** Every stored name — artifact, JUnit manifest record, baseline
+entry, receipt cell — is keyed on `{package, environment, tier}`. Area is *derived* from each
+member's manifest directory with the same rule as `sniff repo package-area` (no committed mapping
+file; a drift contract compares the two wherever sniff is installed), and the only stored name
+carrying it is the per-area result slice `ci-results-<slug>`. Nested areas such as
+`claudine/rendezvous` are their own areas, never folded into a parent.
 
 ## Pipeline Layers
 
@@ -27,17 +37,73 @@ The pipeline has four conceptual layers. Each layer answers a different question
 
 `.githooks/pre-push` runs `just pre-push` before `git push` completes. That is
 `just ci-local --l2`: lint and L1 plus every hostable non-focusing L2 suite for source-changed
-packages, and compile-check for their direct reverse dependencies. A docs-only push gates
-nothing. The hook uses `sniff` to identify macOS, Linux, native Windows, or WSL2 and publishes an
-exact-tree Git-note receipt; CI verifies it before omitting the same environment.
-The receipt identifies the branch's merge base. CI normalizes the event base to
-that common ancestor and still requires its independently calculated package/tier
-scope to match, including when the PR target has advanced. The hook is controlled by
-`RUSTY_BISCUIT_PRE_PUSH`:
+packages. A docs-only push gates nothing. Before any gate, the hook resolves the plan the push
+would trigger (`just ci-local --plan`) and refuses on a recorded execution constraint only when a
+cell in the prohibited environment would still execute; reused or absent cells satisfy it.
 
-- `off` — skip entirely
+Before any gate, and in every mode, the hook publishes a **scope receipt** under
+`refs/notes/ci-local/scope`: the resolved plan and `scope.json` projection for the COMMITTED
+`base..head` (never unstaged or untracked files), bound to the exact base, head, and tree. CI's
+scope job takes a matching receipt as its plan without running the planner, falls back to its own
+calculation on any miss and says which (`scope-missing`, `scope-base-mismatch`, ...), and ignores
+it on `workflow_dispatch`. The base is the one the CI event will compare with: the remote's
+current `main` for a push to `main`, otherwise the merge base with `origin/main`.
+
+The hook uses `sniff` to identify macOS, Linux, native Windows, or WSL2 and publishes a
+**validation receipt** under `refs/notes/ci-local/<environment>` — schema version 2, carrying the
+merge base, head, tree, and scope identity plus one record per `{package, gate}` cell with its
+outcome, exit code, completion, test counts, duration, gate-input identity, backend proof, and
+bounded failure detail. Those records come from the JUnit report each canonical tier recipe
+already stages, so a receipt reports what the run *measured* rather than what it claimed. The
+reports themselves are retained on the producing host under
+`$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/` (root default `~/.rusty-biscuit/ci-evidence`)
+before the receipt is written; `host.report_dir` names that directory, and a copy that fails
+publishes no receipt.
+
+A **complete** run is evidence whether it passed or failed; `strict` and `warn` both publish one.
+A gate that staged no report is recorded `partial` and refused for reuse, so a compile failure
+cannot pass for a tested cell. An L2 cell is `partial` unless a backend it required actually drove
+a test — an absent backend makes the suite *skip*, and nextest prints PASS in about 0.02 s.
+`lint` and `check` stage no report and are therefore always CI-origin.
+
+CI reads **every** environment's notes ref reachable from the outgoing head, so a macOS receipt
+from this push and a prior `cross-check` WSL receipt combine in one answer. A receipt from an
+**older head** is accepted per cell when that cell's *gate-input identity* is unchanged — the
+`git ls-tree` entries of the tested package's build closure (dev-dependencies and the lockfile
+included) plus that gate's global inputs — and the comparison is recomputed over both trees
+rather than read out of the receipt. `schema_version: 1` notes are exact-tree, pass-only,
+whole-environment, never upgraded in place, and render their measurements as
+`not recorded (v1 receipt)`.
+
+An accepted cell has its *execution* omitted and stays a *cell* with local origin, so the rollup
+expects a local-origin result for it instead of reporting `MISSING`. Suppressing the matrix entry
+while leaving the policy expecting a CI result was the PR #76 seven-cell regression.
+
+The hook is controlled by `RUSTY_BISCUIT_PRE_PUSH`:
+
+- `scope-only` — resolve and print the plan, publish the scope receipt, run no gate, publish no outcomes, exclude no CI cells
+- `off` — deprecated alias of `scope-only`
 - `warn` — run and report, but never block the push
 - `strict` — run and block the push on failure (the default)
+
+`scripts/cross-check.sh` publishes a `wsl2-ubuntu` receipt only when its WSL leg ran the outgoing
+head's exact tree on a clean remote worktree with no test filter; every other run prints why it
+published nothing. It ships the developer's local tree, uncommitted work included, so most of its
+runs test a tree no head names.
+
+### Execution constraints
+
+A restriction such as "do not rerun WSL" is **recorded, not remembered**. Each record in the
+constraint store named by `BISCUIT_CI_CONSTRAINTS_DIR` carries an environment, an optional gate, a
+reason, an owner, an expiry, and optionally a repository and branch. `just ci-local --plan` and
+the pre-push hook enforce them; **CI never reads them**, so a constraint can only stop a push and
+can never make CI silently skip required coverage. An expired record is announced and ignored; a
+malformed one blocks, because an instruction that cannot be read is not one that can be ignored.
+
+`just ci-local --plan` is the pre-trigger review surface: it resolves the plan, prints every cell
+with its execution, origin, state, evidence, and governance, and exits non-zero when a prohibited
+cell has no qualifying evidence. It runs no gate and starts no build. `--plan-out <path>` writes
+the same cells as canonical JSON.
 
 Parallel test workers default to `max(1, logical_cores - 2)` locally. CI uses
 all logical cores when there are four or fewer, and `logical_cores - 2` on
@@ -72,23 +138,93 @@ Run the hook's local regression suite with
 ### Layer 2 — Dependency-scoped CI
 
 `ci.yml` runs on pull requests and pushes to `main`. Its first job validates the canonical recipe
-surface, obtains the changed file set from the event's exact base and head SHAs, and calculates:
+surface, obtains the changed file set from the event's exact base and head SHAs, verifies every
+published local receipt per cell, and resolves the plan.
 
-- workspace packages owning changed source files,
-- their direct reverse Cargo dependencies for compile-check only (unchanged
-  consumers are not linted or tested, and transitive dependents are omitted),
-- curated package areas owning those packages.
+The tested half of a run is **one top-level entry per selected package area**. `ci.yml`'s
+`area-ci` job fans out over the planner's `scheduled_areas` and calls `_area-ci.yml`, which fans
+out over that area's package matrix and calls `_package-ci.yml`, which delegates the `wsl2-ubuntu`
+cell to `_wsl-ci.yml`. That is four levels including the caller — GitHub's maximum, with no margin
+for another. Both matrices come from the planner, not from workflow `jq`, so the grouping has test
+coverage.
 
-The selected package matrix calls `_package-ci.yml`. Source-changed packages
-receive lint, check, L1 across their environments, and declared higher tiers;
-direct reverse dependencies receive only the Windows compile-check. Per-package policy — L2/browser tier
-ownership, native libraries, Cargo features, runner tools, and companion
-suites — lives in each package's `[package.metadata.ci]`; environment
-capabilities live in `.github/ci/environments.json`.
-Documentation, manifests, lockfiles, Just recipes, and workflow configuration
-select no package jobs. CI tooling runs its own compact contract suites, and
-`workflow_dispatch` remains the explicit full-workspace path. See
+A called workflow's jobs render as `<caller job name> / <called job name>`, so a compile cell
+reads `area-ci (claudine) / claudine-cli / check (windows-latest)`: area first, package under it,
+environment on the leaf. No display name is parsed for *identity* — that comes from each artifact's
+`manifest.jsonl` and `status.json` — but the composite label **is** parsed by
+`scripts/ci/runner_loss.py` to attribute a dead runner's cell, so renaming a producer job is a
+contract change.
+
+A source-changed package receives lint, L1 across its environments, and its declared higher tiers.
+Compile-check is no longer blanket: the planner reads each package's declared Cargo targets from
+`cargo metadata`, credits the L1 build with the `lib`, `bin`, and `test` kinds, and schedules a
+`check` cell on each native environment **only** where `example` or `bench` targets exist, with
+explicit `--examples`/`--benches` selectors in place of `--all-targets`. Every cell states which gate its
+compile coverage came from, and an archive-only environment names the runner that built its
+archive rather than claiming to have compiled anything. This alone took the full-scope job
+estimate from 486 to 432.
+
+Per-package policy — L2/browser tier ownership, native libraries, Cargo features, runner tools,
+and companion suites — lives in each package's `[package.metadata.ci]`; environment capabilities
+live in `.github/ci/environments.json`. Documentation, manifests, lockfiles, Just recipes, and
+workflow configuration select no package jobs. CI tooling runs its own compact contract suites
+(the Python scope tests, the rollup and plan renderer bins, and the `ci_workflow_contracts`
+suite, which a workflow edit also selects), and `workflow_dispatch` remains the explicit
+full-workspace path. See
 [testing-strategy.md](../testing-strategy.md).
+
+Only cells not already satisfied by verified evidence get a hosted runner: the environment lists
+the area hands each package are the plan's *executing* set. A reused cell is published straight
+into its area's summary, where the grid's "Reused results" table names the receipt's evidence ref,
+counts, duration, and host — no setup, build, archive, or test step runs for it.
+
+Skippable jobs carry **no `name:`**. GitHub never evaluates the matrix context for a job it skips,
+so a declared `name:` containing `${{ matrix.… }}` reaches the Checks tab as raw expression text
+(63 such labels in run 34638047631). Omitting `name:` makes the label the job id when skipped and
+`job-id (matrix values)` when it runs. `lint` has no matrix, so it keeps a static
+`lint (ubuntu-latest)` — its environment has to be visible.
+
+### Each area owns its outcome
+
+`_area-ci.yml`'s `rollup` job runs `if: always()` behind that area's producers and runs
+`ci-rollup rollup --area` then `ci-rollup verdict --area`. It applies that area's baseline, its
+governed policy gaps, and the missing-cell rule, and nobody else's: another area's red cell cannot
+block it and another area's baseline entry cannot excuse it. It also narrows runner-loss
+attribution to its own packages, because a job name carries no area.
+`ci-rollup summarize --results <slice>…` folds the slices into one view and applies no policy at
+all.
+
+An area whose every cell is reused **still fans out**, so its local-origin results are still
+reported somewhere. The matrix is built from each package's declared gates rather than its
+executing cells, which is what gets this right.
+
+### Governed policy gaps
+
+A tier a package owns tests for that an environment cannot host is governed once, in
+`environments.json`, as a capability object carrying `available: false` plus `reason`, `owner`,
+`expiry`, and optionally `closes` — the tracked work that ends the gap. Such a cell is an
+**`ACCEPTED GAP`**: a distinct machine-readable state, decided by the planner before the run and
+never inferred from a GitHub cancellation conclusion. It is neither a pass nor a test failure and
+does not block; the rollup renders its owner, expiry, policy entry, `closes` link, and revocation
+instructions where a reader sees the cell. An absent, incomplete, or expired acceptance is a
+blocking `POLICY GAP` instead, and a real failure outranks an accepted gap.
+
+### The merge gate
+
+`ci.yml`'s `ci-verdict` job is still the single required context in the `protect-your-bacon`
+ruleset. It is **transitional**: it duplicates the area rollups' judgement over the whole run,
+reading the same plan, policy, environment table, artifact patterns, and baseline, so the two
+cannot disagree while both exist. Removing it is not separable from moving the required context —
+delete it first and every PR waits on a check that never reports. The run conclusion is already a
+faithful conjunction: exactly one job (`ci.yml`'s advisory summary) is `continue-on-error`.
+
+`ci-results.json` is `schema_version: 3`, versioned independently of the baseline's 2. Identity is
+still `{package, environment, tier}`; each cell also carries its derived `area`, its `origin`
+(`ci`, `local`, `prior-local`, or `none`), the `evidence` behind a reused result, its measured
+`duration_s`, and the `target_kinds` and `compile_coverage_from` the plan assigned it. The
+document carries `accepted_evidence`, one entry per reused cell — the same set accepted for
+*scheduling*, so the scheduler and the report cannot disagree. A document from an earlier
+generation is refused with a migration error rather than partly read.
 
 ### Layer 3 — Affected coverage and specialized workflows
 
@@ -110,7 +246,7 @@ all-feature coverage and the closed `messenger-desktop-stubs` runner tool. The
 native workflow builds and verifies all six helpers once before L1 and exports
 `MESSENGER_STUB_BIN_DIR`; the WSL2 archive workflow ships Linux helpers as a
 sidecar to its toolchain-free guest. JUnit and producer-status artifacts retain
-the package/environment/tier identity consumed by `ci-verdict`.
+the package/environment/tier identity consumed by their area's rollup.
 `sniff-performance.yml`
 stays independent because its PR leg is artifact-only and its scheduled leg measures work counts,
 not correctness. `build-integrations.yml` stays release-triggered.
@@ -204,10 +340,19 @@ Releases are automated end-to-end by `release-plz.yml` in the public repository.
 ## Caching and Performance
 
 Every Rust workflow uses `Swatinem/rust-cache@v2` with `workspaces: ". -> target"` and a workflow-
-or matrix-scoped `shared-key`. Examples: `area-ci-<area>-<job>-<os>`, `coverage-affected`,
-`coverage`, `bench-nightly-darkmatter`, and `sniff-bench`. Cache keys are
-intentionally per-workflow rather than global — this trades hit rate for protection against
-a poisoned target directory taking down the entire pipeline.
+or matrix-scoped `shared-key`. The package gates key **per package and per job kind**:
+`package-ci-<package>-check-<os>`, `package-ci-<package>-lint-ubuntu-latest`, and
+`package-ci-<package>-test-<environment>`. The L2, browser, and WSL-archive jobs deliberately
+reuse the `test` key for their environment — they compile the same crates as the L1 leg, so one
+warm cache serves every tier instead of three cold ones. Other examples: `coverage-affected`,
+`coverage`, `bench-nightly-darkmatter`, and `sniff-bench`. Cache keys are intentionally scoped
+rather than global — this trades hit rate for protection against a poisoned target directory
+taking down the entire pipeline.
+
+The package-scoped key has **not** been measured against a real run yet. The known pressure is
+GitHub's 10 GB repository cache quota: roughly 5 keys × 63 packages means one full run saves more
+caches than the quota holds and evicts its own predecessors, so only intra-run reuse is reliable
+today. Do not diagnose a cold build as a cache-key bug.
 
 Concurrency is configured per-workflow:
 
@@ -273,8 +418,10 @@ What a reviewer can rely on when approving a PR:
 2. **`just check-canonical` confirms the area structure is well-formed** — no `justfile`
    recipe drift snuck in.
 
-3. **Downstream workspace consumers are included automatically** from Cargo's dependency graph;
-   the two specialized runtime contracts are selected from that same scope by `ci.yml`.
+3. **An unchanged downstream consumer is reported, not scheduled.** It appears by name in the
+   plan's `reverse_dependencies` and receives no area, job, or result cell, so an untested area
+   can never present as a green top-level result. The specialized runtime contracts are still
+   selected from affected scope by `ci.yml`.
 
 4. **Coverage is reported but not gated.** Treat coverage as a delta to inspect, not a number to
    defend.
@@ -287,9 +434,11 @@ What a reviewer can rely on when approving a PR:
 
 What CI explicitly does **not** guarantee:
 
-- **All-target compile coverage on every environment.** The dedicated Windows
-    check compiles examples and benches; L1 on Linux, macOS, and WSL2 compiles
-    and runs test targets but does not promise every non-test target.
+- **Compile coverage inside the WSL2 guest.** L1 compiles and runs the `lib`, `bin`, and `test`
+    kinds on each native environment; the guest only runs the `ubuntu-latest` archive. A `check`
+    cell on each native environment compiles `example` and `bench` through explicit
+    `--examples`/`--benches` selectors, and it is scheduled only for packages that declare those
+    kinds — a package with neither gets no check job at all.
 
 - **Performance regressions blocking merge.** Bench results are tracked in Bencher but not gated.
 - **External-resource (L4 `test-real`) tests passing.** Those tiers are explicitly excluded from

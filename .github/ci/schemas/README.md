@@ -1,31 +1,50 @@
 # CI contract schemas
 
-Two documents carry every decision this repository's CI makes. Both are defined
-once in [`scripts/ci/schema.py`](../../../scripts/ci/schema.py), which is also
-their validator.
+Three documents carry every decision this repository's CI makes. All are
+defined once in [`scripts/ci/schema.py`](../../../scripts/ci/schema.py), which
+is also their validator.
 
 | Document | Version | Written by | Read by |
 |---|---|---|---|
 | Resolved plan | 1 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
 | Validation receipt | 2 | the pre-push hook, `scripts/cross-check.sh` | `scripts/ci/local_evidence.py`, the planner, `ci-rollup` |
+| Scope receipt | 1 | the pre-push hook (`local_evidence.py scope-record`) | `ci.yml` through `local_evidence.py scope-verify` |
 
 `contract.json` in this directory is the field contract dumped from that module
 so Rust tooling can assert against it without running Python. Regenerate it with
 `python3 scripts/ci/schema.py`; `scripts/ci/test_schema.py` fails when it drifts.
 
-> **Status.** `affected_scope.py` emits the resolved plan as of Phase 3
-> (`--resolved-plan`, or `--plan-out` alongside the legacy scope document that
-> `ci.yml`, `just/ci-local.just`, and `ci-rollup` still read, projected from the
-> same cells). As of Phase 4 both receipt producers — the pre-push hook and
-> `scripts/cross-check.sh` — write version 2, and version 1 is read-only.
-> Phases 5 and 6 move the remaining consumers onto `cells` and delete the
-> legacy projection.
+> **Status.** `affected_scope.py` emits the resolved plan with
+> `--resolved-plan`, or with `--plan-out` alongside the legacy scope document.
+> Both receipt producers — the pre-push hook and `scripts/cross-check.sh` —
+> write version 2; version 1 is read-only and never upgraded in place.
+> `ci-rollup rollup --plan` derives its expected cells from `cells[]`, and
+> still reads the legacy *policy* document for the governance of a
+> `gates = false` package, which owns no cells at all.
+>
+> **The legacy `scope.json` projection is still live.** `ci.yml` and
+> `just/ci-local.just` read it, and `affected_scope.py::legacy_scope_document`
+> projects it from the same cells — a projection, not a second calculation, so
+> the two documents cannot disagree about what CI will run. It carries the
+> area fan-out (`scheduled_areas`, `area_matrix`, `area_slugs`) as well.
+> Deleting it means moving those consumers onto `cells[]` first; the governance
+> metadata of a non-gating package has to move into the plan before the policy
+> half can go.
+>
+> A third document, the rollup's own `ci-results.json`, is **not** defined here:
+> it is Rust-owned by `scripts/ci-rollup.rs` and is at `schema_version: 3`,
+> versioned independently of the plan's 1, the receipt's 2, and the baseline's
+> 2. The plan fields that tool reads are asserted against `contract.json` by
+> `plan_fields_match_the_frozen_contract`, so renaming one breaks a test rather
+> than silently dropping a field serde never recognized.
 >
 > The version-1 field list has been amended twice, both times additively and
 > both times without a version bump because no consumer had read the document
-> yet. Phase 3 added `source_packages` and `reverse_dependencies`; Phase 4 added
-> the optional `input_paths` (a package's build closure, which the gate-input
-> identity is defined over) and `evidence_rejections`.
+> yet: `source_packages` and `reverse_dependencies` first (AC1 is stated over
+> the difference between "changed" and "selected", and the OQ1 seam report needs
+> the dependent names), then the optional `input_paths` (a package's build
+> closure, which the gate-input identity is defined over) and
+> `evidence_rejections`.
 
 ## Resolved plan
 
@@ -102,6 +121,26 @@ claim. It is accepted only on exact tree identity, only as pass-only
 whole-environment evidence, never through gate-input equivalence, and is never
 upgraded in place. Its measurements render as the exact string
 `not recorded (v1 receipt)`.
+
+## Scope receipt
+
+What the planner selected for one committed `base..head`, published on
+`refs/notes/ci-local/scope` — one ref for every host, since scope is
+OS-independent — and bound to the exact `{base, head, tree}`. It carries two
+documents: `plan`, the canonical resolved plan exactly as `--plan-out` writes
+it, and `scope`, the legacy `scope.json` projection `ci.yml` still fans out
+from; `plan_schema_version` names the plan's version so a plan migration is
+refused as `scope-schema` rather than parsed. `validate_scope_receipt` checks
+structure only — that the carried plan validates and names the receipt's base
+and head, and that the projection carries every key the workflow reads
+(`SCOPE_PROJECTION_FIELDS`) and the plan's packages. The identity comparison
+is the verifier's, in R3's order: schema, head, tree, base, then structure.
+
+CI reads it from the event head only and, on a hit, writes both documents out
+in place of running the planner. Its miss codes are `SCOPE_REJECTIONS`
+(`scope-missing`, `scope-schema`, `scope-head-mismatch`, `scope-tree-mismatch`,
+`scope-base-mismatch`, `scope-malformed`), kept apart from the cell rejections
+below because they refuse a whole document rather than one outcome.
 
 ## Rejection vocabulary
 

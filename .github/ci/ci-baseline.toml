@@ -1,8 +1,15 @@
 # CI baseline — known-red legs and the approved skip budget.
 #
 # Keyed by stable identity (`package`, `environment`, `tier`), never by a
-# GitHub display name or a shard. Enforced by `ci-rollup verdict`, which is the
-# single required branch-protection check.
+# GitHub display name or a shard. Enforced by `ci-rollup verdict`, which runs
+# twice over the same inputs today: once per selected area inside
+# `_area-ci.yml`'s `rollup` job (`--area`), and once over the whole run in
+# `ci.yml`'s transitional `ci-verdict` job, which is the single required
+# branch-protection context until that context moves.
+#
+# AREA GROUPS, PACKAGE IDENTIFIES. Nothing here is re-keyed by area. An entry
+# is applied by the area that owns its `package`, and by no other: another
+# area's rollup can neither block on it nor be excused by it.
 #
 # Why TOML: this file is hand-edited policy. An owner adds an entry, explains
 # why, and dates its expiry — all of which want comments and readable
@@ -19,6 +26,12 @@
 #     blocking; it cannot be accepted as a known test failure
 #   - an entry past its `expiry` blocks
 #
+# A cell satisfied by verified local evidence is a normal result cell with
+# `origin: local`, not an absence: a complete local FAILURE is a failure and is
+# matched against this file exactly as a hosted one is. Only an INCOMPLETE
+# local gate stays scheduled, so a baselined entry can never be quietly
+# discharged by a receipt.
+#
 # Every entry needs `owner`, `reason`, and `source_run`. `expiry` is optional
 # but strongly encouraged.
 #
@@ -31,8 +44,11 @@
 # baselined entry is only accepted against a `FAIL`.
 #
 # `tier` values: `L1`, `L2`, `browser` (JUnit-producing test tiers) and `lint`
-# (a producer-status job that emits no JUnit; its cell comes from the
-# `status-<package>-lint` artifact).
+# / `check` (producer-status jobs that emit no JUnit; their cells come from the
+# `status-<package>-lint` and `status-<package>-check-<os>` artifacts). Those
+# two are therefore always CI-origin — no local receipt can supply them — and a
+# `check` cell exists only for a package declaring `example` or `bench`
+# targets, because L1 already covers the `lib`, `bin`, and `test` kinds.
 
 schema_version = 2
 
