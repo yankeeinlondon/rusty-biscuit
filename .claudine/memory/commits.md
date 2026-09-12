@@ -90,6 +90,19 @@ belong here.
   in the brief, confirm with `git diff --cached -- <old> <new>` that the old
   side is a deletion of the expected blob, and check `git status --short`
   afterwards for leftover `D` entries.
+- Splitting a single file's content across two commits (e.g. two
+  `planning(repo)` commits whose spec.md needs `review_iterations: 5→6` in
+  commit 1 and `6→7` in commit 2): `git commit --only -- <path>` UPDATES
+  the index entry for `<path>` to the working-tree blob it just committed,
+  so the obvious "restore the second state from staging with
+  `git show :<path> > <path>`" returns the FIRST commit's blob, not the
+  pre-commit staging. Save the pre-commit staged version to a temp file
+  (e.g. `git show :<path> > /tmp/<path>-staged.md`) BEFORE the first
+  `--only`, then `cp` it back to the working tree after the first commit
+  and BEFORE the second. If the original is lost, `git fsck --dangling`
+  can recover the blob (`git cat-file -p <hash>` shows the file;
+  `git cat-file -t <hash>` confirms `blob`); the reflog only retains
+  the post-`--only` blob because the index-update is not a ref update.
 
 ## Signing
 
