@@ -284,6 +284,17 @@ belong here.
   the fix lands in a follow-up that drifts from the fixture's actual
   behavior, and the only signal that the two have diverged is a developer
   running both by hand.
+- A closure document (`fixes/<name>/closure.md` or an analogous
+  implementation-time artifact under a fix / feature directory) may
+  name an "unrelated user edits at entry" list — paths the implementer
+  touched but does not consider part of this fix. The list is the
+  orchestrator's signal to commit those paths in a separate
+  `docs(<area>):` or `chore:` commit, alongside the orchestrator's own
+  `planning(<area>):` close commit. Treat the list as authoritative;
+  do not fold the named paths into the implementation, tests, or docs
+  commits of the same fix even when they share a package area with the
+  fix's scope — the implementer's "unrelated" is a stronger signal than
+  the orchestrator's "lives in the same directory tree".
 - A `RESOLVED_PLAN_SCHEMA_VERSION` bump is one inseparable change with the
   new required fields in `scripts/ci/schema.py`, the regenerated
   `.github/ci/schemas/contract.json`, the version constant in any Rust
