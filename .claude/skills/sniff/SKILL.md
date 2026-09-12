@@ -102,8 +102,9 @@ Worktree projection has two distinct paths:
 
 - Aggregate Git/worktree output uses captured metadata and performs zero linked
   repository opens in the ordinary path.
-- Focused worktree inspection may validate registered targets. It omits an
-  absent stale registration but reports an existing corrupt repository.
+- Focused worktree inspection may validate registered targets. It omits a
+  stale registration (directory or `.git` file absent, as `git worktree list`
+  marks prunable) but reports a corrupt repository whose `.git` file exists.
 
 Conflict prediction operates on captured committed tips in memory. It must not
 fetch, run hooks or subprocesses, consult the live index, or mutate the
