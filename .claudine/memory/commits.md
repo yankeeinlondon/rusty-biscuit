@@ -78,6 +78,12 @@ belong here.
 - Feed messages via `-F -` with a single-quoted heredoc, or `-F <file>` when
   the commit may be retried (lock contention). A bare `-- <paths> <<EOF`
   without `-F` opens the editor and blocks.
+- `-F <file>` MUST come BEFORE the `--` pathspec boundary (`git commit
+  --only -F /tmp/msg.md -- <paths>`). Placing it after the `--` makes git
+  resolve the file path relative to the worktree root, not the caller's
+  cwd, so any absolute path outside the repo — e.g. the `/tmp/commit_msg_*.md`
+  files used to keep per-sub-agent messages from colliding — dies with
+  `fatal: '<path>' is outside repository`.
 - When writing a message file with the `Write` tool, do not put `$$` in the
   filename: the tool stores it literally while the shell later expands it.
 - Under zsh, prefer `git cat-file -p "${rev}":path` over `git show "$rev:$path"`
