@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -354,6 +355,62 @@ class GateInputIdentityTests(EvidenceFixture):
         self.assertIn("gate-inputs-changed", schema.REJECTIONS)
 
 
+class NoteAttachmentTests(EvidenceFixture):
+    """AC5/AC7/AC12: a receipt is credited only to the ref and commit it was filed under."""
+
+    def test_a_receipt_under_the_wrong_environment_ref_is_credited_to_neither(self) -> None:
+        self.add_note(
+            "wsl2-ubuntu", self.receipt("macos-latest", [self.receipt_cell("alpha")])
+        )
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        self.assertEqual([], self.keys(accepted))
+        self.assertEqual(1, len(rejections), rejections)
+        self.assertTrue(rejections[0].startswith("environment-mismatch:"), rejections)
+        self.assertIn("wsl2-ubuntu", rejections[0])
+        self.assertIn("macos-latest", rejections[0])
+
+    def test_a_receipt_declaring_another_head_is_rejected(self) -> None:
+        self.add_note(
+            "macos-latest",
+            self.receipt("macos-latest", [self.receipt_cell("alpha")], head=self.base),
+        )
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        self.assertEqual([], self.keys(accepted))
+        self.assertTrue(
+            any(reason.startswith("revision-mismatch:") for reason in rejections),
+            rejections,
+        )
+
+    def test_a_receipt_declaring_another_tree_is_rejected(self) -> None:
+        # The declared tree is the base's, whose `pkg/alpha` differs from the
+        # head's; pre-fix this was accepted as `prior-local` because the note
+        # sits on the head itself and equivalence compared head with head.
+        self.add_note(
+            "macos-latest",
+            self.receipt(
+                "macos-latest",
+                [self.receipt_cell("alpha")],
+                tree=self.git("rev-parse", f"{self.base}^{{tree}}"),
+            ),
+        )
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        self.assertEqual([], self.keys(accepted))
+        self.assertTrue(
+            any(reason.startswith("revision-mismatch:") for reason in rejections),
+            rejections,
+        )
+
+    def test_the_rejection_codes_are_in_the_shared_vocabulary(self) -> None:
+        self.assertIn("environment-mismatch", schema.REJECTIONS)
+        self.assertIn("revision-mismatch", schema.REJECTIONS)
+
+
 class OutcomeTests(EvidenceFixture):
     """AC8: a complete failure is evidence and stays a failure."""
 
@@ -517,6 +574,15 @@ class LegacyReceiptTests(EvidenceFixture):
             rejections,
         )
 
+    def test_a_v1_note_under_the_wrong_environment_ref_is_credited_to_neither(self) -> None:
+        self.add_note("wsl2-ubuntu", self.legacy_note())
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        self.assertEqual([], self.keys(accepted))
+        self.assertEqual(1, len(rejections), rejections)
+        self.assertTrue(rejections[0].startswith("environment-mismatch:"), rejections)
+
     def test_a_v1_cell_renders_its_measurements_as_unrecorded(self) -> None:
         self.add_note("macos-latest", self.legacy_note())
         accepted, _ = target("verify_cells")(str(self.plan_path), self.base, self.head)
@@ -584,14 +650,82 @@ class ReceiptRecordingTests(EvidenceFixture):
     staging manifest `just _stage_junit` appends to — and feed it back through
     verification, so the writer and the reader are pinned to each other rather
     than to a fixture's idea of the document.
+
+    The stage directory doubles as the retained report directory here: unlike
+    the hook's, it outlives the call, so naming it is truthful.
     """
+
+    def retained(self, directory: Path) -> Path:
+        """A copy of the staged reports where the hook keeps them: elsewhere."""
+        destination = self.root / "evidence" / self.head / "macos-latest"
+        shutil.copytree(directory, destination)
+        return destination
+
+    def test_the_recorded_report_dir_is_exactly_what_was_passed(self) -> None:
+        record = self.staged("alpha")
+        directory = self.stage(record)
+        self.report(directory, record)
+        retained = self.retained(directory)
+        document = json.loads(
+            local_evidence.record_cells(
+                str(self.plan_path),
+                str(directory),
+                "macos-latest",
+                self.base,
+                self.head,
+                report_dir=str(retained),
+            )
+        )
+        self.assertEqual(str(retained), document["host"]["report_dir"])
+        self.assertNotIn("~/.rusty-biscuit", document["host"]["report_dir"])
+        for cell in document["cells"]:
+            self.assertTrue((retained / cell["report"]).is_file(), cell["report"])
+
+    def test_an_empty_report_dir_is_refused(self) -> None:
+        # Spec section 2: the receipt records where the reports are retained so
+        # a reviewer can ask for them. Nothing may invent that path.
+        record = self.staged("alpha")
+        directory = self.stage(record)
+        self.report(directory, record)
+        for empty in ("", "   "):
+            with self.subTest(report_dir=repr(empty)):
+                with self.assertRaisesRegex(ValueError, "--report-dir"):
+                    local_evidence.record_cells(
+                        str(self.plan_path),
+                        str(directory),
+                        "macos-latest",
+                        self.base,
+                        self.head,
+                        report_dir=empty,
+                    )
+
+    def test_a_report_dir_that_does_not_hold_the_reports_is_refused(self) -> None:
+        record = self.staged("alpha")
+        directory = self.stage(record)
+        self.report(directory, record)
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        with self.assertRaisesRegex(ValueError, "does not retain L1/alpha.xml"):
+            local_evidence.record_cells(
+                str(self.plan_path),
+                str(directory),
+                "macos-latest",
+                self.base,
+                self.head,
+                report_dir=str(elsewhere),
+            )
 
     def test_a_passing_run_publishes_measured_cells_that_verify_back(self) -> None:
         record = self.staged("alpha")
         directory = self.stage(record)
         self.report(directory, record)
         contents = local_evidence.record_cells(
-            str(self.plan_path), str(directory), "macos-latest", self.base, self.head
+            str(self.plan_path),
+            str(directory),
+            "macos-latest",
+            self.base,
+            self.head,
+            report_dir=str(directory),
         )
         document = json.loads(contents)
         self.assertEqual([], schema.validate_receipt(document))
@@ -618,11 +752,21 @@ class ReceiptRecordingTests(EvidenceFixture):
         directory = self.stage(record)
         self.report(directory, record)
         first = local_evidence.record_cells(
-            str(self.plan_path), str(directory), "macos-latest", self.base, self.head
+            str(self.plan_path),
+            str(directory),
+            "macos-latest",
+            self.base,
+            self.head,
+            report_dir=str(directory),
         )
         self.publish(first)
         second = local_evidence.record_cells(
-            str(self.plan_path), str(directory), "macos-latest", self.base, self.head
+            str(self.plan_path),
+            str(directory),
+            "macos-latest",
+            self.base,
+            self.head,
+            report_dir=str(directory),
         )
         self.assertEqual(first, second)
         self.assertEqual(first, schema.canonical(json.loads(second)))
@@ -632,7 +776,12 @@ class ReceiptRecordingTests(EvidenceFixture):
         directory = self.stage(record)
         self.report(directory, record, failures=["boom"])
         contents = local_evidence.record_cells(
-            str(self.plan_path), str(directory), "macos-latest", self.base, self.head
+            str(self.plan_path),
+            str(directory),
+            "macos-latest",
+            self.base,
+            self.head,
+            report_dir=str(directory),
         )
         self.publish(contents)
         accepted, rejections = target("verify_cells")(
@@ -649,7 +798,12 @@ class ReceiptRecordingTests(EvidenceFixture):
         record = self.staged("alpha", exit_code=101, report_present=False)
         directory = self.stage(record)
         contents = local_evidence.record_cells(
-            str(self.plan_path), str(directory), "macos-latest", self.base, self.head
+            str(self.plan_path),
+            str(directory),
+            "macos-latest",
+            self.base,
+            self.head,
+            report_dir=str(directory),
         )
         self.assertEqual("partial", json.loads(contents)["cells"][0]["completion"])
         self.publish(contents)
@@ -665,7 +819,12 @@ class ReceiptRecordingTests(EvidenceFixture):
         directory = self.stage()
         with self.assertRaisesRegex(ValueError, "staged no L1/L2/browser report"):
             local_evidence.record_cells(
-                str(self.plan_path), str(directory), "macos-latest", self.base, self.head
+                str(self.plan_path),
+                str(directory),
+                "macos-latest",
+                self.base,
+                self.head,
+                report_dir=str(directory),
             )
 
     def test_lint_and_check_are_never_published_from_a_local_run(self) -> None:
@@ -677,7 +836,12 @@ class ReceiptRecordingTests(EvidenceFixture):
         )
         with self.assertRaisesRegex(ValueError, "staged no L1/L2/browser report"):
             local_evidence.record_cells(
-                str(self.plan_path), str(directory), "macos-latest", self.base, self.head
+                str(self.plan_path),
+                str(directory),
+                "macos-latest",
+                self.base,
+                self.head,
+                report_dir=str(directory),
             )
 
     def test_a_non_ancestor_base_cannot_be_recorded(self) -> None:
@@ -734,7 +898,12 @@ class BackendProofTests(EvidenceFixture):
 
     def cells_of(self, directory: Path) -> dict[str, dict]:
         contents = local_evidence.record_cells(
-            str(self.plan_path), str(directory), "macos-latest", self.base, self.head
+            str(self.plan_path),
+            str(directory),
+            "macos-latest",
+            self.base,
+            self.head,
+            report_dir=str(directory),
         )
         return {cell["gate"]: cell for cell in json.loads(contents)["cells"]}
 
@@ -753,7 +922,12 @@ class BackendProofTests(EvidenceFixture):
 
         self.publish(
             local_evidence.record_cells(
-                str(self.plan_path), str(directory), "macos-latest", self.base, self.head
+                str(self.plan_path),
+                str(directory),
+                "macos-latest",
+                self.base,
+                self.head,
+                report_dir=str(directory),
             )
         )
         accepted, rejections = target("verify_cells")(
@@ -864,6 +1038,7 @@ class CrossCheckPublicationTests(EvidenceFixture):
                 "macos-latest",
                 self.base,
                 self.head,
+                report_dir=str(self.directory),
             )
         )
         self.publish(self.publish_cross_check(), environment="wsl2-ubuntu")

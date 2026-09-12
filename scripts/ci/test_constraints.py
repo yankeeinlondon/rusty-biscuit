@@ -114,6 +114,25 @@ class LoadTests(StoreFixture):
         # so an unfiltered caller still sees it.
         self.assertEqual(1, len(self.load()[0]))
 
+    def test_a_repository_scoped_constraint_matches_every_spelling_of_its_remote(self) -> None:
+        self.write("current", self.constraint(repository="github.com/yankeeinlondon/rusty-biscuit"))
+        for remote in (
+            "git@github.com:yankeeinlondon/rusty-biscuit.git",
+            "https://github.com/yankeeinlondon/rusty-biscuit.git",
+            "ssh://git@github.com/yankeeinlondon/rusty-biscuit",
+            "github.com/yankeeinlondon/rusty-biscuit",
+        ):
+            with self.subTest(remote=remote):
+                self.assertEqual(1, len(self.load(repository=remote)[0]))
+        self.assertEqual([], self.load(repository="git@github.com:someone-else/rusty-biscuit.git")[0])
+        # A checkout with no origin cannot prove it is another repository.
+        self.assertEqual(1, len(self.load(repository="")[0]))
+
+    def test_a_record_may_spell_its_repository_as_a_full_url(self) -> None:
+        self.write("current", self.constraint(repository="https://github.com/yankeeinlondon/rusty-biscuit.git"))
+        self.assertEqual(1, len(self.load(repository="git@github.com:yankeeinlondon/rusty-biscuit.git")[0]))
+        self.assertEqual([], self.load(repository="git@github.com:yankeeinlondon/other.git")[0])
+
 
 class SatisfactionTests(StoreFixture):
     """A constraint is satisfied by a plan that schedules nothing it forbids."""
@@ -143,6 +162,21 @@ class SatisfactionTests(StoreFixture):
 
     def test_no_plan_satisfies_nothing(self) -> None:
         self.assertEqual(1, len(constraints.unsatisfied(self.active(), None)))
+
+    def test_a_cell_the_planner_already_marked_prohibited_is_unsatisfied(self) -> None:
+        # `just ci-local --plan` with the store resolves an unsatisfied cell to
+        # `omit`/`prohibited`; that plan must not read as satisfied here.
+        plan = {
+            "cells": [
+                {
+                    "environment": "wsl2-ubuntu",
+                    "gate": "L1",
+                    "execution": "omit",
+                    "state": "prohibited",
+                }
+            ]
+        }
+        self.assertEqual(1, len(constraints.unsatisfied(self.active(), plan)))
 
     def test_a_gate_scoped_constraint_ignores_other_gates(self) -> None:
         active = self.active(gate="L2")
@@ -248,6 +282,48 @@ class CommandTests(StoreFixture):
         result = self.run_check("--plan", str(plan))
         self.assertNotEqual(0, result.returncode)
         self.assertIn("wsl2-ubuntu", result.stderr)
+
+    def test_an_unreadable_plan_blocks_even_with_an_empty_store(self) -> None:
+        plan = self.store.parent / "plan.json"
+        plan.write_text("{not json", encoding="utf-8")
+        result = self.run_check("--plan", str(plan))
+        self.assertNotEqual(0, result.returncode, "an unreadable plan proves nothing")
+        self.assertIn("cannot read the resolved plan", result.stderr)
+
+    def test_a_plan_without_readable_cells_blocks(self) -> None:
+        self.write("current", self.constraint())
+        plan = self.store.parent / "plan.json"
+        plan.write_text(json.dumps({"cells": "none"}), encoding="utf-8")
+        result = self.run_check("--plan", str(plan))
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("no readable 'cells' list", result.stderr)
+
+    def test_a_missing_plan_file_blocks(self) -> None:
+        result = self.run_check("--plan", str(self.store.parent / "absent.json"))
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("cannot read the resolved plan", result.stderr)
+
+    def test_the_hook_invocation_filters_by_repository_and_branch(self) -> None:
+        self.write("other-branch", self.constraint(branch="main"))
+        self.write("other-repo", self.constraint(repository="github.com/someone-else/rusty-biscuit"))
+        plan = self.store.parent / "plan.json"
+        plan.write_text(
+            json.dumps(
+                {"cells": [{"environment": "wsl2-ubuntu", "gate": "L1", "execution": "execute"}]}
+            ),
+            encoding="utf-8",
+        )
+        result = self.run_check(
+            "--plan",
+            str(plan),
+            "--repository",
+            "git@github.com:yankeeinlondon/rusty-biscuit.git",
+            "--branch",
+            "feat/unifi",
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        result = self.run_check("--plan", str(plan), "--branch", "main")
+        self.assertNotEqual(0, result.returncode)
 
     def test_environments_lists_the_planner_input(self) -> None:
         self.write("current", self.constraint())

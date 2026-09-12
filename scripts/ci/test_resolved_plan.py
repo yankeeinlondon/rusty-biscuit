@@ -24,7 +24,9 @@ import schema  # noqa: E402
 from affected_scope import (  # noqa: E402
     ENVIRONMENTS_CONFIG,
     ROOT,
+    area_slug,
     calculate_scope,
+    legacy_scope_document,
     load_environments,
     load_metadata,
     manifest_directory,
@@ -337,6 +339,105 @@ class TargetCoverageTests(PlannerFixture):
         ]
         self.assertEqual([], offenders)
 
+    NATIVE = ["ubuntu-latest", "windows-latest", "macos-latest"]
+    SELECTORS = {"example": "--examples", "bench": "--benches"}
+    BLANKET = ("--all-targets", "--lib", "--bins", "--tests")
+
+    def check_environments(self, plan: dict, package: str) -> list[str]:
+        return [
+            cell["environment"]
+            for cell in self.cells(plan)
+            if cell["package"] == package and cell["gate"] == "check"
+        ]
+
+    def test_example_targets_are_checked_on_each_native_environment_not_the_guest(self) -> None:
+        plan = self.plan("biscuit-speaks/lib/src/lib.rs")
+        record = self.package_record(plan, "biscuit-speaks")
+        self.assertEqual(["lib", "test", "example"], record["targets"], "fixture: examples only")
+        self.assertEqual(self.NATIVE, self.check_environments(plan, "biscuit-speaks"))
+        for cell in self.cells(plan):
+            if cell["package"] == "biscuit-speaks" and cell["gate"] == "check":
+                self.assertEqual(["example"], cell["target_kinds"])
+                self.assertIn(cell["environment"], cell["selection_reason"])
+        wsl = next(
+            cell
+            for cell in self.cells(plan)
+            if cell["package"] == "biscuit-speaks" and cell["environment"] == "wsl2-ubuntu"
+        )
+        self.assertEqual("ubuntu-latest archive build", wsl["compile_coverage_from"])
+
+    def test_check_args_carry_exactly_the_declared_uncovered_selectors(self) -> None:
+        plan = self.plan(force_all=True)
+        shapes_seen: set[tuple[str, ...]] = set()
+        for record in plan["packages"]:
+            if not record["gates"]:
+                continue
+            with self.subTest(package=record["package"]):
+                expected = [
+                    self.SELECTORS[kind] for kind in ("example", "bench") if kind in record["targets"]
+                ]
+                tokens = record["check_args"].split()
+                self.assertEqual(expected, [token for token in tokens if token in self.SELECTORS.values()])
+                self.assertEqual(["-p", record["package"]], tokens[:2])
+                self.assertEqual([], [token for token in tokens if token in self.BLANKET])
+                self.assertEqual(
+                    self.NATIVE if expected else [],
+                    self.check_environments(plan, record["package"]),
+                )
+                shapes_seen.add(tuple(expected))
+        # Non-vacuous only if the workspace still holds every shape.
+        self.assertEqual(
+            {(), ("--examples",), ("--benches",), ("--examples", "--benches")}, shapes_seen
+        )
+
+    def test_a_reused_macos_l1_keeps_the_macos_check_cell_executing(self) -> None:
+        accepted = [
+            {
+                "package": "biscuit-speaks",
+                "environment": "macos-latest",
+                "gate": "L1",
+                "origin": "local",
+            }
+        ]
+        plan = self.plan("biscuit-speaks/lib/src/lib.rs", accepted_cells=accepted)
+        states = {
+            (cell["environment"], cell["gate"]): cell["execution"]
+            for cell in self.cells(plan)
+            if cell["package"] == "biscuit-speaks"
+        }
+        self.assertEqual("reuse", states[("macos-latest", "L1")], "fixture: macOS L1 reused")
+        self.assertEqual("execute", states[("macos-latest", "check")])
+        scheduled = legacy_scope_document(plan, self.policy, self.environments)
+        matrix = scheduled["area_matrix"]["biscuit-speaks"]["include"]
+        entry = next(item for item in matrix if item["package"] == "biscuit-speaks")
+        self.assertEqual(self.NATIVE, entry["check_os"])
+        self.assertNotIn("macos-latest", entry["native_environments"])
+
+    def test_the_workflow_command_joined_with_check_args_selects_only_the_declared_kinds(self) -> None:
+        # The review's "test the final command": the planner's string and the
+        # workflow's template, joined, and the guest's archive build kept apart.
+        package_ci = (ROOT / ".github/workflows/_package-ci.yml").read_text()
+        template = next(
+            line.strip()
+            for line in package_ci.splitlines()
+            if line.strip().startswith("run: cargo check ")
+        )
+        self.assertEqual("run: cargo check ${{ inputs.check-args }}", template)
+        plan = self.plan("biscuit-speaks/lib/src/lib.rs")
+        record = self.package_record(plan, "biscuit-speaks")
+        command = template.removeprefix("run: ").replace("${{ inputs.check-args }}", record["check_args"])
+        self.assertTrue(
+            command.startswith("cargo check -p biscuit-speaks --examples"), command
+        )
+        self.assertNotIn("--benches", command)
+        for flag in self.BLANKET:
+            self.assertNotIn(flag, command)
+        self.assertIn(
+            "archive-args: -p ${{ inputs.package }} ${{ inputs.test-args }}",
+            package_ci,
+            "the WSL archive build must receive package and features, never the check selectors",
+        )
+
 
 class EnvironmentCoverageTests(PlannerFixture):
     """AC3: Linux and Windows coverage survives a macOS reuse."""
@@ -525,6 +626,103 @@ class ProhibitionTests(PlannerFixture):
             schema.canonical(self.plan("claudine/lib/src/lib.rs")),
             schema.canonical(self.plan("claudine/lib/src/lib.rs", prohibitions={})),
         )
+
+
+class ResultCompletenessTests(PlannerFixture):
+    """Spec §5: the machine-readable results survive `ci-verdict`'s removal.
+
+    Once the global verdict job is gone, the only `ci-results` documents a run
+    produces are the per-area slices `_area-ci.yml` uploads, one per entry in
+    `scheduled_areas`. Their union is complete only if every cell the plan
+    resolved belongs to a scheduled area — including the cells no runner will
+    execute, which is precisely where a completeness hole would hide, because
+    nothing red would appear when one went missing.
+    """
+
+    def scheduled(self, plan: dict) -> dict:
+        return legacy_scope_document(plan, self.policy, self.environments)
+
+    def test_every_resolved_cell_belongs_to_a_scheduled_area(self) -> None:
+        plans = {
+            "two areas": self.plan("claudine/lib/src/lib.rs", "playa/lib/src/lib.rs"),
+            "nested area": self.plan("claudine/rendezvous/core/src/lib.rs"),
+            "full scope": self.plan(force_all=True),
+        }
+        for label, plan in plans.items():
+            scheduled = set(self.scheduled(plan)["scheduled_areas"])
+            orphaned = sorted(
+                {
+                    f"{cell['package']}/{cell['environment']}/{cell['gate']}"
+                    f" in {cell['area']}"
+                    for cell in self.cells(plan)
+                    if cell["area"] not in scheduled
+                }
+            )
+            self.assertEqual(
+                [],
+                orphaned,
+                f"{label}: a cell whose area never fans out reaches no result slice",
+            )
+
+    def test_an_area_whose_every_cell_is_reused_still_owns_a_result_slice(self) -> None:
+        # The completeness hole this class exists for. A receipt covering all
+        # of an area's cells removes every hosted execution from it; if the
+        # area then dropped out of the fan-out, its local-origin results would
+        # be reported nowhere at all, which is the PR #76 failure mode wearing
+        # a different hat.
+        plan = self.plan("playa/lib/src/lib.rs")
+        playa_cells = [cell for cell in self.cells(plan) if cell["area"] == "playa"]
+        self.assertTrue(playa_cells, "the fixture must select the playa area")
+        accepted = [
+            {
+                "package": cell["package"],
+                "environment": cell["environment"],
+                "gate": cell["gate"],
+                "origin": "local",
+            }
+            for cell in playa_cells
+        ]
+        reused = self.plan("playa/lib/src/lib.rs", accepted_cells=accepted)
+        states = {
+            cell["state"] for cell in self.cells(reused) if cell["area"] == "playa"
+        }
+        self.assertEqual({"reused"}, states, "the fixture must reuse every cell")
+
+        scheduled = self.scheduled(reused)
+        self.assertIn(
+            "playa",
+            scheduled["scheduled_areas"],
+            "an all-reused area must still fan out, or its results reach no slice",
+        )
+        matrix = scheduled["area_matrix"]["playa"]["include"]
+        self.assertTrue(matrix, "the area must still carry its package matrix")
+        for entry in matrix:
+            for field in (
+                "native_environments",
+                "check_os",
+                "l2_environments",
+                "browser_environments",
+            ):
+                self.assertEqual(
+                    [],
+                    entry[field],
+                    f"{entry['package']}: no runner may be scheduled for a reused cell",
+                )
+
+    def test_every_scheduled_area_has_an_artifact_safe_slice_name(self) -> None:
+        # The slice artifact is `ci-results-<slug>`; a nested area name is not
+        # a legal artifact name, and a collision would have two areas
+        # overwriting one document.
+        plan = self.plan(force_all=True)
+        scheduled = self.scheduled(plan)
+        slugs = scheduled["area_slugs"]
+        self.assertEqual(sorted(scheduled["scheduled_areas"]), sorted(slugs))
+        self.assertEqual(
+            len(slugs), len(set(slugs.values())), "two areas share one slice name"
+        )
+        for area, slug in slugs.items():
+            self.assertEqual(area_slug(area), slug)
+            self.assertNotIn("/", f"ci-results-{slug}.json")
 
 
 if __name__ == "__main__":

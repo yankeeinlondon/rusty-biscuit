@@ -87,6 +87,7 @@ class CiLocalTests(unittest.TestCase):
                 "test_resolved_plan.py",
                 "test_ci_local.py",
                 "test_constraints.py",
+                "test_runner_loss.py",
             ):
                 (scripts / suite).write_text("", encoding="utf-8")
             stubs = {
@@ -561,6 +562,389 @@ class PlanSurfaceTests(unittest.TestCase):
         for cell in document["cells"]:
             key = f"{cell['package']}/{cell['environment']}/{cell['gate']}"
             self.assertIn(key, rendered, f"the rendered plan omits {key}")
+
+
+WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+SCOPE_STEP = "Calculate package and area scope"
+NULL_OID = "0" * 40
+
+
+def workflow_step_script(workflow: Path, step_name: str) -> str:
+    """The `run: |` body of one named step, dedented into a standalone script.
+
+    The stdlib has no YAML parser, so this leans on the workflow's fixed
+    layout: a step opens at six spaces, its keys sit at eight, and a block
+    scalar's lines at ten. Reaching the next step before `run: |` fails
+    loudly rather than borrowing a neighbor's script.
+    """
+    lines = workflow.read_text(encoding="utf-8").splitlines()
+    start = lines.index(f"      - name: {step_name}")
+    run_index = None
+    for index in range(start + 1, len(lines)):
+        if lines[index].startswith("      - "):
+            break
+        if lines[index] == "        run: |":
+            run_index = index
+            break
+    if run_index is None:
+        raise AssertionError(f"step {step_name!r} has no `run: |` block")
+    indent = 10
+    body: list[str] = []
+    for line in lines[run_index + 1 :]:
+        if line.strip() and len(line) - len(line.lstrip()) < indent:
+            break
+        body.append(line[indent:])
+    return "\n".join(body) + "\n"
+
+
+SCOPE_REF = "refs/notes/ci-local/scope"
+SCOPE_MARKER = "carried by the local scope receipt"
+#: A real workspace source path, so a fixture commit touching it selects a
+#: real package and the plan owns cells a validation receipt can satisfy.
+SOURCE_FILE = "biscuit-hash/lib/src/lib.rs"
+
+
+def fixture_git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+         "-c", "commit.gpgsign=false", *args],
+        cwd=root, check=True, capture_output=True, text=True,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+    ).stdout.strip()
+
+
+class StepRun:
+    """One execution of the extracted scope step."""
+
+    def __init__(self, root: Path, result: subprocess.CompletedProcess, output: Path, summary: Path, planner_log: Path) -> None:
+        self.result = result
+        self.summary = summary.read_text(encoding="utf-8")
+        self.planner_calls = planner_log.read_text(encoding="utf-8").splitlines() if planner_log.is_file() else []
+        self.outputs = dict(
+            line.split("=", 1)
+            for line in output.read_text(encoding="utf-8").splitlines()
+            if "=" in line
+        )
+        plan_path = root / "resolved-plan.json"
+        self.plan_bytes = plan_path.read_text(encoding="utf-8") if plan_path.is_file() else ""
+        self.plan = json.loads(self.plan_bytes) if self.plan_bytes else {}
+
+    def scope_source(self) -> str:
+        for line in self.summary.splitlines():
+            if line.startswith("| scope source |"):
+                return line.split("|")[2].strip()
+        return ""
+
+
+@unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "requires bash and jq")
+class WorkflowScopeStepTests(unittest.TestCase):
+    """The scope step's shell, run for real against every event shape it handles.
+
+    The REAL planner and evidence verifier run (the workspace's, reached
+    through a trampoline in the temp cwd, since the step spells them as
+    cwd-relative paths); only the Git repository the step diffs and verifies
+    against is a fixture. Three commits — `root`, `base`, `head` — give the
+    diff-based events a resolvable `base..head` and a second real base for a
+    mismatched scope receipt; the full-run events never look at them.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.script = workflow_step_script(WORKFLOW, SCOPE_STEP)
+
+    def run_step(
+        self,
+        event: str,
+        *,
+        push_base: str | None = None,
+        scope_receipt=None,
+        validation_receipt: bool = False,
+        expect_failure: bool = False,
+    ) -> StepRun:
+        """The step for one event, over a fresh fixture repository.
+
+        `scope_receipt(root, base, head) -> str` is attached to `head` under
+        `refs/notes/ci-local/scope` before the step runs; `validation_receipt`
+        publishes a complete macOS L1 receipt for the source package so the
+        accepted-cells path is exercised.
+        """
+        with tempfile.TemporaryDirectory(prefix="ci-scope-step-") as temporary:
+            root = Path(temporary).resolve()
+            first, base, head = self.seed_repository(root)
+            scripts = root / "scripts" / "ci"
+            scripts.mkdir(parents=True)
+            planner_log = root / "planner-calls.log"
+            for tool in ("affected_scope.py", "local_evidence.py"):
+                real = ROOT / "scripts" / "ci" / tool
+                # The planner trampoline records every invocation: on a scope
+                # hit the proof is that it was never invoked for selection.
+                record = (
+                    "import os, sys\n"
+                    "if os.environ.get('TEST_PLANNER_LOG'):\n"
+                    "    with open(os.environ['TEST_PLANNER_LOG'], 'a', encoding='utf-8') as log:\n"
+                    "        log.write(' '.join(sys.argv[1:]) + '\\n')\n"
+                    if tool == "affected_scope.py"
+                    else ""
+                )
+                (scripts / tool).write_text(
+                    "import runpy\n" + record
+                    + f"runpy.run_path({str(real)!r}, run_name='__main__')\n",
+                    encoding="utf-8",
+                )
+            shutil.copyfile(ROOT / "rust-toolchain.toml", root / "rust-toolchain.toml")
+            if scope_receipt is not None:
+                fixture_git(root, "notes", "--ref", SCOPE_REF, "add", "-f", "-m",
+                            scope_receipt(root, base, head), head)
+            if validation_receipt:
+                self.publish_validation_receipt(root, base, head)
+            output = root / "github-output"
+            summary = root / "github-step-summary"
+            output.touch()
+            summary.touch()
+
+            environment = clean_policy_environment()
+            for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+                environment.pop(key, None)
+            environment.update(
+                {
+                    "GITHUB_OUTPUT": str(output),
+                    "GITHUB_STEP_SUMMARY": str(summary),
+                    "TEST_PLANNER_LOG": str(planner_log),
+                    "EVENT_NAME": event,
+                    # `github.event.before` is empty outside a push; the PR
+                    # fields are empty outside a pull request.
+                    "PUSH_BASE": (push_base if push_base is not None else base)
+                    if event == "push"
+                    else "",
+                    "PUSH_HEAD": head,
+                    "PR_BASE": base if event == "pull_request" else "",
+                    "PR_HEAD": head if event == "pull_request" else "",
+                }
+            )
+            if push_base == "FIRST":
+                environment["PUSH_BASE"] = first
+            result = subprocess.run(
+                ["bash", "-c", self.script],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            run = StepRun(root, result, output, summary, planner_log)
+            if expect_failure:
+                self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+                return run
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual([], schema.validate_resolved_plan(run.plan))
+            self.assertEqual(head, run.plan["head"])
+            return run
+
+    @staticmethod
+    def seed_repository(root: Path) -> tuple[str, str, str]:
+        fixture_git(root, "init", "-q", "-b", "main")
+        (root / "README.md").write_text("zero\n", encoding="utf-8")
+        fixture_git(root, "add", "README.md")
+        fixture_git(root, "commit", "-q", "-m", "first")
+        first = fixture_git(root, "rev-parse", "HEAD")
+        (root / "README.md").write_text("one\n", encoding="utf-8")
+        fixture_git(root, "commit", "-q", "-am", "base")
+        base = fixture_git(root, "rev-parse", "HEAD")
+        (root / "README.md").write_text("two\n", encoding="utf-8")
+        source = root / SOURCE_FILE
+        source.parent.mkdir(parents=True)
+        source.write_text("pub fn fixture() {}\n", encoding="utf-8")
+        fixture_git(root, "add", "-A")
+        fixture_git(root, "commit", "-q", "-m", "head")
+        return first, base, fixture_git(root, "rev-parse", "HEAD")
+
+    # -- receipts ------------------------------------------------------------
+
+    @staticmethod
+    def tool(root: Path, name: str, *args: str) -> str:
+        result = subprocess.run(
+            ["python3", str(root / "scripts" / "ci" / name), *args],
+            cwd=root, capture_output=True, text=True, check=False,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        )
+        if result.returncode != 0:
+            raise AssertionError(f"{name} {' '.join(args)} failed: {result.stderr}")
+        return result.stdout
+
+    def planned_documents(self, root: Path, base: str, head: str) -> tuple[dict, dict]:
+        """The real planner's plan and projection for the fixture's `base..head`."""
+        projection = json.loads(self.tool(
+            root, "affected_scope.py", "--plan-out", "receipt-plan.json",
+            "--base", base, "--head", head, "--", "README.md", SOURCE_FILE,
+        ))
+        plan = json.loads((root / "receipt-plan.json").read_text(encoding="utf-8"))
+        (root / "planner-calls.log").unlink(missing_ok=True)
+        return plan, projection
+
+    def local_scope_receipt(self, root: Path, base: str, head: str, mutate=None) -> str:
+        """A scope receipt for `base..head` whose free text names its origin.
+
+        The marker is what proves the handoff: the planner never writes it, so
+        its presence in the step's outputs shows the receipt was used.
+        """
+        plan, projection = self.planned_documents(root, base, head)
+        plan["preflight_reason"] = SCOPE_MARKER
+        projection["preflight_reason"] = SCOPE_MARKER
+        if mutate is not None:
+            mutate(plan, projection)
+        (root / "receipt-plan.json").write_text(schema.canonical(plan), encoding="utf-8")
+        (root / "receipt-scope.json").write_text(schema.canonical(projection), encoding="utf-8")
+        return self.tool(
+            root, "local_evidence.py", "scope-record", "--plan", "receipt-plan.json",
+            "--scope", "receipt-scope.json", "--base", base, "--head", head,
+        ).strip()
+
+    def publish_validation_receipt(self, root: Path, base: str, head: str) -> None:
+        plan, _ = self.planned_documents(root, base, head)
+        (root / "validation-plan.json").write_text(schema.canonical(plan), encoding="utf-8")
+        stage = root / "stage" / "L1"
+        stage.mkdir(parents=True)
+        (stage / "biscuit-hash.xml").write_text(
+            '<?xml version="1.0"?><testsuites><testsuite name="biscuit-hash" tests="1" '
+            'failures="0" errors="0" skipped="0"><testcase classname="biscuit-hash" '
+            'name="one"/></testsuite></testsuites>',
+            encoding="utf-8",
+        )
+        (root / "stage" / "manifest.jsonl").write_text(
+            json.dumps({"tier": "L1", "package": "biscuit-hash", "xml": "L1/biscuit-hash.xml",
+                        "exit_code": 0, "environment": "macos-latest", "duration_s": 1,
+                        "report_present": True}) + "\n",
+            encoding="utf-8",
+        )
+        receipt = self.tool(
+            root, "local_evidence.py", "record-cells", "--plan", "validation-plan.json",
+            "--stage", "stage", "--base", base, "--head", head,
+            "--environment", "macos-latest", "--report-dir", str(root / "stage"),
+        ).strip()
+        fixture_git(root, "notes", "--ref", "refs/notes/ci-local/macos-latest", "add", "-f", "-m", receipt, head)
+
+    # -- event shapes --------------------------------------------------------
+
+    def test_a_manual_run_reaches_the_planner_with_full_scope(self) -> None:
+        run = self.run_step("workflow_dispatch")
+        self.assertEqual("true", run.outputs["full_scope"])
+        self.assertEqual(NULL_OID, run.plan["base"])
+
+    def test_a_pull_request_diffs_its_base_and_head(self) -> None:
+        run = self.run_step("pull_request")
+        self.assertEqual("false", run.outputs["full_scope"])
+        self.assertNotEqual(NULL_OID, run.plan["base"])
+
+    def test_a_push_with_a_real_base_diffs_it(self) -> None:
+        run = self.run_step("push")
+        self.assertEqual("false", run.outputs["full_scope"])
+        self.assertNotEqual(NULL_OID, run.plan["base"])
+
+    def test_a_branch_creating_push_runs_the_full_scope(self) -> None:
+        run = self.run_step("push", push_base=NULL_OID)
+        self.assertEqual("true", run.outputs["full_scope"])
+        self.assertEqual(NULL_OID, run.plan["base"])
+        self.assertEqual("CI (no comparison base)", run.scope_source())
+
+    # -- local scope evidence (2026-09-10 spec R3) ---------------------------
+
+    def test_a_matching_scope_receipt_is_the_plan_and_the_planner_never_runs(self) -> None:
+        run = self.run_step("push", scope_receipt=self.local_scope_receipt)
+        self.assertEqual([], run.planner_calls, "the planner ran although the receipt matched")
+        self.assertEqual(f"local ({SCOPE_REF} @ {run.plan['head'][:9]})", run.scope_source())
+        self.assertEqual(SCOPE_MARKER, run.outputs["preflight_reason"])
+        self.assertEqual(SCOPE_MARKER, run.plan["preflight_reason"])
+        self.assertEqual(["biscuit-hash"], [entry["package"] for entry in run.plan["packages"]])
+        self.assertEqual("true", run.outputs["has_packages"])
+
+    def test_the_written_plan_is_byte_identical_to_the_receipts(self) -> None:
+        receipts: dict = {}
+
+        def remember(root: Path, base: str, head: str) -> str:
+            receipts["text"] = self.local_scope_receipt(root, base, head)
+            return receipts["text"]
+
+        run = self.run_step("pull_request", scope_receipt=remember)
+        carried = json.loads(receipts["text"])["plan"]
+        self.assertEqual(schema.canonical(carried), run.plan_bytes)
+
+    def test_a_receipt_for_another_base_falls_back_with_its_code(self) -> None:
+        run = self.run_step("push", push_base="FIRST", scope_receipt=self.local_scope_receipt)
+        self.assertTrue(run.scope_source().startswith("CI fallback (scope-base-mismatch:"), run.scope_source())
+        self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+        self.assertNotEqual(SCOPE_MARKER, run.plan["preflight_reason"])
+
+    def test_a_missing_receipt_falls_back_with_its_code(self) -> None:
+        run = self.run_step("pull_request")
+        self.assertTrue(run.scope_source().startswith("CI fallback (scope-missing:"), run.scope_source())
+        self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+
+    def test_a_receipt_declaring_another_head_or_tree_falls_back(self) -> None:
+        def other_head(root: Path, base: str, head: str) -> str:
+            document = json.loads(self.local_scope_receipt(root, base, head))
+            document["head"] = base
+            return schema.canonical(document)
+
+        def other_tree(root: Path, base: str, head: str) -> str:
+            document = json.loads(self.local_scope_receipt(root, base, head))
+            document["tree"] = fixture_git(root, "rev-parse", f"{base}^{{tree}}")
+            return schema.canonical(document)
+
+        for label, receipt, code in (
+            ("head", other_head, "scope-head-mismatch"),
+            ("tree", other_tree, "scope-tree-mismatch"),
+        ):
+            with self.subTest(label):
+                run = self.run_step("pull_request", scope_receipt=receipt)
+                self.assertTrue(run.scope_source().startswith(f"CI fallback ({code}:"), run.scope_source())
+                self.assertNotEqual(SCOPE_MARKER, run.plan["preflight_reason"])
+                self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+
+    def test_a_receipt_of_another_schema_version_falls_back(self) -> None:
+        def future(root: Path, base: str, head: str) -> str:
+            document = json.loads(self.local_scope_receipt(root, base, head))
+            document["schema_version"] = 99
+            return schema.canonical(document)
+
+        run = self.run_step("pull_request", scope_receipt=future)
+        self.assertTrue(run.scope_source().startswith("CI fallback (scope-schema:"), run.scope_source())
+
+    def test_a_manual_run_never_consults_the_receipt(self) -> None:
+        run = self.run_step("workflow_dispatch", scope_receipt=self.local_scope_receipt)
+        self.assertEqual("CI (workflow_dispatch ignores local scope)", run.scope_source())
+        self.assertEqual("true", run.outputs["full_scope"])
+        self.assertNotEqual(SCOPE_MARKER, run.plan["preflight_reason"])
+        self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+
+    def test_accepted_cells_on_a_scope_hit_are_resolved_by_a_compared_planner_run(self) -> None:
+        # Option B of the evidence path: the accepted set is resolved by one
+        # full planner run, and its selection is compared with the receipt's
+        # rather than handed off.
+        run = self.run_step("pull_request", scope_receipt=self.local_scope_receipt, validation_receipt=True)
+        self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+        self.assertIn("--accepted-cells", run.planner_calls[0])
+        self.assertTrue(run.scope_source().startswith("local ("), run.scope_source())
+        reused = [
+            cell for cell in run.plan["cells"]
+            if cell["package"] == "biscuit-hash" and cell["environment"] == "macos-latest" and cell["gate"] == "L1"
+        ]
+        self.assertEqual(["reuse"], [cell["execution"] for cell in reused])
+
+    def test_a_receipt_that_disagrees_with_the_planner_fails_the_step_loudly(self) -> None:
+        def with_a_ghost(plan: dict, projection: dict) -> None:
+            plan["areas"].append({"area": "ghost", "selection_reason": "fixture", "packages": ["ghost"]})
+            plan["packages"].append({
+                "package": "ghost", "area": "ghost", "selection_reason": "fixture",
+                "gates": [], "targets": [], "tiers": [], "test_args": "", "check_args": "",
+                "l2_backends": [], "runner_tools": [], "companion_suites": [], "native": {},
+            })
+            projection["packages"].append("ghost")
+
+        def drifted(root: Path, base: str, head: str) -> str:
+            return self.local_scope_receipt(root, base, head, mutate=with_a_ghost)
+
+        run = self.run_step("pull_request", scope_receipt=drifted, validation_receipt=True, expect_failure=True)
+        self.assertIn("select different areas or packages", run.result.stdout + run.result.stderr)
 
 
 if __name__ == "__main__":

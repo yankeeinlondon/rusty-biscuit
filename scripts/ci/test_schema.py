@@ -142,6 +142,15 @@ class ContractArtifactTests(unittest.TestCase):
         # would let a reader confuse "what will happen" with "what is true now".
         self.assertEqual(set(schema.CELL_STATES) & set(schema.EXECUTIONS), set())
 
+    def test_scope_rejections_are_their_own_vocabulary(self):
+        # A scope miss refuses a whole document; a cell rejection refuses one
+        # outcome. Sharing a spelling would let a summary conflate the two.
+        self.assertEqual(set(schema.SCOPE_REJECTIONS) & set(schema.REJECTIONS), set())
+        self.assertTrue(all(code.startswith("scope-") for code in schema.SCOPE_REJECTIONS))
+        self.assertEqual(
+            schema.contract()["scope_receipt"]["rejections"], list(schema.SCOPE_REJECTIONS)
+        )
+
     def test_accepted_gap_state_is_not_a_github_conclusion(self):
         # Design Decision 10: the machine-readable state is never inferred from
         # GitHub's conclusion, so it must not be spelled like one.
@@ -345,6 +354,71 @@ class ReceiptValidationTests(unittest.TestCase):
     def test_an_empty_receipt_is_rejected(self):
         problems = schema.validate_receipt(receipt(cells=[]))
         self.assertTrue(any("non-empty list" in problem for problem in problems), problems)
+
+
+def scope_receipt(**overrides: object) -> dict:
+    document = {
+        "schema_version": schema.SCOPE_RECEIPT_SCHEMA_VERSION,
+        "base": SHA_A,
+        "head": SHA_B,
+        "tree": SHA_T,
+        "plan_schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
+        "plan": plan(),
+        "scope": {name: [] for name in schema.SCOPE_PROJECTION_FIELDS} | {"packages": ["claudine"]},
+    }
+    document.update(overrides)
+    return document
+
+
+class ScopeReceiptValidationTests(unittest.TestCase):
+    def test_a_well_formed_scope_receipt_validates(self):
+        self.assertEqual(schema.validate_scope_receipt(scope_receipt()), [])
+
+    def test_round_trip_is_byte_identical(self):
+        once = schema.canonical(scope_receipt())
+        twice = schema.canonical(json.loads(once))
+        self.assertEqual(once, twice)
+
+    def test_every_problem_is_a_scope_code(self):
+        broken = [
+            scope_receipt(schema_version=99),
+            scope_receipt(plan_schema_version=99),
+            scope_receipt(tree="not-a-sha"),
+            scope_receipt(plan=plan(cells=[cell(package="ghost")])),
+            scope_receipt(plan=plan(head=SHA_T)),
+            scope_receipt(scope={"packages": ["claudine"]}),
+            scope_receipt(scope={name: [] for name in schema.SCOPE_PROJECTION_FIELDS} | {"packages": ["other"]}),
+            {"schema_version": schema.SCOPE_RECEIPT_SCHEMA_VERSION},
+            "not an object",
+        ]
+        for document in broken:
+            problems = schema.validate_scope_receipt(document)
+            self.assertTrue(problems, document)
+            for problem in problems:
+                self.assertIn(problem.split(":")[0], schema.SCOPE_REJECTIONS, problem)
+
+    def test_a_schema_mismatch_is_reported_as_scope_schema(self):
+        self.assertTrue(schema.validate_scope_receipt(scope_receipt(schema_version=2))[0].startswith("scope-schema:"))
+        self.assertTrue(schema.validate_scope_receipt(scope_receipt(plan_schema_version=2))[0].startswith("scope-schema:"))
+
+    def test_the_carried_plan_must_name_the_receipts_base_and_head(self):
+        problems = schema.validate_scope_receipt(scope_receipt(plan=plan(base=SHA_T)))
+        self.assertTrue(any("names base" in problem for problem in problems), problems)
+
+    def test_the_carried_projection_must_agree_with_the_plan(self):
+        projection = {name: [] for name in schema.SCOPE_PROJECTION_FIELDS} | {"packages": []}
+        problems = schema.validate_scope_receipt(scope_receipt(scope=projection))
+        self.assertTrue(any("other packages" in problem for problem in problems), problems)
+
+    def test_the_projection_fields_are_what_the_workflow_reads(self):
+        # `ci.yml` reads these keys of `scope.json`; a projection missing one
+        # would fail the fan-out after the planner was already skipped.
+        workflow = (schema.ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        for name in ("matrix", "scheduled_areas", "area_matrix", "area_slugs", "packages",
+                     "full_scope", "flags", "job_estimate", "preflight_os",
+                     "preflight_reason", "change_class"):
+            self.assertIn(name, schema.SCOPE_PROJECTION_FIELDS)
+            self.assertIn(f".{name}", workflow)
 
 
 class ReusableCellsTests(unittest.TestCase):
