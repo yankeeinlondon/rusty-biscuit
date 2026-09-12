@@ -45,10 +45,12 @@ the matching host first, then push once.
 A user's instruction not to rerun an environment also constrains CI triggered
 by a push. Verify every requested exclusion before pushing; a successful macOS
 receipt alone does not suppress WSL. Evidence is now combined **per cell**
-across environments: `local_evidence.py verify --cells` reads every
-`refs/notes/ci-local/<environment>` ref reachable from the outgoing head, so a
-macOS receipt from this push and a prior `cross-check` WSL receipt suppress
-their own cells together. The JUnit reports behind a hook receipt stay on the
+across environments and across commits: `local_evidence.py verify --cells`
+reads every note on every `refs/notes/ci-local/<environment>` ref between the
+merge base and the outgoing head, so a macOS receipt from this push and a prior
+`cross-check` WSL receipt suppress their own cells together, and a WSL receipt
+that covered one package does not hide an earlier one that covered another.
+The JUnit reports behind a hook receipt stay on the
 host that produced it, at the receipt's `host.report_dir`
 (`$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`, root default
 `~/.rusty-biscuit/ci-evidence`), so investigating a reused cell means asking
@@ -60,8 +62,12 @@ triggering CI; do not treat automatic jobs as exempt.
 
 `scope-only` resolves and prints the plan — so a recorded constraint is still
 enforced and the run is still reviewable — but runs no gate, publishes no
-outcomes, and excludes no CI cells. It publishes no standalone *scope* document
-either; CI recalculates scope. `off` is its deprecated alias. `git push
+outcomes, and excludes no CI cells. It does publish the *scope* receipt on
+`refs/notes/ci-local/scope`, as every mode does, and CI takes it on an exact
+`{base, head, tree}` match. The plan the hook reviews and publishes is the
+outgoing revision's COMMITTED one (a temporary worktree when the checkout is
+dirty); `just ci-local --plan` previews the working tree and differs exactly
+when the checkout is dirty. `off` is its deprecated alias. `git push
 --no-verify` produces no new evidence and does not invalidate already-published
 matching receipts, which CI still verifies. See the `rust-devops` skill's
 [evidence and execution contract](../rust-devops/ci-cd.md) before selecting a

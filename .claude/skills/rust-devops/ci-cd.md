@@ -82,6 +82,12 @@ semantics:
   in every mode, before any gate, from the committed `base..head` path set;
   `ci.yml` runs `local_evidence.py scope-verify` before the planner and
   reports `scope source` in its summary with the miss code on a fallback.
+  Validation evidence never reopens selection: on a hit with accepted cells,
+  `affected_scope.py --apply-to` overlays them on the carried plan and
+  re-projects `scope.json` from it, reading nothing from the checkout. The
+  plan is schema version 2 so that it can — it carries its `environments`
+  table, per-package `l1_include_slow`/`exclusion`, and per-cell `reusable`;
+  a version-1 receipt misses as `scope-schema`.
 - A complete host run is reusable whether it passed or failed. CI omits only
   the host cells for which the receipt supplies terminal outcomes and feeds
   those outcomes into the normal rollup. A failed local outcome must make the
@@ -233,16 +239,23 @@ constraint. Check the final resolved matrix, including each package's `wsl`
 flag, against every active constraint before triggering CI. Checking only that
 macOS disappeared is insufficient when WSL must also be excluded.
 
-The planner takes a verified **per-cell** result set (`--accepted-cells`). An
-accepted cell has its execution omitted and stays a cell with local origin, so
-the rollup expects a local-origin result for it instead of reporting `MISSING`;
+The planner takes a verified **per-cell** result set (`--accepted-cells`),
+either while selecting or, in `ci.yml` and `just ci-local --plan`, applied
+afterwards to the plan already in hand (`--apply-to`). Both paths decide a
+reused cell's shape in one helper and are pinned byte-identical. An accepted
+cell has its execution omitted and stays a cell with local origin, so the
+rollup expects a local-origin result for it instead of reporting `MISSING`;
 suppressing the matrix entry while leaving the policy expecting a CI result was
 the PR #76 seven-cell regression.
 
 `local_evidence.py verify --cells` produces that set by reading **every**
-environment's notes ref reachable from the outgoing head, so a macOS receipt
-from this push and a prior WSL receipt combine in one run. Each refusal carries
-a code from `schema.REJECTIONS` and is published with the plan.
+note on every environment's notes ref between the merge base and the outgoing
+head, so a macOS receipt from this push and a prior WSL receipt combine in one
+run. Within one environment each cell is resolved by the **newest note that
+qualifies for it**, so a later run that covered fewer packages does not hide an
+older, still-equivalent receipt for the rest, and an older pass never overrides
+a newer complete failure. Each refusal describes one candidate note, carries a
+code from `schema.REJECTIONS`, and is published with the plan.
 
 `scripts/cross-check.sh` publishes a `wsl2-ubuntu` receipt only when its WSL leg
 ran the outgoing head's exact tree on a clean remote worktree with no test
@@ -257,6 +270,16 @@ CI never reads them, so a constraint can only stop a push. Where the store lives
 by default is Open Question 2 and is unruled — `constraints.default_directory()`
 is empty until it is.
 
+The hook decides them from the plan of the **outgoing revision's committed
+tree**: the committed `base..head` path set, planned by the planner, manifests,
+and policy committed there — in a temporary detached worktree whenever the
+checkout is dirty or the push does not carry `HEAD` — with published evidence
+applied through `--apply-to`. That reviewed plan is also the scope receipt it
+publishes, so the two cannot disagree. `just ci-local --plan` is the
+working-tree preview; a committed change masked by an unstaged revert is
+absent there and present in the hook's review, which is why the preview is
+not the decision.
+
 If prior evidence cannot be reused or CI cannot express the requested
 exclusions, resolve that limitation before pushing. Preserve the restriction
 while explaining what is missing; do not silently substitute a new test run or
@@ -267,11 +290,12 @@ whether a package must support the environment.
 
 Prefer a repository-provided **scope-only** mode over `git push --no-verify`
 when the goal is to skip local tests and let CI exercise every supported
-environment. Scope-only resolves and prints the plan — so a recorded execution
-constraint is still enforced and the run is still reviewable — but runs no gate,
-publishes no validation outcomes, and excludes no CI cells. It does publish the
-standalone *scope* receipt, so CI takes the committed scope from it on an exact
-`{base, head, tree}` match and recalculates only on a miss.
+environment. Scope-only resolves and prints the plan of the outgoing revision's
+committed tree — so a recorded execution constraint is still enforced and the
+run is still reviewable — but runs no gate, publishes no validation outcomes,
+and excludes no CI cells. It does publish the standalone *scope* receipt, so CI
+takes the committed scope from it on an exact `{base, head, tree}` match and
+recalculates only on a miss.
 
 `git push --no-verify` prevents the pre-push hook from executing and produces
 no new evidence. It does not invalidate already-published matching receipts:
