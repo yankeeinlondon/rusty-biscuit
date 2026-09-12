@@ -123,7 +123,7 @@ def prepare(destination):
     host = json.loads(command("sniff", "os", "--json"))
     environment = {"MacOS": "macos-latest", "Windows": "windows-latest", "Linux": "ubuntu-latest"}.get(host["os_type"])
     if not environment or "wsl" in str(host).lower():
-        raise ValueError("fixture preparation requires a native supported host; no WSL fixture execution is authorized")
+        raise ValueError("fixture preparation requires a native supported host for this reduced experiment")
     measurements = []
     for name in ["fixture-reused-pass", "fixture-reused-failure", "fixture-accepted-reused"]:
         stage = destination / "fixture-evidence" / name
@@ -198,7 +198,7 @@ def prepare(destination):
         "activation": {"method": "apply subcommand on an isolated full candidate checkout; then review every outgoing trigger and active constraint before any push or dispatch",
                        "remove_unrelated_workflows": [path.name for path in workflows.iterdir() if path.suffix in {".yml", ".yaml"} and path.name not in {"ci.yml", "_area-ci.yml", "_package-ci.yml", "_wsl-ci.yml"}],
                        "retained_trigger": "ci.yml workflow_dispatch and pull_request targeting codex/cicd-review7-fixture-base only; reusable workflows workflow_call only",
-                       "forbidden_shortcut": "Do not push feat/unifi to bootstrap this fixture; its product plan schedules prohibited WSL work."},
+                       "forbidden_shortcut": "Keep fixture baselines on the isolated fixture branch; product CI runs required cells without qualifying passing evidence on every OS."},
         "expected_gate": {case: "success" if case in {"accepted", "accepted-reused-failure", "empty"} else "failure" for case in CASES},
         "required_observations": ["area-ci (fixture/nested) / fixture-nested label resolved", "fixture-reused-pass result without L1 producer", "gap publisher runs only fixture-gap; neutral cell check", "per-area result slices available; no cross-area acceptance", "accepted and accepted-reused failure green; unaccepted and reused failure red", "missing report and setup failure block", "empty scope skips area-ci and gate passes"],
         "artifacts": ["ci-scope", "ci-resolved-plan", "fixture-evidence", "status-fixture-*-L1-ubuntu-latest", "junit-fixture-*-L1-ubuntu-latest", "ci-results-fixture--nested"],

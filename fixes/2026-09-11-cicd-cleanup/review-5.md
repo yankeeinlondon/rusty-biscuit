@@ -15,7 +15,7 @@ human_review_items:
   - |-
     Choose how pull requests become eligible to merge: require the CI workflow to pass, if a disposable-repository experiment proves that works, or require one fixed check that only combines individual area results. Approve the branch-protection change after the experiment and implementation are ready.
   - |-
-    Choose where saved instructions such as “do not run WSL again” should live: a persistent directory on the computer, a shell setting, or a Git note. The specification recommends a persistent directory so a fresh terminal session still finds the instruction.
+    Choose where saved instructions such as “do not execute this environment during maintenance” should live: a persistent directory on the computer, a shell setting, or a Git note. The specification recommends a persistent directory so a fresh terminal session still finds the instruction.
   - |-
     After a small GitHub example demonstrates both options, choose whether an accepted coverage gap should appear as cancelled or neutral. Cancelled matches the requested appearance; neutral avoids presenting an accepted gap as an unsuccessful check.
   - |-
@@ -33,6 +33,15 @@ next: 2026-09-11-cicd-cleanup/review-6.md
 rulings: 2026-09-11-cicd-cleanup/spec.md#rulings
 ruled_on: "2026-09-12"
 ---
+
+> **Policy correction — 2026-09-12:** Ken clarified that every OS follows
+> the same evidence rule: reuse qualifying passes; execute required tests when
+> qualifying passing evidence is absent. Earlier WSL-ban interpretations and
+> related authorization blockers in this historical record are superseded by
+> the [spec ruling](spec.md#evidence-based-execution-ruling-2026-09-12).
+> Historical observations and synthetic explicit-ban tests remain evidence of
+> what was evaluated; they do not establish a current WSL prohibition.
+
 
 # Review 5
 

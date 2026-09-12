@@ -48,6 +48,17 @@
   cannot merge. Load the `rust-devops` skill before changing CI scope,
   evidence reuse, or the gate.
 
+## Evidence Reuse and Execution Constraints
+
+- Reuse qualifying passing evidence for each required cell on every OS. When
+  qualifying passing evidence is absent, run the required tests. A request to
+  avoid duplicate passing tests does not establish an environment ban.
+- Only a separately explicit execution ban belongs in
+  `<home>/.rusty-biscuit/ci-constraints/<repository>/`, overridden by
+  `BISCUIT_CI_CONSTRAINTS_DIR`. Review `just ci-local --plan` before pushing.
+  The hook enforces those bans; CI does not read the store and cannot silently
+  skip required coverage because of a local constraint.
+
 ## Just Runner
 
 - we use the `just` runner extensively throughout this monorepo.

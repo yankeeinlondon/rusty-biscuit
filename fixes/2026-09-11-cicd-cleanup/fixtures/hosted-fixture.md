@@ -52,8 +52,9 @@ python3 fixes/2026-09-11-cicd-cleanup/fixtures/hosted-fixture.py apply /tmp/cicd
 Application removes every unrelated workflow YAML in that isolated checkout
 and installs the overlay. It never edits this candidate checkout. Review all
 remaining workflow triggers and every active execution constraint against the
-outgoing fixture branch. Do not push `feat/unifi` to bootstrap this fixture:
-its product plan schedules prohibited WSL cells. Fixture-baseline acceptances
+outgoing fixture branch. Keep this fixture isolated from product validation: its small workload is
+for workflow proof, while the product plan runs required cells without
+qualifying passing evidence on every OS. There is no standing WSL ban. Fixture-baseline acceptances
 belong only on the disposable fixture branch.
 
 Once the isolated fixture branch is published through the reviewed route,

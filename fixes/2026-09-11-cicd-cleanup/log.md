@@ -7,6 +7,15 @@ implementation_5: "2026-09-12T01:27:50-07:00"
 implementation_6: "2026-09-12T09:22:04-07:00"
 ---
 
+> **Policy correction — 2026-09-12:** Ken clarified that every OS follows
+> the same evidence rule: reuse qualifying passes; execute required tests when
+> qualifying passing evidence is absent. Earlier WSL-ban interpretations and
+> related authorization blockers in this historical record are superseded by
+> the [spec ruling](spec.md#evidence-based-execution-ruling-2026-09-12).
+> Historical observations and synthetic explicit-ban tests remain evidence of
+> what was evaluated; they do not establish a current WSL prohibition.
+
+
 ## Implementation of Review Findings #1
 
 > **started at:** 2026-09-11T18:31:51-07:00

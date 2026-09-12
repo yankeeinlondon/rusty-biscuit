@@ -17,6 +17,15 @@ status: proposal
 
 # Process review
 
+> **Policy correction — 2026-09-12:** Ken clarified that every OS follows
+> the same evidence rule: reuse qualifying passes; execute required tests when
+> qualifying passing evidence is absent. Earlier WSL-ban interpretations and
+> related authorization blockers in this historical record are superseded by
+> the [spec ruling](spec.md#evidence-based-execution-ruling-2026-09-12).
+> Historical observations and synthetic explicit-ban tests remain evidence of
+> what was evaluated; they do not establish a current WSL prohibition.
+
+
 This fix has consumed six review/fix cycles in thirteen hours and is not
 closed. This document reconstructs what the cycles actually did, names the
 causes that made them slow, and proposes changes to the prompts, the just

@@ -23,6 +23,15 @@ fix: 2026-09-11-cicd-cleanup/review-7.md
 previous: 2026-09-11-cicd-cleanup/review-6.md
 ---
 
+> **Policy correction — 2026-09-12:** Ken clarified that every OS follows
+> the same evidence rule: reuse qualifying passes; execute required tests when
+> qualifying passing evidence is absent. Earlier WSL-ban interpretations and
+> related authorization blockers in this historical record are superseded by
+> the [spec ruling](spec.md#evidence-based-execution-ruling-2026-09-12).
+> Historical observations and synthetic explicit-ban tests remain evidence of
+> what was evaluated; they do not establish a current WSL prohibition.
+
+
 # Review 7
 
 **Not production-ready.** Strict-failure publication, evidence-error fallback, receipt bootstrap, and ancestor-based local reuse now have meaningful behavioral regressions. The dependent compile step exists, but omits native prerequisites for the additional packages it builds. Local reuse still falls back to the old path when the PR target advances. Hosted verification and part of the absorbed audit remain explicitly deferred.
@@ -59,7 +68,7 @@ The producer normalization changes the relevant commands to step-level `continue
 
 AC2/4/8/9/10/11/12 still need the prescribed hosted integration assertions: nested-area labels; visible reused results with no corresponding producer; gap/no-gap publisher routing and artifact access; mixed local/executing/failed cells; and the four normalization cases—accepted producer failure, unaccepted failure, missing report/setup failure, and equivalent reused failure. L1 source contracts and manufactured step outcomes are below the required boundary for these GitHub-observable behaviors. They are not production-readiness evidence for that integration.
 
-Complete and record the controlled hosted demonstration using the candidate implementation, with check names, conclusions, result slices, and gate outcomes. Reconcile its execution plan with every standing restriction first. In particular, the new plan admits it schedules two WSL cells, while this specification expressly authorizes no WSL rerun. Do not treat the fixture's general authorization or an empty constraint directory as overriding that restriction: obtain qualifying evidence or design a smaller fixture that preserves the workflow boundary without prohibited execution. No hosted work was triggered by this review.
+Complete and record the controlled hosted demonstration using the candidate implementation, with check names, conclusions, result slices, and gate outcomes. Reconcile its execution plan with every standing restriction first. Correction (2026-09-12): scheduling WSL cells without qualifying passing evidence is required coverage, not a policy violation. Reuse qualifying passes on every OS. A reduced fixture remains useful for inexpensive workflow-boundary proof, but is not required to evade a WSL ban. No hosted work was triggered by this review.
 
 ### Medium — Deferred audit coverage and active documentation remain incomplete
 

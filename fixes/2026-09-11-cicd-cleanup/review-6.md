@@ -34,6 +34,15 @@ previous: 2026-09-11-cicd-cleanup/review-5.md
 next: 2026-09-11-cicd-cleanup/review-7.md
 ---
 
+> **Policy correction — 2026-09-12:** Ken clarified that every OS follows
+> the same evidence rule: reuse qualifying passes; execute required tests when
+> qualifying passing evidence is absent. Earlier WSL-ban interpretations and
+> related authorization blockers in this historical record are superseded by
+> the [spec ruling](spec.md#evidence-based-execution-ruling-2026-09-12).
+> Historical observations and synthetic explicit-ban tests remain evidence of
+> what was evaluated; they do not establish a current WSL prohibition.
+
+
 # Review 6
 
 **Not production-ready.** The simultaneous-update constraint defect and persistent-store discovery are fixed. The policy-free gate and neutral-gap publisher now exist. However, the implementation does not satisfy several explicit September 12 rulings, and the required hosted presentation verification remains incomplete. Passing tests include assertions that enforce behavior the rulings explicitly rejected.

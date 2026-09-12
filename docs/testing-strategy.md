@@ -48,6 +48,12 @@ The intended loop while working on a change is:
 
 Two principles shape everything below.
 
+**Evidence-based execution applies to every OS.** Reuse qualifying passing
+evidence for the required cell; run required tests when it is absent. Never
+turn a request to avoid duplicate passing tests into a blanket environment
+prohibition. Only a separately explicit execution ban belongs in the
+constraint store.
+
 **All four platforms count equally.** macOS, Linux, native Windows, and WSL2
 are supported to the same standard. None is the reference platform and a
 failure on any one of them is a real failure.

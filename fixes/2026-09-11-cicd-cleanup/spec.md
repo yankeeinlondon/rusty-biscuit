@@ -13,6 +13,28 @@ absorbs:
 
 # CI Cleanup: Impacted Areas, Reused Results, and Area-Owned Outcomes
 
+## Evidence-Based Execution Ruling (2026-09-12)
+
+Ken clarified the intended rule: reuse qualifying passing evidence for the
+required cell; when no qualifying passing evidence exists, execute the required
+tests. This applies equally to macOS, Linux, native Windows, and WSL2. A prior
+pass qualifies only when its tested inputs and coverage satisfy the current
+cell; an arbitrary earlier passing commit is insufficient.
+
+“Do not rerun tests that already passed” is an evidence-reuse requirement, not
+an environment prohibition. Missing, stale, or unusable evidence is a reason
+to run required validation, not a reason to block an otherwise authorized push.
+A separately and explicitly requested execution ban remains a distinct
+constraint; never infer one from a request to avoid duplicate testing.
+
+Earlier versions misinterpreted a WSL example as a standing ban. The generated
+repository-wide `cicd-cleanup-no-wsl.json` records, expiring in year 9999, were
+an agent interpretation of this spec, not the intended user policy. That
+interpretation is superseded by this ruling. Remove those mistaken records;
+do not create replacement bans for any OS. Scope remains limited to required
+impacted work. This ruling does not authorize unrelated full-workspace runs or
+change the separately approved required-check migration.
+
 ## Objective
 
 A viewer of a CI run must be able to identify the impacted package areas being
@@ -108,8 +130,10 @@ exposed the following failures in the current contract:
 - The current verifier returns the first matching environment receipt, and the
   scope calculator accepts one excluded environment. Evidence from multiple
   environments cannot be combined.
-- A request not to rerun WSL was incorrectly treated as applying only to manual
-  reruns. A subsequent push automatically scheduled WSL anyway.
+- Earlier analysis described a WSL rerun as violating a standing restriction.
+  Ken clarified that the actual requirement is to reuse qualifying passes on
+  every OS and execute required cells without that evidence; the WSL-specific
+  interpretation was incorrect.
 - Documentation still prescribes `ci-verdict` as the sole required merge check,
   conflicting with the requested removal. It also incorrectly claimed that
   `--no-verify` prevents reuse of already-published valid receipts. (The
@@ -337,16 +361,19 @@ Requirements:
 
 ### 4. Honor Execution Constraints Before Triggering CI
 
-A restriction such as "do not rerun WSL" applies to direct commands, automatic
-push-triggered jobs, dispatches, and retries. Repush authorization retains that
-restriction unless the user explicitly changes it.
+A separately explicit execution ban (for example, an environment unavailable
+during maintenance) applies to direct commands, automatic push-triggered jobs,
+dispatches, and retries. Repush authorization retains that distinct ban unless
+the user changes it. The evidence-reuse rule above is not such a ban: without
+qualifying passing evidence, required tests execute on every selected OS.
 
 Before a push or other workflow trigger, make the resolved execution plan
 reviewable and reconcile it with every active environment/tier restriction.
 Show which cells are reused, which will execute, and which are accepted gaps.
 
-- Verify all requested exclusions; checking macOS alone does not establish that
-  WSL is excluded.
+- Verify reuse independently for every required cell and environment; a macOS
+  pass does not establish WSL coverage. Missing qualifying passing evidence
+  schedules the required tests unless a separate explicit ban applies.
 - If reusable evidence is insufficient and an environment is prohibited from
   running, stop before the trigger and explain the unsatisfied constraint.
 - Do not automatically convert a user restriction into a policy-gap acceptance,
@@ -557,9 +584,10 @@ proves material, the step can be limited to a declared dependent list in
 
 ### OQ2 — Where is an execution constraint persisted between sessions?
 
-Section 4 requires constraints such as "do not rerun WSL" to survive beyond a
-chat instruction and to be checked by `just ci-local --plan` and the pre-push
-hook.
+Section 4 requires separately explicit execution bans, such as an environment
+unavailable during maintenance, to survive beyond a chat instruction and to
+be checked by `just ci-local --plan` and the pre-push hook. Avoiding duplicate
+passing tests is handled by evidence reuse, never by creating such a ban.
 
 - **Option A — environment variable** (`RUSTY_BISCUIT_CI_FORBID=wsl2-ubuntu`).
   Pros: trivial; already the hook's configuration style
@@ -920,9 +948,10 @@ renaming that preserves the conflicting underlying behavior.
    actual executions, accepted gaps, and prohibited executions. The plan must
    satisfy the user's active restrictions before any push.
 5. Run only authorized impacted-area validation locally, retain its actual
-   reports, and publish verified evidence for the outgoing work. No WSL rerun is
-   authorized by this specification; reuse qualifying prior evidence or surface
-   the gap before triggering CI.
+   reports, and publish verified evidence for the outgoing work. Reuse
+   qualifying passing evidence on every OS, including WSL2. Execute required
+   cells without qualifying passing evidence; do not infer an execution ban
+   from the absence of evidence.
 6. Coordinate the workflow and required-check migration so obsolete checks do
    not block every PR and incomplete coverage is not accidentally allowed. The
    ruleset edit and the workflow change that removes `ci-verdict` land in the
@@ -933,4 +962,6 @@ renaming that preserves the conflicting underlying behavior.
    test execution from setup, builds, queueing, and artifact publication. Never
    attribute the overall local duration to an individual area's cell.
 8. Preserve existing valid results during rollout. This specification does not
-   itself authorize committing, pushing, or rerunning completed suites.
+   itself authorize commits or pushes. Once the work is authorized, reuse
+   qualifying passes and execute required validation without qualifying
+   passing evidence; completion on unrelated inputs does not establish reuse.

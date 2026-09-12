@@ -31,10 +31,11 @@ regression. A prepared fixture is not hosted evidence.
 
 ## Execution boundaries
 
-- No WSL rerun, direct or indirectly triggered; no full-workspace validation.
+- Reuse qualifying passes on every OS; execute required cells without
+  qualifying passing evidence. No blanket WSL ban; no unrelated full-workspace validation.
 - Review every triggered comparison, including bootstrap pushes and open PR
-  bases. The old fixture's two WSL executions are prohibited, and a provisional
-  comparison against main can select the full workspace.
+  bases. A provisional comparison against main can select the full workspace;
+  use the actual PR target and keep fixture workloads deliberately small.
 - No fabricated validation receipts. Any fixture-only inputs/results must be
   clearly distinguished from product test evidence.
 - Existing unrelated edits at entry: `prompts/_agent-skills.md`,
@@ -47,11 +48,10 @@ regression. A prepared fixture is not hosted evidence.
   credential replacement is needed. Preserve this context for CLI API calls.
 - The remote currently has only the macOS notes ref. No WSL receipt was found
   in `git ls-remote origin refs/notes/ci-local/*` on this pass.
-- The WSL prohibition is now recorded under both
-  `/Users/ken/.claudine/.rusty-biscuit/ci-constraints/` and
-  `/Users/ken/.rusty-biscuit/ci-constraints/`, repository-scoped, with a
-  non-expiring sentinel date (`9999-12-31`). It requires an explicit superseding
-  instruction to remove; session-home differences must not lose the restriction.
+- Ken corrected the WSL-ban interpretation on 2026-09-12. The two generated
+  repository-wide `cicd-cleanup-no-wsl.json` records under the session and real
+  user homes are withdrawn. Their year-9999 expiry and owner attribution came
+  from an agent interpretation, not the intended evidence-reuse policy.
 
 ## Explicit B0 dispositions
 
@@ -137,9 +137,39 @@ neutral-check placement on the PR head, or hosted producer omission.
    execute the seven bounded cases and dedicated fixture PR. Record run URLs,
    candidate identities, artifacts, and expected per-cell outcomes.
 3. Complete the focused readiness review from those records. The ordinary
-   `feat/unifi` push remains prohibited while its plan selects seven WSL cells;
-   fixture evidence does not supply product WSL receipts.
+   `feat/unifi` push runs required WSL cells when qualifying passing evidence
+   is absent, just as it does on the other OSes. Fixture evidence does not
+   supply product test receipts.
 4. Obtain the required green candidate run through a constraint-compatible
    route, then seek Ken's separately required approval for the ruleset switch.
    Verify the required context after the approved change. Until then, neither
    the spec nor this closure record is complete.
+
+## Evidence-Policy Correction and Push Preparation (2026-09-12)
+
+Ken clarified that qualifying passes must be reused on every OS and required
+cells without qualifying passing evidence must execute. The mistaken WSL
+records were removed from both the session-home and real-home stores; no
+independent constraint records were found there. Current documentation and
+fixture diagnostics now state that rule. Historical reviews carry explicit
+supersession notices rather than silently rewriting their observations.
+
+The working-tree preview against the local main merge base reports zero
+prohibited cells, no qualifying reused cells, and 46 executing cells: Ubuntu
+18, Windows 10, macOS 11, WSL2 7. It is not full scope. The push hook must still
+review the committed revision against PR #76's current remote target tip.
+The documentation contract test passes, the fixture generator parses, and the
+scoped whitespace check passes. GitNexus reports low risk with no partial or
+truncated change analysis. No product suite was rerun locally in this pass.
+
+Use the committed repository hook in `scope-only` mode to retain trigger review
+and publish scope while leaving required execution to CI. The globally
+configured hook is an older copy without this mode, so select this checkout's
+`.githooks` for the push command rather than bypassing review or altering other
+worktrees' configuration. Signing uses Ken's existing OpenPGP key; GitHub API
+calls use the actual user home to find the existing keyring credential.
+
+The earlier prepared fixture artifacts retain their original input identities.
+The generator's policy wording changed here; regenerate the overlay before a
+future hosted fixture invocation. Hosted closure and the separately approved
+required-check migration remain outstanding, so this fix stays active.

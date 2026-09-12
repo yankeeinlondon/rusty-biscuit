@@ -304,11 +304,16 @@ than credited as a tested cell. That is how a compile failure stays a CI job.
 
 ## Execution constraints before a push
 
-An instruction such as "WSL was already run; do not run it again" also applies
-when a push would automatically schedule WSL. A request to repush retains that
-constraint. Check the final resolved matrix, including each package's `wsl`
-flag, against every active constraint before triggering CI. Checking only that
-macOS disappeared is insufficient when WSL must also be excluded.
+Reuse qualifying passing evidence per required cell on every OS. If no
+qualifying passing evidence exists, execute the required tests. A request to
+avoid rerunning passed tests is not an environment ban. Only a separately
+explicit instruction (such as an environment unavailable during maintenance)
+creates an execution constraint; never infer a blanket WSL prohibition.
+
+A separately explicit execution ban also applies to automatically triggered
+jobs. Review the final matrix against those bans. The CI cleanup WSL example
+was mistakenly promoted to a permanent ban; Ken corrected it on 2026-09-12.
+Missing qualifying passing evidence schedules required coverage, including WSL.
 
 The planner takes a verified **per-cell** result set (`--accepted-cells`),
 either while selecting or, in `ci.yml` and `just ci-local --plan`, applied

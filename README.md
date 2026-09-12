@@ -116,6 +116,8 @@ Shell completions help people learn new CLI's as well as navigate a CLI they don
 
 A local pre-push hook runs `just ci-local --l2`: lint plus L1 and hostable non-focusing L2 for source-changed packages. It detects macOS, Linux, native Windows, or WSL2 with `sniff`. CI compiles unchanged direct reverse dependencies inside the changed package's Ubuntu check; they receive no separate jobs. For a clean outgoing `HEAD`, both passing and failing complete validation outcomes are published per package, environment, and tier. CI reuses qualifying cells and applies reused failures to the owning area's verdict. A comparison containing only documentation changes gates no packages.
 
+Reuse qualifying passes on every OS; required tests without qualifying passing evidence must run. Avoiding duplicate passing tests does not establish an OS-specific execution ban.
+
 Run `just ci-local --plan` to preview execution, reused evidence, and persistent execution constraints before pushing. The hook reviews each pushed branch's committed plan against those constraints and passes the reviewed plan to clean local validation, which skips cells already covered by qualifying passing evidence. Scope is published independently of validation; incomplete runs and explicit package overrides provide no complete reusable validation evidence.
 
 Link the shared hook into your local git repository (`just init` does this):

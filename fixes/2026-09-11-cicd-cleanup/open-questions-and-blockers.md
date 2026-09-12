@@ -8,6 +8,15 @@ status: awaiting-ken
 
 # Phase 1 blockers
 
+> **Policy correction — 2026-09-12:** Ken clarified that every OS follows
+> the same evidence rule: reuse qualifying passes; execute required tests when
+> qualifying passing evidence is absent. Earlier WSL-ban interpretations and
+> related authorization blockers in this historical record are superseded by
+> the [spec ruling](spec.md#evidence-based-execution-ruling-2026-09-12).
+> Historical observations and synthetic explicit-ban tests remain evidence of
+> what was evaluated; they do not establish a current WSL prohibition.
+
+
 Phase 1 tasks 3 and 4 cannot be completed by an agent. This page records what
 each one needs, what was settled without authorization, and exactly what is
 left for Ken. Nothing here is a recommendation substituted for a ruling.

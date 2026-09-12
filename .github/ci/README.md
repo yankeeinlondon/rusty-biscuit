@@ -225,7 +225,13 @@ tree, uncommitted work included, so most of its runs test a tree no head names.
 
 ### Execution constraints
 
-A restriction such as "do not rerun WSL" is recorded in a constraint store, not
+Reuse qualifying passing evidence per required cell on every OS. If no
+qualifying passing evidence exists, execute the required tests. A request to
+avoid rerunning passed tests is not an environment ban. Only a separately
+explicit instruction (such as an environment unavailable during maintenance)
+creates an execution constraint; never infer a blanket WSL prohibition.
+
+A separately explicit execution ban is recorded in a constraint store, not
 remembered: each record names an environment, an optional gate, a reason, an
 owner, an expiry, and optionally a repository and branch. `just ci-local --plan`
 and the pre-push hook read it; **CI never does**, so a constraint can only stop

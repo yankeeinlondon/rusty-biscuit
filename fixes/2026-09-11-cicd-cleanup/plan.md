@@ -205,6 +205,15 @@ documentation:
 
 # CI Cleanup Execution Plan
 
+> **Policy correction — 2026-09-12:** Ken clarified that every OS follows
+> the same evidence rule: reuse qualifying passes; execute required tests when
+> qualifying passing evidence is absent. Earlier WSL-ban interpretations and
+> related authorization blockers in this historical record are superseded by
+> the [spec ruling](spec.md#evidence-based-execution-ruling-2026-09-12).
+> Historical observations and synthetic explicit-ban tests remain evidence of
+> what was evaluated; they do not establish a current WSL prohibition.
+
+
 ## Outcome
 
 Deliver the specification as one coherent CI contract: select only impacted
@@ -231,9 +240,10 @@ Option B as a proven fallback, and OQ4 Option A when the controlled fixture
 shows acceptable PR presentation. These recommendations are not substitutes
 for Ken's recorded rulings.
 
-No task in this plan authorizes a commit, push, workflow dispatch, ruleset edit,
-or WSL rerun. Obtain the relevant authorization at the task boundary. In
-particular, prior WSL evidence must be reused or the trigger must stop.
+Task authorization comes from the user session. Under the corrected execution
+rule, qualifying passes are reused and required cells without qualifying
+passing evidence run on every OS. Only a separately explicit execution ban
+can block a trigger for missing evidence; there is no standing WSL ban.
 
 ## Phase 1 outcome (2026-09-11) — STOPPED
 
@@ -1652,8 +1662,9 @@ far outside this phase's blast radius. `cargo fmt` was not run in any mode.
   constraint the store cannot yet express, so it must be applied by hand.
 - [ ] **BLOCKED (authorization).** Run only explicitly authorized impacted-area
   validation on available hosts, retain full reports under the documented
-  evidence location, and publish exact receipts. Do not rerun WSL; reuse a
-  qualifying prior receipt or stop and report the unsatisfied plan.
+  evidence location, and publish exact receipts. Reuse qualifying passes on
+  every OS; run required cells without qualifying passing evidence. The
+  historical authorization diagnosis below is superseded by the policy correction.
   → The task's second branch is the one that applies, and it is discharged in
   `rollout-2026-09-11.md` §2. No authorization exists to run the `claudine`,
   `playa`, or `biscuit-speaks` gates or to write receipt notes. The one receipt

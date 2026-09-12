@@ -11,7 +11,7 @@ superseded_by: hosted-fixture.md
 # Throwaway-branch fixture plan, 2026-09-12
 
 This historical plan is superseded by [the reduced hosted fixture](hosted-fixture.md).
-Do not execute its push sequence: it schedules prohibited WSL work and requires
+Do not execute this superseded push sequence: it uses the old fixture design and requires
 a feature-branch bootstrap whose own trigger plan can violate the restrictions.
 The replacement keeps fixture execution separate from product suites and does
 not require lifting or expiring any execution constraint.

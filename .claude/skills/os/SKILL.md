@@ -42,8 +42,14 @@ CI is the final proof, not the discovery loop. A full-scope run takes hours
 and every push cancels the previous one, so surface an OS's exact failure on
 the matching host first, then push once.
 
-A user's instruction not to rerun an environment also constrains CI triggered
-by a push. Verify every requested exclusion before pushing; a successful macOS
+Reuse qualifying passing evidence per required cell on every OS. If no
+qualifying passing evidence exists, execute the required tests. A request to
+avoid rerunning passed tests is not an environment ban. Only a separately
+explicit instruction (such as an environment unavailable during maintenance)
+creates an execution constraint; never infer a blanket WSL prohibition.
+
+A separately explicit execution ban also constrains CI triggered by a push.
+Verify every requested exclusion before pushing; a successful macOS
 receipt alone does not suppress WSL. Evidence is now combined **per cell**
 across environments and across commits: `local_evidence.py verify --cells`
 reads every note on every `refs/notes/ci-local/<environment>` ref between the
