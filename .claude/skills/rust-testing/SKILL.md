@@ -589,9 +589,9 @@ The CI-tooling suites carry three implementations, one per language:
   oracle)` decorator. `BISCUIT_PROMOTE_PENDING=1` runs every body unwrapped, so
   you can see which contracts now hold at the end of an implementation phase.
 - Rust — `pending_contract(criterion, reason, oracle, body)` in
-  `scripts/ci-rollup-tests.rs` and
-  `tools/test-toolkit/tests/ci_workflow_contracts.rs`. It swaps the panic hook
-  so a deliberate failure does not spam the output.
+  `scripts/ci-rollup-tests.rs`. It swaps the panic hook so a deliberate
+  failure does not spam the output. (`ci_workflow_contracts.rs` carried a twin
+  until its last pending contract, the accepted-gap publisher, landed.)
 - Shell — `pending_contract` in `.githooks/tests/test-pre-push.sh`.
 
 Pair every pending fixture with a non-pending one that pins the *current*

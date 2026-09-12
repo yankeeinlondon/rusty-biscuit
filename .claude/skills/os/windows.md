@@ -17,6 +17,11 @@ helper that resolves it is named so it is not re-derived.
    `USERPROFILE` and `HOME`.** Hermetic test homes silently do not apply, so
    a Windows test reads the machine's real `~/.claudine`. Use
    `std::env::home_dir()` (un-deprecated, environment-first on Rust ≥ 1.97).
+   Python's `Path.home()` is environment-first but reads `USERPROFILE` on
+   Windows and ignores `HOME` (which native Windows does not set outside Git
+   Bash), so a fixture that relocates the home for a Python tool such as
+   `scripts/ci/constraints.py` must set both `HOME` and `USERPROFILE`; a
+   shell `$HOME` literal is a Unix-only spelling.
 3. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); no
    developer machine does.** Short-versus-long spelling bugs reproduce only
    on CI. `current_dir()` reports the spelling it was given; `canonicalize`

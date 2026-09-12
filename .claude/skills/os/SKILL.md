@@ -55,8 +55,10 @@ host that produced it, at the receipt's `host.report_dir`
 (`$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`, root default
 `~/.rusty-biscuit/ci-evidence`), so investigating a reused cell means asking
 that host. Record the restriction rather than remembering it —
-`BISCUIT_CI_CONSTRAINTS_DIR` holds prohibition records that `just ci-local
---plan` and the pre-push hook refuse on, and that CI deliberately never reads.
+`<home>/.rusty-biscuit/ci-constraints/<repository>/` (`BISCUIT_CI_CONSTRAINTS_DIR`
+overrides it; the home is Python's `Path.home()`, so `USERPROFILE` on native
+Windows) holds prohibition records that `just ci-local --plan` and the pre-push
+hook refuse on, and that CI deliberately never reads.
 If the plan still schedules a prohibited cell, explain the gap before
 triggering CI; do not treat automatic jobs as exempt.
 
@@ -68,7 +70,8 @@ outcomes, and excludes no CI cells. It does publish the *scope* receipt on
 plan (a temporary worktree unless the revision is the clean checkout) under that
 update's remote branch and remote, against the base of each run it triggers
 (the remote's `main` for a push to `main`; each open pull request's target tip
-on a GitHub remote, read through `gh`; otherwise a provisional plan against the
+on a GitHub remote, read through `gh`, plus the incoming revision when the same
+push updates that target too; otherwise a provisional plan against the
 remote's `main`), and publishes HEAD's; `just ci-local --plan`
 previews the working tree and differs exactly when the checkout is dirty. `off` is its deprecated alias. `git push
 --no-verify` produces no new evidence and does not invalidate already-published

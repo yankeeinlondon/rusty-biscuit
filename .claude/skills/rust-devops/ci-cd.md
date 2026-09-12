@@ -11,11 +11,12 @@ repository's CI, pre-push hook, or release automation. The live authorities are
 local and hosted runs. Its package policy is deliberately narrow:
 
 - A package owning changed source receives lint, L1, and its declared higher
-  tiers — and `check` only when it declares `example` or `bench` targets. The
-  L1 build already compiles the `lib`, `bin`, and `test` kinds, so a separate
-  compile job exists solely for the kinds no test gate produces: one check
-  cell per native environment, running `cargo check -p <pkg>` with explicit
-  `--examples`/`--benches` selectors (`check_args`), never `--all-targets`.
+  tiers — and `check` when it declares `example` or `bench` targets or has
+  unchanged direct reverse dependents. The L1 build already compiles the
+  `lib`, `bin`, and `test` kinds, so a separate compile job exists for the
+  kinds no test gate produces: one check cell per native environment, running
+  `cargo check -p <pkg>` with explicit `--examples`/`--benches` selectors
+  (`check_args`), never `--all-targets`.
   `_wsl-ci.yml` takes `archive-args` (package and features only) so those
   selectors cannot reach the guest's archive build. Every cell
   records `target_kinds` and `compile_coverage_from`, and an archive-only
@@ -24,10 +25,16 @@ local and hosted runs. Its package policy is deliberately narrow:
 - An unchanged direct reverse dependency is **reported by name** in the plan's
   `reverse_dependencies` and selected nowhere: no area, no job, no result cell.
   It used to receive a compile-check entry, which presented an untested area as
-  a green top-level result (PR #76). Where — if anywhere — that seam gets
-  compiled is Open Question 1 and is unruled; `dependent_seam` is the optional
-  package field that would carry it. Neither ordinary dependencies nor
-  transitive reverse dependencies are selected.
+  a green top-level result (PR #76). Its seam is compiled inside the changed
+  package's own `ubuntu-latest` check cell instead (Open Question 1, ruled
+  Option B 2026-09-12): the package record's `dependent_seam` carries the
+  sorted names and one `cargo check` string (`-p` per dependent plus the
+  `--lib`/`--bins`/`--tests` selectors their declared kinds need), the cell's
+  status records the names and which half failed, and the rollup renders
+  "also compiled N dependent(s)" on the cell. A dependent that is itself
+  selected, or gates nothing, is not compiled there; local `ci-local` runs
+  execute no check cell. Neither ordinary dependencies nor transitive reverse
+  dependencies are selected.
 - Documentation, manifests, lockfiles, Just recipes, workflow configuration,
   and other CI configuration select no package jobs. CI tooling has compact
   contract tests of its own.
@@ -81,7 +88,11 @@ semantics:
   Live as of 2026-09-11: the hook publishes it on `refs/notes/ci-local/scope`
   in every mode, before any gate, from the committed `base..head` path set;
   `ci.yml` runs `local_evidence.py scope-verify` before the planner and
-  reports `scope source` in its summary with the miss code on a fallback.
+  reports `scope source` in its summary with the miss code on a fallback;
+  `rustup show` runs only on that miss, right before selection, so a hit
+  sets up no toolchain, and the summary's `validation environments`,
+  `reused passing cells`, `reused failing cells`, and `cells retained
+  (evidence incomplete or rejected)` rows come from the written plan.
   Validation evidence never reopens selection: on a hit with accepted cells,
   `affected_scope.py --apply-to` overlays them on the carried plan and
   re-projects `scope.json` from it, reading nothing from the checkout. The
@@ -163,35 +174,52 @@ Two rules the presentation depends on, both cheap to break:
   producer labels at once and nothing turned red, because every fixture spelled
   the names by hand. `test_runner_loss.py` now derives them from the shipped
   workflows instead, and runs in `just ci-local`'s self-test loop.
-- Advisory jobs carry `continue-on-error: true`. The merge gate the repository
-  is moving to folds the run's conclusion, so an advisory job that could fail
-  would become a merge blocker.
+- Advisory jobs carry `continue-on-error: true`. `ci-gate` folds
+  `needs.*.result`, and `continue-on-error` turns a failed job's result into
+  `success` for that fold, so it is exactly what keeps a reporting job out of
+  the gate — and exactly why no blocking job may carry it.
+- A failed gate command is a failed CELL, not a failed job. Each test, lint,
+  and compile step in `_package-ci.yml` and `_wsl-ci.yml` is a step-level
+  `continue-on-error` with an `id:`; the `Record producer status` step folds
+  the outcomes into the status artifact's `result` and annotates the job. The
+  producer, `area-ci`, and the fold stay green, and only the area's rollup —
+  after its baseline — can block on it, so a hosted failure and the same
+  failure reused from local evidence are judged identically. Setup, upload,
+  and cancellation still fail the job directly. The normalized-step set is
+  pinned exactly by `only_gate_commands_are_normalized_never_setup_or_upload`,
+  and `the_status_fold_reports_a_failed_gate_on_a_green_job` runs each
+  shipped status script under Bash.
 
-## The merge gate today
+## The merge gate
 
-`ci.yml`'s `ci-verdict` job is **still the single required context** in ruleset
-`protect-your-bacon` (19747338). It is transitional: it duplicates the area
-rollups' judgement over the whole run, reading the same plan, policy,
-environment table, artifact patterns, and baseline, so the two cannot reach
-opposing verdicts while both exist. Which mechanism replaces it — a required
-workflow, or a policy-free fold of the run conclusion — is Open Question 3 and
-is unruled.
+`ci.yml`'s `ci-gate` job is the single required check: a policy-free fold
+(Open Question 3, ruled 2026-09-12; the ruleset "require workflows" rule is
+organization-only, so the fixed-name conjunction job was selected and proven in
+`fixes/2026-09-11-cicd-cleanup/fixtures/scratch-2026-09-12.md`). It `needs`
+every blocking top-level job, runs `if: always()`, and passes only when each
+`needs.*.result` is `success` or `skipped`. An unselected area's skipped job
+does not block; `failure` and `cancelled` do; a `MISSING` cell is caught by
+its area's rollup, never by the fold. It reads no plan, policy, baseline, or
+artifact — `ci_gate_is_the_single_required_check` in
+`tools/test-toolkit/tests/ci_workflow_contracts.rs` pins that, and
+`WorkflowGateStepTests` in `scripts/ci/test_ci_local.py` runs the extracted
+fold against every result shape.
 
-Removing the job is **not separable** from moving the required context: delete
-it first and every PR waits on a check that never reports. The complete change
-set, when the ruling lands, is the `ci-verdict` job in `ci.yml`, the
-`NON_PRODUCER_JOBS` entry in `scripts/ci/runner_loss.py`, the advisory summary's
-closing line, `just ci-diff`'s `gh run download -n ci-results`,
-`.claudine/scripts/ci-watchdog.ts`'s `ci-verdict` job lookup, and the two
-pending fixtures `no_standalone_global_verdict_job_remains` and
-`the_verdict_consumers_are_rewired_when_the_job_goes` — which must be deleted
-together. The last two consumers are not in the specification's checklist.
+Ruleset `protect-your-bacon` (19747338) still names the retired `ci-verdict`
+context. Until Ken switches it to `ci-gate` — a separate approval, after this
+change's own run is green (specification Validation and Rollout step 6) —
+every pull request shows `ci-verdict — Expected` and cannot merge. The admin
+bypass actor is untouched. The consumers moved with the job: `runner_loss.py`
+excludes `ci-gate`, `just ci-diff` downloads the per-area `ci-results-<slug>`
+slices and folds them through `ci-rollup compare --base … --base … --head …`,
+and `.claudine/scripts/ci-watchdog.ts` waits for `ci-gate`.
 
-The run conclusion is already a faithful conjunction: exactly one job
+The run conclusion is a faithful conjunction: exactly one job
 (`ci.yml:summary`) carries `continue-on-error: true`, asserted as an exact set
 over all four reader-facing workflows. `reuse_validation.py` and
-`release-plz.yml` already key on a completed, successful `ci` run, which is the
-signal the migration makes authoritative, so neither needs rewiring.
+`release-plz.yml` key on a completed, successful `ci` run, which the scratch
+fixture showed can read `cancelled` with a green gate (s6) — the safe
+direction, so neither needs rewiring.
 
 ## Governed policy gaps
 
@@ -204,6 +232,16 @@ the tracked work that ends the gap. A plain `false` is an *ungoverned* absence.
   state: neither a pass nor a test failure, and it does not block. The rollup
   renders its owner, expiry, policy entry, `closes` link, and revocation
   instructions where a reader sees the cell.
+- It is also published **immediately** — before any producer runs — as one
+  `neutral` check run per cell on the PR head by `_area-ci.yml`'s
+  `accepted-gaps` job (`scripts/ci/publish_gaps.py`, OQ4 ruled 2026-09-12).
+  The name identifies the cell; title, summary, and text carry the marker,
+  owner, expiry, reason, revoke instructions, `closes`, and a `details_url`
+  on the policy entry. `neutral` leaves the PR clean and never alters the run
+  conclusion; the tool refuses an ungoverned or expired cell rather than
+  present it as harmless. That job is the only one holding `checks: write`:
+  `ci.yml`'s `area-ci` carries the grant as a cap (a called workflow's token
+  cannot exceed its caller's) and `package-ci`/`rollup` stay read-only.
 - An absent, incomplete, or expired acceptance is a blocking `POLICY GAP`.
 - The state is decided by the planner before the run and is **never inferred
   from a GitHub cancellation conclusion**. A real failure outranks it.
@@ -215,9 +253,21 @@ A `gates = false` package owns no plan cells at all. Its governed
 the only place its owner, class, and expiry live — that document cannot be
 deleted without moving the exclusion metadata into the plan first.
 
-A receipt's `base` is the branch's merge base, and verification normalizes the
-event base with `git merge-base <base> <head>` before comparing, because a PR
-target may have advanced. Recording still requires an ancestor base.
+A receipt's `base` is the reviewed trigger context's base — the scope
+receipt's, so a stacked pull request records its target tip rather than a
+merge base with `origin/main` — and verification normalizes the event base
+with `git merge-base <base> <head>` before comparing, because a PR target may
+have advanced. Recording still requires an ancestor base.
+
+The local gates consume evidence too (ruling D2, audit W14): on a clean
+checkout the hook feeds HEAD's reviewed, evidence-overlaid plan to `just
+pre-push` (`just ci-local --plan-in`, via `BISCUIT_CI_PLAN_IN`), so the
+planner never selects twice, a cell prior passing evidence covers is skipped,
+a cell whose newest evidence is a failure is rerun, lint always runs, and the
+receipt — recorded against that same plan and base, so its `scope_identity`
+is the scope receipt's plan identity — lists only the cells that ran. A dirty
+checkout or `RUSTY_BISCUIT_PRE_PUSH_AREAS` keeps the working-tree replan and
+publishes nothing, saying why.
 
 A receipt from an **older head** is reusable only when the cell's gate-input
 identity is unchanged — the `git ls-tree` entries of the tested package's build
@@ -263,12 +313,16 @@ filter; every other run prints why it published nothing. It ships the
 developer's local tree, uncommitted work included, so most of its runs test a
 tree no head names.
 
-**Record the restriction, do not remember it.** `BISCUIT_CI_CONSTRAINTS_DIR`
-names a store of `{environment, gate?, reason, owner, expiry, repository?,
-branch?}` records. `just ci-local --plan` and the pre-push hook enforce them;
-CI never reads them, so a constraint can only stop a push. Where the store lives
-by default is Open Question 2 and is unruled — `constraints.default_directory()`
-is empty until it is.
+**Record the restriction, do not remember it.** The store at
+`<home>/.rusty-biscuit/ci-constraints/<repository>/` (beside the evidence
+directory; `BISCUIT_CI_CONSTRAINTS_DIR` overrides it) holds `{environment,
+gate?, reason, owner, expiry, repository?, branch?}` records. `just ci-local
+--plan` and the pre-push hook enforce them; CI never reads them, so a
+constraint can only stop a push. The default is resolved only at those two
+trigger boundaries — `constraints.py directory` hands it to the planner's
+`--constraints`, which CI never passes — and an unknown repository reads the
+store root recursively, so every record binds. `<home>` is `Path.home()`, so a
+test that relocates it sets both `HOME` and `USERPROFILE`.
 
 The hook decides them per **branch update**, in the order Git supplies them:
 each pushed revision's committed `base..head` path set, planned by the planner,
@@ -293,7 +347,11 @@ tip of each open pull request's target branch (`gh pr list` on a GitHub
 remote — `gh` or `jq` missing, unauthenticated, or failing blocks the push
 and names the command), each context planned and checked in turn with the
 first failure blocking; or a provisional plan against the remote's `main` when
-no pull request is open. The pull request opened next — from the web UI, where
+no pull request is open. When the same push also updates a target branch, the
+server may apply the two updates in either order, so that run is reviewed in
+both states — against the target's current tip and against the incoming
+revision; a target the push deletes leaves its pull request no base, and the
+hook blocks that update by name. The pull request opened next — from the web UI, where
 no hook runs — is a trigger the hook cannot see, so the provisional plan is
 constrained too. The scope receipt binds the first context's base and is
 withheld, with its reason printed, when that base is not an ancestor of HEAD.
