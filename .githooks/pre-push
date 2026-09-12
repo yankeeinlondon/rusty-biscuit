@@ -11,8 +11,11 @@
 # published as a scope receipt on refs/notes/ci-local/scope before any gate
 # runs. CI takes that document as its plan when it binds the event's exact
 # {base, head, tree}, and calculates scope itself on any miss. Its base is the
-# comparison base the CI event for this push will carry (see "Trigger review"
-# below); the receipt never depends on tree cleanliness or on the gates.
+# FIRST comparison base resolved for HEAD's update (see "Comparison bases"
+# below); when that base is not an ancestor of HEAD — the target branch has
+# advanced — no receipt is recorded, because the receipt's own rule requires an
+# ancestor, and CI calculates scope itself. The receipt never depends on tree
+# cleanliness or on the gates.
 #
 # Behavior is controlled by the RUSTY_BISCUIT_PRE_PUSH environment variable:
 #   scope-only - calculate and publish scope, run no gate, publish no
@@ -38,6 +41,26 @@
 # HEAD and the published scope receipt are one planner output.
 # `just ci-local --plan` previews the WORKING TREE instead; the two differ
 # exactly when the checkout is dirty.
+#
+# Comparison bases. What an update runs depends on the workflow it triggers
+# (.github/workflows/ci.yml fires `push` for main only and `pull_request` for
+# every target branch). A push to `main` triggers the push run, whose base is
+# `github.event.before`: the remote sha Git hands this hook, all zeros for a
+# branch-creating push, which CI plans as full scope. A push to ANY OTHER
+# branch triggers no push run at all; it triggers one pull_request run for
+# EACH open pull request whose head is that branch, and that run's base is the
+# pull request's BASE BRANCH TIP at event time — not the merge base — so a
+# target that advanced past the branch point widens CI's two-dot diff, and the
+# hook mirrors that rather than improving on it. On a github.com remote the
+# open pull requests are listed with `gh pr list`, each base branch's tip is
+# read from the remote being pushed to (fetched once when absent locally), and
+# every resulting context is planned and checked in turn; `gh` or `jq`
+# missing, unauthenticated, or failing blocks the push and names the failing
+# command. With no open pull request, or on a remote that is not GitHub, the
+# update triggers nothing NOW: a PROVISIONAL plan against the remote's main is
+# reviewed and constrained anyway, because the pull request opened next —
+# from the web UI, where no hook runs — is the trigger this hook cannot see,
+# and blocking is the conservative side.
 #
 # A constraint is matched against the update's own identity, never the
 # checkout's: the repository is the remote URL Git hands this hook, and the
@@ -115,8 +138,12 @@ SCOPE_DOC_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-doc.XXXXXX")"
 SCOPE_RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-receipt.XXXXXX")"
 ACCEPTED_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-accepted.XXXXXX")"
 REJECTED_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-rejected.XXXXXX")"
+CONTEXTS_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-contexts.XXXXXX")"
+PR_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-prs.XXXXXX")"
+PR_ERROR_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-prs-err.XXXXXX")"
 REPORTS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/biscuit-pre-push-reports.XXXXXX")"
-TEMP_FILES="$REF_UPDATES_FILE $SCOPE_FILE $PLAN_FILE $PLAN_REVIEW_FILE $RECEIPT_FILE $SCOPE_PLAN_FILE $SCOPE_DOC_FILE $SCOPE_RECEIPT_FILE $ACCEPTED_FILE $REJECTED_FILE"
+TEMP_FILES="$REF_UPDATES_FILE $SCOPE_FILE $PLAN_FILE $PLAN_REVIEW_FILE $RECEIPT_FILE $SCOPE_PLAN_FILE $SCOPE_DOC_FILE $SCOPE_RECEIPT_FILE $ACCEPTED_FILE $REJECTED_FILE $CONTEXTS_FILE $PR_LIST_FILE $PR_ERROR_FILE"
+ZERO_OID="0000000000000000000000000000000000000000"
 TRIGGER_WORKTREE=""
 # Git feeds one `<local ref> <local sha> <remote ref> <remote sha>` line per
 # ref update. Captured before the review so nothing the review spawns can
@@ -150,13 +177,121 @@ block_trigger_review() {
     exit 2
 }
 
+is_zero_oid() {
+    ! printf '%s' "$1" | grep -q '[^0]'
+}
+
+# OWNER/REPO of a github.com remote URL, in GITHUB_REPO. Returns 1 for a
+# remote on any other host, 2 for a github.com URL in a form this hook does
+# not read — the latter is a fail-closed reason, never a guess.
+github_repo_of() {
+    case "$1" in
+        git@github.com:*) GITHUB_REPO="${1#git@github.com:}" ;;
+        ssh://git@github.com/*) GITHUB_REPO="${1#ssh://git@github.com/}" ;;
+        ssh://github.com/*) GITHUB_REPO="${1#ssh://github.com/}" ;;
+        https://github.com/*) GITHUB_REPO="${1#https://github.com/}" ;;
+        https://*@github.com/*) GITHUB_REPO="${1#https://*@github.com/}" ;;
+        http://github.com/*) GITHUB_REPO="${1#http://github.com/}" ;;
+        *github.com*) GITHUB_REPO=""; return 2 ;;
+        *) GITHUB_REPO=""; return 1 ;;
+    esac
+    GITHUB_REPO="${GITHUB_REPO%/}"
+    GITHUB_REPO="${GITHUB_REPO%.git}"
+    case "$GITHUB_REPO" in
+        */*/*|*/|/*|"") GITHUB_REPO=""; return 2 ;;
+        */*) return 0 ;;
+        *) GITHUB_REPO=""; return 2 ;;
+    esac
+}
+
+# The tip of a branch on the remote being pushed to — the remote's, never a
+# tracking ref, which is stale exactly when the target has advanced — made
+# resolvable locally with one fetch. Prints the sha; on failure the reason is
+# in REMOTE_TIP_ERROR.
+remote_branch_tip() {
+    TIP="$(git ls-remote --exit-code "$REMOTE_NAME" "refs/heads/$1" 2>/dev/null | head -n 1 | cut -f1)"
+    if [ -z "$TIP" ]; then
+        REMOTE_TIP_ERROR="branch $1 does not exist on $REMOTE_NAME ($REMOTE_URL), or the remote could not be read"
+        return 1
+    fi
+    if ! git cat-file -e "$TIP^{commit}" 2>/dev/null; then
+        git fetch --no-tags "$REMOTE_NAME" "refs/heads/$1" >/dev/null 2>&1 || true
+    fi
+    if ! git cat-file -e "$TIP^{commit}" 2>/dev/null; then
+        REMOTE_TIP_ERROR="branch $1 on $REMOTE_NAME is at $TIP, which could not be fetched"
+        return 1
+    fi
+    printf '%s' "$TIP"
+}
+
+# Every run the update triggers, one `<base sha> <kind>` line per context in
+# CONTEXTS_FILE (see "Comparison bases" in the header). Exits the hook when a
+# context's base cannot be established.
+resolve_trigger_contexts() {
+    : >"$CONTEXTS_FILE"
+    if [ "$REMOTE_REF" = "refs/heads/main" ]; then
+        if is_zero_oid "$REMOTE_SHA"; then
+            echo "$ZERO_OID the push event's before is all zeros for a branch-creating push of main, so CI plans full scope" >>"$CONTEXTS_FILE"
+            return 0
+        fi
+        if ! git cat-file -e "$REMOTE_SHA^{commit}" 2>/dev/null; then
+            git fetch --no-tags "$REMOTE_NAME" refs/heads/main >/dev/null 2>&1 || true
+        fi
+        if ! git cat-file -e "$REMOTE_SHA^{commit}" 2>/dev/null; then
+            block_trigger_review "the remote's main is at $REMOTE_SHA, which is not available locally even after fetching $REMOTE_NAME; fetch and push again"
+        fi
+        echo "$REMOTE_SHA the remote's main, the push event's before" >>"$CONTEXTS_FILE"
+        return 0
+    fi
+    github_repo_of "$REMOTE_URL"
+    GITHUB_STATUS=$?
+    if [ "$GITHUB_STATUS" -eq 2 ]; then
+        block_trigger_review "$REMOTE_URL names github.com in a form this hook does not read, so the open pull requests that decide what this update runs cannot be listed; use the git@github.com:OWNER/REPO or https://github.com/OWNER/REPO form, or push with --no-verify to skip this review entirely"
+    fi
+    if [ "$GITHUB_STATUS" -eq 0 ]; then
+        for TOOL in gh jq; do
+            if ! command -v "$TOOL" >/dev/null 2>&1; then
+                block_trigger_review "$REMOTE_URL is a GitHub remote, so the open pull requests from $REMOTE_BRANCH decide what this update runs, but \`$TOOL\` is not installed; install it, or push with --no-verify to skip this review entirely"
+            fi
+        done
+        if ! GH_NO_UPDATE_NOTIFIER=1 gh pr list --repo "$GITHUB_REPO" --head "$REMOTE_BRANCH" \
+                --state open --json number,baseRefName >"$PR_LIST_FILE" 2>"$PR_ERROR_FILE" </dev/null; then
+            block_trigger_review "could not list the open pull requests from $REMOTE_BRANCH on $GITHUB_REPO: \`gh pr list\` failed with: $(tr '\n' ' ' <"$PR_ERROR_FILE"); fix that (usually \`gh auth login\`), or push with --no-verify to skip this review entirely"
+        fi
+        if ! jq -r '.[] | "\(.number) \(.baseRefName)"' "$PR_LIST_FILE" >"$PR_ERROR_FILE" 2>/dev/null; then
+            block_trigger_review "\`gh pr list\` returned something jq could not read for $REMOTE_BRANCH on $GITHUB_REPO"
+        fi
+        while read -r PR_NUMBER PR_BASE_BRANCH; do
+            [ -n "$PR_NUMBER" ] || continue
+            if ! PR_BASE_SHA="$(remote_branch_tip "$PR_BASE_BRANCH" </dev/null)"; then
+                block_trigger_review "the base branch of pull request #$PR_NUMBER could not be resolved: $REMOTE_TIP_ERROR"
+            fi
+            echo "$PR_BASE_SHA pull request #$PR_NUMBER into $PR_BASE_BRANCH, the tip of $PR_BASE_BRANCH on $REMOTE_NAME" >>"$CONTEXTS_FILE"
+        done <"$PR_ERROR_FILE"
+        if [ -s "$CONTEXTS_FILE" ]; then
+            return 0
+        fi
+        PROVISIONAL_WHY="no open pull request from $REMOTE_BRANCH on $GITHUB_REPO"
+    else
+        PROVISIONAL_WHY="no open pull request, since $REMOTE_URL is not a GitHub remote"
+    fi
+    if ! PROVISIONAL_BASE="$(remote_branch_tip main </dev/null)"; then
+        block_trigger_review "this update triggers no run now, and the provisional plan against the remote's main cannot be resolved: $REMOTE_TIP_ERROR"
+    fi
+    echo "$PROVISIONAL_BASE provisional: $PROVISIONAL_WHY; a pull request opened against main before main advances will run this plan" >>"$CONTEXTS_FILE"
+}
+
 # The committed base..head path set, planned exactly as CI's scope step plans
 # it (options BEFORE `--`, then the paths), by the planner, manifests, and
 # policy of the reviewed revision's own tree. The planner's just-recipe
 # classification diffs the base against the tree it runs in, which is one
-# more reason that tree must be the committed one.
+# more reason that tree must be the committed one. An all-zero base has no
+# path set; CI plans `--all` for it.
 plan_trigger_scope() {
-    if git diff --quiet "$SCOPE_BASE" "$TRIGGER_SHA" --; then
+    if is_zero_oid "$SCOPE_BASE"; then
+        (cd "$TRIGGER_ROOT" && python3 scripts/ci/affected_scope.py \
+            --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA" --all)
+    elif git diff --quiet "$SCOPE_BASE" "$TRIGGER_SHA" --; then
         (cd "$TRIGGER_ROOT" && python3 scripts/ci/affected_scope.py \
             --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA" --)
     else
@@ -189,13 +324,23 @@ render_trigger_plan() {
 }
 
 # Scope evidence (fixes/2026-09-10-local-affected-scope, R1/R2): the plan and
-# projection the trigger review resolved for HEAD, recorded while HEAD's own
-# committed tree is still materialized and published in every mode before any
-# gate, dirty tree or not — but only after every update has passed review.
+# projection the trigger review resolved for HEAD's FIRST context, recorded
+# while HEAD's own committed tree is still materialized and published in every
+# mode before any gate, dirty tree or not — but only after every update has
+# passed review. One note holds one receipt, and the receipt requires an
+# ancestor base, so an advanced target or an all-zero base records none.
 # Neither a recording failure nor a publication failure changes the exit code:
 # CI detects the missing receipt and calculates scope itself.
 record_scope_evidence() {
     SHORT_HEAD="$(git rev-parse --short=9 "$HEAD_SHA")"
+    if is_zero_oid "$SCOPE_BASE"; then
+        echo "No scope receipt for $SHORT_HEAD: a branch-creating push of main carries no comparison base, so CI calculates full scope itself."
+        return 0
+    fi
+    if ! git merge-base --is-ancestor "$SCOPE_BASE" "$HEAD_SHA" 2>/dev/null; then
+        echo "No scope receipt for $SHORT_HEAD: its comparison base $SHORT_BASE ($SCOPE_BASE_KIND) has advanced past the branch point, so CI calculates scope itself."
+        return 0
+    fi
     if ! python3 "$TRIGGER_ROOT/scripts/ci/local_evidence.py" scope-record \
             --plan "$SCOPE_PLAN_FILE" --scope "$SCOPE_DOC_FILE" \
             --base "$SCOPE_BASE" --head "$HEAD_SHA" >"$SCOPE_RECEIPT_FILE"; then
@@ -204,6 +349,9 @@ record_scope_evidence() {
     fi
     SCOPE_RECORDED=1
     HEAD_SCOPE_BASE="$SCOPE_BASE"
+    if [ "$CONTEXT_COUNT" -gt 1 ]; then
+        echo "The scope receipt for $SHORT_HEAD binds its first comparison base only ($SCOPE_BASE_KIND); one note holds one receipt, and CI calculates the other run's scope itself."
+    fi
 }
 
 publish_scope_evidence() {
@@ -245,29 +393,6 @@ review_ref_update() {
     echo ""
     echo "Reviewing $UPDATE_LABEL ($SHORT_TRIGGER)"
 
-    # The base is the comparison base the CI event for this update will carry.
-    # A push to main is validated by a push event whose `github.event.before`
-    # is the remote's current main — the remote sha Git hands this hook. Any
-    # other branch is validated by a pull_request event against the tip of
-    # main, which the merge base with origin/main equals until main advances
-    # (and a base advance is meant to invalidate local scope). A
-    # branch-creating push carries no base at all, so it too records the merge
-    # base for the pull request run to find. Pull requests open against
-    # origin, so origin/main stays the base even when this push goes to
-    # another remote.
-    if [ "$REMOTE_REF" = "refs/heads/main" ] \
-        && printf '%s' "$REMOTE_SHA" | grep -q '[^0]' \
-        && git cat-file -e "$REMOTE_SHA^{commit}" 2>/dev/null; then
-        SCOPE_BASE="$REMOTE_SHA"
-        SCOPE_BASE_KIND="the remote's main, the push event's before"
-    elif SCOPE_BASE="$(git merge-base origin/main "$TRIGGER_SHA" 2>/dev/null)" && [ -n "$SCOPE_BASE" ]; then
-        SCOPE_BASE_KIND="merge base with origin/main, the pull request base until main advances"
-    else
-        block_trigger_review "origin/main does not resolve, so there is no comparison base; fetch origin and push again"
-    fi
-    SHORT_BASE="$(git rev-parse --short=9 "$SCOPE_BASE")"
-    echo "Comparison base for $SHORT_TRIGGER: $SHORT_BASE ($SCOPE_BASE_KIND)"
-
     # CI validates the REMOTE branch; a renamed refspec keeps the local name
     # in force too, so a constraint recorded under either name is not lost.
     REMOTE_BRANCH="${REMOTE_REF#refs/heads/}"
@@ -283,6 +408,8 @@ review_ref_update() {
         echo "Branch identity: $REMOTE_BRANCH"
     fi
     echo "Remote: $REMOTE_NAME ($REMOTE_URL)"
+    resolve_trigger_contexts
+    CONTEXT_COUNT="$(grep -c . "$CONTEXTS_FILE")"
 
     # The checkout serves as the committed tree only when it IS that tree.
     TRIGGER_ROOT="$REPO_ROOT"
@@ -301,6 +428,31 @@ review_ref_update() {
         TRIGGER_ROOT="$TRIGGER_WORKTREE"
         echo "Reviewing the committed tree of $SHORT_TRIGGER in a temporary worktree ($TRIGGER_TREE_WHY)."
     fi
+
+    # One run per context, each planned, verified, rendered, and checked on its
+    # own; the first that fails blocks the push. The constraint arguments
+    # (`$@`) are the update's, shared by every context.
+    CONTEXT_INDEX=0
+    while IFS= read -r CONTEXT_LINE; do
+        CONTEXT_INDEX=$((CONTEXT_INDEX + 1))
+        review_trigger_context "$CONTEXT_LINE" "$@" </dev/null
+    done <"$CONTEXTS_FILE"
+    remove_trigger_worktree
+    TRIGGER_WORKTREE=""
+}
+
+# One `<base sha> <kind>` context of the update under review, with the
+# update's constraint arguments after it.
+review_trigger_context() {
+    SCOPE_BASE="${1%% *}"
+    SCOPE_BASE_KIND="${1#* }"
+    shift
+    if is_zero_oid "$SCOPE_BASE"; then
+        SHORT_BASE="$SCOPE_BASE"
+    else
+        SHORT_BASE="$(git rev-parse --short=9 "$SCOPE_BASE")"
+    fi
+    echo "Comparison base for $SHORT_TRIGGER: $SHORT_BASE ($SCOPE_BASE_KIND)"
 
     # Execution constraints bind the trigger, not the gates, so they are decided
     # before any work — from the plan CI would resolve for this revision, never
@@ -328,11 +480,9 @@ review_ref_update() {
         echo "Blocked while reviewing $UPDATE_LABEL." >&2
         exit 1
     fi
-    if [ "$TRIGGER_SHA" = "$HEAD_SHA" ]; then
+    if [ "$TRIGGER_SHA" = "$HEAD_SHA" ] && [ "$CONTEXT_INDEX" -eq 1 ]; then
         record_scope_evidence
     fi
-    remove_trigger_worktree
-    TRIGGER_WORKTREE=""
 }
 
 echo ""
