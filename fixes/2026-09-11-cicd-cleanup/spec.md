@@ -5,7 +5,7 @@ implemented: false
 reviewed: true
 reviewed_by: claude/fable
 reviewed_on: 2026-09-11
-review_iterations: 4
+review_iterations: 5
 area: repository-ci
 depends-on:
   - fixes/2026-09-10-local-affected-scope/spec.md
