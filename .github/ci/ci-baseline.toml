@@ -2,10 +2,9 @@
 #
 # Keyed by stable identity (`package`, `environment`, `tier`), never by a
 # GitHub display name or a shard. Enforced by `ci-rollup verdict`, which runs
-# twice over the same inputs today: once per selected area inside
-# `_area-ci.yml`'s `rollup` job (`--area`), and once over the whole run in
-# `ci.yml`'s transitional `ci-verdict` job, which is the single required
-# branch-protection context until that context moves.
+# once per selected area inside `_area-ci.yml`'s `rollup` job (`--area`). The
+# required branch-protection check, `ci.yml`'s `ci-gate`, folds those rollups'
+# job results and never reads this file.
 #
 # AREA GROUPS, PACKAGE IDENTIFIES. Nothing here is re-keyed by area. An entry
 # is applied by the area that owns its `package`, and by no other: another
@@ -47,8 +46,10 @@
 # / `check` (producer-status jobs that emit no JUnit; their cells come from the
 # `status-<package>-lint` and `status-<package>-check-<os>` artifacts). Those
 # two are therefore always CI-origin — no local receipt can supply them — and a
-# `check` cell exists only for a package declaring `example` or `bench`
-# targets, because L1 already covers the `lib`, `bin`, and `test` kinds.
+# `check` cell exists for a package declaring `example` or `bench` targets
+# (L1 already covers the `lib`, `bin`, and `test` kinds) and, on
+# `ubuntu-latest` only, for a package whose unchanged direct reverse
+# dependencies are compiled inside its own check.
 
 schema_version = 2
 

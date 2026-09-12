@@ -29,27 +29,37 @@
   `{package, environment, gate}` cell per unit of work. Every consumer reads
   that document; nothing recalculates scope.
 - **Compile coverage is per target kind.** L1 covers `lib`, `bin`, and `test`; a
-  `check` cell exists only where `example` or `bench` targets are declared. An
-  unchanged reverse dependency is reported by name and scheduled nowhere.
+  `check` cell exists where `example` or `bench` targets are declared, and on
+  `ubuntu-latest` for a package with unchanged direct reverse dependencies,
+  which it compiles inside that cell. An unchanged reverse dependency is
+  reported by name and scheduled nowhere.
 - **Each area owns its outcome.** An area's rollup applies its own baseline,
   governed gaps, and missing-cell rule and nobody else's. A governed, unexpired
   capability gap is a distinct `ACCEPTED GAP` state decided by the planner — it
-  is never inferred from a GitHub conclusion, never baselined, and a real
-  failure outranks it.
-- **The merge gate is still `ci-verdict`,** transitionally, and removing it is
-  not separable from moving the required context. Load the `rust-devops` skill
-  before changing CI scope, evidence reuse, or the gate.
+  is never inferred from a GitHub conclusion, never baselined, published
+  immediately as one `neutral` check run per cell by the only job holding
+  `checks: write`, and a real failure outranks it.
+- **The merge gate is `ci-gate`,** a policy-free fold of every blocking job's
+  `needs.*.result` (`success` and `skipped` pass; `failure` and `cancelled`
+  block). It reads no plan, baseline, or artifact; `MISSING` is each area
+  rollup's to catch. Until the `protect-your-bacon` required context is
+  switched from `ci-verdict` to `ci-gate` — Ken's separate approval, after
+  this branch's own run is green — every PR shows `ci-verdict — Expected` and
+  cannot merge. Load the `rust-devops` skill before changing CI scope,
+  evidence reuse, or the gate.
 
 ## Test Execution Constraints
 
 - A user's instruction not to run or rerun a test environment applies to both
   direct commands and jobs triggered indirectly by a push, dispatch, or retry.
   Do not narrow it to manual reruns unless the user explicitly does so.
-- **Record the restriction, do not remember it.** The constraint store named by
-  `BISCUIT_CI_CONSTRAINTS_DIR` holds `{environment, gate?, reason, owner,
-  expiry, repository?, branch?}` records that `just ci-local --plan` and the
-  pre-push hook refuse on. CI deliberately never reads them, so a constraint can
-  only stop a push and can never make CI silently skip required coverage.
+- **Record the restriction, do not remember it.** The constraint store at
+  `<home>/.rusty-biscuit/ci-constraints/<repository>/` (beside the evidence
+  directory; `BISCUIT_CI_CONSTRAINTS_DIR` overrides it) holds `{environment,
+  gate?, reason, owner, expiry, repository?, branch?}` records that
+  `just ci-local --plan` and the pre-push hook refuse on. CI deliberately never
+  reads them, so a constraint can only stop a push and can never make CI
+  silently skip required coverage.
 - Before pushing, review `just ci-local --plan` — the resolved cells with their
   execution, origin, state, and evidence — against every active constraint.
   Verifying one exclusion does not establish that the others are satisfied.
@@ -65,7 +75,11 @@
   `main`; otherwise the CURRENT remote tip of the target branch of each open
   pull request whose head it is (`gh pr list` on a GitHub remote — a missing,
   unauthenticated, or failing `gh` blocks the push and names the command), or
-  a provisional plan against the remote's `main` when none is open. Opening a
+  a provisional plan against the remote's `main` when none is open. When the
+  same push also updates a pull request's target branch, the run may see
+  either the target's current tip or the incoming revision as its base, so
+  both states are reviewed; a target the push deletes leaves the pull request
+  no base, and that update is blocked. Opening a
   pull request from the web UI is, like a retry, a trigger no hook reviews;
   the provisional plan is the hook's only standing for it, so it is
   constrained too.

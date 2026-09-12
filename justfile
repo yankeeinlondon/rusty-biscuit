@@ -97,8 +97,9 @@ test-leaks *args="":
 
 # pre-push hook entry point: full local evidence for source-changed packages
 #
-# Runs lint and L1 plus hostable L2 for source packages, and compile-checks
-# direct reverse dependencies. A successful hook can let CI omit this host's
+# Runs lint and L1 plus hostable L2 for source packages. Direct reverse
+# dependencies are not compiled here; CI compiles them inside the changed
+# package's own Linux check cell. A successful hook can let CI omit this host's
 # environment for the exact outgoing tree.
 pre-push *selectors="":
     @just ci-local --l2 {{ selectors }}
