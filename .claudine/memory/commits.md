@@ -28,6 +28,24 @@ belong here.
   the commit body reflects only what was staged; otherwise the bullet list
   drifts from the diff and reviewers see a `[[test]]` registration with no
   matching source file in the same change.
+- Splitting a single file's hunks across two commits: when the staged `M `
+  has two semantic groups of hunks (e.g. finding A and finding B both
+  touching the same file), the simplest split is to construct each
+  desired version offline (HEAD + selected-hunks applied) and write
+  version N to the working tree just before commit N. `--only` reads
+  working-tree content, so each commit captures the version you wrote.
+  Constructing versions needs two cumulative offsets: an in-set offset
+  per hunk (cumulative `new_count - old_count` of earlier hunks in the
+  SAME set, so sequentially-applied hunks line up) and a prior offset
+  per hunk for cross-set application (cumulative change from hunks in
+  earlier sets whose `old_end < current old_start`, so applying Group 2
+  on top of Group 1's output lands at the right line). Verify by
+  concatenating the two versions back to STAGED — a mismatch means a
+  hunk was classified wrong. Use `git apply` for one-shot splits when
+  all hunks in one set appear before all hunks in the other in HEAD
+  order and you can pass the patch directly; the offset machinery is
+  for interleaved hunks (`feat-a` at line 30, `feat-b` at line 40,
+  `feat-a` at line 50, etc.), where `git apply` cannot apply a subset.
 - Use `git log` for history examples; `sniff git commits` does not exist.
 
 ## Inspect First
