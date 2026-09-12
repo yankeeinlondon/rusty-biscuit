@@ -1,6 +1,6 @@
 # Rusty Biscuit Monorepo
 
-## Language 
+## Language
 
 - always prefer **US English (en-US)** over other English variants such as UK English (en-GB) when creating symbol names or writing documentation
 
@@ -20,7 +20,7 @@
 ## CI Structure
 
 - **Area groups, package identifies.** CI fans out one top-level entry per
-  selected package *area*, but every stored name — artifact, JUnit manifest
+  selected package _area_, but every stored name — artifact, JUnit manifest
   record, baseline entry, receipt cell — stays keyed on
   `{package, environment, tier}`. Area is derived from the manifest directory,
   never re-keyed onto anything, and never folded into a parent for nested areas
@@ -48,71 +48,25 @@
   cannot merge. Load the `rust-devops` skill before changing CI scope,
   evidence reuse, or the gate.
 
-## Test Execution Constraints
-
-- A user's instruction not to run or rerun a test environment applies to both
-  direct commands and jobs triggered indirectly by a push, dispatch, or retry.
-  Do not narrow it to manual reruns unless the user explicitly does so.
-- **Record the restriction, do not remember it.** The constraint store at
-  `<home>/.rusty-biscuit/ci-constraints/<repository>/` (beside the evidence
-  directory; `BISCUIT_CI_CONSTRAINTS_DIR` overrides it) holds `{environment,
-  gate?, reason, owner, expiry, repository?, branch?}` records that
-  `just ci-local --plan` and the pre-push hook refuse on. CI deliberately never
-  reads them, so a constraint can only stop a push and can never make CI
-  silently skip required coverage.
-- Before pushing, review `just ci-local --plan` — the resolved cells with their
-  execution, origin, state, and evidence — against every active constraint.
-  Verifying one exclusion does not establish that the others are satisfied.
-  That preview reads the working tree; the hook itself reviews EVERY branch
-  update the push carries — each revision's COMMITTED plan (its own planner,
-  manifests, and policy, in a temporary worktree unless it is the clean
-  checkout), checked against that update's remote branch and the remote being
-  pushed to, never the checked-out branch or `origin` — so a committed change
-  an unstaged edit masks, or a prohibition on a branch that is not checked
-  out, is still reviewed and blocked.
-- The hook plans each update against the base of every run it will trigger,
-  never against `origin/main` by assumption: the remote's `main` for a push to
-  `main`; otherwise the CURRENT remote tip of the target branch of each open
-  pull request whose head it is (`gh pr list` on a GitHub remote — a missing,
-  unauthenticated, or failing `gh` blocks the push and names the command), or
-  a provisional plan against the remote's `main` when none is open. When the
-  same push also updates a pull request's target branch, the run may see
-  either the target's current tip or the incoming revision as its base, so
-  both states are reviewed; a target the push deletes leaves the pull request
-  no base, and that update is blocked. Opening a
-  pull request from the web UI is, like a retry, a trigger no hook reviews;
-  the provisional plan is the hook's only standing for it, so it is
-  constrained too.
-- Local evidence combines **per cell across environments**: every
-  `refs/notes/ci-local/<environment>` ref reachable from the outgoing head is
-  read, so this host's receipt and a prior WSL `cross-check` receipt suppress
-  their own cells together. `lint` and `check` are always CI-origin. Scope
-  receipts on `refs/notes/ci-local/scope` are authoritative on an exact
-  `{base, head, tree}`; CI runs the planner only on a miss.
-- If current CI cannot honor a constraint or accept the prior evidence, explain
-  that specific gap before triggering the workflow. Do not silently rerun tests,
-  invent a receipt, or describe an unimplemented reuse mechanism as available.
-- Classify a failed job by its failing step. Passing tests followed by failed
-  artifact upload are not failed tests and do not alone justify rerunning them.
-
 ## Just Runner
 
-- we use the `just` runner extensively throughout this monorepo. 
+- we use the `just` runner extensively throughout this monorepo.
 - you will find a justfile at the root of this monorepo and a justfile in each of the _package areas_
 - shared recipes for just can be found in the @just/ directory
+- recipes you should find in nearly every package-area include:
+    - `just test` - runs all L1 tests for this package area
+    - `just test-l2` - runs all L2 tests for this package area
+    - `just lint` - runs linter over source code in this package area
+    - `just install` - install the primary binary in the package area (if there is one)
+    - etc.
 
 ## Git Identity and Signing
 
-- all commits must use the author `Ken Snyder <ken@ken.net>` and must be
-  OpenPGP-signed
-- the current host is expected to have the correct signing keys available; a
-  signing failure is an environment or configuration problem and must not be
-  bypassed with `--no-gpg-sign`
-- commit messages must not include agent attribution, co-authorship, or
-  co-signing trailers such as `Co-authored-by`, `Generated-by`, or similar
-  agent-identifying metadata
-- repository-local Git configuration should set `user.name`, `user.email`,
-  `user.signingkey`, and `commit.gpgsign`; verify these values before committing
+- all commits must use the author's name/email (NOT the agent used)
+- all commits must be signed (look for OpenPGP signing key; should be present and not needing Github CLI authentication)
+- the current host is expected to have the correct signing keys available; a signing failure is an environment or configuration problem and must not be bypassed with `--no-gpg-sign`
+- commit messages must not include agent attribution, co-authorship, or co-signing trailers such as `Co-authored-by`, `Generated-by`, or similar agent-identifying metadata
+- repository-local Git configuration should set `user.name`, `user.email`, `user.signingkey`, and `commit.gpgsign`; verify these values before committing
 - verify every new commit with `git verify-commit HEAD` before reporting success
 
 ## Code Comment Quality
@@ -138,7 +92,7 @@ Positive criteria — comments worth their length:
 
 **Scope discipline.** Comment-only cleanup commits must contain no behavior changes. If `git diff` of the commit shows non-comment line changes (rendering, format strings, constants, glyphs), split the behavior change into a separate commit before requesting review.
 
-- When in doubt, ask: *would deleting this comment lose information a future reader needs?* If no, delete.
+- When in doubt, ask: _would deleting this comment lose information a future reader needs?_ If no, delete.
 - when drift between comments and code is detected, always assume the code is correct and the comment is wrong (unless instructed otherwise); take appropriate actions and communicate that this drift was detected and how it was resolved
 
 ## Drift Maintenance
@@ -153,13 +107,13 @@ Update alongside code changes:
 ## Rules
 
 - **Rule 1** — Think Before Coding.
-    No silent assumptions. State what you're assuming. Surface trade-offs. Ask before guessing. Push back when a simpler approach exists.
+  No silent assumptions. State what you're assuming. Surface trade-offs. Ask before guessing. Push back when a simpler approach exists.
 - **Rule 2** — Simplicity First.
-    Minimum code that solves the problem. No speculative features. No abstractions for single-use code. If a senior engineer would call it overcomplicated — simplify.
+  Minimum code that solves the problem. No speculative features. No abstractions for single-use code. If a senior engineer would call it overcomplicated — simplify.
 - **Rule 3** — Surgical Changes.
-    Touch only what you must. Don't "improve" adjacent code, comments, or formatting. Don't refactor what isn't broken. Match existing style.
+  Touch only what you must. Don't "improve" adjacent code, comments, or formatting. Don't refactor what isn't broken. Match existing style.
 - **Rule 4** — Goal-Driven Execution.
-    Define success criteria. Loop until verified. Don't tell Claude what steps to follow, tell it what success looks like and let it iterate.
+  Define success criteria. Loop until verified. Don't tell Claude what steps to follow, tell it what success looks like and let it iterate.
 
 ## Features and Fixes
 
@@ -173,6 +127,7 @@ Update alongside code changes:
     - when a feature/fix is completed it is moved to `_completed`
 
 <!-- gitnexus:start -->
+
 # GitNexus — Code Intelligence
 
 This project is indexed by GitNexus as **rusty-biscuit** (158905 symbols, 335372 relationships, 815 execution flows).
@@ -197,22 +152,22 @@ This project is indexed by GitNexus as **rusty-biscuit** (158905 symbols, 335372
 
 ## Resources
 
-| Resource | Use for |
-| --- | --- |
-| `gitnexus://repo/rusty-biscuit/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/rusty-biscuit/clusters` | All functional areas |
-| `gitnexus://repo/rusty-biscuit/processes` | All execution flows |
-| `gitnexus://repo/rusty-biscuit/process/{name}` | Step-by-step execution trace |
+| Resource                                       | Use for                                  |
+| ---------------------------------------------- | ---------------------------------------- |
+| `gitnexus://repo/rusty-biscuit/context`        | Codebase overview, check index freshness |
+| `gitnexus://repo/rusty-biscuit/clusters`       | All functional areas                     |
+| `gitnexus://repo/rusty-biscuit/processes`      | All execution flows                      |
+| `gitnexus://repo/rusty-biscuit/process/{name}` | Step-by-step execution trace             |
 
 ## CLI
 
-| Task | Read this skill file |
-| --- | --- |
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus-cli/SKILL.md` |
+| Task                                         | Read this skill file                               |
+| -------------------------------------------- | -------------------------------------------------- |
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus-exploring/SKILL.md`       |
+| Blast radius / "What breaks if I change X?"  | `.claude/skills/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?"             | `.claude/skills/gitnexus-debugging/SKILL.md`       |
+| Rename / extract / split / refactor          | `.claude/skills/gitnexus-refactoring/SKILL.md`     |
+| Tools, resources, schema reference           | `.claude/skills/gitnexus-guide/SKILL.md`           |
+| Index, status, clean, wiki CLI commands      | `.claude/skills/gitnexus-cli/SKILL.md`             |
 
 <!-- gitnexus:end -->
