@@ -5,6 +5,7 @@ created: 2026-09-12
 spec: fixes/2026-09-11-cicd-cleanup/spec.md
 review: fixes/2026-09-11-cicd-cleanup/review-7.md
 candidate_base: f9de1ea42a36c5653b24e33e0198578bca1d7c49
+committed_candidate: fcf7a4f66977a3dba70f64438fdb757bb3dcb503
 status: in-progress
 ---
 
@@ -24,7 +25,7 @@ regression. A prepared fixture is not hosted evidence.
 | C5 / W6 / W7 / W9 / W12 | evidence, native, audit | Each contract discrepancy has an implementation or explicit justified B0 disposition. | Complete; local regressions pass |
 | C6 / W11 / R10 / AC14 | audit, evidence | README, testing strategy, active skills, and mode diagnostic describe the implementation. | Complete; local regressions pass |
 | C7 / W13 | native | Required actionlint check passes. | Complete; local regressions pass |
-| C8 / review 7.3 | orchestrator | Candidate hosted record proves nested labels, reuse without producers, gap/no-gap routing, artifact access, mixed cells, and accepted/unaccepted/missing-report/reused failure outcomes. | Prepared and locally verified; hosted execution blocked on authentication |
+| C8 / review 7.3 | orchestrator | Candidate hosted record proves nested labels, reuse without producers, gap/no-gap routing, artifact access, mixed cells, and accepted/unaccepted/missing-report/reused failure outcomes. | Prepared and locally verified; authentication confirmed; hosted execution pending |
 | C9 | orchestrator | Focused combined validation and independent delta review cover the completed candidate and checklist. | Local validation and independent delta review complete; final readiness awaits C8 |
 | C10 | Ken, orchestrator | After hosted proof and the required candidate run, separately approve and verify the required-check migration. | Waiting for proof |
 
@@ -38,10 +39,12 @@ regression. A prepared fixture is not hosted evidence.
   clearly distinguished from product test evidence.
 - Existing unrelated edits at entry: `prompts/_agent-skills.md`,
   `darkmatter/docs/inline/looping.md`, `darkmatter/docs/iterables.md`.
-- GitHub CLI authentication is currently unavailable. Default HOME is
-  `/Users/ken/.claudine`; the account under `/Users/ken/.config/gh` reports an
-  invalid token. The connected GitHub app supports read-only inspection, but
-  does not satisfy the authenticated CLI requirement in the pre-push hook.
+- GitHub CLI authentication is available through Ken's existing keyring.
+  This session defaults HOME to `/Users/ken/.claudine`; selecting only
+  `GH_CONFIG_DIR` produced a misleading invalid-token result. Running with
+  Ken's actual home (`env HOME=/Users/ken gh ...`) succeeds for both
+  `auth status` and `api user`, which returns `yankeeinlondon`. No login or
+  credential replacement is needed. Preserve this context for CLI API calls.
 - The remote currently has only the macOS notes ref. No WSL receipt was found
   in `git ls-remote origin refs/notes/ci-local/*` on this pass.
 - The WSL prohibition is now recorded under both
@@ -64,10 +67,21 @@ deferral; none of these entries invents a user ruling.
 
 ## Verification record
 
-The implementation remains uncommitted on candidate base
-`f9de1ea42a36c5653b24e33e0198578bca1d7c49`. Unrelated user edits are excluded
-from the prepared candidate patch. No commit, push, dispatch, PR creation, or
-ruleset write occurred in this pass.
+Ken committed the implementation, regressions, documentation, and fixture
+preparation in `a4aec0909`, `7cfaf5412`, `b7f92896f`, and `ca75a547c`.
+The audited committed candidate is
+`fcf7a4f66977a3dba70f64438fdb757bb3dcb503`, tree
+`34fdd031a962f086748795e667b6b7d515a6e4c4`. All 33 fixture input/workflow
+blobs match the prepared overlay; the 18-path implementation delta exactly
+matches the tested candidate patch. Prior test evidence remains applicable.
+No fixture push, dispatch, PR creation, or ruleset write has occurred.
+
+The implementation commit's OpenPGP signature verifies with
+`GNUPGHOME=/Users/ken/.gnupg git verify-commit a4aec0909`. Git signing is
+available independently of GitHub API authentication. The initial CLI
+authentication diagnosis was incorrect: selecting the actual user home restores
+access to the existing keyring credential. Authenticated API and SSH remote
+inspection both succeed.
 
 | Check | Result |
 |---|---|
@@ -99,8 +113,12 @@ Prepared artifacts live outside the working tree at
 - `candidate.patch` and `candidate-paths.txt`: scoped implementation snapshot.
 - `hosted-overlay/`: generated workflows, measured local fixture reports,
   candidate Git blob identities, and local verification results.
-- `fixture-checkout/`: isolated full candidate clone with the reduced overlay
-  applied and source identity checks passed; no fixture commits exist yet.
+- `fixture-checkout/`: original pre-commit candidate preparation, retained as
+  historical evidence.
+- `committed-fixture-checkout/`: isolated clone at the audited committed
+  candidate, with the reduced overlay applied after matching every input blob.
+  No fixture commits exist yet.
+- `committed-candidate.json`: exact committed tree and all 33 matched blobs.
 - `plans/`: seven resolved fixture plans and their local previews.
 - `logs/`: combined local verification output.
 
@@ -111,8 +129,10 @@ neutral-check placement on the PR head, or hosted producer omission.
 
 ## Remaining closure sequence
 
-1. Restore authenticated GitHub CLI access and explicitly authorize the scoped,
-   signed commits needed to publish only the isolated fixture branches.
+1. Use the verified actual-user-home context for GitHub API calls. The
+   committed implementation, local signing, SSH transport, and API access are
+   verified. The isolated fixture overlay is prepared for publication on its
+   dedicated branches.
 2. Review the actual outgoing triggers against every active constraint, then
    execute the seven bounded cases and dedicated fixture PR. Record run URLs,
    candidate identities, artifacts, and expected per-cell outcomes.

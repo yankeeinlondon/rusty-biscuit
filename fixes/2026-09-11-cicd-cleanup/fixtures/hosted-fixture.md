@@ -37,9 +37,13 @@ The local `verify` command runs seven cases through the shipped Bash status
 script and Rust rollup/verdict; its output is `fixture-local-verification.json`.
 It is not hosted evidence.
 
-Apply only to an isolated **full candidate checkout**, including the current
-uncommitted candidate inputs. A checkout of HEAD alone may be stale. The apply
-command rejects differing candidate input blobs before making changes:
+Apply only to an isolated **full candidate checkout**. Candidate
+`fcf7a4f66977a3dba70f64438fdb757bb3dcb503` contains the committed inputs;
+all 33 recorded input/workflow blobs match the prepared overlay. The original
+manifest's `candidate_head` records the pre-commit preparation base, and
+`committed-candidate.json` beside the durable overlay records the verified
+committed identity. The apply command rejects differing candidate input blobs
+before making changes:
 
 ```sh
 python3 fixes/2026-09-11-cicd-cleanup/fixtures/hosted-fixture.py apply /tmp/cicd-fixture-overlay /absolute/path/to/isolated-candidate
