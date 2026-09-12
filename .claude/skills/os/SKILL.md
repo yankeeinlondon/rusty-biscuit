@@ -87,6 +87,12 @@ push mode.
 
 ## Read this first when a test is red on one environment only
 
+- **Hook fixtures red only on Ubuntu:** temporary repositories need local
+  `user.name` and `user.email` for later `git notes` writes under `env -i`;
+  command-scoped identity on the initial commit does not persist. Initialize
+  fixture bare remotes with `-b main` rather than inheriting the host's default
+  branch. A missing-tool test must use a controlled PATH: Ubuntu's `/usr/bin`
+  already contains `gh`, so adding it defeats a missing-`gh` fixture.
 - **Red only on `wsl2-ubuntu`:** the guest runs a nextest *archive* built on
   `ubuntu-latest`. Anything resolved at compile time to a builder path
   (`env!("CARGO_BIN_EXE_*")`, `CARGO_MANIFEST_DIR` fixtures outside the

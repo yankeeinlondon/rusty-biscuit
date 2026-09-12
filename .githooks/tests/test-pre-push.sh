@@ -103,6 +103,13 @@ fi
 PASS=0
 FAIL=0
 FAILED_TESTS=()
+REPORT_DIR="${PRE_PUSH_TEST_REPORT_DIR:-$(mktemp -d)}"
+mkdir -p "$REPORT_DIR"
+REPORT_DIR="$(cd "$REPORT_DIR" && pwd)"
+: >"$REPORT_DIR/results.tsv"
+if [ -z "${PRE_PUSH_TEST_REPORT_DIR:-}" ]; then
+    trap 'rm -rf "$REPORT_DIR"' EXIT
+fi
 
 # Colors (only when stdout is a terminal).
 if [ -t 1 ]; then
@@ -167,6 +174,11 @@ make_publishing_repo() {
     local repo="$tmpdir/repo" bare="$tmpdir/origin.git"
     local commit=(git -c user.name=hook-test -c user.email=hook@example.com -c commit.gpgsign=false)
     git init -q -b main "$repo"
+    # Notes are commits too; the hook must find identity after env -i removes
+    # ambient configuration. Keep this identity inside the disposable repo.
+    git -C "$repo" config user.name hook-test
+    git -C "$repo" config user.email hook@example.com
+    git -C "$repo" config commit.gpgsign false
     mkdir -p "$repo/scripts/ci" "$repo/.github/ci" "$repo/pkg/alpha/src"
     cp "$REPO_ROOT"/scripts/ci/*.py "$repo/scripts/ci/"
     cp "$FIXTURES/affected_scope_stub.py" "$repo/scripts/ci/affected_scope.py"
@@ -178,7 +190,7 @@ make_publishing_repo() {
     printf '{"preflight_reason": "committed policy"}\n' >"$repo/.github/ci/policy.json"
     "${commit[@]}" -C "$repo" add -A
     "${commit[@]}" -C "$repo" commit -q -m "base"
-    git init -q --bare "$bare"
+    git init -q --bare -b main "$bare"
     git -C "$repo" remote add origin "$bare"
     git -C "$repo" push -q origin main
     git -C "$repo" checkout -q -b feature
@@ -371,16 +383,29 @@ planner_root() {
 run_test() {
     local name="$1"
     shift
-    local tmpdir
+    local tmpdir case_id="$1" status started="$SECONDS" log stream
     tmpdir=$(mktemp -d)
-    if "$@" "$tmpdir"; then
+    log="$REPORT_DIR/$case_id.log"
+    if "$@" "$tmpdir" >"$log" 2>&1; then
+        status=pass
         echo "${C_GREEN}PASS${C_RESET} ${name}"
         PASS=$((PASS + 1))
     else
+        status=fail
         echo "${C_RED}FAIL${C_RESET} ${name}"
         FAIL=$((FAIL + 1))
         FAILED_TESTS+=("$name")
+        # Receipt assertions often inspect stdout; the reason publication
+        # failed is on the hook's captured stderr, which would otherwise vanish.
+        for stream in out err; do
+            if [ -s "$tmpdir/$stream" ]; then
+                printf '\n--- hook %s ---\n' "$stream" >>"$log"
+                cat "$tmpdir/$stream" >>"$log"
+            fi
+        done
+        cat "$log"
     fi
+    printf '%s\t%s\t%s\t%s\n' "$case_id" "$name" "$status" "$((SECONDS - started))" >>"$REPORT_DIR/results.tsv"
     rm -rf "$tmpdir"
 }
 
@@ -1849,8 +1874,15 @@ test_a_github_remote_without_gh_blocks_and_names_it() {
     head="$(git -C "$tmpdir/repo" rev-parse HEAD)"
     # No `gh` on the private PATH: the pull requests cannot be listed, so the
     # plan cannot be known, so the push is refused rather than guessed.
+    # Ubuntu runners install gh in /usr/bin, so a system PATH is not private.
+    mkdir -p "$tmpdir/no-gh"
+    local tool
+    for tool in bash cat cp cut dirname git grep head mkdir mktemp mv rm sed sort tr uniq; do
+        ln -s "$(command -v "$tool")" "$tmpdir/no-gh/$tool"
+    done
     run_hook_as_remote "$tmpdir" scope-only origin "$GITHUB_URL" \
-        "refs/heads/feature $head refs/heads/feature $ZERO_SHA"
+        "refs/heads/feature $head refs/heads/feature $ZERO_SHA" \
+        "PATH=$tmpdir/no-gh:$tmpdir"
     assert_exit "no gh" "$tmpdir" 2 || return 1
     assert_contains "gh named" "$tmpdir/err" "\`gh\` is not installed" || return 1
     assert_contains "bypass named" "$tmpdir/err" "--no-verify" || return 1
@@ -2460,6 +2492,7 @@ echo "================================================"
 echo "pre-push hook test summary"
 echo "================================================"
 echo "${C_GREEN}Passed${C_RESET}: $PASS"
+python3 "$REPO_ROOT/.githooks/tests/report-pre-push.py" "$REPORT_DIR" || exit 1
 if [ "$FAIL" -gt 0 ]; then
     echo "${C_RED}Failed${C_RESET}: $FAIL"
     for t in "${FAILED_TESTS[@]}"; do
