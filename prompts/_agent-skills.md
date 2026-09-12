@@ -18,7 +18,10 @@ skill_map: "<< skills-map.yaml"
 ---
 
 {{current_skill}}
-::loop skill_map where="i => find(ctx.self_content, i.trigger || i)"
+<!-- see "iterables" in Darkmatter docs -->
+::loop skill_map where="i -> find(ctx.self_content, i.trigger || i)"
+- '{{i}}' is likely relevant to this the work being done here based on the content in this prompt:
 
+    {{ skill_description(i) }}
 
 ::end-loop
