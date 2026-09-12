@@ -10,6 +10,11 @@ together, and returns a coded reason for every cell it refused. Evidence from
 macOS and from a prior WSL cross-check therefore combine in one run, which the
 environment-at-a-time predecessor could never express.
 
+`record_scope` and `verify_scope` carry the *scope* receipt, a separate
+document on `refs/notes/ci-local/scope`: what the planner selected for one
+exact `{base, head, tree}`, which CI takes as its plan on an exact match and
+otherwise recomputes.
+
 `verified_environment` and `record` are that predecessor, kept because
 `schema_version: 1` notes are already published against open branches. Spec
 section 3.6 makes those notes exact-tree, pass-only, whole-environment, and
@@ -42,6 +47,12 @@ SCHEMA_VERSION = schema.LEGACY_RECEIPT_SCHEMA_VERSION
 
 ENVIRONMENTS = schema.ENVIRONMENTS
 NOTES_PREFIX = "refs/notes/ci-local"
+
+#: One ref for every host: scope is OS-independent. It sits inside the
+#: `refs/notes/ci-local/*` pattern CI already fetches, and `scope` is not an
+#: environment name, so `verify_cells`'s per-environment loop never reads it.
+SCOPE_NOTES_REF = f"{NOTES_PREFIX}/scope"
+assert "scope" not in ENVIRONMENTS
 
 #: Tiers the JUnit staging manifest records, and therefore the gates a local
 #: run can publish a measured outcome for. `lint` and `check` produce no report
@@ -245,7 +256,7 @@ def verify_cells(
 
         if document.get("schema_version") == schema.LEGACY_RECEIPT_SCHEMA_VERSION:
             legacy_accepted, legacy_rejections = _accept_legacy(
-                document, plan, environment, head_tree, wanted, seen
+                document, environment, note_commit, head_tree, wanted, seen
             )
             accepted.extend(legacy_accepted)
             rejections.extend(legacy_rejections)
@@ -256,7 +267,14 @@ def verify_cells(
         if not cells:
             continue
 
-        exact = document.get("tree") == head_tree
+        mismatch = _environment_mismatch(document, environment, note_commit) or (
+            _revision_mismatch(document, note_commit)
+        )
+        if mismatch:
+            rejections.append(mismatch)
+            continue
+
+        exact = document["tree"] == head_tree
         for cell in cells:
             key = (cell["package"], environment, cell["gate"])
             if key not in wanted or key in seen:
@@ -312,10 +330,46 @@ def _accepted_cell(
     }
 
 
+def _environment_mismatch(
+    document: dict[str, Any], environment: str, note_commit: str
+) -> str | None:
+    """Why `document` may not be credited to the ref it was read from, or `None`.
+
+    The ref names the environment a cell is credited to; the document names
+    the environment the host claims it ran. A note filed under the wrong ref
+    is credited to neither, or a macOS run could stand in for WSL.
+    """
+    declared = document.get("environment")
+    if declared == environment:
+        return None
+    return (
+        f"environment-mismatch: the note on {note_commit[:9]} under "
+        f"{NOTES_PREFIX}/{environment} declares environment {declared!r}; "
+        "it is credited to neither"
+    )
+
+
+def _revision_mismatch(document: dict[str, Any], note_commit: str) -> str | None:
+    """Why `document` does not describe the commit it is attached to, or `None`.
+
+    Equivalence compares the note's commit with the head, so a receipt whose
+    declared head or tree is some other revision would be judged on inputs it
+    never tested.
+    """
+    note_tree = git_optional("rev-parse", "--verify", f"{note_commit}^{{tree}}")
+    if document.get("head") == note_commit and document.get("tree") == note_tree:
+        return None
+    return (
+        f"revision-mismatch: the receipt on {note_commit[:9]} declares head "
+        f"{str(document.get('head'))[:9]} and tree {str(document.get('tree'))[:9]}, "
+        "which is not the commit it is attached to"
+    )
+
+
 def _accept_legacy(
     document: dict[str, Any],
-    plan: dict[str, Any],
     environment: str,
+    note_commit: str,
     head_tree: str,
     wanted: set[tuple[str, str, str]],
     seen: set[tuple[str, str, str]],
@@ -327,6 +381,9 @@ def _accept_legacy(
     neither gains reach nor is silently upgraded. Its measurements render as
     [`schema.UNRECORDED_MEASUREMENT`] because the document has none.
     """
+    mismatch = _environment_mismatch(document, environment, note_commit)
+    if mismatch:
+        return [], [mismatch]
     if document.get("tree") != head_tree:
         return [], [
             f"v1-not-equivalence-eligible: the {environment} version-1 receipt tested "
@@ -354,6 +411,90 @@ def _accept_legacy(
             }
         )
     return accepted, []
+
+
+# ---------------------------------------------------------------------------
+# Scope evidence (fixes/2026-09-10-local-affected-scope, R1-R3)
+# ---------------------------------------------------------------------------
+
+
+def record_scope(plan_path: str, scope_path: str, base: str, head: str) -> str:
+    """The scope receipt for one committed `base..head`, as canonical bytes.
+
+    ## Errors
+
+    Raises ``ValueError`` when `base` is not an ancestor of `head`, or when the
+    assembled document would not validate.
+    """
+    head_sha = revision(head)
+    base_sha = revision(base)
+    if git("merge-base", base_sha, head_sha) != base_sha:
+        raise ValueError("the scope base must be an ancestor of the outgoing head")
+    plan = load_plan(plan_path)
+    document = {
+        "schema_version": schema.SCOPE_RECEIPT_SCHEMA_VERSION,
+        "base": base_sha,
+        "head": head_sha,
+        "tree": revision(f"{head_sha}^{{tree}}"),
+        "plan_schema_version": plan.get("schema_version"),
+        "plan": plan,
+        "scope": load_scope(scope_path),
+    }
+    problems = schema.validate_scope_receipt(document)
+    if problems:
+        raise ValueError(f"the assembled scope receipt is invalid: {problems[0]}")
+    return schema.canonical(document)
+
+
+def verify_scope(base: str, head: str) -> tuple[dict[str, Any] | None, str]:
+    """The scope receipt that binds exactly `{base, head, head tree}`, or why not.
+
+    Read from the event head only — scope binds to an exact head, so an older
+    commit's note can never stand in. Checked in R3's order: schema, head,
+    tree, base, then structure. Every miss fails safe: the caller calculates
+    scope itself.
+
+    ## Returns
+
+    `(receipt, "")` on a hit; `(None, reason)` on a miss, the reason beginning
+    with a code from [`schema.SCOPE_REJECTIONS`].
+    """
+    try:
+        head_sha = revision(head)
+        head_tree = revision(f"{head_sha}^{{tree}}")
+        base_sha = revision(base)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None, "scope-missing: the base/head pair does not resolve in this repository"
+    note = git_optional("notes", "--ref", SCOPE_NOTES_REF, "show", head_sha)
+    if not note:
+        return None, f"scope-missing: no scope receipt on {head_sha[:9]} under {SCOPE_NOTES_REF}"
+    try:
+        document = json.loads(note)
+    except json.JSONDecodeError:
+        return None, f"scope-malformed: the scope note on {head_sha[:9]} is not JSON"
+    if not isinstance(document, dict):
+        return None, f"scope-malformed: the scope note on {head_sha[:9]} is not an object"
+    if document.get("schema_version") != schema.SCOPE_RECEIPT_SCHEMA_VERSION:
+        return None, (
+            f"scope-schema: the scope note on {head_sha[:9]} is version "
+            f"{document.get('schema_version')!r}, this tool reads "
+            f"{schema.SCOPE_RECEIPT_SCHEMA_VERSION}"
+        )
+    for field, expected, code in (
+        ("head", head_sha, "scope-head-mismatch"),
+        ("tree", head_tree, "scope-tree-mismatch"),
+        ("base", base_sha, "scope-base-mismatch"),
+    ):
+        declared = document.get(field)
+        if declared != expected:
+            return None, (
+                f"{code}: the scope note on {head_sha[:9]} declares {field} "
+                f"{str(declared)[:9]}, the event's is {expected[:9]}"
+            )
+    problems = schema.validate_scope_receipt(document)
+    if problems:
+        return None, problems[0]
+    return document, ""
 
 
 # ---------------------------------------------------------------------------
@@ -531,12 +672,19 @@ def record_cells(
 ) -> str:
     """The version-2 receipt for a finished local run, as canonical bytes.
 
+    `report_dir` is where the producing host retains the staged reports after
+    the run — the receipt's `host.report_dir` (spec section 2). It is required
+    even though the parameter has a default: the hook is the only producer and
+    its staging directory is deleted on exit, so a receipt is published only
+    for reports that were already copied somewhere durable.
+
     ## Errors
 
     Raises ``ValueError`` when the tested base is not an ancestor of the
-    outgoing head, when the run staged no recordable gate, or when the
-    assembled document would not validate — publishing an invalid receipt is
-    worse than publishing none, because CI would reject it silently later.
+    outgoing head, when the run staged no recordable gate, when `report_dir`
+    is empty or does not retain every report a complete cell names, or when
+    the assembled document would not validate — publishing an invalid receipt
+    is worse than publishing none, because CI would reject it silently later.
     """
     head_sha = revision(head)
     if git("merge-base", base, head_sha) != revision(base):
@@ -558,6 +706,18 @@ def record_cells(
             f"the run staged no L1/L2/browser report under {stage_dir}; there is "
             "nothing to publish"
         )
+    if not report_dir.strip():
+        raise ValueError(
+            "record-cells needs --report-dir: the receipt names where the reports "
+            "are retained, and the staging directory does not outlive the hook"
+        )
+    retained = Path(report_dir)
+    for cell in cells:
+        if cell["completion"] == "complete" and not (retained / cell["report"]).is_file():
+            raise ValueError(
+                f"{report_dir} does not retain {cell['report']}; a receipt must not "
+                "name reports that are not there"
+            )
     return assemble_receipt(
         plan, environment, base, head_sha, cells, completion, report_dir
     )
@@ -575,12 +735,17 @@ def assemble_receipt(
 ) -> str:
     """The receipt document, validated, as the bytes a Git note carries.
 
+    `report_dir` is recorded verbatim; nothing here invents a location when it
+    is empty, because a path no reports were copied to is provenance for nothing.
+
     ## Errors
 
     Raises ``ValueError`` when the document would not validate — publishing an
     invalid receipt is worse than publishing none, because CI would reject it
     silently later.
     """
+    if host is None and not report_dir.strip():
+        raise ValueError("a receipt must name the directory that retains its reports")
     document = {
         "schema_version": schema.RECEIPT_SCHEMA_VERSION,
         "environment": environment,
@@ -593,8 +758,7 @@ def assemble_receipt(
         or {
             "os": platform.system(),
             "kernel": f"{platform.system()} {platform.release()}",
-            "report_dir": report_dir
-            or f"~/.rusty-biscuit/ci-evidence/{head_sha[:9]}",
+            "report_dir": report_dir,
         },
         "cells": cells,
     }
@@ -826,7 +990,11 @@ def parse_args() -> argparse.Namespace:
     cells.add_argument(
         "--completion", default="complete", choices=list(schema.COMPLETIONS)
     )
-    cells.add_argument("--report-dir", default="")
+    cells.add_argument(
+        "--report-dir",
+        required=True,
+        help="the durable directory the staged reports were copied to",
+    )
 
     cross = subparsers.add_parser(
         "cross-check", help="emit a receipt for a qualifying cross-check run"
@@ -843,6 +1011,26 @@ def parse_args() -> argparse.Namespace:
     cross.add_argument("--head", required=True)
     cross.add_argument("--environment", default="wsl2-ubuntu", choices=ENVIRONMENTS)
     cross.add_argument("--host-label", default="")
+
+    scope_recorder = subparsers.add_parser(
+        "scope-record", help="emit a scope receipt for one committed base..head"
+    )
+    scope_recorder.add_argument("--plan", required=True)
+    scope_recorder.add_argument("--scope", required=True, help="the legacy scope projection")
+    scope_recorder.add_argument("--base", required=True)
+    scope_recorder.add_argument("--head", required=True)
+
+    scope_verifier = subparsers.add_parser(
+        "scope-verify",
+        help="write the plan and scope a matching scope receipt carries; exit 3 on a miss",
+    )
+    scope_verifier.add_argument("--base", required=True)
+    scope_verifier.add_argument("--head", required=True)
+    scope_verifier.add_argument("--plan-out", required=True, metavar="FILE")
+    scope_verifier.add_argument("--scope-out", required=True, metavar="FILE")
+    scope_verifier.add_argument(
+        "--reason-out", metavar="FILE", help="write the coded miss reason here"
+    )
 
     verifier = subparsers.add_parser("verify")
     verifier.add_argument("--scope", help="legacy scope document (version-1 path)")
@@ -879,6 +1067,19 @@ def main() -> None:
                 args.report_dir,
             )
         )
+        return
+    if args.command == "scope-record":
+        print(record_scope(args.plan, args.scope, args.base, args.head))
+        return
+    if args.command == "scope-verify":
+        receipt, reason = verify_scope(args.base, args.head)
+        if receipt is None:
+            if args.reason_out:
+                Path(args.reason_out).write_text(reason + "\n", encoding="utf-8")
+            print(f"scope-verify: {reason}", file=sys.stderr)
+            raise SystemExit(3)
+        Path(args.plan_out).write_text(schema.canonical(receipt["plan"]), encoding="utf-8")
+        Path(args.scope_out).write_text(schema.canonical(receipt["scope"]), encoding="utf-8")
         return
     if args.command == "cross-check":
         try:

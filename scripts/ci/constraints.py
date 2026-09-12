@@ -12,6 +12,13 @@ coverage.
 
 ## Notes
 
+A record's optional `repository` is the `origin` remote URL with its scheme,
+credentials, and `.git` suffix removed — `github.com/yankeeinlondon/rusty-biscuit`
+for this repository — so the SSH and HTTPS spellings of one remote, and every
+worktree of one clone, share an identity. Both the record and the checkout are
+normalized by [`repository_identity`]. A checkout without an `origin` matches
+every repository-scoped record: an unknown identity cannot prove exemption.
+
 Where the store LIVES is Open Question 2 and is not yet ruled (blocker B2 in
 `fixes/2026-09-11-cicd-cleanup/open-questions-and-blockers.md`). This module
 therefore reads the directory named by `BISCUIT_CI_CONSTRAINTS_DIR` and has no
@@ -52,6 +59,22 @@ def default_directory() -> str:
 
 def directory_from_environment() -> str:
     return os.environ.get(ENVIRONMENT_VARIABLE) or default_directory()
+
+
+def repository_identity(remote: str) -> str:
+    """`host/path` for a remote URL in any Git spelling; unchanged if it has neither."""
+    remote = remote.strip()
+    if "://" in remote:
+        remote = remote.split("://", 1)[1]
+    elif ":" in remote and "/" not in remote.split(":", 1)[0]:
+        # scp-like `git@host:owner/name`
+        remote = remote.replace(":", "/", 1)
+    if "@" in remote.split("/", 1)[0]:
+        remote = remote.split("@", 1)[1]
+    remote = remote.rstrip("/")
+    if remote.endswith(".git"):
+        remote = remote[: -len(".git")]
+    return remote
 
 
 class Constraint:
@@ -95,6 +118,8 @@ class Constraint:
             return True
         for field, actual in (("repository", repository), ("branch", branch)):
             declared = self.document.get(field)
+            if field == "repository":
+                declared, actual = repository_identity(str(declared or "")), repository_identity(actual)
             if declared and actual and declared != actual:
                 return False
         return True
@@ -156,15 +181,17 @@ def unsatisfied(constraints: list[Constraint], plan: dict[str, Any] | None) -> l
 
     A constraint is satisfied when the resolved plan schedules no execution in
     its environment — because the cells are reused, governed as accepted gaps,
-    or absent. Without a plan nothing is satisfied: the fail-safe direction at a
-    trigger boundary is to stop and explain, never to assume.
+    or absent. A cell the planner already resolved to `prohibited` counts as an
+    execution: it is the coverage a constraint left unsatisfied, not a cell that
+    was satisfied. Without a plan nothing is satisfied: the fail-safe direction
+    at a trigger boundary is to stop and explain, never to assume.
     """
     if plan is None:
         return list(constraints)
     executing = {
         (cell["environment"], cell["gate"])
         for cell in plan.get("cells", [])
-        if cell.get("execution") == "execute"
+        if cell.get("execution") == "execute" or cell.get("state") == "prohibited"
     }
     return [
         constraint
@@ -182,14 +209,24 @@ def prohibited_environments(constraints: list[Constraint]) -> list[str]:
     return sorted({constraint.environment for constraint in constraints})
 
 
-def read_plan(path: str | None) -> dict[str, Any] | None:
-    if not path:
-        return None
+def read_plan(path: str) -> dict[str, Any]:
+    """The resolved plan at `path`, or a `ValueError` naming why it cannot be trusted.
+
+    Only the cell fields the satisfaction rule reads are checked; the planner's
+    own schema is `schema.validate_resolved_plan`.
+    """
     try:
         document = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return document if isinstance(document, dict) else None
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot read the resolved plan at {path}: {error}") from None
+    cells = document.get("cells") if isinstance(document, dict) else None
+    if not isinstance(cells, list) or not all(
+        isinstance(cell, dict)
+        and all(isinstance(cell.get(field), str) for field in ("environment", "gate", "execution"))
+        for cell in cells
+    ):
+        raise ValueError(f"the resolved plan at {path} has no readable 'cells' list")
+    return document
 
 
 def parse_args() -> argparse.Namespace:
@@ -198,8 +235,8 @@ def parse_args() -> argparse.Namespace:
     for command in ("check", "environments"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--directory", default=directory_from_environment())
-        subparser.add_argument("--plan", default="")
-        subparser.add_argument("--repository", default="")
+        subparser.add_argument("--plan", default="", help="resolved plan JSON; unreadable blocks")
+        subparser.add_argument("--repository", default="", help="origin remote URL, any spelling")
         subparser.add_argument("--branch", default="")
     return parser.parse_args()
 
@@ -217,7 +254,15 @@ def main() -> None:
     for constraint in expired:
         print(f"ci-constraints: ignoring expired constraint — {constraint.describe()}")
 
-    blocking = unsatisfied(active, read_plan(args.plan)) + malformed
+    plan = None
+    if args.plan:
+        try:
+            plan = read_plan(args.plan)
+        except ValueError as error:
+            # An unreadable plan proves nothing, whatever the store holds.
+            print(f"ci-constraints: {error}", file=sys.stderr)
+            raise SystemExit(1)
+    blocking = unsatisfied(active, plan) + malformed
     if not blocking:
         return
     print("", file=sys.stderr)

@@ -23,7 +23,7 @@ import subprocess
 import sys
 from datetime import date
 from pathlib import Path, PurePosixPath
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -99,7 +99,13 @@ LOCKFILE_PATH = "Cargo.lock"
 # `ci_tooling` flag. (`scripts/ci/affected_scope.py` and
 # `.github/ci/environments.json` are additionally GLOBAL_PATHS, since every
 # package's scope depends on them.)
-CI_TOOLING_PREFIXES = ("scripts/", ".github/ci/")
+#
+# The same leg runs the workflow-contract suite, whose subject is every file
+# under `.github/workflows/`. A workflow edit widens the package gates but can
+# select zero packages, and `test-toolkit` is `gates = false`, so without this
+# trigger the one suite that inspects workflows would run on no job.
+CI_TOOLING_PREFIXES = ("scripts/", ".github/ci/", ".github/workflows/")
+CI_TOOLING_PATHS = {"tools/test-toolkit/tests/ci_workflow_contracts.rs"}
 
 # Bootstrap-preflight breadth (D3). A global CI/tooling change validates every
 # runner OS before fan-out; a package-local change validates only the scope host
@@ -144,11 +150,6 @@ CI_TEST_FIELDS = {
 }
 EXCLUSION_FIELDS = {"exclusion-class", "owner", "reason", "expiry"}
 
-# The one environment that compiles the target kinds no test gate produces.
-# Benches and examples compile here and nowhere else, which is the only reason
-# on record for the retired blanket `--all-targets` check (spec section 1.6).
-CHECK_ENVIRONMENT = "windows-latest"
-
 # Where `_package-ci.yml` runs clippy. A cell carries it so the lint gate's
 # environment is visible in the matrix (AC10) instead of being implied.
 LINT_ENVIRONMENT = "ubuntu-latest"
@@ -156,6 +157,11 @@ LINT_ENVIRONMENT = "ubuntu-latest"
 # The gates the L1 build itself compiles. A separate check cell is scheduled
 # only for required kinds outside this set (spec section 1.7).
 L1_TARGET_KINDS = ("lib", "bin", "test")
+
+# Cargo's explicit selector for each kind outside `L1_TARGET_KINDS`. The check
+# command is built from these and nothing else: `--all-targets` would recompile
+# the L1 kinds and make the cell's `target_kinds` a label rather than a fact.
+CHECK_SELECTORS = {"example": "--examples", "bench": "--benches"}
 
 # Cargo target kinds this planner schedules for, in `schema.TARGET_KINDS`
 # order. `custom-build` (build.rs) is deliberately absent: it is compiled as
@@ -170,8 +176,8 @@ LIBRARY_TARGET_KINDS = {"lib", "rlib", "dylib", "cdylib", "staticlib", "proc-mac
 # Named by `sniff repo package-area`, which this planner replicates.
 ROOT_AREA = "root"
 
-# GitHub Actions ceiling for a single matrix. The package matrix must stay
-# under it even on a full-scope run.
+# GitHub Actions ceiling for a single matrix. The area matrix and every area's
+# package matrix must stay under it even on a full-scope run.
 MATRIX_LIMIT = 256
 
 # Package CI is source-driven. Configuration, documentation, generated reports,
@@ -314,7 +320,7 @@ def load_environments(path: Path, today: date | None = None) -> list[dict[str, A
                 raise RuntimeError(
                     f"{cap_label} must be a boolean or an object with 'available': false"
                 )
-            unknown_gap = value.keys() - {"available", "reason", "owner", "expiry"}
+            unknown_gap = value.keys() - {"available", "reason", "owner", "expiry", "closes"}
             if unknown_gap:
                 raise RuntimeError(f"{cap_label} has unknown field(s): {sorted(unknown_gap)}")
             for field in ("reason", "owner"):
@@ -342,6 +348,20 @@ def load_environments(path: Path, today: date | None = None) -> list[dict[str, A
     return environments
 
 
+def native_environments(environments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The environments that are their own runner and hold a toolchain.
+
+    An archive-only environment (the WSL2 guest) is hosted by another runner and
+    compiles nothing, so it can neither be a `runs-on` label nor host a check.
+    """
+    return [
+        environment
+        for environment in environments
+        if not capability(environment, "archive_only")
+        and environment["runner"] == environment["name"]
+    ]
+
+
 def capability(environment: dict[str, Any], name: str) -> bool:
     """Whether an environment can host a capability, boolean or governed object."""
     value = environment["capabilities"][name]
@@ -351,10 +371,23 @@ def capability(environment: dict[str, Any], name: str) -> bool:
 
 
 def capability_gap(environment: dict[str, Any], name: str) -> dict[str, str] | None:
-    """The governance record for a governed unavailability, if one exists."""
+    """The governance record for a governed unavailability, if one exists.
+
+    `closes` names the tracked work that ends the gap. Spec section 6 requires
+    it in the visible description of an accepted gap, so it travels with the
+    record rather than being looked up again downstream. Absent when the policy
+    entry declares none.
+    """
     value = environment["capabilities"][name]
     if isinstance(value, dict) and value.get("available") is False:
-        return {"owner": value["owner"], "reason": value["reason"], "expiry": value["expiry"]}
+        record = {
+            "owner": value["owner"],
+            "reason": value["reason"],
+            "expiry": value["expiry"],
+        }
+        if value.get("closes"):
+            record["closes"] = value["closes"]
+        return record
     return None
 
 
@@ -651,6 +684,22 @@ def package_area(relative_manifest_directory: PurePosixPath | str) -> str:
     return ROOT_AREA if parent.as_posix() in (".", "") else parent.as_posix()
 
 
+def area_slug(area: str) -> str:
+    """A nested area name, spelled so it can be a GitHub artifact name.
+
+    `/` is rejected in artifact names, so `claudine/rendezvous` would silently
+    fail its upload. The slug is presentation only: `--area` and every stored
+    record still carry the real area name.
+
+    ## Examples
+
+    ```python
+    assert area_slug("claudine/rendezvous") == "claudine--rendezvous"
+    ```
+    """
+    return area.replace("/", "--")
+
+
 def manifest_directory(root: Path, package: dict[str, Any]) -> PurePosixPath:
     """A package's manifest directory, relative to the repository root."""
     relative = Path(package["manifest_path"]).resolve().parent.relative_to(root.resolve())
@@ -677,6 +726,23 @@ def declared_target_kinds(package: dict[str, Any]) -> list[str]:
             elif kind in TARGET_KINDS:
                 kinds.add(kind)
     return [kind for kind in TARGET_KINDS if kind in kinds]
+
+
+def uncovered_target_kinds(target_kinds: Sequence[str]) -> list[str]:
+    """The declared kinds no test gate compiles, in `TARGET_KINDS` order."""
+    return [kind for kind in TARGET_KINDS if kind in target_kinds and kind not in L1_TARGET_KINDS]
+
+
+def check_arguments(package: str, target_kinds: Sequence[str], features: str) -> str:
+    """The `cargo check` arguments for a package's uncovered target kinds.
+
+    Explicit selectors only (`--examples`, `--benches`): the L1 build already
+    compiled `lib`, `bin`, and `test`, so a check that re-selects them claims
+    nothing new and costs a second compile. A package with no uncovered kind
+    owns no check cell, and its arguments are just the selector and features.
+    """
+    selectors = [CHECK_SELECTORS[kind] for kind in uncovered_target_kinds(target_kinds)]
+    return " ".join(part for part in ["-p", package, *selectors, features] if part)
 
 
 def package_directories(
@@ -1283,12 +1349,12 @@ def whole_environment_evidence(
 ) -> dict[str, dict[str, Any]]:
     """Accept every cell of an environment on one whole-environment receipt.
 
-    Transitional, and repeatable rather than singular: `local_evidence.py
-    verify` still answers with environment names, and Phase 4 of
-    `fixes/2026-09-11-cicd-cleanup/plan.md` replaces it with the per-cell set.
-    The coarseness is only in *how much* is accepted at once — each cell still
-    carries its own origin and evidence, which is what the retired
-    `excluded_environment` could not express.
+    This is the version-1 migration path of spec section 3.6, not the normal
+    one: a v1 note predates per-cell outcomes, so its only honest reuse grain
+    is the whole environment, on exact tree identity, pass-only. Every live
+    caller passes `--accepted-cells` instead. Repeatable rather than singular,
+    and each cell still carries its own origin and evidence — which is what the
+    retired `excluded_environment` could not express.
     """
     return {
         name: {"origin": "local", "evidence": f"refs/notes/ci-local/{name}"}
@@ -1377,16 +1443,35 @@ def package_cells(
         f"lint gate for {package}, hosted on {LINT_ENVIRONMENT}",
     )
 
-    unchecked = [kind for kind in target_kinds if kind not in L1_TARGET_KINDS]
+    unchecked = uncovered_target_kinds(target_kinds)
     if unchecked:
-        add(
-            CHECK_ENVIRONMENT,
-            "check",
-            unchecked,
-            "check",
-            f"{', '.join(unchecked)} target(s) are compiled by no test gate; "
-            f"{CHECK_ENVIRONMENT} is where that coverage exists",
-        )
+        for environment in native_environments(environments):
+            name = environment["name"]
+            # The guest whose archive this runner builds never compiles, so
+            # this cell is the only compile coverage those kinds get there.
+            stands_for = [
+                guest["name"]
+                for guest in environments
+                if capability(guest, "archive_only") and guest["native_key"] == name
+            ]
+            add(
+                name,
+                "check",
+                unchecked,
+                "check",
+                f"{', '.join(unchecked)} target(s) are compiled by no test gate; "
+                f"checked on {name}"
+                + (
+                    f", which also stands for {', '.join(stands_for)} "
+                    "(archive built here, never compiles)"
+                    if stands_for
+                    else ""
+                ),
+                # A local receipt records L1, L2, and browser only (see
+                # `local_evidence.RECORDABLE_GATES`), so no evidence — per-cell
+                # or whole-environment — can ever stand in for a check.
+                reusable=False,
+            )
 
     l1_kinds = [kind for kind in target_kinds if kind in L1_TARGET_KINDS]
     for environment in environments:
@@ -1447,6 +1532,7 @@ def matrix_record(
     gates: set[str] | frozenset[str] = frozenset(GATES),
     executing: set[tuple[str, str]] | None = None,
     area: str = "",
+    target_kinds: Sequence[str] = ("lib",),
 ) -> dict[str, Any]:
     """The workflow-facing shape of one gating package's policy.
 
@@ -1458,7 +1544,7 @@ def matrix_record(
     what CI will run.
     """
     features = feature_args(record, record["package"])
-    check_args = f"-p {record['package']}" + (f" {features}" if features else "")
+    check_args = check_arguments(record["package"], target_kinds, features)
     testing = "test" in gates
     tiers = record["tiers"] if testing else []
     companion_suites = record["companion_suites"] if testing else []
@@ -1480,17 +1566,14 @@ def matrix_record(
         "native": native,
         "native_environments": [
             environment["name"]
-            for environment in environments
-            if not capability(environment, "archive_only")
-            and environment["runner"] == environment["name"]
-            and testing
-            and runs(environment["name"], "L1")
+            for environment in native_environments(environments)
+            if testing and runs(environment["name"], "L1")
         ],
-        "check_os": (
-            [CHECK_ENVIRONMENT]
-            if "check" in gates and runs(CHECK_ENVIRONMENT, "check")
-            else []
-        ),
+        "check_os": [
+            environment["name"]
+            for environment in native_environments(environments)
+            if "check" in gates and runs(environment["name"], "check")
+        ],
         "l2_environments": (
             [
                 environment["name"]
@@ -1688,7 +1771,7 @@ def calculate_scope(
                 "targets": target_kinds,
                 "tiers": record["tiers"],
                 "test_args": features,
-                "check_args": f"-p {name}" + (f" {features}" if features else ""),
+                "check_args": check_arguments(name, target_kinds, features),
                 "l2_backends": record["l2_backends"],
                 "runner_tools": record["runner_tools"],
                 "companion_suites": record["companion_suites"],
@@ -1721,9 +1804,10 @@ def calculate_scope(
         directory: directory in top_dirs
         for directory in ("claudine", "darkmatter", "sniff", "biscuit-tui", "playa")
     }
+    normalized_files = [raw.replace("\\", "/").removeprefix("./") for raw in files]
     flags["ci_tooling"] = any(
-        raw.replace("\\", "/").removeprefix("./").startswith(CI_TOOLING_PREFIXES)
-        for raw in files
+        path.startswith(CI_TOOLING_PREFIXES) or path in CI_TOOLING_PATHS
+        for path in normalized_files
     )
 
     return {
@@ -1924,6 +2008,11 @@ def legacy_scope_document(
 
     It is a projection, never a second calculation: every environment list
     below is read back out of the plan's cells.
+
+    `area_matrix` groups the same package records by area, one ready-made
+    `{"include": [...]}` per area, so `ci.yml` fans out one caller identity per
+    selected area and `_area-ci.yml` fans out its packages underneath. Grouping
+    happens here rather than in workflow `jq` so the shape is testable.
     """
     executing: dict[str, set[tuple[str, str]]] = {}
     for cell in plan["cells"]:
@@ -1946,12 +2035,20 @@ def legacy_scope_document(
                 gates,
                 executing=executing.get(entry["package"], set()),
                 area=entry["area"],
+                target_kinds=entry["targets"],
             )
         )
+
+    area_matrix: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for entry in matrix:
+        area_matrix.setdefault(entry["area"], {"include": []})["include"].append(entry)
 
     return {
         "packages": [entry["package"] for entry in plan["packages"]],
         "areas": plan["areas"],
+        "scheduled_areas": sorted(area_matrix),
+        "area_matrix": area_matrix,
+        "area_slugs": {area: area_slug(area) for area in sorted(area_matrix)},
         "source_packages": plan["source_packages"],
         "reverse_dependencies": plan["reverse_dependencies"],
         "full_scope": plan["full_scope"],

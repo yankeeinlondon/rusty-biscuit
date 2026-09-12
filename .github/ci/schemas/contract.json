@@ -102,6 +102,44 @@
     "failure_detail_limit": 20,
     "unrecorded_measurement": "not recorded (v1 receipt)"
   },
+  "scope_receipt": {
+    "schema_version": 1,
+    "document": {
+      "schema_version": true,
+      "base": true,
+      "head": true,
+      "tree": true,
+      "plan_schema_version": true,
+      "plan": true,
+      "scope": true
+    },
+    "projection": [
+      "packages",
+      "areas",
+      "scheduled_areas",
+      "area_matrix",
+      "area_slugs",
+      "source_packages",
+      "reverse_dependencies",
+      "full_scope",
+      "full_scope_gates",
+      "change_class",
+      "preflight_os",
+      "preflight_reason",
+      "matrix",
+      "policy",
+      "job_estimate",
+      "flags"
+    ],
+    "rejections": [
+      "scope-missing",
+      "scope-schema",
+      "scope-head-mismatch",
+      "scope-tree-mismatch",
+      "scope-base-mismatch",
+      "scope-malformed"
+    ]
+  },
   "vocabulary": {
     "environments": [
       "ubuntu-latest",
@@ -158,6 +196,8 @@
       "unknown-gate",
       "unknown-package",
       "tree-mismatch",
+      "environment-mismatch",
+      "revision-mismatch",
       "gate-inputs-changed",
       "incomplete-run",
       "conflicting-evidence",

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Canonical CI contracts: the resolved plan and the validation receipt.
+"""Canonical CI contracts: the resolved plan, the validation receipt, and the
+scope receipt.
 
 One module owns both documents so the planner, the evidence verifier, the hook,
 and the Rust rollup cannot drift into private copies of the same vocabulary.
@@ -13,8 +14,10 @@ Python process. `test_schema.py` fails when that file drifts from this module.
 
 ## Notes
 
-`affected_scope.py` emits the resolved plan as of Phase 3. `local_evidence.py`
-and the Rust rollup still predate it; Phases 4 and 5 move them over.
+`affected_scope.py` emits the resolved plan, `local_evidence.py` verifies
+receipts against it per cell, and the Rust rollup reads it through `--plan`.
+All three are on this contract; `verified_environment` survives only as the
+version-1 reader.
 
 Phase 3 amended the frozen field list once, adding `source_packages` and
 `reverse_dependencies`. Both are load-bearing rather than convenience: AC1 is
@@ -45,6 +48,12 @@ CONTRACT_PATH = ROOT / ".github" / "ci" / "schemas" / "contract.json"
 
 RESOLVED_PLAN_SCHEMA_VERSION = 1
 RECEIPT_SCHEMA_VERSION = 2
+
+#: The scope receipt: what the planner selected for one exact `{base, head,
+#: tree}`, published by the hook under `refs/notes/ci-local/scope` and taken as
+#: the plan by CI on an exact match (`fixes/2026-09-10-local-affected-scope`,
+#: R3). Distinct from the validation receipt: it carries no outcome.
+SCOPE_RECEIPT_SCHEMA_VERSION = 1
 
 #: The last receipt version that predates per-cell outcomes. Accepted only on
 #: exact tree identity, pass-only, whole-environment, and never upgraded in
@@ -89,7 +98,7 @@ OUTCOMES = ("pass", "fail")
 
 #: Why a receipt, or one of its cells, was not accepted. Shared by the verifier,
 #: the planner, and `just ci-local --plan` so a rejection reads the same
-#: everywhere. Phase 4 consumes this; adding a code is a contract change.
+#: everywhere. Adding a code is a contract change.
 REJECTIONS = (
     "missing-receipt",
     "malformed-receipt",
@@ -98,6 +107,8 @@ REJECTIONS = (
     "unknown-gate",
     "unknown-package",
     "tree-mismatch",
+    "environment-mismatch",
+    "revision-mismatch",
     "gate-inputs-changed",
     "incomplete-run",
     "conflicting-evidence",
@@ -105,6 +116,18 @@ REJECTIONS = (
     "v1-requires-exact-tree",
     "v1-not-equivalence-eligible",
     "v1-is-pass-only",
+)
+
+#: Why CI declined a scope receipt and calculated scope itself. Kept apart
+#: from [`REJECTIONS`]: those refuse a *cell's outcome*; these refuse a whole
+#: document, and the two are never reported in the same list.
+SCOPE_REJECTIONS = (
+    "scope-missing",
+    "scope-schema",
+    "scope-head-mismatch",
+    "scope-tree-mismatch",
+    "scope-base-mismatch",
+    "scope-malformed",
 )
 
 #: Cap on `failed_tests` carried in a receipt cell. A failing L1 suite can name
@@ -225,6 +248,41 @@ RECEIPT_CELL_FIELDS: dict[str, bool] = {
 
 HOST_FIELDS: dict[str, bool] = {"os": True, "kernel": True, "report_dir": True}
 
+SCOPE_RECEIPT_FIELDS: dict[str, bool] = {
+    "schema_version": True,
+    "base": True,
+    "head": True,
+    "tree": True,
+    "plan_schema_version": True,
+    #: The canonical resolved plan, exactly as `--plan-out` writes it.
+    "plan": True,
+    #: The legacy `scope.json` projection of that plan. Carried because
+    #: `ci.yml` still fans out from it, and CI must not re-project on a hit.
+    "scope": True,
+}
+
+#: The keys of the legacy projection that `ci.yml` reads on a scope hit. A
+#: receipt whose `scope` lacks one would fail the workflow after the planner
+#: was already skipped, so its presence is checked here instead.
+SCOPE_PROJECTION_FIELDS = (
+    "packages",
+    "areas",
+    "scheduled_areas",
+    "area_matrix",
+    "area_slugs",
+    "source_packages",
+    "reverse_dependencies",
+    "full_scope",
+    "full_scope_gates",
+    "change_class",
+    "preflight_os",
+    "preflight_reason",
+    "matrix",
+    "policy",
+    "job_estimate",
+    "flags",
+)
+
 COUNT_FIELDS = ("total", "passed", "failed", "skipped", "errored")
 
 
@@ -247,6 +305,12 @@ def contract() -> dict[str, Any]:
             "counts": list(COUNT_FIELDS),
             "failure_detail_limit": FAILURE_DETAIL_LIMIT,
             "unrecorded_measurement": UNRECORDED_MEASUREMENT,
+        },
+        "scope_receipt": {
+            "schema_version": SCOPE_RECEIPT_SCHEMA_VERSION,
+            "document": SCOPE_RECEIPT_FIELDS,
+            "projection": list(SCOPE_PROJECTION_FIELDS),
+            "rejections": list(SCOPE_REJECTIONS),
         },
         "vocabulary": {
             "environments": list(ENVIRONMENTS),
@@ -287,16 +351,18 @@ def identity(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _keys(where: str, value: Any, fields: dict[str, bool]) -> list[str]:
+def _keys(
+    where: str, value: Any, fields: dict[str, bool], code: str = "malformed-receipt"
+) -> list[str]:
     if not isinstance(value, dict):
-        return [f"malformed-receipt: {where} must be an object"]
+        return [f"{code}: {where} must be an object"]
     problems = [
-        f"malformed-receipt: {where} is missing required field '{name}'"
+        f"{code}: {where} is missing required field '{name}'"
         for name, required in fields.items()
         if required and name not in value
     ]
     problems += [
-        f"malformed-receipt: {where} has unknown field '{name}'"
+        f"{code}: {where} has unknown field '{name}'"
         for name in sorted(value)
         if name not in fields
     ]
@@ -559,6 +625,60 @@ def validate_receipt(document: Any) -> list[str]:
                 f"conflicting-evidence: {label} appears twice with different results"
             )
         seen.setdefault(key, entry)
+    return problems
+
+
+def validate_scope_receipt(document: Any) -> list[str]:
+    """Every reason `document` is not a valid scope receipt, or an empty list.
+
+    Structural validity only: the identity comparison against an event's
+    `{base, head, tree}` is the verifier's, because only it knows the event.
+    Each problem begins with a code from [`SCOPE_REJECTIONS`].
+    """
+    problems = _keys("scope receipt", document, SCOPE_RECEIPT_FIELDS, "scope-malformed")
+    if problems:
+        return problems
+    if document["schema_version"] != SCOPE_RECEIPT_SCHEMA_VERSION:
+        return [
+            f"scope-schema: scope receipt is version {document['schema_version']!r}, "
+            f"this tool reads {SCOPE_RECEIPT_SCHEMA_VERSION}"
+        ]
+    if document["plan_schema_version"] != RESOLVED_PLAN_SCHEMA_VERSION:
+        return [
+            f"scope-schema: scope receipt carries a version "
+            f"{document['plan_schema_version']!r} plan, this tool reads "
+            f"{RESOLVED_PLAN_SCHEMA_VERSION}"
+        ]
+    for field in ("base", "head", "tree"):
+        problems += [
+            problem.replace("malformed-receipt", "scope-malformed", 1)
+            for problem in _sha(f"scope receipt {field}", document[field])
+        ]
+    plan = document["plan"]
+    plan_problems = validate_resolved_plan(plan)
+    if plan_problems:
+        return problems + [f"scope-malformed: the carried plan is invalid: {plan_problems[0]}"]
+    for field in ("base", "head"):
+        if plan[field] != document[field]:
+            problems.append(
+                f"scope-malformed: the carried plan names {field} "
+                f"{str(plan[field])[:9]}, the receipt {str(document[field])[:9]}"
+            )
+    scope = document["scope"]
+    if not isinstance(scope, dict):
+        return problems + ["scope-malformed: scope receipt scope must be an object"]
+    problems += [
+        f"scope-malformed: the carried scope projection lacks '{name}'"
+        for name in SCOPE_PROJECTION_FIELDS
+        if name not in scope
+    ]
+    if not problems and scope["packages"] != [entry["package"] for entry in plan["packages"]]:
+        # One projection of one plan: a scope naming other packages than the
+        # plan it travels with would fan out work the plan never resolved.
+        problems.append(
+            "scope-malformed: the carried scope projection names other packages "
+            "than the carried plan"
+        )
     return problems
 
 
