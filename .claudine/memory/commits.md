@@ -253,3 +253,16 @@ belong here.
   the fix lands in a follow-up that drifts from the fixture's actual
   behavior, and the only signal that the two have diverged is a developer
   running both by hand.
+- A `RESOLVED_PLAN_SCHEMA_VERSION` bump is one inseparable change with the
+  new required fields in `scripts/ci/schema.py`, the regenerated
+  `.github/ci/schemas/contract.json`, the version constant in any Rust
+  reader (e.g. `scripts/ci-rollup.rs`'s `PLAN_SCHEMA_VERSION`), and every
+  hand-built plan fixture scattered across the test suites
+  (`test_schema.py::plan()`, `test_resolved_plan.py::PlannerFixture`,
+  `test_local_evidence.py::ScopeReceiptTests`,
+  `test_evidence_reuse.py::EvidenceFixture`, the single-line
+  `.githooks/tests/fixtures/plan-*.json`). Pre-flight
+  `git diff --cached --stat` counts the fixture files but does not show
+  which builders still carry the old shape; check each builder explicitly
+  (`git show :<path> | grep -F '"<new-field>"'`) or accept the test
+  failure as "missing required field" rather than a missing path.
