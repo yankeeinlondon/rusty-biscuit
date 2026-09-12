@@ -11,9 +11,8 @@
 # published as a scope receipt on refs/notes/ci-local/scope before any gate
 # runs. CI takes that document as its plan when it binds the event's exact
 # {base, head, tree}, and calculates scope itself on any miss. Its base is the
-# comparison base the CI event for this push will carry (see
-# publish_scope_evidence below); the receipt never depends on tree cleanliness
-# or on the gates.
+# comparison base the CI event for this push will carry (see "Trigger review"
+# below); the receipt never depends on tree cleanliness or on the gates.
 #
 # Behavior is controlled by the RUSTY_BISCUIT_PRE_PUSH environment variable:
 #   scope-only - calculate and publish scope, run no gate, publish no
@@ -25,12 +24,24 @@
 # RUSTY_BISCUIT_PRE_PUSH_AREAS (space-separated package or area names) replaces
 # the computed scope with a fixed selection for the local gates only.
 #
-# Every mode first resolves the outgoing plan (`just ci-local --plan`, with
-# published evidence applied) and decides the persisted execution constraints
+# Trigger review. Every mode first resolves the plan CI would run for the
+# OUTGOING REVISION — the committed base..head path set, planned by the
+# committed tree's own planner, manifests, and policy — applies published
+# evidence to it, prints it, and decides the persisted execution constraints
 # from it: a prohibited environment blocks the push only when a cell there
 # would still EXECUTE. Reused or absent cells satisfy the constraint. The store
 # is the one `scripts/ci/constraints.py` resolves (BISCUIT_CI_CONSTRAINTS_DIR,
-# else its default); an unreadable plan or record blocks.
+# else its default); a plan that cannot be resolved, verified, or read blocks.
+# The reviewed plan and the published scope receipt are one planner output.
+# `just ci-local --plan` previews the WORKING TREE instead; the two differ
+# exactly when the checkout is dirty.
+#
+# The reviewed revision is HEAD when the push carries it (or when Git hands
+# the hook no ref line); otherwise it is the last non-deleted local sha the
+# push carries. A push that only deletes refs triggers no run and is not
+# reviewed. When that revision is not the clean checkout, its committed tree
+# is materialized in a temporary detached worktree for the duration of the
+# hook (about three seconds on a 10k-file checkout) and removed on exit.
 #
 # A published receipt names where its JUnit reports are retained on this host:
 # $BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/, with the root defaulting
@@ -68,6 +79,9 @@ esac
 # branch mid-push). The hook's cwd is the worktree root, so plain cwd-based
 # discovery still serves everything below.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX
+# The trigger review runs the committed tree's Python from a worktree that
+# must stay exactly the committed tree; a bytecode cache would dirty it.
+export PYTHONDONTWRITEBYTECODE=1
 
 SELECTION="${RUSTY_BISCUIT_PRE_PUSH_AREAS:-}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -76,13 +90,24 @@ REMOTE_NAME="${1:-origin}"
 PUSHES_HEAD=0
 REMOTE_REF=""
 REMOTE_SHA=""
+REF_LINES=0
+LAST_PUSHED_SHA=""
 while read -r _local_ref local_sha remote_ref remote_sha; do
+    REF_LINES=$((REF_LINES + 1))
     if [ "$local_sha" = "$HEAD_SHA" ]; then
         PUSHES_HEAD=1
         REMOTE_REF="$remote_ref"
         REMOTE_SHA="$remote_sha"
     fi
+    if printf '%s' "$local_sha" | grep -q '[^0]'; then
+        LAST_PUSHED_SHA="$local_sha"
+    fi
 done
+if [ "$PUSHES_HEAD" -eq 1 ] || [ "$REF_LINES" -eq 0 ]; then
+    TRIGGER_SHA="$HEAD_SHA"
+else
+    TRIGGER_SHA="$LAST_PUSHED_SHA"
+fi
 
 SCOPE_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope.XXXXXX")"
 PLAN_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-plan.XXXXXX")"
@@ -91,10 +116,21 @@ RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-receipt.XXXXXX")"
 SCOPE_PLAN_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-plan.XXXXXX")"
 SCOPE_DOC_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-doc.XXXXXX")"
 SCOPE_RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-receipt.XXXXXX")"
+ACCEPTED_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-accepted.XXXXXX")"
+REJECTED_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-rejected.XXXXXX")"
 REPORTS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/biscuit-pre-push-reports.XXXXXX")"
-TEMP_FILES="$SCOPE_FILE $PLAN_FILE $PLAN_REVIEW_FILE $RECEIPT_FILE $SCOPE_PLAN_FILE $SCOPE_DOC_FILE $SCOPE_RECEIPT_FILE"
+TEMP_FILES="$SCOPE_FILE $PLAN_FILE $PLAN_REVIEW_FILE $RECEIPT_FILE $SCOPE_PLAN_FILE $SCOPE_DOC_FILE $SCOPE_RECEIPT_FILE $ACCEPTED_FILE $REJECTED_FILE"
+TRIGGER_WORKTREE=""
+
+# shellcheck disable=SC2329  # invoked from the EXIT traps
+remove_trigger_worktree() {
+    if [ -n "$TRIGGER_WORKTREE" ]; then
+        git worktree remove --force "$TRIGGER_WORKTREE" >/dev/null 2>&1 \
+            || { rm -rf "$TRIGGER_WORKTREE"; git worktree prune >/dev/null 2>&1; }
+    fi
+}
 # shellcheck disable=SC2086  # the list is of mktemp paths, deliberately split
-trap 'rm -f $TEMP_FILES; rm -rf "$REPORTS_DIR"' EXIT
+trap 'rm -f $TEMP_FILES; rm -rf "$REPORTS_DIR"; remove_trigger_worktree' EXIT
 
 # Attach a receipt to the outgoing head on a notes ref, on top of the remote's
 # copy of that ref so the local note never overwrites another host's.
@@ -107,42 +143,63 @@ push_note() {
     git push --no-verify "$REMOTE_NAME" "$1:$1" >/dev/null
 }
 
-# Scope evidence (fixes/2026-09-10-local-affected-scope, R1/R2): the COMMITTED
-# base..head path set, calculated with the planner exactly as CI's scope step
-# calculates it, published in every mode before any gate, dirty tree or not.
-#
-# The base is the comparison base the CI event for this push will carry. A
-# push to main is validated by a push event whose `github.event.before` is the
-# remote's current main — the remote sha Git hands this hook. Any other ref is
-# validated by a pull_request event against the tip of main, which the merge
-# base with origin/main equals until main advances (and a base advance is
-# meant to invalidate local scope). A branch-creating push carries no base at
-# all, so it too records the merge base for the pull request run to find.
-#
-# Neither a calculation failure nor a publication failure changes the exit
-# code: CI detects the missing receipt and calculates scope itself.
-publish_scope_evidence() {
-    SCOPE_NOTES_REF="refs/notes/ci-local/scope"
-    if [ "$REMOTE_REF" = "refs/heads/main" ] \
-        && printf '%s' "$REMOTE_SHA" | grep -q '[^0]' \
-        && git cat-file -e "$REMOTE_SHA^{commit}" 2>/dev/null; then
-        SCOPE_BASE="$REMOTE_SHA"
-        SCOPE_BASE_KIND="the remote's main, the push event's before"
-    elif SCOPE_BASE="$(git merge-base origin/main "$HEAD_SHA" 2>/dev/null)" && [ -n "$SCOPE_BASE" ]; then
-        SCOPE_BASE_KIND="merge base with origin/main, the pull request base until main advances"
+block_trigger_review() {
+    printf "\033[31mTrigger review failed: %s\033[0m\n" "$1" >&2
+    echo "The plan this push would trigger cannot be reviewed against the recorded execution constraints, so the push is blocked." >&2
+    exit 2
+}
+
+# The committed base..head path set, planned exactly as CI's scope step plans
+# it (options BEFORE `--`, then the paths), by the planner, manifests, and
+# policy of the reviewed revision's own tree. The planner's just-recipe
+# classification diffs the base against the tree it runs in, which is one
+# more reason that tree must be the committed one.
+plan_trigger_scope() {
+    if git diff --quiet "$SCOPE_BASE" "$TRIGGER_SHA" --; then
+        (cd "$TRIGGER_ROOT" && python3 scripts/ci/affected_scope.py \
+            --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA" --)
     else
-        echo "Scope evidence CALCULATION skipped: origin/main does not resolve, so there is no comparison base; CI will calculate scope itself." >&2
+        git diff --name-only -z "$SCOPE_BASE" "$TRIGGER_SHA" \
+            | (cd "$TRIGGER_ROOT" && xargs -0 python3 scripts/ci/affected_scope.py \
+                --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA" --)
+    fi
+}
+
+# The same cells `just ci-local --plan` prints, from the same renderer when it
+# is built; the refusal itself comes from constraints.py, not from here.
+render_trigger_plan() {
+    PLAN_BIN="${BISCUIT_CI_PLAN_BIN:-$REPO_ROOT/scripts/target/release/ci-plan}"
+    if [ -x "$PLAN_BIN" ] && "$PLAN_BIN" "$PLAN_REVIEW_FILE"; then
         return 0
     fi
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "(jq is not installed, so the resolved cells are not rendered here)"
+        return 0
+    fi
+    echo ""
+    echo "Resolved plan (cell / execution / origin / state)"
+    echo "------------------------------------------------"
+    jq -r '.cells[] | "  \(.package)/\(.environment)/\(.gate)  \(.execution)  \(.origin)  \(.state)  — \(.selection_reason)"' "$PLAN_REVIEW_FILE"
+    if [ "$(jq -r '(.evidence_rejections // []) | length' "$PLAN_REVIEW_FILE")" != "0" ]; then
+        echo ""
+        echo "Rejected evidence"
+        jq -r '(.evidence_rejections // [])[] | "  ✗ \(.)"' "$PLAN_REVIEW_FILE"
+    fi
+}
+
+# Scope evidence (fixes/2026-09-10-local-affected-scope, R1/R2): the plan and
+# projection the trigger review resolved for HEAD, published in every mode
+# before any gate, dirty tree or not. Neither a recording failure nor a
+# publication failure changes the exit code: CI detects the missing receipt
+# and calculates scope itself.
+publish_scope_evidence() {
+    SCOPE_NOTES_REF="refs/notes/ci-local/scope"
     SHORT_HEAD="$(git rev-parse --short=9 "$HEAD_SHA")"
     SHORT_BASE="$(git rev-parse --short=9 "$SCOPE_BASE")"
-    echo "Scope evidence base for $SHORT_HEAD: $SHORT_BASE ($SCOPE_BASE_KIND)"
-
-    if ! calculate_committed_scope >"$SCOPE_DOC_FILE" \
-        || ! python3 "$REPO_ROOT/scripts/ci/local_evidence.py" scope-record \
+    if ! python3 "$TRIGGER_ROOT/scripts/ci/local_evidence.py" scope-record \
             --plan "$SCOPE_PLAN_FILE" --scope "$SCOPE_DOC_FILE" \
             --base "$SCOPE_BASE" --head "$HEAD_SHA" >"$SCOPE_RECEIPT_FILE"; then
-        echo "Scope evidence CALCULATION failed for $SHORT_HEAD; nothing is published and CI will calculate scope itself." >&2
+        echo "Scope evidence RECORDING failed for $SHORT_HEAD; nothing is published and CI will calculate scope itself." >&2
         return 0
     fi
     if attach_note "$SCOPE_NOTES_REF" "$SCOPE_RECEIPT_FILE" && push_note "$SCOPE_NOTES_REF"; then
@@ -153,19 +210,6 @@ publish_scope_evidence() {
     return 0
 }
 
-# Mirrors ci.yml's scope step: options BEFORE `--`, then the committed path
-# set, so the receipt's documents equal what CI would compute on a miss.
-calculate_committed_scope() {
-    if git diff --quiet "$SCOPE_BASE" "$HEAD_SHA" --; then
-        python3 "$REPO_ROOT/scripts/ci/affected_scope.py" \
-            --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$HEAD_SHA" --
-    else
-        git diff --name-only -z "$SCOPE_BASE" "$HEAD_SHA" \
-            | xargs -0 python3 "$REPO_ROOT/scripts/ci/affected_scope.py" \
-                --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$HEAD_SHA" --
-    fi
-}
-
 echo ""
 if [ "$MODE" = "scope-only" ]; then
     echo "Calculating pre-push scope only; no gate will run."
@@ -174,21 +218,71 @@ else
 fi
 echo "------------------------------------------------"
 echo ""
-# Execution constraints bind the trigger, not the gates, so they are decided
-# before any work — from the plan CI would resolve for this head, never from a
-# selection override, which narrows only the local gates. The store is kept out
-# of this resolution so that the constraint check below is the single decision
-# point: the planner cannot filter by repository or branch, and a cell it had
-# already resolved to `prohibited` would no longer show as executing.
-# CI never reads the store (Design Decision 8).
-BISCUIT_CI_CONSTRAINTS_DIR='' just ci-local --plan --plan-out "$PLAN_REVIEW_FILE"
-PLAN_EXIT=$?
-if [ "$PLAN_EXIT" -ne 0 ]; then
-    exit "$PLAN_EXIT"
-fi
-# `ci-local --plan` exits 0 without writing a plan only when nothing differs
-# from the base ref; a push that schedules nothing violates nothing.
-if [ -s "$PLAN_REVIEW_FILE" ]; then
+if [ -z "$TRIGGER_SHA" ]; then
+    echo "This push only deletes refs; it triggers no run, so there is no plan to review."
+else
+    # The base is the comparison base the CI event for this push will carry. A
+    # push to main is validated by a push event whose `github.event.before` is
+    # the remote's current main — the remote sha Git hands this hook. Any other
+    # ref is validated by a pull_request event against the tip of main, which
+    # the merge base with origin/main equals until main advances (and a base
+    # advance is meant to invalidate local scope). A branch-creating push
+    # carries no base at all, so it too records the merge base for the pull
+    # request run to find.
+    if [ "$REMOTE_REF" = "refs/heads/main" ] \
+        && printf '%s' "$REMOTE_SHA" | grep -q '[^0]' \
+        && git cat-file -e "$REMOTE_SHA^{commit}" 2>/dev/null; then
+        SCOPE_BASE="$REMOTE_SHA"
+        SCOPE_BASE_KIND="the remote's main, the push event's before"
+    elif SCOPE_BASE="$(git merge-base origin/main "$TRIGGER_SHA" 2>/dev/null)" && [ -n "$SCOPE_BASE" ]; then
+        SCOPE_BASE_KIND="merge base with origin/main, the pull request base until main advances"
+    else
+        block_trigger_review "origin/main does not resolve, so there is no comparison base; fetch origin and push again"
+    fi
+    SHORT_TRIGGER="$(git rev-parse --short=9 "$TRIGGER_SHA")"
+    SHORT_BASE="$(git rev-parse --short=9 "$SCOPE_BASE")"
+    echo "Scope evidence base for $SHORT_TRIGGER: $SHORT_BASE ($SCOPE_BASE_KIND)"
+
+    # The checkout serves as the committed tree only when it IS that tree.
+    TRIGGER_ROOT="$REPO_ROOT"
+    if [ "$TRIGGER_SHA" != "$HEAD_SHA" ]; then
+        TRIGGER_TREE_WHY="the push does not carry HEAD"
+    elif [ -n "$(git status --porcelain)" ]; then
+        TRIGGER_TREE_WHY="the checkout has uncommitted changes"
+    else
+        TRIGGER_TREE_WHY=""
+    fi
+    if [ -n "$TRIGGER_TREE_WHY" ]; then
+        TRIGGER_WORKTREE="$(mktemp -d "${TMPDIR:-/tmp}/biscuit-pre-push-tree.XXXXXX")"
+        if ! git worktree add --detach -q "$TRIGGER_WORKTREE" "$TRIGGER_SHA"; then
+            block_trigger_review "could not materialize the committed tree of $SHORT_TRIGGER in a temporary worktree"
+        fi
+        TRIGGER_ROOT="$TRIGGER_WORKTREE"
+        echo "Reviewing the committed tree of $SHORT_TRIGGER in a temporary worktree ($TRIGGER_TREE_WHY)."
+    fi
+
+    # Execution constraints bind the trigger, not the gates, so they are decided
+    # before any work — from the plan CI would resolve for the outgoing
+    # revision, never from a selection override, which narrows only the local
+    # gates. The store is kept out of this resolution so that the constraint
+    # check below is the single decision point: the planner cannot filter by
+    # repository or branch, and a cell it had already resolved to `prohibited`
+    # would no longer show as executing. CI never reads the store (Design
+    # Decision 8).
+    if ! plan_trigger_scope >"$SCOPE_DOC_FILE"; then
+        block_trigger_review "the planner could not resolve the committed scope of $SHORT_TRIGGER"
+    fi
+    if ! python3 "$TRIGGER_ROOT/scripts/ci/local_evidence.py" verify --cells \
+            --plan "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA" \
+            --rejections "$REJECTED_FILE" >"$ACCEPTED_FILE"; then
+        block_trigger_review "published evidence could not be verified against the resolved plan"
+    fi
+    if ! python3 "$TRIGGER_ROOT/scripts/ci/affected_scope.py" --apply-to "$SCOPE_PLAN_FILE" \
+            --accepted-cells "$ACCEPTED_FILE" --evidence-rejections "$REJECTED_FILE" \
+            --resolved-plan --plan-out "$PLAN_REVIEW_FILE" >/dev/null; then
+        block_trigger_review "the verified evidence could not be applied to the resolved plan"
+    fi
+    render_trigger_plan
     if ! python3 "$REPO_ROOT/scripts/ci/constraints.py" check \
         --plan "$PLAN_REVIEW_FILE" \
         --repository "$(git remote get-url origin 2>/dev/null)" \
@@ -264,7 +358,7 @@ if [ "$PUSHES_HEAD" -eq 1 ] && [ -z "$SELECTION" ] \
         else
             # Keep the staging directory so the run's reports can still be read.
             # shellcheck disable=SC2086
-            trap 'rm -f $TEMP_FILES' EXIT
+            trap 'rm -f $TEMP_FILES; remove_trigger_worktree' EXIT
             echo "Could not retain the staged reports under $REPORT_DIR; no receipt is published. The reports remain at $REPORTS_DIR." >&2
         fi
     fi

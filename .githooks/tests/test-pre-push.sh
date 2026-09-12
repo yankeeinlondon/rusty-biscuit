@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Level 1 tests for .githooks/pre-push.
 #
-# Exercises the hook with a fake `just` on PATH so we can assert exit codes
-# and stderr/stdout content for every documented behavior in R3 of
+# Every test runs the hook inside a fixture repository (a `main` on a bare
+# `origin`, one feature commit as HEAD, the real `local_evidence.py`/`schema.py`
+# and `fixtures/affected_scope_stub.py` as `scripts/ci/affected_scope.py`,
+# since no Cargo workspace exists there), with a fake `just` on PATH that
+# answers only `pre-push`, so we can assert exit codes and stderr/stdout
+# content for every documented behavior in R3 of
 # features/2026-05-19-ci-cd/spec.md:
 #
 #   - scope-only / warn / strict modes, and `off` as a deprecated alias
@@ -19,7 +23,12 @@
 # reason, a reused or absent one does not, an expired record is announced,
 # and an unreadable plan blocks.
 #
-# and the evidence-retention contract of its review-1: a published receipt names
+# and its review-2: the plan is resolved from the OUTGOING REVISION's committed
+# tree — never the working tree — so a committed change masked by an unstaged
+# revert is still reviewed, and an unstaged policy edit never reaches the plan
+# or the scope receipt. The stub planner logs the tree it ran in.
+#
+# and the evidence-retention contract of review-1: a published receipt names
 # a report directory that still exists after the hook exits, with every report
 # it lists readable there, and a failed copy publishes no receipt.
 #
@@ -27,17 +36,17 @@
 # (R1/R2): every mode publishes the COMMITTED scope of the outgoing head on
 # refs/notes/ci-local/scope before any gate, dirty tree or not, against the
 # base the CI event will compare with; a publication failure is named as such
-# and never changes the exit code. The planner inside those fixture
-# repositories is `fixtures/affected_scope_stub.py` (no Cargo workspace there);
-# the receipt and note plumbing is the real `local_evidence.py`.
+# and never changes the exit code.
 #
 # Run directly: ./.githooks/tests/test-pre-push.sh
+# PRE_PUSH_HOOK_UNDER_TEST=<path> runs the suite against another copy of the
+# hook (used to prove a new fixture fails against the hook it was written for).
 
 set -u
 set -o pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-HOOK="$REPO_ROOT/.githooks/pre-push"
+HOOK="${PRE_PUSH_HOOK_UNDER_TEST:-$REPO_ROOT/.githooks/pre-push}"
 FIXTURES="$REPO_ROOT/.githooks/tests/fixtures"
 
 if [ ! -x "$HOOK" ]; then
@@ -68,12 +77,11 @@ fi
 #
 # The fake records every invocation (one per line) to "$tmpdir/just.log"
 # with the arguments space-joined. It exits with the requested code for
-# `pre-push`. `ci-local` (the plan resolution, which runs no gate) records the
-# store directory it was handed in "$tmpdir/ci-local.env", then exits with the
-# code in "$tmpdir/ci-local.exit" if a test wrote one; otherwise it copies
-# `plan_fixture` — by default a plan that EXECUTES a wsl2-ubuntu cell — to the
-# path named by `--plan-out` and exits 0. Any other subcommand exits 99 so
-# unexpected calls show up as test failures.
+# `pre-push`. Any other subcommand exits 99 so unexpected calls show up as
+# test failures — the hook resolves the trigger plan itself, through the stub
+# planner, and never through `just ci-local`. `plan_fixture` — by default a
+# plan that EXECUTES a wsl2-ubuntu cell — is what the stub planner emits for
+# the hook's resolution (handed over as TEST_PLANNER_PLAN by the runners).
 make_fake_just() {
     local tmpdir="$1"
     local pre_push_exit="$2"
@@ -91,19 +99,6 @@ case "\$1" in
         fi
         exit $pre_push_exit
         ;;
-    ci-local)
-        echo "BISCUIT_CI_CONSTRAINTS_DIR=\${BISCUIT_CI_CONSTRAINTS_DIR-<unset>}" >"$tmpdir/ci-local.env"
-        if [ -f "$tmpdir/ci-local.exit" ]; then
-            exit "\$(cat "$tmpdir/ci-local.exit")"
-        fi
-        while [ \$# -gt 0 ]; do
-            if [ "\$1" = "--plan-out" ]; then
-                cp "$plan_fixture" "\$2"
-            fi
-            shift
-        done
-        exit 0
-        ;;
     *)
         echo "fake just: unexpected subcommand: \$*" >&2
         exit 99
@@ -111,34 +106,123 @@ case "\$1" in
 esac
 EOF
     chmod +x "$tmpdir/just"
+    printf '%s' "$plan_fixture" >"$tmpdir/planner-plan.path"
 }
 
-# Run the hook with a controlled PATH and capture exit code + output.
+# A repository with `main` on a bare `origin`, one feature commit as HEAD, and
+# the CI scripts committed so the hook's `scripts/ci/*.py` resolve in the
+# committed tree. The planner is the stub: the real one needs the Cargo
+# workspace it lives in. `main` also carries the stub's policy file and a
+# source file for the masked-change fixture.
 #
-# Usage: run_hook <tmpdir> <mode> [areas_override]
+# Usage: make_publishing_repo <tmpdir> [feature_file] [feature_content]
+make_publishing_repo() {
+    local tmpdir="$1" feature_file="${2:-work.txt}" feature_content="${3:-work}"
+    local repo="$tmpdir/repo" bare="$tmpdir/origin.git"
+    local commit=(git -c user.name=hook-test -c user.email=hook@example.com -c commit.gpgsign=false)
+    git init -q -b main "$repo"
+    mkdir -p "$repo/scripts/ci" "$repo/.github/ci" "$repo/pkg/alpha/src"
+    cp "$REPO_ROOT"/scripts/ci/*.py "$repo/scripts/ci/"
+    cp "$FIXTURES/affected_scope_stub.py" "$repo/scripts/ci/affected_scope.py"
+    # As in the real repository: the scripts' bytecode cache must not dirty
+    # the tree, or the clean-tree guard would withhold every receipt.
+    echo "__pycache__/" >"$repo/.gitignore"
+    echo "base" >"$repo/README.md"
+    echo "base lib" >"$repo/pkg/alpha/src/lib.rs"
+    printf '{"preflight_reason": "committed policy"}\n' >"$repo/.github/ci/policy.json"
+    "${commit[@]}" -C "$repo" add -A
+    "${commit[@]}" -C "$repo" commit -q -m "base"
+    git init -q --bare "$bare"
+    git -C "$repo" remote add origin "$bare"
+    git -C "$repo" push -q origin main
+    git -C "$repo" checkout -q -b feature
+    mkdir -p "$(dirname "$repo/$feature_file")"
+    echo "$feature_content" >"$repo/$feature_file"
+    "${commit[@]}" -C "$repo" add -A
+    "${commit[@]}" -C "$repo" commit -q -m "head"
+}
+
+# The tools every run needs on its PATH besides the fake `just`: a fake
+# `sniff` reporting macOS, and the real `jq` and `python3`.
+stage_fixture_tools() {
+    local tmpdir="$1"
+    printf '#!/bin/sh\necho "{\\"os_type\\":\\"MacOS\\",\\"kernel\\":\\"Darwin\\"}"\n' >"$tmpdir/sniff"
+    chmod +x "$tmpdir/sniff"
+    ln -s "$(command -v jq)" "$tmpdir/jq"
+    ln -s "$(command -v python3)" "$tmpdir/python3"
+    mkdir -p "$tmpdir/home"
+}
+
+# Run the hook from the fixture repo as Git would: `origin` as the remote
+# argument and the given ref line on stdin. The stub planner logs its
+# invocations to planner.log and emits the plan fixture `make_fake_just`
+# recorded, if any.
+#
+# Usage: run_hook_with_ref_line <tmpdir> <mode|__UNSET__> <ref_line> [env...]
 #
 # Writes stdout to $tmpdir/out and stderr to $tmpdir/err. Always returns 0
 # itself so set -e in callers does not abort on a non-zero hook exit; the
 # real exit code is written to $tmpdir/exit.
+run_hook_with_ref_line() {
+    local tmpdir="$1" mode="$2" ref_line="$3"
+    shift 3
+    local repo="$tmpdir/repo"
+    if [ ! -d "$repo" ]; then
+        make_publishing_repo "$tmpdir"
+        stage_fixture_tools "$tmpdir"
+    fi
+    local env_args=(
+        "PATH=$tmpdir:/usr/bin:/bin"
+        "HOME=$tmpdir/home"
+        "TEST_PLANNER_LOG=$tmpdir/planner.log"
+    )
+    if [ "$mode" != "__UNSET__" ]; then
+        env_args+=("RUSTY_BISCUIT_PRE_PUSH=$mode")
+    fi
+    if [ -f "$tmpdir/planner-plan.path" ]; then
+        env_args+=("TEST_PLANNER_PLAN=$(cat "$tmpdir/planner-plan.path")")
+    fi
+    # Use `env -i` so the hook does not inherit the developer's
+    # RUSTY_BISCUIT_PRE_PUSH_* values from the surrounding shell.
+    (
+        cd "$repo" || exit 97
+        printf '%s\n' "$ref_line" \
+            | env -i "${env_args[@]}" "$@" \
+                "$HOOK" origin "$tmpdir/origin.git" >"$tmpdir/out" 2>"$tmpdir/err"
+        echo $? >"$tmpdir/exit"
+    )
+}
+
+# Push HEAD to a remote ref whose current sha the caller chooses; the remote
+# ref and sha decide the scope base.
+#
+# Usage: run_hook_in_repo <tmpdir> <mode> <remote_ref> <remote_sha> [env...]
+run_hook_in_repo() {
+    local tmpdir="$1" mode="$2" remote_ref="$3" remote_sha="$4"
+    shift 4
+    if [ ! -d "$tmpdir/repo" ]; then
+        make_publishing_repo "$tmpdir"
+        stage_fixture_tools "$tmpdir"
+    fi
+    local head
+    head="$(git -C "$tmpdir/repo" rev-parse HEAD)"
+    run_hook_with_ref_line "$tmpdir" "$mode" \
+        "refs/heads/feature $head $remote_ref $remote_sha" "$@"
+}
+
+# A push of HEAD creating `feature` on the remote, in the given mode.
+#
+# Usage: run_hook <tmpdir> <mode> [areas_override]
 run_hook() {
     local tmpdir="$1"
     local mode="$2"
     local areas="${3-__UNSET__}"
-
-    local env_args=(
-        "PATH=$tmpdir:/usr/bin:/bin"
-        "RUSTY_BISCUIT_PRE_PUSH=$mode"
-    )
+    local env_args=()
     if [ "$areas" != "__UNSET__" ]; then
         env_args+=("RUSTY_BISCUIT_PRE_PUSH_AREAS=$areas")
     fi
-
-    # Use `env -i` so the hook does not inherit the developer's
-    # RUSTY_BISCUIT_PRE_PUSH_* values from the surrounding shell. Git feeds a
-    # hook its ref lines on stdin; an empty stdin models a push of no ref, and
-    # an inherited one can leave the hook blocked in its ref loop.
-    env -i "${env_args[@]}" "$HOOK" </dev/null >"$tmpdir/out" 2>"$tmpdir/err"
-    echo $? >"$tmpdir/exit"
+    run_hook_in_repo "$tmpdir" "$mode" refs/heads/feature \
+        "0000000000000000000000000000000000000000" "${env_args[@]}"
 }
 
 # Assertion helpers.
@@ -192,14 +276,35 @@ assert_log_has() {
     return 1
 }
 
-assert_log_absent() {
-    local label="$1" tmpdir="$2"
-    if [ ! -f "$tmpdir/just.log" ] || [ ! -s "$tmpdir/just.log" ]; then
+# `needle` is matched at the start of a logged call, i.e. as the subcommand.
+assert_log_lacks() {
+    local label="$1" tmpdir="$2" needle="$3"
+    if [ ! -f "$tmpdir/just.log" ] || ! grep -q -- "^$needle" "$tmpdir/just.log"; then
         return 0
     fi
-    echo "  expected fake-just to NOT be called, but it was:" >&2
+    echo "  expected fake-just NOT to be called with: $needle" >&2
     sed 's/^/  /' "$tmpdir/just.log" >&2
     return 1
+}
+
+# The plan was resolved: the stub planner was invoked to write a plan.
+assert_planner_ran() {
+    local label="$1" tmpdir="$2"
+    if [ -f "$tmpdir/planner.log" ] && grep -qF -- "--plan-out" "$tmpdir/planner.log"; then
+        return 0
+    fi
+    echo "  expected the planner to have resolved a plan ($label)" >&2
+    if [ -f "$tmpdir/planner.log" ]; then
+        sed 's/^/  /' "$tmpdir/planner.log" >&2
+    else
+        echo "  (planner.log was never written — the hook never ran the planner)" >&2
+    fi
+    return 1
+}
+
+# The tree the stub planner lived in and ran from, as it logged them.
+planner_root() {
+    sed -n 's/^root \(.*\) cwd .*$/\1/p' "$1/planner.log" | head -n 1
 }
 
 # Each test is wrapped so a single failure does not abort the whole suite.
@@ -221,18 +326,6 @@ run_test() {
 
 # ---------- test cases ----------
 
-# `needle` is matched at the start of a logged call, i.e. as the subcommand:
-# a temp path such as biscuit-pre-push-review.XXXXXX may appear in any call.
-assert_log_lacks() {
-    local label="$1" tmpdir="$2" needle="$3"
-    if [ ! -f "$tmpdir/just.log" ] || ! grep -q -- "^$needle" "$tmpdir/just.log"; then
-        return 0
-    fi
-    echo "  expected fake-just NOT to be called with: $needle" >&2
-    sed 's/^/  /' "$tmpdir/just.log" >&2
-    return 1
-}
-
 test_scope_only_runs_no_gate_but_still_resolves_scope() {
     local tmpdir="$1"
     make_fake_just "$tmpdir" 7
@@ -240,7 +333,7 @@ test_scope_only_runs_no_gate_but_still_resolves_scope() {
     assert_exit "scope-only" "$tmpdir" 0 || return 1
     # The distinction the mode exists for: scope is calculated and reviewable,
     # no gate runs, and a failing gate exit code cannot be inherited.
-    assert_log_has "plan resolved" "$tmpdir" "ci-local --plan" || return 1
+    assert_planner_ran "plan resolved" "$tmpdir" || return 1
     assert_log_lacks "no gate" "$tmpdir" "pre-push" || return 1
 }
 
@@ -251,7 +344,7 @@ test_off_mode_is_a_deprecated_alias_of_scope_only() {
     assert_exit "off" "$tmpdir" 0 || return 1
     assert_contains "off deprecation notice" "$tmpdir/err" "deprecated" || return 1
     assert_contains "off names its replacement" "$tmpdir/err" "scope-only" || return 1
-    assert_log_has "plan resolved" "$tmpdir" "ci-local --plan" || return 1
+    assert_planner_ran "plan resolved" "$tmpdir" || return 1
     assert_log_lacks "no gate" "$tmpdir" "pre-push" || return 1
 }
 
@@ -311,8 +404,8 @@ test_strict_failing_tests_exits_nonzero_with_no_verify_hint() {
 test_unset_default_is_strict() {
     local tmpdir="$1"
     make_fake_just "$tmpdir" 7
-    env -i "PATH=$tmpdir:/usr/bin:/bin" "$HOOK" </dev/null >"$tmpdir/out" 2>"$tmpdir/err"
-    echo $? >"$tmpdir/exit"
+    run_hook_in_repo "$tmpdir" "__UNSET__" refs/heads/feature \
+        "0000000000000000000000000000000000000000"
     assert_exit "default strict" "$tmpdir" 7 || return 1
 }
 
@@ -321,13 +414,13 @@ test_default_delegates_scope_to_pre_push() {
     make_fake_just "$tmpdir" 0
     run_hook "$tmpdir" "warn"
     assert_exit "default" "$tmpdir" 0 || return 1
-    # The hook computes no scope of its own: the plan resolution, then exactly
-    # one gate call, and it is `pre-push` with no arguments.
+    # The hook resolves the trigger plan through the planner itself, then
+    # makes exactly one `just` call, and it is `pre-push` with no arguments.
+    assert_planner_ran "plan resolved" "$tmpdir" || return 1
     assert_log_has "pre-push called" "$tmpdir" "pre-push" || return 1
-    if [ "$(wc -l <"$tmpdir/just.log" | tr -d ' ')" != "2" ] \
-        || ! sed -n 1p "$tmpdir/just.log" | grep -q '^ci-local --plan --plan-out ' \
-        || [ "$(sed -n 2p "$tmpdir/just.log")" != "pre-push" ]; then
-        echo "  expected 'ci-local --plan --plan-out <file>' then exactly 'pre-push', got:" >&2
+    if [ "$(wc -l <"$tmpdir/just.log" | tr -d ' ')" != "1" ] \
+        || [ "$(sed -n 1p "$tmpdir/just.log")" != "pre-push" ]; then
+        echo "  expected exactly 'pre-push' as the only just call, got:" >&2
         sed 's/^/  /' "$tmpdir/just.log" >&2
         return 1
     fi
@@ -342,9 +435,9 @@ test_areas_override_is_passed_through() {
     assert_contains "override announced" "$tmpdir/out" "biscuit-file sniff" || return 1
     # The override narrows the local gates only; the plan a push triggers is
     # CI's computed scope, so the constraint decision must not see it.
-    if grep -F -- "ci-local" "$tmpdir/just.log" | grep -qF -- "biscuit-file"; then
+    if grep -qF -- "biscuit-file" "$tmpdir/planner.log"; then
         echo "  the plan resolution was narrowed by the selection override:" >&2
-        sed 's/^/  /' "$tmpdir/just.log" >&2
+        sed 's/^/  /' "$tmpdir/planner.log" >&2
         return 1
     fi
 }
@@ -352,17 +445,17 @@ test_areas_override_is_passed_through() {
 # ---------- execution constraints (fixes/2026-09-11-cicd-cleanup, AC17) ------
 #
 # Phase 2 froze these while the hook still read no constraint store; Phase 4
-# built it, so they now run directly. The fake `just` writes a plan that
+# built it, so they now run directly. The stub planner writes a plan that
 # executes a wsl2-ubuntu cell unless a test hands it another fixture, so each
 # refusal below is decided from a resolved plan, exactly as a real push is.
 
-# Run the hook with a passing fake `just` plus extra environment assignments.
+# Run the hook in strict mode with a passing fake `just` plus extra
+# environment assignments.
 run_hook_with_env() {
     local tmpdir="$1"
     shift
-    env -i "PATH=$tmpdir:/usr/bin:/bin" "RUSTY_BISCUIT_PRE_PUSH=strict" "$@" \
-        "$HOOK" </dev/null >"$tmpdir/out" 2>"$tmpdir/err"
-    echo $? >"$tmpdir/exit"
+    run_hook_in_repo "$tmpdir" strict refs/heads/feature \
+        "0000000000000000000000000000000000000000" "$@"
 }
 
 # The constraint store's LOCATION is Open Question 2 (recommendation: a
@@ -457,7 +550,7 @@ test_an_executing_prohibited_cell_blocks_with_its_reason() {
     assert_contains "environment named" "$tmpdir/err" "wsl2-ubuntu" || return 1
     assert_contains "reason stated" "$tmpdir/err" "do not rerun WSL for this branch" || return 1
     # Decided from the plan, before any gate: the refusal must precede pre-push.
-    assert_log_has "plan resolved" "$tmpdir" "ci-local --plan --plan-out" || return 1
+    assert_planner_ran "plan resolved" "$tmpdir" || return 1
     assert_log_lacks "no gate after refusal" "$tmpdir" "pre-push" || return 1
 }
 
@@ -465,10 +558,9 @@ test_the_constraint_is_decided_in_scope_only_mode_too() {
     local tmpdir="$1"
     make_fake_just "$tmpdir" 0 "$FIXTURES/plan-wsl-executing.json"
     write_prohibition "$tmpdir/constraints" "wsl2-ubuntu" "2099-01-01"
-    env -i "PATH=$tmpdir:/usr/bin:/bin" "RUSTY_BISCUIT_PRE_PUSH=scope-only" \
-        "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints" \
-        "$HOOK" </dev/null >"$tmpdir/out" 2>"$tmpdir/err"
-    echo $? >"$tmpdir/exit"
+    run_hook_in_repo "$tmpdir" scope-only refs/heads/feature \
+        "0000000000000000000000000000000000000000" \
+        "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
     assert_exit "scope-only refusal" "$tmpdir" 1 || return 1
     assert_contains "reason stated" "$tmpdir/err" "do not rerun WSL for this branch" || return 1
 }
@@ -483,20 +575,26 @@ test_an_unreadable_plan_blocks() {
         echo "an unreadable plan proves nothing, yet the push proceeded" >&2
         return 1
     fi
-    assert_contains "plan named" "$tmpdir/err" "cannot read the resolved plan" || return 1
+    assert_contains "review named as the failing stage" "$tmpdir/err" "Trigger review failed" || return 1
     assert_log_lacks "no gate after refusal" "$tmpdir" "pre-push" || return 1
 }
 
-test_a_failed_plan_resolution_blocks() {
+# A resolution that fails (planner error, unresolvable base, missing python3,
+# ...) is not a plan that schedules nothing: it blocks, names the stage, and —
+# since the reviewed plan IS the scope receipt — publishes no scope either.
+test_a_failed_plan_resolution_blocks_and_publishes_no_scope() {
     local tmpdir="$1"
     make_fake_just "$tmpdir" 0
-    # A resolution that fails (unresolvable base ref, missing python3, ...)
-    # is not a plan that schedules nothing.
-    echo 2 >"$tmpdir/ci-local.exit"
     write_prohibition "$tmpdir/constraints" "wsl2-ubuntu" "2099-01-01"
-    run_hook_with_env "$tmpdir" "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    run_hook_with_env "$tmpdir" "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints" \
+        "TEST_PLANNER_FAIL=1"
     assert_exit "failed resolution" "$tmpdir" 2 || return 1
+    assert_contains "stage named" "$tmpdir/err" "the planner could not resolve the committed scope" || return 1
     assert_log_lacks "no gate after failure" "$tmpdir" "pre-push" || return 1
+    if scope_receipt "$tmpdir" >/dev/null; then
+        echo "  a scope receipt was attached although the plan resolution failed" >&2
+        return 1
+    fi
 }
 
 # The hook is the single decision point: the planner is handed no store, so it
@@ -507,8 +605,9 @@ test_the_plan_resolution_is_handed_no_constraint_store() {
     make_fake_just "$tmpdir" 0
     write_prohibition "$tmpdir/constraints" "wsl2-ubuntu" "2099-01-01"
     run_hook_with_env "$tmpdir" "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
-    assert_contains "store hidden from planner" "$tmpdir/ci-local.env" "BISCUIT_CI_CONSTRAINTS_DIR=" || return 1
-    assert_not_contains "store hidden from planner" "$tmpdir/ci-local.env" "$tmpdir/constraints" || return 1
+    assert_planner_ran "plan resolved" "$tmpdir" || return 1
+    assert_not_contains "store hidden from planner" "$tmpdir/planner.log" "--constraints" || return 1
+    assert_not_contains "store hidden from planner" "$tmpdir/planner.log" "$tmpdir/constraints" || return 1
 }
 
 test_a_constraint_for_another_branch_does_not_block() {
@@ -528,7 +627,7 @@ EOF
     assert_exit "other branch" "$tmpdir" 0 || return 1
 }
 
-# The fixtures are what the fake `just` hands the hook; a fixture the planner
+# The fixtures are what the stub planner hands the hook; a fixture the planner
 # would never write proves nothing about the real plan.
 test_the_plan_fixtures_are_valid_resolved_plans() {
     local tmpdir="$1"
@@ -549,19 +648,22 @@ PYCHECK
 }
 
 # A failing run reaches the publication block — that is the Phase 4 change
-# (spec section 3.5) — but this hook process pushes no ref, so nothing is
+# (spec section 3.5) — but this fixture's tree is dirtied first, so nothing is
 # published. The distinction the fixture guards is that the failure text is
 # printed AFTER the block rather than short-circuiting past it, which is what
 # makes a complete failing cell publishable at all.
 test_a_failing_warn_run_reaches_the_publication_block() {
     local tmpdir="$1"
     make_fake_just "$tmpdir" 1
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    echo "edited" >>"$tmpdir/repo/README.md"
     run_hook "$tmpdir" "warn"
     assert_exit "warn failure" "$tmpdir" 0 || return 1
     assert_contains "failure still reported" "$tmpdir/out" "Pre-push validation failed" || return 1
-    # No outgoing head in this fixture (the hook reads no ref lines on stdin),
-    # so the guard declines before any note is written.
-    assert_not_contains "no evidence published" "$tmpdir/out" "Published" || return 1
+    # A dirty tree is not exact-tree evidence, so the guard declines before
+    # any validation note is written.
+    assert_not_contains "no evidence published" "$tmpdir/out" "cell(s) of evidence" || return 1
 }
 
 # The publication guard is one conjunction; each clause is load-bearing and
@@ -597,32 +699,6 @@ test_a_blocked_strict_push_records_locally_but_publishes_nothing() {
 # fixtures satisfy the whole publication guard for real: a pushed head, a clean
 # tree, a resolvable `origin/main`, a fake `sniff`, and the real `jq`/`python3`.
 
-# A repository with `main` on a bare `origin`, one feature commit as HEAD, and
-# the CI scripts committed so the hook's `$REPO_ROOT/scripts/ci/*.py` resolve.
-# The planner is the stub: the real one needs the Cargo workspace it lives in.
-make_publishing_repo() {
-    local tmpdir="$1"
-    local repo="$tmpdir/repo" bare="$tmpdir/origin.git"
-    local commit=(git -c user.name=hook-test -c user.email=hook@example.com -c commit.gpgsign=false)
-    git init -q -b main "$repo"
-    mkdir -p "$repo/scripts/ci"
-    cp "$REPO_ROOT"/scripts/ci/*.py "$repo/scripts/ci/"
-    cp "$FIXTURES/affected_scope_stub.py" "$repo/scripts/ci/affected_scope.py"
-    # As in the real repository: the scripts' bytecode cache must not dirty
-    # the tree, or the clean-tree guard would withhold every receipt.
-    echo "__pycache__/" >"$repo/.gitignore"
-    echo "base" >"$repo/README.md"
-    "${commit[@]}" -C "$repo" add -A
-    "${commit[@]}" -C "$repo" commit -q -m "base"
-    git init -q --bare "$bare"
-    git -C "$repo" remote add origin "$bare"
-    git -C "$repo" push -q origin main
-    git -C "$repo" checkout -q -b feature
-    echo "work" >"$repo/work.txt"
-    "${commit[@]}" -C "$repo" add -A
-    "${commit[@]}" -C "$repo" commit -q -m "head"
-}
-
 # The gate stages one passing L1 report for `alpha` and writes the plan the
 # receipt is recorded against, exactly where the hook told it to.
 make_staging_pre_push() {
@@ -635,40 +711,13 @@ printf '{"tier":"L1","package":"alpha","xml":"L1/alpha.xml","exit_code":0,"envir
 EOF
 }
 
-# The tools a publishing run needs on its PATH: a passing fake `just` that
-# stages one macOS L1 report, a fake `sniff`, and the real `jq`, `python3`,
-# `xargs`, and `grep`. The stub planner logs its invocations to planner.log.
+# The tools a publishing run needs: a passing fake `just` that stages one
+# macOS L1 report, with the stub planner emitting the matching one-cell plan.
 stage_publishing_tools() {
     local tmpdir="$1"
     make_fake_just "$tmpdir" 0 "$FIXTURES/plan-macos-executing.json"
     make_staging_pre_push "$tmpdir"
-    printf '#!/bin/sh\necho "{\\"os_type\\":\\"MacOS\\",\\"kernel\\":\\"Darwin\\"}"\n' >"$tmpdir/sniff"
-    chmod +x "$tmpdir/sniff"
-    ln -s "$(command -v jq)" "$tmpdir/jq"
-    ln -s "$(command -v python3)" "$tmpdir/python3"
-    mkdir -p "$tmpdir/home"
-}
-
-# Run the hook from the fixture repo as Git would: `origin` as the remote
-# argument and one ref line on stdin whose local sha is HEAD, so PUSHES_HEAD
-# is 1. The remote ref and sha are the caller's: they decide the scope base.
-#
-# Usage: run_hook_in_repo <tmpdir> <mode> <remote_ref> <remote_sha> [env...]
-run_hook_in_repo() {
-    local tmpdir="$1" mode="$2" remote_ref="$3" remote_sha="$4"
-    shift 4
-    local repo="$tmpdir/repo"
-    local head
-    head="$(git -C "$repo" rev-parse HEAD)"
-    (
-        cd "$repo" || exit 97
-        printf 'refs/heads/feature %s %s %s\n' "$head" "$remote_ref" "$remote_sha" \
-            | env -i "PATH=$tmpdir:/usr/bin:/bin" "HOME=$tmpdir/home" \
-                "TEST_PLANNER_LOG=$tmpdir/planner.log" \
-                "RUSTY_BISCUIT_PRE_PUSH=$mode" "$@" \
-                "$HOOK" origin "$tmpdir/origin.git" >"$tmpdir/out" 2>"$tmpdir/err"
-        echo $? >"$tmpdir/exit"
-    )
+    stage_fixture_tools "$tmpdir"
 }
 
 # A strict run pushing a branch that does not yet exist on the remote.
@@ -862,23 +911,143 @@ test_a_failed_scope_publication_is_named_and_leaves_the_exit_code_alone() {
     run_hook_in_repo "$tmpdir" scope-only refs/heads/feature "0000000000000000000000000000000000000000"
     assert_exit "unpublishable scope" "$tmpdir" 0 || return 1
     assert_contains "publication failure named" "$tmpdir/err" "Scope evidence PUBLICATION failed" || return 1
-    assert_not_contains "not a calculation failure" "$tmpdir/err" "CALCULATION failed" || return 1
+    assert_not_contains "not a recording failure" "$tmpdir/err" "RECORDING failed" || return 1
     assert_not_contains "not announced as published" "$tmpdir/out" "Published scope evidence" || return 1
     # Calculated and recorded locally; only the transfer failed.
     assert_scope_receipt_base "unpublishable scope" "$tmpdir" "$(git -C "$tmpdir/repo" rev-parse origin/main)" || return 1
 }
 
-test_a_failed_scope_calculation_is_named_and_leaves_the_exit_code_alone() {
+# ---------- the outgoing revision's committed tree (review-2, finding 1) ------
+#
+# The plan the hook reviews must be the plan CI resolves for the push: the
+# committed base..head path set, planned by the committed tree's planner,
+# manifests, and policy. The working tree is not that tree whenever it is
+# dirty, and the two failure shapes below are exactly the ones the review
+# reproduced. The stub planner logs `root <dir> cwd <dir>` so a test can see
+# which tree planned.
+
+# No temporary worktree survives the hook, whichever way it exited.
+assert_no_leftover_worktree() {
+    local label="$1" tmpdir="$2"
+    local count
+    count="$(git -C "$tmpdir/repo" worktree list | wc -l | tr -d ' ')"
+    if [ "$count" = "1" ]; then
+        return 0
+    fi
+    echo "  a temporary worktree outlived the hook ($label):" >&2
+    git -C "$tmpdir/repo" worktree list | sed 's/^/  /' >&2
+    return 1
+}
+
+test_a_committed_change_masked_by_an_unstaged_revert_is_still_reviewed() {
+    local tmpdir="$1"
+    # The feature commit changes only the source file; restoring its base
+    # contents unstaged leaves the working tree identical to the base, which
+    # is what a working-tree preview reports as "nothing to gate".
+    make_publishing_repo "$tmpdir" "pkg/alpha/src/lib.rs" "changed lib"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 0 "$FIXTURES/plan-macos-executing.json"
+    local repo="$tmpdir/repo"
+    echo "base lib" >"$repo/pkg/alpha/src/lib.rs"
+    if [ -n "$(git -C "$repo" diff --name-only "$(git -C "$repo" merge-base origin/main HEAD)")" ]; then
+        echo "  fixture error: the working tree still differs from the base" >&2
+        return 1
+    fi
+    write_prohibition "$tmpdir/constraints" "macos-latest" "2099-01-01"
+    run_hook_with_env "$tmpdir" "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    # The push sends the committed change, so CI would schedule the prohibited
+    # cell: the hook must see it and refuse.
+    assert_exit "masked committed change" "$tmpdir" 1 || return 1
+    assert_contains "prohibited cell named" "$tmpdir/err" "macos-latest" || return 1
+    assert_contains "reason stated" "$tmpdir/err" "do not rerun WSL for this branch" || return 1
+    assert_contains "committed path planned" "$tmpdir/planner.log" "-- pkg/alpha/src/lib.rs" || return 1
+    assert_log_lacks "no gate after refusal" "$tmpdir" "pre-push" || return 1
+    # Constraints are decided before the receipt is published, as they always
+    # were: a blocked push leaves no scope note behind.
+    if scope_receipt "$tmpdir" >/dev/null; then
+        echo "  a scope receipt was published for a push the constraint blocked" >&2
+        return 1
+    fi
+    assert_contains "committed tree materialized" "$tmpdir/out" "temporary worktree" || return 1
+    assert_no_leftover_worktree "masked committed change" "$tmpdir" || return 1
+}
+
+test_an_unstaged_policy_edit_never_reaches_the_committed_plan_or_receipt() {
     local tmpdir="$1"
     make_publishing_repo "$tmpdir"
     stage_publishing_tools "$tmpdir"
-    run_hook_in_repo "$tmpdir" scope-only refs/heads/feature \
-        "0000000000000000000000000000000000000000" "TEST_PLANNER_FAIL=1"
-    assert_exit "uncalculable scope" "$tmpdir" 0 || return 1
-    assert_contains "calculation failure named" "$tmpdir/err" "Scope evidence CALCULATION failed" || return 1
-    assert_not_contains "not a publication failure" "$tmpdir/err" "PUBLICATION failed" || return 1
+    local repo="$tmpdir/repo"
+    printf '{"preflight_reason": "working-tree policy"}\n' >"$repo/.github/ci/policy.json"
+    run_hook_in_repo "$tmpdir" scope-only refs/heads/feature "0000000000000000000000000000000000000000"
+    assert_exit "dirty policy" "$tmpdir" 0 || return 1
+    assert_scope_receipt_base "dirty policy" "$tmpdir" "$(git -C "$repo" rev-parse origin/main)" || return 1
+    local receipt
+    receipt="$(scope_receipt "$tmpdir")"
+    if [ "$(printf '%s' "$receipt" | jq -r '.plan.preflight_reason')" != "committed policy" ] \
+        || [ "$(printf '%s' "$receipt" | jq -r '.scope.preflight_reason')" != "committed policy" ]; then
+        echo "  the scope receipt describes the working tree's policy, not the committed one:" >&2
+        printf '%s' "$receipt" | jq '{plan: .plan.preflight_reason, scope: .scope.preflight_reason}' | sed 's/^/  /' >&2
+        return 1
+    fi
+    # The planner that produced it lived in the committed tree, not the checkout.
+    local root
+    root="$(planner_root "$tmpdir")"
+    if [ -z "$root" ] || [ "$root" = "$(cd "$repo" && pwd -P)" ]; then
+        echo "  the planner ran from the checkout ('$root') although its tree was dirty" >&2
+        return 1
+    fi
+    assert_contains "committed tree materialized" "$tmpdir/out" "temporary worktree" || return 1
+    assert_no_leftover_worktree "dirty policy" "$tmpdir" || return 1
+}
+
+test_a_clean_checkout_is_planned_in_place() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_publishing_tools "$tmpdir"
+    run_hook_in_repo "$tmpdir" scope-only refs/heads/feature "0000000000000000000000000000000000000000"
+    assert_exit "clean checkout" "$tmpdir" 0 || return 1
+    # A clean checkout IS the committed tree; no worktree is paid for.
+    if [ "$(planner_root "$tmpdir")" != "$(cd "$tmpdir/repo" && pwd -P)" ]; then
+        echo "  a clean checkout was not planned in place; the planner ran from '$(planner_root "$tmpdir")'" >&2
+        return 1
+    fi
+    assert_not_contains "no worktree announced" "$tmpdir/out" "temporary worktree" || return 1
+    assert_no_leftover_worktree "clean checkout" "$tmpdir" || return 1
+}
+
+test_a_push_that_does_not_carry_head_reviews_the_pushed_revision() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_publishing_tools "$tmpdir"
+    local repo="$tmpdir/repo" pushed
+    local commit=(git -c user.name=hook-test -c user.email=hook@example.com -c commit.gpgsign=false)
+    pushed="$(git -C "$repo" rev-parse HEAD)"
+    echo "more" >"$repo/more.txt"
+    "${commit[@]}" -C "$repo" add -A
+    "${commit[@]}" -C "$repo" commit -q -m "more"
+    run_hook_with_ref_line "$tmpdir" scope-only \
+        "refs/heads/feature $pushed refs/heads/feature 0000000000000000000000000000000000000000"
+    assert_exit "push of an older revision" "$tmpdir" 0 || return 1
+    assert_contains "pushed revision planned" "$tmpdir/planner.log" "--head $pushed -- work.txt" || return 1
+    assert_not_contains "HEAD-only path excluded" "$tmpdir/planner.log" "more.txt" || return 1
+    assert_contains "reason announced" "$tmpdir/out" "the push does not carry HEAD" || return 1
+    # Scope evidence binds HEAD, and HEAD is not going anywhere.
     if scope_receipt "$tmpdir" >/dev/null; then
-        echo "  a scope receipt was attached although the calculation failed" >&2
+        echo "  a scope receipt was attached to HEAD for a push that does not carry it" >&2
+        return 1
+    fi
+    assert_no_leftover_worktree "push of an older revision" "$tmpdir" || return 1
+}
+
+test_a_deletion_only_push_triggers_nothing_and_is_not_reviewed() {
+    local tmpdir="$1"
+    make_fake_just "$tmpdir" 0
+    run_hook_with_ref_line "$tmpdir" scope-only \
+        "(delete) 0000000000000000000000000000000000000000 refs/heads/feature $(git -C "$tmpdir/repo" rev-parse HEAD 2>/dev/null || echo 0)"
+    assert_exit "deletion" "$tmpdir" 0 || return 1
+    assert_contains "deletion announced" "$tmpdir/out" "only deletes refs" || return 1
+    if [ -f "$tmpdir/planner.log" ]; then
+        echo "  the planner ran for a push that triggers no run" >&2
         return 1
     fi
 }
@@ -910,7 +1079,7 @@ run_test "an absent prohibited environment does not block"            test_an_ab
 run_test "an executing prohibited cell blocks with its reason"        test_an_executing_prohibited_cell_blocks_with_its_reason
 run_test "the constraint is decided in scope-only mode too"           test_the_constraint_is_decided_in_scope_only_mode_too
 run_test "an unreadable plan blocks"                                  test_an_unreadable_plan_blocks
-run_test "a failed plan resolution blocks"                            test_a_failed_plan_resolution_blocks
+run_test "a failed plan resolution blocks and publishes no scope"     test_a_failed_plan_resolution_blocks_and_publishes_no_scope
 run_test "the plan resolution is handed no constraint store"          test_the_plan_resolution_is_handed_no_constraint_store
 run_test "a constraint for another branch does not block"             test_a_constraint_for_another_branch_does_not_block
 run_test "the plan fixtures are valid resolved plans"                 test_the_plan_fixtures_are_valid_resolved_plans
@@ -921,7 +1090,11 @@ run_test "a feature push records the PR base, not its previous tip"   test_a_fea
 run_test "a branch-creating push records the merge base and says so"  test_a_branch_creating_push_records_the_merge_base_and_says_so
 run_test "a dirty strict run publishes scope but no validation"       test_a_dirty_strict_run_publishes_scope_but_no_validation_receipt
 run_test "a failed scope publication is named; exit code unchanged"   test_a_failed_scope_publication_is_named_and_leaves_the_exit_code_alone
-run_test "a failed scope calculation is named; exit code unchanged"   test_a_failed_scope_calculation_is_named_and_leaves_the_exit_code_alone
+run_test "a committed change masked by an unstaged revert is reviewed" test_a_committed_change_masked_by_an_unstaged_revert_is_still_reviewed
+run_test "an unstaged policy edit never reaches the plan or receipt"  test_an_unstaged_policy_edit_never_reaches_the_committed_plan_or_receipt
+run_test "a clean checkout is planned in place"                       test_a_clean_checkout_is_planned_in_place
+run_test "a push that does not carry HEAD reviews the pushed revision" test_a_push_that_does_not_carry_head_reviews_the_pushed_revision
+run_test "a deletion-only push triggers nothing and is not reviewed"  test_a_deletion_only_push_triggers_nothing_and_is_not_reviewed
 
 echo ""
 echo "================================================"
