@@ -25,9 +25,13 @@ human_review_items:
 reviewed_by: codex/gpt-6-astra
 created: "2026-09-12T02:39:40-07:00"
 spec: 2026-09-11-cicd-cleanup/spec.md
+implemented: true
+implemented_by: claude/fable
+log: fixes/2026-09-11-cicd-cleanup/log.md
 description: "A **fix** review of `2026-09-11-cicd-cleanup/spec.md`"
 fix: 2026-09-11-cicd-cleanup/review-6.md
 previous: 2026-09-11-cicd-cleanup/review-5.md
+next: 2026-09-11-cicd-cleanup/review-7.md
 ---
 
 # Review 6
