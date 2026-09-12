@@ -44,15 +44,28 @@ the matching host first, then push once.
 
 A user's instruction not to rerun an environment also constrains CI triggered
 by a push. Verify every requested exclusion before pushing; a successful macOS
-receipt alone does not suppress WSL. The current verifier/calculator supports
-only one excluded environment per run. If that cannot satisfy the instruction,
-explain the gap before triggering CI; do not treat automatic jobs as exempt.
+receipt alone does not suppress WSL. Evidence is now combined **per cell**
+across environments: `local_evidence.py verify --cells` reads every
+`refs/notes/ci-local/<environment>` ref reachable from the outgoing head, so a
+macOS receipt from this push and a prior `cross-check` WSL receipt suppress
+their own cells together. The JUnit reports behind a hook receipt stay on the
+host that produced it, at the receipt's `host.report_dir`
+(`$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`, root default
+`~/.rusty-biscuit/ci-evidence`), so investigating a reused cell means asking
+that host. Record the restriction rather than remembering it —
+`BISCUIT_CI_CONSTRAINTS_DIR` holds prohibition records that `just ci-local
+--plan` and the pre-push hook refuse on, and that CI deliberately never reads.
+If the plan still schedules a prohibited cell, explain the gap before
+triggering CI; do not treat automatic jobs as exempt.
 
-The proposed scope-only mode publishes scope without new test outcomes, but
-is not implemented yet. `git push --no-verify` also produces no new evidence;
-already-published matching receipts remain usable by CI. See the `rust-devops`
-skill's [evidence and execution contract](../rust-devops/ci-cd.md) before
-selecting a push mode.
+`scope-only` resolves and prints the plan — so a recorded constraint is still
+enforced and the run is still reviewable — but runs no gate, publishes no
+outcomes, and excludes no CI cells. It publishes no standalone *scope* document
+either; CI recalculates scope. `off` is its deprecated alias. `git push
+--no-verify` produces no new evidence and does not invalidate already-published
+matching receipts, which CI still verifies. See the `rust-devops` skill's
+[evidence and execution contract](../rust-devops/ci-cd.md) before selecting a
+push mode.
 
 ## Read this first when a test is red on one environment only
 

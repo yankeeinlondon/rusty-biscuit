@@ -11,6 +11,13 @@ conditions that masquerade as repository defects.
   Unix (the `launched_spelling` helper does) or the two spellings differ.
   This is the macOS half of the same trap Windows has with short names
   ([windows.md](windows.md)).
+- macOS periodically sweeps files under `/tmp` that have not been accessed
+  for a few days while leaving populated directories in place. A git worktree
+  created there (the `rb-*-baseline` and `rb-*-review` checkouts) loses its
+  small `.git` pointer file first, which `git worktree list` then reports as
+  `prunable`. Do not treat that state as corruption; `git worktree prune`
+  clears the registration, and long-lived worktrees belong under
+  `~/.claudine/worktrees`, not `/tmp`.
 - `dirs::home_dir()` honors `HOME` here, which is why a hermetic-home test can
   be green on macOS and read the real home directory on Windows.
 
