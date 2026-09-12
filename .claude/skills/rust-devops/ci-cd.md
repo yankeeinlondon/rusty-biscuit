@@ -286,6 +286,18 @@ working-tree preview; a committed change masked by an unstaged revert is
 absent there and present in the hook's review, which is why the preview is
 not the decision.
 
+Each update is planned against the base of every run it triggers, because
+`ci.yml` fires `push` for `main` only and `pull_request` for every target
+branch: the remote's `main` for a push to `main`; otherwise the current remote
+tip of each open pull request's target branch (`gh pr list` on a GitHub
+remote — `gh` or `jq` missing, unauthenticated, or failing blocks the push
+and names the command), each context planned and checked in turn with the
+first failure blocking; or a provisional plan against the remote's `main` when
+no pull request is open. The pull request opened next — from the web UI, where
+no hook runs — is a trigger the hook cannot see, so the provisional plan is
+constrained too. The scope receipt binds the first context's base and is
+withheld, with its reason printed, when that base is not an ancestor of HEAD.
+
 If prior evidence cannot be reused or CI cannot express the requested
 exclusions, resolve that limitation before pushing. Preserve the restriction
 while explaining what is missing; do not silently substitute a new test run or

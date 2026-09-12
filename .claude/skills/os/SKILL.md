@@ -66,7 +66,10 @@ outcomes, and excludes no CI cells. It does publish the *scope* receipt on
 `refs/notes/ci-local/scope`, as every mode does, and CI takes it on an exact
 `{base, head, tree}` match. The hook reviews every pushed branch's COMMITTED
 plan (a temporary worktree unless the revision is the clean checkout) under that
-update's remote branch and remote, and publishes HEAD's; `just ci-local --plan`
+update's remote branch and remote, against the base of each run it triggers
+(the remote's `main` for a push to `main`; each open pull request's target tip
+on a GitHub remote, read through `gh`; otherwise a provisional plan against the
+remote's `main`), and publishes HEAD's; `just ci-local --plan`
 previews the working tree and differs exactly when the checkout is dirty. `off` is its deprecated alias. `git push
 --no-verify` produces no new evidence and does not invalidate already-published
 matching receipts, which CI still verifies. See the `rust-devops` skill's
