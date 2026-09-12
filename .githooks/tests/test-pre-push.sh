@@ -39,6 +39,8 @@
 # and never changes the exit code.
 #
 # Run directly: ./.githooks/tests/test-pre-push.sh
+# The suite must stay runnable under Bash 3.2, which is what the shebang
+# selects on a stock macOS host (/bin/bash).
 # PRE_PUSH_HOOK_UNDER_TEST=<path> runs the suite against another copy of the
 # hook (used to prove a new fixture fails against the hook it was written for).
 
@@ -221,8 +223,10 @@ run_hook() {
     if [ "$areas" != "__UNSET__" ]; then
         env_args+=("RUSTY_BISCUIT_PRE_PUSH_AREAS=$areas")
     fi
+    # macOS /bin/bash is 3.2, which treats an empty array's "${a[@]}" as unbound
+    # under `set -u`; this form expands to nothing there instead of aborting.
     run_hook_in_repo "$tmpdir" "$mode" refs/heads/feature \
-        "0000000000000000000000000000000000000000" "${env_args[@]}"
+        "0000000000000000000000000000000000000000" ${env_args[@]+"${env_args[@]}"}
 }
 
 # Assertion helpers.
@@ -424,6 +428,21 @@ test_default_delegates_scope_to_pre_push() {
         sed 's/^/  /' "$tmpdir/just.log" >&2
         return 1
     fi
+}
+
+# Harness self-check: with no override, run_hook must hand the hook no
+# selection variable at all, not an empty one, and it must do so under the
+# default shell. run_hook_with_ref_line reads HOOK dynamically, so a local
+# rebinding routes the run to a stub that records its environment.
+test_run_hook_forwards_no_selection_without_an_override() {
+    local tmpdir="$1"
+    printf '#!/usr/bin/env bash\nenv >"%s/hook.env"\n' "$tmpdir" >"$tmpdir/env-dump"
+    chmod +x "$tmpdir/env-dump"
+    local HOOK="$tmpdir/env-dump"
+    run_hook "$tmpdir" "warn"
+    assert_exit "stub hook ran" "$tmpdir" 0 || return 1
+    assert_contains "mode forwarded" "$tmpdir/hook.env" "RUSTY_BISCUIT_PRE_PUSH=warn" || return 1
+    assert_not_contains "no selection variable" "$tmpdir/hook.env" "RUSTY_BISCUIT_PRE_PUSH_AREAS" || return 1
 }
 
 test_areas_override_is_passed_through() {
@@ -1067,6 +1086,7 @@ run_test "strict + passing → exit 0"                                  test_str
 run_test "strict + failing → propagate exit and mention --no-verify"  test_strict_failing_tests_exits_nonzero_with_no_verify_hint
 run_test "unset default is strict"                                    test_unset_default_is_strict
 run_test "default path calls 'just pre-push' with no selection"       test_default_delegates_scope_to_pre_push
+run_test "run_hook forwards no selection without an override"        test_run_hook_forwards_no_selection_without_an_override
 run_test "RUSTY_BISCUIT_PRE_PUSH_AREAS override is forwarded verbatim" test_areas_override_is_passed_through
 run_test "a failing warn run reaches the publication block"           test_a_failing_warn_run_reaches_the_publication_block
 run_test "publication requires a clean, exact, unoverridden tree"     test_publication_requires_a_clean_exact_tree_and_no_override

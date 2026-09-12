@@ -76,6 +76,12 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   set; the shell stays at the repo root and `just lint`/`just test` run the
   root recipes, surfacing unrelated packages' failures. Use absolute paths and
   confirm with `pwd`.
+- **`#!/usr/bin/env bash` selects `/bin/bash` 3.2 on a stock Mac**, which
+  under `set -u` rejects `"${arr[@]}"` on an empty array as unbound and aborts
+  the script. Homebrew's Bash 5 accepts it, so the script runs for whoever has
+  Homebrew first on PATH and fails for everyone else. Write
+  `${arr[@]+"${arr[@]}"}` and avoid `mapfile`, `declare -A`, and `${v,,}` in
+  any shell script that is `#!/usr/bin/env bash`.
 
 ## Diagnosing a slow host
 
