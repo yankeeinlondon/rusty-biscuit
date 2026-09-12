@@ -28,7 +28,7 @@ initialize:
 start:
     message: "🏃 starting fix of suggestions from review #{{ file_index(review) }} of `{{ parent_dir(review) }}` (_using_ {{ctx.agent}}/{{ctx.model}} _in_ {{ctx.area || ctx.repo}})"
 success:
-    message: "✅  implemented review findings from review **#{{ file_index(review) }}** of `{{ parent_dir(review) }}` (area: **{{ctx.area}}**, wt: **{{ ctx.worktree }}**)"
+    message: "✅  implemented review findings from review **#{{ file_index(review) }}** of `{{ parent_dir(review) }}` (area: **{{ctx.area || ctx.repo }}**, wt: **{{ ctx.worktree }}**, branch: **{{ctx.branch}}**)"
     say: "the review findings in {{ without_date(parent_dir(review)) }} were implemented successfully"
     effect: bong
 failure:

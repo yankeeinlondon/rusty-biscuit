@@ -26,16 +26,26 @@ success:
         - when: "frontmatter(review,'ready') == true && frontmatter(review,'human_review') == true"
           action:
               - message: "{{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- while production ready -- does require human review"
+              - message: |-
+                    The human review items include:
+    
+                    {{ as_ordered_list(frontmatter(review,"human_review_items")) }}
               - info: |-
-                  {{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- _while production ready_ -- does require human review ({{length(frontmatter(review, 'human_review_items'))}} items):
-
-                  {{ as_ordered_list(frontmatter(review, 'human_review_items')) }}
+                    {{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- _while production ready_ -- does require human review ({{length(frontmatter(review, 'human_review_items'))}} items):
+    
+                    {{ as_ordered_list(frontmatter(review, 'human_review_items')) }}
         - when: "frontmatter(review,'ready') != true"
           action:
               - warn: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>"
               - message: "⚠️  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed but was deemed NOT production ready"
               - message: '{{ as_ordered_list( frontmatter(review,"findings") || [] ) }}'
               - effect: sad-trombone
+        - when: "frontmatter(review,'ready') != true && frontmatter(review,'human_review') == true"
+          action:
+              - message: |-
+                    In addition to the review findings, there _are_ human review items as well:
+
+                    {{ as_ordered_list(frontmatter(review, 'human_review_items')) }}
 failure:
     stderr: "{{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!"
     message: "💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area }}** failed to complete ({{err.msg}})!"
