@@ -35,6 +35,11 @@ local and hosted runs. Its package policy is deliberately narrow:
   selected, or gates nothing, is not compiled there; local `ci-local` runs
   execute no check cell. Neither ordinary dependencies nor transitive reverse
   dependencies are selected.
+- `dependent_seam.native` carries the sorted Ubuntu prerequisites of the
+  consumers' complete build closures. The projection's `dependents_native`
+  reaches only the owning Ubuntu check, where setup combines it with the
+  changed package's own requirements. Other jobs retain the original native
+  map.
 - Documentation, manifests, lockfiles, Just recipes, workflow configuration,
   and other CI configuration select no package jobs. CI tooling has compact
   contract tests of its own.
@@ -111,6 +116,14 @@ semantics:
   never come from a local receipt and are always CI-origin — do not expect a
   local-origin lint cell. A receipt is keyed by environment, so it never stands
   in for another OS, for Level 3, or for a companion suite it did not execute.
+
+Browser receipts remain supported by the existing per-cell implementation:
+only a measured `browser` outcome for the matching package and environment
+can satisfy that gate, under the same completion and gate-input verification
+as other recordable tiers. This creates no browser job or cross-environment
+coverage. Audit W9 records an explicit B0 deferral of alignment with the
+absorbed September 10 specification's browser-reuse exclusion; it is not a
+new user ruling or authorization to expand browser scheduling.
 
 These semantics are live as of 2026-09-11. The receipt is version 2, keyed per
 `{package, environment, gate}`; `strict` and `warn` both publish a complete run,
@@ -255,9 +268,11 @@ deleted without moving the exclusion metadata into the plan first.
 
 A receipt's `base` is the reviewed trigger context's base — the scope
 receipt's, so a stacked pull request records its target tip rather than a
-merge base with `origin/main` — and verification normalizes the event base
-with `git merge-base <base> <head>` before comparing, because a PR target may
-have advanced. Recording still requires an ancestor base.
+merge base with `origin/main` — and scope verification requires that exact
+comparison base, even when the PR target has advanced beyond the head's branch point. Version-2 recording
+accepts that advanced base. Validation verification uses the merge base only
+to enumerate candidate notes; reuse still requires exact tested-tree identity
+or independently recomputed gate-input equivalence.
 
 The local gates consume evidence too (ruling D2, audit W14): on a clean
 checkout the hook feeds HEAD's reviewed, evidence-overlaid plan to `just
@@ -268,6 +283,12 @@ receipt — recorded against that same plan and base, so its `scope_identity`
 is the scope receipt's plan identity — lists only the cells that ran. A dirty
 checkout or `RUSTY_BISCUIT_PRE_PUSH_AREAS` keeps the working-tree replan and
 publishes nothing, saying why.
+
+An interrupted local validation publishes no validation receipt, even when an
+earlier gate staged a passing report. The hook handles INT/TERM/HUP directly;
+`ci-local` aborts on signal exit codes and writes an `interrupted` marker in
+its report directory so the hook retains that decision across Just wrappers.
+Ordinary complete failures still publish their measured outcomes.
 
 A receipt from an **older head** is reusable only when the cell's gate-input
 identity is unchanged — the `git ls-tree` entries of the tested package's build
@@ -354,7 +375,9 @@ revision; a target the push deletes leaves its pull request no base, and the
 hook blocks that update by name. The pull request opened next — from the web UI, where
 no hook runs — is a trigger the hook cannot see, so the provisional plan is
 constrained too. The scope receipt binds the first context's base and is
-withheld, with its reason printed, when that base is not an ancestor of HEAD.
+recorded even when that base has advanced beyond HEAD's branch point. An
+all-zero branch-creation base still publishes no scope receipt. The reviewed
+plan feeds clean local validation independently of receipt publication success.
 
 If prior evidence cannot be reused or CI cannot express the requested
 exclusions, resolve that limitation before pushing. Preserve the restriction

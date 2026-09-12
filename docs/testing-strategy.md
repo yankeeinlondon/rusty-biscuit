@@ -3,7 +3,7 @@ title: Testing Strategy
 status: living
 audience: technical person but with no knowledge of this monorepo
 created: 2026-05-24
-updated: 2026-09-11
+updated: 2026-09-12
 ---
 
 # Rusty Biscuit Testing Strategy
@@ -596,10 +596,12 @@ never repeat what has already been proven.
 both CI and the local hook, so both agree on what a change affects. Its policy
 is deliberately tight:
 
-- A package that owns a changed source file gets its configured validation:
-  lint, compile check, Level 1, and any higher tiers it declares.
-- An unchanged direct reverse dependency gets a compile check and nothing
-  else. It is not linted and not tested.
+- A package that owns a changed source file gets lint, Level 1, and any higher
+  tiers it declares. Native compile checks cover declared examples and benches;
+  Level 1 already compiles the library, binaries, and test targets.
+- An unchanged direct reverse dependency receives no jobs or result cells.
+  The changed package's Ubuntu check compiles its unchanged direct consumers
+  with their required native prerequisites and reports their names.
 - Ordinary dependencies and transitive reverse dependencies are not selected
   at all.
 - Documentation, manifests, lockfiles, `just` recipes, and CI configuration
@@ -626,23 +628,27 @@ what your own machine could have told you is pure waste.
 The versioned `.githooks/pre-push` hook therefore runs `just ci-local --l2`
 before a push completes. That is the same scope calculation and the same gate
 recipes CI would use, applied to the source-changed packages: clippy, Level 1,
-a compile check for direct reverse dependencies, and every Level 2 suite the
-host can run without taking window focus. Apple Terminal and Level 3 are
-excluded for that reason. A documentation-only push gates nothing, exactly as
-in CI.
+and every Level 2 suite the host can run without taking window focus. Apple
+Terminal and Level 3 are excluded for that reason. A comparison containing
+only documentation changes gates no packages, exactly as in CI.
 
-`RUSTY_BISCUIT_PRE_PUSH` controls the hook: `strict` blocks the push on
-failure and is the default, `warn` runs and reports without blocking, and
-`off` skips it. `RUSTY_BISCUIT_PRE_PUSH_AREAS` replaces the computed scope
-with a fixed selection.
+`RUSTY_BISCUIT_PRE_PUSH` controls the hook: `strict` publishes complete
+outcomes before blocking on failure and is the default; `warn` publishes them
+without blocking. `scope-only` checks constraints and publishes scope but runs
+no gates; `off` is its deprecated alias. `RUSTY_BISCUIT_PRE_PUSH_AREAS`
+replaces the computed scope with a fixed selection and prevents reusable
+validation publication.
 
-For a clean outgoing tree the hook publishes a Git-note receipt naming the
-environment it validated, which `sniff` detects as macOS, Linux, native
-Windows, or WSL2. CI verifies that receipt against the scope it expects for
-the exact commit and tree, and then drops that environment's duplicate work.
-The other three environments still run. If the receipt is missing, stale,
-dirty, bypassed, or does not match, CI simply runs that environment as usual:
-every failure mode adds work rather than removing it.
+For a clean outgoing tree the hook uses the reviewed plan for local gates,
+skipping cells covered by qualifying passing evidence. It publishes a Git-note
+receipt with each completed package, environment, and tier outcome, including
+failures. CI verifies exact identity or unchanged gate inputs on an older head,
+combines receipts across environments, and omits only proven cells. Lint and
+check always remain CI-origin. Reused failures join the owning area's verdict;
+other environments continue running. Incomplete or rejected evidence leaves
+its cells scheduled. `just ci-local --plan` shows execution, evidence, and
+persistent constraints before any gates run; the hook enforces those
+constraints against each pushed branch's committed trigger plan.
 
 Run `just ci-local` yourself before pushing anything substantial. When the
 scope is large, run `just ci-local --lint-only` first: it takes minutes rather
@@ -669,19 +675,18 @@ check is compile evidence only; say which kind you have.
 CI is the final proof, not the discovery loop. Surface an operating system's
 exact failure on the matching host first, then push once.
 
-### What is in flight
+### Scope and validation evidence
 
-The receipt mechanism is being extended as this is written. The agreed model
-separates two claims: **scope evidence**, which records what the calculator
-selected for an exact base, head, and tree, and **validation evidence**, which
-records the outcome of each completed package, environment, and tier cell. The
-target behavior lets CI adopt a matching local scope without recalculating it,
-reuse a completed local run whether it passed or failed, exclude individual
-proven cells rather than a whole environment, and replaces `off` with a
-`scope-only` mode that publishes scope while leaving every test cell enabled.
-Until the hook, schema, workflow, rollup, tests, and documentation land
-together, the behavior described in the previous section is what actually runs.
-The specification is `fixes/2026-09-10-local-affected-scope/spec.md`.
+Scope evidence records the canonical plan for an exact base, head, and tree.
+CI adopts a matching receipt without recalculating selection or initializing
+Rust; a missing or malformed receipt falls back to CI calculation. Validation
+evidence overlays measured cell outcomes without changing selection. A
+`workflow_dispatch` run deliberately ignores both and selects the full
+workspace. The scope summary reports provenance, reused passing and failing
+cells, and rejection reasons. These mechanisms are implemented under
+`fixes/2026-09-11-cicd-cleanup/spec.md`, which absorbed the September 10
+local-affected-scope specification; hosted rollout verification remains a
+separate obligation.
 
 ### The platform matrix
 
@@ -691,7 +696,7 @@ run.
 
 | Tier | Linux | Windows | macOS | WSL2 |
 | --- | --- | --- | --- | --- |
-| Compile check, all targets | via test job | dedicated job | via test job | no |
+| Compile check, declared examples/benches | dedicated job | dedicated job | dedicated job | no |
 | Level 1 | full | full | full | full, from a prebuilt archive |
 | Level 2 | yes, tmux | policy gap | yes, tmux | policy gap |
 | Browser | yes | policy gap | policy gap | policy gap |
@@ -715,9 +720,10 @@ Other things worth knowing about the matrix:
 - **WSL2 follows Linux code paths** and is never evidence for native Windows.
   It runs from an archive built on Linux, which is why anything resolved at
   compile time to a builder path breaks there and nowhere else.
-- **The all-targets compile check runs on Windows** and nowhere else. It is the
-  only leg that compiles benches and examples. It does not deny warnings; the
-  lint job does.
+- **Native compile checks cover declared examples and benches** with explicit
+  target selectors. An additional Ubuntu check compiles unchanged direct
+  consumers inside the changed package's cell. Checks do not deny warnings;
+  the lint job does.
 - **Only the lint job treats warnings as errors.** Setting `-D warnings` on
   test legs once made a plain rustc warning fail the build before any test ran,
   and on the check job it blamed a dependency's warning on whichever package
@@ -737,11 +743,11 @@ Other things worth knowing about the matrix:
   profiles set `retries = 0`, so a deterministic failure runs exactly once. CI
   marks a test slow at thirty seconds and kills it at ninety, which is the line
   between "slow under contention" and "hung".
-- **Every configured Level 1 leg gates.** There is no `continue-on-error` on
-  any package gate. A previous "soft" mechanism did not merely make a leg
-  non-blocking, it removed the leg from the verdict, so fourteen permanently
-  red Windows directories read as a normal run. A known failure is recorded in
-  the results baseline instead, which keeps it counted and visible.
+- **Every configured Level 1 leg reaches its area's verdict.** Gate commands
+  use step-level `continue-on-error` so producers can publish failed cell
+  outcomes. The area rollup applies the baseline and blocks on unaccepted
+  failures; setup and artifact failures still fail jobs directly. The policy-free
+  `ci-gate` folds all blocking jobs. Known failures stay counted and visible.
 - **Sharding was removed.** Compiling the test binaries is most of a shard's
   cost and every shard pays it in full, so four shards cost roughly three times
   the compute to save a couple of minutes. Level 1 runs with `--no-fail-fast`
@@ -791,9 +797,9 @@ visible without blocking anyone.
 | `[package.metadata.benchmarks] required = false` is the bench opt-out | Grep-able and enforced by reviewer discretion. |
 | Windows runs full Level 1 for a selected package | Highest-risk platform for silent runtime drift; compile-only would miss it. |
 | One deterministic scope calculator shared by CI and the pre-push hook | Two calculators would disagree, and disagreement always resolves toward running more. |
-| Direct reverse dependencies get a compile check, never tests | Their behavior did not change. Testing them re-runs unaffected suites for no signal. |
-| Scope is resolved per gate, not per package | A `clippy.toml` edit cannot change test results, so it must not schedule tests. |
-| Local pre-push evidence removes that environment's CI work | The developer's machine is one of the four supported platforms and is already warm. Rediscovering its result on a hosted runner buys nothing. |
+| Unchanged direct consumers compile inside the changed package's Ubuntu check | The check tests the API seam without creating untested consumer-area results. |
+| Changed source selects its owning packages; dispatch selects the workspace | CI configuration edits run compact tooling contracts without scheduling product suites. |
+| Local evidence removes only equivalent measured cells from CI execution | Completed outcomes remain visible in their area's verdict; lint, check, and unproven cells still execute. |
 | Every evidence failure adds CI work rather than removing it | A missing, stale, or unverifiable receipt must never be read as a pass. |
 | Local evidence never substitutes for another operating system | macOS cannot stand in for Linux, and WSL2 cannot stand in for native Windows. |
 | Platform gaps are registered with an owner and expiry, not hidden | A green cell that ran zero tests is worse than an honest gap, because nobody schedules work against it. |
