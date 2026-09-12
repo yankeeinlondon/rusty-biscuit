@@ -51,9 +51,13 @@
 # `BISCUIT_CI_CONSTRAINTS_DIR` names the constraint store; `--plan-out` keeps
 # the canonical JSON as the machine interface alongside the rendered table.
 # The pre-push hook does NOT call this: it reviews each PUSHED REVISION's
-# committed tree with the planner, manifests, and policy committed there, so
-# the two differ exactly when the checkout is dirty (a committed change masked
-# by an unstaged revert is absent here and present in the hook's review).
+# committed tree with the planner, manifests, and policy committed there,
+# against the base of each run the push triggers (an open pull request's
+# target tip on the remote, or the remote's main when none is open), where
+# this preview diffs the checkout against `origin/main`. The two differ when
+# the checkout is dirty (a committed change masked by an unstaged revert is
+# absent here and present in the hook's review) and when the pull request
+# targets another branch or its target has advanced.
 #
 # Usage:
 #   just ci-local                       affected packages vs origin/main

@@ -60,6 +60,15 @@
   pushed to, never the checked-out branch or `origin` — so a committed change
   an unstaged edit masks, or a prohibition on a branch that is not checked
   out, is still reviewed and blocked.
+- The hook plans each update against the base of every run it will trigger,
+  never against `origin/main` by assumption: the remote's `main` for a push to
+  `main`; otherwise the CURRENT remote tip of the target branch of each open
+  pull request whose head it is (`gh pr list` on a GitHub remote — a missing,
+  unauthenticated, or failing `gh` blocks the push and names the command), or
+  a provisional plan against the remote's `main` when none is open. Opening a
+  pull request from the web UI is, like a retry, a trigger no hook reviews;
+  the provisional plan is the hook's only standing for it, so it is
+  constrained too.
 - Local evidence combines **per cell across environments**: every
   `refs/notes/ci-local/<environment>` ref reachable from the outgoing head is
   read, so this host's receipt and a prior WSL `cross-check` receipt suppress

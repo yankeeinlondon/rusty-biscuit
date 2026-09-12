@@ -113,9 +113,14 @@ the canonical resolved plan plus the legacy `scope.json` projection `ci.yml`
 fans out from, bound to the exact `{base, head, tree}`. The hook publishes it
 in every mode before any gate runs, from the committed path set and never the
 worktree's, so a dirty tree still publishes scope. Its base is the comparison
-base the CI event will carry: the remote's current `main` for a push to
-`main`, otherwise the merge base with `origin/main` (the pull request base
-until `main` advances). CI's scope job runs `local_evidence.py scope-verify`
+base of the first run the update triggers: the remote's current `main` for a
+push to `main` (`github.event.before`); otherwise the current remote tip of
+the target branch of the first open pull request from that head
+(`pull_request.base.sha`, listed with `gh pr list` on a GitHub remote), or the
+remote's `main` when no pull request is open yet. A target that has advanced
+past the branch point is reviewed for constraints but records no receipt —
+the receipt requires an ancestor base — and CI calculates scope itself. CI's
+scope job runs `local_evidence.py scope-verify`
 first; on an exact match it emits the carried documents as the plan and the
 policy artifact **without running the planner**, and on any miss —
 `scope-missing`, `scope-schema`, `scope-head-mismatch`, `scope-tree-mismatch`,

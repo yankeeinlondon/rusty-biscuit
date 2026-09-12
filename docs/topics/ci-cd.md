@@ -52,7 +52,14 @@ Before any gate, and in every mode, the hook publishes a **scope receipt** under
 scope job takes a matching receipt as its plan without running the planner, falls back to its own
 calculation on any miss and says which (`scope-missing`, `scope-base-mismatch`, ...), and ignores
 it on `workflow_dispatch`. The base is the one the CI event will compare with: the remote's
-current `main` for a push to `main`, otherwise the merge base with `origin/main`.
+current `main` for a push to `main` (`github.event.before`); otherwise — `ci.yml` fires
+`pull_request` for every target branch — the current remote tip of each open pull request's target
+branch (listed with `gh pr list` on a GitHub remote; a missing, unauthenticated, or failing `gh`
+blocks the push and names the command), each planned and checked in turn, or a provisional plan
+against the remote's `main` when no pull request is open. A pull request opened from the web UI is
+a trigger no hook reviews, which is why the provisional plan is constrained too. The receipt binds
+the first context's base; a target that advanced past the branch point is reviewed but records no
+receipt, and CI calculates scope itself.
 
 The hook uses `sniff` to identify macOS, Linux, native Windows, or WSL2 and publishes a
 **validation receipt** under `refs/notes/ci-local/<environment>` — schema version 2, carrying the
