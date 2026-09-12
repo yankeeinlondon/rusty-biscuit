@@ -5,9 +5,9 @@ implemented: false
 reviewed: true
 reviewed_by: claude/fable
 reviewed_on: 2026-09-11
-review_iterations: 5
+review_iterations: 6
 area: repository-ci
-depends-on:
+absorbs:
   - fixes/2026-09-10-local-affected-scope/spec.md
 ---
 
@@ -34,7 +34,7 @@ compile-only jobs for unchanged reverse dependencies.
 > inheritance as open for renegotiation.
 
 **Inherited from `fixes/2026-09-10-local-affected-scope/spec.md`** (the
-`depends-on` above; its items are assumed complete before this work starts):
+`absorbs` above; B0 in Rulings makes its items this fix's own scope):
 
 - scope evidence and validation evidence are distinct versioned documents;
 - validation evidence is keyed per `{package, environment, gate or tier}`
@@ -658,6 +658,159 @@ mechanism exists, and Design Decision 10 removes the only correctness risk
 (misreading the conclusion as an interruption). The merge-box wording is a
 presentation cost only Ken can weigh, so the fixture must show it before the
 choice is final.
+
+## Rulings
+
+Rulings by Ken, recorded as they are given. Each names the option selected and
+what the ruling authorizes; anything it does not name stays gated.
+
+### OQ3 — ruled 2026-09-12: Option C with Option B as fallback; the experiment selected Option B
+
+The merge gate is the ruleset rule pointing at `.github/workflows/ci.yml`,
+with Option B (a policy-free fixed-name conjunction job) as the fallback only
+if the scratch-repository experiment shows the rule unavailable or misbehaving
+on reruns or dispatches. The ruling authorizes the scratch-repository
+experiment that proves the rule. The live edit to `protect-your-bacon` on this
+repository remains a separate approval, given after the experiment's record
+and the implementation are ready, and lands per Validation and Rollout step 6:
+the rule is added while `ci-verdict` is still required, verified on a real
+pull request, and only then is the `ci-verdict` context and job removed in one
+change. Every advisory job must carry `continue-on-error` before the rule goes
+live.
+
+**Experiment outcome, 2026-09-12** (`fixtures/scratch-2026-09-12.md`): the
+`workflows` rule is unavailable on a user-owned repository (API 422 in five
+spellings; the documentation limits it to organization and enterprise
+rulesets), so **Option B is the mechanism**: a fixed-name `ci-gate` job that
+`needs` every area rollup, runs under `if: always()`, and whose only step
+folds `needs.*.result`, accepting `success` and `skipped`. It is the single
+required status check. Proven: a failed area blocks, an unselected area is
+skipped and does not block, a never-reporting gate blocks, a mid-flight
+cancellation blocks, a fix push clears, and `workflow_dispatch` touches no
+pull request. `continue-on-error` makes a job's result `success` for the
+fold, so it is reserved for advisory jobs only. MISSING detection stays in
+the per-area rollup because the fold accepts a skipped job by design.
+
+### OQ2 — ruled 2026-09-12: Option B, a per-repository directory on the host
+
+The constraint store defaults to `<home>/.rusty-biscuit/ci-constraints/<repo>/`
+beside the evidence directory, with `BISCUIT_CI_CONSTRAINTS_DIR` kept as an
+override. The working host is often macOS but may be any OS, and the store
+must behave identically on macOS, Linux, native Windows, and WSL2: resolve
+`<home>` with `Path.home()` in Python (never a literal `$HOME`, which native
+Windows does not set outside Git Bash), derive `<repo>` from the repository
+identity the store already computes, and prove the fresh-session case (a
+record written in one environment refuses the plan preview and the hook in a
+clean one without the variable) on every OS the cross-check covers. Cross-host
+loss is accepted: the host that would spend the time is the host holding the
+file.
+
+### OQ4 — ruled 2026-09-12: Option B, `neutral`
+
+An accepted policy gap is published as a check run with conclusion `neutral`.
+The check's name identifies the cell and its title and summary carry the
+`ACCEPTED GAP` marker, owner, expiry, explanation, and link, so the
+explanation lives in the text rather than the glyph. Section 6's request for
+a cancelled cell is superseded: `cancelled` keeps its single existing meaning
+of interruption, and the merge box stays at "All checks have passed" on pull
+requests that carry an accepted gap. The publishing job alone acquires
+`checks: write`. The scratch-repository fixture records the resulting
+presentation but no longer decides the conclusion.
+
+**Experiment outcome, 2026-09-12**: a `neutral` synthetic check leaves the
+pull request CLEAN and does not alter the run conclusion; `cancelled` puts it
+in the UNSTABLE ("some checks were not successful") state. The ruling's
+premise is confirmed.
+
+### OQ1 — ruled 2026-09-12: Option B, compile dependents inside the changed package's check job
+
+Unchanged direct reverse dependencies are compiled as a step of the changed
+package's own `check` cell on `ubuntu-latest` only, reported in that cell's
+details as "also compiled N dependents" with their names. The unchanged area
+still receives no job, entry, or cell, so AC1 holds unchanged. A dependent
+that is itself selected is excluded from the list. Hub-crate duration is
+measured in the first real run; if material, the step may be limited to a
+declared dependent list in `[package.metadata.ci]` without changing the
+presentation.
+
+### B0 — ruled 2026-09-12: the 2026-09-10 specification is absorbed into this fix
+
+`fixes/2026-09-10-local-affected-scope/spec.md` is not landed as its own fix.
+Review cycles 2 through 4 built its mechanisms here; this fix now owns every
+requirement and acceptance criterion in it, under the three supersessions the
+Relationship section already records. The `depends-on` entry above becomes an
+`absorbs` entry. The condition of the ruling is a formal pass over the 09-10
+objectives, recorded in `absorption-audit-2026-09-12.md`, which replaces
+`prerequisite-audit.md` as the reference. That audit finds the absorption
+substantive and lists fourteen work items (W1 through W14) and five missing
+tests (T1 through T5) that a deliberate implementation would have included;
+they are part of this fix's remaining scope and must be closed or explicitly
+deferred before this specification is marked implemented. Two spec-versus-code
+disagreements the audit surfaced need their own rulings and are recorded
+below as they are given: D1 (strict-failure publication) and D2 (cross-note
+conflict resolution).
+
+### D1 — ruled 2026-09-12: a complete failing `strict` run publishes its validation note
+
+09-10 R4 and AC7 stand. The hook publishes every complete per-cell outcome to
+the remote before a `strict` failure blocks the push, so a later `--no-verify`
+push of the unchanged tree reuses the known failure and runs only the other
+environments. The hook's "not published while the push is blocked" branch is
+removed, and its source-grep pin in the hook suite is replaced by a
+behavioral test that blocks the push and asserts the note reached the remote
+(audit item T2). The four documents that already say strict and warn both
+publish become correct rather than needing correction.
+
+### D2 — ruled 2026-09-12: newest wins, and new commits plan from prior evidence
+
+Cross-note conflicts for one cell resolve by recency in both directions, as
+implemented: the newest qualifying candidate settles the cell, so a newer
+pass supersedes an older failure on the same inputs and a newer failure
+supersedes an older pass. The 09-10 rule that a conflict schedules the cell is
+not adopted; the existing recency tests stand.
+
+The ruling also makes audit item W14 required behavior rather than optional
+cleanup: a new commit computes its blast radius from prior commits' evidence
+instead of blindly retesting. The hook applies the accepted set to its own
+local gates, skipping every cell that qualifying prior evidence already
+covers under gate-input equivalence, and records only the cells it ran.
+Implementation assumption, open to correction: the hook skips on prior
+*passing* evidence only. A cell whose newest prior evidence is a failure is
+rerun locally, since a local rerun is cheap and the fresh outcome supersedes
+the old one by this ruling; CI, by contrast, keeps reusing a complete failure
+and never spends a hosted runner rediscovering it.
+
+### B5 — ruled 2026-09-12: both GitHub fixtures are authorized
+
+The throwaway branch on this repository and the scratch repository under
+Ken's account are both authorized now. The scratch repository proves the OQ3
+rule (availability, `workflow_dispatch`, reruns, blocking and non-pending
+semantics, the Option B fallback) and holds every ruleset write; the
+throwaway branch proves check-run presentation (`neutral`, with `cancelled`
+and `skipped` beside it for comparison), whether a synthetic check alters
+the run conclusion, and the labels of mixed reused, executing, gapped, failed,
+and unselected cells. Assumptions, open to correction: the scratch repository
+is public, named `rusty-biscuit-ci-scratch`, and is deleted once its record
+is captured under `fixes/2026-09-11-cicd-cleanup/fixtures/`; the throwaway
+branch carries a reduced workflow that exercises only the presentation under
+test.
+
+**Status, 2026-09-12**: the scratch half is complete and recorded. The
+synthetic-check questions assigned to the throwaway branch were answered in
+the scratch repository instead, at no cost to this repository. The throwaway
+branch now owes only the nested-area display and the mixed-cell labels, and
+runs once the area workflow and gap publisher exist. The scratch repository
+was deleted on 2026-09-12 after its record was captured.
+
+### Governing principle — ruled 2026-09-12: test only what needs testing
+
+At every point in this fix, prefer the smallest verification that answers the
+question. CI turnaround currently runs to hours; every fixture, every
+selected cell, and every local gate must justify its runtime. This restates
+Validation and Rollout step 2 ("do not use the workspace's full test matrix
+just to discover check/job UI semantics") as a rule for the whole fix, and it
+is the reason W14 is required: a commit whose inputs are already proven does
+not retest them.
 
 ## Implementation Boundaries
 

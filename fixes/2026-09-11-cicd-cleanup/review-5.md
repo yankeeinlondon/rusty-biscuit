@@ -23,10 +23,15 @@ human_review_items:
 reviewed_by: codex/gpt-6-astra
 created: "2026-09-12T00:06:05-07:00"
 spec: 2026-09-11-cicd-cleanup/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/fable
+log: fixes/2026-09-11-cicd-cleanup/log.md
 description: "A **fix** review of `2026-09-11-cicd-cleanup/spec.md`"
 fix: 2026-09-11-cicd-cleanup/review-5.md
 previous: 2026-09-11-cicd-cleanup/review-4.md
+next: 2026-09-11-cicd-cleanup/review-6.md
+rulings: 2026-09-11-cicd-cleanup/spec.md#rulings
+ruled_on: "2026-09-12"
 ---
 
 # Review 5
@@ -126,3 +131,39 @@ No full-workspace suite, WSL execution, terminal window, hosted workflow trigger
 GitNexus was queried for CI flow and document impact. Its index binds this worktree to HEAD `a69c02c5c`; it does not establish the uncommitted implementation as indexed. Document impacts were UNKNOWN with no resolved callers/processes, so text inspection confirmed the review-chain and plan references before metadata edits. No code symbols were edited.
 
 The requested previous-review path under `prompts/_reviews/fixes/` returns no match through `bf reference` (the biscuit-file FileReference CLI). The existing review resolves at `fixes/2026-09-11-cicd-cleanup/review-4.md`; its `next` now points here and `implemented: true` is preserved. The specification records `review_iterations: 5`.
+
+## Rulings and pointers (2026-09-12)
+
+Ken ruled every human-review item in this review, plus the blockers and the
+absorption decisions that surfaced while ruling, on 2026-09-12. The
+authoritative text is the `## Rulings` section of `spec.md`; the entries
+below only point there and to the records each ruling produced. Nothing in
+the findings above is amended by this section.
+
+### Human-review items
+
+| Item | Ruling | Where |
+|---|---|---|
+| 1. How pull requests become eligible to merge | Option C (ruleset "Require workflows to pass") with Option B as fallback. The scratch experiment showed the rule is unavailable on a user-owned repository, so **Option B is the mechanism**: a fixed-name, policy-free `ci-gate` fold job as the single required check. | `spec.md` Rulings → OQ3; `fixtures/scratch-2026-09-12.md` Findings 1 and 2 |
+| 2. Where saved instructions live | Option B, a per-repository directory on the host beside the evidence directory, environment variable kept as override, identical behavior on macOS, Linux, native Windows, and WSL2. | `spec.md` Rulings → OQ2 |
+| 3. Cancelled or neutral for an accepted gap | **`neutral`**, superseding section 6's cancelled request. The experiment confirmed `neutral` leaves a PR CLEAN and `cancelled` makes it UNSTABLE. | `spec.md` Rulings → OQ4; `fixtures/scratch-2026-09-12.md` Finding 3 |
+| 4. Compile check for unchanged dependents | Option B, an in-job step of the changed package's check cell on Linux, reported as "also compiled N dependents". | `spec.md` Rulings → OQ1 |
+
+### Findings
+
+| Finding | Status after the rulings | Where |
+|---|---|---|
+| Simultaneous PR head and target updates bypass the constraint check | Needs no ruling; implementable now. Still open. | this review, first finding |
+| The standalone global policy verdict remains | Unblocked: replace `ci-verdict` with the `ci-gate` fold and migrate the required-check context per Validation and Rollout step 6. The live ruleset edit is a separate approval after the implementation is ready. | `spec.md` Rulings → OQ3, B5 |
+| Accepted-gap publication and hosted verification incomplete | Unblocked: publisher emits `neutral` from a job holding `checks: write`. The throwaway-branch fixture now owes only the nested-area display and mixed-cell labels, and runs once the publisher and area workflow exist. | `spec.md` Rulings → OQ4, B5; `fixtures/scratch-2026-09-12.md` |
+| Constraints disappear in an unconfigured fresh session | Unblocked: one line in `constraints.default_directory()` plus the fresh-session test on every OS. | `spec.md` Rulings → OQ2 |
+
+### Blockers and absorption decisions ruled in the same session
+
+| Decision | Ruling | Where |
+|---|---|---|
+| B0 prerequisite | The 2026-09-10 specification is **absorbed**; its requirements are this fix's own scope. A formal pass found the absorption substantive and listed fourteen work items (W1–W14) and five missing tests (T1–T5) now owned here. | `spec.md` Rulings → B0; `absorption-audit-2026-09-12.md` (supersedes `prerequisite-audit.md`) |
+| D1 strict-failure publication | A complete failing `strict` run **publishes** its validation note before blocking (09-10 R4/AC7 stand); the source-grep pin becomes a behavioral test. | `spec.md` Rulings → D1 |
+| D2 cross-note conflicts | **Newest wins** in both directions. New commits compute their blast radius from prior commits' evidence, so W14 (the hook applies accepted evidence to its own local gates) is required behavior. | `spec.md` Rulings → D2 |
+| B5 GitHub fixtures | Both authorized. Scratch half complete, recorded, and the scratch repository deleted on 2026-09-12. Throwaway-branch half deferred to implementation. | `spec.md` Rulings → B5; `fixtures/scratch-2026-09-12.md` |
+| Governing principle | Test only what needs testing; CI turnaround is measured in hours and every fixture, cell, and gate must justify its runtime. | `spec.md` Rulings → Governing principle |

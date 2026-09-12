@@ -32,14 +32,14 @@ supersedes three of 2026-09-10's decisions (compile-only reverse dependency,
 one-environment receipt, `ci-verdict`). Implementing them and then reversing
 them is wasted work. But it must be a recorded decision.
 
-Per Phase 1 task 1's own instruction, **this plan is stopped** until B0 is
-answered.
+**Ruled 2026-09-12: absorb.** Recorded in the spec's `## Rulings` (B0);
+the formal pass over the 09-10 objectives is `absorption-audit-2026-09-12.md`,
+which supersedes `prerequisite-audit.md`. The plan is no longer stopped on B0.
 
 ## B1 — OQ1: where the downstream seam gets compiled
 
-**Status: unresolved.** Plan recommendation is Option B (compile direct
-reverse dependents as a step inside the changed package's own check job, on
-`ubuntu-latest` only).
+**Status: ruled 2026-09-12 — Option B (compile direct reverse dependencies
+inside the changed package's check job); see the spec's `## Rulings`.**
 
 Measured input for the decision, from `baseline-2026-09-11.md`: the AC1
 fixture (Claudine + Playa source) currently produces four compile-only
@@ -53,8 +53,9 @@ in Phase 3 may begin.
 
 ## B2 — OQ2: where an execution constraint is persisted
 
-**Status: unresolved.** Plan recommendation is Option B (per-branch file at
-`~/.rusty-biscuit/ci-constraints/<repo>/<branch>.json`).
+**Status: ruled 2026-09-12 — Option B (per-repository directory on the host);
+see the spec's `## Rulings`.** The store must work identically on macOS,
+Linux, native Windows, and WSL2, resolving the home directory portably.
 
 One fact worth having before the ruling: the evidence directory the spec
 points at, `~/.rusty-biscuit/ci-evidence/`, is a host convention established
@@ -64,9 +65,10 @@ beside it, so both live or die with the host. That is the stated trade-off
 
 ## B3 — OQ3: the merge gate after `ci-verdict`
 
-**Status: unresolved, and the recommended option cannot be verified from
-here.** Plan recommendation is Option C (ruleset "Require workflows to
-pass"), with Option B (fixed-name conjunction job) as the fallback.
+**Status: ruled 2026-09-12 — Option C (ruleset "Require workflows to
+pass"), Option B (fixed-name conjunction job) as the fallback; see the spec's
+`## Rulings`.** The scratch-repository experiment is authorized by the ruling;
+the live ruleset edit on this repository is still a separate approval.
 
 Settled read-only:
 
@@ -87,9 +89,9 @@ a scratch repository — and it is why B3 cannot be closed without B4.
 
 ## B4 — OQ4: `cancelled` or `neutral` for accepted policy gaps
 
-**Status: unresolved.** Plan recommendation is Option A (`cancelled`) if the
-fixture shows Ken finds the merge-box wording tolerable, otherwise Option B
-(`neutral`). The wording judgement is Ken's by construction.
+**Status: ruled 2026-09-12 — Option B (`neutral`); see the spec's
+`## Rulings`.** The fixture records the presentation; it no longer decides
+the conclusion.
 
 **Concrete blocker found while measuring:** no job in `.github/workflows/ci.yml`
 currently holds `checks: write`. The top-level grant is `contents: read`; the
@@ -100,7 +102,7 @@ than hoisted to the workflow. Record this in Phase 6.
 
 ## B5 — The GitHub fixtures (Phase 1 task 3)
 
-**Status: not started — requires authorization this session cannot obtain.**
+**Status: authorized 2026-09-12 (both fixtures); see the spec's `## Rulings`, B5.**
 
 The task needs two things an agent must not do unasked:
 
@@ -163,12 +165,12 @@ start:
 
 | # | Decision | Depends on |
 |---|---|---|
-| B0 | Land 2026-09-10 first, or absorb it into Phases 3–4 | nothing — can be answered now |
-| B1 | OQ1 seam location | nothing — can be answered now |
-| B2 | OQ2 constraint store | nothing — can be answered now |
-| B5 | Authorize the throwaway branch and scratch repository | nothing — can be answered now |
-| B3 | OQ3 merge gate | **B5** — Option C is unverifiable without it |
-| B4 | OQ4 gap conclusion | **B5** — the merge-box wording must be seen |
+| B0 | Land 2026-09-10 first, or absorb it into Phases 3–4 | **ruled 2026-09-12: absorb**; audit D1/D2 pending |
+| B1 | OQ1 seam location | **ruled 2026-09-12: Option B**, in-job step |
+| B2 | OQ2 constraint store | **ruled 2026-09-12: Option B**, any host OS |
+| B5 | Authorize the throwaway branch and scratch repository | **authorized 2026-09-12; scratch half DONE**, branch half waits for the publisher and area workflow |
+| B3 | OQ3 merge gate | **ruled 2026-09-12; experiment shows Option C unavailable, Option B proven** (`fixtures/scratch-2026-09-12.md`) |
+| B4 | OQ4 gap conclusion | **ruled 2026-09-12: `neutral`** |
 
-B0, B1, B2, and B5 unblock immediately. B3 and B4 unblock only after the B5
-fixtures run.
+B0 through B5 are all ruled or authorized as of 2026-09-12. Nothing in this
+document blocks implementation any longer.

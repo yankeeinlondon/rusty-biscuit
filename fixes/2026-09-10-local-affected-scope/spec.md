@@ -1,5 +1,7 @@
 ---
-status: draft
+status: absorbed
+absorbed-by: fixes/2026-09-11-cicd-cleanup/spec.md
+absorbed-on: 2026-09-12
 created: 2026-09-10
 area: repo
 packages: []
@@ -9,6 +11,12 @@ depends-on:
 ---
 
 # Local affected scope and host-result reuse
+
+> **Absorbed 2026-09-12.** This specification was never implemented as its
+> own fix. Its scope is owned by `fixes/2026-09-11-cicd-cleanup/spec.md`
+> (Rulings, B0), which deliberately supersedes three of its decisions and
+> audits the rest in `fixes/2026-09-11-cicd-cleanup/absorption-audit-2026-09-12.md`.
+> The text below is unchanged and is read through that audit.
 
 ## Summary
 
