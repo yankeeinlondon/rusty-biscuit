@@ -6,7 +6,17 @@
 #   just _lint <pkg>                      clippy, --all-targets, NO features
 #   just _test <pkg> --no-fail-fast <test_args>   L1 with the declared CI features
 #   just _test_l2 <pkg> <test_args>        declared L2 on a hostable backend
-#   cargo check --all-targets -p <pkg>     direct reverse dependencies only
+#   cargo check <check_args>               check-ONLY packages (see below)
+#
+# The `cargo check` branch is CURRENTLY UNREACHABLE and deliberately left that
+# way. It fires only for a package whose sole selected gate is `check`, which
+# was the old unchanged-reverse-dependency shape. Those are no longer selected
+# at all, and every gating package now owns a `lint` cell, so no package can
+# carry `check` alone. The live consequence: CI schedules a `check` cell for a
+# package declaring `example` or `bench` targets and this recipe does not, so
+# an examples-only compile break surfaces in CI rather than pre-push. Widening
+# the condition would add a compile pass to every push, which is a cost
+# decision, not a drift fix.
 #
 # The lint gate deliberately builds without features: that is CI's invocation,
 # and it is where incomplete `terminal-tests`/`daemon-tests`-style gating
@@ -227,7 +237,7 @@ ci-local *args="":
     fi
 
     echo "CI scope: ${count} package(s) (class=${change_class}, full_scope=${full_scope}${full_gates:+ for ${full_gates}})"
-    echo "Gates   : $([[ ${run_lint} == 1 ]] && printf 'lint ')$([[ ${run_check} == 1 ]] && printf 'reverse-check ')$([[ ${run_test} == 1 ]] && printf 'L1 ')$([[ ${run_l2} == 1 ]] && printf 'L2')"
+    echo "Gates   : $([[ ${run_lint} == 1 ]] && printf 'lint ')$([[ ${run_check} == 1 ]] && printf 'check ')$([[ ${run_test} == 1 ]] && printf 'L1 ')$([[ ${run_l2} == 1 ]] && printf 'L2')"
     echo "------------------------------------------------"
     if (( dry_run == 1 )); then
         while IFS= read -r package; do
@@ -282,8 +292,10 @@ ci-local *args="":
     selftest_log="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-selftest.XXXXXX")"
     # `test_resolved_plan.py` carries the sniff area-drift contract (AC15),
     # which only runs where sniff is installed — a developer host, not a
-    # hosted runner.
-    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py; do
+    # hosted runner. `test_runner_loss.py` derives every producer's composite
+    # job label from the shipped workflows, so a rename that would silently
+    # kill runner-loss attribution fails here rather than on a dead runner.
+    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py test_runner_loss.py; do
         if python3 "scripts/ci/${suite}" > "${selftest_log}" 2>&1; then
             passed+=("ci-infra ${suite}")
         else
@@ -296,16 +308,17 @@ ci-local *args="":
     while IFS= read -r package; do
         [[ -n "${package}" ]] || continue
         test_args="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .test_args // ""' "${scope_file}")"
-        # Source packages carry every gate; direct reverse dependencies carry
-        # compile-check only.
+        # A package reached only through the check gate. Unreachable today (see
+        # the recipe header): every gating package owns a lint cell, so `check`
+        # is never a package's sole gate.
         gates="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .gates // ["lint","check","test"] | join(" ")' "${scope_file}")"
         if (( run_check == 1 )) && [[ " ${gates} " == " check " ]]; then
             check_args="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .check_args' "${scope_file}")"
             # shellcheck disable=SC2086
-            if cargo check --all-targets ${check_args}; then
-                passed+=("check ${package} (direct reverse dependency)")
+            if cargo check ${check_args}; then
+                passed+=("check ${package} (check-only selection)")
             else
-                failed+=("check ${package} (direct reverse dependency)")
+                failed+=("check ${package} (check-only selection)")
             fi
         fi
         if (( run_lint == 1 )) && [[ " ${gates} " == *" lint "* ]]; then

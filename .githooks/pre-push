@@ -1,25 +1,41 @@
 #!/bin/sh
 # Rusty Biscuit pre-push hook
 #
-# Runs lint, L1, and hostable L2 for source-changed packages, plus a compile
-# check for their direct reverse dependencies. A COMPLETE run — passing or
-# failing — is attached to the outgoing commit as a per-cell validation receipt
-# on an OS-specific Git notes ref; CI then omits the execution of each proven
-# cell while still expecting a result for it.
+# Runs lint, L1, and hostable L2 for source-changed packages. An unchanged
+# reverse dependency is reported by name and gates nothing. A COMPLETE run —
+# passing or failing — is attached to the outgoing commit as a per-cell
+# validation receipt on an OS-specific Git notes ref; CI then omits the
+# execution of each proven cell while still expecting a result for it.
+#
+# Separately, and in every mode, the COMMITTED scope of the outgoing head is
+# published as a scope receipt on refs/notes/ci-local/scope before any gate
+# runs. CI takes that document as its plan when it binds the event's exact
+# {base, head, tree}, and calculates scope itself on any miss. Its base is the
+# comparison base the CI event for this push will carry (see
+# publish_scope_evidence below); the receipt never depends on tree cleanliness
+# or on the gates.
 #
 # Behavior is controlled by the RUSTY_BISCUIT_PRE_PUSH environment variable:
-#   scope-only - calculate scope, run no gate, publish no validation evidence
+#   scope-only - calculate and publish scope, run no gate, publish no
+#                validation evidence
 #   off        - deprecated alias of scope-only
 #   warn       - run the gates, print failures in red, but allow the push
 #   strict     - run the gates, block the push on failure (default)
 #
 # RUSTY_BISCUIT_PRE_PUSH_AREAS (space-separated package or area names) replaces
-# the computed scope with a fixed selection.
+# the computed scope with a fixed selection for the local gates only.
 #
-# BISCUIT_CI_CONSTRAINTS_DIR names the persisted execution-constraint store. An
-# unexpired constraint blocks the push before any gate runs unless the resolved
-# plan proves the environment it forbids is not scheduled; `just ci-local --plan`
-# is the surface that can prove it.
+# Every mode first resolves the outgoing plan (`just ci-local --plan`, with
+# published evidence applied) and decides the persisted execution constraints
+# from it: a prohibited environment blocks the push only when a cell there
+# would still EXECUTE. Reused or absent cells satisfy the constraint. The store
+# is the one `scripts/ci/constraints.py` resolves (BISCUIT_CI_CONSTRAINTS_DIR,
+# else its default); an unreadable plan or record blocks.
+#
+# A published receipt names where its JUnit reports are retained on this host:
+# $BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/, with the root defaulting
+# to ~/.rusty-biscuit/ci-evidence. The reports are copied there BEFORE the
+# receipt is written, and no receipt is published if that copy fails.
 #
 # Link this hook into your local git hooks:
 #   ln -s ../../.githooks/pre-push .git/hooks/pre-push
@@ -56,42 +72,142 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR G
 SELECTION="${RUSTY_BISCUIT_PRE_PUSH_AREAS:-}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 HEAD_SHA="$(git rev-parse HEAD)"
+REMOTE_NAME="${1:-origin}"
 PUSHES_HEAD=0
-while read -r _local_ref local_sha _remote_ref _remote_sha; do
+REMOTE_REF=""
+REMOTE_SHA=""
+while read -r _local_ref local_sha remote_ref remote_sha; do
     if [ "$local_sha" = "$HEAD_SHA" ]; then
         PUSHES_HEAD=1
+        REMOTE_REF="$remote_ref"
+        REMOTE_SHA="$remote_sha"
     fi
 done
 
-# Execution constraints bind the trigger, not the gates, so they are checked
-# before any work: a push that would violate one must not first spend twenty
-# minutes proving it. CI never reads this store (Design Decision 8).
-if [ -n "${BISCUIT_CI_CONSTRAINTS_DIR:-}" ] && command -v python3 > /dev/null 2>&1; then
+SCOPE_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope.XXXXXX")"
+PLAN_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-plan.XXXXXX")"
+PLAN_REVIEW_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-review.XXXXXX")"
+RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-receipt.XXXXXX")"
+SCOPE_PLAN_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-plan.XXXXXX")"
+SCOPE_DOC_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-doc.XXXXXX")"
+SCOPE_RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-receipt.XXXXXX")"
+REPORTS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/biscuit-pre-push-reports.XXXXXX")"
+TEMP_FILES="$SCOPE_FILE $PLAN_FILE $PLAN_REVIEW_FILE $RECEIPT_FILE $SCOPE_PLAN_FILE $SCOPE_DOC_FILE $SCOPE_RECEIPT_FILE"
+# shellcheck disable=SC2086  # the list is of mktemp paths, deliberately split
+trap 'rm -f $TEMP_FILES; rm -rf "$REPORTS_DIR"' EXIT
+
+# Attach a receipt to the outgoing head on a notes ref, on top of the remote's
+# copy of that ref so the local note never overwrites another host's.
+attach_note() {
+    git fetch --no-tags "$REMOTE_NAME" "+$1:$1" >/dev/null 2>&1 || true
+    git notes --ref "$1" add -f -F "$2" "$HEAD_SHA"
+}
+
+push_note() {
+    git push --no-verify "$REMOTE_NAME" "$1:$1" >/dev/null
+}
+
+# Scope evidence (fixes/2026-09-10-local-affected-scope, R1/R2): the COMMITTED
+# base..head path set, calculated with the planner exactly as CI's scope step
+# calculates it, published in every mode before any gate, dirty tree or not.
+#
+# The base is the comparison base the CI event for this push will carry. A
+# push to main is validated by a push event whose `github.event.before` is the
+# remote's current main — the remote sha Git hands this hook. Any other ref is
+# validated by a pull_request event against the tip of main, which the merge
+# base with origin/main equals until main advances (and a base advance is
+# meant to invalidate local scope). A branch-creating push carries no base at
+# all, so it too records the merge base for the pull request run to find.
+#
+# Neither a calculation failure nor a publication failure changes the exit
+# code: CI detects the missing receipt and calculates scope itself.
+publish_scope_evidence() {
+    SCOPE_NOTES_REF="refs/notes/ci-local/scope"
+    if [ "$REMOTE_REF" = "refs/heads/main" ] \
+        && printf '%s' "$REMOTE_SHA" | grep -q '[^0]' \
+        && git cat-file -e "$REMOTE_SHA^{commit}" 2>/dev/null; then
+        SCOPE_BASE="$REMOTE_SHA"
+        SCOPE_BASE_KIND="the remote's main, the push event's before"
+    elif SCOPE_BASE="$(git merge-base origin/main "$HEAD_SHA" 2>/dev/null)" && [ -n "$SCOPE_BASE" ]; then
+        SCOPE_BASE_KIND="merge base with origin/main, the pull request base until main advances"
+    else
+        echo "Scope evidence CALCULATION skipped: origin/main does not resolve, so there is no comparison base; CI will calculate scope itself." >&2
+        return 0
+    fi
+    SHORT_HEAD="$(git rev-parse --short=9 "$HEAD_SHA")"
+    SHORT_BASE="$(git rev-parse --short=9 "$SCOPE_BASE")"
+    echo "Scope evidence base for $SHORT_HEAD: $SHORT_BASE ($SCOPE_BASE_KIND)"
+
+    if ! calculate_committed_scope >"$SCOPE_DOC_FILE" \
+        || ! python3 "$REPO_ROOT/scripts/ci/local_evidence.py" scope-record \
+            --plan "$SCOPE_PLAN_FILE" --scope "$SCOPE_DOC_FILE" \
+            --base "$SCOPE_BASE" --head "$HEAD_SHA" >"$SCOPE_RECEIPT_FILE"; then
+        echo "Scope evidence CALCULATION failed for $SHORT_HEAD; nothing is published and CI will calculate scope itself." >&2
+        return 0
+    fi
+    if attach_note "$SCOPE_NOTES_REF" "$SCOPE_RECEIPT_FILE" && push_note "$SCOPE_NOTES_REF"; then
+        echo "Published scope evidence for $SHORT_HEAD (base $SHORT_BASE) on $SCOPE_NOTES_REF."
+    else
+        echo "Scope evidence PUBLICATION failed for $SHORT_HEAD (calculated against $SHORT_BASE, not published to $REMOTE_NAME); CI will calculate scope itself." >&2
+    fi
+    return 0
+}
+
+# Mirrors ci.yml's scope step: options BEFORE `--`, then the committed path
+# set, so the receipt's documents equal what CI would compute on a miss.
+calculate_committed_scope() {
+    if git diff --quiet "$SCOPE_BASE" "$HEAD_SHA" --; then
+        python3 "$REPO_ROOT/scripts/ci/affected_scope.py" \
+            --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$HEAD_SHA" --
+    else
+        git diff --name-only -z "$SCOPE_BASE" "$HEAD_SHA" \
+            | xargs -0 python3 "$REPO_ROOT/scripts/ci/affected_scope.py" \
+                --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$HEAD_SHA" --
+    fi
+}
+
+echo ""
+if [ "$MODE" = "scope-only" ]; then
+    echo "Calculating pre-push scope only; no gate will run."
+else
+    echo "Resolving the plan this push would trigger"
+fi
+echo "------------------------------------------------"
+echo ""
+# Execution constraints bind the trigger, not the gates, so they are decided
+# before any work — from the plan CI would resolve for this head, never from a
+# selection override, which narrows only the local gates. The store is kept out
+# of this resolution so that the constraint check below is the single decision
+# point: the planner cannot filter by repository or branch, and a cell it had
+# already resolved to `prohibited` would no longer show as executing.
+# CI never reads the store (Design Decision 8).
+BISCUIT_CI_CONSTRAINTS_DIR='' just ci-local --plan --plan-out "$PLAN_REVIEW_FILE"
+PLAN_EXIT=$?
+if [ "$PLAN_EXIT" -ne 0 ]; then
+    exit "$PLAN_EXIT"
+fi
+# `ci-local --plan` exits 0 without writing a plan only when nothing differs
+# from the base ref; a push that schedules nothing violates nothing.
+if [ -s "$PLAN_REVIEW_FILE" ]; then
     if ! python3 "$REPO_ROOT/scripts/ci/constraints.py" check \
-        --directory "$BISCUIT_CI_CONSTRAINTS_DIR" \
+        --plan "$PLAN_REVIEW_FILE" \
+        --repository "$(git remote get-url origin 2>/dev/null)" \
         --branch "$(git rev-parse --abbrev-ref HEAD)"; then
         exit 1
     fi
 fi
+if [ "$PUSHES_HEAD" -eq 1 ]; then
+    publish_scope_evidence
+fi
+if [ "$MODE" = "scope-only" ]; then
+    exit 0
+fi
 
-SCOPE_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope.XXXXXX")"
-PLAN_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-plan.XXXXXX")"
-RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-receipt.XXXXXX")"
-REPORTS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/biscuit-pre-push-reports.XXXXXX")"
-trap 'rm -f "$SCOPE_FILE" "$PLAN_FILE" "$RECEIPT_FILE"; rm -rf "$REPORTS_DIR"' EXIT
 export BISCUIT_CI_SCOPE_OUT="$SCOPE_FILE"
 export BISCUIT_CI_PLAN_OUT="$PLAN_FILE"
 export BISCUIT_CI_REPORTS_OUT="$REPORTS_DIR"
 
 echo ""
-if [ "$MODE" = "scope-only" ]; then
-    echo "Calculating pre-push scope only; no gate will run."
-    echo "------------------------------------------------"
-    echo ""
-    # shellcheck disable=SC2086
-    just ci-local --plan $SELECTION
-    exit $?
-fi
 
 if [ -n "$SELECTION" ]; then
     echo "Running pre-push validation for: $SELECTION"
@@ -132,21 +248,41 @@ if [ "$PUSHES_HEAD" -eq 1 ] && [ -z "$SELECTION" ] \
         *) ENVIRONMENT="" ;;
     esac
 
-    if [ -n "$ENVIRONMENT" ] && python3 "$REPO_ROOT/scripts/ci/local_evidence.py" record-cells \
+    # The staging directory dies with this process, so the reports move to
+    # their durable home first and the receipt names that location; a receipt
+    # is never written for reports that are not there (spec section 2).
+    RETAINED=0
+    if [ -n "$ENVIRONMENT" ]; then
+        EVIDENCE_ROOT="${BISCUIT_CI_EVIDENCE_DIR:-$HOME/.rusty-biscuit/ci-evidence}"
+        case "$EVIDENCE_ROOT" in
+            /*) ;;
+            *) EVIDENCE_ROOT="$PWD/$EVIDENCE_ROOT" ;;
+        esac
+        REPORT_DIR="$EVIDENCE_ROOT/$HEAD_SHA/$ENVIRONMENT"
+        if rm -rf "$REPORT_DIR" && mkdir -p "$REPORT_DIR" && cp -R "$REPORTS_DIR/." "$REPORT_DIR/"; then
+            RETAINED=1
+        else
+            # Keep the staging directory so the run's reports can still be read.
+            # shellcheck disable=SC2086
+            trap 'rm -f $TEMP_FILES' EXIT
+            echo "Could not retain the staged reports under $REPORT_DIR; no receipt is published. The reports remain at $REPORTS_DIR." >&2
+        fi
+    fi
+
+    if [ "$RETAINED" -eq 1 ] && python3 "$REPO_ROOT/scripts/ci/local_evidence.py" record-cells \
         --plan "$PLAN_FILE" --stage "$REPORTS_DIR" --base "$BASE_SHA" \
-        --head "$HEAD_SHA" --environment "$ENVIRONMENT" >"$RECEIPT_FILE"; then
+        --head "$HEAD_SHA" --environment "$ENVIRONMENT" \
+        --report-dir "$REPORT_DIR" >"$RECEIPT_FILE"; then
         NOTES_REF="refs/notes/ci-local/$ENVIRONMENT"
-        REMOTE_NAME="${1:-origin}"
-        git fetch --no-tags "$REMOTE_NAME" "+$NOTES_REF:$NOTES_REF" >/dev/null 2>&1 || true
-        git notes --ref "$NOTES_REF" add -f -F "$RECEIPT_FILE" "$HEAD_SHA"
+        attach_note "$NOTES_REF" "$RECEIPT_FILE"
         SHORT_SHA="$(git rev-parse --short=9 "$HEAD_SHA")"
         CELLS="$(jq -r '.cells | length' "$RECEIPT_FILE")"
         if [ "$EXIT_CODE" -ne 0 ] && [ "$MODE" = "strict" ]; then
             # The branch is not going anywhere, so neither is the notes ref;
             # the local note still stands if the same head is pushed later.
-            echo "Recorded $CELLS $ENVIRONMENT cell(s) for $SHORT_SHA locally; not published while the push is blocked."
-        elif git push --no-verify "$REMOTE_NAME" "$NOTES_REF:$NOTES_REF" >/dev/null; then
-            echo "Published $CELLS $ENVIRONMENT cell(s) of evidence for $SHORT_SHA."
+            echo "Recorded $CELLS $ENVIRONMENT cell(s) for $SHORT_SHA locally; not published while the push is blocked. Reports retained under $REPORT_DIR."
+        elif push_note "$NOTES_REF"; then
+            echo "Published $CELLS $ENVIRONMENT cell(s) of evidence for $SHORT_SHA. Reports retained under $REPORT_DIR."
         else
             echo "Local evidence recorded but could not be published; CI will retain $ENVIRONMENT." >&2
         fi
