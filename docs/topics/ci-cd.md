@@ -38,8 +38,12 @@ The pipeline has four conceptual layers. Each layer answers a different question
 `.githooks/pre-push` runs `just pre-push` before `git push` completes. That is
 `just ci-local --l2`: lint and L1 plus every hostable non-focusing L2 suite for source-changed
 packages. A docs-only push gates nothing. Before any gate, the hook resolves the plan the push
-would trigger (`just ci-local --plan`) and refuses on a recorded execution constraint only when a
+would trigger — from the outgoing revision's COMMITTED tree (its own planner, manifests, and
+policy, in a temporary worktree when the checkout is dirty), never the working tree — applies
+published evidence to it, prints it, and refuses on a recorded execution constraint only when a
 cell in the prohibited environment would still execute; reused or absent cells satisfy it.
+`just ci-local --plan` is the working-tree preview of that review; the two differ exactly when
+the checkout is dirty.
 
 Before any gate, and in every mode, the hook publishes a **scope receipt** under
 `refs/notes/ci-local/scope`: the resolved plan and `scope.json` projection for the COMMITTED
@@ -66,8 +70,10 @@ cannot pass for a tested cell. An L2 cell is `partial` unless a backend it requi
 a test — an absent backend makes the suite *skip*, and nextest prints PASS in about 0.02 s.
 `lint` and `check` stage no report and are therefore always CI-origin.
 
-CI reads **every** environment's notes ref reachable from the outgoing head, so a macOS receipt
-from this push and a prior `cross-check` WSL receipt combine in one answer. A receipt from an
+CI reads **every** note on every environment's notes ref between the merge base and the outgoing
+head, so a macOS receipt from this push and a prior `cross-check` WSL receipt combine in one
+answer, and two receipts on one environment covering different packages combine across commits;
+each cell is resolved by the newest note that qualifies for it. A receipt from an
 **older head** is accepted per cell when that cell's *gate-input identity* is unchanged — the
 `git ls-tree` entries of the tested package's build closure (dev-dependencies and the lockfile
 included) plus that gate's global inputs — and the comparison is recomputed over both trees

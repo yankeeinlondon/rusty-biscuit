@@ -6,7 +6,7 @@ is also their validator.
 
 | Document | Version | Written by | Read by |
 |---|---|---|---|
-| Resolved plan | 1 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
+| Resolved plan | 2 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
 | Validation receipt | 2 | the pre-push hook, `scripts/cross-check.sh` | `scripts/ci/local_evidence.py`, the planner, `ci-rollup` |
 | Scope receipt | 1 | the pre-push hook (`local_evidence.py scope-record`) | `ci.yml` through `local_evidence.py scope-verify` |
 
@@ -33,18 +33,27 @@ so Rust tooling can assert against it without running Python. Regenerate it with
 >
 > A third document, the rollup's own `ci-results.json`, is **not** defined here:
 > it is Rust-owned by `scripts/ci-rollup.rs` and is at `schema_version: 3`,
-> versioned independently of the plan's 1, the receipt's 2, and the baseline's
+> versioned independently of the plan's 2, the receipt's 2, and the baseline's
 > 2. The plan fields that tool reads are asserted against `contract.json` by
 > `plan_fields_match_the_frozen_contract`, so renaming one breaks a test rather
 > than silently dropping a field serde never recognized.
 >
-> The version-1 field list has been amended twice, both times additively and
+> The version-1 field list was amended twice, both times additively and
 > both times without a version bump because no consumer had read the document
 > yet: `source_packages` and `reverse_dependencies` first (AC1 is stated over
 > the difference between "changed" and "selected", and the OQ1 seam report needs
 > the dependent names), then the optional `input_paths` (a package's build
 > closure, which the gate-input identity is defined over) and
 > `evidence_rejections`.
+>
+> Version 2 makes a carried plan self-sufficient: CI applies verified evidence
+> to a matching scope receipt (`affected_scope.py --apply-to`) and re-projects
+> `scope.json` from it without re-selecting, so the plan carries the
+> `environments` table it was resolved against, each package's
+> `l1_include_slow` and (for `gates = false`) its `exclusion`, and each cell's
+> `reusable`. They are required, so a version-1 scope receipt misses as
+> `scope-schema` and CI calculates scope itself — the miss the receipt
+> contract permits — rather than hitting and then having to re-run selection.
 
 ## Resolved plan
 
@@ -70,6 +79,12 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   and which direct reverse dependents were reported but selected nowhere. An
   unchanged dependent receives no area, package record, or cell (AC1); whether
   its seam is compiled at all is Open Question 1.
+- `environments[]` — the `.github/ci/environments.json` records the cells were
+  resolved against, verbatim: the runner labels, native keys, and capabilities
+  that evidence application and the legacy projection read.
+- `l1_include_slow` on a package record, and `exclusion` on exactly the
+  records whose `gates` list is empty — the policy facts the legacy matrix and
+  rollup policy documents are projected from.
 - `input_paths[]` on a package record — the manifest directories of its build
   closure, dev-dependencies included. The gate-input identity of a cell is
   computed over these plus that gate's global inputs; a plan that omits them
@@ -79,8 +94,10 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   so a reviewer can tell a missing receipt from a rejected one. Optional.
 - `cells[]` — one record per `{package, environment, gate}`, carrying
   `execution` (what will happen), `origin` (where the result comes from),
-  `state` (what is true now), the target kinds covered, which gate supplied the
-  compile coverage, and a selection reason.
+  `state` (what is true now), `reusable` (whether any local receipt may ever
+  satisfy it — false for `check` and for the L1 host a companion suite needs),
+  the target kinds covered, which gate supplied the compile coverage, and a
+  selection reason.
 - `accepted_evidence[]`, `policy_gaps[]`, `prohibited_cells[]` — the three
   reasons a cell is not executed, kept as separate lists so none can be
   silently read as another.
@@ -137,7 +154,10 @@ and head, and that the projection carries every key the workflow reads
 is the verifier's, in R3's order: schema, head, tree, base, then structure.
 
 CI reads it from the event head only and, on a hit, writes both documents out
-in place of running the planner. Its miss codes are `SCOPE_REJECTIONS`
+in place of running the planner; verified validation evidence is then applied
+to the carried plan (`affected_scope.py --apply-to`) and the projection is
+re-derived from the result, still without selection. Its miss codes are
+`SCOPE_REJECTIONS`
 (`scope-missing`, `scope-schema`, `scope-head-mismatch`, `scope-tree-mismatch`,
 `scope-base-mismatch`, `scope-malformed`), kept apart from the cell rejections
 below because they refuse a whole document rather than one outcome.

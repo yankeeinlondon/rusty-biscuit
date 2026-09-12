@@ -122,9 +122,15 @@ policy artifact **without running the planner**, and on any miss —
 `scope-base-mismatch`, `scope-malformed` — it calculates scope exactly as
 before and names the code in the summary's `scope source` row.
 `workflow_dispatch` never consults it. When a matching receipt is combined
-with accepted validation cells, the planner re-resolves execution once and its
-selected areas and packages are *compared* with the receipt's; a disagreement
-fails the scope job rather than letting either side win silently.
+with accepted validation cells, selection still never runs: the accepted set is
+applied to the carried plan (`affected_scope.py --apply-to`, which reads no
+manifest, policy, or environment table) and `scope.json` is re-projected from
+the result. Only a cell's execution, origin, state, and evidence, plus the
+fields derived from them (`accepted_evidence`, `evidence_rejections`,
+`prohibited_cells`, `job_estimate`, `change_class`, `preflight_os`,
+`preflight_reason`), can differ from the receipt; every other execution
+attribute reaches the fan-out as the hook resolved it. The same operation
+applies evidence on a scope miss, after the one selection run.
 
 The **validation receipt** is what a host measured. The pre-push hook runs
 lint plus L1 and hostable L2 for source-changed packages. It uses `sniff os --json` to identify macOS, Linux, native Windows,
@@ -157,14 +163,20 @@ L1, L2, and browser only: `lint` and `check` stage no report and are always
 CI-origin, and an environment needed by a companion suite is retained even if
 that duplicates its Rust L1 run. Manual full-scope runs ignore local receipts.
 
-`local_evidence.py verify --cells` reads **every** environment's notes ref
-reachable from the outgoing head and returns the accepted cells from all of
-them, plus a coded reason per refusal. A macOS receipt from this push and a
-prior WSL receipt from `cross-check` therefore combine in one run. The scope
-calculator takes that set (`--accepted-cells`); an accepted cell has its
-*execution* omitted and stays a *cell* with local origin, so the rollup expects
-a local-origin result for it rather than reporting MISSING — the PR #76
-regression.
+`local_evidence.py verify --cells` reads **every** note on every environment's
+notes ref between the merge base and the outgoing head and returns the accepted
+cells from all of them, plus a coded reason per refused candidate. A macOS
+receipt from this push and a prior WSL receipt from `cross-check` therefore
+combine in one run, and so do two receipts on one environment that covered
+different packages on successive commits: each cell goes to the newest note that
+qualifies for it, so an older pass never overrides a newer complete failure and
+a refused newer note never hides an older one that still qualifies. The scope
+calculator applies that set to the plan in hand (`--apply-to` with
+`--accepted-cells`); an accepted cell has its *execution* omitted and stays a
+*cell* with local origin, so the rollup expects a local-origin result for it
+rather than reporting MISSING — the PR #76 regression. A cell records whether
+a receipt may ever satisfy it (`reusable`): `check` cells and the L1 host a
+companion suite needs are never reused, whatever a receipt claims.
 
 A receipt from an **older head** is accepted only when the cell's *gate-input
 identity* is unchanged: the `git ls-tree` entries of the tested package's build
@@ -186,9 +198,12 @@ remembered: each record names an environment, an optional gate, a reason, an
 owner, an expiry, and optionally a repository and branch. `just ci-local --plan`
 and the pre-push hook read it; **CI never does**, so a constraint can only stop
 a push and can never make CI silently skip required coverage. The hook resolves
-the outgoing plan first and decides from its executions: a prohibited
-environment blocks only when a cell there would still execute, so reused or
-absent cells satisfy the record. The repository field is the `origin` URL
+the outgoing plan first — from the outgoing revision's committed `base..head`
+path set, planned by the committed tree's own planner, manifests, and policy
+(a temporary worktree when the checkout is dirty), never from the working
+tree — and decides from its executions: a prohibited environment blocks only
+when a cell there would still execute, so reused or absent cells satisfy the
+record. That reviewed plan is the scope receipt it then publishes. The repository field is the `origin` URL
 without scheme, credentials, or `.git` (`github.com/yankeeinlondon/rusty-biscuit`),
 so one record covers every spelling and worktree of a clone. An expired record
 is announced and ignored; a malformed one blocks, because an instruction that
@@ -199,10 +214,11 @@ still Open Question 2 of `fixes/2026-09-11-cicd-cleanup/spec.md` and is
 deliberately empty until Ken rules; `constraints.default_directory()` is the one
 line that fills it.
 
-`just ci-local --plan` is the review surface: it resolves the plan, prints every
-cell with its execution, origin, state, evidence, and governance, and exits
-non-zero when a prohibited cell has no qualifying evidence. It runs no gate and
-starts no build.
+`just ci-local --plan` is the developer's working-tree preview of that review:
+it resolves the plan, prints every cell with its execution, origin, state,
+evidence, and governance, and exits non-zero when a prohibited cell has no
+qualifying evidence. It runs no gate and starts no build. It and the hook's
+review differ exactly when the checkout is dirty.
 
 Skipping the local hook with `--no-verify` creates no new evidence but does not
 disable previously published matching notes. CI still verifies those notes.
