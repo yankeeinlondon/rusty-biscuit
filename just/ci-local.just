@@ -50,7 +50,7 @@
 # runs no gate and builds nothing, so it is safe to run before every push.
 # `BISCUIT_CI_CONSTRAINTS_DIR` names the constraint store; `--plan-out` keeps
 # the canonical JSON as the machine interface alongside the rendered table.
-# The pre-push hook does NOT call this: it reviews the OUTGOING REVISION's
+# The pre-push hook does NOT call this: it reviews each PUSHED REVISION's
 # committed tree with the planner, manifests, and policy committed there, so
 # the two differ exactly when the checkout is dirty (a committed change masked
 # by an unstaged revert is absent here and present in the hook's review).

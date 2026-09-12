@@ -53,10 +53,13 @@
 - Before pushing, review `just ci-local --plan` — the resolved cells with their
   execution, origin, state, and evidence — against every active constraint.
   Verifying one exclusion does not establish that the others are satisfied.
-  That preview reads the working tree; the hook itself reviews the outgoing
-  revision's COMMITTED plan (its own planner, manifests, and policy, in a
-  temporary worktree when the checkout is dirty), so a committed change an
-  unstaged edit masks is still reviewed and blocked.
+  That preview reads the working tree; the hook itself reviews EVERY branch
+  update the push carries — each revision's COMMITTED plan (its own planner,
+  manifests, and policy, in a temporary worktree unless it is the clean
+  checkout), checked against that update's remote branch and the remote being
+  pushed to, never the checked-out branch or `origin` — so a committed change
+  an unstaged edit masks, or a prohibition on a branch that is not checked
+  out, is still reviewed and blocked.
 - Local evidence combines **per cell across environments**: every
   `refs/notes/ci-local/<environment>` ref reachable from the outgoing head is
   read, so this host's receipt and a prior WSL `cross-check` receipt suppress

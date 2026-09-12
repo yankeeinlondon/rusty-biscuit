@@ -37,11 +37,12 @@ The pipeline has four conceptual layers. Each layer answers a different question
 
 `.githooks/pre-push` runs `just pre-push` before `git push` completes. That is
 `just ci-local --l2`: lint and L1 plus every hostable non-focusing L2 suite for source-changed
-packages. A docs-only push gates nothing. Before any gate, the hook resolves the plan the push
-would trigger — from the outgoing revision's COMMITTED tree (its own planner, manifests, and
-policy, in a temporary worktree when the checkout is dirty), never the working tree — applies
-published evidence to it, prints it, and refuses on a recorded execution constraint only when a
-cell in the prohibited environment would still execute; reused or absent cells satisfy it.
+packages. A docs-only push gates nothing. Before any gate, the hook reviews every branch update
+the push carries, in order — each revision's COMMITTED tree (its own planner, manifests, and
+policy, in a temporary worktree unless it is the clean checkout), never the working tree — applies
+published evidence to it, prints it, and refuses on a recorded execution constraint scoped to that
+update's remote branch (either name when the refspec renames) and remote only when a cell in the
+prohibited environment would still execute; reused or absent cells satisfy it.
 `just ci-local --plan` is the working-tree preview of that review; the two differ exactly when
 the checkout is dirty.
 

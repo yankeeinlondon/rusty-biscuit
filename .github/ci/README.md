@@ -197,13 +197,15 @@ A restriction such as "do not rerun WSL" is recorded in a constraint store, not
 remembered: each record names an environment, an optional gate, a reason, an
 owner, an expiry, and optionally a repository and branch. `just ci-local --plan`
 and the pre-push hook read it; **CI never does**, so a constraint can only stop
-a push and can never make CI silently skip required coverage. The hook resolves
-the outgoing plan first — from the outgoing revision's committed `base..head`
-path set, planned by the committed tree's own planner, manifests, and policy
-(a temporary worktree when the checkout is dirty), never from the working
-tree — and decides from its executions: a prohibited environment blocks only
-when a cell there would still execute, so reused or absent cells satisfy the
-record. That reviewed plan is the scope receipt it then publishes. The repository field is the `origin` URL
+a push and can never make CI silently skip required coverage. The hook reviews
+every branch update the push carries first — each revision's committed
+`base..head` path set, planned by its committed tree's own planner, manifests,
+and policy (a temporary worktree unless it is the clean checkout), never the
+working tree — under that update's remote branch (both names when the refspec
+renames) and the remote being pushed to, and decides from its executions: a
+prohibited environment blocks only when a cell there would still execute, so
+reused or absent cells satisfy the record. HEAD's reviewed plan is the scope
+receipt it then publishes. The repository field is the remote's URL
 without scheme, credentials, or `.git` (`github.com/yankeeinlondon/rusty-biscuit`),
 so one record covers every spelling and worktree of a clone. An expired record
 is announced and ignored; a malformed one blocks, because an instruction that
