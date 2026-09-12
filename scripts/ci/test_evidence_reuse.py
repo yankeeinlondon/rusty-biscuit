@@ -182,6 +182,7 @@ class EvidenceFixture(unittest.TestCase):
                     "l2_backends": [],
                     "runner_tools": [],
                     "companion_suites": [],
+                    "l1_include_slow": False,
                     "native": {},
                     # The build closure the gate-input identity covers. Real
                     # plans get this from `cargo metadata`; here the two
@@ -193,6 +194,20 @@ class EvidenceFixture(unittest.TestCase):
             ],
             "source_packages": ["alpha"],
             "reverse_dependencies": [],
+            "environments": [
+                {
+                    "name": name,
+                    "runner": "windows-latest" if name == "wsl2-ubuntu" else name,
+                    "native_key": "ubuntu-latest" if name == "wsl2-ubuntu" else name,
+                    "capabilities": {
+                        "tmux": name in ("ubuntu-latest", "macos-latest"),
+                        "headless_browser": name == "ubuntu-latest",
+                        "node_pnpm": name == "ubuntu-latest",
+                        "archive_only": name == "wsl2-ubuntu",
+                    },
+                }
+                for name in schema.ENVIRONMENTS
+            ],
             "cells": cells,
             "accepted_evidence": [],
             "policy_gaps": [],
@@ -212,6 +227,7 @@ class EvidenceFixture(unittest.TestCase):
             "execution": "execute",
             "origin": "ci",
             "state": "pending",
+            "reusable": True,
             "target_kinds": ["lib", "test"],
             "compile_coverage_from": gate,
             "selection_reason": "source package on a required environment",
@@ -624,6 +640,203 @@ class LegacyReceiptTests(EvidenceFixture):
                 encoding="utf-8",
             )
         return path
+
+
+class SuccessiveReceiptTests(EvidenceFixture):
+    """AC5/AC7: receipts on successive commits of one environment combine per cell.
+
+    A later run that covered fewer packages must not hide an older, still
+    valid receipt for the packages it did not cover; conflicts on one cell go
+    to the newest qualifying candidate, whatever its outcome.
+    """
+
+    ENV = "wsl2-ubuntu"
+
+    def advance(self, relative: str, text: str) -> str:
+        self.write(relative, text)
+        self.git("commit", "-q", "-am", f"touch {relative}")
+        self.head = self.git("rev-parse", "HEAD")
+        self.plan_path.write_text(schema.canonical(self.plan()), encoding="utf-8")
+        return self.head
+
+    def receipt_at(self, commit: str, cells: list[dict], environment: str = ENV) -> dict:
+        return self.receipt(
+            environment, cells, head=commit, tree=self.git("rev-parse", f"{commit}^{{tree}}")
+        )
+
+    def legacy_note_at(self, commit: str, environment: str = "macos-latest") -> dict:
+        return {
+            "schema_version": 1,
+            "base": self.base,
+            "head": commit,
+            "tree": self.git("rev-parse", f"{commit}^{{tree}}"),
+            "environment": environment,
+            "source_packages": ["alpha"],
+            "reverse_dependencies": [],
+            "l1_packages": ["alpha"],
+            "l2_packages": [],
+        }
+
+    def by_key(self, accepted: list[dict]) -> dict[str, dict]:
+        return {
+            f"{cell['package']}/{cell['environment']}/{cell['gate']}": cell for cell in accepted
+        }
+
+    def test_a_newer_partial_receipt_does_not_hide_an_older_one(self) -> None:
+        # The review's reproduction: alpha on C1, an unrelated commit C2 that
+        # carries beta only, both packages' inputs unchanged.
+        first = self.head
+        self.add_note(self.ENV, self.receipt_at(first, [self.receipt_cell("alpha")]), first)
+        second = self.advance("docs/unrelated.md", "more prose\n")
+        self.add_note(self.ENV, self.receipt_at(second, [self.receipt_cell("beta")]), second)
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        cells = self.by_key(accepted)
+        self.assertEqual(["alpha/wsl2-ubuntu/L1", "beta/wsl2-ubuntu/L1"], sorted(cells))
+        self.assertEqual("prior-local", cells["alpha/wsl2-ubuntu/L1"]["origin"])
+        self.assertEqual(first, cells["alpha/wsl2-ubuntu/L1"]["evidence"]["commit"])
+        self.assertEqual("local", cells["beta/wsl2-ubuntu/L1"]["origin"])
+        self.assertEqual(second, cells["beta/wsl2-ubuntu/L1"]["evidence"]["commit"])
+        self.assertEqual([], rejections)
+
+    def test_an_older_cell_whose_inputs_changed_is_refused_and_its_sibling_kept(self) -> None:
+        first = self.head
+        self.add_note(self.ENV, self.receipt_at(first, [self.receipt_cell("alpha")]), first)
+        second = self.advance("pkg/alpha/src/lib.rs", "pub fn alpha() { /* v2 */ }\n")
+        self.add_note(self.ENV, self.receipt_at(second, [self.receipt_cell("beta")]), second)
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        self.assertEqual(["beta/wsl2-ubuntu/L1"], self.keys(accepted))
+        self.assertEqual(1, len(rejections), rejections)
+        self.assertTrue(rejections[0].startswith("gate-inputs-changed:"), rejections)
+        self.assertIn(first[:9], rejections[0])
+
+    def test_a_malformed_newer_note_does_not_hide_an_older_one(self) -> None:
+        first = self.head
+        self.add_note(
+            self.ENV,
+            self.receipt_at(first, [self.receipt_cell("alpha"), self.receipt_cell("beta")]),
+            first,
+        )
+        second = self.advance("docs/unrelated.md", "more prose\n")
+        self.add_note(self.ENV, "{not json", second)
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        self.assertEqual(["alpha/wsl2-ubuntu/L1", "beta/wsl2-ubuntu/L1"], self.keys(accepted))
+        self.assertEqual({first}, {cell["evidence"]["commit"] for cell in accepted})
+        self.assertEqual(1, len(rejections), rejections)
+        self.assertTrue(rejections[0].startswith("malformed-receipt:"), rejections)
+        self.assertIn(second[:9], rejections[0])
+
+    def test_a_newer_complete_failure_shadows_an_older_pass(self) -> None:
+        first = self.head
+        self.add_note(self.ENV, self.receipt_at(first, [self.receipt_cell("alpha")]), first)
+        second = self.advance("docs/unrelated.md", "more prose\n")
+        failing = self.receipt_cell(
+            "alpha", outcome="fail", exit_code=100, failed_tests=["alpha::boom"]
+        )
+        self.add_note(self.ENV, self.receipt_at(second, [failing]), second)
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.keys(accepted))
+        self.assertEqual("fail", accepted[0]["outcome"])
+        self.assertEqual("local", accepted[0]["origin"])
+        self.assertEqual(second, accepted[0]["evidence"]["commit"])
+        self.assertEqual([], rejections)
+
+    def test_a_newer_pass_shadows_an_older_failure_too(self) -> None:
+        # Precedence is recency, not outcome: the newest qualifying candidate
+        # wins in both directions.
+        first = self.head
+        failing = self.receipt_cell(
+            "alpha", outcome="fail", exit_code=100, failed_tests=["alpha::boom"]
+        )
+        self.add_note(self.ENV, self.receipt_at(first, [failing]), first)
+        second = self.advance("docs/unrelated.md", "more prose\n")
+        self.add_note(self.ENV, self.receipt_at(second, [self.receipt_cell("alpha")]), second)
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.keys(accepted))
+        self.assertEqual("pass", accepted[0]["outcome"])
+        self.assertEqual(second, accepted[0]["evidence"]["commit"])
+        self.assertEqual([], rejections)
+
+    def test_an_older_v1_note_does_not_claim_a_cell_a_newer_v2_note_resolved(self) -> None:
+        # An empty commit keeps the tree, so the older v1 note is exact-tree
+        # eligible for the head and would otherwise claim both cells.
+        first = self.head
+        self.add_note("macos-latest", self.legacy_note_at(first), first)
+        self.git("commit", "-q", "--allow-empty", "-m", "empty")
+        self.head = self.git("rev-parse", "HEAD")
+        self.plan_path.write_text(schema.canonical(self.plan()), encoding="utf-8")
+        self.add_note(
+            "macos-latest",
+            self.receipt_at(self.head, [self.receipt_cell("alpha")], "macos-latest"),
+            self.head,
+        )
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        cells = self.by_key(accepted)
+        self.assertEqual(["alpha/macos-latest/L1", "beta/macos-latest/L1"], sorted(cells))
+        alpha, beta = cells["alpha/macos-latest/L1"], cells["beta/macos-latest/L1"]
+        self.assertEqual(self.head, alpha["evidence"]["commit"])
+        self.assertNotEqual(schema.UNRECORDED_MEASUREMENT, alpha["measurements"])
+        self.assertEqual(schema.UNRECORDED_MEASUREMENT, beta["measurements"])
+        self.assertEqual([], rejections)
+
+    def test_a_v1_note_on_the_head_is_not_overridden_by_an_older_v2_note(self) -> None:
+        first = self.head
+        self.add_note(
+            "macos-latest",
+            self.receipt_at(first, [self.receipt_cell("alpha")], "macos-latest"),
+            first,
+        )
+        second = self.advance("docs/unrelated.md", "more prose\n")
+        self.add_note("macos-latest", self.legacy_note_at(second), second)
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        cells = self.by_key(accepted)
+        self.assertEqual(["alpha/macos-latest/L1", "beta/macos-latest/L1"], sorted(cells))
+        for cell in cells.values():
+            self.assertEqual(schema.UNRECORDED_MEASUREMENT, cell["measurements"])
+            self.assertEqual(1, cell["evidence"]["schema_version"])
+            self.assertNotIn("commit", cell["evidence"])
+        self.assertEqual([], rejections)
+
+    def test_a_head_note_and_two_older_notes_on_another_environment_combine(self) -> None:
+        first = self.head
+        self.add_note(self.ENV, self.receipt_at(first, [self.receipt_cell("alpha")]), first)
+        second = self.advance("docs/unrelated.md", "more prose\n")
+        self.add_note(self.ENV, self.receipt_at(second, [self.receipt_cell("beta")]), second)
+        third = self.advance("docs/unrelated.md", "even more prose\n")
+        self.add_note(
+            "macos-latest",
+            self.receipt_at(
+                third, [self.receipt_cell("alpha"), self.receipt_cell("beta")], "macos-latest"
+            ),
+            third,
+        )
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        cells = self.by_key(accepted)
+        self.assertEqual(
+            {
+                "alpha/macos-latest/L1": ("local", third),
+                "beta/macos-latest/L1": ("local", third),
+                "alpha/wsl2-ubuntu/L1": ("prior-local", first),
+                "beta/wsl2-ubuntu/L1": ("prior-local", second),
+            },
+            {key: (cell["origin"], cell["evidence"]["commit"]) for key, cell in cells.items()},
+        )
+        self.assertEqual([], rejections)
 
 
 class NoVerifyTests(EvidenceFixture):

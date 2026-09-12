@@ -4,11 +4,15 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
 
+import schema
 from affected_scope import (
     calculate_scope,
     legacy_scope_document,
@@ -22,6 +26,8 @@ from affected_scope import (
     matrix_record,
     package_cells,
     check_arguments,
+    feature_args,
+    apply_accepted_cells,
     capability,
     load_environments,
     package_ci_policy,
@@ -58,7 +64,7 @@ def scope_document(
     plan = calculate_scope(
         files, root, metadata, environments, policy, force_all, **kwargs  # type: ignore[arg-type]
     )
-    return legacy_scope_document(plan, policy, environments)
+    return legacy_scope_document(plan)
 
 
 def package(
@@ -228,7 +234,7 @@ class AffectedScopeTests(unittest.TestCase):
             "the plan must carry the evidence it scheduled against, so the "
             "rollup expects the same set it consumed",
         )
-        scope = legacy_scope_document(plan, self.policy, environments_for_tests())
+        scope = legacy_scope_document(plan)
         records = {entry["package"]: entry for entry in scope["matrix"]}
         self.assertNotIn("macos-latest", records["alpha-core"]["native_environments"])
 
@@ -852,20 +858,23 @@ class PackagePolicyTests(unittest.TestCase):
 
 class MatrixRecordTests(unittest.TestCase):
     def test_features_become_qualified_check_and_test_args(self) -> None:
+        policy = {"features": ["test-fixtures"], "all_features": False}
+        features = feature_args(policy, "sniff-cli")
+        self.assertEqual(features, "--features test-fixtures")
+        self.assertEqual(
+            check_arguments("sniff-cli", ["lib"], features), "-p sniff-cli --features test-fixtures"
+        )
         record = matrix_record(
-            {
-                "package": "sniff-cli",
-                "tiers": ["L1", "L2"],
-                "l2_backends": ["tmux"],
-                "features": ["test-fixtures"],
-                "all_features": False,
-                "l1_include_slow": False,
-                "runner_tools": [],
-                "companion_suites": [],
-            },
-            native={},
+            plan_package(
+                package="sniff-cli",
+                tiers=["L1", "L2"],
+                l2_backends=["tmux"],
+                test_args=features,
+                check_args=check_arguments("sniff-cli", ["lib"], features),
+            ),
             environments=environments_for_tests(),
         )
+        # The matrix forwards the plan's feature contract; it never re-derives it.
         self.assertEqual(record["check_args"], "-p sniff-cli --features test-fixtures")
         self.assertEqual(record["test_args"], "--features test-fixtures")
         self.assertEqual(record["l2_environments"], ["ubuntu-latest", "macos-latest"])
@@ -874,52 +883,27 @@ class MatrixRecordTests(unittest.TestCase):
         self.assertTrue(record["wsl"])
 
     def test_all_features_propagates_consistently(self) -> None:
-        record = matrix_record(
-            {
-                "package": "biscuit-hash",
-                "tiers": ["L1"],
-                "l2_backends": [],
-                "features": [],
-                "all_features": True,
-                "l1_include_slow": False,
-                "runner_tools": [],
-                "companion_suites": [],
-            },
-            native={},
-            environments=environments_for_tests(),
+        features = feature_args({"features": [], "all_features": True}, "biscuit-hash")
+        self.assertEqual(features, "--all-features")
+        self.assertEqual(
+            check_arguments("biscuit-hash", ["lib"], features), "-p biscuit-hash --all-features"
         )
-        self.assertEqual(record["check_args"], "-p biscuit-hash --all-features")
-        self.assertEqual(record["test_args"], "--all-features")
 
     def test_browser_and_node_environments_are_capability_derived(self) -> None:
         record = matrix_record(
-            {
-                "package": "biscuit-terminal",
-                "tiers": ["L1", "L2", "browser"],
-                "l2_backends": ["tmux"],
-                "features": [],
-                "all_features": False,
-                "l1_include_slow": False,
-                "runner_tools": [],
-                "companion_suites": [],
-            },
-            native={},
+            plan_package(
+                package="biscuit-terminal", tiers=["L1", "L2", "browser"], l2_backends=["tmux"]
+            ),
             environments=environments_for_tests(),
         )
         self.assertEqual(record["browser_environments"], ["ubuntu-latest"])
 
         record = matrix_record(
-            {
-                "package": "homelab-server",
-                "tiers": ["L1"],
-                "l2_backends": [],
-                "features": [],
-                "all_features": False,
-                "l1_include_slow": False,
-                "runner_tools": ["node-22", "pnpm-10"],
-                "companion_suites": ["homelab-frontend"],
-            },
-            native={},
+            plan_package(
+                package="homelab-server",
+                runner_tools=["node-22", "pnpm-10"],
+                companion_suites=["homelab-frontend"],
+            ),
             environments=environments_for_tests(),
         )
         self.assertEqual(record["node_environments"], ["ubuntu-latest"])
@@ -1646,10 +1630,8 @@ class CheckCellTests(unittest.TestCase):
     def test_l1_only_kinds_get_no_check_cell_and_no_selector(self) -> None:
         self.assertEqual([], self.check_cells(["lib", "bin", "test"]))
         record = matrix_record(
-            self.ARGUMENTS,
-            native={},
+            plan_package(package="a", targets=["lib", "bin", "test"]),
             environments=environments_for_tests(),
-            target_kinds=["lib", "bin", "test"],
         )
         self.assertEqual("-p a", record["check_args"])
 
@@ -1682,11 +1664,11 @@ class CheckCellTests(unittest.TestCase):
     def test_check_os_lists_every_executing_check_environment(self) -> None:
         def record(executing: set[tuple[str, str]]) -> dict[str, object]:
             return matrix_record(
-                self.ARGUMENTS,
-                native={},
+                plan_package(
+                    package="a", targets=["lib", "example"], check_args="-p a --examples"
+                ),
                 environments=environments_for_tests(),
                 executing=executing,
-                target_kinds=["lib", "example"],
             )
 
         every = {(environment, "check") for environment in self.NATIVE}
@@ -1761,13 +1743,221 @@ class CheckCellScopeTests(unittest.TestCase):
         )
         matrix = {
             entry["package"]: entry
-            for entry in legacy_scope_document(plan, self.policy, environments_for_tests())["matrix"]
+            for entry in legacy_scope_document(plan)["matrix"]
         }
         self.assertEqual("-p alpha-core --examples", matrix["alpha-core"]["check_args"])
         # macOS L1 reused and Windows prohibited: the check still runs on the
         # two environments that can host it, and macOS is one of them.
         self.assertEqual(["ubuntu-latest", "macos-latest"], matrix["alpha-core"]["check_os"])
         self.assertEqual([], matrix["beta-app"]["check_os"])
+
+
+class ApplyFixture(unittest.TestCase):
+    """A workspace holding every evidence-eligibility case, plus evidence for each.
+
+    A `check` cell (never reusable), a companion-suite L1 on the Node host
+    (never reusable), a governed gap (never reusable), a prohibited cell that
+    evidence satisfies, and one that nothing satisfies.
+    """
+
+    CONSTRAINT = {
+        "owner": "ken",
+        "reason": "do not rerun WSL for this branch",
+        "expiry": "2099-01-01",
+        "source": "current.json",
+    }
+    FILES = ["alpha/lib/src/lib.rs", "web/server/src/main.rs", "tools/excluded/src/lib.rs"]
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        (self.root / "homelab").mkdir()
+        (self.root / "homelab" / "justfile").write_text("test-frontend:\n")
+        packages = [
+            package(
+                self.root,
+                "alpha-core",
+                "alpha/lib/Cargo.toml",
+                ci=ci_policy(tests={"tiers": ["L1", "L2"], "l2-backends": ["tmux"]}),
+                targets=["lib", "example"],
+            ),
+            package(
+                self.root,
+                "web-server",
+                "web/server/Cargo.toml",
+                ci=ci_policy(tests={"companion-suites": ["homelab-frontend"]}),
+                targets=["bin"],
+            ),
+            package(
+                self.root,
+                "excluded",
+                "tools/excluded/Cargo.toml",
+                ci=ci_policy(
+                    gates=False,
+                    reason="promotion pending",
+                    owner="@o",
+                    **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+                ),
+            ),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": item["id"], "deps": []} for item in packages]},
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+        self.accepted = [
+            {"package": "alpha-core", "environment": "macos-latest", "gate": "L1",
+             "origin": "local", "outcome": "pass", "evidence": {"ref": "refs/notes/ci-local/macos-latest"}},
+            {"package": "alpha-core", "environment": "wsl2-ubuntu", "gate": "L1",
+             "origin": "prior-local", "outcome": "pass", "evidence": {"ref": "refs/notes/ci-local/wsl2-ubuntu"}},
+            {"package": "web-server", "environment": "macos-latest", "gate": "L1",
+             "origin": "local", "outcome": "fail", "evidence": {"ref": "refs/notes/ci-local/macos-latest"}},
+            # Never reusable, whatever a receipt claims:
+            {"package": "alpha-core", "environment": "macos-latest", "gate": "check", "origin": "local"},
+            {"package": "web-server", "environment": "ubuntu-latest", "gate": "L1", "origin": "local"},
+            {"package": "alpha-core", "environment": "windows-latest", "gate": "L2", "origin": "local"},
+        ]
+        self.rejections = ["gate-inputs-changed: alpha-core/ubuntu-latest/L1"]
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def plan(self, **kwargs: object) -> dict[str, object]:
+        return calculate_scope(
+            self.FILES,
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            prohibitions={"wsl2-ubuntu": self.CONSTRAINT},
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    @staticmethod
+    def dispositions(plan: dict[str, object]) -> dict[str, tuple[str, str]]:
+        return {
+            f"{cell['package']}/{cell['environment']}/{cell['gate']}": (cell["execution"], cell["state"])
+            for cell in plan["cells"]  # type: ignore[union-attr]
+        }
+
+
+class ApplyAcceptedCellsTests(ApplyFixture):
+    """Evidence applied to a resolved plan is exactly what resolving with it yields.
+
+    `apply_accepted_cells` is the operation CI performs on a matching scope
+    receipt, so it must decide a reused cell's shape identically to the
+    planner — or a receipt would fan out differently from a fresh calculation
+    for the same evidence.
+    """
+
+    def test_applying_evidence_is_byte_identical_to_resolving_with_it(self) -> None:
+        resolved = self.plan(accepted_cells=self.accepted, evidence_rejections=self.rejections)
+        applied = apply_accepted_cells(self.plan(), self.accepted, self.rejections)
+        self.assertEqual(schema.canonical(resolved), schema.canonical(applied))
+        self.assertEqual([], schema.validate_resolved_plan(applied))
+        self.assertEqual(legacy_scope_document(resolved), legacy_scope_document(applied))
+
+        # The fixture exercises every eligibility rule, not just the happy path.
+        states = self.dispositions(applied)
+        self.assertEqual(("reuse", "reused"), states["alpha-core/macos-latest/L1"])
+        self.assertEqual(("reuse", "reused"), states["web-server/macos-latest/L1"])
+        self.assertEqual(("reuse", "reused"), states["alpha-core/wsl2-ubuntu/L1"], "evidence satisfies the prohibition")
+        self.assertEqual(("execute", "pending"), states["alpha-core/macos-latest/check"])
+        self.assertEqual(("execute", "pending"), states["web-server/ubuntu-latest/L1"], "companion host")
+        self.assertEqual(("omit", "accepted-gap"), states["alpha-core/windows-latest/L2"])
+        self.assertEqual(("omit", "accepted-gap"), states["alpha-core/wsl2-ubuntu/L2"])
+        self.assertEqual(("omit", "prohibited"), states["web-server/wsl2-ubuntu/L1"], "no evidence, still prohibited")
+        self.assertEqual(["web-server/wsl2-ubuntu/L1"], applied["prohibited_cells"])
+        self.assertEqual(self.rejections, applied["evidence_rejections"])
+        self.assertEqual(3, len(applied["accepted_evidence"]))
+        self.assertNotIn("prohibition", next(
+            cell for cell in applied["cells"]  # type: ignore[union-attr]
+            if cell["environment"] == "wsl2-ubuntu" and cell["gate"] == "L1"
+        ))
+        self.assertLess(applied["job_estimate"], self.plan()["job_estimate"])  # type: ignore[operator]
+
+    def test_applying_no_evidence_is_the_identity_and_leaves_the_input_alone(self) -> None:
+        plan = self.plan()
+        before = schema.canonical(plan)
+        applied = apply_accepted_cells(plan, [], [])
+        self.assertEqual(before, schema.canonical(applied))
+        apply_accepted_cells(plan, self.accepted, self.rejections)
+        self.assertEqual(before, schema.canonical(plan), "the input plan must not be mutated")
+
+    def test_an_already_reused_cell_is_left_as_carried(self) -> None:
+        first = apply_accepted_cells(self.plan(), self.accepted[:1], [])
+        other = {**self.accepted[0], "origin": "prior-local", "evidence": {"ref": "elsewhere"}}
+        second = apply_accepted_cells(first, [other], [])
+        self.assertEqual(schema.canonical(first), schema.canonical(second))
+
+    def test_a_plan_of_another_generation_is_refused(self) -> None:
+        stale = {**self.plan(), "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION - 1}
+        with self.assertRaises(RuntimeError) as raised:
+            apply_accepted_cells(stale, self.accepted, [])
+        self.assertIn("unknown-schema-version", str(raised.exception))
+
+    def test_the_projection_needs_nothing_beyond_the_plan(self) -> None:
+        # A receipt's plan round-trips through JSON and is projected in CI
+        # from that text alone: no policy, no environment table.
+        plan = json.loads(schema.canonical(self.plan(accepted_cells=self.accepted)))
+        projection = legacy_scope_document(plan)
+        matrix = {entry["package"]: entry for entry in projection["matrix"]}
+        self.assertNotIn("macos-latest", matrix["alpha-core"]["native_environments"])
+        self.assertEqual(["ubuntu-latest", "windows-latest", "macos-latest"], matrix["alpha-core"]["check_os"])
+        self.assertEqual(["ubuntu-latest"], matrix["web-server"]["node_environments"])
+        policy = {entry["package"]: entry for entry in projection["policy"]}
+        self.assertFalse(policy["excluded"]["gates"])
+        self.assertEqual("promotion-pending", policy["excluded"]["exclusion"]["exclusion_class"])
+        self.assertTrue(policy["alpha-core"]["gates"])
+        self.assertNotIn("exclusion", policy["alpha-core"])
+
+
+class ApplyCliTests(ApplyFixture):
+    """`--apply-to` is the whole of what CI runs on a carried plan."""
+
+    def run_planner(self, *args: str, cwd: Path) -> subprocess.CompletedProcess:
+        bin_dir = cwd / "bin"
+        bin_dir.mkdir(exist_ok=True)
+        # Selection reads `cargo metadata`; applying evidence must not.
+        stub = bin_dir / "cargo"
+        stub.write_text("#!/bin/sh\necho 'cargo must not run under --apply-to' >&2\nexit 97\n")
+        stub.chmod(0o755)
+        environment = {**os.environ, "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", "")}
+        return subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "ci" / "affected_scope.py"), *args],
+            cwd=cwd, env=environment, capture_output=True, text=True, timeout=120,
+        )
+
+    def test_apply_to_writes_the_applied_plan_and_prints_its_projection(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            cwd = Path(temporary)
+            (cwd / "plan.json").write_text(schema.canonical(self.plan()), encoding="utf-8")
+            (cwd / "accepted.json").write_text(json.dumps(self.accepted), encoding="utf-8")
+            (cwd / "rejected.json").write_text(json.dumps(self.rejections), encoding="utf-8")
+            result = self.run_planner(
+                "--apply-to", "plan.json", "--accepted-cells", "accepted.json",
+                "--evidence-rejections", "rejected.json", "--plan-out", "plan.json", cwd=cwd,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            expected = apply_accepted_cells(self.plan(), self.accepted, self.rejections)
+            self.assertEqual(schema.canonical(expected), (cwd / "plan.json").read_text(encoding="utf-8"))
+            self.assertEqual(legacy_scope_document(expected), json.loads(result.stdout))
+
+    def test_apply_to_excludes_selection_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            cwd = Path(temporary)
+            (cwd / "plan.json").write_text(schema.canonical(self.plan()), encoding="utf-8")
+            for extra in (["--all"], ["--", "alpha/lib/src/lib.rs"], ["--constraints", "."]):
+                with self.subTest(extra):
+                    result = self.run_planner("--apply-to", "plan.json", *extra, cwd=cwd)
+                    self.assertEqual(2, result.returncode, result.stderr)
+                    self.assertIn("performs no selection", result.stderr)
 
 
 class CiToolingFlagTests(unittest.TestCase):
@@ -1894,34 +2084,14 @@ class L2BackendAxisTests(unittest.TestCase):
         for environment in environments:
             environment["capabilities"]["wezterm"] = environment["name"] == "macos-latest"
         record = matrix_record(
-            {
-                "package": "a",
-                "tiers": ["L1", "L2"],
-                "l2_backends": ["wezterm"],
-                "features": [],
-                "all_features": False,
-                "l1_include_slow": False,
-                "runner_tools": [],
-                "companion_suites": [],
-            },
-            native={},
+            plan_package(package="a", tiers=["L1", "L2"], l2_backends=["wezterm"]),
             environments=environments,
         )
         self.assertEqual(record["l2_environments"], ["macos-latest"])
 
     def test_a_backend_with_no_capability_entry_is_hostable_nowhere(self) -> None:
         record = matrix_record(
-            {
-                "package": "a",
-                "tiers": ["L1", "L2"],
-                "l2_backends": ["kitty"],
-                "features": [],
-                "all_features": False,
-                "l1_include_slow": False,
-                "runner_tools": [],
-                "companion_suites": [],
-            },
-            native={},
+            plan_package(package="a", tiers=["L1", "L2"], l2_backends=["kitty"]),
             environments=environments_for_tests(),
         )
         self.assertEqual(record["l2_environments"], [])
@@ -2262,6 +2432,29 @@ class WorkflowContractTests(unittest.TestCase):
 
 
 # --- helpers ---------------------------------------------------------------
+
+
+def plan_package(**overrides: object) -> dict[str, object]:
+    """A plan package record, the shape `matrix_record` projects from."""
+    record: dict[str, object] = {
+        "package": "a",
+        "area": "a",
+        "selection_reason": "source change",
+        "gates": ["lint", "L1"],
+        "targets": ["lib"],
+        "tiers": ["L1"],
+        "test_args": "",
+        "check_args": "-p a",
+        "l2_backends": [],
+        "runner_tools": [],
+        "companion_suites": [],
+        "l1_include_slow": False,
+        "native": {},
+    }
+    record.update(overrides)
+    if "check_args" not in overrides and "package" in overrides:
+        record["check_args"] = f"-p {overrides['package']}"
+    return record
 
 
 def environments_for_tests() -> list[dict[str, object]]:

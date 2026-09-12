@@ -407,7 +407,7 @@ class TargetCoverageTests(PlannerFixture):
         }
         self.assertEqual("reuse", states[("macos-latest", "L1")], "fixture: macOS L1 reused")
         self.assertEqual("execute", states[("macos-latest", "check")])
-        scheduled = legacy_scope_document(plan, self.policy, self.environments)
+        scheduled = legacy_scope_document(plan)
         matrix = scheduled["area_matrix"]["biscuit-speaks"]["include"]
         entry = next(item for item in matrix if item["package"] == "biscuit-speaks")
         self.assertEqual(self.NATIVE, entry["check_os"])
@@ -640,7 +640,7 @@ class ResultCompletenessTests(PlannerFixture):
     """
 
     def scheduled(self, plan: dict) -> dict:
-        return legacy_scope_document(plan, self.policy, self.environments)
+        return legacy_scope_document(plan)
 
     def test_every_resolved_cell_belongs_to_a_scheduled_area(self) -> None:
         plans = {

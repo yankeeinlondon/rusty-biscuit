@@ -10,11 +10,13 @@ import subprocess
 import tempfile
 import sys
 import unittest
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import schema  # noqa: E402
+from affected_scope import legacy_scope_document  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -348,6 +350,7 @@ class PlanSurfaceTests(unittest.TestCase):
                 "execution": "reuse",
                 "origin": "local",
                 "state": "reused",
+                "reusable": True,
                 "target_kinds": ["lib", "test"],
                 "compile_coverage_from": "L1",
                 "selection_reason": "satisfied by this host's receipt",
@@ -361,6 +364,7 @@ class PlanSurfaceTests(unittest.TestCase):
                 "execution": "execute",
                 "origin": "ci",
                 "state": "pending",
+                "reusable": True,
                 "target_kinds": ["lib", "test"],
                 "compile_coverage_from": "L1",
                 "selection_reason": "no evidence for this environment",
@@ -373,6 +377,7 @@ class PlanSurfaceTests(unittest.TestCase):
                 "execution": "omit",
                 "origin": "none",
                 "state": "accepted-gap",
+                "reusable": True,
                 "target_kinds": ["test"],
                 "compile_coverage_from": None,
                 "selection_reason": "no L2 backend is provisionable on Windows",
@@ -390,6 +395,7 @@ class PlanSurfaceTests(unittest.TestCase):
                 "execution": "reuse" if prohibited_is_covered else "omit",
                 "origin": "prior-local" if prohibited_is_covered else "none",
                 "state": "reused" if prohibited_is_covered else "prohibited",
+                "reusable": True,
                 "target_kinds": ["lib", "test"],
                 "compile_coverage_from": "L1",
                 "selection_reason": (
@@ -433,11 +439,26 @@ class PlanSurfaceTests(unittest.TestCase):
                     "l2_backends": ["tmux"],
                     "runner_tools": [],
                     "companion_suites": [],
+                    "l1_include_slow": False,
                     "native": {},
                 }
             ],
             "source_packages": ["alpha"],
             "reverse_dependencies": [],
+            "environments": [
+                {
+                    "name": name,
+                    "runner": "windows-latest" if name == "wsl2-ubuntu" else name,
+                    "native_key": "ubuntu-latest" if name == "wsl2-ubuntu" else name,
+                    "capabilities": {
+                        "tmux": name in ("ubuntu-latest", "macos-latest"),
+                        "headless_browser": name == "ubuntu-latest",
+                        "node_pnpm": name == "ubuntu-latest",
+                        "archive_only": name == "wsl2-ubuntu",
+                    },
+                }
+                for name in schema.ENVIRONMENTS
+            ],
             "cells": cells,
             "accepted_evidence": [],
             "policy_gaps": [],
@@ -597,6 +618,81 @@ def workflow_step_script(workflow: Path, step_name: str) -> str:
     return "\n".join(body) + "\n"
 
 
+BASH_OVERRIDE = "BISCUIT_TEST_BASH"
+# Prefixes that commonly hold a modern Bash *behind* the system one on PATH:
+# Homebrew (Apple Silicon and Intel), distro `/usr/bin`, and Git for Windows.
+WELL_KNOWN_BASH: tuple[str, ...] = (
+    "/opt/homebrew/bin/bash",
+    "/usr/local/bin/bash",
+    "/usr/bin/bash",
+    str(Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe"),
+)
+STEP_BASH_REQUIREMENT = "Bash >= 4.4 (`mapfile -d`) and jq"
+
+
+def bash_version(candidate: str) -> tuple[int, int] | None:
+    probe = 'printf "%s %s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"'
+    try:
+        result = subprocess.run(
+            [candidate, "-c", probe], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    parts = result.stdout.split()
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        return None
+    return int(parts[0]), int(parts[1])
+
+
+def bash_runs_the_scope_step(version: tuple[int, int]) -> bool:
+    # The step's `mapfile -d ''` needs 4.4; macOS ships 3.2 as `/bin/bash`.
+    major, minor = version
+    return major >= 5 or (major == 4 and minor >= 4)
+
+
+def bash_candidates(
+    environment: Mapping[str, str], well_known: Sequence[str] = WELL_KNOWN_BASH
+) -> list[str]:
+    """Every place a Bash may live, in the order they are tried.
+
+    `shutil.which` stops at the first PATH hit, which on macOS is whichever of
+    the system 3.2 and a Homebrew 5.x the developer happened to put first —
+    the exact PATH-ordering accident this resolver exists to remove.
+
+    An override is the *only* candidate: falling through past an incompatible
+    one to some other Bash would hide the misconfiguration it was set to fix.
+    """
+    override = environment.get(BASH_OVERRIDE)
+    if override:
+        return [override]
+    names = ["bash"]
+    if sys.platform == "win32":
+        names = ["bash" + ext.lower() for ext in environment.get("PATHEXT", ".EXE").split(";") if ext]
+    candidates: list[str] = []
+    for entry in environment.get("PATH", "").split(os.pathsep):
+        if entry:
+            candidates.extend(str(Path(entry) / name) for name in names)
+    candidates.extend(well_known)
+    return list(dict.fromkeys(candidates))
+
+
+def resolve_step_bash(
+    environment: Mapping[str, str] | None = None,
+    well_known: Sequence[str] = WELL_KNOWN_BASH,
+) -> str | None:
+    """The first Bash able to run the extracted scope step, as an absolute path, or None."""
+    for candidate in bash_candidates(os.environ if environment is None else environment, well_known):
+        if not Path(candidate).is_file():
+            continue
+        version = bash_version(candidate)
+        if version is not None and bash_runs_the_scope_step(version):
+            return str(Path(candidate).resolve())
+    return None
+
+
+STEP_BASH = resolve_step_bash()
 SCOPE_REF = "refs/notes/ci-local/scope"
 SCOPE_MARKER = "carried by the local scope receipt"
 #: A real workspace source path, so a fixture commit touching it selects a
@@ -628,6 +724,8 @@ class StepRun:
         plan_path = root / "resolved-plan.json"
         self.plan_bytes = plan_path.read_text(encoding="utf-8") if plan_path.is_file() else ""
         self.plan = json.loads(self.plan_bytes) if self.plan_bytes else {}
+        scope_path = root / "scope.json"
+        self.scope = json.loads(scope_path.read_text(encoding="utf-8")) if scope_path.is_file() else {}
 
     def scope_source(self) -> str:
         for line in self.summary.splitlines():
@@ -636,7 +734,6 @@ class StepRun:
         return ""
 
 
-@unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "requires bash and jq")
 class WorkflowScopeStepTests(unittest.TestCase):
     """The scope step's shell, run for real against every event shape it handles.
 
@@ -646,10 +743,26 @@ class WorkflowScopeStepTests(unittest.TestCase):
     against is a fixture. Three commits — `root`, `base`, `head` — give the
     diff-based events a resolvable `base..head` and a second real base for a
     mismatched scope receipt; the full-run events never look at them.
+
+    The step runs under the Bash that `resolve_step_bash` found, never a bare
+    `bash` from PATH; `BISCUIT_TEST_BASH` names one explicitly and is then the
+    only one considered.
     """
 
     @classmethod
     def setUpClass(cls) -> None:
+        if STEP_BASH is None or not shutil.which("jq"):
+            message = (
+                f"requires {STEP_BASH_REQUIREMENT}; set {BASH_OVERRIDE} to point at one "
+                f"(tried: {', '.join(bash_candidates(os.environ))})"
+            )
+            # A developer host may lack a modern Bash, and skipping there is
+            # honest. The hosted `ci-tooling` job is the only place these
+            # contracts are guaranteed to execute, so a skip there would be a
+            # green cell that verified nothing.
+            if os.environ.get("CI"):
+                raise AssertionError(message)
+            raise unittest.SkipTest(message)
         cls.script = workflow_step_script(WORKFLOW, SCOPE_STEP)
 
     def run_step(
@@ -724,7 +837,7 @@ class WorkflowScopeStepTests(unittest.TestCase):
             if push_base == "FIRST":
                 environment["PUSH_BASE"] = first
             result = subprocess.run(
-                ["bash", "-c", self.script],
+                [STEP_BASH, "-c", self.script],
                 cwd=root,
                 env=environment,
                 capture_output=True,
@@ -865,8 +978,13 @@ class WorkflowScopeStepTests(unittest.TestCase):
             return receipts["text"]
 
         run = self.run_step("pull_request", scope_receipt=remember)
-        carried = json.loads(receipts["text"])["plan"]
-        self.assertEqual(schema.canonical(carried), run.plan_bytes)
+        receipt = json.loads(receipts["text"])
+        self.assertEqual(schema.canonical(receipt["plan"]), run.plan_bytes)
+        self.assertEqual(receipt["scope"], run.scope)
+        # Either document could serve: the carried projection is exactly what
+        # projecting the carried plan yields, so a hit with no evidence and a
+        # hit with evidence read the same shape.
+        self.assertEqual(receipt["scope"], legacy_scope_document(receipt["plan"]))
 
     def test_a_receipt_for_another_base_falls_back_with_its_code(self) -> None:
         run = self.run_step("push", push_base="FIRST", scope_receipt=self.local_scope_receipt)
@@ -916,35 +1034,144 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertNotEqual(SCOPE_MARKER, run.plan["preflight_reason"])
         self.assertEqual(1, len(run.planner_calls), run.planner_calls)
 
-    def test_accepted_cells_on_a_scope_hit_are_resolved_by_a_compared_planner_run(self) -> None:
-        # Option B of the evidence path: the accepted set is resolved by one
-        # full planner run, and its selection is compared with the receipt's
-        # rather than handed off.
-        run = self.run_step("pull_request", scope_receipt=self.local_scope_receipt, validation_receipt=True)
-        self.assertEqual(1, len(run.planner_calls), run.planner_calls)
-        self.assertIn("--accepted-cells", run.planner_calls[0])
-        self.assertTrue(run.scope_source().startswith("local ("), run.scope_source())
-        reused = [
-            cell for cell in run.plan["cells"]
+    # -- validation evidence on top of scope (review-2, "still recomputed") --
+
+    #: What applying evidence may change. Everything else on the carried plan
+    #: — selection, targets, features, environments, policy — must reach the
+    #: fan-out byte-for-byte as the hook resolved it.
+    EVIDENCE_PLAN_FIELDS = (
+        "accepted_evidence", "evidence_rejections", "prohibited_cells", "job_estimate",
+        "change_class", "preflight_os", "preflight_reason",
+    )
+    EVIDENCE_CELL_FIELDS = ("execution", "origin", "state", "evidence", "prohibition")
+
+    @classmethod
+    def without_evidence(cls, plan: dict) -> str:
+        stripped = {key: value for key, value in plan.items() if key not in cls.EVIDENCE_PLAN_FIELDS}
+        stripped["cells"] = [
+            {key: value for key, value in cell.items() if key not in cls.EVIDENCE_CELL_FIELDS}
+            for cell in plan["cells"]
+        ]
+        return schema.canonical(stripped)
+
+    @staticmethod
+    def reused_l1(run: StepRun) -> list[str]:
+        return [
+            cell["execution"] for cell in run.plan["cells"]
             if cell["package"] == "biscuit-hash" and cell["environment"] == "macos-latest" and cell["gate"] == "L1"
         ]
-        self.assertEqual(["reuse"], [cell["execution"] for cell in reused])
 
-    def test_a_receipt_that_disagrees_with_the_planner_fails_the_step_loudly(self) -> None:
-        def with_a_ghost(plan: dict, projection: dict) -> None:
-            plan["areas"].append({"area": "ghost", "selection_reason": "fixture", "packages": ["ghost"]})
-            plan["packages"].append({
-                "package": "ghost", "area": "ghost", "selection_reason": "fixture",
-                "gates": [], "targets": [], "tiers": [], "test_args": "", "check_args": "",
-                "l2_backends": [], "runner_tools": [], "companion_suites": [], "native": {},
-            })
-            projection["packages"].append("ghost")
+    def test_evidence_on_a_scope_hit_is_applied_to_the_carried_plan_without_selection(self) -> None:
+        receipts: dict = {}
 
-        def drifted(root: Path, base: str, head: str) -> str:
-            return self.local_scope_receipt(root, base, head, mutate=with_a_ghost)
+        def remember(root: Path, base: str, head: str) -> str:
+            receipts["text"] = self.local_scope_receipt(root, base, head)
+            return receipts["text"]
 
-        run = self.run_step("pull_request", scope_receipt=drifted, validation_receipt=True, expect_failure=True)
-        self.assertIn("select different areas or packages", run.result.stdout + run.result.stderr)
+        run = self.run_step("pull_request", scope_receipt=remember, validation_receipt=True)
+        self.assertTrue(run.scope_source().startswith("local ("), run.scope_source())
+        self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+        for call in run.planner_calls:
+            self.assertIn("--apply-to resolved-plan.json", call, "a planner call performed selection")
+        self.assertEqual(["reuse"], self.reused_l1(run))
+        carried = json.loads(receipts["text"])["plan"]
+        self.assertEqual(self.without_evidence(carried), self.without_evidence(run.plan))
+        self.assertEqual([carried["cells"][0]["package"]], [cell["package"] for cell in run.plan["cells"][:1]])
+
+    def test_the_projection_on_an_evidence_hit_is_derived_from_the_written_plan(self) -> None:
+        run = self.run_step("pull_request", scope_receipt=self.local_scope_receipt, validation_receipt=True)
+        self.assertEqual(legacy_scope_document(run.plan), run.scope)
+        entry = next(item for item in run.scope["matrix"] if item["package"] == "biscuit-hash")
+        self.assertNotIn("macos-latest", entry["native_environments"], "the reused cell must leave the fan-out")
+        self.assertEqual(run.scope["job_estimate"], run.plan["job_estimate"])
+        self.assertEqual(str(run.plan["job_estimate"]), run.outputs["job_estimate"])
+
+    def test_evidence_on_a_scope_miss_is_applied_after_one_selection_run(self) -> None:
+        run = self.run_step("pull_request", validation_receipt=True)
+        self.assertTrue(run.scope_source().startswith("CI fallback (scope-missing:"), run.scope_source())
+        selection = [call for call in run.planner_calls if "--apply-to" not in call]
+        applications = [call for call in run.planner_calls if "--apply-to" in call]
+        self.assertEqual(1, len(selection), run.planner_calls)
+        self.assertEqual(1, len(applications), run.planner_calls)
+        self.assertNotIn("--accepted-cells", selection[0], "selection must not resolve evidence")
+        self.assertEqual(["reuse"], self.reused_l1(run))
+        self.assertEqual(legacy_scope_document(run.plan), run.scope)
+
+
+class StepBashResolverTests(unittest.TestCase):
+    """`resolve_step_bash` against fake Bash executables, with no well-known fallbacks."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory(prefix="ci-step-bash-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+
+    def fake_bash(self, name: str, body: str) -> str:
+        directory = self.root / name
+        directory.mkdir()
+        if sys.platform == "win32":
+            path = directory / "bash.exe"
+            path.write_text(body, encoding="utf-8")
+        else:
+            path = directory / "bash"
+            path.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+            path.chmod(0o755)
+        return str(path)
+
+    def resolve(self, path_entries: list[str], override: str | None = None) -> str | None:
+        environment = {"PATH": os.pathsep.join(path_entries)}
+        if override is not None:
+            environment[BASH_OVERRIDE] = override
+        return resolve_step_bash(environment, well_known=())
+
+    @unittest.skipIf(sys.platform == "win32", "the fake Bash executables are POSIX shell scripts")
+    def test_version_threshold_is_4_4(self) -> None:
+        old = self.fake_bash("old", "printf '3 2'")
+        floor = self.fake_bash("floor", "printf '4 4'")
+        below = self.fake_bash("below", "printf '4 3'")
+        broken = self.fake_bash("broken", "exit 7")
+
+        self.assertIsNone(self.resolve([str(Path(old).parent)]))
+        self.assertIsNone(self.resolve([str(Path(below).parent)]))
+        self.assertIsNone(self.resolve([str(Path(broken).parent)]))
+        self.assertEqual(floor, self.resolve([str(Path(floor).parent)]))
+        # First compatible candidate in PATH order, not first candidate.
+        self.assertEqual(
+            floor,
+            self.resolve([str(Path(old).parent), str(Path(broken).parent), str(Path(floor).parent)]),
+        )
+
+    @unittest.skipIf(sys.platform == "win32", "the fake Bash executables are POSIX shell scripts")
+    def test_override_wins_over_path(self) -> None:
+        on_path = self.fake_bash("on-path", "printf '5 3'")
+        override = self.fake_bash("override", "printf '5 0'")
+        old_override = self.fake_bash("old-override", "printf '3 2'")
+
+        self.assertEqual(override, self.resolve([str(Path(on_path).parent)], override=override))
+        # An incompatible override is reported, never quietly replaced.
+        self.assertIsNone(self.resolve([str(Path(on_path).parent)], override=old_override))
+
+    @unittest.skipIf(sys.platform == "win32", "the fake Bash executables are POSIX shell scripts")
+    def test_missing_candidates_are_skipped(self) -> None:
+        modern = self.fake_bash("modern", "printf '5 3'")
+        missing_dir = str(self.root / "no-such-dir")
+        missing_override = str(self.root / "no-such-bash")
+
+        self.assertEqual(modern, self.resolve([missing_dir, str(Path(modern).parent)]))
+        self.assertIsNone(self.resolve([missing_dir]))
+        self.assertIsNone(self.resolve([str(Path(modern).parent)], override=missing_override))
+
+    def test_override_is_exclusive_and_well_known_comes_last(self) -> None:
+        path = os.pathsep.join(["/p1", "/p2"])
+        self.assertEqual(
+            ["/override/bash"],
+            bash_candidates({"PATH": path, BASH_OVERRIDE: "/override/bash"}, well_known=("/well/known/bash",)),
+        )
+        candidates = bash_candidates({"PATH": path}, well_known=("/well/known/bash",))
+        self.assertEqual("/well/known/bash", candidates[-1])
+        first_p1 = next(i for i, c in enumerate(candidates) if c.startswith(str(Path("/p1"))))
+        first_p2 = next(i for i, c in enumerate(candidates) if c.startswith(str(Path("/p2"))))
+        self.assertLess(first_p1, first_p2)
 
 
 if __name__ == "__main__":

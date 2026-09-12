@@ -168,11 +168,26 @@ class ScopeReceiptTests(RepositoryFixture):
                     "l2_backends": [],
                     "runner_tools": [],
                     "companion_suites": [],
+                    "l1_include_slow": False,
                     "native": {},
                 }
             ],
             "source_packages": ["alpha"],
             "reverse_dependencies": [],
+            "environments": [
+                {
+                    "name": name,
+                    "runner": "windows-latest" if name == "wsl2-ubuntu" else name,
+                    "native_key": "ubuntu-latest" if name == "wsl2-ubuntu" else name,
+                    "capabilities": {
+                        "tmux": name in ("ubuntu-latest", "macos-latest"),
+                        "headless_browser": name == "ubuntu-latest",
+                        "node_pnpm": name == "ubuntu-latest",
+                        "archive_only": name == "wsl2-ubuntu",
+                    },
+                }
+                for name in schema.ENVIRONMENTS
+            ],
             "cells": [
                 {
                     "package": "alpha",
@@ -182,6 +197,7 @@ class ScopeReceiptTests(RepositoryFixture):
                     "execution": "execute",
                     "origin": "ci",
                     "state": "pending",
+                    "reusable": True,
                     "target_kinds": ["lib", "test"],
                     "compile_coverage_from": "L1",
                     "selection_reason": "no evidence",

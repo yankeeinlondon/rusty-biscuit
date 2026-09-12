@@ -49,11 +49,26 @@ def plan(**overrides: object) -> dict:
                 "l2_backends": [],
                 "runner_tools": [],
                 "companion_suites": [],
+                "l1_include_slow": False,
                 "native": {},
             }
         ],
         "source_packages": ["claudine"],
         "reverse_dependencies": ["claudine-cli"],
+        "environments": [
+            {
+                "name": name,
+                "runner": "windows-latest" if name == "wsl2-ubuntu" else name,
+                "native_key": "ubuntu-latest" if name == "wsl2-ubuntu" else name,
+                "capabilities": {
+                    "tmux": name in ("ubuntu-latest", "macos-latest"),
+                    "headless_browser": name == "ubuntu-latest",
+                    "node_pnpm": name == "ubuntu-latest",
+                    "archive_only": name == "wsl2-ubuntu",
+                },
+            }
+            for name in schema.ENVIRONMENTS
+        ],
         "cells": [cell()],
         "accepted_evidence": [],
         "policy_gaps": [],
@@ -76,6 +91,7 @@ def cell(**overrides: object) -> dict:
         "execution": "execute",
         "origin": "ci",
         "state": "pending",
+        "reusable": True,
         "target_kinds": ["lib", "test"],
         "compile_coverage_from": "L1",
         "selection_reason": "source package on a required environment",
@@ -398,8 +414,13 @@ class ScopeReceiptValidationTests(unittest.TestCase):
                 self.assertIn(problem.split(":")[0], schema.SCOPE_REJECTIONS, problem)
 
     def test_a_schema_mismatch_is_reported_as_scope_schema(self):
-        self.assertTrue(schema.validate_scope_receipt(scope_receipt(schema_version=2))[0].startswith("scope-schema:"))
-        self.assertTrue(schema.validate_scope_receipt(scope_receipt(plan_schema_version=2))[0].startswith("scope-schema:"))
+        # A receipt one generation behind is the live migration case: the plan
+        # it carries lacks the fields CI needs to apply evidence and project
+        # it, so it must miss as `scope-schema` rather than hit.
+        other = schema.SCOPE_RECEIPT_SCHEMA_VERSION + 1
+        previous_plan = schema.RESOLVED_PLAN_SCHEMA_VERSION - 1
+        self.assertTrue(schema.validate_scope_receipt(scope_receipt(schema_version=other))[0].startswith("scope-schema:"))
+        self.assertTrue(schema.validate_scope_receipt(scope_receipt(plan_schema_version=previous_plan))[0].startswith("scope-schema:"))
 
     def test_the_carried_plan_must_name_the_receipts_base_and_head(self):
         problems = schema.validate_scope_receipt(scope_receipt(plan=plan(base=SHA_T)))
