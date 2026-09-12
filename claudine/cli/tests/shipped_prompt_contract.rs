@@ -369,6 +369,13 @@ fn feature_review_cli_preserves_numeric_iteration_and_dependent_paths() {
         .args(["-y", "--codex"])
         .assert()
         .success();
+    // `ready: true` from the stub selects the shipped success branch, whose
+    // `effect: small-group-cheer` is real playback; the fixture default dry-run
+    // must be what kept it silent, so the spool it would have used is checked.
+    assert!(
+        !fixture.audio_spool().exists(),
+        "the shipped review lifecycle must not publish audio from a test"
+    );
 
     let composed = fs::read_to_string(captured_prompt).unwrap();
     assert!(

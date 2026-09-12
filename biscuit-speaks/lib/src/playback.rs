@@ -6,7 +6,8 @@
 //! ## Features
 //!
 //! - Native-first audio playback with automatic host-player fallback
-//! - Volume and speed control where the player supports it
+//! - Volume preserved across native playback and supported host fallbacks
+//! - Speed control where the player supports it
 //! - Support for WAV, MP3, Ogg, and PCM formats
 //!
 //! ## Requirements

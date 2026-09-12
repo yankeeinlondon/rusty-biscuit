@@ -128,6 +128,12 @@ writes, or child processes.
 
 Players are ranked by capability score (speed control +4, volume control +3, stream input +2).
 
+An explicit volume, including `0.0` for mute, is preserved through native playback
+and host fallback. Automatic selection excludes players without volume control;
+explicit-player APIs return `UnsupportedVolume` before launching such a player.
+Audio tests must use zero volume or intrinsically silent PCM fixtures. Speech
+fixtures should say “This is a test message.” instead of announcing work status.
+
 | Software | OS | Speed | Vol | Stream In | Stream Out | Codecs | File Formats |
 |----------|:--:|:-----:|:---:|:---------:|:----------:|--------|--------------|
 | [mpv](https://mpv.io/) | All | ✅ | ✅ | ✅ | ❌ | PCM, FLAC, ALAC, MP3, AAC, Vorbis, Opus | WAV, AIFF, FLAC, MP3, OGG, M4A, WebM |

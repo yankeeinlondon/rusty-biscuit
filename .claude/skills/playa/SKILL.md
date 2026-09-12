@@ -61,6 +61,11 @@ short-circuits before source, cache, spool, journal, or subprocess side effects.
 
 Host players are ranked by capability (speed, volume, streaming). Top tier (score 9): mpv, FFplay, SoX.
 
+Explicit volume is mandatory across every route: automatic selection excludes
+players without volume control, and explicit-player APIs reject them with
+`PlaybackError::UnsupportedVolume`. Zero means mute. Tests that exercise real
+audio use zero volume or zero-filled PCM; speech fixtures use clear test messages.
+
 ```rust
 // Get ranked compatible players
 let players = match_available_players(format);

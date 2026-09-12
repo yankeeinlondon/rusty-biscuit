@@ -266,7 +266,7 @@ fn preparing_head_holds_order_until_atomic_ready_publication() {
     let mut first = ready_envelope(&root.0, 1, "first");
     first.state = JobState::Preparing {
         preparation: PreparingPayload::new(serde_json::json!({
-            "speech": "Phase 1 of the plan in the claudine package area, was implemented successfully"
+            "speech": "This is a test message."
         })),
     };
     let first_path = publish(&root.0, &first);
@@ -329,9 +329,13 @@ fn unsupported_schema_is_quarantined_without_execution() {
 fn journal_is_redacted_and_rotates_to_one_prior_file() {
     let root = TestRoot::new("journal");
     let envelope = ready_envelope(&root.0, 1, "secret-full-path");
-    append_journal(&root.0, journal_failure(&envelope, "playback_failed"))
+    let failure = PlaybackError::AudioSubsystem {
+        detail: "failed to play secret-full-path.wav".to_string(),
+    };
+    append_journal(&root.0, journal_failure(&envelope, &redacted_failure_reason(&failure)))
         .expect("journal should append");
     let first = fs::read_to_string(root.0.join("journal.jsonl")).expect("journal should read");
+    assert!(first.contains("playback_failed"));
     assert!(!first.contains("secret-full-path.wav"));
 
     let large_reason = "x".repeat(8192);

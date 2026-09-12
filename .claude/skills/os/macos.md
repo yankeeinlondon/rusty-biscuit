@@ -11,6 +11,13 @@ conditions that masquerade as repository defects.
   Unix (the `launched_spelling` helper does) or the two spellings differ.
   This is the macOS half of the same trap Windows has with short names
   ([windows.md](windows.md)).
+- macOS periodically sweeps files under `/tmp` that have not been accessed
+  for a few days while leaving populated directories in place. A git worktree
+  created there (the `rb-*-baseline` and `rb-*-review` checkouts) loses its
+  small `.git` pointer file first, which `git worktree list` then reports as
+  `prunable`. Do not treat that state as corruption; `git worktree prune`
+  clears the registration, and long-lived worktrees belong under
+  `~/.claudine/worktrees`, not `/tmp`.
 - `dirs::home_dir()` honors `HOME` here, which is why a hermetic-home test can
   be green on macOS and read the real home directory on Windows.
 
@@ -69,6 +76,12 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   set; the shell stays at the repo root and `just lint`/`just test` run the
   root recipes, surfacing unrelated packages' failures. Use absolute paths and
   confirm with `pwd`.
+- **`#!/usr/bin/env bash` selects `/bin/bash` 3.2 on a stock Mac**, which
+  under `set -u` rejects `"${arr[@]}"` on an empty array as unbound and aborts
+  the script. Homebrew's Bash 5 accepts it, so the script runs for whoever has
+  Homebrew first on PATH and fails for everyone else. Write
+  `${arr[@]+"${arr[@]}"}` and avoid `mapfile`, `declare -A`, and `${v,,}` in
+  any shell script that is `#!/usr/bin/env bash`.
 
 ## Diagnosing a slow host
 
@@ -84,6 +97,16 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   which thread is hot.
 - After an OS upgrade, third-party menu-bar and window overlays are the first
   suspect for WindowServer load.
+
+## Audio fixture discovery outside PATH
+
+Sniff's program discovery falls back to macOS application bundles after PATH.
+A private PATH containing only a fake `aplay` still discovered `mpv.app` during
+the silent-audio fix. Therefore a private PATH does not prove that the installed
+player list contains only fixture programs. Playa currently launches host players
+by bare binary name, so an out-of-PATH bundle produces a spawn error; it does not
+launch that bundle. Keep a volume-capable recording player in PATH for controlled
+fallback tests, and test incapable-player rejection at command construction.
 
 ## Proving a call was eliminated
 

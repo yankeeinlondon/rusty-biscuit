@@ -955,8 +955,8 @@ mod tests {
             return;
         }
 
-        let config = TtsConfig::default();
-        let result = provider.speak("Hello from Kokoro TTS test.", &config).await;
+        let config = TtsConfig::default().with_volume(crate::types::VolumeLevel::Explicit(0.0));
+        let result = provider.speak("This is a test message.", &config).await;
 
         // This may fail if model files aren't present
         match result {

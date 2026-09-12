@@ -42,6 +42,49 @@ CI is the final proof, not the discovery loop. A full-scope run takes hours
 and every push cancels the previous one, so surface an OS's exact failure on
 the matching host first, then push once.
 
+Reuse qualifying passing evidence per required cell on every OS. If no
+qualifying passing evidence exists, execute the required tests. A request to
+avoid rerunning passed tests is not an environment ban. Only a separately
+explicit instruction (such as an environment unavailable during maintenance)
+creates an execution constraint; never infer a blanket WSL prohibition.
+
+A separately explicit execution ban also constrains CI triggered by a push.
+Verify every requested exclusion before pushing; a successful macOS
+receipt alone does not suppress WSL. Evidence is now combined **per cell**
+across environments and across commits: `local_evidence.py verify --cells`
+reads every note on every `refs/notes/ci-local/<environment>` ref between the
+merge base and the outgoing head, so a macOS receipt from this push and a prior
+`cross-check` WSL receipt suppress their own cells together, and a WSL receipt
+that covered one package does not hide an earlier one that covered another.
+The JUnit reports behind a hook receipt stay on the
+host that produced it, at the receipt's `host.report_dir`
+(`$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`, root default
+`~/.rusty-biscuit/ci-evidence`), so investigating a reused cell means asking
+that host. Record the restriction rather than remembering it —
+`<home>/.rusty-biscuit/ci-constraints/<repository>/` (`BISCUIT_CI_CONSTRAINTS_DIR`
+overrides it; the home is Python's `Path.home()`, so `USERPROFILE` on native
+Windows) holds prohibition records that `just ci-local --plan` and the pre-push
+hook refuse on, and that CI deliberately never reads.
+If the plan still schedules a prohibited cell, explain the gap before
+triggering CI; do not treat automatic jobs as exempt.
+
+`scope-only` resolves and prints the plan — so a recorded constraint is still
+enforced and the run is still reviewable — but runs no gate, publishes no
+outcomes, and excludes no CI cells. It does publish the *scope* receipt on
+`refs/notes/ci-local/scope`, as every mode does, and CI takes it on an exact
+`{base, head, tree}` match. The hook reviews every pushed branch's COMMITTED
+plan (a temporary worktree unless the revision is the clean checkout) under that
+update's remote branch and remote, against the base of each run it triggers
+(the remote's `main` for a push to `main`; each open pull request's target tip
+on a GitHub remote, read through `gh`, plus the incoming revision when the same
+push updates that target too; otherwise a provisional plan against the
+remote's `main`), and publishes HEAD's; `just ci-local --plan`
+previews the working tree and differs exactly when the checkout is dirty. `off` is its deprecated alias. `git push
+--no-verify` produces no new evidence and does not invalidate already-published
+matching receipts, which CI still verifies. See the `rust-devops` skill's
+[evidence and execution contract](../rust-devops/ci-cd.md) before selecting a
+push mode.
+
 ## Read this first when a test is red on one environment only
 
 - **Red only on `wsl2-ubuntu`:** the guest runs a nextest *archive* built on

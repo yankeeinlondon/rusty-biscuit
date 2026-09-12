@@ -1,0 +1,22 @@
+docs: restructure GitNexus skill tree to flat top-level per topic
+
+- add `.claude/skills/gitnexus-cli/SKILL.md` covering the project-local
+  `node .gitnexus/run.cjs` runner, fresh-clone regeneration, and the
+  npm 11 / bun-only fallback matrix that previously lived under
+  `.claude/skills/gitnexus/gitnexus-cli/`
+- add `.claude/skills/gitnexus-debugging/SKILL.md` for bug tracing and
+  error attribution workflows extracted from the nested skill
+- add `.claude/skills/gitnexus-exploring/SKILL.md` documenting the
+  `query` / `context` / `trace` / `route_map` entry points for
+  architectural discovery
+- add `.claude/skills/gitnexus-impact-analysis/SKILL.md` for the
+  pre-edit blast-radius ritual (`impact`, `detect_changes`) and the
+  HIGH/CRITICAL gate that blocks edits without a reported call graph
+- add `.claude/skills/gitnexus-refactoring/SKILL.md` for the safe
+  rename / extract / split workflow that pairs `rename` with
+  `detect_changes` verification
+- rename `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` to
+  `.claude/skills/gitnexus-guide/SKILL.md` so the meta-reference lives
+  alongside its peers instead of inside the directory it documents;
+  the empty intermediate `.claude/skills/gitnexus/gitnexus-guide/`
+  path is removed in the same commit

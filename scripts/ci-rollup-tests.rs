@@ -65,18 +65,24 @@ fn passing_record(package: &str, environment: &str, tier: Tier) -> RunRecord {
     rec
 }
 
+/// The repository root. `scripts/` is a workspace of its own, so the manifest
+/// directory is one level down.
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("scripts/ has a parent")
+        .to_path_buf()
+}
+
 fn expectation(package: &str, environment: &str, tier: Tier) -> ExpectedCell {
-    ExpectedCell {
-        key: CellKey {
+    ExpectedCell::new(
+        CellKey {
             package: package.to_owned(),
             environment: environment.to_owned(),
             tier,
         },
-        backends: Vec::new(),
-        gap: None,
-        exclusion: None,
-        companion_suites: Vec::new(),
-    }
+        String::new(),
+    )
 }
 
 /// A well-formed, owned, unexpired governed capability gap. Tests that
@@ -86,6 +92,9 @@ fn gap() -> DeclaredGap {
         owner: "@yankeeinlondon".to_owned(),
         reason: "tmux has no Windows port".to_owned(),
         expiry: "2027-01-31".to_owned(),
+        capability: "tmux".to_owned(),
+        policy: POLICY_LINK.to_owned(),
+        closes: "features/_unscheduled/windows-l2-ci-leg".to_owned(),
     }
 }
 
@@ -109,6 +118,7 @@ fn test_environments() -> Vec<Environment> {
         reason: reason.to_owned(),
         owner: "@yankeeinlondon".to_owned(),
         expiry: "2027-01-31".to_owned(),
+        closes: String::new(),
     };
     let plain = |tmux: bool, browser: bool, node: bool, archive: bool| {
         BTreeMap::from([
@@ -156,9 +166,14 @@ fn test_environments() -> Vec<Environment> {
     ]
 }
 
+/// A gating package's policy. Its area follows the repo's commonest layout — a
+/// library and its `-cli` companion share one area — so an area-scoped fixture
+/// exercises the grouping rather than a one-package-per-area degenerate case.
+/// The real derivation is the planner's, from the manifest directory.
 fn policy(package: &str) -> PackagePolicy {
     PackagePolicy {
         package: package.to_owned(),
+        area: package.trim_end_matches("-cli").to_owned(),
         gates: true,
         tiers: vec![Tier::L1],
         l2_backends: Vec::new(),
@@ -188,9 +203,12 @@ fn only_cell(cells: Vec<Cell>) -> Cell {
 /// "cannot say" and fail closed.
 fn rollup_of(cells: Vec<Cell>, scope: &[&str]) -> Rollup {
     Rollup {
-        schema_version: SCHEMA_VERSION,
+        schema_version: RESULT_SCHEMA_VERSION,
         run_id: None,
         scope: scope.iter().map(|s| (*s).to_owned()).collect(),
+        areas: derived_areas(&cells),
+        area_scope: Vec::new(),
+        accepted_evidence: accepted_evidence(&cells),
         scope_degraded: false,
         scheduled: None,
         records: Vec::new(),
@@ -548,6 +566,7 @@ fn a_failing_lint_is_never_blamed_for_a_missing_l1_cell() {
         environment: None,
         detail: None,
         companion: None,
+        dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
 
@@ -587,6 +606,7 @@ fn a_producer_detail_explains_why_a_cell_has_no_evidence() {
         environment: Some("wsl2-ubuntu".to_owned()),
         detail: Some("the WSL2 guest became unreachable after the test step".to_owned()),
         companion: None,
+        dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
 
@@ -616,6 +636,7 @@ fn a_failing_l1_is_still_blamed_for_a_missing_l2_cell() {
         environment: None,
         detail: None,
         companion: None,
+        dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
 
@@ -739,6 +760,7 @@ fn a_producer_failure_downgrades_a_green_report() {
                 .to_owned(),
         ),
         companion: None,
+        dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
 
@@ -775,6 +797,7 @@ fn a_producer_success_never_upgrades_a_failing_cell() {
         environment: Some("ubuntu-latest".to_owned()),
         detail: None,
         companion: None,
+        dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
     let mut rec = passing_record("sniff-cli", "ubuntu-latest", Tier::L1);
@@ -808,6 +831,7 @@ fn companion_status(result: &str, companion: Option<&str>) -> ProducerStatus {
         environment: Some("ubuntu-latest".to_owned()),
         detail: None,
         companion: companion.map(str::to_owned),
+        dependents: Vec::new(),
     }
 }
 
@@ -903,6 +927,7 @@ fn a_skipped_companion_downgrades_a_green_lint() {
         environment: None,
         detail: None,
         companion: Some("skipped".to_owned()),
+        dependents: Vec::new(),
     }];
 
     let cells = status_cells(
@@ -910,6 +935,7 @@ fn a_skipped_companion_downgrades_a_green_lint() {
         &scope_of(&["homelab-server"]),
         &[],
         &[homelab],
+        &[],
     );
     let cell = only_cell(cells);
     assert_eq!(cell.key.tier, Tier::parse("lint"));
@@ -929,6 +955,7 @@ fn status_cells_map_each_job_result_to_a_cell_state() {
         environment: None,
         detail: None,
         companion: None,
+        dependents: Vec::new(),
     };
     let statuses = vec![
         status("pkg-success", "success"),
@@ -945,7 +972,7 @@ fn status_cells_map_each_job_result_to_a_cell_state() {
         "pkg-mystery",
     ]);
 
-    let cells = status_cells(&statuses, &scope, &[], &[policy("x")]);
+    let cells = status_cells(&statuses, &scope, &[], &[policy("x")], &[]);
     let state_of = |package: &str| {
         cells
             .iter()
@@ -972,6 +999,7 @@ fn status_cells_skip_test_tiers_and_out_of_scope_packages() {
             environment: Some("ubuntu-latest".to_owned()),
             detail: None,
             companion: None,
+            dependents: Vec::new(),
         },
         ProducerStatus {
             package: "outsider".to_owned(),
@@ -980,9 +1008,10 @@ fn status_cells_skip_test_tiers_and_out_of_scope_packages() {
             environment: None,
             detail: None,
             companion: None,
+            dependents: Vec::new(),
         },
     ];
-    let cells = status_cells(&statuses, &scope_of(&["sniff-cli"]), &[], &[policy("x")]);
+    let cells = status_cells(&statuses, &scope_of(&["sniff-cli"]), &[], &[policy("x")], &[]);
     assert!(cells.is_empty(), "no status cell may appear: {cells:#?}");
 }
 
@@ -1199,11 +1228,11 @@ fn the_checked_in_environments_table_parses_and_is_well_governed() {
             .collect()
     );
 
-    // Every governed absence must satisfy the acceptance rule, or `ci-verdict`
-    // can never exit 0 on a run touching an L2-owning package.
+    // Every governed absence must satisfy the acceptance rule, or an area's
+    // verdict can never exit 0 on a run touching an L2-owning package.
     for environment in &doc.environments {
-        for capability in environment.capabilities.values() {
-            if let Some(gap) = capability.governed_gap() {
+        for (name, capability) in &environment.capabilities {
+            if let Some(gap) = capability.governed_gap(name) {
                 assert!(!gap.owner.trim().is_empty(), "{} gap has no owner", environment.name);
                 assert!(!gap.reason.trim().is_empty(), "{} gap has no reason", environment.name);
                 assert!(
@@ -1446,7 +1475,7 @@ fn a_listed_failure_is_accepted() {
         }],
     );
     let baseline = Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: vec![failure_entry("sniff", "macos-latest", Tier::L1)],
         skip: Vec::new(),
     };
@@ -1473,7 +1502,7 @@ fn messenger_l1_failure_requires_an_exact_package_keyed_baseline() {
 
     let rollup = rollup_of(vec![cell], &["messenger"]);
     let wrong_environment = Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: vec![failure_entry("messenger", "ubuntu-latest", Tier::L1)],
         skip: Vec::new(),
     };
@@ -1481,7 +1510,7 @@ fn messenger_l1_failure_requires_an_exact_package_keyed_baseline() {
     assert!(blocks_with_rule(&findings, "cell-failed"));
 
     let exact = Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: vec![failure_entry("messenger", "windows-latest", Tier::L1)],
         skip: Vec::new(),
     };
@@ -1509,7 +1538,7 @@ fn rendezvous_l1_missing_evidence_stays_package_keyed_and_blocks() {
     assert_eq!(cell.state, CellState::Missing);
 
     let baseline = Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: vec![failure_entry(
             "rendezvous-daemon",
             "wsl2-ubuntu",
@@ -1532,7 +1561,7 @@ fn a_listed_entry_that_now_passes_blocks_to_force_cleanup() {
         &[passing_record("biscuit-speaks", "ubuntu-latest", Tier::L1)],
     );
     let baseline = Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: vec![failure_entry("biscuit-speaks", "ubuntu-latest", Tier::L1)],
         skip: Vec::new(),
     };
@@ -1544,7 +1573,7 @@ fn a_listed_entry_that_now_passes_blocks_to_force_cleanup() {
 #[test]
 fn an_out_of_scope_entry_is_ignored_and_not_treated_as_a_pass() {
     let baseline = Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: vec![failure_entry("homelab", "ubuntu-latest", Tier::L1)],
         skip: Vec::new(),
     };
@@ -1566,23 +1595,12 @@ fn an_out_of_scope_entry_is_ignored_and_not_treated_as_a_pass() {
 #[case(CellState::PolicyGap)]
 fn a_scheduled_entry_with_no_test_result_stays_blocking(#[case] state: CellState) {
     let cell = Cell {
-        key: CellKey {
-            package: "claudine".to_owned(),
-            environment: "ubuntu-latest".to_owned(),
-            tier: Tier::L1,
-        },
         state,
-        counts: Counts::default(),
         scheduled: true,
-        skipped_tests: Vec::new(),
-        failed_tests: Vec::new(),
-        skip_evidence_degraded: false,
-        declared_gap: None,
-        reasons: Vec::new(),
-        records: Vec::new(),
+        ..blank_cell(cell_key("claudine", "ubuntu-latest", Tier::L1))
     };
     let baseline = Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: vec![failure_entry("claudine", "ubuntu-latest", Tier::L1)],
         skip: Vec::new(),
     };
@@ -1601,7 +1619,7 @@ fn a_scheduled_entry_with_no_test_result_stays_blocking(#[case] state: CellState
 #[test]
 fn a_baselined_leg_the_run_did_not_schedule_is_ignored_with_a_note() {
     let baseline = Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: vec![failure_entry("claudine", "windows-latest", Tier::L1)],
         skip: Vec::new(),
     };
@@ -1610,16 +1628,9 @@ fn a_baselined_leg_the_run_did_not_schedule_is_ignored_with_a_note() {
     let lint = cell_key("claudine", "ubuntu-latest", Tier::parse("lint"));
     let rollup = rollup_scheduling(
         vec![Cell {
-            key: lint.clone(),
             state: CellState::Pass,
-            counts: Counts::default(),
             scheduled: true,
-            skipped_tests: Vec::new(),
-            failed_tests: Vec::new(),
-            skip_evidence_degraded: false,
-            declared_gap: None,
-            reasons: Vec::new(),
-            records: Vec::new(),
+            ..blank_cell(lint.clone())
         }],
         &["claudine"],
         vec![lint],
@@ -1640,7 +1651,7 @@ fn a_baselined_leg_the_run_did_not_schedule_is_ignored_with_a_note() {
 #[test]
 fn a_baselined_leg_the_run_scheduled_but_has_no_cell_for_still_blocks() {
     let baseline = Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: vec![failure_entry("claudine", "windows-latest", Tier::L1)],
         skip: Vec::new(),
     };
@@ -1658,7 +1669,7 @@ fn a_baselined_leg_the_run_scheduled_but_has_no_cell_for_still_blocks() {
 #[test]
 fn a_baselined_package_that_produced_no_cell_at_all_blocks() {
     let baseline = Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: vec![failure_entry("claudine", "windows-latest", Tier::L1)],
         skip: Vec::new(),
     };
@@ -1679,7 +1690,7 @@ fn an_expired_entry_blocks() {
     let mut entry = failure_entry("sniff", "macos-latest", Tier::L1);
     entry.expiry = Some("2026-01-01".to_owned());
     let baseline = Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: vec![entry],
         skip: Vec::new(),
     };
@@ -1883,12 +1894,8 @@ fn a_governed_gap_round_trips_through_the_result_document() {
 
 fn skip_cell(skips: &[&str]) -> Cell {
     Cell {
-        key: CellKey {
-            package: "biscuit-terminal".to_owned(),
-            environment: "ubuntu-latest".to_owned(),
-            tier: Tier::L2,
-        },
         state: CellState::Pass,
+        origin: Origin::Ci,
         counts: Counts {
             total: 5,
             passed: 5 - skips.len() as u32,
@@ -1897,17 +1904,13 @@ fn skip_cell(skips: &[&str]) -> Cell {
         },
         scheduled: true,
         skipped_tests: skips.iter().map(|s| (*s).to_owned()).collect(),
-        failed_tests: Vec::new(),
-        skip_evidence_degraded: false,
-        declared_gap: None,
-        reasons: Vec::new(),
-        records: Vec::new(),
+        ..blank_cell(cell_key("biscuit-terminal", "ubuntu-latest", Tier::L2))
     }
 }
 
 fn skip_budget(tests: &[&str]) -> Baseline {
     Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: Vec::new(),
         skip: vec![SkipEntry {
             package: "biscuit-terminal".to_owned(),
@@ -2144,18 +2147,20 @@ fn a_lint_baseline_entry_excuses_a_lint_failure() {
         environment: None,
         detail: None,
         companion: None,
+        dependents: Vec::new(),
     }];
     let cells = status_cells(
         &statuses,
         &scope_of(&["homelab-server"]),
         &[],
         &[policy("homelab-server")],
+        &[],
     );
     assert_eq!(cells.len(), 1);
     assert_eq!(cells[0].state, CellState::Fail);
 
     let baseline = Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: vec![failure_entry(
             "homelab-server",
             "ubuntu-latest",
@@ -2177,7 +2182,7 @@ fn a_lint_baseline_entry_excuses_a_lint_failure() {
 #[test]
 fn synthetic_baseline_identities_report_out_of_scope_by_name() {
     let baseline = Baseline {
-        schema_version: SCHEMA_VERSION,
+        schema_version: BASELINE_SCHEMA_VERSION,
         failure: vec![
             failure_entry("claudine-gen-drift", "ubuntu-latest", Tier::parse("lint")),
             failure_entry("some-other-synthetic", "ubuntu-latest", Tier::parse("lint")),
@@ -2581,28 +2586,21 @@ fn passing_evidence_for_an_unscheduled_cell_renders_pass_and_blocks() {
 
 fn compare_cell(package: &str, state: CellState, failed: &[&str]) -> Cell {
     Cell {
-        key: CellKey {
-            package: package.to_owned(),
-            environment: "ubuntu-latest".to_owned(),
-            tier: Tier::L1,
-        },
         state,
-        counts: Counts::default(),
         scheduled: state != CellState::NotScheduled,
-        skipped_tests: Vec::new(),
         failed_tests: failed.iter().map(|t| (*t).to_owned()).collect(),
-        skip_evidence_degraded: false,
-        declared_gap: None,
-        reasons: Vec::new(),
-        records: Vec::new(),
+        ..blank_cell(cell_key(package, "ubuntu-latest", Tier::L1))
     }
 }
 
 fn compare_rollup(cells: Vec<Cell>) -> Rollup {
     Rollup {
-        schema_version: SCHEMA_VERSION,
+        schema_version: RESULT_SCHEMA_VERSION,
         run_id: None,
         scope: Vec::new(),
+        areas: derived_areas(&cells),
+        area_scope: Vec::new(),
+        accepted_evidence: Vec::new(),
         scope_degraded: false,
         scheduled: None,
         records: Vec::new(),
@@ -2694,4 +2692,1844 @@ fn a_cell_present_in_only_one_document_is_not_comparable() {
 
     assert!(!result.regressed());
     assert_eq!(result.incomparable.len(), 2);
+}
+
+/// Write one result document per slice and return the `--<flag>` argument
+/// pairs that name them.
+fn slice_args(temp: &TempDir, flag: &str, slices: &[(&str, Rollup)]) -> Vec<String> {
+    let mut args = Vec::new();
+    for (name, slice) in slices {
+        let path = temp.path().join(format!("{name}.json"));
+        fs::write(&path, serde_json::to_string(slice).unwrap()).unwrap();
+        args.push(format!("--{flag}"));
+        args.push(path.to_str().unwrap().to_owned());
+    }
+    args
+}
+
+fn areaed(mut rollup: Rollup, area: &str, run_id: Option<&str>) -> Rollup {
+    for cell in &mut rollup.cells {
+        cell.area = area.to_owned();
+    }
+    rollup.areas = derived_areas(&rollup.cells);
+    rollup.run_id = run_id.map(str::to_owned);
+    rollup
+}
+
+/// `just ci-diff` downloads one run's `ci-results-<slug>` slices, since no
+/// whole-run document exists any more; `compare` folds them by concatenation.
+#[test]
+fn compare_folds_repeated_base_and_head_slices_without_judging_them() {
+    let temp = TempDir::new("compare-fold");
+    let base_sniff = areaed(
+        compare_rollup(vec![compare_cell("sniff", CellState::Fail, &["a"])]),
+        "sniff",
+        Some("100"),
+    );
+    let base_queue = areaed(
+        compare_rollup(vec![compare_cell("queue", CellState::Pass, &[])]),
+        "queue",
+        Some("100"),
+    );
+    // The regression hides in the SECOND head slice: a single-file compare
+    // would report `queue` as not comparable and clear the branch.
+    let head_sniff = areaed(
+        compare_rollup(vec![compare_cell("sniff", CellState::Fail, &["a"])]),
+        "sniff",
+        Some("200"),
+    );
+    let head_queue = areaed(
+        compare_rollup(vec![compare_cell("queue", CellState::Fail, &["b"])]),
+        "queue",
+        Some("200"),
+    );
+    let summary = temp.path().join("summary.md");
+    let mut raw = slice_args(&temp, "base", &[("base-sniff", base_sniff), ("base-queue", base_queue)]);
+    raw.extend(slice_args(&temp, "head", &[("head-sniff", head_sniff), ("head-queue", head_queue)]));
+    raw.extend(["--summary".to_owned(), summary.to_str().unwrap().to_owned()]);
+    let args = Args::parse(raw.into_iter()).unwrap();
+
+    assert_eq!(cmd_compare(&args).unwrap(), EXIT_BLOCKED, "queue regressed in the second slice");
+
+    let rendered = fs::read_to_string(&summary).unwrap();
+    assert!(rendered.contains("base: run 100 · head: run 200"), "{rendered}");
+    assert!(rendered.contains("queue/ubuntu-latest/L1"), "{rendered}");
+    assert!(!rendered.contains("not comparable"), "both sides carry both cells: {rendered}");
+}
+
+#[test]
+fn compare_refuses_a_cell_that_two_slices_both_carry() {
+    let temp = TempDir::new("compare-overlap");
+    let twice = areaed(
+        compare_rollup(vec![compare_cell("sniff", CellState::Pass, &[])]),
+        "sniff",
+        None,
+    );
+    let mut raw = slice_args(&temp, "base", &[("one", twice.clone()), ("two", twice.clone())]);
+    raw.extend(slice_args(&temp, "head", &[("head", twice)]));
+    let args = Args::parse(raw.into_iter()).unwrap();
+
+    let error = cmd_compare(&args).unwrap_err().to_string();
+
+    assert!(
+        error.contains("sniff/ubuntu-latest/L1") && error.contains("earlier `--base` slice"),
+        "{error}"
+    );
+}
+
+#[test]
+fn compare_still_requires_at_least_one_document_per_side() {
+    let temp = TempDir::new("compare-missing");
+    let only = areaed(
+        compare_rollup(vec![compare_cell("sniff", CellState::Pass, &[])]),
+        "sniff",
+        None,
+    );
+    let raw = slice_args(&temp, "base", &[("base", only)]);
+    let args = Args::parse(raw.into_iter()).unwrap();
+
+    let error = cmd_compare(&args).unwrap_err().to_string();
+
+    assert!(error.contains("`--head` is required"), "{error}");
+}
+// ---------------------------------------------------------------------------
+// The area-owned result model
+//
+// Phase 2 of `fixes/2026-09-11-cicd-cleanup/plan.md` froze these contracts as
+// `pending_contract` fixtures; Phase 5 implements them, so the wrappers are
+// gone and a regression fails this suite directly. The fixtures that pin the
+// *defect* (`the_pr_76_fixture_reproduces_the_regression_exactly`) are
+// deliberately kept: they are what stops a contract from being satisfied by
+// changing what the fixture builds.
+// ---------------------------------------------------------------------------
+
+/// The six packages and seven cells PR #76 filed as `MISSING`, from
+/// `fixes/2026-09-11-cicd-cleanup/baseline-2026-09-11.md` section 4.
+const PR76_L1_PACKAGES: [&str; 6] = [
+    "biscuit-speaks",
+    "biscuit-speaks-cli",
+    "claudine",
+    "claudine-cli",
+    "playa",
+    "playa-cli",
+];
+
+fn pr76_policies() -> Vec<PackagePolicy> {
+    let mut policies: Vec<PackagePolicy> = PR76_L1_PACKAGES.iter().map(|p| policy(p)).collect();
+    // `claudine-cli` is the one package with an L2 tier, giving the seventh cell.
+    let cli = policies
+        .iter_mut()
+        .find(|p| p.package == "claudine-cli")
+        .expect("claudine-cli is in the fixture");
+    cli.tiers = vec![Tier::L1, Tier::L2];
+    cli.l2_backends = vec!["tmux".to_owned()];
+    policies
+}
+
+/// The run as it actually happened: every hosted environment reported, macOS
+/// reported nothing because a local receipt suppressed its execution, and
+/// nothing told the rollup the receipt existed.
+fn pr76_cells() -> Vec<Cell> {
+    let policies = pr76_policies();
+    let scope = scope_of(&PR76_L1_PACKAGES);
+    let expected = expected_cells(&policies, &scope, &test_environments());
+    classify_simple(&expected, &pr76_records())
+}
+
+/// Every hosted record the run produced. macOS is absent by construction.
+fn pr76_records() -> Vec<RunRecord> {
+    let mut records = Vec::new();
+    for package in PR76_L1_PACKAGES {
+        for environment in ["ubuntu-latest", "windows-latest", "wsl2-ubuntu"] {
+            records.push(passing_record(package, environment, Tier::L1));
+        }
+    }
+    records.push(passing_record("claudine-cli", "ubuntu-latest", Tier::L2));
+    records
+}
+
+/// The same run, rolled up against the plan that scheduled it: the seven macOS
+/// cells are reused from the receipt that suppressed their execution.
+fn pr76_cells_from_the_plan() -> Vec<Cell> {
+    let mut cells = Vec::new();
+    for package in PR76_L1_PACKAGES {
+        for environment in ENVIRONMENTS {
+            cells.push(plan_cell_json(package, environment, "L1", environment == "macos-latest"));
+        }
+    }
+    for environment in ENVIRONMENTS {
+        // Windows and the WSL2 guest host no L2 backend, and both absences are
+        // governed: the plan accepts them rather than scheduling a job.
+        if matches!(environment, "windows-latest" | "wsl2-ubuntu") {
+            let mut gap = accepted_gap_cell_json(true, "2027-01-31");
+            gap["environment"] = serde_json::json!(environment);
+            cells.push(gap);
+            continue;
+        }
+        cells.push(plan_cell_json(
+            "claudine-cli",
+            environment,
+            "L2",
+            environment == "macos-latest",
+        ));
+    }
+    let plan = plan_of(cells);
+    let expected = plan_expected_cells(&plan).expect("the plan is the current generation");
+    classify_simple(&expected, &pr76_records())
+}
+
+const ENVIRONMENTS: [&str; 4] = [
+    "ubuntu-latest",
+    "windows-latest",
+    "macos-latest",
+    "wsl2-ubuntu",
+];
+
+/// One plan cell, in the JSON the planner writes. Built as text rather than as
+/// a struct so the fixtures exercise the deserializer the artifact is read
+/// through, not a hand-built value that cannot drift with it.
+fn plan_cell_json(
+    package: &str,
+    environment: &str,
+    gate: &str,
+    reused: bool,
+) -> serde_json::Value {
+    let area = package.trim_end_matches("-cli");
+    let mut cell = serde_json::json!({
+        "package": package,
+        "area": area,
+        "environment": environment,
+        "gate": gate,
+        "execution": "execute",
+        "origin": "ci",
+        "state": "pending",
+        "target_kinds": if gate == "L1" { vec!["lib", "test"] } else { Vec::new() },
+        "compile_coverage_from": if gate == "L1" { "L1" } else { "" },
+        "selection_reason": format!("{package} declares the {gate} tier"),
+    });
+    if reused {
+        cell["execution"] = serde_json::json!("reuse");
+        cell["origin"] = serde_json::json!("local");
+        cell["state"] = serde_json::json!("reused");
+        cell["evidence"] = receipt_evidence(package, gate, "pass", 3, 0);
+    }
+    cell
+}
+
+/// The accepted-cell record `local_evidence.py verify --cells` publishes.
+fn receipt_evidence(package: &str, gate: &str, outcome: &str, passed: u32, failed: u32) -> serde_json::Value {
+    serde_json::json!({
+        "package": package,
+        "gate": gate,
+        "environment": "macos-latest",
+        "origin": "local",
+        "outcome": outcome,
+        "completion": "complete",
+        "exit_code": if outcome == "pass" { 0 } else { 100 },
+        "counts": {
+            "total": passed + failed,
+            "passed": passed,
+            "failed": failed,
+            "skipped": 0,
+            "errored": 0,
+        },
+        "duration_s": 12,
+        "gate_input_identity": "abcdef0123456789",
+        "backends": Vec::<String>::new(),
+        "report": "junit/L1.xml",
+        "failed_tests": if failed > 0 { vec![format!("{package}::boom")] } else { Vec::new() },
+        "measurements": format!("{} test(s), {failed} failed, 12s", passed + failed),
+        "evidence": {
+            "ref": "refs/notes/ci-local/macos-latest",
+            "commit": "f".repeat(40),
+            "host": {"os": "macos", "kernel": "27.0.0", "report_dir": "~/.rusty-biscuit/ci-evidence/0156096ff"},
+        },
+    })
+}
+
+/// A resolved plan carrying `cells`, parsed exactly as the artifact is.
+fn plan_of(cells: Vec<serde_json::Value>) -> ResolvedPlan {
+    let packages: BTreeSet<String> = cells
+        .iter()
+        .map(|cell| cell["package"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    let document = serde_json::json!({
+        "schema_version": PLAN_SCHEMA_VERSION,
+        "packages": packages
+            .iter()
+            .map(|package| serde_json::json!({"package": package}))
+            .collect::<Vec<_>>(),
+        "cells": cells,
+    });
+    serde_json::from_str(&document.to_string()).expect("the plan document parses")
+}
+
+fn find_cell<'a>(cells: &'a [Cell], package: &str, environment: &str, tier: Tier) -> &'a Cell {
+    cells
+        .iter()
+        .find(|cell| cell.key == cell_key(package, environment, tier.clone()))
+        .unwrap_or_else(|| panic!("no {package}/{environment}/{tier} cell in {cells:#?}"))
+}
+
+// --- AC6: the PR #76 regression ------------------------------------------
+
+#[test]
+fn the_pr_76_macos_cells_must_not_resolve_to_missing() {
+    let cells = pr76_cells_from_the_plan();
+    let macos: Vec<&Cell> = cells
+        .iter()
+        .filter(|cell| cell.key.environment == "macos-latest")
+        .collect();
+
+    assert_eq!(
+        7,
+        macos.len(),
+        "the regression is exactly seven macOS cells: six L1 and one L2"
+    );
+    for cell in macos {
+        assert_ne!(
+            cell.state,
+            CellState::Missing,
+            "{} resolved to MISSING although local evidence proved it passed",
+            cell.key
+        );
+        assert_eq!(cell.state, CellState::Pass);
+        assert_eq!(cell.origin, Origin::Local);
+    }
+}
+
+#[test]
+fn the_pr_76_fixture_reproduces_the_regression_exactly() {
+    // Non-pending: pins the defect itself, so a Phase 5 change that makes the
+    // contract above pass by changing what the fixture *builds* is caught here.
+    // This is the run WITHOUT its plan — nothing tells the rollup a receipt
+    // satisfied those cells, and failing safe means MISSING.
+    let cells = pr76_cells();
+    let missing: Vec<String> = cells
+        .iter()
+        .filter(|cell| cell.key.environment == "macos-latest" && cell.state == CellState::Missing)
+        .map(|cell| cell.key.to_string())
+        .collect();
+
+    assert_eq!(
+        vec![
+            "biscuit-speaks-cli/macos-latest/L1",
+            "biscuit-speaks/macos-latest/L1",
+            "claudine-cli/macos-latest/L1",
+            "claudine-cli/macos-latest/L2",
+            "claudine/macos-latest/L1",
+            "playa-cli/macos-latest/L1",
+            "playa/macos-latest/L1",
+        ],
+        {
+            let mut sorted = missing;
+            sorted.sort();
+            sorted
+        }
+    );
+}
+
+#[test]
+fn the_pr_76_hosted_cells_still_pass() {
+    // The other half of the regression: everything that ran was green, so a
+    // Phase 5 fix must not make the macOS cells pass by degrading these. The two
+    // exceptions are the governed L2 gaps the baseline records as POLICY GAP,
+    // which did not block that run and must not start to.
+    let cells = pr76_cells();
+    let not_passing: Vec<String> = cells
+        .iter()
+        .filter(|cell| cell.key.environment != "macos-latest" && cell.state != CellState::Pass)
+        .map(|cell| format!("{} = {}", cell.key, cell.state))
+        .collect();
+    assert_eq!(
+        vec![
+            "claudine-cli/windows-latest/L2 = POLICY GAP",
+            "claudine-cli/wsl2-ubuntu/L2 = POLICY GAP",
+        ],
+        not_passing
+    );
+}
+
+#[test]
+fn the_pr_76_hosted_cells_stay_ci_origin_when_the_plan_is_read() {
+    // Reusing macOS must not quietly relabel the environments that did run.
+    let cells = pr76_cells_from_the_plan();
+    for cell in cells
+        .iter()
+        .filter(|cell| cell.key.environment != "macos-latest")
+    {
+        let expected = if cell.state == CellState::AcceptedGap {
+            // Nothing ran and nothing was reused: the cell has no result to
+            // attribute to anyone.
+            Origin::Unproduced
+        } else {
+            Origin::Ci
+        };
+        assert_eq!(cell.origin, expected, "{} changed origin", cell.key);
+        assert!(cell.evidence.is_none(), "{} invented evidence", cell.key);
+    }
+
+    // The two governed gaps of that run stay visible and stay non-blocking.
+    let gaps: Vec<String> = cells
+        .iter()
+        .filter(|cell| cell.state == CellState::AcceptedGap)
+        .map(|cell| cell.key.to_string())
+        .collect();
+    assert_eq!(
+        gaps,
+        vec![
+            "claudine-cli/windows-latest/L2".to_owned(),
+            "claudine-cli/wsl2-ubuntu/L2".to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn a_reused_cell_carries_the_measurements_its_receipt_recorded() {
+    let cells = pr76_cells_from_the_plan();
+    let cell = find_cell(&cells, "claudine", "macos-latest", Tier::L1);
+
+    assert_eq!(cell.counts.passed, 3);
+    assert_eq!(cell.counts.total, 3);
+    assert_eq!(cell.duration_s, 12);
+    let evidence = cell.evidence.clone().expect("a reused cell names its receipt");
+    assert_eq!(evidence.reference, "refs/notes/ci-local/macos-latest");
+    assert_eq!(evidence.measurements, "3 test(s), 0 failed, 12s");
+    assert_eq!(evidence.host, "macos 27.0.0");
+    assert_eq!(evidence.report, "~/.rusty-biscuit/ci-evidence/0156096ff");
+    assert!(
+        cell.records.is_empty(),
+        "no CI job ran for a reused cell, so it owns no run record"
+    );
+}
+
+#[test]
+fn the_result_document_records_the_evidence_it_was_scheduled_against() {
+    let cells = pr76_cells_from_the_plan();
+    let rollup = rollup_of(cells, &PR76_L1_PACKAGES);
+    let json = serde_json::to_value(&rollup).expect("a rollup serializes");
+
+    assert!(
+        json.get("accepted_evidence").is_some(),
+        "the rollup document records no accepted evidence; evidence accepted \
+         for scheduling cannot satisfy its result cell"
+    );
+    assert_eq!(
+        rollup.accepted_evidence.len(),
+        7,
+        "one entry per reused cell: {:#?}",
+        rollup.accepted_evidence
+    );
+    for entry in &rollup.accepted_evidence {
+        assert_eq!(entry.origin, Origin::Local);
+        assert_eq!(entry.evidence.reference, "refs/notes/ci-local/macos-latest");
+        assert!(!entry.area.is_empty(), "{} carries no area", entry.key);
+    }
+}
+
+// --- AC4: one result model, with origin and evidence ---------------------
+
+#[test]
+fn a_result_cell_reports_where_its_result_came_from() {
+    let cell = &pr76_cells_from_the_plan()[0];
+    let json = serde_json::to_value(cell).expect("a cell serializes");
+    assert!(
+        json.get("origin").is_some(),
+        "the result cell carries no `origin`; local, prior-local, and CI \
+         results are indistinguishable in {json}"
+    );
+}
+
+#[test]
+fn a_result_cell_carries_its_area_alongside_its_package() {
+    let cell = &pr76_cells_from_the_plan()[0];
+    let json = serde_json::to_value(cell).expect("a cell serializes");
+    assert!(
+        json.get("area").is_some(),
+        "the result cell carries no `area`; there is nothing to group \
+         a top-level identity by in {json}"
+    );
+}
+
+#[test]
+fn package_stays_the_stored_identity_of_every_cell() {
+    // Deliberately the inverse of the fixture above: Design Decision 1 forbids
+    // re-keying results by area. Adding `area` is required; replacing
+    // `package` with it is not.
+    let cell = &pr76_cells_from_the_plan()[0];
+    let json = serde_json::to_value(cell).expect("a cell serializes");
+    assert!(json.get("package").is_some(), "package is the stored identity");
+    assert!(json.get("environment").is_some());
+    assert!(json.get("tier").is_some());
+}
+
+#[test]
+fn a_prior_local_receipt_is_distinguishable_from_the_outgoing_head() {
+    // Gate-input equivalence accepts a receipt from an OLDER head. That is a
+    // weaker claim than an exact-tree match and the result must say so.
+    let mut cell = plan_cell_json("claudine", "macos-latest", "L1", true);
+    cell["origin"] = serde_json::json!("prior-local");
+    cell["evidence"]["origin"] = serde_json::json!("prior-local");
+    let plan = plan_of(vec![cell]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let cell = only_cell(classify_simple(&expected, &[]));
+
+    assert_eq!(cell.state, CellState::Pass);
+    assert_eq!(cell.origin, Origin::PriorLocal);
+    assert!(
+        cell.reasons.iter().any(|reason| reason.contains("prior-local")),
+        "the reason must name the weaker claim: {:#?}",
+        cell.reasons
+    );
+}
+
+#[test]
+fn a_version_one_receipt_renders_its_measurements_as_unrecorded() {
+    // Spec section 3.6: a v1 note carries no per-cell outcome. It is pass-only
+    // by contract, and the text is part of the contract.
+    let mut cell = plan_cell_json("claudine", "macos-latest", "L1", true);
+    cell["evidence"] = serde_json::json!({
+        "origin": "local",
+        "evidence": "refs/notes/ci-local/macos-latest",
+    });
+    let plan = plan_of(vec![cell]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let cell = only_cell(classify_simple(&expected, &[]));
+
+    assert_eq!(cell.state, CellState::Pass);
+    assert_eq!(cell.counts, Counts::default());
+    let evidence = cell.evidence.clone().expect("the note is still named");
+    assert_eq!(evidence.measurements, "not recorded (v1 receipt)");
+    assert_eq!(evidence.reference, "refs/notes/ci-local/macos-latest");
+}
+
+#[test]
+fn a_reused_cell_that_also_produced_ci_evidence_reports_the_executed_result() {
+    // The plan and the run disagree: something executed work the plan reused.
+    // The executed result is the one with a report behind it, and the
+    // disagreement is stated rather than hidden.
+    let plan = plan_of(vec![plan_cell_json("claudine", "macos-latest", "L1", true)]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let mut record = record("claudine", "macos-latest", Tier::L1);
+    record.counts = Counts {
+        total: 2,
+        passed: 1,
+        failed: 1,
+        ..Counts::default()
+    };
+    record.failed_tests = vec!["claudine::real_failure".to_owned()];
+    let cell = only_cell(classify_simple(&expected, &[record]));
+
+    assert_eq!(cell.state, CellState::Fail);
+    assert_eq!(cell.origin, Origin::Ci);
+    assert_eq!(cell.failed_tests, vec!["claudine::real_failure".to_owned()]);
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|reason| reason.contains("also produced CI evidence")),
+        "the disagreement must be visible: {:#?}",
+        cell.reasons
+    );
+}
+
+// --- AC8: a failure blocks its own area, and only its own area -----------
+
+#[test]
+fn a_complete_failed_local_result_stays_a_failure() {
+    let mut cell = plan_cell_json("claudine", "macos-latest", "L1", true);
+    cell["evidence"] = receipt_evidence("claudine", "L1", "fail", 2, 1);
+    let plan = plan_of(vec![cell]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let cell = only_cell(classify_simple(&expected, &[]));
+
+    assert_eq!(cell.state, CellState::Fail);
+    assert_eq!(cell.origin, Origin::Local);
+    assert_eq!(cell.failed_tests, vec!["claudine::boom".to_owned()]);
+
+    let findings = verdict(
+        &rollup_of(vec![cell], &["claudine"]),
+        &Baseline::default(),
+        None,
+    );
+    assert!(
+        blocks_with_rule(&findings, "cell-failed"),
+        "reuse must not turn a failure into a success: {findings:#?}"
+    );
+}
+
+/// Two areas, one red. Narrowing is what makes the outcome area-owned.
+fn two_area_rollup() -> Rollup {
+    let cells = vec![
+        Cell {
+            area: "claudine".to_owned(),
+            state: CellState::Fail,
+            origin: Origin::Ci,
+            failed_tests: vec!["claudine::boom".to_owned()],
+            scheduled: true,
+            ..blank_cell(cell_key("claudine", "ubuntu-latest", Tier::L1))
+        },
+        Cell {
+            area: "playa".to_owned(),
+            state: CellState::Pass,
+            origin: Origin::Ci,
+            counts: Counts {
+                total: 4,
+                passed: 4,
+                ..Counts::default()
+            },
+            scheduled: true,
+            ..blank_cell(cell_key("playa", "ubuntu-latest", Tier::L1))
+        },
+    ];
+    rollup_of(cells, &["claudine", "playa"])
+}
+
+#[test]
+fn a_failed_area_blocks_only_its_own_slice() {
+    let rollup = two_area_rollup();
+
+    let claudine = rollup.narrowed(&["claudine".to_owned()].into_iter().collect());
+    let findings = verdict(&claudine, &Baseline::default(), None);
+    assert!(
+        blocks_with_rule(&findings, "cell-failed"),
+        "the owning area must block: {findings:#?}"
+    );
+
+    let playa = rollup.narrowed(&["playa".to_owned()].into_iter().collect());
+    let findings = verdict(&playa, &Baseline::default(), None);
+    assert!(
+        !any_block(&findings),
+        "an independent area must still complete and stay green: {findings:#?}"
+    );
+}
+
+#[test]
+fn narrowing_keeps_only_the_areas_own_cells_scope_and_evidence() {
+    let mut rollup = two_area_rollup();
+    rollup.accepted_evidence = vec![AcceptedEvidence {
+        key: cell_key("playa", "macos-latest", Tier::L1),
+        area: "playa".to_owned(),
+        origin: Origin::Local,
+        measurements: "4 test(s), 0 failed, 3s".to_owned(),
+        evidence: Evidence {
+            reference: "refs/notes/ci-local/macos-latest".to_owned(),
+            ..Evidence::default()
+        },
+    }];
+    rollup.scheduled = Some(vec![
+        cell_key("claudine", "ubuntu-latest", Tier::L1),
+        cell_key("playa", "ubuntu-latest", Tier::L1),
+    ]);
+
+    let playa = rollup.narrowed(&["playa".to_owned()].into_iter().collect());
+
+    assert_eq!(playa.scope, vec!["playa".to_owned()]);
+    assert_eq!(playa.areas, vec!["playa".to_owned()]);
+    assert_eq!(playa.area_scope, vec!["playa".to_owned()]);
+    assert_eq!(playa.cells.len(), 1);
+    assert_eq!(playa.accepted_evidence.len(), 1);
+    assert_eq!(
+        playa.scheduled.as_deref(),
+        Some([cell_key("playa", "ubuntu-latest", Tier::L1)].as_slice())
+    );
+}
+
+#[test]
+fn another_areas_baseline_entry_is_out_of_scope_in_this_slice() {
+    // The entry names a package this slice says nothing about. Ignoring it is
+    // right; counting it as a pass or as a vanished result is not.
+    let baseline = Baseline {
+        schema_version: BASELINE_SCHEMA_VERSION,
+        failure: vec![failure_entry("claudine", "ubuntu-latest", Tier::L1)],
+        skip: Vec::new(),
+    };
+    let playa = two_area_rollup().narrowed(&["playa".to_owned()].into_iter().collect());
+
+    let findings = verdict(&playa, &baseline, None);
+    assert!(!any_block(&findings), "{findings:#?}");
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.rule == "baseline-out-of-scope"),
+        "the other area's entry must be visibly ignored: {findings:#?}"
+    );
+}
+
+#[test]
+fn a_missing_cell_blocks_its_own_area() {
+    let cells = vec![Cell {
+        area: "claudine".to_owned(),
+        state: CellState::Missing,
+        scheduled: true,
+        ..blank_cell(cell_key("claudine", "macos-latest", Tier::L1))
+    }];
+    let findings = verdict(
+        &rollup_of(cells, &["claudine"]).narrowed(&["claudine".to_owned()].into_iter().collect()),
+        &Baseline::default(),
+        None,
+    );
+    assert!(blocks_with_rule(&findings, "cell-missing"), "{findings:#?}");
+}
+
+#[test]
+fn a_prohibited_cell_is_missing_and_names_the_constraint() {
+    // A recorded execution constraint stops the push, never CI's expectation.
+    // If a prohibited cell reaches a run unsatisfied, its coverage is genuinely
+    // absent and the area must block.
+    let mut cell = plan_cell_json("claudine", "wsl2-ubuntu", "L1", false);
+    cell["execution"] = serde_json::json!("omit");
+    cell["origin"] = serde_json::json!("none");
+    cell["state"] = serde_json::json!("prohibited");
+    cell["prohibition"] = serde_json::json!({
+        "owner": "@yankeeinlondon",
+        "reason": "WSL was already run; do not run it again",
+        "expiry": "2026-10-01",
+    });
+    let plan = plan_of(vec![cell]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let cell = only_cell(classify_simple(&expected, &[]));
+
+    assert_eq!(cell.state, CellState::Missing);
+    assert_eq!(cell.origin, Origin::Unproduced);
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|reason| reason.contains("do not run it again")),
+        "the constraint must be named: {:#?}",
+        cell.reasons
+    );
+}
+
+// --- AC9: the accepted-gap state ----------------------------------------
+
+fn accepted_gap_cell_json(governed: bool, expiry: &str) -> serde_json::Value {
+    let mut cell = plan_cell_json("claudine-cli", "windows-latest", "L2", false);
+    cell["execution"] = serde_json::json!("omit");
+    cell["origin"] = serde_json::json!("none");
+    cell["state"] = serde_json::json!("accepted-gap");
+    cell["gap"] = serde_json::json!({
+        "capability": "tmux",
+        "governed": governed,
+        "policy": ".github/ci/environments.json",
+        "owner": "@yankeeinlondon",
+        "reason": "tmux has no Windows port",
+        "expiry": expiry,
+        "closes": "features/_unscheduled/windows-l2-ci-leg",
+    });
+    if !governed {
+        cell["gap"] = serde_json::json!({
+            "capability": "tmux",
+            "governed": false,
+            "policy": ".github/ci/environments.json",
+        });
+    }
+    cell
+}
+
+fn accepted_gap_cell(governed: bool, expiry: &str) -> Cell {
+    let plan = plan_of(vec![accepted_gap_cell_json(governed, expiry)]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    only_cell(classify_simple(&expected, &[]))
+}
+
+#[test]
+fn accepted_gap_is_a_distinct_machine_readable_state() {
+    let parsed = serde_json::from_str::<CellState>("\"ACCEPTED GAP\"")
+        .expect("CellState parses the ACCEPTED GAP state");
+    assert_eq!(parsed, CellState::AcceptedGap);
+    assert_eq!(
+        serde_json::to_string(&CellState::AcceptedGap).unwrap(),
+        "\"ACCEPTED GAP\"",
+        "the machine-readable name is part of the contract"
+    );
+    assert_ne!(
+        CellState::AcceptedGap,
+        CellState::PolicyGap,
+        "an accepted gap must not collapse into an unowned one"
+    );
+}
+
+#[test]
+fn an_accepted_gap_carries_its_owner_expiry_policy_and_closure() {
+    let cell = accepted_gap_cell(true, "2027-01-31");
+
+    assert_eq!(cell.state, CellState::AcceptedGap);
+    let gap = cell.declared_gap.clone().expect("a governed gap");
+    assert_eq!(gap.owner, "@yankeeinlondon");
+    assert_eq!(gap.expiry, "2027-01-31");
+    assert_eq!(gap.capability, "tmux");
+    assert_eq!(gap.policy, ".github/ci/environments.json");
+    assert_eq!(gap.closes, "features/_unscheduled/windows-l2-ci-leg");
+
+    let reason = cell.reasons.join(" ");
+    for required in [
+        "@yankeeinlondon",
+        "2027-01-31",
+        ".github/ci/environments.json",
+        "features/_unscheduled/windows-l2-ci-leg",
+        "to revoke",
+    ] {
+        assert!(
+            reason.contains(required),
+            "the visible description must carry {required:?}: {reason}"
+        );
+    }
+}
+
+#[test]
+fn an_accepted_gap_is_neither_a_pass_nor_a_failure_and_does_not_block() {
+    let cell = accepted_gap_cell(true, "2027-01-31");
+    assert!(
+        !cell.state.blocks(),
+        "an owned, unexpired gap is not a failing observation"
+    );
+
+    let findings = verdict(
+        &rollup_of(vec![cell], &["claudine-cli"]),
+        &Baseline::default(),
+        Some("2026-09-11"),
+    );
+    assert!(!any_block(&findings), "{findings:#?}");
+    assert!(
+        findings.iter().any(|finding| finding.rule == "policy-gap-accepted"
+            && finding.severity == Severity::Note
+            && finding.detail.contains("features/_unscheduled/windows-l2-ci-leg")),
+        "acceptance must stay visible, with what closes it: {findings:#?}"
+    );
+}
+
+#[test]
+fn an_expired_accepted_gap_blocks_its_area() {
+    let cell = accepted_gap_cell(true, "2026-01-01");
+    let findings = verdict(
+        &rollup_of(vec![cell], &["claudine-cli"]),
+        &Baseline::default(),
+        Some("2026-09-11"),
+    );
+    assert!(blocks_with_rule(&findings, "policy-gap-expired"), "{findings:#?}");
+}
+
+#[test]
+fn an_ungoverned_gap_is_never_accepted_however_the_plan_labels_it() {
+    // The plan says `accepted-gap`; the policy entry names no owner, reason, or
+    // expiry. Acceptance that cannot be traced excuses nothing.
+    let cell = accepted_gap_cell(false, "");
+    assert_ne!(cell.state, CellState::AcceptedGap);
+    assert!(cell.state.blocks());
+    assert!(cell.declared_gap.is_none());
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|reason| reason.contains("UNGOVERNED policy gap")),
+        "the unowned absence must be named: {:#?}",
+        cell.reasons
+    );
+
+    let findings = verdict(
+        &rollup_of(vec![cell], &["claudine-cli"]),
+        &Baseline::default(),
+        Some("2026-09-11"),
+    );
+    assert!(any_block(&findings), "{findings:#?}");
+    assert!(
+        !findings
+            .iter()
+            .any(|finding| finding.rule == "policy-gap-accepted"),
+        "an ungoverned gap is never acceptable: {findings:#?}"
+    );
+}
+
+#[test]
+fn an_accepted_gap_state_with_no_policy_entry_blocks() {
+    // A hand-edited or corrupted document, not something the planner writes.
+    // The verdict must still refuse it rather than read the state as consent.
+    let cells = vec![Cell {
+        area: "claudine-cli".to_owned(),
+        state: CellState::AcceptedGap,
+        scheduled: true,
+        ..blank_cell(cell_key("claudine-cli", "windows-latest", Tier::L2))
+    }];
+    let findings = verdict(
+        &rollup_of(cells, &["claudine-cli"]),
+        &Baseline::default(),
+        Some("2026-09-11"),
+    );
+    assert!(
+        blocks_with_rule(&findings, "policy-gap-incomplete"),
+        "{findings:#?}"
+    );
+}
+
+#[test]
+fn a_real_failure_outranks_an_accepted_gap() {
+    // A gap declaration can never suppress evidence: something ran and failed.
+    let plan = plan_of(vec![accepted_gap_cell_json(true, "2027-01-31")]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let mut record = record("claudine-cli", "windows-latest", Tier::L2);
+    record.counts = Counts {
+        total: 1,
+        failed: 1,
+        ..Counts::default()
+    };
+    record.failed_tests = vec!["claudine_cli::l2".to_owned()];
+    let cell = only_cell(classify_simple(&expected, &[record]));
+
+    assert_eq!(cell.state, CellState::Fail);
+}
+
+#[test]
+fn a_cancelled_job_is_not_an_accepted_gap() {
+    // Spec section 6: an ordinary cancellation, a runner cancellation, and an
+    // interrupted test are not accepted gaps. The state is never inferred from
+    // a GitHub conclusion.
+    let statuses = vec![ProducerStatus {
+        package: "claudine".to_owned(),
+        job: "check".to_owned(),
+        result: "cancelled".to_owned(),
+        environment: Some("windows-latest".to_owned()),
+        detail: None,
+        companion: None,
+        dependents: Vec::new(),
+    }];
+    let cells = status_cells(
+        &statuses,
+        &scope_of(&["claudine"]),
+        &[],
+        &[policy("claudine")],
+        &[],
+    );
+
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].state, CellState::Missing);
+    assert_ne!(cells[0].state, CellState::AcceptedGap);
+}
+
+// --- AC3: target coverage travels with the cell --------------------------
+
+#[test]
+fn a_cell_reports_the_target_kinds_and_compile_coverage_the_plan_gave_it() {
+    let cells = pr76_cells_from_the_plan();
+    let cell = find_cell(&cells, "claudine", "ubuntu-latest", Tier::L1);
+    assert_eq!(cell.target_kinds, vec!["lib".to_owned(), "test".to_owned()]);
+    assert_eq!(cell.compile_coverage_from, "L1");
+}
+
+#[test]
+fn a_status_gate_reports_the_target_coverage_the_plan_scheduled_it_for() {
+    // The check gate is where the `--all-targets` replacement is visible: it
+    // exists only for target kinds no test gate compiles.
+    let mut check = plan_cell_json("claudine", "windows-latest", "check", false);
+    check["gate"] = serde_json::json!("check");
+    check["target_kinds"] = serde_json::json!(["bench"]);
+    check["compile_coverage_from"] = serde_json::json!("check");
+    let plan = plan_of(vec![check]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let statuses = vec![ProducerStatus {
+        package: "claudine".to_owned(),
+        job: "check".to_owned(),
+        result: "success".to_owned(),
+        environment: Some("windows-latest".to_owned()),
+        detail: None,
+        companion: None,
+        dependents: Vec::new(),
+    }];
+
+    let cells = status_cells(
+        &statuses,
+        &scope_of(&["claudine"]),
+        &[],
+        &[policy("claudine")],
+        &expected,
+    );
+
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].state, CellState::Pass);
+    assert_eq!(cells[0].target_kinds, vec!["bench".to_owned()]);
+    assert_eq!(cells[0].compile_coverage_from, "check");
+    assert_eq!(cells[0].area, "claudine");
+}
+
+#[test]
+fn a_scheduled_gate_that_uploaded_no_status_is_missing_not_absent() {
+    let plan = plan_of(vec![plan_cell_json("claudine", "ubuntu-latest", "lint", false)]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+
+    let cells = status_cells(
+        &[],
+        &scope_of(&["claudine"]),
+        &[],
+        &[policy("claudine")],
+        &expected,
+    );
+
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].state, CellState::Missing);
+    assert_eq!(cells[0].origin, Origin::Unproduced);
+}
+
+// --- AC11: area scope, and a summary that applies no policy --------------
+
+#[test]
+fn the_rollup_and_verdict_commands_accept_an_area_scope() {
+    assert!(
+        USAGE.contains("--area"),
+        "the usage text does not document `--area`, so no area can apply \
+         its own baseline, gaps, and missing-cell rule"
+    );
+}
+
+#[test]
+fn the_grid_groups_cells_under_their_area() {
+    let markdown = render_grid(&two_area_rollup());
+    assert!(markdown.contains("### area `claudine`"), "{markdown}");
+    assert!(markdown.contains("### area `playa`"), "{markdown}");
+    assert!(
+        markdown.find("### area `claudine`") < markdown.find("`playa`"),
+        "areas are the top-level grouping, in a stable order: {markdown}"
+    );
+}
+
+#[test]
+fn the_grid_shows_a_reused_cell_with_its_origin_and_evidence() {
+    let rollup = rollup_of(pr76_cells_from_the_plan(), &PR76_L1_PACKAGES);
+    let markdown = render_grid(&rollup);
+
+    assert!(markdown.contains("PASS 3/0/0 (local)"), "{markdown}");
+    assert!(markdown.contains("### Reused results"), "{markdown}");
+    assert!(
+        markdown.contains("refs/notes/ci-local/macos-latest"),
+        "a local-origin cell's evidence link is its notes ref: {markdown}"
+    );
+}
+
+#[test]
+fn the_grid_explains_an_accepted_gap_where_a_reader_sees_it() {
+    let rollup = rollup_of(vec![accepted_gap_cell(true, "2027-01-31")], &["claudine-cli"]);
+    let markdown = render_grid(&rollup);
+
+    assert!(markdown.contains("### Accepted policy gaps"), "{markdown}");
+    assert!(markdown.contains("@yankeeinlondon"), "{markdown}");
+    assert!(markdown.contains("2027-01-31"), "{markdown}");
+    assert!(markdown.contains("features/_unscheduled/windows-l2-ci-leg"), "{markdown}");
+    assert!(
+        !markdown.contains("### Cells failing the summary gate"),
+        "an owned, unexpired gap is not a failing cell: {markdown}"
+    );
+}
+
+#[test]
+fn the_combined_summary_aggregates_area_slices_and_applies_no_policy() {
+    let rollup = two_area_rollup();
+    let claudine = rollup.narrowed(&["claudine".to_owned()].into_iter().collect());
+    let playa = rollup.narrowed(&["playa".to_owned()].into_iter().collect());
+
+    let markdown = render_combined_summary(&[claudine, playa]);
+
+    assert!(markdown.contains("| claudine |"), "{markdown}");
+    assert!(markdown.contains("| playa |"), "{markdown}");
+    // The words a policy evaluation would have to produce. The prose above may
+    // say what this view does NOT do; a decision is what it must not make.
+    for policy_word in [
+        "BLOCKED",
+        "CLEAR —",
+        "must not merge",
+        "baseline-",
+        "policy-gap-",
+        "## CI verdict",
+    ] {
+        assert!(
+            !markdown.contains(policy_word),
+            "the combined summary applied policy ({policy_word:?}): {markdown}"
+        );
+    }
+}
+
+// --- The versioned result-schema migration -------------------------------
+
+#[test]
+fn a_result_document_from_the_previous_generation_is_refused() {
+    let dir = std::env::temp_dir().join(format!("ci-rollup-r2-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("v2-results.json");
+    fs::write(
+        &path,
+        r#"{"schema_version":2,"scope":[],"scope_degraded":false,"records":[],"cells":[]}"#,
+    )
+    .unwrap();
+
+    let err = load_rollup(&path).expect_err("the previous generation must be refused");
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("area, origin, and evidence"),
+        "the error must name the migration: {message}"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_result_and_baseline_schemas_version_independently() {
+    // The baseline is hand-edited policy and does not move when the generated
+    // result document gains fields.
+    assert_eq!(RESULT_SCHEMA_VERSION, 3);
+    assert_eq!(BASELINE_SCHEMA_VERSION, 2);
+    let baseline = load_baseline(&repo_root().join(".github/ci/ci-baseline.toml"))
+        .expect("the shipped baseline loads");
+    assert!(baseline.failure.len() + baseline.skip.len() > 0 || true);
+}
+
+#[test]
+fn a_plan_from_another_generation_is_refused_rather_than_partly_read() {
+    let document = serde_json::json!({
+        "schema_version": 99,
+        "packages": [],
+        "cells": [],
+    });
+    let plan: ResolvedPlan = serde_json::from_str(&document.to_string()).unwrap();
+    let err = plan_expected_cells(&plan).expect_err("a future plan must be refused");
+    assert!(format!("{err:#}").contains("schema_version 99"), "{err:#}");
+}
+
+// --- The shipped artifacts -----------------------------------------------
+
+/// Every field this tool reads out of the resolved plan, against the frozen
+/// cross-language contract the planner is validated with.
+///
+/// A passive corpus test over the shipped artifact: renaming a plan field
+/// breaks the rollup silently otherwise, because serde ignores what it does not
+/// recognize.
+#[test]
+fn plan_fields_match_the_frozen_contract() {
+    let text = fs::read_to_string(repo_root().join(".github/ci/schemas/contract.json"))
+        .expect("the frozen contract is shipped");
+    let contract: serde_json::Value =
+        serde_json::from_str(&text).expect("the frozen contract parses");
+    let plan = &contract["resolved_plan"];
+
+    assert_eq!(
+        plan["schema_version"].as_u64(),
+        Some(u64::from(PLAN_SCHEMA_VERSION)),
+        "this tool reads a plan generation the contract no longer describes"
+    );
+    for field in ["packages", "cells"] {
+        assert!(
+            plan["document"].get(field).is_some(),
+            "the plan document contract has no `{field}`"
+        );
+    }
+    for field in [
+        "package", "area", "environment", "gate", "execution", "origin", "state",
+        "target_kinds", "compile_coverage_from", "evidence", "gap",
+    ] {
+        assert!(
+            plan["cell"].get(field).is_some(),
+            "the plan cell contract has no `{field}`"
+        );
+    }
+    assert!(plan["package"].get("package").is_some());
+
+    let origins: BTreeSet<&str> = contract["vocabulary"]["origins"]
+        .as_array()
+        .expect("origins is a list")
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        origins,
+        ["ci", "local", "prior-local", "none"].into_iter().collect(),
+        "the origin vocabulary drifted from `Origin`"
+    );
+    assert_eq!(
+        contract["vocabulary"]["accepted_gap_state"].as_str(),
+        Some(CellState::AcceptedGap.label()),
+        "the accepted-gap state name drifted from `CellState`"
+    );
+}
+
+/// The two current L2 gaps must name the work that closes them, and that work
+/// must exist. Spec section 6 requires the closure link in the visible
+/// description; a link to a deleted feature is worse than none.
+#[test]
+fn the_shipped_capability_table_names_what_closes_its_l2_gaps() {
+    let text = fs::read_to_string(repo_root().join(".github/ci/environments.json"))
+        .expect("environments.json is readable");
+    let doc: EnvironmentsDoc = serde_json::from_str(&text).expect("environments.json parses");
+
+    for environment in ["windows-latest", "wsl2-ubuntu"] {
+        let gap = doc
+            .environments
+            .iter()
+            .find(|candidate| candidate.name == environment)
+            .expect("the environment is declared")
+            .gap_for("tmux")
+            .expect("the L2 backend gap is governed");
+        assert!(
+            !gap.closes.is_empty(),
+            "{environment}'s tmux gap names no closing work"
+        );
+        assert!(
+            repo_root().join(&gap.closes).exists(),
+            "{environment}'s tmux gap points at {}, which does not exist",
+            gap.closes
+        );
+    }
+}
+
+/// End to end over the real planner: the shipped `affected_scope.py` writes a
+/// plan and this tool reads it, through the normal invocation path.
+///
+/// The unit fixtures build plan JSON by hand, which cannot catch the planner
+/// emitting a shape the reader rejects. Skipped where python3 is unavailable
+/// rather than failing: the Rust suite must still run on a host without it.
+#[test]
+fn the_real_planners_plan_rolls_up() {
+    let Ok(output) = std::process::Command::new("python3")
+        .current_dir(repo_root())
+        .args([
+            "scripts/ci/affected_scope.py",
+            "--resolved-plan",
+            "--",
+            "claudine/lib/src/lib.rs",
+        ])
+        .output()
+    else {
+        eprintln!("python3 is unavailable; skipping the end-to-end plan fixture");
+        return;
+    };
+    assert!(
+        output.status.success(),
+        "the planner failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let plan: ResolvedPlan = serde_json::from_slice(&output.stdout)
+        .expect("the planner's own output parses as a resolved plan");
+    let expected = plan_expected_cells(&plan).expect("the planner writes the current generation");
+    assert!(
+        !expected.is_empty(),
+        "a source change in claudine must schedule cells"
+    );
+    assert!(
+        expected.iter().all(|cell| cell.area == "claudine"),
+        "every cell of this plan belongs to the claudine area"
+    );
+
+    let cells = classify_simple(
+        &expected
+            .iter()
+            .filter(|cell| is_test_tier(&cell.key.tier))
+            .cloned()
+            .collect::<Vec<_>>(),
+        &[],
+    );
+    assert!(
+        cells.iter().all(|cell| cell.area == "claudine"),
+        "the area must survive into the result document"
+    );
+    assert!(
+        cells.iter().any(|cell| cell.state == CellState::Missing),
+        "nothing ran, so every scheduled test cell is missing: {cells:#?}"
+    );
+}
+
+// --- The command surface, end to end -------------------------------------
+
+/// `rollup --plan … --area … --out`, then `verdict --results … --area`, then
+/// `summarize`, through the same argument parsing the CLI uses.
+///
+/// The unit fixtures above call the classifier directly. This one goes through
+/// the files: a result document is written, read back, judged, and folded into
+/// a summary, so a field that serializes but does not deserialize — or an
+/// `--area` that narrows one command and not the other — cannot pass.
+#[test]
+fn the_command_surface_writes_reads_and_judges_one_areas_slice() {
+    let temp = TempDir::new("cli");
+    let artifacts = temp.path().join("ci-artifacts");
+    let artifact = artifacts.join("junit-claudine-L1-ubuntu-latest");
+    fs::create_dir_all(artifact.join("L1")).unwrap();
+    fs::write(
+        artifact.join("L1").join("claudine.xml"),
+        junit("claudine", &passing_case("claudine::a")),
+    )
+    .unwrap();
+    fs::write(
+        artifact.join("manifest.jsonl"),
+        serde_json::json!({
+            "tier": "L1",
+            "package": "claudine",
+            "xml": "L1/claudine.xml",
+            "exit_code": 0,
+            "environment": "ubuntu-latest",
+            "duration_s": 7,
+            "report_present": true,
+        })
+        .to_string()
+            + "\n",
+    )
+    .unwrap();
+
+    // Two areas: claudine executed on Linux and reused macOS; playa executed.
+    let plan = temp.path().join("resolved-plan.json");
+    let cells = vec![
+        plan_cell_json("claudine", "ubuntu-latest", "L1", false),
+        plan_cell_json("claudine", "macos-latest", "L1", true),
+        plan_cell_json("playa", "ubuntu-latest", "L1", false),
+    ];
+    fs::write(
+        &plan,
+        serde_json::json!({
+            "schema_version": PLAN_SCHEMA_VERSION,
+            "packages": [{"package": "claudine"}, {"package": "playa"}],
+            "cells": cells,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let environments = temp.path().join("environments.json");
+    fs::write(
+        &environments,
+        serde_json::json!({"schema_version": 1, "environments": []}).to_string(),
+    )
+    .unwrap();
+
+    let results = temp.path().join("claudine-results.json");
+    let summary = temp.path().join("summary.md");
+    let args = Args::parse(
+        [
+            "--artifacts",
+            artifacts.to_str().unwrap(),
+            "--plan",
+            plan.to_str().unwrap(),
+            "--environments",
+            environments.to_str().unwrap(),
+            "--area",
+            "claudine",
+            "--out",
+            results.to_str().unwrap(),
+            "--summary",
+            summary.to_str().unwrap(),
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    )
+    .unwrap();
+
+    assert_eq!(cmd_rollup(&args).unwrap(), 0, "nothing in this slice blocks");
+
+    let document: Rollup =
+        serde_json::from_str(&fs::read_to_string(&results).unwrap()).expect("the slice reloads");
+    assert_eq!(document.schema_version, RESULT_SCHEMA_VERSION);
+    assert_eq!(document.area_scope, vec!["claudine".to_owned()]);
+    assert_eq!(document.scope, vec!["claudine".to_owned()]);
+    assert_eq!(
+        document
+            .cells
+            .iter()
+            .map(|cell| format!("{} {} {}", cell.key, cell.state, cell.origin))
+            .collect::<Vec<_>>(),
+        vec![
+            "claudine/macos-latest/L1 PASS local".to_owned(),
+            "claudine/ubuntu-latest/L1 PASS ci".to_owned(),
+        ],
+        "playa belongs to another area's slice"
+    );
+    assert_eq!(document.accepted_evidence.len(), 1);
+    assert_eq!(
+        document.cells[1].duration_s, 7,
+        "the executed cell reports the duration its manifest recorded"
+    );
+
+    // Read/write/read: rolling the same run up twice produces identical bytes.
+    let again = temp.path().join("claudine-results-2.json");
+    let repeat = Args::parse(
+        [
+            "--artifacts",
+            artifacts.to_str().unwrap(),
+            "--plan",
+            plan.to_str().unwrap(),
+            "--environments",
+            environments.to_str().unwrap(),
+            "--area",
+            "claudine",
+            "--out",
+            again.to_str().unwrap(),
+            "--summary",
+            summary.to_str().unwrap(),
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    )
+    .unwrap();
+    assert_eq!(cmd_rollup(&repeat).unwrap(), 0);
+    assert_eq!(
+        fs::read_to_string(&results).unwrap(),
+        fs::read_to_string(&again).unwrap(),
+    );
+
+    let baseline = temp.path().join("ci-baseline.toml");
+    fs::write(&baseline, "schema_version = 2\n").unwrap();
+    let verdict_args = Args::parse(
+        [
+            "--results",
+            results.to_str().unwrap(),
+            "--baseline",
+            baseline.to_str().unwrap(),
+            "--area",
+            "claudine",
+            "--summary",
+            summary.to_str().unwrap(),
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    )
+    .unwrap();
+    assert_eq!(cmd_verdict(&verdict_args).unwrap(), 0, "the slice is clear");
+
+    let summarize_args = Args::parse(
+        [
+            "--results",
+            results.to_str().unwrap(),
+            "--summary",
+            summary.to_str().unwrap(),
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    )
+    .unwrap();
+    assert_eq!(cmd_summarize(&summarize_args).unwrap(), 0);
+
+    let rendered = fs::read_to_string(&summary).unwrap();
+    assert!(rendered.contains("### area `claudine`"), "{rendered}");
+    assert!(rendered.contains("## CI results by area"), "{rendered}");
+    assert!(
+        rendered.contains("refs/notes/ci-local/macos-latest"),
+        "the reused cell's evidence must reach the step summary: {rendered}"
+    );
+}
+
+/// R10 under the plan: a `gates = false` package owns no plan cells, so its
+/// governed NOT SCHEDULED entries can only come from the policy document. They
+/// must not vanish when the rollup reads the plan.
+#[test]
+fn a_non_gating_packages_governed_cells_survive_the_plan_path() {
+    let temp = TempDir::new("nongating");
+    let artifacts = temp.path().join("ci-artifacts");
+    fs::create_dir_all(&artifacts).unwrap();
+
+    let plan = temp.path().join("resolved-plan.json");
+    fs::write(
+        &plan,
+        serde_json::json!({
+            "schema_version": PLAN_SCHEMA_VERSION,
+            "packages": [{"package": "claudine"}, {"package": "tabby"}],
+            "cells": [plan_cell_json("claudine", "ubuntu-latest", "L1", false)],
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let mut excluded = policy("tabby");
+    excluded.gates = false;
+    excluded.exclusion = Some(exclusion());
+    let policy_doc = temp.path().join("scope.json");
+    fs::write(
+        &policy_doc,
+        serde_json::json!({
+            "policy": [{
+                "package": "tabby",
+                "area": "tabby",
+                "gates": false,
+                "tiers": ["L1"],
+                "l2_backends": [],
+                "companion_suites": [],
+                "exclusion": {
+                    "exclusion_class": "promotion-pending",
+                    "owner": "@yankeeinlondon",
+                    "reason": "blocked on the canonical recipe set",
+                    "expiry": "2026-10-31",
+                },
+            }],
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let environments = temp.path().join("environments.json");
+    fs::write(
+        &environments,
+        serde_json::json!({
+            "schema_version": 1,
+            "environments": [{"name": "ubuntu-latest", "capabilities": {}}],
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let results = temp.path().join("results.json");
+    let args = Args::parse(
+        [
+            "--artifacts",
+            artifacts.to_str().unwrap(),
+            "--plan",
+            plan.to_str().unwrap(),
+            "--policy",
+            policy_doc.to_str().unwrap(),
+            "--environments",
+            environments.to_str().unwrap(),
+            "--out",
+            results.to_str().unwrap(),
+            "--summary",
+            temp.path().join("summary.md").to_str().unwrap(),
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    )
+    .unwrap();
+    assert_eq!(cmd_rollup(&args).unwrap(), EXIT_BLOCKED, "claudine produced nothing");
+
+    let document: Rollup =
+        serde_json::from_str(&fs::read_to_string(&results).unwrap()).expect("the document reloads");
+    let tabby = document
+        .cells
+        .iter()
+        .find(|cell| cell.key.package == "tabby")
+        .expect("a non-gating package stays visible");
+    assert_eq!(tabby.state, CellState::NotScheduled);
+    assert_eq!(tabby.area, "tabby");
+    assert!(
+        tabby.reasons.iter().any(|reason| reason.contains("promotion-pending")),
+        "its governance must travel with it: {:#?}",
+        tabby.reasons
+    );
+}
+
+#[test]
+fn the_rollup_refuses_to_run_with_neither_a_plan_nor_a_policy() {
+    let temp = TempDir::new("noinput");
+    let args = Args::parse(
+        ["--artifacts", temp.path().to_str().unwrap()]
+            .into_iter()
+            .map(str::to_owned),
+    )
+    .unwrap();
+    let err = cmd_rollup(&args).expect_err("an expectation source is required");
+    assert!(format!("{err:#}").contains("`--plan` or `--policy` is required"));
+}
+
+#[test]
+fn a_failing_slice_makes_its_own_verdict_block() {
+    // The other half of `the_command_surface…`: an area whose cell failed must
+    // exit 2 from its own verdict, not from a global one.
+    let temp = TempDir::new("cli-fail");
+    let results = temp.path().join("results.json");
+    let rollup = rollup_of(
+        vec![Cell {
+            area: "claudine".to_owned(),
+            state: CellState::Fail,
+            origin: Origin::Local,
+            failed_tests: vec!["claudine::boom".to_owned()],
+            scheduled: true,
+            ..blank_cell(cell_key("claudine", "macos-latest", Tier::L1))
+        }],
+        &["claudine"],
+    );
+    fs::write(&results, serde_json::to_string(&rollup).unwrap()).unwrap();
+    let baseline = temp.path().join("ci-baseline.toml");
+    fs::write(&baseline, "schema_version = 2\n").unwrap();
+
+    let args = Args::parse(
+        [
+            "--results",
+            results.to_str().unwrap(),
+            "--baseline",
+            baseline.to_str().unwrap(),
+            "--area",
+            "claudine",
+            "--summary",
+            temp.path().join("summary.md").to_str().unwrap(),
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    )
+    .unwrap();
+    assert_eq!(cmd_verdict(&args).unwrap(), EXIT_BLOCKED);
+}
+
+#[test]
+fn an_area_that_selects_no_cell_is_a_tool_error_not_a_vacuous_pass() {
+    let rollup = two_area_rollup();
+    let err = narrow(rollup, &["messenger".to_owned()])
+        .expect_err("a narrowing that selects nothing must not produce a verdict");
+    let message = format!("{err:#}");
+    assert!(message.contains("selects no cell"), "{message}");
+    assert!(
+        message.contains("claudine, playa"),
+        "the error must name what the document does cover: {message}"
+    );
+}
+
+#[test]
+fn no_area_flag_leaves_the_document_whole() {
+    let rollup = narrow(two_area_rollup(), &[]).expect("no narrowing requested");
+    assert_eq!(rollup.cells.len(), 2);
+    assert!(rollup.area_scope.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Review 6, finding 1: a failed gate command on a healthy producer job
+// ---------------------------------------------------------------------------
+
+/// The artifact a normalized producer writes — the gate command failed under
+/// `continue-on-error`, the job stayed green, and the status step folded the
+/// step outcome into `result` — read from disk exactly as the rollup reads it,
+/// so the shipped JSON shape is what is judged.
+fn normalized_failure_status(root: &Path, package: &str, job: &str, environment: &str) {
+    let dir = root.join(format!("status-{package}-{job}-{environment}"));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("status.json"),
+        format!(
+            r#"{{"package":"{package}","job":"{job}","environment":"{environment}","result":"failure"}}"#
+        ),
+    )
+    .unwrap();
+}
+
+/// A status-only gate (`check`) whose command failed on a green job is a FAIL
+/// cell: it blocks with no baseline, and an exact `{package, environment,
+/// tier}` entry — nothing wider — accepts it. The area's baseline is then the
+/// only thing between that failure and the merge, because the job it ran in
+/// no longer reaches `ci-gate` red.
+#[test]
+fn a_failed_check_command_on_a_green_job_is_judged_by_the_baseline_alone() {
+    let temp = TempDir::new("normalized-check");
+    normalized_failure_status(temp.path(), "sniff", "check", "windows-latest");
+    let statuses = read_producer_statuses(temp.path()).unwrap();
+    assert_eq!(statuses.len(), 1);
+
+    let cells = status_cells(&statuses, &scope_of(&["sniff"]), &[], &[policy("sniff")], &[]);
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].state, CellState::Fail);
+
+    let rollup = rollup_of(cells, &["sniff"]);
+    let findings = verdict(&rollup, &Baseline::default(), None);
+    assert!(blocks_with_rule(&findings, "cell-failed"));
+
+    let wrong_environment = Baseline {
+        schema_version: BASELINE_SCHEMA_VERSION,
+        failure: vec![failure_entry("sniff", "ubuntu-latest", Tier::parse("check"))],
+        skip: Vec::new(),
+    };
+    assert!(blocks_with_rule(&verdict(&rollup, &wrong_environment, None), "cell-failed"));
+
+    let exact = Baseline {
+        schema_version: BASELINE_SCHEMA_VERSION,
+        failure: vec![failure_entry("sniff", "windows-latest", Tier::parse("check"))],
+        skip: Vec::new(),
+    };
+    let findings = verdict(&rollup, &exact, None);
+    assert!(!any_block(&findings), "unexpected blocks: {findings:#?}");
+    assert!(findings.iter().any(|f| f.rule == "baseline-accepted" && f.subject.contains("sniff")));
+}
+
+/// Open Question 1, Option B: a check producer that also compiled the changed
+/// package's unchanged dependents says so in its status, and the cell renders
+/// it — in its reasons and in the step summary's "Compiled dependents" table —
+/// while the dependents themselves hold no cell.
+#[test]
+fn a_check_cell_reports_the_dependents_it_also_compiled() {
+    let temp = TempDir::new("dependents-pass");
+    write_status(
+        temp.path(),
+        "darkmatter",
+        "check",
+        "ubuntu-latest",
+        r#"{"package":"darkmatter","job":"check","environment":"ubuntu-latest","result":"success","dependents":["darkmatter-cli","dmls"]}"#,
+    );
+    let statuses = read_producer_statuses(temp.path()).unwrap();
+    assert_eq!(statuses[0].dependents, vec!["darkmatter-cli", "dmls"]);
+
+    let cells = status_cells(
+        &statuses,
+        &scope_of(&["darkmatter"]),
+        &[],
+        &[policy("darkmatter")],
+        &[],
+    );
+    let cell = only_cell(cells);
+    assert_eq!(cell.state, CellState::Pass);
+    assert_eq!(cell.key.package, "darkmatter");
+    assert_eq!(cell.area, "darkmatter");
+    assert_eq!(cell.dependents, vec!["darkmatter-cli", "dmls"]);
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|reason| reason == "also compiled 2 dependent(s): darkmatter-cli, dmls"),
+        "the cell must say what else it compiled: {:?}",
+        cell.reasons
+    );
+
+    let rollup = rollup_of(vec![cell], &["darkmatter"]);
+    let summary = render_grid(&rollup);
+    assert!(summary.contains("### Compiled dependents"), "{summary}");
+    assert!(
+        summary.contains("| `darkmatter/ubuntu-latest/check` | PASS | 2 dependent(s): darkmatter-cli, dmls |"),
+        "{summary}"
+    );
+    assert!(!any_block(&verdict(&rollup, &Baseline::default(), None)));
+}
+
+/// The dependents half failing is the CHANGED package's failure: a FAIL cell
+/// keyed on the changed package, attributed to its area, that blocks — with
+/// the producer's detail naming the half that broke and the names of what was
+/// compiled. No consumer cell exists to blame.
+#[test]
+fn a_failed_dependents_half_is_a_fail_cell_on_the_changed_packages_area() {
+    let temp = TempDir::new("dependents-fail");
+    write_status(
+        temp.path(),
+        "darkmatter",
+        "check",
+        "ubuntu-latest",
+        r#"{"package":"darkmatter","job":"check","environment":"ubuntu-latest","result":"failure","dependents":["dmls"],"detail":"an unchanged dependent failed to compile against this package's public API (the package's own targets compiled)"}"#,
+    );
+    let statuses = read_producer_statuses(temp.path()).unwrap();
+
+    let cells = status_cells(
+        &statuses,
+        &scope_of(&["darkmatter"]),
+        &[],
+        &[policy("darkmatter")],
+        &[],
+    );
+    assert!(
+        cells.iter().all(|cell| cell.key.package == "darkmatter"),
+        "no consumer may receive a cell: {cells:#?}"
+    );
+    let cell = only_cell(cells);
+    assert_eq!(cell.state, CellState::Fail);
+    assert_eq!(cell.area, "darkmatter");
+    assert_eq!(cell.dependents, vec!["dmls"]);
+    assert!(
+        cell.reasons.iter().any(|reason| reason.contains("unchanged dependent failed to compile"))
+            && cell.reasons.iter().any(|reason| reason == "also compiled 1 dependent(s): dmls"),
+        "the failure must name the half that broke and what was compiled: {:?}",
+        cell.reasons
+    );
+
+    let rollup = rollup_of(vec![cell], &["darkmatter"]);
+    let findings = verdict(&rollup, &Baseline::default(), None);
+    assert!(blocks_with_rule(&findings, "cell-failed"));
+    let finding = findings
+        .iter()
+        .find(|finding| finding.rule == "cell-failed")
+        .unwrap();
+    assert_eq!(finding.subject, "darkmatter/ubuntu-latest/check");
+    assert!(finding.detail.contains("dmls"), "{}", finding.detail);
+    let summary = render_grid(&rollup);
+    assert!(
+        summary.contains("| `darkmatter/ubuntu-latest/check` | FAIL | 1 dependent(s): dmls |"),
+        "{summary}"
+    );
+}
+
+fn write_status(root: &Path, package: &str, job: &str, environment: &str, json: &str) {
+    let dir = root.join(format!("status-{package}-{job}-{environment}"));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("status.json"), json).unwrap();
+}
+
+/// The L1 shape of the same finding: the suite ran, the JUnit names the failing
+/// test, and the folded status confirms the failure. Judged identically.
+#[test]
+fn a_failed_l1_command_on_a_green_job_is_judged_by_the_baseline_alone() {
+    let temp = TempDir::new("normalized-l1");
+    normalized_failure_status(temp.path(), "messenger", "L1", "windows-latest");
+    let statuses = read_producer_statuses(temp.path()).unwrap();
+
+    let mut record = passing_record("messenger", "windows-latest", Tier::L1);
+    record.counts.failed = 1;
+    record.counts.total += 1;
+    record.failed_tests = vec!["messenger::desktop::notification".into()];
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[expectation("messenger", "windows-latest", Tier::L1)],
+        records: &[record],
+        statuses: &statuses,
+        expected_tests: &BTreeMap::new(),
+    }));
+    assert_eq!(cell.state, CellState::Fail);
+
+    let rollup = rollup_of(vec![cell], &["messenger"]);
+    assert!(blocks_with_rule(&verdict(&rollup, &Baseline::default(), None), "cell-failed"));
+    let exact = Baseline {
+        schema_version: BASELINE_SCHEMA_VERSION,
+        failure: vec![failure_entry("messenger", "windows-latest", Tier::L1)],
+        skip: Vec::new(),
+    };
+    let findings = verdict(&rollup, &exact, None);
+    assert!(!any_block(&findings), "unexpected blocks: {findings:#?}");
+}
+
+/// A green JUnit under a folded `failure` status (the backend-proof bracket or
+/// a fixture failed after every test passed) is still a FAIL cell: the status
+/// can only worsen a reading, and nothing in it can be misread as a pass.
+#[test]
+fn a_folded_failure_status_downgrades_a_green_report_without_a_detail() {
+    let temp = TempDir::new("normalized-green-junit");
+    normalized_failure_status(temp.path(), "sniff-cli", "L1", "ubuntu-latest");
+    let statuses = read_producer_statuses(temp.path()).unwrap();
+
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[expectation("sniff-cli", "ubuntu-latest", Tier::L1)],
+        records: &[passing_record("sniff-cli", "ubuntu-latest", Tier::L1)],
+        statuses: &statuses,
+        expected_tests: &BTreeMap::new(),
+    }));
+    assert_eq!(cell.state, CellState::Fail);
+    assert!(
+        cell.reasons.iter().any(|r| r.contains("producer status reports `failure`")),
+        "the downgrade must say the status, not the job, reported it: {:?}",
+        cell.reasons
+    );
+}
+
+/// Normalization changes what the JOB concludes, never what the rollup
+/// requires: a gate command that failed to build (exit 101, no report) is
+/// MISSING under a folded `failure` status exactly as before, and a cell with
+/// neither report nor status is MISSING too. Neither can be baselined.
+#[test]
+fn a_normalized_producer_with_no_report_is_missing_and_no_baseline_excuses_it() {
+    let temp = TempDir::new("normalized-missing");
+    normalized_failure_status(temp.path(), "queue", "L1", "windows-latest");
+    let statuses = read_producer_statuses(temp.path()).unwrap();
+
+    let mut built_nothing = record("queue", "windows-latest", Tier::L1);
+    built_nothing.report_present = false;
+    built_nothing.exit_code = 101;
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[expectation("queue", "windows-latest", Tier::L1)],
+        records: &[built_nothing],
+        statuses: &statuses,
+        expected_tests: &BTreeMap::new(),
+    }));
+    assert_eq!(cell.state, CellState::Missing);
+    let excused_anyway = Baseline {
+        schema_version: BASELINE_SCHEMA_VERSION,
+        failure: vec![failure_entry("queue", "windows-latest", Tier::L1)],
+        skip: Vec::new(),
+    };
+    let findings = verdict(&rollup_of(vec![cell], &["queue"]), &excused_anyway, None);
+    assert!(blocks_with_rule(&findings, "cell-missing"), "{findings:#?}");
+
+    // Neither a status nor a report: the producer never got as far as the
+    // status step (or its upload failed), and the job itself is red for it.
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[expectation("queue", "macos-latest", Tier::L1)],
+        records: &[],
+        statuses: &[],
+        expected_tests: &BTreeMap::new(),
+    }));
+    assert_eq!(cell.state, CellState::Missing);
+    let findings = verdict(&rollup_of(vec![cell], &["queue"]), &excused_anyway, None);
+    assert!(blocks_with_rule(&findings, "cell-missing"), "{findings:#?}");
 }

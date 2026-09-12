@@ -139,22 +139,17 @@ fn run_dry_run_compose<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
     let _ = biscuit_test_harness::wait_for_prompt(harness);
 
     let cmd = format!("{claudine} compose --goose --dry-run {}", doc.display());
-    harness
-        .send_command_with_env(
-            &cmd,
-            &[
-                ("HOME", home.as_str()),
-                ("PATH", path.as_str()),
-                ("FORCE_COLOR", "1"),
-                // Deterministic table width well inside any pane.
-                ("COLUMNS", "80"),
-            ],
-        )
-        .expect("send compose --dry-run");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    std::thread::sleep(Duration::from_millis(250));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = capture_dry_run_command(
+        harness,
+        &cmd,
+        &[
+            ("HOME", home.as_str()),
+            ("PATH", path.as_str()),
+            ("FORCE_COLOR", "1"),
+            // Deterministic table width well inside any pane.
+            ("COLUMNS", "80"),
+        ],
+    );
     DryRunCapture {
         frame,
         _workspace: workspace,
@@ -206,24 +201,53 @@ fn run_dry_run_compose_with_doc<H: TerminalHarness>(
 
     // No --goose (or any --provider) flag — frontmatter drives resolution.
     let cmd = format!("{claudine} compose --dry-run {}", doc.display());
-    harness
-        .send_command_with_env(
-            &cmd,
-            &[
-                ("HOME", home.as_str()),
-                ("PATH", path.as_str()),
-                ("FORCE_COLOR", "1"),
-                ("COLUMNS", "80"),
-            ],
-        )
-        .expect("send compose --dry-run");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    std::thread::sleep(Duration::from_millis(250));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = capture_dry_run_command(
+        harness,
+        &cmd,
+        &[
+            ("HOME", home.as_str()),
+            ("PATH", path.as_str()),
+            ("FORCE_COLOR", "1"),
+            ("COLUMNS", "80"),
+        ],
+    );
     DryRunCapture {
         frame,
         _workspace: workspace,
+    }
+}
+
+/// Shared broker panes retain previous tests' tables. Clear their viewport
+/// before this command and wait for its own exit marker so neither old rows nor
+/// an old shell prompt can satisfy this invocation's capture.
+fn capture_dry_run_command<H: TerminalHarness>(
+    harness: &mut H,
+    command: &str,
+    env: &[(&str, &str)],
+) -> CapturedFrame {
+    static NEXT_CAPTURE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let sequence = NEXT_CAPTURE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let marker = format!("DRYRUN_{}_{}", std::process::id(), sequence);
+    let script = format!(
+        "printf '\\033[2J\\033[H'; {command}; printf '\\n{marker}:%s\\n' \"$?\""
+    );
+    let command = format!("/bin/sh -c {}", common::sh_quote(&script));
+    harness.send_command_with_env(&command, env).expect("send dry-run command");
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let frame = harness.capture().expect("capture dry-run command");
+        if let Some(status) = frame.plain.lines().find_map(|line| {
+            line.trim().strip_prefix(&format!("{marker}:"))
+        }) {
+            assert_eq!(status, "0", "dry-run failed:\n{}", frame.plain);
+            return frame;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "dry-run completion marker did not appear:\n{}",
+            frame.plain
+        );
+        std::thread::sleep(Duration::from_millis(40));
     }
 }
 
@@ -654,30 +678,25 @@ fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCaptu
     let _ = biscuit_test_harness::wait_for_prompt(harness);
 
     let cmd = format!("{claudine} compose --goose --dry-run {}", doc.display());
-    harness
-        .send_command_with_env(
-            &cmd,
-            &[
-                ("HOME", home.as_str()),
-                ("PATH", path.as_str()),
-                ("COLUMNS", "80"),
-                // Neutralize the harness's session-level `FORCE_COLOR=1`, which
-                // otherwise routes claudine through an optimistic terminal that
-                // claims Kitty image support (the hr would then emit as a Kitty
-                // image that tmux strips). With it off, real detection applies:
-                // the tmux pane still reports 256-color (YAML highlighting kept)
-                // but no image protocol, so the hr renders as text dashes.
-                ("FORCE_COLOR", "0"),
-                ("CLICOLOR_FORCE", "0"),
-                // Belt-and-braces: also clear the image-capable TERM_PROGRAM.
-                ("TERM_PROGRAM", ""),
-            ],
-        )
-        .expect("send compose --dry-run");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    std::thread::sleep(Duration::from_millis(250));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = capture_dry_run_command(
+        harness,
+        &cmd,
+        &[
+            ("HOME", home.as_str()),
+            ("PATH", path.as_str()),
+            ("COLUMNS", "80"),
+            // Neutralize the harness's session-level `FORCE_COLOR=1`, which
+            // otherwise routes claudine through an optimistic terminal that
+            // claims Kitty image support (the hr would then emit as a Kitty
+            // image that tmux strips). With it off, real detection applies:
+            // the tmux pane still reports 256-color (YAML highlighting kept)
+            // but no image protocol, so the hr renders as text dashes.
+            ("FORCE_COLOR", "0"),
+            ("CLICOLOR_FORCE", "0"),
+            // Belt-and-braces: also clear the image-capable TERM_PROGRAM.
+            ("TERM_PROGRAM", ""),
+        ],
+    );
     DryRunCapture {
         frame,
         _workspace: workspace,
@@ -804,4 +823,27 @@ fn level2_dry_run_no_agent_multiline_alignment_in_tmux() {
     );
 
     assert_agent_cell_alignment(&capture.frame, "Agent");
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_dry_run_reused_tmux_pane_does_not_reuse_previous_agent_rows() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let previous = run_dry_run_compose_with_doc(
+        &mut harness,
+        FIXTURE_NO_AGENT,
+        "claudine-dryrun-reused-noagent",
+    );
+    assert!(previous.frame.plain.contains("didn't specify the Agent"));
+    let current = run_dry_run_compose_with_doc(
+        &mut harness,
+        FIXTURE_NOT_INSTALLED,
+        "claudine-dryrun-reused-notinst",
+    );
+    assert!(!current.frame.plain.contains("didn't specify the Agent"));
+    let row = row_raw(&current.frame, "Agent").expect("current Agent row");
+    assert!(common::strip_ansi(row).contains("Agent Not Installed"), "{row:?}");
+    assert!(has_yellow(row), "{row:?}");
+    assert!(has_dim(row), "{row:?}");
 }

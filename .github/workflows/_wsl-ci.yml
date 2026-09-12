@@ -49,8 +49,8 @@ on:
         description: "Cargo package name; the unit of selection, execution, and result identity (e.g. sniff-cli)."
         type: string
         required: true
-      check-args:
-        description: "Cargo package selector and declared features for the archive build (e.g. '-p sniff --features remote')."
+      archive-args:
+        description: "Cargo package selector and declared features for the archive build (e.g. '-p sniff --features remote'). Never a target selector: the guest runs what the L1 archive built."
         type: string
         required: true
       test-args:
@@ -80,7 +80,7 @@ on:
         type: string
         required: true
         default: sniff
-      check-args:
+      archive-args:
         description: "Cargo package selector and features for the archive build."
         type: string
         required: true
@@ -178,9 +178,13 @@ jobs:
           NATIVE: ${{ inputs.native }}
         run: |
           set -euo pipefail
-          packages="$(jq -r '."ubuntu-latest" // [] | join(" ")' <<<"$NATIVE")"
-          if [ -n "$packages" ]; then
-            just _ensure-native-libs $packages
+          packages="$(jq -r '."ubuntu-latest" // [] | .[]' <<<"$NATIVE")"
+          native_args=()
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then native_args+=("$package"); fi
+          done <<<"$packages"
+          if [ ${#native_args[@]} -gt 0 ]; then
+            just _ensure-native-libs "${native_args[@]}"
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
@@ -199,7 +203,7 @@ jobs:
           cargo nextest archive \
             --archive-file "$RUNNER_TEMP/$ARCHIVE_NAME" \
             --target x86_64-unknown-linux-gnu \
-            ${{ inputs.check-args }}
+            ${{ inputs.archive-args }}
       - name: Build messenger desktop stub sidecar
         if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
         shell: bash
@@ -235,8 +239,11 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  # A static name: this job carries `needs:`, so a skip would otherwise reach
+  # the Checks tab as the raw `${{ inputs.package }}` expression (AC10). The
+  # package comes from the caller's job label.
   wsl:
-    name: test (${{ inputs.package }} on wsl2-ubuntu)
+    name: test (wsl2-ubuntu)
     needs: archive
     runs-on: windows-latest
     timeout-minutes: 60
@@ -464,9 +471,13 @@ jobs:
           # host process, and `wsl-bash` forwards only WSLENV-listed variables
           # into the guest — an `env:`-sourced $NATIVE is unbound here.
           cd "${{ env.GUEST_ROOT }}"
-          packages="$(jq -r '."ubuntu-latest" // [] | join(" ")' <<<'${{ inputs.native }}')"
-          if [ -n "$packages" ]; then
-            just _ensure-native-libs $packages
+          packages="$(jq -r '."ubuntu-latest" // [] | .[]' <<<'${{ inputs.native }}')"
+          native_args=()
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then native_args+=("$package"); fi
+          done <<<"$packages"
+          if [ ${#native_args[@]} -gt 0 ]; then
+            just _ensure-native-libs "${native_args[@]}"
           fi
       # DIAGNOSTIC ONLY — nothing below changes what runs or how it is reported.
       #
@@ -533,8 +544,13 @@ jobs:
             free -m
             swapon --show 2>&1 || true
           } 2>&1 | tee "$workspace/wsl-diag/guest-census.txt"
+      # Gate command: normalized exactly as in `_package-ci.yml` (see its
+      # header). A failed suite is the CELL's failure, folded into the status
+      # below and judged by the area rollup; the job stays green so the
+      # baseline, not `area-ci`'s job result, decides whether it blocks.
       - name: L1 tests from the archive
         id: l1
+        continue-on-error: true
         shell: wsl-bash {0}
         run: |
           set -euo pipefail
@@ -741,7 +757,7 @@ jobs:
           PACKAGE: ${{ inputs.package }}
           JOB: L1
           ENVIRONMENT: wsl2-ubuntu
-          RESULT: ${{ job.status }}
+          JOB_STATUS: ${{ job.status }}
           # Provisioning is two steps, so its outcome is the SECOND attempt's
           # unless the first already succeeded — otherwise a guest that came up
           # on the retry would still be reported as never having provisioned.
@@ -752,6 +768,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/status"
+          # `result` is the CELL's conclusion, not the job's: the test step is
+          # `continue-on-error`, so a failed suite leaves `job.status` at
+          # `success` and only `L1` can say the cell failed. Everything else
+          # that fails the job (provisioning, staging, upload, cancellation)
+          # arrives in JOB_STATUS unchanged.
+          result="$JOB_STATUS"
+          if [ "$result" = "success" ] && [ "$L1" = "failure" ]; then
+            result=failure
+            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::the L1 suite failed in the WSL2 guest. The job completes so the area rollup judges the cell against its baseline; a failure the baseline does not accept blocks there."
+          fi
           # Name WHY no evidence exists, when that is the case.
           #
           # A guest that dies takes the staging step with it, `wsl-junit` stays
@@ -760,8 +786,8 @@ jobs:
           # identically to a tier that ran and had no tests. Only the producer
           # can tell those apart, so it says which.
           #
-          # A failing TEST does not reach here: the guest stays healthy, staging
-          # succeeds, and the report is uploaded normally.
+          # A failing TEST needs no detail: the guest stays healthy, staging
+          # succeeds, and the report the rollup reads is uploaded normally.
           detail=""
           if [ "$PROVISION" != "success" ]; then
             detail="the WSL2 guest failed to provision (attempt 1: ${PROVISION_FIRST}, attempt 2: ${PROVISION}); no test could run"
@@ -770,11 +796,11 @@ jobs:
           fi
           if [ -n "$detail" ]; then
             printf '{"package":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"}\n' \
-              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" "$detail" \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$result" "$detail" \
               >"$RUNNER_TEMP/status/status.json"
           else
             printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
-              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$result" \
               >"$RUNNER_TEMP/status/status.json"
           fi
       - name: Upload producer status

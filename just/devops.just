@@ -22,6 +22,27 @@ underline := '\033[4m'
 _storage_preflight:
     @repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"; if [[ -n "$repo_root" && -f "$repo_root/scripts/storage-preflight.sh" ]]; then bash "$repo_root/scripts/storage-preflight.sh"; fi
 
+# Worker budget: keep two slots for other host work, except on small CI
+# runners where reserving them would discard half or more of the capacity.
+# This limits test processes, not CPU affinity or Cargo build jobs.
+_test_threads:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cores=""
+    if command -v sniff >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+        cores="$(sniff cpu --json 2>/dev/null | jq -er '.logical_cores | select(type == "number" and . > 0)' 2>/dev/null)" || cores=""
+    fi
+    # Bootstrap and archive-only CI environments may not have Sniff installed.
+    if [[ ! "$cores" =~ ^[1-9][0-9]*$ ]]; then
+        cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-1}")"
+    fi
+    [[ "$cores" =~ ^[1-9][0-9]*$ ]] || cores=1
+    if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]] && (( cores <= 4 )); then
+        echo "$cores"
+    else
+        echo "$(( cores > 2 ? cores - 2 : 1 ))"
+    fi
+
 # Build the package
 _build package pkg_name *args="": _storage_preflight
     #!/usr/bin/env bash
@@ -502,6 +523,8 @@ _test_local_all specs *args="": _storage_preflight
     set -euo pipefail
 
     read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    test_threads="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
+    export NEXTEST_TEST_THREADS="$test_threads"
     forwarded=({{ args }})
 
     specs='{{ specs }}'
@@ -821,6 +844,8 @@ _test pkg *args="": _storage_preflight
 
     # One overridable nextest invocation for both the probe and the run.
     read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    test_threads="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
+    export NEXTEST_TEST_THREADS="$test_threads"
 
     forwarded=({{ args }})
     archive_mode=0
@@ -1416,6 +1441,8 @@ _sanity pkg *args="": _storage_preflight
     SECONDS=0
     just _stage_junit_reset
     read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    test_threads="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
+    export NEXTEST_TEST_THREADS="$test_threads"
     exit_code=0
     "${nextest_bin[@]}" run -p {{ pkg }} "${targets[@]}" \
         -E "$(just _tier_filter sanity '{{ pkg }}')" \
@@ -1478,6 +1505,8 @@ _test_l2 pkg *args="": _storage_preflight
     echo
 
     read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    test_threads="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
+    export NEXTEST_TEST_THREADS="$test_threads"
 
     # Every nextest invocation below is bracketed so its JUnit report is staged
     # before the next one can overwrite it — including a failing invocation.
@@ -1679,6 +1708,8 @@ _test_real pkg *args="": _storage_preflight
     just _stage_junit_reset
     exit_code=0
     read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    test_threads="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
+    export NEXTEST_TEST_THREADS="$test_threads"
     "${nextest_bin[@]}" run -p {{ pkg }} -E "$(just _tier_filter real)" --no-tests=pass {{ args }} || exit_code=$?
     just _stage_junit real "{{ pkg }}" "${exit_code}" "${SECONDS}"
     exit "${exit_code}"
@@ -2044,16 +2075,21 @@ _doc package open="false":
 
 # `main` carries known-red cells, so "is the run green" is not a question this
 # repo can ask. The only decidable one is whether a branch fails something its
-# base does not, which needs both runs' `ci-results.json` side by side. Doing
-# that by hand — locate two runs, download two artifacts, diff two failure sets
-# — is the manual triage this recipe exists to delete.
+# base does not, which needs both runs' results side by side. Doing that by
+# hand — locate two runs, download their artifacts, diff two failure sets — is
+# the manual triage this recipe exists to delete.
 #
 # `ref` is a PR number or a branch name; it defaults to the current branch.
 #
-# Runs that scheduled no package area upload no `ci-results` artifact and are
-# skipped on both sides. That case is not rare: any change confined to
-# `.github/` or docs produces a fully green run with nothing in it, and
-# comparing against one would report every cell as not comparable.
+# A run's results are its per-area `ci-results-<slug>` slices, one per area
+# rollup; there is no whole-run document (the global verdict job that wrote
+# one is gone). `ci-rollup compare` folds each side's slices by concatenation
+# and applies no policy.
+#
+# Runs that scheduled no package area upload no slice and are skipped on both
+# sides. That case is not rare: any change confined to `.github/` or docs
+# produces a fully green run with nothing in it, and comparing against one
+# would report every cell as not comparable.
 #
 # Exit 2 means the branch regressed. Exit 0 means it did not — NOT that CI is
 # green.
@@ -2081,7 +2117,7 @@ ci-diff ref="":
         exit 1
     fi
 
-    # Newest completed run for a branch that actually uploaded results.
+    # Newest completed run for a branch that actually uploaded a slice.
     #
     # The artifact names are captured before matching rather than piped into
     # `grep -q`. Under `pipefail` that pipeline reports the producer's SIGPIPE
@@ -2097,7 +2133,7 @@ ci-diff ref="":
                               --jq '.artifacts[].name' 2>/dev/null)"; then
                 continue
             fi
-            if grep -qx 'ci-results' <<<"${names}"; then
+            if grep -q '^ci-results-' <<<"${names}"; then
                 echo "${id}"
                 return 0
             fi
@@ -2107,11 +2143,11 @@ ci-diff ref="":
 
     echo -e "Locating runs…"
     base_run="$(latest_run_with_results main)" || {
-        echo -e "{{ red }}No completed {{ bold }}main{{ reset }}{{ red }} run has a ci-results artifact.{{ reset }}" >&2
+        echo -e "{{ red }}No completed {{ bold }}main{{ reset }}{{ red }} run has a ci-results-* slice.{{ reset }}" >&2
         exit 1
     }
     head_run="$(latest_run_with_results "${branch}")" || {
-        echo -e "{{ red }}No completed run on {{ bold }}${branch}{{ reset }}{{ red }} has a ci-results artifact.{{ reset }}" >&2
+        echo -e "{{ red }}No completed run on {{ bold }}${branch}{{ reset }}{{ red }} has a ci-results-* slice.{{ reset }}" >&2
         echo -e "{{ dim }}A run that scheduled no package area uploads none.{{ reset }}" >&2
         exit 1
     }
@@ -2119,8 +2155,17 @@ ci-diff ref="":
     workdir="$(mktemp -d)"
     trap 'rm -rf "${workdir}"' EXIT
 
-    gh run download "${base_run}" -n ci-results -D "${workdir}/base" >/dev/null
-    gh run download "${head_run}" -n ci-results -D "${workdir}/head" >/dev/null
+    # Each slice unpacks into its own artifact-named directory.
+    gh run download "${base_run}" -p 'ci-results-*' -D "${workdir}/base" >/dev/null
+    gh run download "${head_run}" -p 'ci-results-*' -D "${workdir}/head" >/dev/null
+
+    compare_args=()
+    for slice in "${workdir}"/base/ci-results-*/ci-results-*.json; do
+        compare_args+=(--base "${slice}")
+    done
+    for slice in "${workdir}"/head/ci-results-*/ci-results-*.json; do
+        compare_args+=(--head "${slice}")
+    done
 
     # Same flags CI builds it with; --no-default-features keeps this off gix,
     # duckdb, and the terminal renderer.
@@ -2131,9 +2176,7 @@ ci-diff ref="":
     echo -e "head {{ bold }}${branch}{{ reset }} run ${head_run} $(gh run view "${head_run}" --json createdAt --jq .createdAt)"
 
     status=0
-    ./scripts/target/release/ci-rollup compare \
-        --base "${workdir}/base/ci-results.json" \
-        --head "${workdir}/head/ci-results.json" || status=$?
+    ./scripts/target/release/ci-rollup compare "${compare_args[@]}" || status=$?
 
     if [[ "${status}" -eq 2 ]]; then
         echo -e "{{ red }}❌ {{ bold }}${branch}{{ reset }}{{ red }} fails something main does not.{{ reset }}"

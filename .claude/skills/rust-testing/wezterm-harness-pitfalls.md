@@ -90,6 +90,32 @@ themes can share `#2e3440` or close-but-not-identical bg colors. Prefer
 themes you're trying to discriminate (e.g. nord blue `#81a1c1` vs dracula
 pink `#ff79c6` for the `fn`/`let` keywords in a rust snippet).
 
+## The Client Evaluates The Developer's Config
+
+Every `wezterm cli …` process the harness starts is a full WezTerm client, and
+some subcommands (`spawn`; not `list`) evaluate the developer's `wezterm.lua`
+before doing anything. The harness only ever talks to the mux named by
+`WEZTERM_UNIX_SOCKET`, so nothing in that config can change what its commands
+do — but it can stall them (a `dofile` of an unreachable network path blocked
+`spawn` for 21 s on the Windows build host, against a 15 s `SPAWN_TIMEOUT`),
+fail them, or add log lines to stderr. `WezTermHarness` therefore runs its
+clients under an empty `WEZTERM_CONFIG_FILE` unless the caller has set one.
+Each client owns a private temporary config until it exits, then removes it;
+concurrent clients never rewrite a shared path. Config preparation errors are
+reported through the operation's normal error path. A
+test that shells out to `wezterm cli` on its own should do the same, or go
+through the harness.
+
+Two related readings of a WezTerm gate worth knowing:
+
+- `WezTermHarness::available()` requires `WEZTERM_UNIX_SOCKET`. A shell that
+  lacks it — `cross-check --os windows`'s SSH session, for one — skips the
+  test, and nextest prints **PASS in ~0.02 s**. A real run takes seconds.
+  `BISCUIT_TEST_REQUIRED_BACKENDS=wezterm` turns that skip into a failure.
+- A `?` typed into an interactive shell that loads Atuin opens the Atuin AI
+  overlay and wedges the pane; `"$?"` in an exit-marker trailer is enough.
+  Report status with `&& … || …` instead.
+
 ## Cross-References
 
 - `darkmatter/cli/tests/level2_layout.rs` module-level doc — same pitfall

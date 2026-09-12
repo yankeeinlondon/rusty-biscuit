@@ -1,24 +1,22 @@
 ---
 $schema:
     review: file(required;eager;match(**/*review*.md)) -> the underlying review file who's findings we will implement
-    target: file
+    target: file -> the review this prompt will be writing
     iteration: number
     initial_review: file -> the OG review that kicked off this review/implement cycle
 description: |-
-    This prompt expects that the originating content was a review and that we are either _implementing_ the findings/suggestions 
-    of that original review, or, if the review has been marked as "implemented" then we will move to the highest indexed review
-    in the same directory and implement that (unless that too is marked as "implemented").
+    This prompt expects that the originating content was a review and that we are either _implementing_ the findings/suggestions of that original review, or, if the review has been marked as "implemented" then we will move to the highest indexed review in the same directory and implement that (unless that too is marked as "implemented").
 
 target: "{{ review }}"
 iteration: {{ file_index(review) }}
-report: {{ dirname(review) + '/' + 'implementation-report-' + iteration + '.md' }}
+report: "{{ dirname(review) + '/' + 'implementation-report-' + iteration + '.md' }}"
 initial_review: {{ review }}
 
 initialize:
     stack:
         - when: "!frontmatter(review, 'implemented') && !is_indexed_file(review)"
           action:
-              - message: "🏃  starting the _implementation_ of the findings/suggestions in the review {{review}}"
+              - message: "🏃  starting the _implementation_ of the findings/suggestions in the review {{parent_dir(review)}}"
         - when: "frontmatter(review, 'implemented') && !is_indexed_file(review) && find_latest_index(review) && frontmatter(find_latest_index(review), 'implemented')"
           action:
               - message: "😵  the initial review `{{review}}` was _implemented_ and so was the most recent iteration of the review cycle: `find_latest_index(review)`! Nothing to implement."

@@ -28,6 +28,24 @@ belong here.
   the commit body reflects only what was staged; otherwise the bullet list
   drifts from the diff and reviewers see a `[[test]]` registration with no
   matching source file in the same change.
+- Splitting a single file's hunks across two commits: when the staged `M `
+  has two semantic groups of hunks (e.g. finding A and finding B both
+  touching the same file), the simplest split is to construct each
+  desired version offline (HEAD + selected-hunks applied) and write
+  version N to the working tree just before commit N. `--only` reads
+  working-tree content, so each commit captures the version you wrote.
+  Constructing versions needs two cumulative offsets: an in-set offset
+  per hunk (cumulative `new_count - old_count` of earlier hunks in the
+  SAME set, so sequentially-applied hunks line up) and a prior offset
+  per hunk for cross-set application (cumulative change from hunks in
+  earlier sets whose `old_end < current old_start`, so applying Group 2
+  on top of Group 1's output lands at the right line). Verify by
+  concatenating the two versions back to STAGED — a mismatch means a
+  hunk was classified wrong. Use `git apply` for one-shot splits when
+  all hunks in one set appear before all hunks in the other in HEAD
+  order and you can pass the patch directly; the offset machinery is
+  for interleaved hunks (`feat-a` at line 30, `feat-b` at line 40,
+  `feat-a` at line 50, etc.), where `git apply` cannot apply a subset.
 - Use `git log` for history examples; `sniff git commits` does not exist.
 
 ## Inspect First
@@ -60,6 +78,12 @@ belong here.
 - Feed messages via `-F -` with a single-quoted heredoc, or `-F <file>` when
   the commit may be retried (lock contention). A bare `-- <paths> <<EOF`
   without `-F` opens the editor and blocks.
+- `-F <file>` MUST come BEFORE the `--` pathspec boundary (`git commit
+  --only -F /tmp/msg.md -- <paths>`). Placing it after the `--` makes git
+  resolve the file path relative to the worktree root, not the caller's
+  cwd, so any absolute path outside the repo — e.g. the `/tmp/commit_msg_*.md`
+  files used to keep per-sub-agent messages from colliding — dies with
+  `fatal: '<path>' is outside repository`.
 - When writing a message file with the `Write` tool, do not put `$$` in the
   filename: the tool stores it literally while the shell later expands it.
 - Under zsh, prefer `git cat-file -p "${rev}":path` over `git show "$rev:$path"`
@@ -72,6 +96,19 @@ belong here.
   in the brief, confirm with `git diff --cached -- <old> <new>` that the old
   side is a deletion of the expected blob, and check `git status --short`
   afterwards for leftover `D` entries.
+- Splitting a single file's content across two commits (e.g. two
+  `planning(repo)` commits whose spec.md needs `review_iterations: 5→6` in
+  commit 1 and `6→7` in commit 2): `git commit --only -- <path>` UPDATES
+  the index entry for `<path>` to the working-tree blob it just committed,
+  so the obvious "restore the second state from staging with
+  `git show :<path> > <path>`" returns the FIRST commit's blob, not the
+  pre-commit staging. Save the pre-commit staged version to a temp file
+  (e.g. `git show :<path> > /tmp/<path>-staged.md`) BEFORE the first
+  `--only`, then `cp` it back to the working tree after the first commit
+  and BEFORE the second. If the original is lost, `git fsck --dangling`
+  can recover the blob (`git cat-file -p <hash>` shows the file;
+  `git cat-file -t <hash>` confirms `blob`); the reflog only retains
+  the post-`--only` blob because the index-update is not a ref update.
 
 ## Signing
 
@@ -95,12 +132,26 @@ belong here.
 ## Commit Messages
 
 - Conventional Commits, lowercase after the colon, subject < 72 chars.
-- `planning` covers moves into `_completed` / out of `_unscheduled` AND
-  review-cycle doc edits inside a fix/feature directory (`log.md` entry,
-  `review-N.md` flipping `implemented: true`, new `review-(N+1).md`, `spec.md`
-  bumping `review_iterations`): `planning(<area>): close <fix> cycle N, open
+- `planning` covers moves into `_completed` / out of `_unscheduled`, **new
+  spec files added to `features/_unscheduled/`** (a pure `A` for the spec —
+  `planning(<area>): schedule <name> for implementation`), **new spec files
+  added to an active `fixes/YYYY-MM-DD-<name>/` directory** (a new dated fix
+  being scheduled for implementation, distinct from `_unscheduled/`; same
+  `planning(<area>): schedule <name>` shape — see `97f12132c` adding
+  `fixes/2026-09-10-local-affected-scope/spec.md`, `aedeeb46d` adding
+  `fixes/2026-09-11-cicd-cleanup/spec.md`), AND review-cycle doc edits
+  inside a fix/feature directory (`log.md` entry, `review-N.md` flipping
+  `implemented: true`, new `review-(N+1).md`, `spec.md` bumping
+  `review_iterations`): `planning(<area>): close <fix> cycle N, open
   cycle N+1` (see `4c903c586`, `152ea6b84`, `690b2ecc3`). Such commits may
-  have zero source diff; they are valid cycle iterations, not no-ops.
+  have zero source diff; they are valid cycle iterations, not no-ops. The
+  unscheduled-add case is not a `feat` because no code ships, and not `docs`
+  because `_unscheduled/` is a planning surface (the frontmatter `area`
+  is the scope — `area: repo` → `planning(repo)` even for CI-leg specs).
+  The active-fix-spec case uses the same rationale: no code ships, the
+  dated directory is a planning surface, the frontmatter `area` is the
+  scope (e.g. `area: repository-ci` for a repo-wide CI fix still becomes
+  `planning(repo):` per the analogous `97f12132c` precedent).
 - In cycle-close bodies quote what the diff says; do not paraphrase into
   claims the staged text did not make ("smoke test failed" vs. "smoke attempt
   interrupted by host load").
@@ -192,6 +243,21 @@ belong here.
   prose siblings. The placeholders are intentional scaffolding, not missing
   content — commit them together with the prose; do not omit them as "empty
   files" or split them into a follow-up.
+- Docs consolidation across multiple deleted sources plus a single new file is
+  not a rename. When two `docs/topics/*.md` files are deleted and replaced by
+  one heavily synthesized `docs/<topic>.md` (similarity below `git diff -M50%`
+  threshold), the index holds an independent `D + D + A + M(sibling link-fix)`
+  set. Splitting the A from the D pair ships a 1200-line file with no
+  antecedent; splitting a D from the A loses the "what was consolidated"
+  evidence. Commit all of them in one `--only` invocation so reviewers see
+  the replacement as one change.
+- A sibling skill that introduces a contract (e.g. rust-devops rewrites its
+  CI/CD section) and a referencing skill (e.g. `os` adds a cross-reference to
+  the new contract) are disjoint paths and commit safely in parallel, but the
+  cross-reference is stale between the two commits and the reflog shows it.
+  Either ship them in the same commit when paths allow, or document the
+  ordering in the second commit's body so reviewers know the cross-reference
+  resolves against an earlier sibling.
 - Use `git show --pretty=format: --name-only <hash>` when diffing the committed
   path list against a pathspec file.
 - A workspace-wide version-pin refresh that swaps the version number in a
@@ -205,3 +271,46 @@ belong here.
   silently shipping a self-contradicting paragraph.
 - After all groups finish, reconcile `git status --short` against the
   original staged set; anything left belongs to a failed or unassigned group.
+- When a commit subject describes a structural move ("restructure skill tree",
+  "extract to new module", "consolidate under `foo/`") but the staging only
+  adds the new path without staging the old as `D` or `R`, the tracking-tree
+  ends up with both old and new files. The pre-commit diff against HEAD will
+  not surface the leftover because nothing is staged for it; detect by
+  `git ls-files <old-glob>` after staging and either re-stage the deletes or
+  flag the leftover tracked paths in the commit body as a follow-up. A batch
+  of `A`-only entries alongside a single `R` is the giveaway: the rename
+  collapses a `D + A` into one index fact but every other plain `A` is a
+  tracked-path addition, not a move.
+- Extracting a shared fixture into a CI-skipped crate (e.g. one whose
+  `[package.metadata.ci] gates = false` lists the package out of every
+  CI leg's test run) requires a parallel regression test in a CI-gated
+  package — the canonical fixture test in the skipped crate is reference
+  evidence only and is never executed in CI. Ship the parallel test in
+  the same atomic commit as the extraction; otherwise the gate that proves
+  the fix lands in a follow-up that drifts from the fixture's actual
+  behavior, and the only signal that the two have diverged is a developer
+  running both by hand.
+- A closure document (`fixes/<name>/closure.md` or an analogous
+  implementation-time artifact under a fix / feature directory) may
+  name an "unrelated user edits at entry" list — paths the implementer
+  touched but does not consider part of this fix. The list is the
+  orchestrator's signal to commit those paths in a separate
+  `docs(<area>):` or `chore:` commit, alongside the orchestrator's own
+  `planning(<area>):` close commit. Treat the list as authoritative;
+  do not fold the named paths into the implementation, tests, or docs
+  commits of the same fix even when they share a package area with the
+  fix's scope — the implementer's "unrelated" is a stronger signal than
+  the orchestrator's "lives in the same directory tree".
+- A `RESOLVED_PLAN_SCHEMA_VERSION` bump is one inseparable change with the
+  new required fields in `scripts/ci/schema.py`, the regenerated
+  `.github/ci/schemas/contract.json`, the version constant in any Rust
+  reader (e.g. `scripts/ci-rollup.rs`'s `PLAN_SCHEMA_VERSION`), and every
+  hand-built plan fixture scattered across the test suites
+  (`test_schema.py::plan()`, `test_resolved_plan.py::PlannerFixture`,
+  `test_local_evidence.py::ScopeReceiptTests`,
+  `test_evidence_reuse.py::EvidenceFixture`, the single-line
+  `.githooks/tests/fixtures/plan-*.json`). Pre-flight
+  `git diff --cached --stat` counts the fixture files but does not show
+  which builders still carry the old shape; check each builder explicitly
+  (`git show :<path> | grep -F '"<new-field>"'`) or accept the test
+  failure as "missing required field" rather than a missing path.

@@ -2,6 +2,9 @@
 
 ## Recent Dependency Notes
 
+- `biscuit-test-harness` uses `tempfile` as a regular dependency to retain private
+  WezTerm client configuration files through subprocess completion and remove
+  them afterward.
 - `playa/lib` uses `fs4` for its private cross-process spool locks,
   `biscuit-hash` for stable user/cache fingerprints, `chrono` for protocol
   deadlines, and `windows-sys` for atomic replacement on Windows. `playa-cli`
@@ -10,8 +13,20 @@
 - `biscuit-speaks/lib`'s optional `playa` feature enables
   `playa/native-playback`; Linux CI therefore provisions `libasound2-dev`
   alongside `espeak-ng`. It uses `biscuit-hash` xxHash for content-addressed
-  TTS audio cache names and `fs4` for detached-helper/test coordination. See
+  TTS audio cache names. See
   [`biscuit-speaks/docs/dependencies.md`](./biscuit-speaks/docs/dependencies.md).
+- `tools/test-toolkit` uses `fs4` for `LockedAudioSpool`, the one publication
+  fixture for Playa's detached spool. It takes Playa's `worker.lock` and
+  `queue.lock` in the scheduler's order so a test cannot release worker
+  ownership over a record a publisher committed during cleanup. `fs4` is an
+  unconditional dependency rather than feature-gated like the crate's binary-only
+  `clap`/`sysinfo`: it resolves to `rustix`/`windows-sys`, which every
+  dev-dependent already builds. Its adopters — `playa-cli`, `biscuit-speaks/lib`,
+  `claudine/lib`, and `claudine-cli` — dropped their own `fs4` dev dependencies
+  and their divergent local copies of the guard.
+- `biscuit-speaks-cli` uses `fs4` and `sysinfo` as development dependencies
+  to wait for detached audio test ownership and terminate only fixture-owned
+  executables when cooperative cleanup times out.
 - Both Claudine crates explicitly enable `playa/native-playback`; their Linux
   native policy includes `libasound2-dev`. Their direct `biscuit-file` and
   `biscuit-hash` edges remain composition/MCP/session authorities rather than

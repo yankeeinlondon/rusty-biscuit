@@ -362,3 +362,20 @@ fn dedup_collapses_when_area_equals_repo_path() {
     dedup_scopes(&mut set);
     assert!(set.package_area.is_none());
 }
+
+/// The candidate walk yields native separators; the typed partial is whatever
+/// the user wrote. Both spellings of the query must find a natively built path.
+/// On Unix `Path::join` already renders `/`, so the `\` query is the arm that
+/// exercises the normalization there; on Windows both arms do.
+#[test]
+fn path_matches_query_ignores_separator_spelling() {
+    let native = Path::new("packages")
+        .join("example")
+        .join("fixes")
+        .join("2026-09-10-local-a")
+        .join("spec.md");
+    assert!(path_matches_query(&native, "fixes/2026-09-10-local"));
+    assert!(path_matches_query(&native, "fixes\\2026-09-10-local"));
+    assert!(path_matches_query(&native, "example/fixes"));
+    assert!(!path_matches_query(&native, "fixes/2026-09-10-decoy"));
+}

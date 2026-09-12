@@ -25,7 +25,9 @@ const DEFAULT_RATE_WPM: f32 = 175.0;
 /// ## Voice Selection
 ///
 /// The `-v` flag selects the voice by name (e.g., "Samantha", "Alex").
-/// Note: macOS `say` does NOT have a volume flag.
+/// Speech is synthesized to PCM WAV and played through Playa so volume is
+/// effective without changing the selected voice. Without `playa`, macOS
+/// `afplay -v` provides volume-controlled playback.
 ///
 /// ## Examples
 ///
@@ -227,27 +229,36 @@ impl SayProvider {
         }
     }
 
-    /// Check if the `say` binary exists on the system.
-    async fn say_binary_exists() -> bool {
-        which::which("say").is_ok()
+    #[cfg(feature = "playa")]
+    fn cache_path(text: &str, config: &TtsConfig) -> std::path::PathBuf {
+        let voice = Self::resolve_voice(config).unwrap_or("system-default");
+        let rate = Self::resolve_rate(config.speed)
+            .map_or_else(|| "system-default".into(), |rate| rate.to_string());
+        crate::audio_cache::CacheKey::new("say", format!("{voice};rate={rate}"), text, "wav")
+            .cache_path()
     }
-}
 
-impl TtsExecutor for SayProvider {
-    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+    async fn synthesize(text: &str, config: &TtsConfig) -> Result<tempfile::TempPath, TtsError> {
+        let path = tempfile::Builder::new()
+            .suffix(".wav")
+            .tempfile()?
+            .into_temp_path();
         let mut cmd = tokio::process::Command::new("say");
 
-        // Voice selection (NOT volume - macOS say has no volume flag)
+        cmd.arg("-o")
+            .arg(&path)
+            .arg("--file-format=WAVE")
+            .arg("--data-format=LEI16");
+
         if let Some(voice) = Self::resolve_voice(config) {
             cmd.arg("-v").arg(voice);
         }
 
-        // Rate (speed) selection
         if let Some(rate) = Self::resolve_rate(config.speed) {
             cmd.arg("-r").arg(rate.to_string());
         }
 
-        // Use stdin for text input
+        cmd.kill_on_drop(true);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::null());
         cmd.stderr(Stdio::piped());
@@ -257,7 +268,6 @@ impl TtsExecutor for SayProvider {
             source: e,
         })?;
 
-        // Write text to stdin
         let mut stdin = child.stdin.take().ok_or_else(|| TtsError::StdinPipeError {
             provider: Self::PROVIDER_NAME.into(),
         })?;
@@ -269,23 +279,79 @@ impl TtsExecutor for SayProvider {
                 provider: Self::PROVIDER_NAME.into(),
             })?;
 
-        // CRITICAL: Drop stdin to send EOF signal
+        // Close stdin so say can observe EOF and finish synthesis.
         drop(stdin);
 
-        // Wait for completion
         let output = child
             .wait_with_output()
             .await
             .map_err(|e| TtsError::IoError { source: e })?;
 
         if output.status.success() {
-            Ok(())
+            Ok(path)
         } else {
             Err(TtsError::ProcessFailed {
                 provider: Self::PROVIDER_NAME.into(),
                 stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             })
         }
+    }
+
+    async fn play_report(
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<crate::types::SpeakPlaybackReport, TtsError> {
+        #[cfg(feature = "playa")]
+        {
+            let path = Self::synthesize(text, config).await?;
+            let mut playback_config = config.clone();
+            // The requested rate is already baked into the synthesized audio.
+            playback_config.speed = SpeedLevel::Normal;
+            crate::playback::play_audio_file_with_report(
+                &path,
+                crate::types::AudioFormat::Wav,
+                &playback_config,
+            )
+            .await
+        }
+        #[cfg(not(feature = "playa"))]
+        {
+            let path = Self::synthesize(text, config).await?;
+            let started = std::time::Instant::now();
+            let output = tokio::process::Command::new("afplay")
+                .arg("-v")
+                .arg(config.volume.value().to_string())
+                .arg(&path)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true)
+                .output()
+                .await?;
+            if !output.status.success() {
+                return Err(TtsError::ProcessFailed {
+                    provider: "afplay".into(),
+                    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                });
+            }
+            Ok(crate::types::SpeakPlaybackReport {
+                route: crate::types::SpeakPlaybackRoute::Host("afplay".into()),
+                expected_millis: None,
+                elapsed_millis: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                verdict: crate::types::SpeakPlaybackVerdict::Unverified,
+            })
+        }
+    }
+
+    /// Check if the `say` binary exists on the system.
+    async fn say_binary_exists() -> bool {
+        which::which("say").is_ok()
+    }
+}
+
+impl TtsExecutor for SayProvider {
+    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        Self::play_report(text, config).await.map(|_| ())
     }
 
     /// Check if the Say provider is ready.
@@ -312,24 +378,24 @@ impl TtsExecutor for SayProvider {
     ) -> Result<SpeakResult, TtsError> {
         // If a specific voice was requested, use it directly
         if let Some(voice_name) = &config.requested_voice {
-            // Speak with the requested voice
-            self.speak(text, config).await?;
+            let playback = Self::play_report(text, config).await?;
 
             // Try to find the voice in the list for full metadata
             if let Ok(voices) = self.list_voices().await
                 && let Some(voice) = voices.iter().find(|v| v.name == *voice_name)
             {
-                return Ok(SpeakResult::new(
-                    TtsProvider::Host(HostTtsProvider::Say),
-                    voice.clone(),
-                ));
+                return Ok(
+                    SpeakResult::new(TtsProvider::Host(HostTtsProvider::Say), voice.clone())
+                        .with_playback(playback),
+                );
             }
 
             // Fallback if voice not found in list
             return Ok(SpeakResult::new(
                 TtsProvider::Host(HostTtsProvider::Say),
                 Voice::new(voice_name.clone()).with_language(Language::English),
-            ));
+            )
+            .with_playback(playback));
         }
 
         // No specific voice requested - select the best one based on constraints
@@ -345,13 +411,10 @@ impl TtsExecutor for SayProvider {
         let mut config_with_voice = config.clone();
         config_with_voice.requested_voice = Some(selected_voice.name.clone());
 
-        // Speak with the selected voice
-        self.speak(text, &config_with_voice).await?;
+        let playback = Self::play_report(text, &config_with_voice).await?;
 
-        Ok(SpeakResult::new(
-            TtsProvider::Host(HostTtsProvider::Say),
-            selected_voice,
-        ))
+        Ok(SpeakResult::new(TtsProvider::Host(HostTtsProvider::Say), selected_voice)
+            .with_playback(playback))
     }
 
     #[cfg(feature = "playa")]
@@ -360,15 +423,42 @@ impl TtsExecutor for SayProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<playa::detached::SpoolJob, TtsError> {
-        let mut args = Vec::new();
-        if let Some(voice) = Self::resolve_voice(config) {
-            args.extend(["-v".into(), voice.into()]);
+        let path = Self::synthesize(text, config).await?;
+        let mut playback_config = config.clone();
+        playback_config.speed = SpeedLevel::Normal;
+        let cache = if Self::resolve_voice(config).is_some() && Self::resolve_rate(config.speed).is_some() {
+            Self::cache_path(text, config)
+        } else {
+            // Unknown system voice/rate must not let another preparation replace this audio.
+            crate::audio_cache::CacheKey::new("say", path.to_string_lossy().as_ref(), text, "wav")
+                .cache_path()
+        };
+        let audio = tokio::fs::read(&path).await?;
+        crate::audio_cache::write_atomic(&cache, &audio).map_err(|error| {
+            TtsError::ProviderFailed {
+                provider: Self::PROVIDER_NAME.into(),
+                message: error.to_string(),
+            }
+        })?;
+        Ok(crate::playa_bridge::file_job(cache, &playback_config))
+    }
+
+    #[cfg(feature = "playa")]
+    async fn cached_detached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<Option<playa::detached::SpoolJob>, TtsError> {
+        // System voice and rate defaults can change independently of this config.
+        if Self::resolve_voice(config).is_none() || Self::resolve_rate(config.speed).is_none() {
+            return Ok(None);
         }
-        if let Some(rate) = Self::resolve_rate(config.speed) {
-            args.extend(["-r".into(), rate.to_string().into()]);
-        }
-        args.push(text.into());
-        crate::playa_bridge::command_job("say", args)
+        let path = Self::cache_path(text, config);
+        let mut playback_config = config.clone();
+        playback_config.speed = SpeedLevel::Normal;
+        Ok(path
+            .is_file()
+            .then(|| crate::playa_bridge::file_job(path, &playback_config)))
     }
 }
 
@@ -802,14 +892,16 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[tokio::test]
-    #[ignore] // Produces audio - run manually
-    async fn test_say_provider_speaks() {
-        let provider = SayProvider;
-        let config = TtsConfig::default();
-        let result = provider
-            .speak("Hello from the Say provider test.", &config)
-            .await;
-        assert!(result.is_ok());
+    async fn real_say_provider_speaks_muted() {
+        let config = TtsConfig::default().with_volume(crate::types::VolumeLevel::Explicit(0.0));
+        let report = SayProvider::play_report("This is a test message.", &config).await.unwrap();
+        #[cfg(feature = "playa")]
+        {
+            assert_eq!(report.route, crate::types::SpeakPlaybackRoute::Native);
+            assert_eq!(report.verdict, crate::types::SpeakPlaybackVerdict::Complete);
+        }
+        #[cfg(not(feature = "playa"))]
+        assert_eq!(report.route, crate::types::SpeakPlaybackRoute::Host("afplay".into()));
     }
 
     #[cfg(target_os = "macos")]

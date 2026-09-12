@@ -117,7 +117,7 @@ All three commands share a wrapper-grade execution pipeline with full support fo
 
 Provider selection uses explicit flags (`--claude`, `--codex`, etc.), frontmatter hints, config favorites, or interactive chooser. Use `-i` for interactive sessions, `--exclude` to filter providers.
 
-For full details, see [Composition](./docs/topics/composition.md).
+For eager file parameters with a schema `match(...)` glob, a partial path triggers confirmation or a file chooser before `initialize` reads it. This also works with `-y`; missing unrelated parameters remain deferred until after initialization. See [Composition](./docs/topics/composition.md#provided-partial-file-references) for the matching rules and interactive gates.
 
 ### Performance Reporting
 

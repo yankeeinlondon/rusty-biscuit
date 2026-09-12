@@ -430,8 +430,8 @@ for `rendezvous-core`, `rendezvous-client`, and `rendezvous-daemon` on native
 `windows-latest`. The same ordinary package grid runs each package on
 `macos-latest` and `ubuntu-latest`, with WSL2 represented by its own
 `wsl2-ubuntu` L1 evidence cell and no `continue-on-error` on any leg. JUnit and
-producer status preserve each `{package, environment, tier}` result for
-`ci-verdict`.
+producer status preserve each `{package, environment, tier}` result for the
+area's rollup.
 
 Two verification gaps are known and tracked in the fix's plan rather than papered
 over:

@@ -1343,7 +1343,6 @@ version = "0.1.0"
 dependencies = [
  "biscuit-hash",
  "dirs",
- "fs4",
  "gender_guesser",
  "playa",
  "reqwest 0.13.2",
@@ -1369,10 +1368,12 @@ dependencies = [
  "clap 4.6.1",
  "clap_complete",
  "darkmatter",
+ "fs4",
  "inquire",
  "owo-colors",
  "sniff",
  "strum 0.28.0",
+ "sysinfo",
  "tempfile",
  "tokio",
 ]
@@ -2137,7 +2138,6 @@ dependencies = [
  "darkmatter",
  "dirs",
  "dunce",
- "fs4",
  "iana-time-zone",
  "indexmap 2.14.0",
  "libc",
@@ -2202,7 +2202,6 @@ dependencies = [
  "darkmatter-cli",
  "dirs",
  "expectrl",
- "fs4",
  "globset",
  "ignore",
  "indexmap 2.14.0",
@@ -9543,6 +9542,7 @@ dependencies = [
  "serial_test",
  "sniff",
  "strum 0.28.0",
+ "test-toolkit",
  "tokio",
 ]
 
@@ -13600,6 +13600,7 @@ name = "test-toolkit"
 version = "0.1.0"
 dependencies = [
  "clap 4.6.1",
+ "fs4",
  "serde_json",
  "serial_test",
  "sysinfo",

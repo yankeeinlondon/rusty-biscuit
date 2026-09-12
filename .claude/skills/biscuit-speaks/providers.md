@@ -4,7 +4,7 @@
 
 | Provider | Type | Platform | Quality | Vol | Speed | Notes |
 |----------|------|----------|---------|:---:|:-----:|-------|
-| Say | Host | macOS | Moderate-Good | - | Yes | Built-in macOS TTS |
+| Say | Host | macOS | Moderate-Good | Yes | Yes | Built-in macOS TTS |
 | eSpeak | Host | Cross-platform | Low | Yes | Yes | Formant synthesis, 100+ languages |
 | SAPI | Host | Windows | Moderate-Excellent | Yes | Yes | Windows Speech API |
 | Echogarden | Host | Cross-platform | Good-Excellent | - | - | Multi-engine (Kokoro, VITS) |
@@ -36,7 +36,9 @@ provider.speak("Hello", &TtsConfig::default()).await?;
 
 **Voice Enumeration**: Parses `say -v '?'` output.
 
-**Limitations**: No volume control (macOS `say` lacks volume flag).
+**Volume**: Synthesizes PCM WAV using the selected voice/rate, then plays it at
+the requested gain through native Playa. Without `playa`, uses macOS `afplay -v`.
+Detached synthesis reserves an ordered preparation slot.
 
 ---
 

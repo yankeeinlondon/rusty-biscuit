@@ -45,6 +45,8 @@ mod playa_bridge;
 pub mod playback;
 pub mod providers;
 pub mod speak;
+#[cfg(test)]
+mod test_support;
 pub mod traits;
 pub mod types;
 

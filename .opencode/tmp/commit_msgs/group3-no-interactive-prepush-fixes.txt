@@ -1,0 +1,40 @@
+fix(claudine): apply pre-push validation fixes for no-interactive-completion
+
+The first push after `adf29f559` exposed two test-infrastructure
+regressions: a sequence-preflight timeout and a dry-run terminal
+capture failure. Both were fixture-shape problems; reducing concurrency
+was a diagnostic step, not the resolution. Each fix below is paired
+with a measurable before/after and re-runs the affected suites at
+default concurrency.
+
+- test(claudine/lib): confine `sequence/preflight/tests.rs` fixture
+  loads to a fixture-owned `FileResolutionContext` so the shared loader
+  no longer discovers the runner's monorepo on every matrix case. The
+  ambient `resolve_composition_source` call sites in the four
+  `loading` / `blocked` modules now route through
+  `resolve_fixture_source`, which constructs an explicit base
+  directory with an empty `HashMap` provider. The original 16-case
+  matrix and its assertions are unchanged; with the same focused
+  command and default concurrency the matrix fell from 4.241 s to
+  0.030 s and the 44-test module from 4.801 s to 0.655 s, then
+  `just test-library` passed all 4,116 tests including the matrix
+  in 0.044 s at default concurrency with no timeout or thread cap
+  adjusted.
+- test(claudine/cli): refactor `level2_dry_run_metadata_capture.rs`
+  dry-run drivers to use a new `capture_dry_run_command` helper that
+  clears the shared tmux viewport and waits for a unique
+  command-completion marker, then add
+  `level2_dry_run_reused_tmux_pane_does_not_reuse_previous_agent_rows`
+  as a same-pane no-agent → not-installed regression: it asserts the
+  previous run's "didn't specify the Agent" row is gone, the current
+  Agent row reads "Agent Not Installed" with yellow + dim styling, and
+  both harness paths exercise the pre-push broker's shared-pane
+  behavior. All eight focused dry-run tests and all 244 CLI L2 tests
+  pass under the package area's default parallel terminal mode and
+  `BISCUIT_L2_THREADS=1 just test-l2 level2_dry_run_` also passes the
+  eight tests through the same broker.
+- planning(claudine/fixes): append a "Pre-push validation fixes"
+  section to `claudine/fixes/2026-09-10-no-interactive-completion/plan.md`
+  recording both fixture fixes, the before/after timings, the focused
+  suite evidence, and the open native-Windows / WSL2 platform-evidence
+  gap that remains for the parent fix.

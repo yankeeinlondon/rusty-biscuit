@@ -1,18 +1,19 @@
 //! Roll per-job JUnit artifacts into a package × environment × tier grid, and
 //! render a merge verdict against a machine-readable baseline.
 //!
-//! Two subcommands share one data model:
+//! Three subcommands share one data model:
 //!
 //! - `rollup` walks the downloaded CI artifacts, parses every staged JUnit
-//!   document, crosses the observations with the run's resolved package policy
-//!   (the scope job's artifact) and the environment capability table, and
-//!   emits both a Markdown grid (for `GITHUB_STEP_SUMMARY`) and a
-//!   machine-readable result document.
+//!   document, crosses the observations with the run's resolved execution plan
+//!   (or, transitionally, the legacy package policy) and the environment
+//!   capability table, and emits both a Markdown grid (for
+//!   `GITHUB_STEP_SUMMARY`) and a machine-readable result document.
 //! - `verdict` diffs that result document against `.github/ci/ci-baseline.toml`,
 //!   rules on the capability-derived policy gaps the rollup recorded, and exits
-//!   non-zero when the run must not merge. It is the single required
-//!   branch-protection check, so it must run even when every producer job
-//!   failed.
+//!   non-zero when the run must not merge. It must run even when every producer
+//!   job failed.
+//! - `summarize` folds several area result documents into one reader-facing
+//!   view. It applies no policy at all.
 //!
 //! The split is observation versus judgement. `rollup` never consults the
 //! baseline and never excuses anything: its grid shows every cell that is not
@@ -21,15 +22,19 @@
 //!
 //! ## Notes
 //!
-//! Cell identity is `{package, environment, tier}`. It is never derived from a
-//! GitHub job display name: when `needs:` skips a matrix job, GitHub never
-//! evaluates the matrix context and reports the raw, un-interpolated name
-//! expression, so nothing is recoverable from it at all.
+//! Cell identity is `{package, environment, tier}`, and stays so:
+//! `fixes/2026-09-11-cicd-cleanup/spec.md` Design Decision 1 makes the package
+//! the stored identity and the area a derived grouping field. It is never
+//! derived from a GitHub job display name: when `needs:` skips a matrix job,
+//! GitHub never evaluates the matrix context and reports the raw,
+//! un-interpolated name expression, so nothing is recoverable from it at all.
 //!
 //! The absence of an artifact is therefore ambiguous on its own. `NOT
-//! SCHEDULED` versus `MISSING` is resolved from policy (the scope artifact
+//! SCHEDULED` versus `MISSING` is resolved from the plan (the scope artifact
 //! crossed with the run's affected scope), never from what happens to be on
-//! disk.
+//! disk. A cell the plan satisfied from a local receipt carries its result and
+//! its origin rather than producing nothing: omitting an *execution* must never
+//! omit the *cell*, which is the PR #76 seven-cell `MISSING` regression.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -42,15 +47,31 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 
-/// Version of both emitted documents (`results.json`) and the accepted
-/// baseline. Version 2 keys every identity on the package; version 1 was
-/// area-keyed and is rejected with an explicit migration error. A consumer
-/// that reads a higher version must refuse to interpret it.
-const SCHEMA_VERSION: u32 = 2;
+/// Version of the emitted result document (`results.json`).
+///
+/// Version 1 was area-keyed. Version 2 keyed every identity on the package.
+/// Version 3 keeps that identity and adds the area-owned result model: each
+/// cell carries its derived `area`, its `origin`, the evidence behind a reused
+/// result, its measured duration, and its target coverage, and the document
+/// carries the accepted evidence the run was scheduled against. A consumer that
+/// reads a higher version must refuse to interpret it.
+const RESULT_SCHEMA_VERSION: u32 = 3;
 
-/// Process exit codes. The verdict is destined to be the single required
-/// branch-protection check, so a blocked run and a broken tool must be
-/// distinguishable but both non-zero.
+/// Version of `.github/ci/ci-baseline.toml`. Deliberately its own constant: the
+/// baseline is hand-edited policy keyed on `{package, environment, tier}` and
+/// does not move when the machine-generated result document gains fields.
+const BASELINE_SCHEMA_VERSION: u32 = 2;
+
+/// Version of an expected-test manifest (`just/devops.just::_expected_manifest`).
+const EXPECTED_MANIFEST_SCHEMA_VERSION: u32 = 1;
+
+/// Version of the resolved execution plan this tool reads
+/// (`scripts/ci/schema.py::RESOLVED_PLAN_SCHEMA_VERSION`).
+const PLAN_SCHEMA_VERSION: u32 = 2;
+
+/// Process exit codes. A verdict gates merging — per area, through each
+/// `_area-ci.yml` rollup; `ci.yml`'s `ci-gate` only folds job results — so a
+/// blocked run and a broken tool must be distinguishable but both non-zero.
 const EXIT_TOOL_ERROR: i32 = 1;
 const EXIT_BLOCKED: i32 = 2;
 
@@ -127,6 +148,13 @@ impl<'de> Deserialize<'de> for Tier {
 /// scheduled package whose invocation selected zero tests — neither a pass
 /// implying coverage nor a blocking missing result; the second is a
 /// `gates = false` package carrying its governance metadata.
+///
+/// `AcceptedGap` and `PolicyGap` are likewise never conflated. `AcceptedGap` is
+/// the plan's own decision, taken before the run from a governed, unexpired
+/// `environments.json` record, and is neither a pass nor a failure. `PolicyGap`
+/// is an unowned or undated absence the verdict must never excuse. Neither is
+/// ever inferred from a GitHub cancellation conclusion (Design Decision 10), so
+/// retry and rollup logic cannot mistake an accepted gap for an interruption.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 enum CellState {
@@ -140,6 +168,8 @@ enum CellState {
     NotScheduled,
     #[serde(rename = "POLICY GAP")]
     PolicyGap,
+    #[serde(rename = "ACCEPTED GAP")]
+    AcceptedGap,
 }
 
 impl CellState {
@@ -152,7 +182,14 @@ impl CellState {
             Self::Missing => "MISSING",
             Self::NotScheduled => "NOT SCHEDULED",
             Self::PolicyGap => "POLICY GAP",
+            Self::AcceptedGap => "ACCEPTED GAP",
         }
+    }
+
+    /// Whether this state describes an environment that cannot host the cell's
+    /// tier, governed or not. Both kinds are ruled on by the same verdict rule.
+    fn is_gap(self) -> bool {
+        matches!(self, Self::PolicyGap | Self::AcceptedGap)
     }
 
     /// Whether this state alone fails the summary gate.
@@ -169,6 +206,14 @@ impl CellState {
     /// excuse the second: the merge decision belongs to `verdict`, and keeping
     /// this predicate policy-free is what makes the rollup's "Cells failing the
     /// summary gate" table an honest inventory of everything not green.
+    ///
+    /// `AcceptedGap` is absent because it is not an observation of something
+    /// missing: the plan decided, from an owned and unexpired policy entry,
+    /// that the cell will not execute, and the grid renders it in its own
+    /// section with that governance. The verdict still re-checks its expiry —
+    /// `policy_gap_findings` blocks an expired or incomplete one without
+    /// consulting this predicate — because the verdict runs when the scope job
+    /// did not.
     fn blocks(self) -> bool {
         matches!(self, Self::Fail | Self::Missing | Self::PolicyGap)
     }
@@ -203,6 +248,72 @@ impl Counts {
     fn bad(&self) -> u32 {
         self.failed + self.errored
     }
+}
+
+/// Where a cell's result came from.
+///
+/// ## Notes
+///
+/// The vocabulary is the resolved plan's (`scripts/ci/schema.py::ORIGINS`), so
+/// the document that scheduled the run and the document that reports it name a
+/// reused result the same way. `PriorLocal` is a receipt from an older head
+/// accepted through gate-input identity; `Local` is the outgoing head's own.
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Origin {
+    #[default]
+    Ci,
+    Local,
+    PriorLocal,
+    #[serde(rename = "none")]
+    Unproduced,
+}
+
+impl Origin {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Ci => "ci",
+            Self::Local => "local",
+            Self::PriorLocal => "prior-local",
+            Self::Unproduced => "none",
+        }
+    }
+
+    /// Whether a result of this origin was produced off this run, so no CI job
+    /// is expected to have uploaded anything for it.
+    fn is_reused(self) -> bool {
+        matches!(self, Self::Local | Self::PriorLocal)
+    }
+}
+
+impl fmt::Display for Origin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+/// What a reused cell's result can be traced back to.
+///
+/// CI cannot link to a file on a developer host, so the link is the Git notes
+/// ref that carried the receipt (Design Decision 6). The full report stays on
+/// the producing host, and `report` records where, so a reviewer can ask for it.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+struct Evidence {
+    /// `refs/notes/ci-local/<environment>`.
+    #[serde(rename = "ref")]
+    reference: String,
+    /// The note commit the receipt was read from, when the verifier recorded it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    commit: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    host: String,
+    /// Counts and duration as the receipt recorded them, or
+    /// `not recorded (v1 receipt)` for a legacy note.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    measurements: String,
+    /// The producing host's report directory, when the receipt named one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    report: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -276,10 +387,29 @@ impl fmt::Display for CellKey {
 struct DeclaredGap {
     owner: String,
     reason: String,
-    /// `""` when undeclared. See [`PolicyGap::expiry`].
+    /// `""` when undeclared. See [`policy_gap_findings`].
     #[serde(default)]
     expiry: String,
+    /// The capability whose governed absence produced the gap (`tmux`,
+    /// `headless_browser`, …). Empty on a document written before the field.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    capability: String,
+    /// Where the acceptance is declared, so a reader can reach it without being
+    /// told the path.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    policy: String,
+    /// The tracked work that closes the gap, when the policy entry names it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    closes: String,
 }
+
+/// How acceptance is changed or revoked. Spec section 6 requires the
+/// instructions to travel with the cell; the path is the one authority
+/// `verdict` and the grid both point at.
+const POLICY_LINK: &str = ".github/ci/environments.json";
+const REVOCATION_INSTRUCTIONS: &str = "to revoke, set the capability to `true` \
+    (or delete the governed record) in .github/ci/environments.json; the cell \
+    then blocks its area until the coverage exists";
 
 impl DeclaredGap {
     fn owner_or_unassigned(&self) -> &str {
@@ -287,6 +417,14 @@ impl DeclaredGap {
             "unassigned"
         } else {
             self.owner.as_str()
+        }
+    }
+
+    fn policy_link(&self) -> &str {
+        if self.policy.trim().is_empty() {
+            POLICY_LINK
+        } else {
+            self.policy.as_str()
         }
     }
 
@@ -303,14 +441,54 @@ impl DeclaredGap {
             self.owner_or_unassigned()
         )
     }
+
+    /// Everything spec section 6 requires an accepted gap to show: who owns it,
+    /// why, until when, where it is declared, what closes it, and how to revoke
+    /// it.
+    fn describe_acceptance(&self) -> String {
+        let mut out = self.describe();
+        if !self.capability.is_empty() {
+            out.push_str(&format!("; capability `{}`", self.capability));
+        }
+        out.push_str(&format!("; policy {}", self.policy_link()));
+        if !self.closes.is_empty() {
+            out.push_str(&format!("; closed by {}", self.closes));
+        }
+        out.push_str(&format!("; {REVOCATION_INSTRUCTIONS}"));
+        out
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Cell {
     #[serde(flatten)]
     key: CellKey,
+    /// The package's package area, derived at plan time and carried here for
+    /// grouping only. Package stays the identity (Design Decision 1); this is
+    /// never a key. `""` when the producing document predates area derivation.
+    #[serde(default)]
+    area: String,
     state: CellState,
+    /// Whether this result was produced by this run or reused from a receipt.
+    #[serde(default)]
+    origin: Origin,
     counts: Counts,
+    /// Wall time of the executions behind this cell, summed across its records,
+    /// or the receipt's recorded duration for a reused cell.
+    #[serde(default)]
+    duration_s: u64,
+    /// Cargo target kinds the cell's gate covers, from the plan. Empty when the
+    /// rollup ran without a plan.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    target_kinds: Vec<String>,
+    /// Which gate produced this cell's compile coverage, from the plan. An
+    /// archive-only environment names the runner that built its archive rather
+    /// than claiming a compile it never performed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    compile_coverage_from: String,
+    /// What satisfied a reused cell. Absent on a CI-origin cell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    evidence: Option<Evidence>,
     /// Whether policy scheduled this cell for this run.
     scheduled: bool,
     /// Exact identities of every test observed as skipped, plus (when an
@@ -329,6 +507,10 @@ struct Cell {
     /// excuse.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     declared_gap: Option<DeclaredGap>,
+    /// Unchanged direct reverse dependencies this `check` cell also compiled,
+    /// from the producer's status. They have no cell of their own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    dependents: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     reasons: Vec<String>,
     /// Indices into [`Rollup::records`].
@@ -343,6 +525,21 @@ struct Rollup {
     run_id: Option<String>,
     /// Packages policy considered in scope for this run.
     scope: Vec<String>,
+    /// The package areas this document covers, derived from its cells. A
+    /// grouping field, not an identity.
+    #[serde(default)]
+    areas: Vec<String>,
+    /// The `--area` narrowing applied to this document, empty when it covers
+    /// the whole run. A narrowed document is one area's own slice: it applies
+    /// that area's baseline, gaps, and missing-cell rule and nobody else's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    area_scope: Vec<String>,
+    /// The verified evidence this run was scheduled against, one entry per
+    /// reused cell. Written so the reporting path cannot expect a CI result for
+    /// a cell a receipt already satisfied — the PR #76 regression — and so a
+    /// reviewer can reach the receipt behind every non-CI result.
+    #[serde(default)]
+    accepted_evidence: Vec<AcceptedEvidence>,
     /// True when the scope was inferred from the artifacts on disk instead of
     /// being supplied. An inferred scope cannot see a package that produced
     /// nothing at all, which is exactly the case `MISSING` exists to catch.
@@ -369,6 +566,79 @@ impl Rollup {
     fn cell(&self, key: &CellKey) -> Option<&Cell> {
         self.cells.iter().find(|cell| &cell.key == key)
     }
+
+    /// This document narrowed to one area's own slice.
+    ///
+    /// ## Notes
+    ///
+    /// `scope` is narrowed with the cells. A baseline entry naming another
+    /// area's package then has the standing of an out-of-scope entry — ignored
+    /// with a note — rather than a vanished result, which is what keeps one
+    /// area's failure from blocking another's outcome (spec section 5).
+    fn narrowed(&self, areas: &BTreeSet<String>) -> Self {
+        let cells: Vec<Cell> = self
+            .cells
+            .iter()
+            .filter(|cell| areas.contains(&cell.area))
+            .cloned()
+            .collect();
+        let packages: BTreeSet<&String> = cells.iter().map(|cell| &cell.key.package).collect();
+        Self {
+            schema_version: self.schema_version,
+            run_id: self.run_id.clone(),
+            scope: self
+                .scope
+                .iter()
+                .filter(|package| packages.contains(package))
+                .cloned()
+                .collect(),
+            areas: derived_areas(&cells),
+            area_scope: areas.iter().cloned().collect(),
+            accepted_evidence: self
+                .accepted_evidence
+                .iter()
+                .filter(|entry| areas.contains(&entry.area))
+                .cloned()
+                .collect(),
+            scope_degraded: self.scope_degraded,
+            scheduled: self.scheduled.as_ref().map(|keys| {
+                keys.iter()
+                    .filter(|key| packages.contains(&key.package))
+                    .cloned()
+                    .collect()
+            }),
+            records: self.records.clone(),
+            cells,
+        }
+    }
+}
+
+/// The areas a set of cells covers, deduplicated and ordered.
+fn derived_areas(cells: &[Cell]) -> Vec<String> {
+    cells
+        .iter()
+        .filter(|cell| !cell.area.is_empty())
+        .map(|cell| cell.area.clone())
+        .collect::<BTreeSet<String>>()
+        .into_iter()
+        .collect()
+}
+
+/// One cell the plan satisfied from a receipt instead of scheduling.
+///
+/// Carried in the result document so the evidence accepted for *scheduling* is
+/// the same evidence that satisfies the *result* cell. Recalculating a
+/// conflicting expectation in the reporting path is what produced the PR #76
+/// seven-cell regression (spec section 3.1).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct AcceptedEvidence {
+    #[serde(flatten)]
+    key: CellKey,
+    area: String,
+    origin: Origin,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    measurements: String,
+    evidence: Evidence,
 }
 
 // ---------------------------------------------------------------------------
@@ -401,7 +671,12 @@ struct ManifestRecord {
 struct ProducerStatus {
     package: String,
     job: String,
-    /// GitHub `needs.<job>.result`: `success`, `failure`, `cancelled`, `skipped`.
+    /// The producer's conclusion for the CELL: `success`, `failure`,
+    /// `cancelled`, `skipped`. The gate commands are `continue-on-error`
+    /// steps, so a failed test, lint, or compile leaves GitHub's `job.status`
+    /// at `success`; the status step folds the step outcomes in and writes
+    /// `failure` here. Only this document — never the producer job's
+    /// conclusion — can therefore tell the rollup a gate command failed.
     result: String,
     #[serde(default)]
     environment: Option<String>,
@@ -417,6 +692,12 @@ struct ProducerStatus {
     /// evidence and must downgrade the cell just as a failed one does.
     #[serde(default)]
     companion: Option<String>,
+    /// The unchanged direct reverse dependencies a `check` producer also
+    /// compiled inside this cell (Open Question 1, Option B). Names only; a
+    /// failure of that half arrives as `result: failure` with a `detail`
+    /// saying so, because the cell — not a consumer's — owns the outcome.
+    #[serde(default)]
+    dependents: Vec<String>,
 }
 
 /// Tests the target environment actually compiled, generated *on* that
@@ -443,6 +724,9 @@ struct ExpectedManifest {
 #[derive(Clone, Debug, Deserialize)]
 struct PackagePolicy {
     package: String,
+    /// The package's area, derived by the planner. Grouping only.
+    #[serde(default)]
+    area: String,
     #[serde(default = "default_true")]
     gates: bool,
     /// CI-gating tiers this package owns. Always contains L1 for a gating
@@ -521,6 +805,9 @@ enum Capability {
         owner: String,
         #[serde(default)]
         expiry: String,
+        /// The tracked work that closes the gap, when the record names it.
+        #[serde(default)]
+        closes: String,
     },
 }
 
@@ -535,17 +822,21 @@ impl Capability {
     /// The governance record, when this unavailability is governed. A plain
     /// `false` is an UNGOVERNED absence — the gap it produces is never
     /// excused, exactly like an undeclared gap before.
-    fn governed_gap(&self) -> Option<DeclaredGap> {
+    fn governed_gap(&self, capability: &str) -> Option<DeclaredGap> {
         match self {
             Self::Governed {
                 available: false,
                 reason,
                 owner,
                 expiry,
+                closes,
             } => Some(DeclaredGap {
                 owner: owner.clone(),
                 reason: reason.clone(),
                 expiry: expiry.clone(),
+                capability: capability.to_owned(),
+                policy: POLICY_LINK.to_owned(),
+                closes: closes.clone(),
             }),
             _ => None,
         }
@@ -561,7 +852,7 @@ impl Environment {
     }
 
     fn gap_for(&self, capability: &str) -> Option<DeclaredGap> {
-        self.capabilities.get(capability)?.governed_gap()
+        self.capabilities.get(capability)?.governed_gap(capability)
     }
 }
 
@@ -589,6 +880,8 @@ enum GapStatus {
 #[derive(Clone, Debug)]
 struct ExpectedCell {
     key: CellKey,
+    /// The package's area. Grouping only; `""` without a plan.
+    area: String,
     /// L2 backends this package's tests require, empty when the tier is
     /// backend-agnostic.
     backends: Vec<String>,
@@ -602,6 +895,50 @@ struct ExpectedCell {
     /// status must report the companion step's success; a skipped companion
     /// downgrades an otherwise-green cell (R12).
     companion_suites: Vec<String>,
+    /// The result a receipt already established for this cell. Present only on
+    /// the plan path; a cell carrying one expects no CI job to have run.
+    reused: Option<ReusedResult>,
+    /// True when the plan accepted this cell's gap from a governed, unexpired
+    /// policy entry. The gap itself is in `gap`.
+    accepted_gap: bool,
+    /// The recorded execution constraint that stopped this cell, when one did.
+    prohibition: Option<String>,
+    /// Cargo target kinds the gate covers, from the plan.
+    target_kinds: Vec<String>,
+    /// Where the cell's compile coverage came from, from the plan.
+    compile_coverage_from: String,
+}
+
+impl ExpectedCell {
+    /// A cell with no plan-side detail, for the legacy policy path.
+    fn new(key: CellKey, area: String) -> Self {
+        Self {
+            key,
+            area,
+            backends: Vec::new(),
+            gap: None,
+            exclusion: None,
+            companion_suites: Vec::new(),
+            reused: None,
+            accepted_gap: false,
+            prohibition: None,
+            target_kinds: Vec::new(),
+            compile_coverage_from: String::new(),
+        }
+    }
+}
+
+/// A result a validation receipt established off this run.
+#[derive(Clone, Debug)]
+struct ReusedResult {
+    origin: Origin,
+    /// `false` when the receipt recorded a complete failure for the cell. A
+    /// complete failed local result stays a failure (spec section 3.5).
+    passed: bool,
+    counts: Counts,
+    duration_s: u64,
+    failed_tests: Vec<String>,
+    evidence: Evidence,
 }
 
 /// Cross the resolved package policy with the run's affected scope to derive
@@ -617,6 +954,41 @@ struct ExpectedCell {
 /// rather than the tier hardcoding `tmux`); a gap arises only when no
 /// declared backend can be hosted, governed by that backend's own capability
 /// record.
+/// The visible, governed `NOT SCHEDULED` cells of a `gates = false` package —
+/// never a pass, never a silent absence.
+///
+/// ## Notes
+///
+/// A policy whose exclusion block is absent still renders (backstop):
+/// `affected_scope.py` validation is supposed to reject that shape, and the
+/// rollup must not let a config-side regression vanish a package from the grid.
+/// The resolved plan gives a non-gating package no cells at all, so this stays
+/// keyed off the package policy document under both input paths.
+fn exclusion_cells(policy: &PackagePolicy, environments: &[Environment]) -> Vec<ExpectedCell> {
+    let exclusion = policy.exclusion.clone().unwrap_or_else(|| Exclusion {
+        exclusion_class: "ungoverned".to_owned(),
+        owner: "unassigned".to_owned(),
+        reason: "`gates = false` without exclusion metadata; the scope \
+                 job's validation is supposed to reject this"
+            .to_owned(),
+        expiry: None,
+    });
+    environments
+        .iter()
+        .map(|environment| ExpectedCell {
+            exclusion: Some(exclusion.clone()),
+            ..ExpectedCell::new(
+                CellKey {
+                    package: policy.package.clone(),
+                    environment: environment.name.clone(),
+                    tier: Tier::L1,
+                },
+                policy.area.clone(),
+            )
+        })
+        .collect()
+}
+
 fn expected_cells(
     policies: &[PackagePolicy],
     scope: &BTreeSet<String>,
@@ -630,32 +1002,7 @@ fn expected_cells(
         }
 
         if !policy.gates {
-            // `gates = false`: visible, governed NOT SCHEDULED cells — never a
-            // pass, never a silent absence. A policy whose exclusion block is
-            // absent still renders (backstop): `affected_scope.py` validation
-            // is supposed to reject that shape, and the rollup must not let a
-            // config-side regression vanish a package from the grid.
-            let exclusion = policy.exclusion.clone().unwrap_or_else(|| Exclusion {
-                exclusion_class: "ungoverned".to_owned(),
-                owner: "unassigned".to_owned(),
-                reason: "`gates = false` without exclusion metadata; the scope \
-                         job's validation is supposed to reject this"
-                    .to_owned(),
-                expiry: None,
-            });
-            for environment in environments {
-                expected.push(ExpectedCell {
-                    key: CellKey {
-                        package: policy.package.clone(),
-                        environment: environment.name.clone(),
-                        tier: Tier::L1,
-                    },
-                    backends: Vec::new(),
-                    gap: None,
-                    exclusion: Some(exclusion.clone()),
-                    companion_suites: Vec::new(),
-                });
-            }
+            expected.extend(exclusion_cells(policy, environments));
             continue;
         }
 
@@ -709,15 +1056,17 @@ fn expected_cells(
                     Vec::new()
                 };
                 expected.push(ExpectedCell {
-                    key: CellKey {
-                        package: policy.package.clone(),
-                        environment: environment.name.clone(),
-                        tier: tier.clone(),
-                    },
                     backends,
                     gap,
-                    exclusion: None,
                     companion_suites,
+                    ..ExpectedCell::new(
+                        CellKey {
+                            package: policy.package.clone(),
+                            environment: environment.name.clone(),
+                            tier: tier.clone(),
+                        },
+                        policy.area.clone(),
+                    )
                 });
             }
         }
@@ -726,6 +1075,302 @@ fn expected_cells(
     expected.sort_by(|left, right| left.key.cmp(&right.key));
     expected
 }
+
+// ---------------------------------------------------------------------------
+// Policy: the canonical resolved execution plan
+// ---------------------------------------------------------------------------
+
+/// The resolved execution plan (`scripts/ci/affected_scope.py --plan-out`).
+///
+/// ## Notes
+///
+/// The planner already crossed the package policy with the capability table and
+/// with the verified evidence, so reading the plan is a *translation*, not a
+/// second calculation: this file derives no expectation the plan does not state.
+/// That is what spec section 3.1 requires — evidence accepted for scheduling
+/// must satisfy the corresponding result cell, and a reporting path that
+/// recomputes the expectation can disagree with the scheduler, which is exactly
+/// how PR #76 filed seven passing cells as `MISSING`.
+///
+/// Only the fields this tool consumes are declared; the planner owns the rest.
+/// `plan_fields_match_the_frozen_contract` pins these names against
+/// `.github/ci/schemas/contract.json` so a rename cannot land silently.
+#[derive(Clone, Debug, Deserialize)]
+struct ResolvedPlan {
+    schema_version: u32,
+    cells: Vec<PlanCell>,
+    packages: Vec<PlanPackage>,
+}
+
+/// A package the plan selected. Only the name is read here: the area travels on
+/// every cell, and a `gates = false` package's governance stays in the policy
+/// document, which is the only place that carries its owner and expiry.
+#[derive(Clone, Debug, Deserialize)]
+struct PlanPackage {
+    package: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct PlanCell {
+    package: String,
+    area: String,
+    environment: String,
+    /// `lint`, `check`, `L1`, `L2`, or `browser`.
+    gate: String,
+    /// `execute`, `reuse`, or `omit`.
+    execution: String,
+    origin: Origin,
+    /// `pending`, `reused`, `accepted-gap`, or `prohibited`.
+    state: String,
+    #[serde(default)]
+    target_kinds: Vec<String>,
+    #[serde(default)]
+    compile_coverage_from: String,
+    #[serde(default)]
+    evidence: Option<PlanEvidence>,
+    #[serde(default)]
+    gap: Option<PlanGap>,
+    #[serde(default)]
+    prohibition: Option<PlanProhibition>,
+}
+
+/// A plan cell's accepted evidence.
+///
+/// Two shapes reach this field. A per-cell acceptance carries the whole receipt
+/// cell (outcome, counts, duration, report) plus the note it came from; the
+/// transitional whole-environment acceptance carries only an origin and a ref
+/// string. Every measurement is therefore optional, and an acceptance with no
+/// recorded outcome is a version-1 receipt — pass-only by contract (spec
+/// section 3.6), rendered with its measurements marked unrecorded.
+#[derive(Clone, Debug, Deserialize)]
+struct PlanEvidence {
+    #[serde(default)]
+    origin: Option<Origin>,
+    #[serde(default)]
+    outcome: Option<String>,
+    #[serde(default)]
+    counts: Option<Counts>,
+    #[serde(default)]
+    duration_s: Option<f64>,
+    #[serde(default)]
+    measurements: Option<String>,
+    #[serde(default)]
+    failed_tests: Vec<String>,
+    #[serde(default)]
+    report: Option<String>,
+    #[serde(default)]
+    evidence: Option<EvidenceLink>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+enum EvidenceLink {
+    /// The whole-environment shape: just the notes ref.
+    Reference(String),
+    Detail {
+        #[serde(default, rename = "ref")]
+        reference: String,
+        #[serde(default)]
+        commit: String,
+        #[serde(default)]
+        host: Option<ReceiptHost>,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ReceiptHost {
+    #[serde(default)]
+    os: String,
+    #[serde(default)]
+    kernel: String,
+    #[serde(default)]
+    report_dir: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct PlanGap {
+    #[serde(default)]
+    capability: String,
+    governed: bool,
+    #[serde(default)]
+    policy: String,
+    #[serde(default)]
+    owner: String,
+    #[serde(default)]
+    reason: String,
+    #[serde(default)]
+    expiry: String,
+    #[serde(default)]
+    closes: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct PlanProhibition {
+    #[serde(default)]
+    owner: String,
+    #[serde(default)]
+    reason: String,
+    #[serde(default)]
+    expiry: String,
+}
+
+impl PlanEvidence {
+    fn link(&self) -> Evidence {
+        match &self.evidence {
+            Some(EvidenceLink::Reference(reference)) => Evidence {
+                reference: reference.clone(),
+                measurements: self.measurements.clone().unwrap_or_default(),
+                report: self.report.clone().unwrap_or_default(),
+                ..Evidence::default()
+            },
+            Some(EvidenceLink::Detail {
+                reference,
+                commit,
+                host,
+            }) => Evidence {
+                reference: reference.clone(),
+                commit: commit.clone(),
+                host: host
+                    .as_ref()
+                    .map(|host| {
+                        let kernel = if host.kernel.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" {}", host.kernel)
+                        };
+                        format!("{}{kernel}", host.os).trim().to_owned()
+                    })
+                    .unwrap_or_default(),
+                measurements: self.measurements.clone().unwrap_or_default(),
+                report: host
+                    .as_ref()
+                    .map(|host| host.report_dir.clone())
+                    .filter(|dir| !dir.is_empty())
+                    .or_else(|| self.report.clone())
+                    .unwrap_or_default(),
+            },
+            None => Evidence {
+                measurements: self.measurements.clone().unwrap_or_default(),
+                report: self.report.clone().unwrap_or_default(),
+                ..Evidence::default()
+            },
+        }
+    }
+}
+
+/// Turn the plan's cells into the expectations the rollup classifies against.
+///
+/// ## Errors
+///
+/// A plan from another schema generation is refused rather than partially
+/// interpreted: an unknown vocabulary would silently reclassify cells.
+fn plan_expected_cells(plan: &ResolvedPlan) -> Result<Vec<ExpectedCell>> {
+    if plan.schema_version != PLAN_SCHEMA_VERSION {
+        bail!(
+            "resolved plan schema_version {} is not the {PLAN_SCHEMA_VERSION} this tool \
+             reads; regenerate it with scripts/ci/affected_scope.py",
+            plan.schema_version
+        );
+    }
+
+    let mut expected = Vec::new();
+    for cell in &plan.cells {
+        let key = CellKey {
+            package: cell.package.clone(),
+            environment: cell.environment.clone(),
+            tier: Tier::parse(&cell.gate),
+        };
+        let mut expectation = ExpectedCell::new(key, cell.area.clone());
+        expectation.target_kinds = cell.target_kinds.clone();
+        expectation.compile_coverage_from = cell.compile_coverage_from.clone();
+
+        if let Some(gap) = &cell.gap {
+            let declared = DeclaredGap {
+                owner: gap.owner.clone(),
+                reason: gap.reason.clone(),
+                expiry: gap.expiry.clone(),
+                capability: gap.capability.clone(),
+                policy: gap.policy.clone(),
+                closes: gap.closes.clone(),
+            };
+            // A gap the plan did not govern is never accepted here either. The
+            // `accepted-gap` state without a governed record is treated as
+            // ungoverned rather than trusted: acceptance that cannot name an
+            // owner and an expiry is a permanent exclusion wearing a temporary
+            // label.
+            if gap.governed {
+                expectation.gap = Some(GapStatus::Governed(declared));
+                expectation.accepted_gap = cell.state == "accepted-gap";
+            } else {
+                expectation.gap = Some(GapStatus::Ungoverned);
+            }
+        } else if cell.state == "accepted-gap" {
+            expectation.gap = Some(GapStatus::Ungoverned);
+        }
+
+        if let Some(prohibition) = &cell.prohibition {
+            expectation.prohibition = Some(format!(
+                "a recorded execution constraint forbids {}: {} (owner {}{})",
+                cell.environment,
+                prohibition.reason,
+                if prohibition.owner.is_empty() {
+                    "unassigned"
+                } else {
+                    prohibition.owner.as_str()
+                },
+                if prohibition.expiry.is_empty() {
+                    String::new()
+                } else {
+                    format!(", expires {}", prohibition.expiry)
+                }
+            ));
+        }
+
+        if cell.execution == "reuse" {
+            let evidence = cell.evidence.as_ref();
+            let counts = evidence.and_then(|record| record.counts).unwrap_or_default();
+            let measured = evidence.is_some_and(|record| record.outcome.is_some());
+            let mut link = evidence.map(PlanEvidence::link).unwrap_or_default();
+            if link.measurements.is_empty() {
+                link.measurements = if measured {
+                    format!(
+                        "{} test(s), {} failed, {}s",
+                        counts.total,
+                        counts.bad(),
+                        evidence.and_then(|record| record.duration_s).unwrap_or(0.0) as u64
+                    )
+                } else {
+                    // Spec section 3.6's verbatim text for a version-1 receipt.
+                    "not recorded (v1 receipt)".to_owned()
+                };
+            }
+            if link.reference.is_empty() {
+                link.reference = format!("refs/notes/ci-local/{}", cell.environment);
+            }
+            expectation.reused = Some(ReusedResult {
+                origin: evidence
+                    .and_then(|record| record.origin)
+                    .unwrap_or(cell.origin),
+                passed: evidence.and_then(|record| record.outcome.as_deref()) != Some("fail"),
+                counts,
+                duration_s: evidence
+                    .and_then(|record| record.duration_s)
+                    .unwrap_or(0.0)
+                    .max(0.0) as u64,
+                failed_tests: evidence
+                    .map(|record| record.failed_tests.clone())
+                    .unwrap_or_default(),
+                evidence: link,
+            });
+        }
+
+        expected.push(expectation);
+    }
+
+    expected.sort_by(|left, right| left.key.cmp(&right.key));
+    Ok(expected)
+}
+
 
 // ---------------------------------------------------------------------------
 // JUnit parsing
@@ -1123,10 +1768,12 @@ fn classify_one(
     let mut packages_with_evidence = BTreeSet::new();
     let mut reasons = Vec::new();
     let mut has_unusable_record = false;
+    let mut duration_s = 0u64;
 
     for &index in indices {
         let record = &inputs.records[index];
         counts.add(&record.counts);
+        duration_s += record.duration_s;
         failed_tests.extend(record.failed_tests.iter().cloned());
         observed_skips.extend(record.skipped_tests.iter().cloned());
         observed_tests.extend(record.failed_tests.iter().cloned());
@@ -1210,7 +1857,14 @@ fn classify_one(
 
     if let Some(gap) = &declared_gap {
         policy_gap = true;
-        reasons.push(format!("governed policy gap: {}", gap.describe()));
+        if expectation.is_some_and(|cell| cell.accepted_gap) {
+            // Spec section 6: the visible description must carry the owner,
+            // expiry, policy link, what closes the gap, and how to revoke the
+            // acceptance. A reader must not have to be told where to look.
+            reasons.push(format!("accepted policy gap: {}", gap.describe_acceptance()));
+        } else {
+            reasons.push(format!("governed policy gap: {}", gap.describe()));
+        }
     } else if matches!(expectation.and_then(|cell| cell.gap.as_ref()), Some(GapStatus::Ungoverned)) {
         // An *ungoverned* gap: the package declares this tier on an environment
         // the capability table records as plainly unable to host it, with no
@@ -1257,13 +1911,50 @@ fn classify_one(
     // a clean JUnit report is the companion-suite case — a green Rust report
     // must never hide a failed companion suite (or fixture, or backend proof),
     // so the status DOWNGRADES the cell below. It can never upgrade one.
-    let own_status = inputs.statuses.iter().find(|status| {
-        status.package == key.package
-            && Tier::parse(&status.job) == key.tier
-            && status.environment.as_deref() == Some(key.environment.as_str())
-    });
+    let own_status = find_status(inputs.statuses, key);
 
-    let mut state = if let Some(exclusion) = &exclusion {
+    // The plan's own decisions, taken before the run. A reused cell's result
+    // came off a receipt the scheduler already accepted; an accepted gap is an
+    // owned, unexpired entry in the capability table. Both are *states of the
+    // cell*, not reasons to drop it, which is what makes the PR #76 shape —
+    // omitting an execution and losing the cell — unrepresentable here.
+    let reused = expectation.and_then(|cell| cell.reused.as_ref());
+    let reuse_contested = reused.is_some() && !indices.is_empty();
+    if reuse_contested {
+        reasons.push(
+            "a cell satisfied by a receipt also produced CI evidence; the run \
+             executed work the plan reused, and the executed result is the one \
+             reported"
+                .to_owned(),
+        );
+    }
+    if let Some(result) = reused.filter(|_| !reuse_contested) {
+        reasons.push(format!(
+            "reused {} evidence from {}: {}",
+            result.origin, result.evidence.reference, result.evidence.measurements
+        ));
+        counts = result.counts;
+        duration_s = result.duration_s;
+        failed_tests.extend(result.failed_tests.iter().cloned());
+    }
+    if let Some(prohibition) = expectation.and_then(|cell| cell.prohibition.as_deref()) {
+        reasons.push(prohibition.to_owned());
+    }
+
+    let mut state = if let Some(result) = reused.filter(|_| !reuse_contested) {
+        // A complete failed local result stays a failure (spec section 3.5):
+        // reuse must not turn a failure into a success or conceal it.
+        if result.passed {
+            CellState::Pass
+        } else {
+            CellState::Fail
+        }
+    } else if expectation.is_some_and(|cell| cell.accepted_gap) && counts.bad() == 0 {
+        // Governed and unexpired at plan time, so the cell is neither a pass
+        // nor a failure and no test or archive build was started for it. Real
+        // failures still outrank it, as they do for POLICY GAP.
+        CellState::AcceptedGap
+    } else if let Some(exclusion) = &exclusion {
         if indices.is_empty() {
             // `gates = false`: NOT SCHEDULED with its governance metadata —
             // never conflated with NOTHING TO RUN, never a pass.
@@ -1331,12 +2022,33 @@ fn classify_one(
 
     Cell {
         key: key.clone(),
+        area: expectation.map(|cell| cell.area.clone()).unwrap_or_default(),
         state,
+        // A cell nothing produced is `none`, not `ci`: reporting a CI origin
+        // for a result that does not exist would make a MISSING cell look like
+        // something CI answered for.
+        origin: match reused {
+            Some(result) if !reuse_contested => result.origin,
+            _ if indices.is_empty() => Origin::Unproduced,
+            _ => Origin::Ci,
+        },
         counts: Counts {
             skipped: counts.skipped + absent_skips.len() as u32,
             ..counts
         },
+        duration_s,
+        target_kinds: expectation
+            .map(|cell| cell.target_kinds.clone())
+            .unwrap_or_default(),
+        compile_coverage_from: expectation
+            .map(|cell| cell.compile_coverage_from.clone())
+            .unwrap_or_default(),
+        evidence: reused
+            .filter(|_| !reuse_contested)
+            .map(|result| result.evidence.clone()),
         scheduled,
+        // JUnit-backed tiers compile no dependents; only a check status does.
+        dependents: Vec::new(),
         skipped_tests: all_skips.into_iter().collect(),
         failed_tests: failed_tests.into_iter().collect(),
         skip_evidence_degraded,
@@ -1407,9 +2119,9 @@ fn classify_state_from_evidence(
     };
 
     // A producer status of `failure` for THIS cell downgrades any clean
-    // reading: the job failed although its JUnit shows no failing test, which
-    // is exactly the companion-suite / fixture / backend-proof case. Status
-    // evidence can worsen a cell, never improve it.
+    // reading: a gate command or the job failed although its JUnit shows no
+    // failing test, which is exactly the companion-suite / fixture /
+    // backend-proof case. Status evidence can worsen a cell, never improve it.
     if matches!(state, CellState::Pass | CellState::NothingToRun | CellState::Skip)
         && own_status.is_some_and(|status| status.result == "failure")
     {
@@ -1417,7 +2129,7 @@ fn classify_state_from_evidence(
             .and_then(|status| status.detail.as_deref())
             .map(str::to_owned)
             .unwrap_or_else(|| {
-                "the producer job concluded `failure` although its report shows no \
+                "the producer status reports `failure` although its report shows no \
                  failing test"
                     .to_owned()
             });
@@ -1457,23 +2169,65 @@ fn missing_report_reason(exit_code: i64) -> String {
 ///
 /// ## Notes
 ///
-/// This is why the verdict can be the single required check. GitHub's own job
-/// name for a skipped matrix leg is an un-interpolated expression, so the run's
-/// job list cannot supply this; an explicit status artifact can.
+/// This is why a verdict can gate merging at all. GitHub's own job name for a
+/// skipped matrix leg is an un-interpolated expression, so the run's job list
+/// cannot supply this; an explicit status artifact can. It is also why these
+/// gates are always CI-origin: with no JUnit report to attribute, a local
+/// receipt has nothing to contribute for them.
 fn status_cells(
     statuses: &[ProducerStatus],
     scope: &BTreeSet<String>,
     existing: &[Cell],
     policies: &[PackagePolicy],
+    planned_gates: &[ExpectedCell],
 ) -> Vec<Cell> {
-    let mut cells = Vec::new();
+    let mut cells: Vec<Cell> = Vec::new();
+
+    // A gate the plan scheduled that uploaded no status at all is MISSING, not
+    // absent. Without the plan there is nothing to notice its absence against,
+    // which is why this half only exists on the plan path.
+    for expectation in planned_gates {
+        if existing.iter().any(|cell| cell.key == expectation.key)
+            || cells.iter().any(|cell| cell.key == expectation.key)
+        {
+            continue;
+        }
+        let status = find_status(statuses, &expectation.key);
+        let (state, reason) = match status {
+            Some(status) => state_from_status(status),
+            None => (
+                CellState::Missing,
+                Some(
+                    "scheduled but uploaded no producer status; the job never \
+                     reported a result"
+                        .to_owned(),
+                ),
+            ),
+        };
+        let (state, reason) = companion_lint_downgrade(status, policies, state, reason);
+        cells.push(Cell {
+            area: expectation.area.clone(),
+            state,
+            origin: if status.is_some() {
+                Origin::Ci
+            } else {
+                Origin::Unproduced
+            },
+            target_kinds: expectation.target_kinds.clone(),
+            compile_coverage_from: expectation.compile_coverage_from.clone(),
+            scheduled: true,
+            dependents: status.map(|status| status.dependents.clone()).unwrap_or_default(),
+            reasons: reason.into_iter().chain(status.and_then(dependents_note)).collect(),
+            ..blank_cell(expectation.key.clone())
+        });
+    }
 
     for status in statuses {
         if !scope.contains(&status.package) {
             continue;
         }
         let tier = Tier::parse(&status.job);
-        if matches!(tier, Tier::L1 | Tier::L2 | Tier::L3 | Tier::Browser | Tier::Real) {
+        if is_test_tier(&tier) {
             continue;
         }
         let key = CellKey {
@@ -1490,62 +2244,142 @@ fn status_cells(
             continue;
         }
 
-        let (state, reason) = match status.result.as_str() {
-            "success" => (CellState::Pass, None),
-            "failure" => (CellState::Fail, None),
-            "cancelled" => (
-                CellState::Missing,
-                Some("job was cancelled, so it emitted no result".to_owned()),
-            ),
-            "skipped" => (
-                CellState::NotScheduled,
-                Some("job was skipped by its `if:` condition".to_owned()),
-            ),
-            other => (
-                CellState::Missing,
-                Some(format!("unrecognized job result `{other}`")),
-            ),
-        };
+        let (state, reason) = state_from_status(status);
 
-        // A declared companion suite lints too (the lint job runs the frontend
-        // lint on its Node-capable leg), so its success must be evidenced
-        // exactly as on the L1 cell: a skipped companion downgrades a green
-        // lint rather than hiding behind it (R12).
-        let (state, reason) = if status.job == "lint"
-            && state == CellState::Pass
-            && policies
-                .iter()
-                .any(|policy| policy.package == status.package && !policy.companion_suites.is_empty())
-            && status.companion.as_deref() != Some("success")
-        {
-            (
-                CellState::Fail,
-                Some(format!(
-                    "declared companion suite produced no success evidence (the \
-                     producer reports `{}`); a green lint must not hide a \
-                     companion suite that never ran",
-                    status.companion.as_deref().unwrap_or("no companion outcome"),
-                )),
-            )
-        } else {
-            (state, reason)
-        };
-
+        let (state, reason) = companion_lint_downgrade(Some(status), policies, state, reason);
+        let area = policies
+            .iter()
+            .find(|policy| policy.package == status.package)
+            .map(|policy| policy.area.clone())
+            .unwrap_or_default();
         cells.push(Cell {
-            key,
+            area,
             state,
-            counts: Counts::default(),
+            origin: Origin::Ci,
             scheduled: true,
-            skipped_tests: Vec::new(),
-            failed_tests: Vec::new(),
-            skip_evidence_degraded: false,
-            declared_gap: None,
-            reasons: reason.into_iter().collect(),
-            records: Vec::new(),
+            dependents: status.dependents.clone(),
+            reasons: reason.into_iter().chain(dependents_note(status)).collect(),
+            ..blank_cell(key)
         });
     }
 
     cells
+}
+
+/// The "also compiled N dependent(s): …" line of a check cell whose producer
+/// compiled the changed package's unchanged consumers (Open Question 1,
+/// Option B). Rendered whatever the state: on a pass it is the only record
+/// that the seam was checked, and on a failure the producer's `detail` says
+/// which half broke while this line says against whom.
+fn dependents_note(status: &ProducerStatus) -> Option<String> {
+    (!status.dependents.is_empty()).then(|| {
+        format!(
+            "also compiled {} dependent(s): {}",
+            status.dependents.len(),
+            status.dependents.join(", ")
+        )
+    })
+}
+
+/// Tiers whose evidence is a JUnit report. Everything else (`lint`, `check`)
+/// reports through an explicit producer status.
+fn is_test_tier(tier: &Tier) -> bool {
+    matches!(
+        tier,
+        Tier::L1 | Tier::L2 | Tier::L3 | Tier::Browser | Tier::Real
+    )
+}
+
+/// The producer status covering a cell, if one was uploaded.
+///
+/// A status that names no environment is the lint job's, which is Linux-only
+/// (`_package-ci.yml`); it covers the default environment rather than nothing.
+fn find_status<'a>(statuses: &'a [ProducerStatus], key: &CellKey) -> Option<&'a ProducerStatus> {
+    statuses.iter().find(|status| {
+        status.package == key.package
+            && Tier::parse(&status.job) == key.tier
+            && status
+                .environment
+                .as_deref()
+                .unwrap_or(DEFAULT_STATUS_ENVIRONMENT)
+                == key.environment
+    })
+}
+
+/// A producer's own account of a gate that emits no JUnit.
+fn state_from_status(status: &ProducerStatus) -> (CellState, Option<String>) {
+    match status.result.as_str() {
+        "success" => (CellState::Pass, None),
+        "failure" => (CellState::Fail, status.detail.clone()),
+        "cancelled" => (
+            CellState::Missing,
+            Some("job was cancelled, so it emitted no result".to_owned()),
+        ),
+        "skipped" => (
+            CellState::NotScheduled,
+            Some("job was skipped by its `if:` condition".to_owned()),
+        ),
+        other => (
+            CellState::Missing,
+            Some(format!("unrecognized job result `{other}`")),
+        ),
+    }
+}
+
+/// A declared companion suite lints too (the lint job runs the frontend lint on
+/// its Node-capable leg), so its success must be evidenced exactly as on the L1
+/// cell: a skipped companion downgrades a green lint rather than hiding behind
+/// it (R12).
+fn companion_lint_downgrade(
+    status: Option<&ProducerStatus>,
+    policies: &[PackagePolicy],
+    state: CellState,
+    reason: Option<String>,
+) -> (CellState, Option<String>) {
+    let Some(status) = status else {
+        return (state, reason);
+    };
+    if status.job == "lint"
+        && state == CellState::Pass
+        && policies
+            .iter()
+            .any(|policy| policy.package == status.package && !policy.companion_suites.is_empty())
+        && status.companion.as_deref() != Some("success")
+    {
+        return (
+            CellState::Fail,
+            Some(format!(
+                "declared companion suite produced no success evidence (the \
+                 producer reports `{}`); a green lint must not hide a \
+                 companion suite that never ran",
+                status.companion.as_deref().unwrap_or("no companion outcome"),
+            )),
+        );
+    }
+    (state, reason)
+}
+
+/// A cell with no observations yet, for the status-derived gates.
+fn blank_cell(key: CellKey) -> Cell {
+    Cell {
+        key,
+        area: String::new(),
+        state: CellState::NotScheduled,
+        origin: Origin::Unproduced,
+        counts: Counts::default(),
+        duration_s: 0,
+        target_kinds: Vec::new(),
+        compile_coverage_from: String::new(),
+        evidence: None,
+        scheduled: false,
+        skipped_tests: Vec::new(),
+        failed_tests: Vec::new(),
+        skip_evidence_degraded: false,
+        declared_gap: None,
+        dependents: Vec::new(),
+        reasons: Vec::new(),
+        records: Vec::new(),
+    }
 }
 
 /// Whether an expected test identity produced any result — pass, fail, or an
@@ -1625,17 +2459,18 @@ fn load_baseline(path: &Path) -> Result<Baseline> {
     let baseline: Baseline =
         toml::from_str(&text).with_context(|| format!("invalid baseline {}", path.display()))?;
 
-    if baseline.schema_version > SCHEMA_VERSION {
+    if baseline.schema_version > BASELINE_SCHEMA_VERSION {
         bail!(
-            "baseline schema_version {} is newer than this tool understands ({SCHEMA_VERSION})",
+            "baseline schema_version {} is newer than this tool understands \
+             ({BASELINE_SCHEMA_VERSION})",
             baseline.schema_version
         );
     }
-    if baseline.schema_version < SCHEMA_VERSION {
+    if baseline.schema_version < BASELINE_SCHEMA_VERSION {
         bail!(
             "baseline {} is schema_version {} (area-keyed); this tool reads \
-             schema_version {SCHEMA_VERSION} (package-keyed). Re-key the entries to \
-             packages — see fixes/2026-08-06-cicd/plan.md (Phase 4)",
+             schema_version {BASELINE_SCHEMA_VERSION} (package-keyed). Re-key the entries \
+             to packages — see fixes/2026-08-06-cicd/plan.md (Phase 4)",
             path.display(),
             baseline.schema_version
         );
@@ -1868,14 +2703,14 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
         if cell.state == CellState::Fail && excused_cells.contains(&cell.key) {
             continue;
         }
-        if cell.state == CellState::PolicyGap && ruled_on_gaps.contains(&cell.key) {
+        if cell.state.is_gap() && ruled_on_gaps.contains(&cell.key) {
             continue;
         }
         let detail = why(cell);
         findings.push(Finding::block(
             match cell.state {
                 CellState::Missing => "cell-missing",
-                CellState::PolicyGap => "cell-policy-gap",
+                state if state.is_gap() => "cell-policy-gap",
                 _ => "cell-failed",
             },
             cell.key.to_string(),
@@ -1887,8 +2722,9 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
     findings
 }
 
-/// Decide, for every `POLICY GAP` cell, whether it is acknowledged work or an
-/// unexplained hole. This is the entire accept/block decision for the state.
+/// Decide, for every gap cell — `POLICY GAP` and `ACCEPTED GAP` alike — whether
+/// it is acknowledged work or an unexplained hole. This is the entire
+/// accept/block decision for both states.
 ///
 /// Returns the findings to report and the cells this function has already ruled
 /// on — accepted *or* rejected — which the caller must therefore not also emit a
@@ -1897,13 +2733,20 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
 ///
 /// ## Notes
 ///
-/// Acknowledged is not acceptable, and neither is invisible. An accepted gap
-/// still renders `POLICY GAP` in the grid — `classify` decided that and nothing
-/// here can change it — still appears in the rollup's failing-cells table, and
-/// still appears in the verdict table as a `note` naming its owner and expiry,
-/// exactly as an accepted baseline failure does. Acceptance buys one thing: the
-/// run may merge. This is deliberately *not* `soft_os`, which removed the leg
-/// from the verdict altogether (plan §1.4).
+/// Acknowledged is not acceptable, and neither is invisible. A gap cell renders
+/// in the grid with its governance — `classify` decided its state and nothing
+/// here can change it — and appears in the verdict table as a `note` naming its
+/// owner, expiry, policy entry, and what closes it, exactly as an accepted
+/// baseline failure does. Acceptance buys one thing: the run may merge. This is
+/// deliberately *not* `soft_os`, which removed the leg from the verdict
+/// altogether (plan §1.4).
+///
+/// The state distinction is *where the decision was taken*, not whether the
+/// verdict re-checks it. `ACCEPTED GAP` means the plan already matched the cell
+/// to a governed, unexpired entry before the run; `POLICY GAP` means the rollup
+/// derived the gap from the capability table itself. Both are ruled on here,
+/// because the verdict runs `if: always()` and must catch an expiry that lapsed
+/// after the plan was written.
 ///
 /// Three things forfeit acceptance, and each maps to a rule the plan already
 /// states for baselined failures:
@@ -1934,21 +2777,34 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
 /// The expiry check duplicates `affected_scope.py::validate_expiry` on purpose.
 /// That one fails the scope job at config time with the most actionable
 /// message, and it is the better place to *learn* about a lapsed gap. But it is
-/// not sufficient: `verdict` is the single required branch-protection check and
-/// runs `if: always()`, precisely so a failed, skipped, or never-scheduled
-/// scope job cannot suppress the verdict. If expiry lived only in the Python,
-/// an expired gap would be excused by the one check that actually gates merging
-/// whenever the check that catches it did not run.
+/// not sufficient: every `verdict` invocation — each area's own rollup — runs
+/// `if: always()`, precisely so a failed, skipped, or never-scheduled scope job
+/// cannot suppress it. If
+/// expiry lived only in the Python, an expired gap would be excused by the
+/// checks that actually gate merging whenever the check that catches it did not
+/// run.
 fn policy_gap_findings(rollup: &Rollup, today: Option<&str>) -> (Vec<Finding>, BTreeSet<CellKey>) {
     let mut findings = Vec::new();
     let mut ruled_on: BTreeSet<CellKey> = BTreeSet::new();
 
     for cell in &rollup.cells {
-        if cell.state != CellState::PolicyGap {
+        if !cell.state.is_gap() {
             continue;
         }
         let subject = cell.key.to_string();
         let Some(gap) = &cell.declared_gap else {
+            if cell.state == CellState::AcceptedGap {
+                // An acceptance that names no policy entry is not an
+                // acceptance. It cannot be traced to an owner or an expiry, so
+                // it excuses nothing.
+                findings.push(Finding::block(
+                    "policy-gap-incomplete",
+                    subject,
+                    "carries the ACCEPTED GAP state with no governing policy entry; \
+                     an ungoverned gap can never excuse missing coverage",
+                ));
+                ruled_on.insert(cell.key.clone());
+            }
             continue;
         };
         ruled_on.insert(cell.key.clone());
@@ -2007,8 +2863,16 @@ fn policy_gap_findings(rollup: &Rollup, today: Option<&str>) -> (Vec<Finding>, B
             "policy-gap-accepted",
             subject,
             format!(
-                "owned, unexpired policy gap: {} (owner {}, expires {expiry})",
-                gap.reason, gap.owner
+                "owned, unexpired policy gap: {} (owner {}, expires {expiry}); policy {}{}; \
+                 {REVOCATION_INSTRUCTIONS}",
+                gap.reason,
+                gap.owner,
+                gap.policy_link(),
+                if gap.closes.is_empty() {
+                    String::new()
+                } else {
+                    format!("; closed by {}", gap.closes)
+                },
             ),
         ));
     }
@@ -2143,7 +3007,11 @@ fn cell_text(value: &str) -> String {
 /// own GFM renderer. Neither the terminal nor the browser fold is ever used
 /// here, so the render tree buys nothing for the compile time it costs.
 fn render_grid(rollup: &Rollup) -> String {
-    let mut out = String::from("## CI rollup\n\n");
+    let mut out = if rollup.area_scope.is_empty() {
+        String::from("## CI rollup\n\n")
+    } else {
+        format!("## CI rollup — {}\n\n", rollup.area_scope.join(", "))
+    };
 
     if rollup.scope_degraded {
         out.push_str(
@@ -2153,57 +3021,164 @@ fn render_grid(rollup: &Rollup) -> String {
         );
     }
 
-    let tiers: BTreeSet<Tier> = rollup.cells.iter().map(|cell| cell.key.tier.clone()).collect();
+    // Area is the reader's entry point and package the identity underneath it;
+    // a document with no areas (the legacy policy path) renders one unnamed
+    // group, which is the old layout exactly.
+    let areas: BTreeSet<&str> = rollup
+        .cells
+        .iter()
+        .map(|cell| cell.area.as_str())
+        .collect();
 
-    for tier in &tiers {
-        let cells: Vec<&Cell> = rollup
+    for area in &areas {
+        let area_cells: Vec<&Cell> = rollup
             .cells
             .iter()
-            .filter(|cell| &cell.key.tier == tier)
+            .filter(|cell| cell.area == *area)
             .collect();
-        let environments: BTreeSet<&String> =
-            cells.iter().map(|cell| &cell.key.environment).collect();
-        let packages: BTreeSet<&String> = cells.iter().map(|cell| &cell.key.package).collect();
-
-        out.push_str(&format!("### {tier}\n\n| package |"));
-        for environment in &environments {
-            out.push_str(&format!(" {} |", cell_text(environment)));
+        if !area.is_empty() {
+            out.push_str(&format!("### area `{}`\n\n", cell_text(area)));
         }
-        out.push_str("\n| --- |");
-        for _ in &environments {
-            out.push_str(" --- |");
-        }
-        out.push('\n');
+        let tiers: BTreeSet<Tier> = area_cells.iter().map(|cell| cell.key.tier.clone()).collect();
 
-        for package in &packages {
-            out.push_str(&format!("| `{}` |", cell_text(package)));
+        for tier in &tiers {
+            let cells: Vec<&&Cell> = area_cells
+                .iter()
+                .filter(|cell| &cell.key.tier == tier)
+                .collect();
+            let environments: BTreeSet<&String> =
+                cells.iter().map(|cell| &cell.key.environment).collect();
+            let packages: BTreeSet<&String> = cells.iter().map(|cell| &cell.key.package).collect();
+
+            let heading = if area.is_empty() { "###" } else { "####" };
+            out.push_str(&format!("{heading} {tier}\n\n| package |"));
             for environment in &environments {
-                let found = cells.iter().find(|cell| {
-                    cell.key.package == **package && cell.key.environment == **environment
-                });
-                let text = match found {
-                    Some(cell) => match cell.state {
-                        CellState::NotScheduled | CellState::NothingToRun => {
-                            cell.state.label().to_owned()
-                        }
-                        _ => format!(
-                            "{} {}/{}/{}",
-                            cell.state.label(),
-                            cell.counts.passed,
-                            cell.counts.bad(),
-                            cell.counts.skipped
-                        ),
-                    },
-                    None => CellState::NotScheduled.label().to_owned(),
-                };
-                out.push_str(&format!(" {} |", cell_text(&text)));
+                out.push_str(&format!(" {} |", cell_text(environment)));
+            }
+            out.push_str("\n| --- |");
+            for _ in &environments {
+                out.push_str(" --- |");
             }
             out.push('\n');
+
+            for package in &packages {
+                out.push_str(&format!("| `{}` |", cell_text(package)));
+                for environment in &environments {
+                    let found = cells.iter().find(|cell| {
+                        cell.key.package == **package && cell.key.environment == **environment
+                    });
+                    let text = match found {
+                        Some(cell) => grid_text(cell),
+                        None => CellState::NotScheduled.label().to_owned(),
+                    };
+                    out.push_str(&format!(" {} |", cell_text(&text)));
+                }
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+    }
+
+    out.push_str(
+        "Cells read `STATE pass/fail/skip`; a result produced off this run names its \
+         origin.\n\n",
+    );
+
+    let reused: Vec<&Cell> = rollup
+        .cells
+        .iter()
+        .filter(|cell| cell.origin.is_reused())
+        .collect();
+    if !reused.is_empty() {
+        out.push_str(
+            "### Reused results\n\nNo test runner started for these cells. Their evidence \
+             is the Git note that carried the receipt; the full report stays on the \
+             producing host.\n\n\
+             | cell | origin | measurements | evidence |\n| --- | --- | --- | --- |\n",
+        );
+        for cell in reused {
+            let evidence = cell.evidence.clone().unwrap_or_default();
+            out.push_str(&format!(
+                "| `{}` | {} | {} | `{}`{} |\n",
+                cell_text(&cell.key.to_string()),
+                cell.origin,
+                cell_text(&evidence.measurements),
+                cell_text(&evidence.reference),
+                if evidence.host.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", cell_text(&evidence.host))
+                },
+            ));
         }
         out.push('\n');
     }
 
-    out.push_str("Cells read `STATE pass/fail/skip`.\n\n");
+    let accepted: Vec<&Cell> = rollup
+        .cells
+        .iter()
+        .filter(|cell| cell.state == CellState::AcceptedGap)
+        .collect();
+    if !accepted.is_empty() {
+        out.push_str(
+            "### Accepted policy gaps\n\nNeither a pass nor a test failure: the \
+             environment cannot host the tier, and the absence is owned and dated.\n\n\
+             | cell | owner | expires | reason | policy | closed by |\n\
+             | --- | --- | --- | --- | --- | --- |\n",
+        );
+        for cell in accepted {
+            let gap = cell.declared_gap.clone().unwrap_or_else(|| DeclaredGap {
+                owner: String::new(),
+                reason: "no governing policy entry".to_owned(),
+                expiry: String::new(),
+                capability: String::new(),
+                policy: String::new(),
+                closes: String::new(),
+            });
+            out.push_str(&format!(
+                "| `{}` | {} | {} | {} | `{}` | {} |\n",
+                cell_text(&cell.key.to_string()),
+                cell_text(gap.owner_or_unassigned()),
+                cell_text(if gap.expiry.is_empty() {
+                    "no expiry"
+                } else {
+                    gap.expiry.as_str()
+                }),
+                cell_text(&gap.reason),
+                cell_text(gap.policy_link()),
+                cell_text(if gap.closes.is_empty() {
+                    "unscheduled"
+                } else {
+                    gap.closes.as_str()
+                }),
+            ));
+        }
+        out.push_str(&format!("\n{REVOCATION_INSTRUCTIONS}.\n\n"));
+    }
+
+    let seams: Vec<&Cell> = rollup
+        .cells
+        .iter()
+        .filter(|cell| !cell.dependents.is_empty())
+        .collect();
+    if !seams.is_empty() {
+        out.push_str(
+            "### Compiled dependents\n\nUnchanged direct reverse dependencies compiled \
+             inside the changed package's own check cell; they are scheduled nowhere \
+             else, and a break here belongs to this area.\n\n\
+             | cell | state | also compiled |\n| --- | --- | --- |\n",
+        );
+        for cell in seams {
+            out.push_str(&format!(
+                "| `{}` | {} | {} dependent(s): {} |\n",
+                cell_text(&cell.key.to_string()),
+                cell.state.label(),
+                cell.dependents.len(),
+                cell_text(&cell.dependents.join(", ")),
+            ));
+        }
+        out.push('\n');
+    }
 
     let blocking: Vec<&Cell> = rollup
         .cells
@@ -2226,6 +3201,30 @@ fn render_grid(rollup: &Rollup) -> String {
     }
 
     out
+}
+
+/// One grid cell: its state, its counts, and — when the result did not come
+/// from this run — where it did come from.
+fn grid_text(cell: &Cell) -> String {
+    match cell.state {
+        CellState::NotScheduled | CellState::NothingToRun | CellState::AcceptedGap => {
+            cell.state.label().to_owned()
+        }
+        _ => {
+            let origin = if cell.origin.is_reused() {
+                format!(" ({})", cell.origin)
+            } else {
+                String::new()
+            };
+            format!(
+                "{} {}/{}/{}{origin}",
+                cell.state.label(),
+                cell.counts.passed,
+                cell.counts.bad(),
+                cell.counts.skipped
+            )
+        }
+    }
 }
 
 /// One line explaining why a cell is in the state it is in. Failing test
@@ -2565,18 +3564,28 @@ const USAGE: &str = "\
 ci-rollup — package × environment × tier CI rollup and merge verdict
 
 USAGE:
-  ci-rollup rollup  --artifacts <dir> [options]
-  ci-rollup verdict --results <file> --baseline <file> [options]
-  ci-rollup compare --base <file> --head <file> [options]
+  ci-rollup rollup    --artifacts <dir> [options]
+  ci-rollup verdict   --results <file> --baseline <file> [options]
+  ci-rollup compare   --base <file>… --head <file>… [options]
+  ci-rollup summarize --results <file> [--results <file>…] [options]
 
 ROLLUP OPTIONS:
   --artifacts <dir>              root holding the downloaded per-job artifacts
+  --plan <file>                  the scope job's resolved execution plan
+                                 (resolved-plan.json): every cell it scheduled,
+                                 reused, or accepted as a policy gap
   --policy <file>                the scope job's policy artifact (scope.json), carrying
-                                 every impacted package's resolved CI policy
+                                 every impacted package's resolved CI policy. Required
+                                 without --plan; with it, supplies `gates = false`
+                                 governance
   --environments <file>          environment capability table
                                  (default .github/ci/environments.json)
   --scope <a,b,c>                packages this run scheduled; repeatable. Omitting it
-                                 infers scope from artifacts and marks the run degraded
+                                 takes scope from the plan, or infers it from the
+                                 artifacts and marks the run degraded
+  --area <a,b>                   emit only these areas' slice; repeatable. Each area
+                                 then applies its own baseline, gaps, and missing-cell
+                                 rule and nobody else's
   --expected-manifest <file>     expected-test manifest generated ON the target
                                  environment; repeatable
   --out <file>                   write the machine-readable result document
@@ -2586,23 +3595,40 @@ ROLLUP OPTIONS:
 VERDICT OPTIONS:
   --results <file>               a result document written by `rollup --out`
   --baseline <file>              .github/ci/ci-baseline.toml
+  --area <a,b>                   judge only these areas; repeatable
   --summary <file>               append Markdown (default $GITHUB_STEP_SUMMARY)
   --today <YYYY-MM-DD>           override today's date for expiry evaluation
 
+SUMMARIZE OPTIONS:
+  --results <file>               an area's result slice; repeatable
+  --summary <file>               append Markdown (default $GITHUB_STEP_SUMMARY)
+
+  Folds area slices into one view and applies NO policy: no baseline, no gap
+  acceptance, no missing-cell rule, no merge decision. Each area's own rollup
+  already made those decisions, and a second evaluation could contradict it.
+  Always exits 0.
+
 COMPARE OPTIONS:
-  --base <file>                  result document to compare against (usually main)
-  --head <file>                  result document under judgement (the branch)
+  --base <file>                  result document to compare against (usually main);
+                                 repeat to fold one run's per-area slices
+  --head <file>                  result document under judgement (the branch);
+                                 repeatable the same way
   --summary <file>               append Markdown (default $GITHUB_STEP_SUMMARY)
 
   Answers `is this branch worse than its base`, which is the only question a
   repo with known-red cells can ask of a run. Cells scheduled on one side only
-  are reported as not comparable rather than counted either way.
+  are reported as not comparable rather than counted either way. Folding
+  slices applies no policy: their cells are concatenated, and a cell present
+  in two slices is an error rather than a silent shadow.
 
 EXIT CODES:
   0  clear
   1  tool error (bad usage, unreadable input)
   2  blocked (verdict), or the head run regressed against its base (compare)
 ";
+
+/// Subcommands, for the dispatch table and the unknown-command error.
+const COMMANDS: [&str; 4] = ["rollup", "verdict", "compare", "summarize"];
 
 fn main() {
     match run() {
@@ -2678,26 +3704,50 @@ fn run() -> Result<i32> {
         "rollup" => cmd_rollup(&args),
         "verdict" => cmd_verdict(&args),
         "compare" => cmd_compare(&args),
+        "summarize" => cmd_summarize(&args),
         "--help" | "-h" | "help" | "" => {
             println!("{USAGE}");
             Ok(0)
         }
-        other => bail!("unknown subcommand `{other}`\n\n{USAGE}"),
+        other => bail!(
+            "unknown subcommand `{other}`; expected one of {}\n\n{USAGE}",
+            COMMANDS.join(", ")
+        ),
     }
 }
 
 fn cmd_rollup(args: &Args) -> Result<i32> {
     let artifacts = PathBuf::from(args.required("artifacts")?);
-    let policy_path = PathBuf::from(args.required("policy")?);
+    let plan_path = args.one("plan").map(PathBuf::from);
+    let policy_path = args.one("policy").map(PathBuf::from);
+    if plan_path.is_none() && policy_path.is_none() {
+        bail!("`--plan` or `--policy` is required\n\n{USAGE}");
+    }
     let environments_path = args
         .one("environments")
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new(".github").join("ci").join("environments.json"));
 
-    let policy_text = fs::read_to_string(&policy_path)
-        .with_context(|| format!("failed to read {}", policy_path.display()))?;
-    let policy_doc: PolicyDoc = serde_json::from_str(&policy_text)
-        .with_context(|| format!("invalid package policy {}", policy_path.display()))?;
+    let policy_doc = match &policy_path {
+        Some(path) => {
+            let text = fs::read_to_string(path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            serde_json::from_str::<PolicyDoc>(&text)
+                .with_context(|| format!("invalid package policy {}", path.display()))?
+        }
+        None => PolicyDoc { policy: Vec::new() },
+    };
+    let plan = match &plan_path {
+        Some(path) => {
+            let text = fs::read_to_string(path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            Some(
+                serde_json::from_str::<ResolvedPlan>(&text)
+                    .with_context(|| format!("invalid resolved plan {}", path.display()))?,
+            )
+        }
+        None => None,
+    };
 
     let environments_text = fs::read_to_string(&environments_path)
         .with_context(|| format!("failed to read {}", environments_path.display()))?;
@@ -2721,34 +3771,84 @@ fn cmd_rollup(args: &Args) -> Result<i32> {
     let statuses = read_producer_statuses(&artifacts)?;
 
     let explicit_scope = args.list("scope");
-    let scope_degraded = explicit_scope.is_empty();
-    let scope: BTreeSet<String> = if scope_degraded {
-        records.iter().map(|record| record.package.clone()).collect()
-    } else {
+    // The plan names every package it selected, so a run with a plan is never
+    // scope-degraded: a package that produced nothing at all is still visible.
+    let plan_scope: Vec<String> = plan
+        .as_ref()
+        .map(|plan| {
+            plan.packages
+                .iter()
+                .map(|entry| entry.package.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let scope_degraded = explicit_scope.is_empty() && plan_scope.is_empty();
+    let scope: BTreeSet<String> = if !explicit_scope.is_empty() {
         explicit_scope.into_iter().collect()
+    } else if !plan_scope.is_empty() {
+        plan_scope.into_iter().collect()
+    } else {
+        records.iter().map(|record| record.package.clone()).collect()
     };
 
     let expected_tests = load_expected_manifests(args)?;
 
-    let expected = expected_cells(&policy_doc.policy, &scope, &environments_doc.environments);
+    // One expectation set, from the plan when there is one. The planner already
+    // crossed policy, capabilities, and evidence; deriving a second expectation
+    // here is how the scheduler and the report come to disagree.
+    let all_expected = match &plan {
+        Some(plan) => {
+            let mut expected = plan_expected_cells(plan)?;
+            for policy in &policy_doc.policy {
+                if !policy.gates && scope.contains(&policy.package) {
+                    expected.extend(exclusion_cells(policy, &environments_doc.environments));
+                }
+            }
+            expected.sort_by(|left, right| left.key.cmp(&right.key));
+            expected
+        }
+        None => expected_cells(&policy_doc.policy, &scope, &environments_doc.environments),
+    };
+    // `lint` and `check` stage no JUnit; their evidence is an explicit producer
+    // status, so they are classified from `status_cells` rather than from the
+    // reports on disk.
+    let (expected, planned_gates): (Vec<ExpectedCell>, Vec<ExpectedCell>) = all_expected
+        .into_iter()
+        .partition(|cell| is_test_tier(&cell.key.tier));
+
     let mut cells = classify(&ClassifyInputs {
         expected: &expected,
         records: &records,
         statuses: &statuses,
         expected_tests: &expected_tests,
     });
-    cells.extend(status_cells(&statuses, &scope, &cells, &policy_doc.policy));
+    cells.extend(status_cells(
+        &statuses,
+        &scope,
+        &cells,
+        &policy_doc.policy,
+        &planned_gates,
+    ));
     cells.sort_by(|left, right| left.key.cmp(&right.key));
 
+    let accepted_evidence = accepted_evidence(&cells);
+    let mut scheduled: Vec<CellKey> = expected.iter().map(|cell| cell.key.clone()).collect();
+    scheduled.extend(planned_gates.iter().map(|cell| cell.key.clone()));
+
     let rollup = Rollup {
-        schema_version: SCHEMA_VERSION,
+        schema_version: RESULT_SCHEMA_VERSION,
         run_id: args.one("run-id").map(str::to_owned),
         scope: scope.into_iter().collect(),
+        areas: derived_areas(&cells),
+        area_scope: Vec::new(),
+        accepted_evidence,
         scope_degraded,
-        scheduled: Some(expected.iter().map(|cell| cell.key.clone()).collect()),
+        scheduled: Some(scheduled),
         records,
         cells,
     };
+
+    let rollup = narrow(rollup, &args.list("area"))?;
 
     if let Some(out) = args.one("out") {
         let json = serde_json::to_string_pretty(&rollup)?;
@@ -2763,6 +3863,57 @@ fn cmd_rollup(args: &Args) -> Result<i32> {
     Ok(if blocked { EXIT_BLOCKED } else { 0 })
 }
 
+/// Apply the `--area` narrowing, refusing a narrowing that selects nothing.
+///
+/// ## Errors
+///
+/// An area naming no cell in a document that has cells. That is a broken
+/// invocation — a misspelled area, or a slice asked of a document that predates
+/// area derivation — and the honest answer is a tool error. Left unchecked it
+/// would produce a green verdict over an empty grid, which is precisely the
+/// vacuous pass the area-owned model exists to prevent.
+fn narrow(rollup: Rollup, areas: &[String]) -> Result<Rollup> {
+    if areas.is_empty() {
+        return Ok(rollup);
+    }
+    let wanted: BTreeSet<String> = areas.iter().cloned().collect();
+    let narrowed = rollup.narrowed(&wanted);
+    if narrowed.cells.is_empty() && !rollup.cells.is_empty() {
+        bail!(
+            "`--area {}` selects no cell; the document covers {}",
+            areas.join(","),
+            if rollup.areas.is_empty() {
+                "no area at all".to_owned()
+            } else {
+                rollup.areas.join(", ")
+            }
+        );
+    }
+    Ok(narrowed)
+}
+
+/// The evidence behind every reused cell, in cell order.
+///
+/// Derived from the cells rather than copied from the plan so the document
+/// cannot claim evidence for a cell it did not report, or report a reused cell
+/// whose evidence it does not carry.
+fn accepted_evidence(cells: &[Cell]) -> Vec<AcceptedEvidence> {
+    cells
+        .iter()
+        .filter(|cell| cell.origin.is_reused())
+        .map(|cell| {
+            let evidence = cell.evidence.clone().unwrap_or_default();
+            AcceptedEvidence {
+                key: cell.key.clone(),
+                area: cell.area.clone(),
+                origin: cell.origin,
+                measurements: evidence.measurements.clone(),
+                evidence,
+            }
+        })
+        .collect()
+}
+
 fn cmd_verdict(args: &Args) -> Result<i32> {
     let results_path = PathBuf::from(args.required("results")?);
     let baseline_path = PathBuf::from(args.required("baseline")?);
@@ -2772,6 +3923,12 @@ fn cmd_verdict(args: &Args) -> Result<i32> {
     let rollup: Rollup = serde_json::from_str(&results_text)
         .with_context(|| format!("invalid result document {}", results_path.display()))?;
     reject_old_schema(rollup.schema_version, &results_path)?;
+
+    // Narrowing to an area is what makes the outcome area-owned: this verdict
+    // sees that area's cells, that area's scope, and that area's accepted
+    // evidence, so another area's failure can neither block it nor be excused
+    // by it (spec section 5).
+    let rollup = narrow(rollup, &args.list("area"))?;
 
     let baseline = load_baseline(&baseline_path)?;
     let today = args.one("today").map(str::to_owned).or_else(today_utc);
@@ -2788,8 +3945,8 @@ fn cmd_verdict(args: &Args) -> Result<i32> {
 }
 
 fn cmd_compare(args: &Args) -> Result<i32> {
-    let base = load_rollup(Path::new(args.required("base")?))?;
-    let head = load_rollup(Path::new(args.required("head")?))?;
+    let base = load_rollups(&args.many("base"), "base")?;
+    let head = load_rollups(&args.many("head"), "head")?;
 
     let comparison = compare(&base, &head);
     let markdown = render_comparison(&comparison, &base, &head);
@@ -2801,6 +3958,113 @@ fn cmd_compare(args: &Args) -> Result<i32> {
     } else {
         0
     })
+}
+
+/// Fold several area result slices into one reader-facing view.
+///
+/// ## Notes
+///
+/// This applies no policy: no baseline, no gap acceptance, no missing-cell
+/// rule, no merge decision. Each area's own rollup already took those decisions
+/// and owns its outcome; a combined job that evaluated them again could
+/// contradict a green area, which is the global verdict this specification
+/// removes (spec section 5). It therefore always exits 0 — its failure mode is
+/// being unreadable, not being wrong.
+fn cmd_summarize(args: &Args) -> Result<i32> {
+    let paths = args.many("results");
+    if paths.is_empty() {
+        bail!("`--results` is required\n\n{USAGE}");
+    }
+    let slices = paths
+        .iter()
+        .map(|raw| load_rollup(Path::new(raw)))
+        .collect::<Result<Vec<Rollup>>>()?;
+
+    let markdown = render_combined_summary(&slices);
+    append_summary(args, &markdown)?;
+    print!("{markdown}");
+    Ok(0)
+}
+
+/// Render the combined view: one row per area, counted from the states its own
+/// rollup already recorded.
+fn render_combined_summary(slices: &[Rollup]) -> String {
+    let mut by_area: BTreeMap<String, Vec<&Cell>> = BTreeMap::new();
+    for slice in slices {
+        for cell in &slice.cells {
+            by_area.entry(cell.area.clone()).or_default().push(cell);
+        }
+    }
+
+    let mut out = String::from("## CI results by area\n\n");
+    out.push_str(
+        "A reporting view of the slices each area's own rollup produced. It applies no \
+         baseline, gap, missing-cell, or merge policy: each area owns its outcome.\n\n",
+    );
+    out.push_str(
+        "| area | cells | passed | failed | missing | accepted gaps | reused | tests |\n\
+         | --- | --- | --- | --- | --- | --- | --- | --- |\n",
+    );
+
+    for (area, cells) in &by_area {
+        let count = |state: CellState| cells.iter().filter(|cell| cell.state == state).count();
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            cell_text(if area.is_empty() { "(ungrouped)" } else { area }),
+            cells.len(),
+            count(CellState::Pass),
+            count(CellState::Fail),
+            count(CellState::Missing),
+            count(CellState::AcceptedGap),
+            cells.iter().filter(|cell| cell.origin.is_reused()).count(),
+            cells.iter().map(|cell| cell.counts.total).sum::<u32>(),
+        ));
+    }
+
+    let evidence: Vec<&AcceptedEvidence> = slices
+        .iter()
+        .flat_map(|slice| slice.accepted_evidence.iter())
+        .collect();
+    if !evidence.is_empty() {
+        out.push_str(&format!(
+            "\n{} cell(s) were satisfied by verified evidence rather than executed; each \
+             area's slice links the note that carried it.\n",
+            evidence.len()
+        ));
+    }
+
+    out
+}
+
+/// One result document, or one run's per-area slices folded into one.
+///
+/// A fold is a concatenation, never a re-judgement: each area's rollup already
+/// took every policy decision its slice records. The run id is the first one
+/// any slice carries. The same `{package, environment, tier}` in two slices is
+/// refused, because a package belongs to exactly one area and letting one
+/// slice shadow another would compare against a cell nobody produced.
+fn load_rollups(paths: &[String], flag: &str) -> Result<Rollup> {
+    let (first, rest) = paths
+        .split_first()
+        .ok_or_else(|| anyhow!("`--{flag}` is required\n\n{USAGE}"))?;
+    let mut folded = load_rollup(Path::new(first))?;
+    for raw in rest {
+        let slice = load_rollup(Path::new(raw))?;
+        if folded.run_id.is_none() {
+            folded.run_id = slice.run_id;
+        }
+        for cell in slice.cells {
+            if folded.cells.iter().any(|known| known.key == cell.key) {
+                bail!("{raw}: cell {} is already present in an earlier `--{flag}` slice", cell.key);
+            }
+            folded.cells.push(cell);
+        }
+        folded.scope.extend(slice.scope);
+        folded.accepted_evidence.extend(slice.accepted_evidence);
+        folded.records.extend(slice.records);
+    }
+    folded.areas = derived_areas(&folded.cells);
+    Ok(folded)
 }
 
 fn load_rollup(path: &Path) -> Result<Rollup> {
@@ -2817,18 +4081,28 @@ fn load_rollup(path: &Path) -> Result<Rollup> {
 /// package. Reading one as the other would silently mis-key every cell, so the
 /// error names the migration rather than just the mismatch.
 fn reject_old_schema(version: u32, path: &Path) -> Result<()> {
-    if version > SCHEMA_VERSION {
+    if version > RESULT_SCHEMA_VERSION {
         bail!(
-            "result schema_version {} in {} is newer than this tool understands ({SCHEMA_VERSION})",
+            "result schema_version {} in {} is newer than this tool understands \
+             ({RESULT_SCHEMA_VERSION})",
             version,
             path.display()
         );
     }
-    if version < SCHEMA_VERSION {
+    if version == 1 {
         bail!(
-            "result document {} is schema_version {version} (area-keyed); this tool reads \
-             schema_version {SCHEMA_VERSION} (package-keyed). Re-run the rollup that \
-             produced it — see fixes/2026-08-06-cicd/plan.md (Phase 4)",
+            "result document {} is schema_version 1 (area-keyed); this tool reads \
+             schema_version {RESULT_SCHEMA_VERSION} (package-keyed, area-grouped). Re-run \
+             the rollup that produced it — see fixes/2026-08-06-cicd/plan.md (Phase 4)",
+            path.display()
+        );
+    }
+    if version < RESULT_SCHEMA_VERSION {
+        bail!(
+            "result document {} is schema_version {version}; this tool reads \
+             schema_version {RESULT_SCHEMA_VERSION}, which adds each cell's area, origin, \
+             and evidence. Re-run the rollup that produced it — see \
+             fixes/2026-09-11-cicd-cleanup/plan.md (Phase 5)",
             path.display()
         );
     }
@@ -2845,9 +4119,10 @@ fn load_expected_manifests(args: &Args) -> Result<ExpectedTests> {
             .with_context(|| format!("failed to read {}", path.display()))?;
         let manifest: ExpectedManifest = serde_json::from_str(&text)
             .with_context(|| format!("invalid expected-test manifest {}", path.display()))?;
-        if manifest.schema_version > SCHEMA_VERSION {
+        if manifest.schema_version > EXPECTED_MANIFEST_SCHEMA_VERSION {
             bail!(
-                "expected-test manifest {} has schema_version {} (max {SCHEMA_VERSION})",
+                "expected-test manifest {} has schema_version {} (max \
+                 {EXPECTED_MANIFEST_SCHEMA_VERSION})",
                 path.display(),
                 manifest.schema_version
             );

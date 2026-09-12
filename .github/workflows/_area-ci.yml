@@ -1,0 +1,304 @@
+name: area-ci
+
+# One package AREA's whole CI slice: its packages' gates, and the rollup that
+# owns their combined outcome.
+#
+# `ci.yml` calls this once per selected area, which is what makes the area the
+# top-level identity in the Actions graph and the Checks tab. A called
+# workflow's jobs render as `<caller job name> / <called job name>`, so a
+# package's compile cell reads `area-ci (claudine) / claudine-cli /
+# check (windows-latest)` — area first, package under it, no display-name
+# parsing anywhere.
+#
+# Area is a GROUPING, never an identity (Design Decision 1). Nothing here
+# re-keys an artifact, a baseline entry, or a receipt by area: the package
+# fan-out below is keyed by package exactly as before, and `--area` narrows the
+# rollup rather than renaming what it reads.
+#
+# Chain depth: ci.yml -> _area-ci.yml -> _package-ci.yml -> _wsl-ci.yml is
+# four levels, GitHub's maximum. No level here may call a further reusable
+# workflow.
+
+on:
+  workflow_call:
+    inputs:
+      area:
+        description: "Package area, as `sniff repo package-area` names it (e.g. claudine, claudine/rendezvous, root)."
+        type: string
+        required: true
+      slug:
+        description: "The area name spelled for artifact names (`/` -> `--`). Presentation only; `--area` still receives the real name."
+        type: string
+        required: true
+      packages:
+        description: "This area's package matrix as a JSON `{\"include\": [...]}` document, produced by `affected_scope.py`."
+        type: string
+        required: true
+      accepted-gaps:
+        description: "Whether the resolved plan carries an accepted policy gap in this area. Required, so a caller that forgets it fails at parse rather than silently publishing nothing."
+        type: boolean
+        required: true
+
+env:
+  # The repository tracks no rustc wrapper; cleared explicitly so a stray
+  # environment value cannot silently intercept the rollup's build. A called
+  # workflow does not inherit this, and `_package-ci.yml` clears it itself.
+  RUSTC_WRAPPER: ""
+
+jobs:
+  # No `name:` and no `if:`/`needs:`: the caller only calls this workflow for
+  # areas that have packages, so this job always expands and GitHub labels each
+  # leg from the matrix. `name: ${{ matrix.package }}` keeps the package — the
+  # result identity — as the label a reader sees under the area.
+  #
+  # This job's result is what `ci.yml`'s `area-ci` — and so `ci-gate` — sees
+  # of the producers, so it must fail ONLY for what no baseline may excuse. A
+  # failed gate command does not fail a producer job: `_package-ci.yml` runs
+  # every test, lint, and compile command under step-level `continue-on-error`
+  # and folds the outcome into the cell's status artifact, which `rollup`
+  # below judges. Setup, provisioning, uploads, and cancellation still fail
+  # the producer, this job, and the gate directly.
+  package-ci:
+    name: ${{ matrix.package }}
+    # A `uses:` job accepts `permissions`, and this one CONFINES the token:
+    # `ci.yml`'s `area-ci` had to widen to `checks: write` for the publisher
+    # below (a called workflow's token is capped by its caller's), so the
+    # package fan-out is pinned to read-only here or it would inherit that
+    # grant. Neither `_package-ci.yml` nor `_wsl-ci.yml` uses the token.
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.packages) }}
+    uses: ./.github/workflows/_package-ci.yml
+    with:
+      package: ${{ matrix.package }}
+      check-args: ${{ matrix.check_args }}
+      # The unchanged direct dependents the planner attributed to this package,
+      # compiled inside its own Linux check cell (Open Question 1, Option B).
+      dependents-check-args: ${{ matrix.dependents_check_args }}
+      dependents-native: ${{ toJSON(matrix.dependents_native) }}
+      dependents: ${{ toJSON(matrix.dependents) }}
+      test-args: ${{ matrix.test_args }}
+      gates: ${{ toJSON(matrix.gates) }}
+      l1-include-slow: ${{ matrix.l1_include_slow }}
+      # `native_environments`, `l2_environments`, and `wsl` are DERIVED by
+      # `affected_scope.py` from package policy crossed with the environment
+      # capability table, and narrowed to the cells the plan resolved to hosted
+      # EXECUTION. A cell a verified receipt already satisfied is absent from
+      # these lists — no runner is scheduled for it — while staying a cell in
+      # the plan, so the rollup below reports its local-origin result instead of
+      # MISSING. That difference is the PR #76 regression.
+      native-environments: ${{ toJSON(matrix.native_environments) }}
+      check-os: ${{ toJSON(matrix.check_os) }}
+      l2-environments: ${{ toJSON(matrix.l2_environments) }}
+      browser-environments: ${{ toJSON(matrix.browser_environments) }}
+      node-environments: ${{ toJSON(matrix.node_environments) }}
+      backends: ${{ toJSON(matrix.l2_backends) }}
+      runner-tools: ${{ toJSON(matrix.runner_tools) }}
+      companion-suites: ${{ toJSON(matrix.companion_suites) }}
+      native: ${{ toJSON(matrix.native) }}
+      wsl: ${{ matrix.wsl }}
+    secrets: inherit
+
+  # This area's accepted policy gaps, published the moment the area starts
+  # (specification section 6; Open Question 4 ruled `neutral`, 2026-09-12).
+  #
+  # No `needs:`: the resolved plan is uploaded by `ci.yml`'s scope job before
+  # any area is called, so this job reads it at once and waits on no test or
+  # archive build. `publish_gaps.py` creates one `neutral` check run per
+  # accepted-gap cell — name identifying the cell, title and summary carrying
+  # the `ACCEPTED GAP` marker, owner, expiry, and reason, text carrying the
+  # revoke instructions and the `closes` work, `details_url` on the policy
+  # entry. The workflow itself spells no conclusion, and the tool refuses a
+  # cell whose acceptance is ungoverned or expired rather than publish a
+  # `neutral` check for a cell the rollup is about to block on.
+  #
+  # The check runs land on the PULL REQUEST HEAD: on a `pull_request` event
+  # `github.sha` is the merge commit, and a check created there never appears
+  # in the PR's checks list. On a push the two are the same commit.
+  #
+  # The only job in this workflow holding `checks: write`; `package-ci` and
+  # `rollup` stay read-only. Presentation only (Design Decision 10): the
+  # rollup, the gate, and runner-loss never read what this job publishes.
+  #
+  # `if:` makes this job skippable, so it carries no `name:` and is labelled
+  # `accepted-gaps` whether it runs or not (AC10).
+  accepted-gaps:
+    if: inputs.accepted-gaps
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v5
+      # The plain in-run download, not the `run-id` overlay the rollup uses:
+      # that form needs `actions: read`, which this job deliberately lacks,
+      # and the plan is among the first artifacts the run produces.
+      - name: Download the resolved execution plan
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-resolved-plan
+          path: ci-artifacts/ci-resolved-plan
+      - name: Publish this area's accepted gaps as neutral check runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AREA: ${{ inputs.area }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/publish_gaps.py \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
+            --area "$AREA" \
+            --head-sha "$HEAD_SHA" \
+            --repo "$GITHUB_REPOSITORY" \
+            --server "$GITHUB_SERVER_URL"
+
+  # THE area's own outcome (specification section 5, Design Decision 9).
+  #
+  # It applies the baseline, the governed policy gaps, and the missing-cell
+  # rule for THIS AREA and no other, and it fails when one of this area's
+  # required cells failed, is missing, or is an unexcused gap. Another area's
+  # red cell cannot block it and another area's baseline entry cannot excuse
+  # it: `--area` narrows the cells, the scope, the scheduled set, and the
+  # accepted evidence together. It is also the ONLY path by which a failed
+  # test, lint, or compile command reaches `ci-gate`: the producers fold that
+  # failure into their status artifacts rather than their job results, so a
+  # hosted failure and the same failure reused from local evidence are judged
+  # here identically.
+  #
+  # `if: always()` for the same reason `ci-gate` has it: a producer that
+  # failed or was cancelled must not skip the job that reports it. `needs:` is
+  # a "wait for, then download from" list, not a gate.
+  #
+  # No `name:`, so the whole-job skip that a cancelled run produces is labelled
+  # `rollup` rather than an unresolved expression (AC10).
+  rollup:
+    needs: package-ci
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      - name: Resolve this area's packages
+        id: area
+        shell: bash
+        env:
+          PACKAGES: ${{ inputs.packages }}
+        run: |
+          set -euo pipefail
+          echo "packages=$(jq -r '[.include[].package] | join(",")' <<<"$PACKAGES")" >>"$GITHUB_OUTPUT"
+      # A named lookup does not share the paginated bulk listing, so the policy
+      # and the plan stay available while a high-fan-out run is still making
+      # older artifacts visible through that listing.
+      - name: Download the resolved package policy
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-scope
+          path: ci-artifacts/ci-scope
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
+      - name: Download the resolved execution plan
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-resolved-plan
+          path: ci-artifacts/ci-resolved-plan
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
+      # The in-run artifact service sees the current attempt atomically; the
+      # run-wide overlay then lets a current result win when a rerun produced
+      # the same artifact name twice.
+      - name: Download current-attempt result and status artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: '{junit-*,status-*}'
+          path: ci-artifacts
+          merge-multiple: false
+      - name: Overlay newest run-wide result and status artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: '{junit-*,status-*}'
+          path: ci-artifacts
+          merge-multiple: false
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
+      # A producer whose hosted runner died never reached its status step, so
+      # it uploaded nothing and the rollup could only say "produced no report
+      # at all". `--package` keeps the synthesis inside this area: a job name
+      # carries no area, so the area is expressed as its package list.
+      - name: Attribute producers whose runner was lost
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AREA_PACKAGES: ${{ steps.area.outputs.packages }}
+        run: |
+          set -euo pipefail
+          mkdir -p ci-artifacts
+          python3 scripts/ci/runner_loss.py attribute \
+            --repo "$GITHUB_REPOSITORY" \
+            --run-id "$GITHUB_RUN_ID" \
+            --attempt "$GITHUB_RUN_ATTEMPT" \
+            --artifacts ci-artifacts \
+            --package "$AREA_PACKAGES" \
+            --out "$RUNNER_TEMP/runner-loss.json"
+      # `--no-default-features` deselects biscuit-terminal, sniff, and
+      # cargo_metadata, which the other two bins in `scripts/` need and this one
+      # does not. Measured: ~8s versus 40s+. Do not drop the flag.
+      - name: Build ci-rollup
+        run: |
+          cargo build --release \
+            --manifest-path scripts/Cargo.toml \
+            --no-default-features --bin ci-rollup
+      # Renders this area's grid — including its reused cells and its accepted
+      # policy gaps, with the evidence, counts, duration, and host each receipt
+      # recorded — into the area's own step summary. A reused cell is published
+      # here without any setup, build, archive, or test step having run for it.
+      - name: Roll up this area's cells
+        id: rollup
+        # The rollup's own exit 2 (a cell fails the summary gate) must not stop
+        # the verdict step below from running and explaining WHY.
+        continue-on-error: true
+        shell: bash
+        env:
+          AREA: ${{ inputs.area }}
+        run: |
+          set -euo pipefail
+          mkdir -p ci-artifacts
+          ./scripts/target/release/ci-rollup rollup \
+            --artifacts ci-artifacts \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
+            --policy ci-artifacts/ci-scope/scope.json \
+            --environments .github/ci/environments.json \
+            --area "$AREA" \
+            --out "ci-results-${{ inputs.slug }}.json" \
+            --run-id '${{ github.run_id }}'
+      # One slice per area. `ci-results` stays package-keyed inside; only the
+      # artifact NAME carries the area, so the combined summary can fold the
+      # slices without re-keying anything.
+      - name: Upload this area's result slice
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ci-results-${{ inputs.slug }}
+          path: ci-results-${{ inputs.slug }}.json
+          if-no-files-found: ignore
+      # THE area's gate. Exit 2 = this area is blocked, exit 1 = the tool could
+      # not read its input (including a rollup that never wrote its slice).
+      # Both are non-zero, so the area fails closed.
+      - name: Judge this area
+        shell: bash
+        env:
+          AREA: ${{ inputs.area }}
+        run: |
+          ./scripts/target/release/ci-rollup verdict \
+            --results "ci-results-${{ inputs.slug }}.json" \
+            --area "$AREA" \
+            --baseline .github/ci/ci-baseline.toml

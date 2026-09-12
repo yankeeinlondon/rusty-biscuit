@@ -114,7 +114,11 @@ Shell completions help people learn new CLI's as well as navigate a CLI they don
 
 ### Pre-push Hook
 
-A local pre-push hook runs `just ci-local --l2`: lint plus L1 and hostable non-focusing L2 for source-changed packages, and compile-check for their direct reverse dependencies. It detects macOS, Linux, native Windows, or WSL2 with `sniff`. For a clean outgoing `HEAD`, successful validation publishes exact-tree evidence that lets CI omit the same environment. A docs-only push gates nothing and returns in seconds.
+A local pre-push hook runs `just ci-local --l2`: lint plus L1 and hostable non-focusing L2 for source-changed packages. It detects macOS, Linux, native Windows, or WSL2 with `sniff`. CI compiles unchanged direct reverse dependencies inside the changed package's Ubuntu check; they receive no separate jobs. For a clean outgoing `HEAD`, both passing and failing complete validation outcomes are published per package, environment, and tier. CI reuses qualifying cells and applies reused failures to the owning area's verdict. A comparison containing only documentation changes gates no packages.
+
+Reuse qualifying passes on every OS; required tests without qualifying passing evidence must run. Avoiding duplicate passing tests does not establish an OS-specific execution ban.
+
+Run `just ci-local --plan` to preview execution, reused evidence, and persistent execution constraints before pushing. The hook reviews each pushed branch's committed plan against those constraints and passes the reviewed plan to clean local validation, which skips cells already covered by qualifying passing evidence. Scope is published independently of validation; incomplete runs and explicit package overrides provide no complete reusable validation evidence.
 
 Link the shared hook into your local git repository (`just init` does this):
 
@@ -126,9 +130,10 @@ The hook's behavior is controlled by the `RUSTY_BISCUIT_PRE_PUSH` environment va
 
 | Value | Behavior |
 | --- | --- |
-| `off` | Skip validation entirely and allow the push |
-| `warn` | Run validation, print failures in red, but still allow the push |
-| `strict` | Run validation and block the push if it fails (default) |
+| `scope-only` | Review constraints and publish scope; run no local gates |
+| `off` | Deprecated alias of `scope-only` |
+| `warn` | Publish complete passing or failing outcomes and allow the push |
+| `strict` | Publish complete outcomes, then block the push on failure (default) |
 
 For example, to enable strict mode in your shell:
 

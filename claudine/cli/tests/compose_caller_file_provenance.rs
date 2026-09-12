@@ -117,11 +117,16 @@ fn run_compose(
 ) -> String {
     // Escape: caller-relative references must resolve from this fixture directory.
     let mut command = fixture.command_builder().ambient_context(cwd).build();
+    let audio_spool = fixture.cwd().join("provenance-audio-spool");
+    // Shipped templates retain their lifecycle actions; provenance tests must not play them.
     command
+        .env("PLAYA_DRY_RUN", "1")
+        .env("PLAYA_SPOOL_DIR", &audio_spool)
         .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
         .args(["compose", "--goose", document.to_str().unwrap()]);
     command.args(setters);
     let assertion = command.assert().success();
+    assert!(!audio_spool.exists(), "provenance tests must not publish audio");
     strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr))
 }
 
@@ -136,12 +141,17 @@ fn run_compose_failure(
         .join(format!("diagnostic-{}.json", document.file_stem().unwrap().to_string_lossy()));
     // Escape: caller-relative references must resolve from this fixture directory.
     let mut command = fixture.command_builder().ambient_context(cwd).build();
+    let audio_spool = fixture.cwd().join("provenance-audio-spool");
+    // Shipped templates retain their lifecycle actions; provenance tests must not play them.
     command
+        .env("PLAYA_DRY_RUN", "1")
+        .env("PLAYA_SPOOL_DIR", &audio_spool)
         .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
         .env("CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT", &snapshot)
         .args(["compose", "--goose", document.to_str().unwrap()]);
     command.args(setters);
     let assertion = command.assert().failure();
+    assert!(!audio_spool.exists(), "provenance tests must not publish audio");
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
     let diagnostic = serde_json::from_str(
         &std::fs::read_to_string(&snapshot)
@@ -1005,4 +1015,103 @@ fn canonical_portable(path: &std::path::Path) -> String {
         out.push(name);
     }
     biscuit_file::to_portable_string(&out)
+}
+
+#[test]
+fn shipped_review_router_non_tty_partial_fails_before_initialize() {
+    let fixture = CliProcessFixture::named("review-router-non-tty-partial");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    install_goose(&fixture);
+    let package = fixture.cwd().join("packages/example");
+    write(
+        &package.join("fixes/2026-09-10-local-affected-scope/spec.md"),
+        "---\nreviewed: true\n---\nSpecification.\n",
+    );
+    let router = fixture.cwd().join("prompts/review.md");
+    write(&router, include_str!("../../../prompts/review.md"));
+
+    // The fixture package is the caller's launch origin, separate from the router.
+    let mut command = fixture.command_builder().ambient_context(&package).build();
+    let output = command
+        .args(["compose", "--goose", "-y"])
+        .arg(&router)
+        .arg("spec=fixes/2026-09-10-local")
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output));
+    assert!(stderr.contains("no existing file matched reference"), "{stderr}");
+    assert!(stderr.contains("fixes/2026-09-10-local"), "{stderr}");
+    assert!(!stderr.contains("lifecycle evaluation error"), "{stderr}");
+    assert!(!fixture.home().join("provider-prompt").exists(), "{stderr}");
+}
+
+/// The caller's document declares no schema, so the proxy target is the first
+/// document that can classify `spec` as a file input. The target's own
+/// `initialize` reads that value, so the resolution pass has to run again for
+/// the adopted document — skipping it there returns the lifecycle evaluation
+/// error this fix removed instead of the typed schema diagnostic.
+#[test]
+fn proxy_target_partial_is_resolved_before_the_target_initialize() {
+    let fixture = CliProcessFixture::named("review-router-proxy-target-partial");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    install_goose(&fixture);
+    let package = fixture.cwd().join("packages/example");
+    write(
+        &package.join("fixes/2026-09-10-local-affected-scope/spec.md"),
+        "---\nreviewed: true\n---\nSpecification.\n",
+    );
+    write(
+        &fixture.cwd().join("prompts/review.md"),
+        include_str!("../../../prompts/review.md"),
+    );
+    let entry = fixture.cwd().join("prompts/entry.md");
+    write(
+        &entry,
+        "---\ninitialize:\n  stack:\n    - action:\n        - proxy: ./review.md\n---\nEntry without a schema.\n",
+    );
+
+    let mut command = fixture.command_builder().ambient_context(&package).build();
+    let output = command
+        .args(["compose", "--goose", "-y"])
+        .arg(&entry)
+        .arg("spec=fixes/2026-09-10-local")
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output));
+    assert!(stderr.contains("no existing file matched reference"), "{stderr}");
+    assert!(stderr.contains("fixes/2026-09-10-local"), "{stderr}");
+    assert!(!stderr.contains("lifecycle evaluation error"), "{stderr}");
+    assert!(!fixture.home().join("provider-prompt").exists(), "{stderr}");
+}
+
+#[test]
+fn shipped_review_router_literal_does_not_collect_absent_route_inputs() {
+    let fixture = CliProcessFixture::named("review-router-literal-route");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    install_goose(&fixture);
+    let package = fixture.cwd().join("packages/example");
+    write(
+        &package.join("fixes/case/spec.md"),
+        "---\nreviewed: true\nmarker: caller-spec\n---\nSpecification.\n",
+    );
+    let router = fixture.cwd().join("prompts/review.md");
+    write(&router, include_str!("../../../prompts/review.md"));
+    write(
+        &fixture.cwd().join("prompts/_reviews/feature-review.md"),
+        "---\n$schema:\n  spec: file(required;eager;match(**/*spec*.md))\nselected: \"{{ frontmatter(spec, 'marker') }}\"\n---\nSELECTED={{ selected }}\n",
+    );
+    let stderr = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
+    let prompt = std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
+    assert!(prompt.contains("SELECTED=caller-spec"), "{prompt}");
+    assert!(!stderr.contains("Use this file"), "{stderr}");
+    assert!(!stderr.contains("did not match a file directly"), "{stderr}");
 }

@@ -17,6 +17,11 @@ helper that resolves it is named so it is not re-derived.
    `USERPROFILE` and `HOME`.** Hermetic test homes silently do not apply, so
    a Windows test reads the machine's real `~/.claudine`. Use
    `std::env::home_dir()` (un-deprecated, environment-first on Rust ≥ 1.97).
+   Python's `Path.home()` is environment-first but reads `USERPROFILE` on
+   Windows and ignores `HOME` (which native Windows does not set outside Git
+   Bash), so a fixture that relocates the home for a Python tool such as
+   `scripts/ci/constraints.py` must set both `HOME` and `USERPROFILE`; a
+   shell `$HOME` literal is a Unix-only spelling.
 3. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); no
    developer machine does.** Short-versus-long spelling bugs reproduce only
    on CI. `current_dir()` reports the spelling it was given; `canonicalize`
@@ -36,6 +41,45 @@ Contract to test against: `ctx.repo_root`, `package_root`,
 `package_area_root`, and `area_root` are portable `/`-separated strings
 without verbatim prefixes on every OS (`biscuit_file::to_portable_string`).
 Compare against that, never against `to_string_lossy()`.
+
+6. **A user-typed path fragment never matches walker output by raw text.**
+   `ignore::Walk` yields native `\` paths; the fragment is whatever was typed,
+   `/` on every platform. Claudine's partial-file and operation-file
+   autocomplete compared them raw and found zero candidates on Windows for
+   every `/`-spelled partial, so the typed "no existing file matched" failure
+   fired where macOS offered the confirmation (found 2026-09-10 by the first
+   native-Windows Level 2 run; `claudine/cli/src/completion/scopes.rs`
+   `path_matches_query`). Compare both sides through `to_portable_string`
+   and normalize `\` in the fragment. The non-interactive Windows tests had
+   passed the whole time — the zero-candidate path and the interaction-denied
+   path produce the same diagnostic — which is why only a real-terminal run
+   on Windows could see it.
+
+## WezTerm on `build-win`
+
+- `~/.wezterm.lua` there `dofile`s the shared config from `X:` and then a UNC
+  path. `X:` is a per-logon mapped drive that no SSH, nextest, or mux-server
+  process has, so every config *evaluation* from those contexts blocks for
+  the SMB connect timeout — measured at 21.2–21.3 s, deterministic, on each
+  `wezterm cli spawn`; Windows negative-caches the failure for well under a
+  minute, so a second spawn seconds later is 0.1 s. `wezterm cli list` does
+  not evaluate the config at all, which is why the harness's availability
+  gate passes and only the spawn times out (15 s `SPAWN_TIMEOUT`).
+  `biscuit-test-harness` now runs every `wezterm` client under an empty
+  `WEZTERM_CONFIG_FILE` unless the caller set one; the mux server keeps its
+  own config. The empty config is a private, uniquely created temporary file
+  retained until that client exits and then removed; creation/write errors
+  propagate rather than selecting an existing shared pathname. Do not "fix"
+  this by raising the timeout.
+- A headless `wezterm-mux-server` reachable through `WEZTERM_UNIX_SOCKET`
+  (`C:\Users\ken\.local\share\wezterm\sock`) is all the Level 2 tier needs
+  there; the twin in `level2_windows_provided_partial_file_capture.rs` passes
+  against it in ~4 s. Never blanket-stop mux servers on that host — one of
+  them may be carrying the session the developer is working in.
+- `cross-check --os windows` runs in an SSH session with no
+  `WEZTERM_UNIX_SOCKET`, so a WezTerm Level 2 test **skips there and nextest
+  prints PASS in ~0.02 s**. Read the duration, or set
+  `BISCUIT_TEST_REQUIRED_BACKENDS=wezterm` so a missing backend fails.
 
 ## Environment and processes
 
@@ -66,6 +110,14 @@ Compare against that, never against `to_string_lossy()`.
   `signal-handling.md`, "Windows parity".
 
 ## The `windows-latest` leg
+
+- **Malformed bytes with an audio extension still reach host playback.**
+  Playa's format detector accepts a recognized extension when header detection
+  fails; native decode failure then falls back to installed host players. The
+  detached CLI journal test's invalid `.wav` therefore depended on the Windows
+  runner's players; a CI journal timeout exposed this mismatch. Worker-failure fixtures
+  use an unrecognized extension and assert source rejection before any backend
+  is reached; deterministic library tests cover playback-error classification.
 
 Slowest build phase of the four CI legs, fewer test identities because
 `#![cfg(unix)]` binaries are excluded (declare them as platform exclusions,

@@ -26,6 +26,8 @@ strum = "0.28"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
+fs4 = "0.13"
+sysinfo = "0.38"
 # `bin_exe!`: resolves the `so-you-say` path at run time so the integration
 # tests survive execution from a relocated nextest archive (the wsl2 leg).
 biscuit-test-harness = { path = "../../biscuit-test-harness" }

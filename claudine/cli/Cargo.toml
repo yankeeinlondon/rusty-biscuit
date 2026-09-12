@@ -113,7 +113,6 @@ url = "2"
 shellexpand = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
-fs4 = "0.13"
 # `test-support` supplies the endpoint constructor the daemon-spawning fixtures
 # build against. Unlike the daemon itself it carries no native dependency, so it
 # is available on every target.
@@ -192,7 +191,15 @@ name = "level2_prompt_reporting_capture"
 required-features = ["terminal-tests"]
 
 [[test]]
+name = "level2_provided_partial_file_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
 name = "level2_provided_partial_file_pty"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_windows_provided_partial_file_capture"
 required-features = ["terminal-tests"]
 
 [[test]]

@@ -13,6 +13,12 @@ were declared when you report.
 | `BUILD_WSL` | A WSL2 Ubuntu guest | `~/ci-verification/rusty-biscuit` | Target of `just cross-check --os wsl`, which runs CI's archive mode ([wsl.md](wsl.md)). For ad hoc commands, non-login shells lack `~/.cargo/bin`; wrap them in `bash -lc`. |
 | `BUILD_MACOS` | A macOS host other than the current one | `~/ci-verification/rusty-biscuit` | Target of `just cross-check --os macos`; same flow as Linux. |
 
+`cross-check` forwards `BISCUIT_TEST_REQUIRED_BACKENDS` from your shell to the
+remote run. Set it whenever you run a Level 2 filter remotely — a backend the
+host lacks otherwise skips, and nextest prints PASS in ~0.02 s. The Unix legs
+also never read the remote `~/.config` (`GIT_CONFIG_GLOBAL=/dev/null`, empty
+`XDG_CONFIG_HOME`), so a down NAS cannot fail them ([wsl.md](wsl.md)).
+
 Each value is an SSH destination: an alias from the developer's
 `~/.ssh/config` or `user@host`. Use it as `ssh -o BatchMode=yes "$BUILD_WSL"
 ...` so a missing key fails fast instead of prompting. The `post-quantum`

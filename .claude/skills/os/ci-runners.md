@@ -82,11 +82,31 @@ none are recorded here (see "Noise" below).
 
 ## Cross-cutting
 
-- **A clean pre-push can replace one hosted environment.** The hook uses
-  `sniff os --json` to distinguish macOS, Linux, native Windows, and WSL2, then
-  records the exact source-package L1/L2 scope in an OS-specific Git note. CI
-  omits that environment only when the note matches its own base, head, tree,
-  and scope calculation. Browser and companion-suite work remains in CI.
+- **Test worker budgets follow the shared policy.** `_test_threads` in
+  `just/devops.just` uses `max(1, logical_cores - 2)` locally; CI uses all cores
+  through four and subtracts two above four. CI means `CI=true`,
+  `GITHUB_ACTIONS=true`, or nonempty `BISCUIT_CI_ENVIRONMENT`, not merely the
+  Nextest `ci` profile. Worker counts do not set CPU affinity, reserve cores,
+  or change Cargo build jobs. Explicit thread settings and narrower CI-profile
+  groups remain effective: Claudine L1 is capped at four, Claudine CLI L1 at
+  one, and Sniff Windows L1 at one. Shared-resource L2 stays serial; isolated
+  suites use the `l2-parallel-self-spawn` marker. See the
+  [central policy](../../../docs/topics/ci-cd.md#layer-1--local-pre-push-hook)
+  for override and direct Nextest behavior.
+
+- **A clean pre-push replaces individual cells, not a whole environment.** The
+  hook uses `sniff os --json` to distinguish macOS, Linux, native Windows, and
+  WSL2, then publishes a validation receipt under
+  `refs/notes/ci-local/<environment>` carrying one record per
+  `{package, gate}` cell with its outcome, counts, duration, backend proof, and
+  gate-input identity. CI reads **every** environment's ref reachable from the
+  outgoing head, so this host's receipt and a prior `cross-check` WSL receipt
+  omit their own cells in the same run. A cell from an older head is accepted
+  only when its gate-input identity — the `git ls-tree` entries of the tested
+  package's build closure plus that gate's global inputs — is unchanged, and
+  the comparison is recomputed over both trees rather than read out of the
+  receipt. `lint` and `check` stage no report and are always CI-origin; browser
+  and companion-suite work remains in CI.
 
 - **Caches do not warm across runs.** Per-package, per-environment caching
   cannot survive the 10 GB repository cache quota: one full run saves more

@@ -1,6 +1,6 @@
 //! Level 2 real-terminal capture tests for the `--perf` metrics tree.
 //!
-//! The L1 unit tests in `perf.rs` and the CLI integration tests assert the
+//! The L1 unit tests in `perf/tests/` and the CLI integration tests assert the
 //! report's *semantics* after stripping escape codes, so they cannot catch
 //! broken glyph emission, column alignment, or SGR styling in a real terminal.
 //! These tests drive the real `claudine compose --perf --dry-run` binary inside
@@ -14,9 +14,9 @@
 //! - the dry-run `—` agent placeholder — P-5
 //! - the yellow `▌ ` block-quote frame — Presentation
 //!
-//! The fixture contains a `::shell sleep 0.3` directive (`--yolo` auto-approves
-//! it) so shell expansion is the unambiguous dominant leaf, making the `HOT`
-//! marker deterministic.
+//! The fixture contains a measurable `::shell sleep 0.3` directive (`--yolo`
+//! auto-approves it). Host load can make another leaf hotter; deterministic L1
+//! fixtures verify which leaf wins, while these captures verify its styling.
 //!
 //! Stream separation (the `--perf` report is stderr-only, stdout stays clean) is
 //! a Level-1 concern proved by the assert-command tests — a captured terminal
@@ -46,8 +46,7 @@ use test_toolkit::{Backend, Level, require_level};
 mod common;
 use common::{TestWorkspace, augmented_path, clear_no_color, write_executable};
 
-/// A compose fixture with a slow `::shell` directive so shell expansion is the
-/// unambiguous dominant leaf (deterministic `HOT` marker).
+/// A measurable shell span; host load may make environment setup take longer.
 const FIXTURE_DOC: &str = "\
 ---
 name: Perf Doc
@@ -69,7 +68,7 @@ struct PerfCapture {
 ///
 /// `--goose` resolves the Agent (stubbed on `PATH`, never launched under
 /// `--dry-run`); `--yolo` auto-approves the `::shell` directive so the compose
-/// pass executes it and the perf tree carries a dominant shell-expansion leaf.
+/// pass executes it and the perf tree carries a measured shell-expansion leaf.
 fn run_perf_compose<H: TerminalHarness>(harness: &mut H) -> PerfCapture {
     let workspace = TestWorkspace::named("claudine-perf-l2");
     let bin_dir = workspace.path().join("bin");
@@ -94,10 +93,18 @@ fn run_perf_compose<H: TerminalHarness>(harness: &mut H) -> PerfCapture {
         .expect("cd into workspace");
     let _ = biscuit_test_harness::wait_for_prompt(harness);
 
-    let cmd = format!(
-        "{claudine} compose --goose --perf --dry-run --yolo {}",
-        doc.display()
+    static NEXT_CAPTURE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let sequence = NEXT_CAPTURE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let marker = format!("PERF_{}_{}", std::process::id(), sequence);
+    // A shared pane can retain unrelated text containing duration units. Clear
+    // it before output, and distinguish this command's completion from an old prompt.
+    let script = format!(
+        "printf '\\033[2J\\033[H'; {} compose --goose --perf --dry-run --yolo {} \
+         && printf '\\n{marker}:ok\\n' || printf '\\n{marker}:failed\\n'",
+        common::sh_quote(&claudine),
+        common::sh_quote(&doc.to_string_lossy()),
     );
+    let cmd = format!("/bin/sh -c {}", common::sh_quote(&script));
     harness
         .send_command_with_env(
             &cmd,
@@ -110,12 +117,21 @@ fn run_perf_compose<H: TerminalHarness>(harness: &mut H) -> PerfCapture {
             ],
         )
         .expect("send compose --perf --dry-run");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    // The `::shell sleep 0.3` directive runs during the compose pass; allow the
-    // command to finish and the pane to settle before capturing.
-    std::thread::sleep(Duration::from_millis(600));
-
-    let frame = harness.capture().expect("capture failed");
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let prefix = format!("{marker}:");
+    let frame = loop {
+        let frame = harness.capture().expect("capture perf command");
+        if let Some(status) = frame.plain.lines().find_map(|line| line.trim().strip_prefix(&prefix)) {
+            assert_eq!(status, "ok", "perf command failed:\n{}", frame.plain);
+            break frame;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "perf completion marker did not appear:\n{}",
+            frame.plain
+        );
+        std::thread::sleep(Duration::from_millis(40));
+    };
     PerfCapture {
         frame,
         _workspace: workspace,
@@ -185,7 +201,7 @@ fn has_bold(line: &str) -> bool {
 /// correctness is locked by the L1 snapshot test (`render_perf_report_snapshot_…`)
 /// instead. Everything asserted here lives in the visible bottom region: the
 /// connector hierarchy, the unit-aligned value column, the percent column, the
-/// `HOT` marker on the dominant shell directive, and the dry-run placeholder.
+/// unique `HOT` marker, the shell directive, and the dry-run placeholder.
 fn assert_tree_structure(frame: &CapturedFrame) {
     let plain = &frame.plain;
 
@@ -201,14 +217,23 @@ fn assert_tree_structure(frame: &CapturedFrame) {
         "expected the `▌` block-quote frame.\nplain:\n{plain}",
     );
 
-    // The dominant leaf is the slow shell directive, flagged `▇ HOT` (P-3).
-    let hot = plain
+    assert_eq!(
+        plain.matches("▇ HOT").count(),
+        1,
+        "expected exactly one HOT marker.\nplain:\n{plain}",
+    );
+    let shell = plain
         .lines()
-        .find(|l| l.contains("▇ HOT"))
-        .unwrap_or_else(|| panic!("expected a `▇ HOT` marker.\nplain:\n{plain}"));
+        .find(|l| l.contains("shell · sleep"))
+        .unwrap_or_else(|| panic!("expected the measured shell directive.\nplain:\n{plain}"));
+    let measured_duration = shell.split_whitespace().any(|cell| {
+        ["ms", "µs", "s"].iter()
+            .find_map(|unit| cell.strip_suffix(*unit))
+            .is_some_and(|number| number.parse::<f64>().is_ok_and(|duration| duration > 0.0))
+    });
     assert!(
-        hot.contains("shell · sleep"),
-        "HOT must flag the dominant `::shell` directive; got: {hot:?}",
+        shell.contains('%') && measured_duration,
+        "shell directive must carry a duration and share; got: {shell:?}",
     );
 
     // Dry-run agent placeholder (P-5): an `—` leaf annotated `(dry run)`.
@@ -306,4 +331,27 @@ fn level2_perf_tree_renders_styled_in_wezterm() {
         has_bold(hot),
         "expected the `▇ HOT` marker to render bold (SGR 1).\nrow: {hot:?}",
     );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_perf_capture_excludes_previous_pane_duration_text() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    clear_no_color(&mut harness);
+    harness
+        .send_text(b"printf 'STALE_PERF_CAPTURE 1ms\\n'\n")
+        .expect("seed previous pane output");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let frame = harness.capture().expect("capture seeded output");
+        if frame.plain.lines().any(|line| line.trim() == "STALE_PERF_CAPTURE 1ms") {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "seed output did not appear");
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    let capture = run_perf_compose(&mut harness);
+    assert!(!capture.frame.plain.contains("STALE_PERF_CAPTURE"), "{}", capture.frame.plain);
+    assert_tree_structure(&capture.frame);
 }
