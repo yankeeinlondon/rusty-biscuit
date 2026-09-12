@@ -270,12 +270,18 @@ CI never reads them, so a constraint can only stop a push. Where the store lives
 by default is Open Question 2 and is unruled — `constraints.default_directory()`
 is empty until it is.
 
-The hook decides them from the plan of the **outgoing revision's committed
-tree**: the committed `base..head` path set, planned by the planner, manifests,
-and policy committed there — in a temporary detached worktree whenever the
-checkout is dirty or the push does not carry `HEAD` — with published evidence
-applied through `--apply-to`. That reviewed plan is also the scope receipt it
-publishes, so the two cannot disagree. `just ci-local --plan` is the
+The hook decides them per **branch update**, in the order Git supplies them:
+each pushed revision's committed `base..head` path set, planned by the planner,
+manifests, and policy committed there — in a temporary detached worktree unless
+the revision is the clean checkout — with published evidence applied through
+`--apply-to`. Each update is checked under its own identity: the repository is
+the remote URL Git hands the hook, the branch is the remote branch the update
+writes, and a renamed refspec (`feature:other`) binds a record under either
+name; the checked-out branch and `origin` are never substituted. Deletions,
+tags, and other non-branch refs trigger no run and are skipped by name; the
+first failing update blocks the push before any note is published. HEAD's
+reviewed plan is also the scope receipt it publishes, so the two cannot
+disagree. `just ci-local --plan` is the
 working-tree preview; a committed change masked by an unstaged revert is
 absent there and present in the hook's review, which is why the preview is
 not the decision.
@@ -290,7 +296,7 @@ whether a package must support the environment.
 
 Prefer a repository-provided **scope-only** mode over `git push --no-verify`
 when the goal is to skip local tests and let CI exercise every supported
-environment. Scope-only resolves and prints the plan of the outgoing revision's
+environment. Scope-only resolves and prints the plan of every pushed branch's
 committed tree — so a recorded execution constraint is still enforced and the
 run is still reviewable — but runs no gate, publishes no validation outcomes,
 and excludes no CI cells. It does publish the standalone *scope* receipt, so CI

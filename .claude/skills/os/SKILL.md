@@ -64,10 +64,10 @@ triggering CI; do not treat automatic jobs as exempt.
 enforced and the run is still reviewable — but runs no gate, publishes no
 outcomes, and excludes no CI cells. It does publish the *scope* receipt on
 `refs/notes/ci-local/scope`, as every mode does, and CI takes it on an exact
-`{base, head, tree}` match. The plan the hook reviews and publishes is the
-outgoing revision's COMMITTED one (a temporary worktree when the checkout is
-dirty); `just ci-local --plan` previews the working tree and differs exactly
-when the checkout is dirty. `off` is its deprecated alias. `git push
+`{base, head, tree}` match. The hook reviews every pushed branch's COMMITTED
+plan (a temporary worktree unless the revision is the clean checkout) under that
+update's remote branch and remote, and publishes HEAD's; `just ci-local --plan`
+previews the working tree and differs exactly when the checkout is dirty. `off` is its deprecated alias. `git push
 --no-verify` produces no new evidence and does not invalidate already-published
 matching receipts, which CI still verifies. See the `rust-devops` skill's
 [evidence and execution contract](../rust-devops/ci-cd.md) before selecting a
