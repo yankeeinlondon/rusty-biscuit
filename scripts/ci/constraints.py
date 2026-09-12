@@ -25,11 +25,15 @@ supplies (`--branch` may repeat): the hook names the REMOTE branch an update
 writes and, when the refspec renames it, the local branch too, so a record
 under either name binds.
 
-Where the store LIVES is Open Question 2 and is not yet ruled (blocker B2 in
-`fixes/2026-09-11-cicd-cleanup/open-questions-and-blockers.md`). This module
-therefore reads the directory named by `BISCUIT_CI_CONSTRAINTS_DIR` and has no
-default: every part of the interface that holds under all three options is
-implemented, and the one line that encodes the choice is [`default_directory`].
+The store lives at `<home>/.rusty-biscuit/ci-constraints/<repository>/`
+(Open Question 2, ruled 2026-09-12: Option B), beside the evidence directory,
+with `BISCUIT_CI_CONSTRAINTS_DIR` as an override; [`default_directory`] derives
+`<repository>` from the same identity. `<home>` is `Path.home()` — `HOME` on
+Unix, `USERPROFILE` on native Windows, which sets no `HOME` outside Git Bash —
+so a test that relocates the home must set both. The default is resolved only
+by this module's commands, which only the hook and `just ci-local` run; the
+planner takes the store as an explicit `--constraints` argument and has no
+default, which is what keeps CI from ever reading it.
 """
 
 from __future__ import annotations
@@ -51,20 +55,51 @@ OPTIONAL_FIELDS = ("gate", "repository", "branch")
 ENVIRONMENT_VARIABLE = "BISCUIT_CI_CONSTRAINTS_DIR"
 
 
-def default_directory() -> str:
-    """The store's location when none is named explicitly.
+#: Characters a repository identity may carry that some filesystem refuses in a
+#: path segment: a port (`host:2222`), a Windows drive (`C:`), and the rest of
+#: the NTFS reserved set. Each becomes `_` so one identity is one directory on
+#: every OS.
+_UNPORTABLE_SEGMENT_CHARACTERS = '<>:"|?*'
 
-    Empty until Open Question 2 is ruled. The recommendation on record is a
-    per-branch file under `~/.rusty-biscuit/ci-constraints/<repo>/`, beside the
-    evidence directory PR #74 established; Option A (an environment variable)
-    and Option C (a Git note) would fill this differently. Nothing else in this
-    module depends on the answer.
+
+def store_root() -> Path:
+    """`<home>/.rusty-biscuit/ci-constraints`, beside the evidence directory."""
+    return Path.home() / ".rusty-biscuit" / "ci-constraints"
+
+
+def store_segments(identity: str) -> list[str]:
+    """A repository identity as nested directory names under the store root.
+
+    A filesystem remote's identity is an absolute path (`/tmp/x/origin`, or
+    `C/Users/x/origin` once `repository_identity` has split the drive), so the
+    segments are taken relative — joining an absolute identity onto the root
+    would replace the root, and a record would land outside the store.
     """
-    return ""
+    segments = []
+    for segment in identity.replace("\\", "/").split("/"):
+        cleaned = "".join(
+            "_" if character in _UNPORTABLE_SEGMENT_CHARACTERS or ord(character) < 32 else character
+            for character in segment
+        )
+        if cleaned in ("", ".", ".."):
+            continue
+        segments.append(cleaned)
+    return segments
 
 
-def directory_from_environment() -> str:
-    return os.environ.get(ENVIRONMENT_VARIABLE) or default_directory()
+def default_directory(repository: str = "") -> str:
+    """The store directory for `repository`, a remote URL in any spelling.
+
+    An unknown repository (empty identity) resolves to the store ROOT, and
+    `load` reads recursively, so every repository's records bind: an unknown
+    identity cannot prove exemption from any of them.
+    """
+    return str(store_root().joinpath(*store_segments(repository_identity(repository))))
+
+
+def resolve_directory(repository: str = "", explicit: str = "") -> str:
+    """The store to read: `explicit`, else `BISCUIT_CI_CONSTRAINTS_DIR`, else the default."""
+    return explicit or os.environ.get(ENVIRONMENT_VARIABLE) or default_directory(repository)
 
 
 def repository_identity(remote: str) -> str:
@@ -161,6 +196,10 @@ def load(
     `(active, expired, malformed)`. A malformed record is reported separately
     and is treated as **binding** by callers: an instruction that cannot be read
     is not an instruction that can be ignored.
+
+    Records are read recursively: the store root holds one directory per
+    repository, and a caller that could not name its repository is handed the
+    root so that all of them bind.
     """
     today = today or date.today()
     active: list[Constraint] = []
@@ -171,7 +210,7 @@ def load(
     root = Path(directory)
     if not root.is_dir():
         return active, expired, malformed
-    for path in sorted(root.glob("*.json")):
+    for path in sorted(root.rglob("*.json")):
         try:
             document = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
@@ -247,9 +286,13 @@ def read_plan(path: str) -> dict[str, Any]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for command in ("check", "environments"):
+    for command in ("check", "environments", "directory"):
         subparser = subparsers.add_parser(command)
-        subparser.add_argument("--directory", default=directory_from_environment())
+        subparser.add_argument(
+            "--directory",
+            default="",
+            help=f"the store; default ${ENVIRONMENT_VARIABLE}, else the repository's directory",
+        )
         subparser.add_argument("--plan", default="", help="resolved plan JSON; unreadable blocks")
         subparser.add_argument(
             "--repository", default="", help="URL of the remote being pushed to, any spelling"
@@ -265,7 +308,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    active, expired, malformed = load(args.directory, args.repository, args.branch or ())
+    directory = resolve_directory(args.repository, args.directory)
+
+    if args.command == "directory":
+        # `just ci-local` hands this to the planner's `--constraints` so the
+        # planner itself never resolves a default.
+        print(directory)
+        return
+
+    active, expired, malformed = load(directory, args.repository, args.branch or ())
 
     if args.command == "environments":
         # The planner's input: every environment a recorded constraint forbids,

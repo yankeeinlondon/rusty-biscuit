@@ -566,6 +566,7 @@ fn a_failing_lint_is_never_blamed_for_a_missing_l1_cell() {
         environment: None,
         detail: None,
         companion: None,
+        dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
 
@@ -605,6 +606,7 @@ fn a_producer_detail_explains_why_a_cell_has_no_evidence() {
         environment: Some("wsl2-ubuntu".to_owned()),
         detail: Some("the WSL2 guest became unreachable after the test step".to_owned()),
         companion: None,
+        dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
 
@@ -634,6 +636,7 @@ fn a_failing_l1_is_still_blamed_for_a_missing_l2_cell() {
         environment: None,
         detail: None,
         companion: None,
+        dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
 
@@ -757,6 +760,7 @@ fn a_producer_failure_downgrades_a_green_report() {
                 .to_owned(),
         ),
         companion: None,
+        dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
 
@@ -793,6 +797,7 @@ fn a_producer_success_never_upgrades_a_failing_cell() {
         environment: Some("ubuntu-latest".to_owned()),
         detail: None,
         companion: None,
+        dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
     let mut rec = passing_record("sniff-cli", "ubuntu-latest", Tier::L1);
@@ -826,6 +831,7 @@ fn companion_status(result: &str, companion: Option<&str>) -> ProducerStatus {
         environment: Some("ubuntu-latest".to_owned()),
         detail: None,
         companion: companion.map(str::to_owned),
+        dependents: Vec::new(),
     }
 }
 
@@ -921,6 +927,7 @@ fn a_skipped_companion_downgrades_a_green_lint() {
         environment: None,
         detail: None,
         companion: Some("skipped".to_owned()),
+        dependents: Vec::new(),
     }];
 
     let cells = status_cells(
@@ -948,6 +955,7 @@ fn status_cells_map_each_job_result_to_a_cell_state() {
         environment: None,
         detail: None,
         companion: None,
+        dependents: Vec::new(),
     };
     let statuses = vec![
         status("pkg-success", "success"),
@@ -991,6 +999,7 @@ fn status_cells_skip_test_tiers_and_out_of_scope_packages() {
             environment: Some("ubuntu-latest".to_owned()),
             detail: None,
             companion: None,
+            dependents: Vec::new(),
         },
         ProducerStatus {
             package: "outsider".to_owned(),
@@ -999,6 +1008,7 @@ fn status_cells_skip_test_tiers_and_out_of_scope_packages() {
             environment: None,
             detail: None,
             companion: None,
+            dependents: Vec::new(),
         },
     ];
     let cells = status_cells(&statuses, &scope_of(&["sniff-cli"]), &[], &[policy("x")], &[]);
@@ -1218,8 +1228,8 @@ fn the_checked_in_environments_table_parses_and_is_well_governed() {
             .collect()
     );
 
-    // Every governed absence must satisfy the acceptance rule, or `ci-verdict`
-    // can never exit 0 on a run touching an L2-owning package.
+    // Every governed absence must satisfy the acceptance rule, or an area's
+    // verdict can never exit 0 on a run touching an L2-owning package.
     for environment in &doc.environments {
         for (name, capability) in &environment.capabilities {
             if let Some(gap) = capability.governed_gap(name) {
@@ -2137,6 +2147,7 @@ fn a_lint_baseline_entry_excuses_a_lint_failure() {
         environment: None,
         detail: None,
         companion: None,
+        dependents: Vec::new(),
     }];
     let cells = status_cells(
         &statuses,
@@ -2681,6 +2692,105 @@ fn a_cell_present_in_only_one_document_is_not_comparable() {
 
     assert!(!result.regressed());
     assert_eq!(result.incomparable.len(), 2);
+}
+
+/// Write one result document per slice and return the `--<flag>` argument
+/// pairs that name them.
+fn slice_args(temp: &TempDir, flag: &str, slices: &[(&str, Rollup)]) -> Vec<String> {
+    let mut args = Vec::new();
+    for (name, slice) in slices {
+        let path = temp.path().join(format!("{name}.json"));
+        fs::write(&path, serde_json::to_string(slice).unwrap()).unwrap();
+        args.push(format!("--{flag}"));
+        args.push(path.to_str().unwrap().to_owned());
+    }
+    args
+}
+
+fn areaed(mut rollup: Rollup, area: &str, run_id: Option<&str>) -> Rollup {
+    for cell in &mut rollup.cells {
+        cell.area = area.to_owned();
+    }
+    rollup.areas = derived_areas(&rollup.cells);
+    rollup.run_id = run_id.map(str::to_owned);
+    rollup
+}
+
+/// `just ci-diff` downloads one run's `ci-results-<slug>` slices, since no
+/// whole-run document exists any more; `compare` folds them by concatenation.
+#[test]
+fn compare_folds_repeated_base_and_head_slices_without_judging_them() {
+    let temp = TempDir::new("compare-fold");
+    let base_sniff = areaed(
+        compare_rollup(vec![compare_cell("sniff", CellState::Fail, &["a"])]),
+        "sniff",
+        Some("100"),
+    );
+    let base_queue = areaed(
+        compare_rollup(vec![compare_cell("queue", CellState::Pass, &[])]),
+        "queue",
+        Some("100"),
+    );
+    // The regression hides in the SECOND head slice: a single-file compare
+    // would report `queue` as not comparable and clear the branch.
+    let head_sniff = areaed(
+        compare_rollup(vec![compare_cell("sniff", CellState::Fail, &["a"])]),
+        "sniff",
+        Some("200"),
+    );
+    let head_queue = areaed(
+        compare_rollup(vec![compare_cell("queue", CellState::Fail, &["b"])]),
+        "queue",
+        Some("200"),
+    );
+    let summary = temp.path().join("summary.md");
+    let mut raw = slice_args(&temp, "base", &[("base-sniff", base_sniff), ("base-queue", base_queue)]);
+    raw.extend(slice_args(&temp, "head", &[("head-sniff", head_sniff), ("head-queue", head_queue)]));
+    raw.extend(["--summary".to_owned(), summary.to_str().unwrap().to_owned()]);
+    let args = Args::parse(raw.into_iter()).unwrap();
+
+    assert_eq!(cmd_compare(&args).unwrap(), EXIT_BLOCKED, "queue regressed in the second slice");
+
+    let rendered = fs::read_to_string(&summary).unwrap();
+    assert!(rendered.contains("base: run 100 · head: run 200"), "{rendered}");
+    assert!(rendered.contains("queue/ubuntu-latest/L1"), "{rendered}");
+    assert!(!rendered.contains("not comparable"), "both sides carry both cells: {rendered}");
+}
+
+#[test]
+fn compare_refuses_a_cell_that_two_slices_both_carry() {
+    let temp = TempDir::new("compare-overlap");
+    let twice = areaed(
+        compare_rollup(vec![compare_cell("sniff", CellState::Pass, &[])]),
+        "sniff",
+        None,
+    );
+    let mut raw = slice_args(&temp, "base", &[("one", twice.clone()), ("two", twice.clone())]);
+    raw.extend(slice_args(&temp, "head", &[("head", twice)]));
+    let args = Args::parse(raw.into_iter()).unwrap();
+
+    let error = cmd_compare(&args).unwrap_err().to_string();
+
+    assert!(
+        error.contains("sniff/ubuntu-latest/L1") && error.contains("earlier `--base` slice"),
+        "{error}"
+    );
+}
+
+#[test]
+fn compare_still_requires_at_least_one_document_per_side() {
+    let temp = TempDir::new("compare-missing");
+    let only = areaed(
+        compare_rollup(vec![compare_cell("sniff", CellState::Pass, &[])]),
+        "sniff",
+        None,
+    );
+    let raw = slice_args(&temp, "base", &[("base", only)]);
+    let args = Args::parse(raw.into_iter()).unwrap();
+
+    let error = cmd_compare(&args).unwrap_err().to_string();
+
+    assert!(error.contains("`--head` is required"), "{error}");
 }
 // ---------------------------------------------------------------------------
 // The area-owned result model
@@ -3479,6 +3589,7 @@ fn a_cancelled_job_is_not_an_accepted_gap() {
         environment: Some("windows-latest".to_owned()),
         detail: None,
         companion: None,
+        dependents: Vec::new(),
     }];
     let cells = status_cells(
         &statuses,
@@ -3520,6 +3631,7 @@ fn a_status_gate_reports_the_target_coverage_the_plan_scheduled_it_for() {
         environment: Some("windows-latest".to_owned()),
         detail: None,
         companion: None,
+        dependents: Vec::new(),
     }];
 
     let cells = status_cells(
@@ -4161,4 +4273,263 @@ fn no_area_flag_leaves_the_document_whole() {
     let rollup = narrow(two_area_rollup(), &[]).expect("no narrowing requested");
     assert_eq!(rollup.cells.len(), 2);
     assert!(rollup.area_scope.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Review 6, finding 1: a failed gate command on a healthy producer job
+// ---------------------------------------------------------------------------
+
+/// The artifact a normalized producer writes — the gate command failed under
+/// `continue-on-error`, the job stayed green, and the status step folded the
+/// step outcome into `result` — read from disk exactly as the rollup reads it,
+/// so the shipped JSON shape is what is judged.
+fn normalized_failure_status(root: &Path, package: &str, job: &str, environment: &str) {
+    let dir = root.join(format!("status-{package}-{job}-{environment}"));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("status.json"),
+        format!(
+            r#"{{"package":"{package}","job":"{job}","environment":"{environment}","result":"failure"}}"#
+        ),
+    )
+    .unwrap();
+}
+
+/// A status-only gate (`check`) whose command failed on a green job is a FAIL
+/// cell: it blocks with no baseline, and an exact `{package, environment,
+/// tier}` entry — nothing wider — accepts it. The area's baseline is then the
+/// only thing between that failure and the merge, because the job it ran in
+/// no longer reaches `ci-gate` red.
+#[test]
+fn a_failed_check_command_on_a_green_job_is_judged_by_the_baseline_alone() {
+    let temp = TempDir::new("normalized-check");
+    normalized_failure_status(temp.path(), "sniff", "check", "windows-latest");
+    let statuses = read_producer_statuses(temp.path()).unwrap();
+    assert_eq!(statuses.len(), 1);
+
+    let cells = status_cells(&statuses, &scope_of(&["sniff"]), &[], &[policy("sniff")], &[]);
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].state, CellState::Fail);
+
+    let rollup = rollup_of(cells, &["sniff"]);
+    let findings = verdict(&rollup, &Baseline::default(), None);
+    assert!(blocks_with_rule(&findings, "cell-failed"));
+
+    let wrong_environment = Baseline {
+        schema_version: BASELINE_SCHEMA_VERSION,
+        failure: vec![failure_entry("sniff", "ubuntu-latest", Tier::parse("check"))],
+        skip: Vec::new(),
+    };
+    assert!(blocks_with_rule(&verdict(&rollup, &wrong_environment, None), "cell-failed"));
+
+    let exact = Baseline {
+        schema_version: BASELINE_SCHEMA_VERSION,
+        failure: vec![failure_entry("sniff", "windows-latest", Tier::parse("check"))],
+        skip: Vec::new(),
+    };
+    let findings = verdict(&rollup, &exact, None);
+    assert!(!any_block(&findings), "unexpected blocks: {findings:#?}");
+    assert!(findings.iter().any(|f| f.rule == "baseline-accepted" && f.subject.contains("sniff")));
+}
+
+/// Open Question 1, Option B: a check producer that also compiled the changed
+/// package's unchanged dependents says so in its status, and the cell renders
+/// it — in its reasons and in the step summary's "Compiled dependents" table —
+/// while the dependents themselves hold no cell.
+#[test]
+fn a_check_cell_reports_the_dependents_it_also_compiled() {
+    let temp = TempDir::new("dependents-pass");
+    write_status(
+        temp.path(),
+        "darkmatter",
+        "check",
+        "ubuntu-latest",
+        r#"{"package":"darkmatter","job":"check","environment":"ubuntu-latest","result":"success","dependents":["darkmatter-cli","dmls"]}"#,
+    );
+    let statuses = read_producer_statuses(temp.path()).unwrap();
+    assert_eq!(statuses[0].dependents, vec!["darkmatter-cli", "dmls"]);
+
+    let cells = status_cells(
+        &statuses,
+        &scope_of(&["darkmatter"]),
+        &[],
+        &[policy("darkmatter")],
+        &[],
+    );
+    let cell = only_cell(cells);
+    assert_eq!(cell.state, CellState::Pass);
+    assert_eq!(cell.key.package, "darkmatter");
+    assert_eq!(cell.area, "darkmatter");
+    assert_eq!(cell.dependents, vec!["darkmatter-cli", "dmls"]);
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|reason| reason == "also compiled 2 dependent(s): darkmatter-cli, dmls"),
+        "the cell must say what else it compiled: {:?}",
+        cell.reasons
+    );
+
+    let rollup = rollup_of(vec![cell], &["darkmatter"]);
+    let summary = render_grid(&rollup);
+    assert!(summary.contains("### Compiled dependents"), "{summary}");
+    assert!(
+        summary.contains("| `darkmatter/ubuntu-latest/check` | PASS | 2 dependent(s): darkmatter-cli, dmls |"),
+        "{summary}"
+    );
+    assert!(!any_block(&verdict(&rollup, &Baseline::default(), None)));
+}
+
+/// The dependents half failing is the CHANGED package's failure: a FAIL cell
+/// keyed on the changed package, attributed to its area, that blocks — with
+/// the producer's detail naming the half that broke and the names of what was
+/// compiled. No consumer cell exists to blame.
+#[test]
+fn a_failed_dependents_half_is_a_fail_cell_on_the_changed_packages_area() {
+    let temp = TempDir::new("dependents-fail");
+    write_status(
+        temp.path(),
+        "darkmatter",
+        "check",
+        "ubuntu-latest",
+        r#"{"package":"darkmatter","job":"check","environment":"ubuntu-latest","result":"failure","dependents":["dmls"],"detail":"an unchanged dependent failed to compile against this package's public API (the package's own targets compiled)"}"#,
+    );
+    let statuses = read_producer_statuses(temp.path()).unwrap();
+
+    let cells = status_cells(
+        &statuses,
+        &scope_of(&["darkmatter"]),
+        &[],
+        &[policy("darkmatter")],
+        &[],
+    );
+    assert!(
+        cells.iter().all(|cell| cell.key.package == "darkmatter"),
+        "no consumer may receive a cell: {cells:#?}"
+    );
+    let cell = only_cell(cells);
+    assert_eq!(cell.state, CellState::Fail);
+    assert_eq!(cell.area, "darkmatter");
+    assert_eq!(cell.dependents, vec!["dmls"]);
+    assert!(
+        cell.reasons.iter().any(|reason| reason.contains("unchanged dependent failed to compile"))
+            && cell.reasons.iter().any(|reason| reason == "also compiled 1 dependent(s): dmls"),
+        "the failure must name the half that broke and what was compiled: {:?}",
+        cell.reasons
+    );
+
+    let rollup = rollup_of(vec![cell], &["darkmatter"]);
+    let findings = verdict(&rollup, &Baseline::default(), None);
+    assert!(blocks_with_rule(&findings, "cell-failed"));
+    let finding = findings
+        .iter()
+        .find(|finding| finding.rule == "cell-failed")
+        .unwrap();
+    assert_eq!(finding.subject, "darkmatter/ubuntu-latest/check");
+    assert!(finding.detail.contains("dmls"), "{}", finding.detail);
+    let summary = render_grid(&rollup);
+    assert!(
+        summary.contains("| `darkmatter/ubuntu-latest/check` | FAIL | 1 dependent(s): dmls |"),
+        "{summary}"
+    );
+}
+
+fn write_status(root: &Path, package: &str, job: &str, environment: &str, json: &str) {
+    let dir = root.join(format!("status-{package}-{job}-{environment}"));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("status.json"), json).unwrap();
+}
+
+/// The L1 shape of the same finding: the suite ran, the JUnit names the failing
+/// test, and the folded status confirms the failure. Judged identically.
+#[test]
+fn a_failed_l1_command_on_a_green_job_is_judged_by_the_baseline_alone() {
+    let temp = TempDir::new("normalized-l1");
+    normalized_failure_status(temp.path(), "messenger", "L1", "windows-latest");
+    let statuses = read_producer_statuses(temp.path()).unwrap();
+
+    let mut record = passing_record("messenger", "windows-latest", Tier::L1);
+    record.counts.failed = 1;
+    record.counts.total += 1;
+    record.failed_tests = vec!["messenger::desktop::notification".into()];
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[expectation("messenger", "windows-latest", Tier::L1)],
+        records: &[record],
+        statuses: &statuses,
+        expected_tests: &BTreeMap::new(),
+    }));
+    assert_eq!(cell.state, CellState::Fail);
+
+    let rollup = rollup_of(vec![cell], &["messenger"]);
+    assert!(blocks_with_rule(&verdict(&rollup, &Baseline::default(), None), "cell-failed"));
+    let exact = Baseline {
+        schema_version: BASELINE_SCHEMA_VERSION,
+        failure: vec![failure_entry("messenger", "windows-latest", Tier::L1)],
+        skip: Vec::new(),
+    };
+    let findings = verdict(&rollup, &exact, None);
+    assert!(!any_block(&findings), "unexpected blocks: {findings:#?}");
+}
+
+/// A green JUnit under a folded `failure` status (the backend-proof bracket or
+/// a fixture failed after every test passed) is still a FAIL cell: the status
+/// can only worsen a reading, and nothing in it can be misread as a pass.
+#[test]
+fn a_folded_failure_status_downgrades_a_green_report_without_a_detail() {
+    let temp = TempDir::new("normalized-green-junit");
+    normalized_failure_status(temp.path(), "sniff-cli", "L1", "ubuntu-latest");
+    let statuses = read_producer_statuses(temp.path()).unwrap();
+
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[expectation("sniff-cli", "ubuntu-latest", Tier::L1)],
+        records: &[passing_record("sniff-cli", "ubuntu-latest", Tier::L1)],
+        statuses: &statuses,
+        expected_tests: &BTreeMap::new(),
+    }));
+    assert_eq!(cell.state, CellState::Fail);
+    assert!(
+        cell.reasons.iter().any(|r| r.contains("producer status reports `failure`")),
+        "the downgrade must say the status, not the job, reported it: {:?}",
+        cell.reasons
+    );
+}
+
+/// Normalization changes what the JOB concludes, never what the rollup
+/// requires: a gate command that failed to build (exit 101, no report) is
+/// MISSING under a folded `failure` status exactly as before, and a cell with
+/// neither report nor status is MISSING too. Neither can be baselined.
+#[test]
+fn a_normalized_producer_with_no_report_is_missing_and_no_baseline_excuses_it() {
+    let temp = TempDir::new("normalized-missing");
+    normalized_failure_status(temp.path(), "queue", "L1", "windows-latest");
+    let statuses = read_producer_statuses(temp.path()).unwrap();
+
+    let mut built_nothing = record("queue", "windows-latest", Tier::L1);
+    built_nothing.report_present = false;
+    built_nothing.exit_code = 101;
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[expectation("queue", "windows-latest", Tier::L1)],
+        records: &[built_nothing],
+        statuses: &statuses,
+        expected_tests: &BTreeMap::new(),
+    }));
+    assert_eq!(cell.state, CellState::Missing);
+    let excused_anyway = Baseline {
+        schema_version: BASELINE_SCHEMA_VERSION,
+        failure: vec![failure_entry("queue", "windows-latest", Tier::L1)],
+        skip: Vec::new(),
+    };
+    let findings = verdict(&rollup_of(vec![cell], &["queue"]), &excused_anyway, None);
+    assert!(blocks_with_rule(&findings, "cell-missing"), "{findings:#?}");
+
+    // Neither a status nor a report: the producer never got as far as the
+    // status step (or its upload failed), and the job itself is red for it.
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[expectation("queue", "macos-latest", Tier::L1)],
+        records: &[],
+        statuses: &[],
+        expected_tests: &BTreeMap::new(),
+    }));
+    assert_eq!(cell.state, CellState::Missing);
+    let findings = verdict(&rollup_of(vec![cell], &["queue"]), &excused_anyway, None);
+    assert!(blocks_with_rule(&findings, "cell-missing"), "{findings:#?}");
 }

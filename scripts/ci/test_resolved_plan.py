@@ -194,6 +194,53 @@ class SelectionTests(PlannerFixture):
         self.assertTrue(plan["flags"]["ci_tooling"])
 
 
+class DependentSeamTests(PlannerFixture):
+    """Open Question 1, Option B, against the real workspace graph.
+
+    A darkmatter change compiles its unchanged direct dependents (`dmls` and
+    `darkmatter-cli` among them) inside darkmatter's own `ubuntu-latest` check
+    cell; those dependents still receive no job, area, or cell.
+    """
+
+    def test_a_hub_change_attributes_its_unchanged_dependents_to_its_own_check(self) -> None:
+        plan = self.plan("darkmatter/lib/src/lib.rs")
+        record = self.package_record(plan, "darkmatter")
+        seam = record["dependent_seam"]
+        self.assertLessEqual({"dmls", "darkmatter-cli"}, set(seam["dependents"]))
+        self.assertEqual(sorted(seam["dependents"]), seam["dependents"])
+        self.assertLessEqual(set(seam["dependents"]), set(plan["reverse_dependencies"]))
+        self.assertEqual(
+            [], sorted(set(seam["dependents"]) & set(self.job_packages(plan)))
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        for name in seam["dependents"]:
+            self.assertRegex(seam["check_args"], rf"(^| )-p {name}( |$)")
+        self.assertNotIn("--all-targets", seam["check_args"])
+
+    def test_only_the_linux_check_cell_carries_the_seam(self) -> None:
+        plan = self.plan("darkmatter/lib/src/lib.rs")
+        record = self.package_record(plan, "darkmatter")
+        checks = {
+            cell["environment"]: cell
+            for cell in self.cells(plan)
+            if cell["package"] == "darkmatter" and cell["gate"] == "check"
+        }
+        self.assertIn("ubuntu-latest", checks)
+        self.assertEqual(record["dependent_seam"]["dependents"], checks["ubuntu-latest"]["dependents"])
+        for environment, cell in checks.items():
+            if environment != "ubuntu-latest":
+                self.assertNotIn("dependents", cell)
+        matrix = {entry["package"]: entry for entry in legacy_scope_document(plan)["matrix"]}
+        self.assertEqual(
+            record["dependent_seam"]["check_args"], matrix["darkmatter"]["dependents_check_args"]
+        )
+
+    def test_a_full_scope_run_attributes_no_dependents(self) -> None:
+        plan = self.plan(force_all=True)
+        self.assertEqual([], [entry["package"] for entry in plan["packages"] if "dependent_seam" in entry])
+        self.assertEqual([], [cell for cell in self.cells(plan) if "dependents" in cell])
+
+
 class AreaGroupingTests(PlannerFixture):
     """AC2 and AC15: area is derived from the manifest directory."""
 
@@ -670,7 +717,12 @@ class ResultCompletenessTests(PlannerFixture):
         # area then dropped out of the fan-out, its local-origin results would
         # be reported nowhere at all, which is the PR #76 failure mode wearing
         # a different hat.
-        plan = self.plan("playa/lib/src/lib.rs")
+        #
+        # playa-cli, not playa: a receipt can never satisfy a check cell, and
+        # the playa library owns one for its unchanged dependents (Open
+        # Question 1, Option B), so only a package with no dependents and no
+        # example/bench kinds can have EVERY cell reused.
+        plan = self.plan("playa/cli/src/main.rs")
         playa_cells = [cell for cell in self.cells(plan) if cell["area"] == "playa"]
         self.assertTrue(playa_cells, "the fixture must select the playa area")
         accepted = [
@@ -682,7 +734,7 @@ class ResultCompletenessTests(PlannerFixture):
             }
             for cell in playa_cells
         ]
-        reused = self.plan("playa/lib/src/lib.rs", accepted_cells=accepted)
+        reused = self.plan("playa/cli/src/main.rs", accepted_cells=accepted)
         states = {
             cell["state"] for cell in self.cells(reused) if cell["area"] == "playa"
         }

@@ -77,8 +77,9 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   cells: a governed absence stays visible without demanding a result.
 - `source_packages[]` and `reverse_dependencies[]` — which packages *changed*,
   and which direct reverse dependents were reported but selected nowhere. An
-  unchanged dependent receives no area, package record, or cell (AC1); whether
-  its seam is compiled at all is Open Question 1.
+  unchanged dependent receives no area, package record, or cell (AC1); its
+  seam is compiled inside the changed package's own `ubuntu-latest` check
+  cell, whose `dependents` names it (Open Question 1, Option B).
 - `environments[]` — the `.github/ci/environments.json` records the cells were
   resolved against, verbatim: the runner labels, native keys, and capabilities
   that evidence application and the legacy projection read.

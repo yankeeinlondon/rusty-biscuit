@@ -2,7 +2,8 @@
 /**
  * Monitor the current branch's CI run and delegate repairs until one complete
  * run passes. Production mode exits successfully only after both the workflow
- * and its ci-verdict job succeed with no bad job conclusions.
+ * and its ci-gate job — the policy-free fold of every blocking job's result,
+ * the single required check — succeed with no bad job conclusions.
  *
  * Usage:
  *   .claudine/scripts/ci-watchdog.ts
@@ -316,7 +317,8 @@ function repairTargets(jobs: WorkflowJob[]): WorkflowJob[] {
     const actionable = badJobs(jobs).filter(
         (job) => job.conclusion !== "cancelled",
     );
-    const concrete = actionable.filter((job) => job.name !== "ci-verdict");
+    // The gate fails BECAUSE a job it folds did; it is never the thing to fix.
+    const concrete = actionable.filter((job) => job.name !== "ci-gate");
     return concrete.length > 0 ? concrete : actionable;
 }
 
@@ -482,17 +484,17 @@ async function inspectOnce(): Promise<Inspection> {
         return "pending";
     }
 
-    const verdict = jobs.find((job) => job.name === "ci-verdict");
-    if (runInfo.conclusion === "success" && verdict?.conclusion === "success") {
+    const gate = jobs.find((job) => job.name === "ci-gate");
+    if (runInfo.conclusion === "success" && gate?.conclusion === "success") {
         log(
-            `SUCCESS: full CI run ${runInfo.databaseId} completed with ci-verdict green and zero bad jobs.`,
+            `SUCCESS: full CI run ${runInfo.databaseId} completed with ci-gate green and zero bad jobs.`,
         );
         return "success";
     }
 
     log(
         `Completed run is not fully green: workflow=${runInfo.conclusion || "none"}, ` +
-            `ci-verdict=${verdict?.conclusion ?? "missing"}.`,
+            `ci-gate=${gate?.conclusion ?? "missing"}.`,
     );
     invokeRepairAgent(runInfo, failedJobs, sha);
     return "failure";

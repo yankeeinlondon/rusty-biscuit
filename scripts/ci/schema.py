@@ -222,6 +222,11 @@ PACKAGE_FIELDS: dict[str, bool] = {
     #: is computed over these plus the gate's global inputs. Optional: a plan
     #: that omits it simply makes its cells exact-tree-only for reuse.
     "input_paths": False,
+    #: The unchanged direct reverse dependencies compiled inside this package's
+    #: own `ubuntu-latest` check cell (Open Question 1, Option B): the sorted
+    #: `dependents` names and the explicit `check_args` that compile them.
+    #: Present exactly when at least one is attributed; never names a package
+    #: the plan also selects.
     "dependent_seam": False,
 }
 
@@ -244,6 +249,9 @@ CELL_FIELDS: dict[str, bool] = {
     "evidence": False,
     "gap": False,
     "prohibition": False,
+    #: On a `check` cell only: the package record's `dependent_seam.dependents`,
+    #: carried so a reader of the cell alone sees what it also compiled.
+    "dependents": False,
 }
 
 RECEIPT_FIELDS: dict[str, bool] = {
@@ -492,6 +500,8 @@ def validate_resolved_plan(document: Any) -> list[str]:
                 f"malformed-receipt: package {entry['package']} carries an exclusion "
                 "exactly when it gates nothing"
             )
+        if "dependent_seam" in entry:
+            problems += _dependent_seam(entry["package"], entry["dependent_seam"])
 
     if not isinstance(document["environments"], list) or not all(
         isinstance(environment, dict) and isinstance(environment.get("name"), str)
@@ -513,6 +523,17 @@ def validate_resolved_plan(document: Any) -> list[str]:
             for name in document["reverse_dependencies"]
             if name in packages
         ]
+    for name, entry in packages.items():
+        seam = entry.get("dependent_seam")
+        if isinstance(seam, dict) and isinstance(seam.get("dependents"), list):
+            # The same rule for the compiled seam: a dependent is compiled
+            # inside the changed package's cell BECAUSE it is not selected.
+            problems += [
+                f"unknown-package: {dependent!r} is compiled as a dependent of "
+                f"{name!r} and must not also hold a package record"
+                for dependent in seam["dependents"]
+                if dependent in packages
+            ]
 
     for entry in document["cells"]:
         problems += _keys("cell record", entry, CELL_FIELDS)
@@ -538,6 +559,13 @@ def validate_resolved_plan(document: Any) -> list[str]:
             )
         if not entry.get("selection_reason"):
             problems.append(f"malformed-receipt: {label} has no selection reason")
+        if "dependents" in entry:
+            problems += _str_list(f"{label} dependents", entry["dependents"])
+            if entry.get("gate") != "check":
+                problems.append(
+                    f"malformed-receipt: {label} carries dependents but only a check "
+                    "cell compiles them"
+                )
         problems += _cell_consistency(label, entry)
 
     if "evidence_rejections" in document:
@@ -546,6 +574,24 @@ def validate_resolved_plan(document: Any) -> list[str]:
         )
     if not isinstance(document["job_estimate"], int) or document["job_estimate"] < 0:
         problems.append("malformed-receipt: resolved plan job_estimate must be a non-negative integer")
+    return problems
+
+
+def _dependent_seam(package: str, seam: Any) -> list[str]:
+    where = f"package {package} dependent_seam"
+    if not isinstance(seam, dict):
+        return [f"malformed-receipt: {where} must be an object"]
+    problems = _keys(where, seam, {"dependents": True, "check_args": True})
+    if problems:
+        return problems
+    problems += _str_list(f"{where} dependents", seam["dependents"])
+    if not seam["dependents"]:
+        problems.append(
+            f"malformed-receipt: {where} names no dependent; a record with none "
+            "to compile carries no seam at all"
+        )
+    if not isinstance(seam["check_args"], str) or not seam["check_args"]:
+        problems.append(f"malformed-receipt: {where} check_args must be a non-empty string")
     return problems
 
 

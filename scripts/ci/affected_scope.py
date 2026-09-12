@@ -167,6 +167,22 @@ L1_TARGET_KINDS = ("lib", "bin", "test")
 # the L1 kinds and make the cell's `target_kinds` a label rather than a fact.
 CHECK_SELECTORS = {"example": "--examples", "bench": "--benches"}
 
+# Cargo's explicit selector for each L1 kind of an UNCHANGED direct dependent
+# compiled inside a changed package's own check cell (Open Question 1, ruled
+# Option B on 2026-09-12). The seam under test is the changed package's public
+# API, and a consumer's `lib`, `bin`, and `test` targets are what consume it —
+# the same kinds its own L1 build would compile were it selected. Its
+# `example`/`bench` kinds are deliberately not selected: they would need a
+# check cell of their own if the dependent were selected, and that cost is not
+# in the ruling. Selected by the dependent's DECLARED kinds, never
+# `--all-targets`, for the same reason as `CHECK_SELECTORS`.
+DEPENDENT_SELECTORS = {"lib": "--lib", "bin": "--bins", "test": "--tests"}
+
+# The one environment on which dependents are compiled (the ruling: Linux
+# only). `_package-ci.yml` spells the same label in its step condition;
+# `ci_workflow_contracts.rs` asserts the two agree.
+DEPENDENTS_ENVIRONMENT = "ubuntu-latest"
+
 # Cargo target kinds this planner schedules for, in `schema.TARGET_KINDS`
 # order. `custom-build` (build.rs) is deliberately absent: it is compiled as
 # part of every other kind and is never independently selectable.
@@ -749,6 +765,36 @@ def check_arguments(package: str, target_kinds: Sequence[str], features: str) ->
     return " ".join(part for part in ["-p", package, *selectors, features] if part)
 
 
+def dependent_seam(
+    dependents: Sequence[str], packages_by_name: dict[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    """The unchanged dependents a changed package compiles in its own check.
+
+    One `cargo check` for all of them: every `-p`, then the union of the
+    `DEPENDENT_SELECTORS` their declared kinds need. A selector appears only
+    when at least one listed dependent declares that kind, so no flag is a
+    no-op. No feature flags: the seam is the public API under each dependent's
+    default features, and declared-feature coverage is the dependent's own L1
+    when it is itself selected.
+
+    ## Returns
+
+    `{"dependents": [...], "check_args": "..."}`, or `None` when there is
+    nothing to compile — the record then carries no `dependent_seam` at all.
+    """
+    names = sorted(dependents)
+    if not names:
+        return None
+    kinds: set[str] = set()
+    for name in names:
+        kinds.update(declared_target_kinds(packages_by_name[name]))
+    selectors = [
+        DEPENDENT_SELECTORS[kind] for kind in TARGET_KINDS if kind in kinds and kind in DEPENDENT_SELECTORS
+    ]
+    parts = [part for name in names for part in ("-p", name)] + selectors
+    return {"dependents": names, "check_args": " ".join(parts)}
+
+
 def package_directories(
     root: Path, packages: dict[str, dict[str, Any]]
 ) -> list[tuple[PurePosixPath, str]]:
@@ -758,6 +804,23 @@ def package_directories(
         relative = manifest.parent.relative_to(root.resolve())
         directories.append((PurePosixPath(relative.as_posix()), package_id))
     return sorted(directories, key=lambda item: len(item[0].parts), reverse=True)
+
+
+def reverse_dependency_map(
+    metadata: dict[str, Any], packages: dict[str, dict[str, Any]]
+) -> dict[str, set[str]]:
+    """Each workspace member's DIRECT reverse dependencies among the members."""
+    reverse_dependencies: dict[str, set[str]] = {
+        package_id: set() for package_id in packages
+    }
+    for node in metadata["resolve"]["nodes"]:
+        if node["id"] not in packages:
+            continue
+        for dependency in node.get("deps", []):
+            dependency_id = dependency["pkg"]
+            if dependency_id in reverse_dependencies:
+                reverse_dependencies[dependency_id].add(node["id"])
+    return reverse_dependencies
 
 
 def direct_dependents(
@@ -771,16 +834,7 @@ def direct_dependents(
     surfaces the next time the intermediate itself is touched (or on a
     `workflow_dispatch` full run).
     """
-    reverse_dependencies: dict[str, set[str]] = {
-        package_id: set() for package_id in packages
-    }
-    for node in metadata["resolve"]["nodes"]:
-        if node["id"] not in packages:
-            continue
-        for dependency in node.get("deps", []):
-            dependency_id = dependency["pkg"]
-            if dependency_id in reverse_dependencies:
-                reverse_dependencies[dependency_id].add(node["id"])
+    reverse_dependencies = reverse_dependency_map(metadata, packages)
 
     affected = set(seeds)
     for package_id in seeds:
@@ -1405,6 +1459,7 @@ def package_cells(
     accepted: dict[tuple[str, str, str], dict[str, Any]],
     accepted_environments: dict[str, dict[str, Any]] | None = None,
     prohibitions: dict[str, dict[str, Any]] | None = None,
+    dependents: Sequence[str] = (),
 ) -> list[dict[str, Any]]:
     """Every result cell one gating package owns, with its execution decided.
 
@@ -1418,6 +1473,12 @@ def package_cells(
     Each cell records whether local evidence may ever satisfy it (`reusable`),
     so evidence verified after the plan was resolved can be applied to the
     carried document without re-deriving the policy that decided it.
+
+    `dependents` are the unchanged direct reverse dependencies this package
+    compiles inside its `DEPENDENTS_ENVIRONMENT` check cell (Open Question 1,
+    Option B). They give a package that check cell even when no target kind of
+    its own needs one; the other native environments' check cells still exist
+    only for uncovered kinds.
     """
     package = record["package"]
     cells: list[dict[str, Any]] = []
@@ -1431,6 +1492,7 @@ def package_cells(
         *,
         gap: dict[str, Any] | None = None,
         reusable: bool = True,
+        compiled_dependents: Sequence[str] = (),
     ) -> None:
         cell: dict[str, Any] = {
             "package": package,
@@ -1445,6 +1507,8 @@ def package_cells(
             "compile_coverage_from": coverage,
             "selection_reason": reason,
         }
+        if compiled_dependents:
+            cell["dependents"] = list(compiled_dependents)
         if gap is not None:
             cell["execution"] = "omit"
             cell["origin"] = "none"
@@ -1479,6 +1543,11 @@ def package_cells(
     )
 
     unchecked = uncovered_target_kinds(target_kinds)
+    seam = sorted(dependents)
+    seam_reason = (
+        f"also compiles {len(seam)} unchanged dependent(s) against {package}'s "
+        f"public API: {', '.join(seam)}"
+    )
     if unchecked:
         for environment in native_environments(environments):
             name = environment["name"]
@@ -1489,6 +1558,7 @@ def package_cells(
                 for guest in environments
                 if capability(guest, "archive_only") and guest["native_key"] == name
             ]
+            hosts_seam = name == DEPENDENTS_ENVIRONMENT and bool(seam)
             add(
                 name,
                 "check",
@@ -1501,12 +1571,27 @@ def package_cells(
                     "(archive built here, never compiles)"
                     if stands_for
                     else ""
-                ),
+                )
+                + (f"; {seam_reason}" if hosts_seam else ""),
                 # A local receipt records L1, L2, and browser only (see
                 # `local_evidence.RECORDABLE_GATES`), so no evidence — per-cell
                 # or whole-environment — can ever stand in for a check.
                 reusable=False,
+                compiled_dependents=seam if hosts_seam else (),
             )
+    elif seam:
+        # No kind of its own needs a check, so this cell compiles nothing of
+        # the package (`target_kinds` is empty) and exists for the seam alone.
+        add(
+            DEPENDENTS_ENVIRONMENT,
+            "check",
+            [],
+            "check",
+            f"no target kind of {package} needs a check; {seam_reason}; "
+            f"checked on {DEPENDENTS_ENVIRONMENT} only",
+            reusable=False,
+            compiled_dependents=seam,
+        )
 
     l1_kinds = [kind for kind in target_kinds if kind in L1_TARGET_KINDS]
     for environment in environments:
@@ -1591,6 +1676,8 @@ def matrix_record(
         "area": record["area"],
         "gates": sorted(gates, key=GATES.index),
         "check_args": record["check_args"],
+        "dependents": record.get("dependent_seam", {}).get("dependents", []),
+        "dependents_check_args": record.get("dependent_seam", {}).get("check_args", ""),
         "test_args": record["test_args"],
         "l1_include_slow": record["l1_include_slow"],
         "tiers": tiers,
@@ -1748,13 +1835,29 @@ def calculate_scope(
 
     source_paths = source_paths_by_package(list(files), root, packages)
     source_ids = set(source_paths)
+    reverse_map = reverse_dependency_map(metadata, packages)
     reverse_ids = direct_dependents(source_ids, metadata, packages) - source_ids
 
     # AC1: an unchanged direct reverse dependent is *reported* here and
-    # selected nowhere — no area, no package record, no cell. Whether its seam
-    # is compiled at all, and where, is Open Question 1; every option there
-    # leaves this presentation rule intact.
+    # selected nowhere — no area, no package record, no cell. Its seam is
+    # compiled inside the changed package's own check cell instead (Open
+    # Question 1, ruled Option B 2026-09-12): each source package's record and
+    # `DEPENDENTS_ENVIRONMENT` check cell list the unselected, gating
+    # dependents attributed to it. A dependent that is itself selected is
+    # excluded (its own gates cover it), and a full-scope run selects
+    # everything, so it attributes none.
     affected_ids = set(packages) if full_scope else source_ids
+    packages_by_name = {package["name"]: package for package in packages.values()}
+
+    def attributed_dependents(package_id: str) -> list[str]:
+        return sorted(
+            packages[dependent]["name"]
+            for dependent in reverse_map[package_id]
+            if dependent not in affected_ids
+            # A `gates = false` member is a governed "CI launches nothing for
+            # this package"; compiling it here would launch something.
+            and policy[packages[dependent]["name"]]["gates"]
+        )
     impacted = sorted(packages[package_id]["name"] for package_id in affected_ids)
     id_of = {packages[package_id]["name"]: package_id for package_id in affected_ids}
 
@@ -1782,6 +1885,7 @@ def calculate_scope(
             continue
 
         target_kinds = declared_target_kinds(packages[package_id])
+        seam = dependent_seam(attributed_dependents(package_id), packages_by_name)
         owned = package_cells(
             record,
             area,
@@ -1790,33 +1894,35 @@ def calculate_scope(
             accepted,
             whole_environments,
             prohibitions,
+            dependents=seam["dependents"] if seam else (),
         )
         cells.extend(owned)
         features = feature_args(record, name)
-        package_records.append(
-            {
-                "package": name,
-                "area": area,
-                "selection_reason": reason,
-                "gates": [
-                    gate
-                    for gate in schema.GATES
-                    if any(cell["gate"] == gate for cell in owned)
-                ],
-                "targets": target_kinds,
-                "tiers": record["tiers"],
-                "test_args": features,
-                "check_args": check_arguments(name, target_kinds, features),
-                "l2_backends": record["l2_backends"],
-                "runner_tools": record["runner_tools"],
-                "companion_suites": record["companion_suites"],
-                "l1_include_slow": record["l1_include_slow"],
-                "native": native_closure(package_id, metadata, packages, policy),
-                "input_paths": closure_directories(
-                    package_id, root, metadata, packages
-                ),
-            }
-        )
+        package_record = {
+            "package": name,
+            "area": area,
+            "selection_reason": reason,
+            "gates": [
+                gate
+                for gate in schema.GATES
+                if any(cell["gate"] == gate for cell in owned)
+            ],
+            "targets": target_kinds,
+            "tiers": record["tiers"],
+            "test_args": features,
+            "check_args": check_arguments(name, target_kinds, features),
+            "l2_backends": record["l2_backends"],
+            "runner_tools": record["runner_tools"],
+            "companion_suites": record["companion_suites"],
+            "l1_include_slow": record["l1_include_slow"],
+            "native": native_closure(package_id, metadata, packages, policy),
+            "input_paths": closure_directories(
+                package_id, root, metadata, packages
+            ),
+        }
+        if seam:
+            package_record["dependent_seam"] = seam
+        package_records.append(package_record)
 
     gating = [entry for entry in package_records if entry["gates"]]
     if len(gating) > MATRIX_LIMIT:
@@ -2285,8 +2391,9 @@ def read_accepted_cells(source: str | None) -> list[dict[str, Any]]:
 def read_prohibitions(directory: str | None) -> dict[str, dict[str, Any]]:
     """The recorded constraints, keyed by the environment each forbids.
 
-    The store's location is Open Question 2; `constraints.py` owns that choice
-    and this function owns none of it.
+    The store is only ever the explicit `--constraints` directory: its default
+    location is resolved by `constraints.py` at the trigger boundary (the hook,
+    `just ci-local`), never here, so CI, which passes no store, cannot read one.
     """
     if not directory:
         return {}

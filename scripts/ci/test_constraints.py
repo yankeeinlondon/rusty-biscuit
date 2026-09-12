@@ -3,19 +3,22 @@
 
 The store guards a trigger boundary, so the fixtures here are about refusal:
 what blocks a push, what stops blocking it, and what a reader is told. The
-store's *location* is Open Question 2 and is deliberately not asserted — every
-fixture names the directory explicitly, exactly as the hook suite does.
+refusal fixtures name the directory explicitly; `LocationTests` covers the
+default location (OQ2, ruled 2026-09-12) and the fresh session that finds it
+with no variable set.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -374,16 +377,111 @@ class CommandTests(StoreFixture):
         self.assertEqual("wsl2-ubuntu", result.stdout.strip())
 
 
-class LocationTests(unittest.TestCase):
-    """Open Question 2 is unruled, and the code says so in one place."""
+class LocationTests(StoreFixture):
+    """OQ2 (ruled 2026-09-12, Option B): `<home>/.rusty-biscuit/ci-constraints/<repository>/`.
 
-    def test_the_default_location_is_still_the_open_question(self) -> None:
-        self.assertEqual(
-            "",
-            constraints.default_directory(),
-            "OQ2 (where a constraint is persisted) has no ruling on record; when "
-            "one lands, fill default_directory() and delete this fixture",
+    The home is relocated through the environment rather than by patching
+    `Path.home`, because that is the seam a real session crosses: HOME on
+    Unix, USERPROFILE on native Windows, so both are set.
+    """
+
+    REMOTE = "git@github.com:yankeeinlondon/rusty-biscuit.git"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.home = self.store / "home"
+        self.home.mkdir()
+        self.environment = mock.patch.dict(
+            os.environ,
+            {"HOME": str(self.home), "USERPROFILE": str(self.home)},
+            clear=False,
         )
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+        os.environ.pop(constraints.ENVIRONMENT_VARIABLE, None)
+        self.root = self.home / ".rusty-biscuit" / "ci-constraints"
+
+    def test_the_default_is_the_repository_directory_beside_the_evidence(self) -> None:
+        self.assertEqual(
+            str(self.root / "github.com" / "yankeeinlondon" / "rusty-biscuit"),
+            constraints.default_directory(self.REMOTE),
+        )
+
+    def test_every_spelling_of_one_remote_shares_one_directory(self) -> None:
+        expected = constraints.default_directory(self.REMOTE)
+        for remote in (
+            "https://github.com/yankeeinlondon/rusty-biscuit.git",
+            "ssh://git@github.com/yankeeinlondon/rusty-biscuit",
+            "github.com/yankeeinlondon/rusty-biscuit",
+        ):
+            with self.subTest(remote=remote):
+                self.assertEqual(expected, constraints.default_directory(remote))
+
+    def test_an_unknown_repository_resolves_to_the_store_root(self) -> None:
+        self.assertEqual(str(self.root), constraints.default_directory(""))
+
+    def test_the_directory_never_escapes_the_root_and_is_portable(self) -> None:
+        # A filesystem remote's identity is an absolute path; a port or a
+        # Windows drive carries a colon. Neither may leave the root or name a
+        # segment some OS refuses.
+        for remote, segments in (
+            ("/tmp/work/origin.git", ("tmp", "work", "origin")),
+            ("C:\\Users\\ken\\origin.git", ("C", "Users", "ken", "origin")),
+            ("ssh://git@github.com:2222/org/repo.git", ("github.com_2222", "org", "repo")),
+        ):
+            with self.subTest(remote=remote):
+                self.assertEqual(
+                    str(self.root.joinpath(*segments)), constraints.default_directory(remote)
+                )
+
+    def test_the_override_wins_over_the_default(self) -> None:
+        with mock.patch.dict(os.environ, {constraints.ENVIRONMENT_VARIABLE: "/elsewhere"}):
+            self.assertEqual("/elsewhere", constraints.resolve_directory(self.REMOTE))
+            self.assertEqual("/explicit", constraints.resolve_directory(self.REMOTE, "/explicit"))
+        self.assertEqual(
+            constraints.default_directory(self.REMOTE), constraints.resolve_directory(self.REMOTE)
+        )
+
+    def write_under(self, relative: str, **overrides: object) -> None:
+        path = self.root / relative / "current.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.constraint(**overrides)), encoding="utf-8")
+
+    def test_the_root_reads_every_repository_and_a_repository_only_its_own(self) -> None:
+        self.write_under("github.com/yankeeinlondon/rusty-biscuit", reason="ours")
+        self.write_under("github.com/other/repo", reason="theirs")
+        at_root = constraints.load(constraints.default_directory(""), today=TODAY)[0]
+        self.assertEqual(["ours", "theirs"], sorted(entry.document["reason"] for entry in at_root))
+        ours = constraints.load(constraints.default_directory(self.REMOTE), today=TODAY)[0]
+        self.assertEqual(["ours"], [entry.document["reason"] for entry in ours])
+
+    def test_a_fresh_session_without_the_variable_is_bound_by_a_recorded_constraint(self) -> None:
+        # The real command, in a child that inherits no store variable and
+        # whose home is the relocated one: the case that was still open.
+        self.write_under("github.com/yankeeinlondon/rusty-biscuit", reason="recorded last session")
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if key != constraints.ENVIRONMENT_VARIABLE
+        }
+        result = subprocess.run(
+            [sys.executable, str(MODULE), "check", "--repository", self.REMOTE],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=environment,
+        )
+        self.assertNotEqual(0, result.returncode, "the record was not found from a fresh session")
+        self.assertIn("recorded last session", result.stderr)
+        result = subprocess.run(
+            [sys.executable, str(MODULE), "directory", "--repository", self.REMOTE],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=environment,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(constraints.default_directory(self.REMOTE), result.stdout.strip())
 
 
 if __name__ == "__main__":

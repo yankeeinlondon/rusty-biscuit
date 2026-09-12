@@ -26,6 +26,8 @@ from affected_scope import (
     matrix_record,
     package_cells,
     check_arguments,
+    dependent_seam,
+    DEPENDENTS_ENVIRONMENT,
     feature_args,
     apply_accepted_cells,
     capability,
@@ -143,11 +145,16 @@ class AffectedScopeTests(unittest.TestCase):
         scope = self.scope(["alpha/lib/src/lib.rs"])
         self.assertEqual(["alpha-core"], scope["packages"])
         self.assertEqual(["beta-app"], scope["reverse_dependencies"])
-        # No `check` gate: alpha-core declares only a library target, which the
-        # L1 build already compiles (spec section 1.7).
+        # alpha-core declares only a library target, which the L1 build
+        # already compiles (spec section 1.7), so its `check` gate exists for
+        # beta-app's seam alone: one Linux cell owned by alpha-core (Open
+        # Question 1, Option B), never a job for beta-app.
         gates = {entry["package"]: entry["gates"] for entry in scope["matrix"]}
-        self.assertEqual(["lint", "test"], gates["alpha-core"])
+        self.assertEqual(["lint", "check", "test"], gates["alpha-core"])
         self.assertNotIn("beta-app", gates)
+        alpha = next(entry for entry in scope["matrix"] if entry["package"] == "alpha-core")
+        self.assertEqual([DEPENDENTS_ENVIRONMENT], alpha["check_os"])
+        self.assertEqual(["beta-app"], alpha["dependents"])
 
     def test_an_unchanged_reverse_dependent_gets_no_area_job_or_cell(self) -> None:
         plan = calculate_scope(
@@ -311,7 +318,12 @@ class AffectedScopeTests(unittest.TestCase):
     def test_non_source_input_does_not_widen_a_source_change(self) -> None:
         scope = self.scope(["clippy.toml", "alpha/lib/src/lib.rs"])
         gates = {entry["package"]: entry["gates"] for entry in scope["matrix"]}
-        self.assertEqual(["lint", "test"], gates["alpha-core"])
+        unwidened = {
+            entry["package"]: entry["gates"]
+            for entry in self.scope(["alpha/lib/src/lib.rs"])["matrix"]
+        }
+        self.assertEqual(unwidened, gates)
+        self.assertEqual(["lint", "check", "test"], gates["alpha-core"])
         self.assertNotIn("beta-app", gates)
         self.assertNotIn("shared-tests", gates)
 
@@ -1752,6 +1764,308 @@ class CheckCellScopeTests(unittest.TestCase):
         self.assertEqual([], matrix["beta-app"]["check_os"])
 
 
+class DependentSeamTests(unittest.TestCase):
+    """Open Question 1, Option B: the seam is compiled inside the changed package.
+
+    A change to `alpha-core` compiles its unchanged direct dependents as a step
+    of alpha-core's own `ubuntu-latest` check cell. The dependents receive no
+    area, record, or cell (AC1 holds), a dependent that is itself selected is
+    excluded, a `gates = false` dependent is never compiled, and the other
+    native environments' check cells still exist only for uncovered kinds.
+    """
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        # beta-app and gamma-lib depend on alpha-core; gamma-lib also depends
+        # on delta-lib; excluded-app depends on alpha-core but gates nothing.
+        packages = [
+            package(self.root, "alpha-core", "alpha/lib/Cargo.toml", targets=["lib"]),
+            package(self.root, "beta-app", "beta/app/Cargo.toml", targets=["bin", "test"]),
+            package(self.root, "gamma-lib", "gamma/lib/Cargo.toml", targets=["lib", "example"]),
+            package(self.root, "delta-lib", "delta/lib/Cargo.toml", targets=["lib", "bench"]),
+            package(
+                self.root,
+                "excluded-app",
+                "excluded/app/Cargo.toml",
+                targets=["bin"],
+                ci=ci_policy(
+                    gates=False,
+                    reason="blocked on identified work",
+                    owner="@o",
+                    **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+                ),
+            ),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {
+                "nodes": [
+                    {"id": "alpha-core", "deps": []},
+                    {"id": "beta-app", "deps": [{"pkg": "alpha-core", "dep_kinds": [{"kind": None}]}]},
+                    {
+                        "id": "gamma-lib",
+                        "deps": [
+                            {"pkg": "alpha-core", "dep_kinds": [{"kind": None}]},
+                            {"pkg": "delta-lib", "dep_kinds": [{"kind": None}]},
+                        ],
+                    },
+                    {"id": "delta-lib", "deps": []},
+                    {"id": "excluded-app", "deps": [{"pkg": "alpha-core", "dep_kinds": [{"kind": None}]}]},
+                ]
+            },
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def plan(self, *files: str, **kwargs: object) -> dict[str, object]:
+        return calculate_scope(
+            list(files),
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    @staticmethod
+    def check_cells(plan: dict[str, object], package: str) -> dict[str, dict[str, object]]:
+        return {
+            cell["environment"]: cell
+            for cell in plan["cells"]  # type: ignore[union-attr]
+            if cell["package"] == package and cell["gate"] == "check"
+        }
+
+    def test_a_change_lists_its_unchanged_gating_dependents_on_its_own_record(self) -> None:
+        plan = self.plan("alpha/lib/src/lib.rs")
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        records = {entry["package"]: entry for entry in plan["packages"]}  # type: ignore[union-attr]
+        self.assertEqual(["alpha-core"], sorted(records))
+        self.assertEqual(
+            {
+                "dependents": ["beta-app", "gamma-lib"],
+                "check_args": "-p beta-app -p gamma-lib --lib --bins --tests",
+            },
+            records["alpha-core"]["dependent_seam"],
+        )
+        self.assertEqual(["lint", "check", "L1"], records["alpha-core"]["gates"])
+        # Reporting is unchanged: every unselected direct dependent, gating or
+        # not, is still named in the summary row.
+        self.assertEqual(
+            ["beta-app", "excluded-app", "gamma-lib"], plan["reverse_dependencies"]
+        )
+        self.assertEqual(["alpha"], [entry["area"] for entry in plan["areas"]])  # type: ignore[union-attr]
+        self.assertEqual(
+            [], [cell for cell in plan["cells"] if cell["package"] != "alpha-core"]  # type: ignore[union-attr]
+        )
+
+    def test_a_package_with_no_uncovered_kind_gets_one_linux_check_cell_for_the_seam(self) -> None:
+        checks = self.check_cells(self.plan("alpha/lib/src/lib.rs"), "alpha-core")
+        self.assertEqual([DEPENDENTS_ENVIRONMENT], sorted(checks))
+        cell = checks[DEPENDENTS_ENVIRONMENT]
+        self.assertEqual("ubuntu-latest", DEPENDENTS_ENVIRONMENT)
+        self.assertEqual(["beta-app", "gamma-lib"], cell["dependents"])
+        self.assertEqual([], cell["target_kinds"])
+        self.assertEqual("check", cell["compile_coverage_from"])
+        self.assertEqual("execute", cell["execution"])
+        self.assertFalse(cell["reusable"])
+        self.assertIn("also compiles 2 unchanged dependent(s)", cell["selection_reason"])
+        self.assertIn("beta-app, gamma-lib", cell["selection_reason"])
+
+    def test_uncovered_kinds_keep_every_native_check_and_only_linux_carries_the_seam(self) -> None:
+        # delta-lib declares a bench, so its own check runs on every native
+        # environment as before; gamma-lib's seam rides on the Linux cell only,
+        # and the Windows and macOS cells are not widened by it.
+        plan = self.plan("delta/lib/src/lib.rs")
+        checks = self.check_cells(plan, "delta-lib")
+        self.assertEqual(
+            ["macos-latest", "ubuntu-latest", "windows-latest"], sorted(checks)
+        )
+        for environment, cell in checks.items():
+            self.assertEqual(["bench"], cell["target_kinds"])
+            self.assertEqual(
+                environment == DEPENDENTS_ENVIRONMENT, "dependents" in cell, environment
+            )
+        self.assertEqual(["gamma-lib"], checks[DEPENDENTS_ENVIRONMENT]["dependents"])
+        self.assertIn("bench target(s)", checks[DEPENDENTS_ENVIRONMENT]["selection_reason"])
+        self.assertIn("also compiles 1 unchanged", checks[DEPENDENTS_ENVIRONMENT]["selection_reason"])
+        record = next(entry for entry in plan["packages"] if entry["package"] == "delta-lib")  # type: ignore[union-attr]
+        self.assertEqual("-p delta-lib --benches", record["check_args"])
+        self.assertEqual("-p gamma-lib --lib", record["dependent_seam"]["check_args"])
+        # gamma-lib has an example but no dependents: its own check runs
+        # everywhere and no cell carries a seam.
+        gamma_checks = self.check_cells(self.plan("gamma/lib/src/lib.rs"), "gamma-lib")
+        self.assertEqual(3, len(gamma_checks))
+        self.assertEqual([], [cell for cell in gamma_checks.values() if "dependents" in cell])
+
+    def test_a_dependent_that_is_itself_selected_is_excluded_from_the_seam(self) -> None:
+        plan = self.plan("alpha/lib/src/lib.rs", "beta/app/src/main.rs")
+        records = {entry["package"]: entry for entry in plan["packages"]}  # type: ignore[union-attr]
+        self.assertEqual(["alpha-core", "beta-app"], sorted(records))
+        self.assertEqual(["gamma-lib"], records["alpha-core"]["dependent_seam"]["dependents"])
+        self.assertEqual("-p gamma-lib --lib", records["alpha-core"]["dependent_seam"]["check_args"])
+        self.assertEqual(["excluded-app", "gamma-lib"], plan["reverse_dependencies"])
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+
+    def test_a_full_scope_run_attributes_no_dependents(self) -> None:
+        plan = self.plan(force_all=True)
+        self.assertEqual(
+            [], [entry for entry in plan["packages"] if "dependent_seam" in entry]  # type: ignore[union-attr]
+        )
+        self.assertEqual(
+            [], [cell for cell in plan["cells"] if "dependents" in cell]  # type: ignore[union-attr]
+        )
+        self.assertEqual([], plan["reverse_dependencies"])
+
+    def test_the_matrix_carries_the_dependents_and_their_arguments(self) -> None:
+        matrix = {
+            entry["package"]: entry
+            for entry in legacy_scope_document(self.plan("alpha/lib/src/lib.rs"))["matrix"]
+        }
+        self.assertEqual(["alpha-core"], sorted(matrix))
+        self.assertEqual(["beta-app", "gamma-lib"], matrix["alpha-core"]["dependents"])
+        self.assertEqual(
+            "-p beta-app -p gamma-lib --lib --bins --tests",
+            matrix["alpha-core"]["dependents_check_args"],
+        )
+        self.assertEqual("-p alpha-core", matrix["alpha-core"]["check_args"])
+        self.assertEqual([DEPENDENTS_ENVIRONMENT], matrix["alpha-core"]["check_os"])
+        # A record with no seam projects empty fields, never a missing key.
+        without = matrix_record(plan_package(package="x"), environments_for_tests())
+        self.assertEqual([], without["dependents"])
+        self.assertEqual("", without["dependents_check_args"])
+
+    def test_the_seam_arguments_select_by_declared_kinds_and_never_all_targets(self) -> None:
+        by_name = {entry["name"]: entry for entry in self.metadata["packages"]}  # type: ignore[union-attr]
+        self.assertIsNone(dependent_seam([], by_name))
+        self.assertEqual(
+            {"dependents": ["beta-app"], "check_args": "-p beta-app --bins --tests"},
+            dependent_seam(["beta-app"], by_name),
+        )
+        seam = dependent_seam(["gamma-lib", "beta-app"], by_name)
+        self.assertEqual(["beta-app", "gamma-lib"], seam["dependents"])
+        # gamma-lib's example is not part of the seam; see DEPENDENT_SELECTORS.
+        self.assertEqual("-p beta-app -p gamma-lib --lib --bins --tests", seam["check_args"])
+        self.assertNotIn("--all-targets", seam["check_args"])
+        self.assertNotIn("--examples", seam["check_args"])
+
+    def test_a_reported_dependent_holding_a_record_is_rejected_by_the_schema(self) -> None:
+        plan = self.plan("alpha/lib/src/lib.rs")
+        records = {entry["package"]: entry for entry in plan["packages"]}  # type: ignore[union-attr]
+        records["alpha-core"]["dependent_seam"]["dependents"] = ["alpha-core"]
+        self.assertTrue(
+            any("alpha-core" in problem and "compiled as a dependent" in problem for problem in schema.validate_resolved_plan(plan)),
+        )
+
+
+class DependentSeamFixtureTests(unittest.TestCase):
+    """The ruled compile step, run for real against a broken consumer.
+
+    A two-crate Cargo workspace: `alpha` exports one function, and `beta` calls
+    a function alpha does NOT export. A change to alpha's source must attribute
+    beta to alpha's own Linux check, schedule no `beta` area, and the generated
+    dependents command must fail naming beta while alpha's own check passes.
+    Skipped only when no `cargo` is available on the host.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import shutil
+
+        if shutil.which("cargo") is None:
+            raise unittest.SkipTest("cargo is not on PATH")
+        cls.temporary_directory = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary_directory.name).resolve()
+        (cls.root / "Cargo.toml").write_text(
+            '[workspace]\nresolver = "2"\nmembers = ["alpha/lib", "beta/app"]\n',
+            encoding="utf-8",
+        )
+        (cls.root / "alpha/lib/src").mkdir(parents=True)
+        (cls.root / "alpha/lib/Cargo.toml").write_text(
+            '[package]\nname = "alpha"\nversion = "0.1.0"\nedition = "2021"\n\n'
+            "[package.metadata.ci]\ngates = true\n",
+            encoding="utf-8",
+        )
+        (cls.root / "alpha/lib/src/lib.rs").write_text(
+            "pub fn exported() -> u32 {\n    1\n}\n", encoding="utf-8"
+        )
+        (cls.root / "beta/app/src").mkdir(parents=True)
+        (cls.root / "beta/app/Cargo.toml").write_text(
+            '[package]\nname = "beta"\nversion = "0.1.0"\nedition = "2021"\n\n'
+            '[dependencies]\nalpha = { path = "../../alpha/lib" }\n',
+            encoding="utf-8",
+        )
+        # Broken against alpha's public API on purpose.
+        (cls.root / "beta/app/src/main.rs").write_text(
+            'fn main() {\n    println!("{}", alpha::not_exported());\n}\n', encoding="utf-8"
+        )
+        cls.cargo_env = {
+            **os.environ,
+            "CARGO_TARGET_DIR": str(cls.root / "target"),
+            "CARGO_NET_OFFLINE": "true",
+        }
+        cls.metadata = load_metadata(cls.root)
+        cls.packages = workspace_packages(cls.metadata)
+        cls.environments = environments_for_tests()
+        cls.policy = package_ci_policy(
+            cls.packages,
+            runner_labels={environment["runner"] for environment in cls.environments},
+            root=cls.root,
+            today=TODAY,
+        )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary_directory.cleanup()
+
+    def cargo_check(self, arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["cargo", "check", "--offline", *arguments.split()],
+            cwd=self.root,
+            env=self.cargo_env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=300,
+            check=False,
+        )
+
+    def test_the_broken_consumer_fails_inside_the_changed_packages_own_check(self) -> None:
+        plan = calculate_scope(
+            ["alpha/lib/src/lib.rs"], self.root, self.metadata, self.environments, self.policy
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        self.assertEqual(["alpha"], [entry["area"] for entry in plan["areas"]])
+        self.assertEqual(["alpha"], [entry["package"] for entry in plan["packages"]])
+        self.assertEqual(["beta"], plan["reverse_dependencies"])
+        self.assertEqual([], [cell for cell in plan["cells"] if cell["package"] != "alpha"])
+
+        alpha = plan["packages"][0]
+        self.assertEqual(
+            {"dependents": ["beta"], "check_args": "-p beta --bins"}, alpha["dependent_seam"]
+        )
+        checks = {cell["environment"]: cell for cell in plan["cells"] if cell["gate"] == "check"}
+        self.assertEqual([DEPENDENTS_ENVIRONMENT], sorted(checks))
+        self.assertEqual(["beta"], checks[DEPENDENTS_ENVIRONMENT]["dependents"])
+
+        own = self.cargo_check(alpha["check_args"])
+        self.assertEqual(0, own.returncode, own.stderr)
+
+        seam = self.cargo_check(alpha["dependent_seam"]["check_args"])
+        self.assertNotEqual(0, seam.returncode, "beta calls a function alpha does not export")
+        self.assertIn("not_exported", seam.stderr)
+        self.assertIn("could not compile `beta`", seam.stderr)
+        self.assertNotIn("could not compile `alpha`", seam.stderr)
+
+
 class ApplyFixture(unittest.TestCase):
     """A workspace holding every evidence-eligibility case, plus evidence for each.
 
@@ -2409,12 +2723,15 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
 class WorkflowContractTests(unittest.TestCase):
     """Contracts in workflow YAML that are not represented by scope data."""
 
-    def test_verdict_download_unions_current_and_run_wide_artifacts(self) -> None:
-        ci = (ROOT / ".github/workflows/ci.yml").read_text()
-        verdict_downloads = ci.split(
+    def test_area_rollup_download_unions_current_and_run_wide_artifacts(self) -> None:
+        # The whole-run verdict job that first carried these downloads was
+        # replaced by the per-area rollup on 2026-09-12; the union it needs
+        # (current attempt first, newest run-wide overlay second) is unchanged.
+        area_ci = (ROOT / ".github/workflows/_area-ci.yml").read_text()
+        rollup_downloads = area_ci.split(
             "- name: Download the resolved package policy", 1
         )[1].split("- name: Build ci-rollup", 1)[0]
-        policy, plan, current, newest = verdict_downloads.split(
+        policy, plan, current, newest = rollup_downloads.split(
             "uses: actions/download-artifact@v7"
         )[1:]
 

@@ -60,7 +60,8 @@
       "selection_reason": true,
       "evidence": false,
       "gap": false,
-      "prohibition": false
+      "prohibition": false,
+      "dependents": false
     }
   },
   "receipt": {

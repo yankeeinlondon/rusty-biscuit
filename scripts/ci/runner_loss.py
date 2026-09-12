@@ -30,6 +30,15 @@ A job whose tests passed and whose artifact upload then failed is a
 regression and rerunning the suite would prove nothing (spec section 4, and the
 repository's own classification rule).
 
+A failed test, lint, or compile COMMAND is not a failed job at all: the
+producers run their gate commands under `continue-on-error` and fold the
+outcome into the status artifact, so such a job concludes `success` with a
+red step and is classified nowhere here — it is neither a lost runner nor a
+failure that vetoes the retry. That is deliberate. The failure is judged by
+the area's rollup against its baseline; if it is accepted, a rerun of the
+lost job is exactly what turns the run green, and if it is not, the rerun
+re-executes only the lost job, never the failed suite.
+
 Both read the same GitHub data — the run's jobs and each failed job's check-run
 annotations — through `gh api`, and the classification itself is pure so the
 tests never touch the network.
@@ -85,10 +94,10 @@ WSL_DELEGATION_SEGMENT = "wsl2"
 # Jobs that judge the run rather than produce evidence. Their failure follows
 # from the producers' and must not veto a retry — an area rollup fails BECAUSE
 # its producer's runner died, so counting it as an unrelated failure would
-# disable the one-shot retry entirely. `ci-verdict` is transitional: this entry
-# is one of the six places that must change together when the required merge
-# context moves off it (Open Question 3, still unruled).
-NON_PRODUCER_JOBS = {"ci-verdict", "infrastructure summary (advisory)"}
+# disable the one-shot retry entirely. `ci-gate` is the policy-free fold of
+# every blocking job's result (`ci.yml`), so it fails whenever any producer
+# did.
+NON_PRODUCER_JOBS = {"ci-gate", "infrastructure summary (advisory)"}
 AREA_ROLLUP_JOB = re.compile(r"^area-ci \(.+\) / rollup$")
 
 

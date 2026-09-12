@@ -34,6 +34,10 @@ on:
         description: "This area's package matrix as a JSON `{\"include\": [...]}` document, produced by `affected_scope.py`."
         type: string
         required: true
+      accepted-gaps:
+        description: "Whether the resolved plan carries an accepted policy gap in this area. Required, so a caller that forgets it fails at parse rather than silently publishing nothing."
+        type: boolean
+        required: true
 
 env:
   # The repository tracks no rustc wrapper; cleared explicitly so a stray
@@ -46,8 +50,23 @@ jobs:
   # areas that have packages, so this job always expands and GitHub labels each
   # leg from the matrix. `name: ${{ matrix.package }}` keeps the package — the
   # result identity — as the label a reader sees under the area.
+  #
+  # This job's result is what `ci.yml`'s `area-ci` — and so `ci-gate` — sees
+  # of the producers, so it must fail ONLY for what no baseline may excuse. A
+  # failed gate command does not fail a producer job: `_package-ci.yml` runs
+  # every test, lint, and compile command under step-level `continue-on-error`
+  # and folds the outcome into the cell's status artifact, which `rollup`
+  # below judges. Setup, provisioning, uploads, and cancellation still fail
+  # the producer, this job, and the gate directly.
   package-ci:
     name: ${{ matrix.package }}
+    # A `uses:` job accepts `permissions`, and this one CONFINES the token:
+    # `ci.yml`'s `area-ci` had to widen to `checks: write` for the publisher
+    # below (a called workflow's token is capped by its caller's), so the
+    # package fan-out is pinned to read-only here or it would inherit that
+    # grant. Neither `_package-ci.yml` nor `_wsl-ci.yml` uses the token.
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(inputs.packages) }}
@@ -55,6 +74,10 @@ jobs:
     with:
       package: ${{ matrix.package }}
       check-args: ${{ matrix.check_args }}
+      # The unchanged direct dependents the planner attributed to this package,
+      # compiled inside its own Linux check cell (Open Question 1, Option B).
+      dependents-check-args: ${{ matrix.dependents_check_args }}
+      dependents: ${{ toJSON(matrix.dependents) }}
       test-args: ${{ matrix.test_args }}
       gates: ${{ toJSON(matrix.gates) }}
       l1-include-slow: ${{ matrix.l1_include_slow }}
@@ -77,6 +100,61 @@ jobs:
       wsl: ${{ matrix.wsl }}
     secrets: inherit
 
+  # This area's accepted policy gaps, published the moment the area starts
+  # (specification section 6; Open Question 4 ruled `neutral`, 2026-09-12).
+  #
+  # No `needs:`: the resolved plan is uploaded by `ci.yml`'s scope job before
+  # any area is called, so this job reads it at once and waits on no test or
+  # archive build. `publish_gaps.py` creates one `neutral` check run per
+  # accepted-gap cell — name identifying the cell, title and summary carrying
+  # the `ACCEPTED GAP` marker, owner, expiry, and reason, text carrying the
+  # revoke instructions and the `closes` work, `details_url` on the policy
+  # entry. The workflow itself spells no conclusion, and the tool refuses a
+  # cell whose acceptance is ungoverned or expired rather than publish a
+  # `neutral` check for a cell the rollup is about to block on.
+  #
+  # The check runs land on the PULL REQUEST HEAD: on a `pull_request` event
+  # `github.sha` is the merge commit, and a check created there never appears
+  # in the PR's checks list. On a push the two are the same commit.
+  #
+  # The only job in this workflow holding `checks: write`; `package-ci` and
+  # `rollup` stay read-only. Presentation only (Design Decision 10): the
+  # rollup, the gate, and runner-loss never read what this job publishes.
+  #
+  # `if:` makes this job skippable, so it carries no `name:` and is labelled
+  # `accepted-gaps` whether it runs or not (AC10).
+  accepted-gaps:
+    if: inputs.accepted-gaps
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v5
+      # The plain in-run download, not the `run-id` overlay the rollup uses:
+      # that form needs `actions: read`, which this job deliberately lacks,
+      # and the plan is among the first artifacts the run produces.
+      - name: Download the resolved execution plan
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-resolved-plan
+          path: ci-artifacts/ci-resolved-plan
+      - name: Publish this area's accepted gaps as neutral check runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AREA: ${{ inputs.area }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/publish_gaps.py \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
+            --area "$AREA" \
+            --head-sha "$HEAD_SHA" \
+            --repo "$GITHUB_REPOSITORY" \
+            --server "$GITHUB_SERVER_URL"
+
   # THE area's own outcome (specification section 5, Design Decision 9).
   #
   # It applies the baseline, the governed policy gaps, and the missing-cell
@@ -84,9 +162,13 @@ jobs:
   # required cells failed, is missing, or is an unexcused gap. Another area's
   # red cell cannot block it and another area's baseline entry cannot excuse
   # it: `--area` narrows the cells, the scope, the scheduled set, and the
-  # accepted evidence together.
+  # accepted evidence together. It is also the ONLY path by which a failed
+  # test, lint, or compile command reaches `ci-gate`: the producers fold that
+  # failure into their status artifacts rather than their job results, so a
+  # hosted failure and the same failure reused from local evidence are judged
+  # here identically.
   #
-  # `if: always()` for the same reason `ci-verdict` has it: a producer that
+  # `if: always()` for the same reason `ci-gate` has it: a producer that
   # failed or was cancelled must not skip the job that reports it. `needs:` is
   # a "wait for, then download from" list, not a gate.
   #

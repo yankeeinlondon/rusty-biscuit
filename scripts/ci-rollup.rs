@@ -69,10 +69,9 @@ const EXPECTED_MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// (`scripts/ci/schema.py::RESOLVED_PLAN_SCHEMA_VERSION`).
 const PLAN_SCHEMA_VERSION: u32 = 2;
 
-/// Process exit codes. A verdict gates merging — today through the
-/// transitional whole-run `ci-verdict` job, and per area through each
-/// `_area-ci.yml` rollup — so a blocked run and a broken tool must be
-/// distinguishable but both non-zero.
+/// Process exit codes. A verdict gates merging — per area, through each
+/// `_area-ci.yml` rollup; `ci.yml`'s `ci-gate` only folds job results — so a
+/// blocked run and a broken tool must be distinguishable but both non-zero.
 const EXIT_TOOL_ERROR: i32 = 1;
 const EXIT_BLOCKED: i32 = 2;
 
@@ -508,6 +507,10 @@ struct Cell {
     /// excuse.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     declared_gap: Option<DeclaredGap>,
+    /// Unchanged direct reverse dependencies this `check` cell also compiled,
+    /// from the producer's status. They have no cell of their own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    dependents: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     reasons: Vec<String>,
     /// Indices into [`Rollup::records`].
@@ -668,7 +671,12 @@ struct ManifestRecord {
 struct ProducerStatus {
     package: String,
     job: String,
-    /// GitHub `needs.<job>.result`: `success`, `failure`, `cancelled`, `skipped`.
+    /// The producer's conclusion for the CELL: `success`, `failure`,
+    /// `cancelled`, `skipped`. The gate commands are `continue-on-error`
+    /// steps, so a failed test, lint, or compile leaves GitHub's `job.status`
+    /// at `success`; the status step folds the step outcomes in and writes
+    /// `failure` here. Only this document — never the producer job's
+    /// conclusion — can therefore tell the rollup a gate command failed.
     result: String,
     #[serde(default)]
     environment: Option<String>,
@@ -684,6 +692,12 @@ struct ProducerStatus {
     /// evidence and must downgrade the cell just as a failed one does.
     #[serde(default)]
     companion: Option<String>,
+    /// The unchanged direct reverse dependencies a `check` producer also
+    /// compiled inside this cell (Open Question 1, Option B). Names only; a
+    /// failure of that half arrives as `result: failure` with a `detail`
+    /// saying so, because the cell — not a consumer's — owns the outcome.
+    #[serde(default)]
+    dependents: Vec<String>,
 }
 
 /// Tests the target environment actually compiled, generated *on* that
@@ -2033,6 +2047,8 @@ fn classify_one(
             .filter(|_| !reuse_contested)
             .map(|result| result.evidence.clone()),
         scheduled,
+        // JUnit-backed tiers compile no dependents; only a check status does.
+        dependents: Vec::new(),
         skipped_tests: all_skips.into_iter().collect(),
         failed_tests: failed_tests.into_iter().collect(),
         skip_evidence_degraded,
@@ -2103,9 +2119,9 @@ fn classify_state_from_evidence(
     };
 
     // A producer status of `failure` for THIS cell downgrades any clean
-    // reading: the job failed although its JUnit shows no failing test, which
-    // is exactly the companion-suite / fixture / backend-proof case. Status
-    // evidence can worsen a cell, never improve it.
+    // reading: a gate command or the job failed although its JUnit shows no
+    // failing test, which is exactly the companion-suite / fixture /
+    // backend-proof case. Status evidence can worsen a cell, never improve it.
     if matches!(state, CellState::Pass | CellState::NothingToRun | CellState::Skip)
         && own_status.is_some_and(|status| status.result == "failure")
     {
@@ -2113,7 +2129,7 @@ fn classify_state_from_evidence(
             .and_then(|status| status.detail.as_deref())
             .map(str::to_owned)
             .unwrap_or_else(|| {
-                "the producer job concluded `failure` although its report shows no \
+                "the producer status reports `failure` although its report shows no \
                  failing test"
                     .to_owned()
             });
@@ -2200,7 +2216,8 @@ fn status_cells(
             target_kinds: expectation.target_kinds.clone(),
             compile_coverage_from: expectation.compile_coverage_from.clone(),
             scheduled: true,
-            reasons: reason.into_iter().collect(),
+            dependents: status.map(|status| status.dependents.clone()).unwrap_or_default(),
+            reasons: reason.into_iter().chain(status.and_then(dependents_note)).collect(),
             ..blank_cell(expectation.key.clone())
         });
     }
@@ -2240,12 +2257,28 @@ fn status_cells(
             state,
             origin: Origin::Ci,
             scheduled: true,
-            reasons: reason.into_iter().collect(),
+            dependents: status.dependents.clone(),
+            reasons: reason.into_iter().chain(dependents_note(status)).collect(),
             ..blank_cell(key)
         });
     }
 
     cells
+}
+
+/// The "also compiled N dependent(s): …" line of a check cell whose producer
+/// compiled the changed package's unchanged consumers (Open Question 1,
+/// Option B). Rendered whatever the state: on a pass it is the only record
+/// that the seam was checked, and on a failure the producer's `detail` says
+/// which half broke while this line says against whom.
+fn dependents_note(status: &ProducerStatus) -> Option<String> {
+    (!status.dependents.is_empty()).then(|| {
+        format!(
+            "also compiled {} dependent(s): {}",
+            status.dependents.len(),
+            status.dependents.join(", ")
+        )
+    })
 }
 
 /// Tiers whose evidence is a JUnit report. Everything else (`lint`, `check`)
@@ -2343,6 +2376,7 @@ fn blank_cell(key: CellKey) -> Cell {
         failed_tests: Vec::new(),
         skip_evidence_degraded: false,
         declared_gap: None,
+        dependents: Vec::new(),
         reasons: Vec::new(),
         records: Vec::new(),
     }
@@ -2743,9 +2777,9 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
 /// The expiry check duplicates `affected_scope.py::validate_expiry` on purpose.
 /// That one fails the scope job at config time with the most actionable
 /// message, and it is the better place to *learn* about a lapsed gap. But it is
-/// not sufficient: every `verdict` invocation — the transitional whole-run
-/// `ci-verdict` job and each area's own rollup — runs `if: always()`, precisely
-/// so a failed, skipped, or never-scheduled scope job cannot suppress it. If
+/// not sufficient: every `verdict` invocation — each area's own rollup — runs
+/// `if: always()`, precisely so a failed, skipped, or never-scheduled scope job
+/// cannot suppress it. If
 /// expiry lived only in the Python, an expired gap would be excused by the
 /// checks that actually gate merging whenever the check that catches it did not
 /// run.
@@ -3120,6 +3154,30 @@ fn render_grid(rollup: &Rollup) -> String {
             ));
         }
         out.push_str(&format!("\n{REVOCATION_INSTRUCTIONS}.\n\n"));
+    }
+
+    let seams: Vec<&Cell> = rollup
+        .cells
+        .iter()
+        .filter(|cell| !cell.dependents.is_empty())
+        .collect();
+    if !seams.is_empty() {
+        out.push_str(
+            "### Compiled dependents\n\nUnchanged direct reverse dependencies compiled \
+             inside the changed package's own check cell; they are scheduled nowhere \
+             else, and a break here belongs to this area.\n\n\
+             | cell | state | also compiled |\n| --- | --- | --- |\n",
+        );
+        for cell in seams {
+            out.push_str(&format!(
+                "| `{}` | {} | {} dependent(s): {} |\n",
+                cell_text(&cell.key.to_string()),
+                cell.state.label(),
+                cell.dependents.len(),
+                cell_text(&cell.dependents.join(", ")),
+            ));
+        }
+        out.push('\n');
     }
 
     let blocking: Vec<&Cell> = rollup
@@ -3508,7 +3566,7 @@ ci-rollup — package × environment × tier CI rollup and merge verdict
 USAGE:
   ci-rollup rollup    --artifacts <dir> [options]
   ci-rollup verdict   --results <file> --baseline <file> [options]
-  ci-rollup compare   --base <file> --head <file> [options]
+  ci-rollup compare   --base <file>… --head <file>… [options]
   ci-rollup summarize --results <file> [--results <file>…] [options]
 
 ROLLUP OPTIONS:
@@ -3551,13 +3609,17 @@ SUMMARIZE OPTIONS:
   Always exits 0.
 
 COMPARE OPTIONS:
-  --base <file>                  result document to compare against (usually main)
-  --head <file>                  result document under judgement (the branch)
+  --base <file>                  result document to compare against (usually main);
+                                 repeat to fold one run's per-area slices
+  --head <file>                  result document under judgement (the branch);
+                                 repeatable the same way
   --summary <file>               append Markdown (default $GITHUB_STEP_SUMMARY)
 
   Answers `is this branch worse than its base`, which is the only question a
   repo with known-red cells can ask of a run. Cells scheduled on one side only
-  are reported as not comparable rather than counted either way.
+  are reported as not comparable rather than counted either way. Folding
+  slices applies no policy: their cells are concatenated, and a cell present
+  in two slices is an error rather than a silent shadow.
 
 EXIT CODES:
   0  clear
@@ -3883,8 +3945,8 @@ fn cmd_verdict(args: &Args) -> Result<i32> {
 }
 
 fn cmd_compare(args: &Args) -> Result<i32> {
-    let base = load_rollup(Path::new(args.required("base")?))?;
-    let head = load_rollup(Path::new(args.required("head")?))?;
+    let base = load_rollups(&args.many("base"), "base")?;
+    let head = load_rollups(&args.many("head"), "head")?;
 
     let comparison = compare(&base, &head);
     let markdown = render_comparison(&comparison, &base, &head);
@@ -3972,6 +4034,37 @@ fn render_combined_summary(slices: &[Rollup]) -> String {
     }
 
     out
+}
+
+/// One result document, or one run's per-area slices folded into one.
+///
+/// A fold is a concatenation, never a re-judgement: each area's rollup already
+/// took every policy decision its slice records. The run id is the first one
+/// any slice carries. The same `{package, environment, tier}` in two slices is
+/// refused, because a package belongs to exactly one area and letting one
+/// slice shadow another would compare against a cell nobody produced.
+fn load_rollups(paths: &[String], flag: &str) -> Result<Rollup> {
+    let (first, rest) = paths
+        .split_first()
+        .ok_or_else(|| anyhow!("`--{flag}` is required\n\n{USAGE}"))?;
+    let mut folded = load_rollup(Path::new(first))?;
+    for raw in rest {
+        let slice = load_rollup(Path::new(raw))?;
+        if folded.run_id.is_none() {
+            folded.run_id = slice.run_id;
+        }
+        for cell in slice.cells {
+            if folded.cells.iter().any(|known| known.key == cell.key) {
+                bail!("{raw}: cell {} is already present in an earlier `--{flag}` slice", cell.key);
+            }
+            folded.cells.push(cell);
+        }
+        folded.scope.extend(slice.scope);
+        folded.accepted_evidence.extend(slice.accepted_evidence);
+        folded.records.extend(slice.records);
+    }
+    folded.areas = derived_areas(&folded.cells);
+    Ok(folded)
 }
 
 fn load_rollup(path: &Path) -> Result<Rollup> {

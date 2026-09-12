@@ -22,7 +22,21 @@ from affected_scope import legacy_scope_document  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 RECIPE = ROOT / "just" / "ci-local.just"
 DEVOPS = ROOT / "just" / "devops.just"
+CONSTRAINTS = ROOT / "scripts" / "ci" / "constraints.py"
 JUST = shutil.which("just")
+
+
+def relocate_home(environment: dict[str, str], home: Path) -> None:
+    """Point the recipe's default constraint store at a home the test owns.
+
+    Both variables, because `constraints.py` reads `Path.home()`: HOME on
+    Unix, USERPROFILE on native Windows. Without this the developer's real
+    `~/.rusty-biscuit/ci-constraints/` would decide these tests.
+    """
+    home.mkdir(parents=True, exist_ok=True)
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    environment.pop("BISCUIT_CI_CONSTRAINTS_DIR", None)
 
 
 def thread_policy_recipe() -> str:
@@ -81,6 +95,7 @@ class CiLocalTests(unittest.TestCase):
                 'from pathlib import Path\nprint(Path("scope.json").read_text())\n',
                 encoding="utf-8",
             )
+            shutil.copyfile(CONSTRAINTS, scripts / "constraints.py")
             # The recipe's self-test loop; each is a no-op stub here because
             # this fixture tests the recipe's scheduling, not those suites.
             for suite in (
@@ -89,6 +104,7 @@ class CiLocalTests(unittest.TestCase):
                 "test_resolved_plan.py",
                 "test_ci_local.py",
                 "test_constraints.py",
+                "test_publish_gaps.py",
                 "test_runner_loss.py",
             ):
                 (scripts / suite).write_text("", encoding="utf-8")
@@ -120,6 +136,7 @@ class CiLocalTests(unittest.TestCase):
                 path.write_text("#!/usr/bin/env python3\n" + body, encoding="utf-8")
                 path.chmod(0o755)
             environment = clean_policy_environment()
+            relocate_home(environment, root / "home")
             environment.update({
                 "PATH": str(bin_dir) + os.pathsep + environment.get("PATH", ""),
                 "TEST_CALL_LOG": str(root / "calls.jsonl"),
@@ -127,9 +144,12 @@ class CiLocalTests(unittest.TestCase):
                 "TEST_REAL_JUST": JUST,
                 "TEST_POLICY_RECIPE": str(root / "policy.just"),
             })
+            # The hook exports these for the run it wraps, and this suite runs
+            # inside that run's self-test loop; a fed plan would refuse `--all`.
             for key in (
                 "BISCUIT_L2_THREADS", "BISCUIT_TEST_REQUIRED_BACKENDS",
-                "BISCUIT_CI_SCOPE_OUT", "WEZTERM_UNIX_SOCKET", "KITTY_LISTEN_ON",
+                "BISCUIT_CI_SCOPE_OUT", "BISCUIT_CI_PLAN_OUT", "BISCUIT_CI_PLAN_IN",
+                "WEZTERM_UNIX_SOCKET", "KITTY_LISTEN_ON",
             ):
                 environment.pop(key, None)
             if threads is not None:
@@ -476,9 +496,47 @@ class PlanSurfaceTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         return result.stdout, captured["plan"]
 
+    #: The stand-in planner. It prints the fixture plan, except that every cell
+    #: in an environment the store handed through `--constraints` forbids is
+    #: resolved to `prohibited` carrying that record — the one planner behavior
+    #: the plan surface depends on, so the recipe's store resolution is proven
+    #: by the reason a refusal names.
+    STUB_PLANNER = (
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).resolve().parent))\n"
+        "import constraints\n"
+        "plan = json.loads(Path('plan.json').read_text())\n"
+        "args = sys.argv[1:]\n"
+        "store = args[args.index('--constraints') + 1] if '--constraints' in args else ''\n"
+        "active, _expired, malformed = constraints.load(store)\n"
+        "for entry in active + malformed:\n"
+        "    for cell in plan['cells']:\n"
+        "        if cell['environment'] != entry.environment:\n"
+        "            continue\n"
+        "        cell.pop('evidence', None)\n"
+        "        record = {key: str(entry.document.get(key, '')) for key in ('owner', 'reason', 'expiry')}\n"
+        "        cell.update(execution='omit', origin='none', state='prohibited', prohibition=record,\n"
+        "                    selection_reason='a persisted constraint forbids this environment')\n"
+        "        key = f\"{cell['package']}/{cell['environment']}/{cell['gate']}\"\n"
+        "        if key not in plan['prohibited_cells']:\n"
+        "            plan['prohibited_cells'].append(key)\n"
+        "print(json.dumps(plan))\n"
+    )
+
     def run_plan(
-        self, prohibited_is_covered: bool = True, capture: dict | None = None
+        self,
+        prohibited_is_covered: bool = True,
+        capture: dict | None = None,
+        origin: str = "",
+        records: Mapping[str, dict] | None = None,
     ) -> subprocess.CompletedProcess:
+        """Run `just ci-local --all --plan` in a temp root with a relocated home.
+
+        `records` maps a store-relative path to a record written under the
+        relocated home's default store; `origin` becomes the root's `origin`
+        remote so the recipe derives the store directory from it.
+        """
         document = self.resolved_plan(prohibited_is_covered)
         self.assertEqual(
             [],
@@ -499,10 +557,16 @@ class PlanSurfaceTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "plan.json").write_text(schema.canonical(document), encoding="utf-8")
-            (scripts / "affected_scope.py").write_text(
-                'from pathlib import Path\nprint(Path("plan.json").read_text())\n',
-                encoding="utf-8",
-            )
+            (scripts / "affected_scope.py").write_text(self.STUB_PLANNER, encoding="utf-8")
+            shutil.copyfile(CONSTRAINTS, scripts / "constraints.py")
+            home = root / "home"
+            for relative, record in (records or {}).items():
+                path = home / ".rusty-biscuit" / "ci-constraints" / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(record), encoding="utf-8")
+            if origin:
+                for command in (["git", "init", "-q"], ["git", "remote", "add", "origin", origin]):
+                    subprocess.run(command, cwd=root, check=True, capture_output=True, timeout=30)
             for name in ("cargo", "sniff"):
                 path = bin_dir / name
                 path.write_text(
@@ -512,9 +576,10 @@ class PlanSurfaceTests(unittest.TestCase):
                 )
                 path.chmod(0o755)
             environment = clean_policy_environment()
+            relocate_home(environment, home)
             environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
             environment.pop("BISCUIT_CI_PLAN_OUT", None)
-            environment.pop("BISCUIT_CI_CONSTRAINTS_DIR", None)
+            environment.pop("BISCUIT_CI_PLAN_IN", None)
             command = [JUST, "--justfile", str(root / "justfile"), "ci-local", "--all", "--plan"]
             if capture is not None:
                 command += ["--plan-out", str(root / "written-plan.json")]
@@ -575,6 +640,37 @@ class PlanSurfaceTests(unittest.TestCase):
         self.assertIn("ken", combined)
         self.assertIn("2099-01-01", combined)
 
+    def test_plan_finds_a_record_in_the_default_store_without_the_variable(self) -> None:
+        # Review-5: a record written in one session must bind a fresh one that
+        # never set BISCUIT_CI_CONSTRAINTS_DIR. The store directory is derived
+        # from `origin`, so a record under another repository's directory is
+        # not this repository's constraint.
+        def record(reason: str, repository: str) -> dict:
+            return {
+                "environment": "wsl2-ubuntu",
+                "reason": reason,
+                "owner": "ken",
+                "expiry": "2099-01-01",
+                "repository": repository,
+            }
+
+        records = {
+            "github.com/acme/widgets/wsl.json": record(
+                "recorded in an earlier session", "github.com/acme/widgets"
+            ),
+            "github.com/other/repo/wsl.json": record("another repository's", "github.com/other/repo"),
+        }
+        result = self.run_plan(origin="git@github.com:acme/widgets.git", records=records)
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode, combined)
+        self.assertIn("recorded in an earlier session", combined)
+        self.assertNotIn("another repository's", combined)
+        self.assertIn("Constraint store:", result.stdout)
+        self.assertIn(str(Path("github.com", "acme", "widgets")), result.stdout)
+
+        result = self.run_plan(origin="git@github.com:acme/other.git", records=records)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
     def test_plan_writes_the_same_cells_it_rendered(self) -> None:
         # The rendered table is a projection; the canonical JSON is the machine
         # interface. AC17 needs them to describe one plan, not two.
@@ -585,7 +681,266 @@ class PlanSurfaceTests(unittest.TestCase):
             self.assertIn(key, rendered, f"the rendered plan omits {key}")
 
 
-WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+PLANNER = ROOT / "scripts" / "ci" / "affected_scope.py"
+
+
+@unittest.skipUnless(JUST and shutil.which("jq"), "requires just and jq")
+class PlanFedRunTests(unittest.TestCase):
+    """The hook's path (ruling D2, audit W14): gates run FROM a resolved plan.
+
+    A fed plan carries the evidence its caller verified, so the recipe must
+    run only the cells the plan leaves executing for this host — plus a cell
+    reused from a FAILURE, which is rerun — and must never run the planner's
+    selection again. The planner on PATH is a trampoline that logs every
+    invocation, refuses selection outright, and answers `--apply-to` with the
+    real module, so the count is of real invocations, not of a stub's opinion.
+    """
+
+    #: Refuses selection so a regression to replanning fails the recipe loudly;
+    #: `--apply-to` (the projection, which reads nothing from the checkout) is
+    #: answered by the real planner.
+    TRAMPOLINE = (
+        "import os, subprocess, sys\n"
+        "with open(os.environ['TEST_PLANNER_LOG'], 'a', encoding='utf-8') as log:\n"
+        "    log.write(' '.join(sys.argv[1:]) + '\\n')\n"
+        "if '--apply-to' not in sys.argv:\n"
+        "    raise SystemExit('the planner selected scope although a plan was fed in')\n"
+        "raise SystemExit(subprocess.run([sys.executable, os.environ['TEST_REAL_PLANNER'], *sys.argv[1:]], check=False).returncode)\n"
+    )
+
+    def fed_plan(self, alpha_reused_outcome: str) -> dict:
+        """alpha/L1 reused (with the given outcome) beside beta/L1 executing.
+
+        Both packages own a lint cell (hosted on ubuntu-latest, never
+        reusable), and alpha also owns an L1 cell on ubuntu-latest so a cell
+        executing in ANOTHER environment is present to be left alone.
+        """
+        def package(name: str) -> dict:
+            return {
+                "package": name,
+                "area": "pkg",
+                "selection_reason": "source change",
+                "gates": ["lint", "L1"],
+                "targets": ["lib", "test"],
+                "tiers": ["L1"],
+                "test_args": f"--features {name}-tests",
+                "check_args": f"-p {name}",
+                "l2_backends": [],
+                "runner_tools": [],
+                "companion_suites": [],
+                "l1_include_slow": False,
+                "native": {},
+            }
+
+        def cell(name: str, environment: str, gate: str, **overrides) -> dict:
+            record = {
+                "package": name,
+                "area": "pkg",
+                "environment": environment,
+                "gate": gate,
+                "execution": "execute",
+                "origin": "ci",
+                "state": "pending",
+                "reusable": True,
+                "target_kinds": ["lib", "test"],
+                "compile_coverage_from": "L1" if gate == "L1" else "",
+                "selection_reason": "no evidence for this environment",
+            }
+            record.update(overrides)
+            return record
+
+        cells = [
+            cell("alpha", "ubuntu-latest", "lint"),
+            cell(
+                "alpha",
+                "macos-latest",
+                "L1",
+                execution="reuse",
+                origin="prior-local",
+                state="reused",
+                selection_reason="satisfied by a prior receipt",
+                evidence={
+                    "ref": "refs/notes/ci-local/macos-latest",
+                    "commit": "c" * 40,
+                    "outcome": alpha_reused_outcome,
+                    "completion": "complete",
+                },
+            ),
+            cell("alpha", "ubuntu-latest", "L1"),
+            cell("beta", "ubuntu-latest", "lint"),
+            cell("beta", "macos-latest", "L1"),
+        ]
+        return {
+            "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            "base": "a" * 40,
+            "head": "b" * 40,
+            "change_class": "package",
+            "full_scope": False,
+            "full_scope_gates": [],
+            "areas": [
+                {"area": "pkg", "selection_reason": "source change", "packages": ["alpha", "beta"]}
+            ],
+            "packages": [package("alpha"), package("beta")],
+            "source_packages": ["alpha", "beta"],
+            "reverse_dependencies": [],
+            "environments": [
+                {
+                    "name": name,
+                    "runner": "windows-latest" if name == "wsl2-ubuntu" else name,
+                    "native_key": "ubuntu-latest" if name == "wsl2-ubuntu" else name,
+                    "capabilities": {
+                        "tmux": name in ("ubuntu-latest", "macos-latest"),
+                        "headless_browser": name == "ubuntu-latest",
+                        "node_pnpm": name == "ubuntu-latest",
+                        "archive_only": name == "wsl2-ubuntu",
+                    },
+                }
+                for name in schema.ENVIRONMENTS
+            ],
+            "cells": cells,
+            "accepted_evidence": [cells[1]["evidence"]],
+            "policy_gaps": [],
+            "prohibited_cells": [],
+            "job_estimate": 4,
+            "preflight_os": ["ubuntu-latest"],
+            "preflight_reason": "package-local change",
+            "flags": {"ci_tooling": False},
+        }
+
+    def run_fed(self, alpha_reused_outcome: str = "pass", through_env: bool = False) -> dict:
+        """Run `just ci-local --l2` from the fed plan; the gate and planner calls."""
+        document = self.fed_plan(alpha_reused_outcome)
+        self.assertEqual([], schema.validate_resolved_plan(document), "fixture plan must be valid")
+        with tempfile.TemporaryDirectory(prefix="ci-local-fed-") as temporary:
+            root = Path(temporary)
+            bin_dir = root / "bin"
+            scripts = root / "scripts" / "ci"
+            bin_dir.mkdir()
+            scripts.mkdir(parents=True)
+            shutil.copyfile(RECIPE, root / "ci-local.just")
+            (root / "policy.just").write_text(thread_policy_recipe(), encoding="utf-8")
+            (root / "justfile").write_text(
+                'red := ""\ngreen := ""\nreset := ""\nimport "ci-local.just"\n',
+                encoding="utf-8",
+            )
+            (root / "plan.json").write_text(schema.canonical(document), encoding="utf-8")
+            (scripts / "affected_scope.py").write_text(self.TRAMPOLINE, encoding="utf-8")
+            shutil.copyfile(CONSTRAINTS, scripts / "constraints.py")
+            for suite in (
+                "test_schema.py",
+                "test_affected_scope.py",
+                "test_resolved_plan.py",
+                "test_ci_local.py",
+                "test_constraints.py",
+                "test_publish_gaps.py",
+                "test_runner_loss.py",
+            ):
+                (scripts / suite).write_text("", encoding="utf-8")
+            stubs = {
+                "sniff": (
+                    "import json, sys\n"
+                    "assert sys.argv[1:] == ['os', '--json'], sys.argv\n"
+                    "print(json.dumps({'os_type': 'MacOS', 'kernel': 'Darwin'}))\n"
+                ),
+                "just": (
+                    "import json, os, sys\n"
+                    "assert sys.argv[1] in ('_lint', '_test', '_test_l2'), sys.argv\n"
+                    "with open(os.environ['TEST_CALL_LOG'], 'a', encoding='utf-8') as log:\n"
+                    "    log.write(json.dumps({'args': sys.argv[1:]}) + '\\n')\n"
+                ),
+                "cargo": "raise SystemExit('Rust builds are forbidden in this test')\n",
+                "tmux": "raise SystemExit('tmux must only be detected, never started')\n",
+            }
+            for name, body in stubs.items():
+                path = bin_dir / name
+                path.write_text("#!/usr/bin/env python3\n" + body, encoding="utf-8")
+                path.chmod(0o755)
+            environment = clean_policy_environment()
+            relocate_home(environment, root / "home")
+            environment.update({
+                "PATH": str(bin_dir) + os.pathsep + environment.get("PATH", ""),
+                "TEST_CALL_LOG": str(root / "calls.jsonl"),
+                "TEST_PLANNER_LOG": str(root / "planner.log"),
+                "TEST_REAL_PLANNER": str(PLANNER),
+            })
+            for key in (
+                "BISCUIT_L2_THREADS", "BISCUIT_TEST_REQUIRED_BACKENDS", "BISCUIT_CI_SCOPE_OUT",
+                "BISCUIT_CI_PLAN_OUT", "BISCUIT_CI_PLAN_IN", "BISCUIT_CI_REPORTS_OUT",
+                "WEZTERM_UNIX_SOCKET", "KITTY_LISTEN_ON",
+            ):
+                environment.pop(key, None)
+            command = [JUST, "--justfile", str(root / "justfile"), "ci-local", "--l2"]
+            if through_env:
+                environment["BISCUIT_CI_PLAN_IN"] = str(root / "plan.json")
+            else:
+                command += ["--plan-in", str(root / "plan.json")]
+            command += ["--plan-out", str(root / "written-plan.json")]
+            result = subprocess.run(
+                command, cwd=root, env=environment, capture_output=True, text=True, timeout=60
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            calls_path = root / "calls.jsonl"
+            calls = (
+                [json.loads(line)["args"] for line in calls_path.read_text().splitlines()]
+                if calls_path.is_file()
+                else []
+            )
+            planner_log = root / "planner.log"
+            return {
+                "calls": calls,
+                "planner": planner_log.read_text().splitlines() if planner_log.is_file() else [],
+                "stdout": result.stdout,
+                "written_plan": json.loads((root / "written-plan.json").read_text()),
+                "plan": document,
+            }
+
+    def test_a_reused_passing_cell_is_skipped_and_the_planner_never_selects(self) -> None:
+        run = self.run_fed("pass")
+        self.assertEqual(
+            [["_lint", "alpha"], ["_lint", "beta"], ["_test", "beta", "--no-fail-fast", "--features", "beta-tests"]],
+            run["calls"],
+            "only beta's L1 runs here: alpha's is reused from a pass, alpha's other L1 "
+            "belongs to ubuntu-latest, and lint is never reusable",
+        )
+        # One projection (`--apply-to`) and no selection: the trampoline would
+        # have failed the recipe on a selection call, and the log proves the
+        # projection call is the only one.
+        self.assertEqual(1, len(run["planner"]), run["planner"])
+        self.assertIn("--apply-to", run["planner"][0])
+        self.assertIn("skip   alpha/L1", run["stdout"])
+        self.assertIn("run    beta/L1", run["stdout"])
+
+    def test_a_reused_failing_cell_is_rerun(self) -> None:
+        run = self.run_fed("fail")
+        self.assertEqual(
+            [
+                ["_lint", "alpha"],
+                ["_test", "alpha", "--no-fail-fast", "--features", "alpha-tests"],
+                ["_lint", "beta"],
+                ["_test", "beta", "--no-fail-fast", "--features", "beta-tests"],
+            ],
+            run["calls"],
+            "a cell whose newest prior evidence is a failure is rerun locally (D2)",
+        )
+        self.assertIn("rerun  alpha/L1", run["stdout"])
+        self.assertEqual(1, len(run["planner"]), run["planner"])
+
+    def test_the_environment_form_feeds_the_same_plan_and_writes_it_back_unchanged(self) -> None:
+        # The hook hands the plan over as BISCUIT_CI_PLAN_IN; `--plan-out` must
+        # then be that plan byte-for-byte, evidence rejections included, so
+        # the receipt the hook records is against the plan the gates ran from.
+        run = self.run_fed("pass", through_env=True)
+        self.assertEqual(
+            [["_lint", "alpha"], ["_lint", "beta"], ["_test", "beta", "--no-fail-fast", "--features", "beta-tests"]],
+            run["calls"],
+        )
+        self.assertEqual(run["plan"], run["written_plan"])
+
+
+#: `CI_WORKFLOW_UNDER_TEST=<path>` runs the step suites against another copy
+#: of the workflow, so a new regression can be shown to fail on the pre-change
+#: step (the same seam `PRE_PUSH_HOOK_UNDER_TEST` gives the hook suite).
+WORKFLOW = Path(os.environ.get("CI_WORKFLOW_UNDER_TEST") or ROOT / ".github" / "workflows" / "ci.yml")
 SCOPE_STEP = "Calculate package and area scope"
 NULL_OID = "0" * 40
 
@@ -616,6 +971,64 @@ def workflow_step_script(workflow: Path, step_name: str) -> str:
             break
         body.append(line[indent:])
     return "\n".join(body) + "\n"
+
+
+class JobStep:
+    """One `run:` step of a job: its name, script, and whether a failure is fatal."""
+
+    def __init__(self, name: str, script: str, continue_on_error: bool) -> None:
+        self.name = name
+        self.script = script
+        self.continue_on_error = continue_on_error
+
+
+def workflow_job_run_steps(workflow: Path, job: str) -> list[JobStep]:
+    """Every `run:` step of one job, in order, as standalone scripts.
+
+    `uses:` steps have no script and are skipped. Same fixed-layout reading as
+    `workflow_step_script`: a job opens at two spaces, its steps at six, a
+    step's keys at eight, and a block scalar's lines at ten. Running the whole
+    job rather than one step is what lets a test see a toolchain step that
+    precedes the scope decision — a single extracted step cannot.
+    """
+    lines = workflow.read_text(encoding="utf-8").splitlines()
+    start = lines.index(f"  {job}:") + 1
+    end = next(
+        (index for index in range(start, len(lines)) if lines[index][:2] == "  " and lines[index][2:3] not in (" ", "")),
+        len(lines),
+    )
+    steps: list[JobStep] = []
+    index = start
+    while index < end:
+        if not lines[index].startswith("      - "):
+            index += 1
+            continue
+        step_end = next(
+            (candidate for candidate in range(index + 1, end) if lines[candidate].startswith("      - ")),
+            end,
+        )
+        # Six spaces off every line: the `- ` key lands at two, the rest of
+        # the keys at two, and a block scalar's lines at four.
+        step = ["  " + lines[index][len("      - "):]] + [line[6:] for line in lines[index + 1 : step_end]]
+        name = next((line[len("  name: "):] for line in step if line.startswith("  name: ")), "")
+        continue_on_error = "  continue-on-error: true" in step
+        script: str | None = None
+        for position, line in enumerate(step):
+            if line == "  run: |":
+                body = []
+                for following in step[position + 1 :]:
+                    if following.strip() and len(following) - len(following.lstrip()) < 4:
+                        break
+                    body.append(following[4:])
+                script = "\n".join(body) + "\n"
+                break
+            if line.startswith("  run: "):
+                script = line[len("  run: "):] + "\n"
+                break
+        if script is not None:
+            steps.append(JobStep(name, script, continue_on_error))
+        index = step_end
+    return steps
 
 
 BASH_OVERRIDE = "BISCUIT_TEST_BASH"
@@ -709,13 +1122,24 @@ def fixture_git(root: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-class StepRun:
-    """One execution of the extracted scope step."""
+PLANNER_CALL = "affected_scope.py "
+RUSTUP_CALL = "rustup "
 
-    def __init__(self, root: Path, result: subprocess.CompletedProcess, output: Path, summary: Path, planner_log: Path) -> None:
+
+class StepRun:
+    """One execution of the scope job's `run:` steps through the scope step.
+
+    `result` is the scope step's own process. `calls` is the shared tool log
+    in invocation order — every planner and `rustup` call any step made —
+    with `planner_calls` and `rustup_calls` the two projections of it.
+    """
+
+    def __init__(self, root: Path, result: subprocess.CompletedProcess, output: Path, summary: Path, call_log: Path) -> None:
         self.result = result
         self.summary = summary.read_text(encoding="utf-8")
-        self.planner_calls = planner_log.read_text(encoding="utf-8").splitlines() if planner_log.is_file() else []
+        self.calls = call_log.read_text(encoding="utf-8").splitlines() if call_log.is_file() else []
+        self.planner_calls = [call[len(PLANNER_CALL):] for call in self.calls if call.startswith(PLANNER_CALL)]
+        self.rustup_calls = [call for call in self.calls if call.startswith(RUSTUP_CALL)]
         self.outputs = dict(
             line.split("=", 1)
             for line in output.read_text(encoding="utf-8").splitlines()
@@ -727,22 +1151,30 @@ class StepRun:
         scope_path = root / "scope.json"
         self.scope = json.loads(scope_path.read_text(encoding="utf-8")) if scope_path.is_file() else {}
 
-    def scope_source(self) -> str:
+    def summary_row(self, field: str) -> str:
         for line in self.summary.splitlines():
-            if line.startswith("| scope source |"):
+            if line.startswith(f"| {field} |"):
                 return line.split("|")[2].strip()
         return ""
 
+    def scope_source(self) -> str:
+        return self.summary_row("scope source")
+
 
 class WorkflowScopeStepTests(unittest.TestCase):
-    """The scope step's shell, run for real against every event shape it handles.
+    """The scope job's shell, run for real against every event shape it handles.
 
-    The REAL planner and evidence verifier run (the workspace's, reached
-    through a trampoline in the temp cwd, since the step spells them as
-    cwd-relative paths); only the Git repository the step diffs and verifies
-    against is a fixture. Three commits — `root`, `base`, `head` — give the
-    diff-based events a resolvable `base..head` and a second real base for a
-    mismatched scope receipt; the full-run events never look at them.
+    Every `run:` step of the job through the scope step executes, in order,
+    one shell each as GitHub runs them, so a toolchain step placed ahead of
+    the receipt decision is seen — the proof that a receipt hit sets up no
+    Rust has to span that boundary. The REAL planner and evidence verifier
+    run (the workspace's, reached through a trampoline in the temp cwd, since
+    the step spells them as cwd-relative paths); `rustup` is a counting stub
+    first on PATH, since the toolchain must not be materialized by a test.
+    Only the Git repository the step diffs and verifies against is a fixture.
+    Three commits — `root`, `base`, `head` — give the diff-based events a
+    resolvable `base..head` and a second real base for a mismatched scope
+    receipt; the full-run events never look at them.
 
     The step runs under the Bash that `resolve_step_bash` found, never a bare
     `bash` from PATH; `BISCUIT_TEST_BASH` names one explicitly and is then the
@@ -763,7 +1195,11 @@ class WorkflowScopeStepTests(unittest.TestCase):
             if os.environ.get("CI"):
                 raise AssertionError(message)
             raise unittest.SkipTest(message)
-        cls.script = workflow_step_script(WORKFLOW, SCOPE_STEP)
+        steps = workflow_job_run_steps(WORKFLOW, "scope")
+        names = [step.name for step in steps]
+        if SCOPE_STEP not in names:
+            raise AssertionError(f"the scope job has no {SCOPE_STEP!r} run step")
+        cls.steps = steps[: names.index(SCOPE_STEP) + 1]
 
     def run_step(
         self,
@@ -772,44 +1208,88 @@ class WorkflowScopeStepTests(unittest.TestCase):
         push_base: str | None = None,
         scope_receipt=None,
         validation_receipt: bool = False,
+        evidence: Sequence[dict] | None = None,
         expect_failure: bool = False,
+        verifier_failure: str | None = None,
+        overlay_failure: bool = False,
     ) -> StepRun:
-        """The step for one event, over a fresh fixture repository.
+        """The job's run steps through the scope step, for one event, over a
+        fresh fixture repository.
 
         `scope_receipt(root, base, head) -> str` is attached to `head` under
-        `refs/notes/ci-local/scope` before the step runs; `validation_receipt`
-        publishes a complete macOS L1 receipt for the source package so the
-        accepted-cells path is exercised.
+        `refs/notes/ci-local/scope` before the steps run; `validation_receipt`
+        publishes a complete passing macOS L1 receipt for the source package
+        so the accepted-cells path is exercised, and `evidence` publishes one
+        receipt per entry with `publish_validation_receipt`'s keyword
+        arguments (environment, outcome, mutate).
+
+        `verifier_failure` breaks only `local_evidence.py verify` (the
+        trampoline's other subcommands stay real): a digit string is the exit
+        code it dies with, `"garbage"` prints a non-JSON line and exits 0.
+        `overlay_failure` breaks only the planner's `--apply-to` form: it
+        clobbers the `--plan-out` target and exits 7, so a step that let the
+        overlay write straight into `resolved-plan.json` would hand the
+        fan-out a corrupt plan.
         """
         with tempfile.TemporaryDirectory(prefix="ci-scope-step-") as temporary:
             root = Path(temporary).resolve()
             first, base, head = self.seed_repository(root)
             scripts = root / "scripts" / "ci"
             scripts.mkdir(parents=True)
-            planner_log = root / "planner-calls.log"
+            call_log = root / "tool-calls.log"
             for tool in ("affected_scope.py", "local_evidence.py"):
                 real = ROOT / "scripts" / "ci" / tool
-                # The planner trampoline records every invocation: on a scope
-                # hit the proof is that it was never invoked for selection.
-                record = (
-                    "import os, sys\n"
-                    "if os.environ.get('TEST_PLANNER_LOG'):\n"
-                    "    with open(os.environ['TEST_PLANNER_LOG'], 'a', encoding='utf-8') as log:\n"
-                    "        log.write(' '.join(sys.argv[1:]) + '\\n')\n"
-                    if tool == "affected_scope.py"
-                    else ""
-                )
+                # The planner trampoline records every invocation in the
+                # shared call log: on a scope hit the proof is that it was
+                # never invoked for selection, and on a miss that the
+                # toolchain was set up before it. Both trampolines carry an
+                # evidence-processing fault, armed by `run_step`, that fires
+                # on exactly one subcommand.
+                if tool == "affected_scope.py":
+                    fault = (
+                        "import os, sys\n"
+                        "if os.environ.get('TEST_CALL_LOG'):\n"
+                        "    with open(os.environ['TEST_CALL_LOG'], 'a', encoding='utf-8') as log:\n"
+                        f"        log.write({PLANNER_CALL!r} + ' '.join(sys.argv[1:]) + '\\n')\n"
+                        "if os.environ.get('TEST_OVERLAY_FAILURE') and '--apply-to' in sys.argv:\n"
+                        "    out = sys.argv[sys.argv.index('--plan-out') + 1]\n"
+                        "    open(out, 'w', encoding='utf-8').write('{\"corrupt\": true}')\n"
+                        "    sys.exit(7)\n"
+                    )
+                else:
+                    fault = (
+                        "import os, sys\n"
+                        "mode = os.environ.get('TEST_VERIFIER_FAILURE')\n"
+                        "if mode and sys.argv[1:2] == ['verify']:\n"
+                        "    if mode == 'garbage':\n"
+                        "        print('not json {')\n"
+                        "        sys.exit(0)\n"
+                        "    sys.exit(int(mode))\n"
+                    )
                 (scripts / tool).write_text(
-                    "import runpy\n" + record
+                    "import runpy\n" + fault
                     + f"runpy.run_path({str(real)!r}, run_name='__main__')\n",
                     encoding="utf-8",
                 )
             shutil.copyfile(ROOT / "rust-toolchain.toml", root / "rust-toolchain.toml")
+            # The toolchain invocation counter. A real `rustup show` would
+            # install the pinned toolchain on a bare host, which is exactly
+            # the cost the receipt path must never pay, so the stub records
+            # the call and does nothing else.
+            stubs = root / "bin"
+            stubs.mkdir()
+            rustup = stubs / "rustup"
+            rustup.write_text(
+                "#!/bin/sh\n"
+                f"printf '%s%s\\n' {RUSTUP_CALL!r} \"$*\" >> \"$TEST_CALL_LOG\"\n",
+                encoding="utf-8",
+            )
+            rustup.chmod(0o755)
             if scope_receipt is not None:
                 fixture_git(root, "notes", "--ref", SCOPE_REF, "add", "-f", "-m",
                             scope_receipt(root, base, head), head)
-            if validation_receipt:
-                self.publish_validation_receipt(root, base, head)
+            for receipt in ([{}] if validation_receipt else []) + list(evidence or []):
+                self.publish_validation_receipt(root, base, head, **receipt)
             output = root / "github-output"
             summary = root / "github-step-summary"
             output.touch()
@@ -820,9 +1300,10 @@ class WorkflowScopeStepTests(unittest.TestCase):
                 environment.pop(key, None)
             environment.update(
                 {
+                    "PATH": os.pathsep.join([str(stubs), environment.get("PATH", "")]),
                     "GITHUB_OUTPUT": str(output),
                     "GITHUB_STEP_SUMMARY": str(summary),
-                    "TEST_PLANNER_LOG": str(planner_log),
+                    "TEST_CALL_LOG": str(call_log),
                     "EVENT_NAME": event,
                     # `github.event.before` is empty outside a push; the PR
                     # fields are empty outside a pull request.
@@ -836,15 +1317,25 @@ class WorkflowScopeStepTests(unittest.TestCase):
             )
             if push_base == "FIRST":
                 environment["PUSH_BASE"] = first
-            result = subprocess.run(
-                [STEP_BASH, "-c", self.script],
-                cwd=root,
-                env=environment,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            run = StepRun(root, result, output, summary, planner_log)
+            if verifier_failure is not None:
+                environment["TEST_VERIFIER_FAILURE"] = verifier_failure
+            if overlay_failure:
+                environment["TEST_OVERLAY_FAILURE"] = "1"
+            # One shell per step, as GitHub runs them; a failing step ends
+            # the job unless it is `continue-on-error` (the notes fetch is,
+            # and fails here because the fixture has no `origin`).
+            for step in self.steps:
+                result = subprocess.run(
+                    [STEP_BASH, "-c", step.script],
+                    cwd=root,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if result.returncode != 0 and not step.continue_on_error:
+                    break
+            run = StepRun(root, result, output, summary, call_log)
             if expect_failure:
                 self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
                 return run
@@ -891,7 +1382,7 @@ class WorkflowScopeStepTests(unittest.TestCase):
             "--base", base, "--head", head, "--", "README.md", SOURCE_FILE,
         ))
         plan = json.loads((root / "receipt-plan.json").read_text(encoding="utf-8"))
-        (root / "planner-calls.log").unlink(missing_ok=True)
+        (root / "tool-calls.log").unlink(missing_ok=True)
         return plan, projection
 
     def local_scope_receipt(self, root: Path, base: str, head: str, mutate=None) -> str:
@@ -912,29 +1403,54 @@ class WorkflowScopeStepTests(unittest.TestCase):
             "--scope", "receipt-scope.json", "--base", base, "--head", head,
         ).strip()
 
-    def publish_validation_receipt(self, root: Path, base: str, head: str) -> None:
+    def publish_validation_receipt(
+        self,
+        root: Path,
+        base: str,
+        head: str,
+        environment: str = "macos-latest",
+        outcome: str = "pass",
+        mutate=None,
+    ) -> None:
+        """A complete L1 receipt for the source package on `head`, under
+        `refs/notes/ci-local/<environment>`.
+
+        A failing outcome names its failing test, since a failure the report
+        cannot attribute is recorded `partial` and reused by nothing.
+        `mutate(document)` edits the recorded receipt before it is attached,
+        for notes the verifier must refuse.
+        """
         plan, _ = self.planned_documents(root, base, head)
         (root / "validation-plan.json").write_text(schema.canonical(plan), encoding="utf-8")
-        stage = root / "stage" / "L1"
+        stage_root = root / "stage" / environment
+        stage = stage_root / "L1"
         stage.mkdir(parents=True)
+        failures = 0 if outcome == "pass" else 1
+        case = (
+            '<testcase classname="biscuit-hash" name="one"/>' if outcome == "pass"
+            else '<testcase classname="biscuit-hash" name="one"><failure message="boom"/></testcase>'
+        )
         (stage / "biscuit-hash.xml").write_text(
-            '<?xml version="1.0"?><testsuites><testsuite name="biscuit-hash" tests="1" '
-            'failures="0" errors="0" skipped="0"><testcase classname="biscuit-hash" '
-            'name="one"/></testsuite></testsuites>',
+            f'<?xml version="1.0"?><testsuites><testsuite name="biscuit-hash" tests="1" '
+            f'failures="{failures}" errors="0" skipped="0">{case}</testsuite></testsuites>',
             encoding="utf-8",
         )
-        (root / "stage" / "manifest.jsonl").write_text(
+        (stage_root / "manifest.jsonl").write_text(
             json.dumps({"tier": "L1", "package": "biscuit-hash", "xml": "L1/biscuit-hash.xml",
-                        "exit_code": 0, "environment": "macos-latest", "duration_s": 1,
+                        "exit_code": failures, "environment": environment, "duration_s": 1,
                         "report_present": True}) + "\n",
             encoding="utf-8",
         )
         receipt = self.tool(
             root, "local_evidence.py", "record-cells", "--plan", "validation-plan.json",
-            "--stage", "stage", "--base", base, "--head", head,
-            "--environment", "macos-latest", "--report-dir", str(root / "stage"),
+            "--stage", str(stage_root), "--base", base, "--head", head,
+            "--environment", environment, "--report-dir", str(stage_root),
         ).strip()
-        fixture_git(root, "notes", "--ref", "refs/notes/ci-local/macos-latest", "add", "-f", "-m", receipt, head)
+        if mutate is not None:
+            document = json.loads(receipt)
+            mutate(document)
+            receipt = schema.canonical(document)
+        fixture_git(root, "notes", "--ref", f"refs/notes/ci-local/{environment}", "add", "-f", "-m", receipt, head)
 
     # -- event shapes --------------------------------------------------------
 
@@ -942,6 +1458,10 @@ class WorkflowScopeStepTests(unittest.TestCase):
         run = self.run_step("workflow_dispatch")
         self.assertEqual("true", run.outputs["full_scope"])
         self.assertEqual(NULL_OID, run.plan["base"])
+        # Selection reads `cargo metadata`, so the manual path still sets up
+        # the toolchain, and says it ran no verifier rather than `none`.
+        self.assertEqual(["rustup show"], run.rustup_calls)
+        self.assertEqual("n/a (workflow_dispatch runs no verifier)", run.summary_row("validation environments"))
 
     def test_a_pull_request_diffs_its_base_and_head(self) -> None:
         run = self.run_step("pull_request")
@@ -964,6 +1484,7 @@ class WorkflowScopeStepTests(unittest.TestCase):
     def test_a_matching_scope_receipt_is_the_plan_and_the_planner_never_runs(self) -> None:
         run = self.run_step("push", scope_receipt=self.local_scope_receipt)
         self.assertEqual([], run.planner_calls, "the planner ran although the receipt matched")
+        self.assertEqual([], run.rustup_calls, "a receipt hit needs no Rust, so no step may set up the toolchain (R9)")
         self.assertEqual(f"local ({SCOPE_REF} @ {run.plan['head'][:9]})", run.scope_source())
         self.assertEqual(SCOPE_MARKER, run.outputs["preflight_reason"])
         self.assertEqual(SCOPE_MARKER, run.plan["preflight_reason"])
@@ -996,6 +1517,71 @@ class WorkflowScopeStepTests(unittest.TestCase):
         run = self.run_step("pull_request")
         self.assertTrue(run.scope_source().startswith("CI fallback (scope-missing:"), run.scope_source())
         self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+
+    # -- the toolchain is set up only for selection (2026-09-10 spec R9) -----
+
+    def test_a_receipt_miss_sets_up_the_toolchain_once_before_selection(self) -> None:
+        run = self.run_step("pull_request")
+        self.assertEqual(["rustup show"], run.rustup_calls)
+        # Order, from the shared log: the toolchain first, then the one
+        # selection run that needs it, and nothing in between.
+        self.assertEqual(2, len(run.calls), run.calls)
+        self.assertEqual("rustup show", run.calls[0])
+        self.assertTrue(run.calls[1].startswith(PLANNER_CALL), run.calls)
+        self.assertNotIn("--apply-to", run.calls[1])
+
+    def test_a_hit_with_accepted_evidence_sets_up_no_toolchain_and_reports_the_reuse(self) -> None:
+        run = self.run_step("pull_request", scope_receipt=self.local_scope_receipt, validation_receipt=True)
+        self.assertEqual(["reuse"], self.reused_l1(run))
+        self.assertEqual([], run.rustup_calls, "verify --cells and --apply-to are Python; no step may set up Rust")
+        self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+        self.assertIn("--apply-to", run.planner_calls[0])
+        self.assertEqual("consulted: macos-latest; matched: macos-latest", run.summary_row("validation environments"))
+        self.assertEqual("1: biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
+        self.assertEqual("none", run.summary_row("reused failing cells"))
+        self.assertEqual("none", run.summary_row("cells retained (evidence incomplete or rejected)"))
+
+    # -- the summary's evidence provenance (2026-09-10 spec R9, AC15) --------
+
+    def test_all_rejected_evidence_still_publishes_its_rejections(self) -> None:
+        def interrupted(document: dict) -> None:
+            document["completion"] = "interrupted"
+
+        run = self.run_step("pull_request", scope_receipt=self.local_scope_receipt,
+                            evidence=[{"mutate": interrupted}])
+        rejections = run.plan["evidence_rejections"]
+        self.assertEqual(1, len(rejections), rejections)
+        self.assertTrue(rejections[0].startswith("incomplete-run: the macos-latest run is interrupted"), rejections)
+        self.assertEqual([], run.plan["accepted_evidence"])
+        self.assertEqual(["execute"], self.reused_l1(run))
+        # The refusal reached the plan through the overlay, with nothing to
+        # accept, and selection still never ran.
+        self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+        self.assertIn("--apply-to", run.planner_calls[0])
+        self.assertEqual([], run.rustup_calls)
+        self.assertEqual("consulted: macos-latest; matched: none", run.summary_row("validation environments"))
+        self.assertEqual("none", run.summary_row("reused passing cells"))
+        self.assertEqual("none", run.summary_row("reused failing cells"))
+        self.assertEqual("1 rejection(s): incomplete-run (1)", run.summary_row("cells retained (evidence incomplete or rejected)"))
+
+    def test_reused_passing_and_failing_cells_are_listed_separately(self) -> None:
+        run = self.run_step(
+            "pull_request",
+            scope_receipt=self.local_scope_receipt,
+            evidence=[{"environment": "macos-latest", "outcome": "pass"},
+                      {"environment": "ubuntu-latest", "outcome": "fail"}],
+        )
+        reused = {
+            (cell["environment"], cell["evidence"]["outcome"])
+            for cell in run.plan["cells"] if cell["execution"] == "reuse"
+        }
+        self.assertEqual({("macos-latest", "pass"), ("ubuntu-latest", "fail")}, reused)
+        self.assertEqual("consulted: macos-latest, ubuntu-latest; matched: macos-latest, ubuntu-latest",
+                         run.summary_row("validation environments"))
+        self.assertEqual("1: biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
+        self.assertEqual("1: biscuit-hash/ubuntu-latest/L1", run.summary_row("reused failing cells"))
+        self.assertEqual("none", run.summary_row("cells retained (evidence incomplete or rejected)"))
+        self.assertEqual([], run.rustup_calls)
 
     def test_a_receipt_declaring_another_head_or_tree_falls_back(self) -> None:
         def other_head(root: Path, base: str, head: str) -> str:
@@ -1096,6 +1682,148 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertNotIn("--accepted-cells", selection[0], "selection must not resolve evidence")
         self.assertEqual(["reuse"], self.reused_l1(run))
         self.assertEqual(legacy_scope_document(run.plan), run.scope)
+
+    # -- evidence processing adds work, never removes it (R8, audit W4) ------
+
+    #: Every matrix output the fan-out reads. A step that died before writing
+    #: them would lose the run's package work, which is the defect.
+    MATRIX_OUTPUTS = (
+        "scheduled_areas", "area_matrix", "area_slugs", "gap_areas", "packages",
+        "package_names", "has_packages", "full_scope", "sniff", "biscuit_tui",
+        "ci_tooling", "job_estimate", "preflight_os", "preflight_reason", "change_class",
+    )
+
+    def assert_unmodified_plan_and_nothing_reused(self, run: StepRun, carried_receipt: str) -> None:
+        self.assertEqual(schema.canonical(json.loads(carried_receipt)["plan"]), run.plan_bytes,
+                         "the written plan must be the pre-overlay plan, byte for byte")
+        self.assertEqual([], run.plan.get("accepted_evidence", []))
+        self.assertEqual([], [cell for cell in run.plan["cells"] if cell.get("execution") == "reuse"])
+        self.assertEqual(legacy_scope_document(run.plan), run.scope)
+        self.assertEqual("true", run.outputs["has_packages"])
+        self.assertEqual(set(), set(self.MATRIX_OUTPUTS) - set(run.outputs), "matrix outputs missing")
+        # The provenance rows describe the unmodified plan, honestly.
+        self.assertEqual("consulted: macos-latest; matched: none", run.summary_row("validation environments"))
+        self.assertEqual("none", run.summary_row("reused passing cells"))
+        self.assertEqual("none", run.summary_row("reused failing cells"))
+        self.assertEqual("none", run.summary_row("cells retained (evidence incomplete or rejected)"))
+
+    def test_a_crashing_verifier_retains_the_plan_and_reuses_nothing(self) -> None:
+        receipts: dict = {}
+
+        def remember(root: Path, base: str, head: str) -> str:
+            receipts["text"] = self.local_scope_receipt(root, base, head)
+            return receipts["text"]
+
+        run = self.run_step("pull_request", scope_receipt=remember, validation_receipt=True,
+                            verifier_failure="42")
+        self.assert_unmodified_plan_and_nothing_reused(run, receipts["text"])
+        self.assertEqual([], run.planner_calls, "no overlay may run on a verifier crash")
+        self.assertIn("| evidence processing | verifier failed (exit 42); no cell reused |", run.summary)
+        self.assertIn("::warning title=CI scope::local evidence verifier failed (exit 42)", run.result.stdout)
+
+    def test_a_verifier_printing_garbage_is_a_failure_not_evidence(self) -> None:
+        receipts: dict = {}
+
+        def remember(root: Path, base: str, head: str) -> str:
+            receipts["text"] = self.local_scope_receipt(root, base, head)
+            return receipts["text"]
+
+        run = self.run_step("pull_request", scope_receipt=remember, validation_receipt=True,
+                            verifier_failure="garbage")
+        self.assert_unmodified_plan_and_nothing_reused(run, receipts["text"])
+        self.assertEqual([], run.planner_calls)
+        self.assertIn("| evidence processing | verifier output is not a JSON list; no cell reused |", run.summary)
+        self.assertIn("::warning title=CI scope::local evidence verifier output is not a JSON list", run.result.stdout)
+
+    def test_a_crashing_overlay_retains_the_plan_and_reuses_nothing(self) -> None:
+        receipts: dict = {}
+
+        def remember(root: Path, base: str, head: str) -> str:
+            receipts["text"] = self.local_scope_receipt(root, base, head)
+            return receipts["text"]
+
+        run = self.run_step("pull_request", scope_receipt=remember, validation_receipt=True,
+                            overlay_failure=True)
+        # The verifier accepted the macOS L1 cell, so the overlay was reached.
+        self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+        self.assertIn("--apply-to resolved-plan.json", run.planner_calls[0])
+        self.assert_unmodified_plan_and_nothing_reused(run, receipts["text"])
+        self.assertIn("| evidence processing | overlay failed (exit 7); no cell reused |", run.summary)
+        self.assertIn("::warning title=CI scope::local evidence overlay failed (exit 7)", run.result.stdout)
+
+
+GATE_STEP = "Fold the blocking jobs' results"
+
+
+class WorkflowGateStepTests(unittest.TestCase):
+    """`ci-gate`'s fold, run for real over every `needs.*.result` shape.
+
+    The semantics come from the scratch-repository fixture
+    (`fixes/2026-09-11-cicd-cleanup/fixtures/scratch-2026-09-12.md`): an
+    unselected area's job is `skipped` and must not block; `failure` and
+    `cancelled` must. The step needs nothing beyond POSIX shell plus Bash's
+    here-string, so any Bash runs it; the scope step's version floor is not
+    required here.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.script = workflow_step_script(WORKFLOW, GATE_STEP)
+        cls.bash = STEP_BASH or shutil.which("bash")
+        if cls.bash is None:
+            raise unittest.SkipTest("requires a Bash")
+
+    def fold(self, results: dict[str, str], script: str | None = None) -> subprocess.CompletedProcess:
+        env_block = "".join(f"{job}:{result}\n" for job, result in results.items())
+        return subprocess.run(
+            [self.bash, "-c", script or self.script],
+            env={**clean_policy_environment(), "RESULTS": env_block},
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    @staticmethod
+    def all_success() -> dict[str, str]:
+        return {
+            job: "success"
+            for job in ("validation", "scope", "preflight", "area-ci", "biscuit-tui-captured-stdout", "ci-tooling")
+        }
+
+    def test_every_job_succeeded_passes(self) -> None:
+        run = self.fold(self.all_success())
+        self.assertEqual(0, run.returncode, run.stdout + run.stderr)
+        self.assertIn("every blocking job succeeded or was skipped", run.stdout)
+
+    def test_a_skipped_job_is_accepted(self) -> None:
+        # An unselected area (or every downstream job on a reused validation).
+        results = {**self.all_success(), "area-ci": "skipped", "biscuit-tui-captured-stdout": "skipped"}
+        run = self.fold(results)
+        self.assertEqual(0, run.returncode, run.stdout + run.stderr)
+
+    def test_a_failed_job_blocks_and_is_named(self) -> None:
+        run = self.fold({**self.all_success(), "ci-tooling": "failure"})
+        self.assertEqual(1, run.returncode, run.stdout + run.stderr)
+        self.assertIn("ci-gate: blocked by ci-tooling", run.stderr)
+        self.assertIn("ci-tooling: failure (blocks)", run.stdout)
+
+    def test_a_cancelled_job_blocks(self) -> None:
+        run = self.fold({**self.all_success(), "area-ci": "cancelled"})
+        self.assertEqual(1, run.returncode, run.stdout + run.stderr)
+        self.assertIn("area-ci", run.stderr)
+
+    def test_every_blocking_job_is_named_not_just_the_first(self) -> None:
+        run = self.fold({**self.all_success(), "scope": "failure", "preflight": "cancelled"})
+        self.assertEqual(1, run.returncode)
+        self.assertIn("blocked by scope preflight", run.stderr)
+
+    def test_the_assertions_reject_a_fold_that_accepts_failure(self) -> None:
+        # Non-vacuity: the same inputs against a fold widened to accept
+        # `failure` exit 0, so the blocking assertions above are load-bearing.
+        widened = self.script.replace("success|skipped)", "success|skipped|failure)")
+        self.assertNotEqual(widened, self.script, "the accept clause must be where the tests expect it")
+        run = self.fold({**self.all_success(), "ci-tooling": "failure"}, script=widened)
+        self.assertEqual(0, run.returncode, "a widened fold lets a failed job through")
 
 
 class StepBashResolverTests(unittest.TestCase):

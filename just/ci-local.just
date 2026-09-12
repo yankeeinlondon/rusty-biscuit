@@ -13,10 +13,12 @@
 # was the old unchanged-reverse-dependency shape. Those are no longer selected
 # at all, and every gating package now owns a `lint` cell, so no package can
 # carry `check` alone. The live consequence: CI schedules a `check` cell for a
-# package declaring `example` or `bench` targets and this recipe does not, so
-# an examples-only compile break surfaces in CI rather than pre-push. Widening
-# the condition would add a compile pass to every push, which is a cost
-# decision, not a drift fix.
+# package declaring `example` or `bench` targets, and on `ubuntu-latest` for a
+# package with unchanged direct reverse dependencies (compiled inside that
+# cell; Open Question 1, Option B), and this recipe executes neither, so an
+# examples-only compile break or a broken unchanged consumer surfaces in CI
+# rather than pre-push. Widening the condition would add a compile pass to
+# every push, which is a cost decision, not a drift fix.
 #
 # The lint gate deliberately builds without features: that is CI's invocation,
 # and it is where incomplete `terminal-tests`/`daemon-tests`-style gating
@@ -48,16 +50,34 @@
 # files that differ from the base ref in the checkout, prints it, and exits
 # non-zero when a recorded execution constraint would still be violated. It
 # runs no gate and builds nothing, so it is safe to run before every push.
-# `BISCUIT_CI_CONSTRAINTS_DIR` names the constraint store; `--plan-out` keeps
-# the canonical JSON as the machine interface alongside the rendered table.
-# The pre-push hook does NOT call this: it reviews each PUSHED REVISION's
+# The constraint store is `<home>/.rusty-biscuit/ci-constraints/<repository>/`
+# (resolved by `scripts/ci/constraints.py directory`) unless
+# `BISCUIT_CI_CONSTRAINTS_DIR` or `--constraints` overrides it; `--plan-out`
+# keeps the canonical JSON as the machine interface alongside the rendered table.
+# The pre-push hook does NOT call `--plan`: it reviews each PUSHED REVISION's
 # committed tree with the planner, manifests, and policy committed there,
 # against the base of each run the push triggers (an open pull request's
-# target tip on the remote, or the remote's main when none is open), where
+# target tip on the remote — and its incoming revision too, when the same
+# push updates the target — or the remote's main when none is open), where
 # this preview diffs the checkout against `origin/main`. The two differ when
 # the checkout is dirty (a committed change masked by an unstaged revert is
 # absent here and present in the hook's review) and when the pull request
 # targets another branch or its target has advanced.
+#
+# `--plan-in <path>` (or `BISCUIT_CI_PLAN_IN`, the form the hook uses) runs the
+# gates FROM a resolved plan instead of computing one: the planner's selection
+# never runs, the package list, gates, and test arguments are the legacy
+# projection of that plan (`affected_scope.py --apply-to`, which reads nothing
+# from the checkout), and for this host's environment an L1/L2 cell runs only
+# when the plan says it EXECUTES — or when it was reused from prior evidence
+# whose outcome is a FAILURE, since a local rerun is cheap and the fresh result
+# supersedes the old one (spec ruling D2). Lint stages no report and is never
+# reusable, so it runs as always. This is how a clean-checkout push runs only
+# the cells prior passing evidence does not already cover: the hook feeds the
+# reviewed, evidence-overlaid plan of the outgoing head, then records a receipt
+# for the cells that actually ran against that same plan and base. A dirty
+# checkout or an RUSTY_BISCUIT_PRE_PUSH_AREAS override keeps the working-tree
+# replan below, which is wider feedback and never published as evidence.
 #
 # Usage:
 #   just ci-local                       affected packages vs origin/main
@@ -69,6 +89,8 @@
 #   just ci-local --dry-run             print the scope and gates, run nothing
 #   just ci-local --plan                review every resolved cell, run nothing
 #   just ci-local --plan-out <path>     also write the canonical plan JSON
+#   just ci-local --plan-in <path>      run the gates a resolved plan leaves executing
+#   just ci-local --constraints <dir>   read execution constraints from another store
 #   just ci-local claudine-cli darkmatter   named packages or areas, no scope calc
 ci-local *args="":
     #!/usr/bin/env bash
@@ -84,6 +106,7 @@ ci-local *args="":
     show_plan=0
     scope_out="${BISCUIT_CI_SCOPE_OUT:-}"
     plan_out="${BISCUIT_CI_PLAN_OUT:-}"
+    plan_in="${BISCUIT_CI_PLAN_IN:-}"
     constraints_dir="${BISCUIT_CI_CONSTRAINTS_DIR:-}"
     selectors=()
     set -- {{ args }}
@@ -96,6 +119,8 @@ ci-local *args="":
             --scope-out=*) scope_out="${1#--scope-out=}" ;;
             --plan-out) shift; plan_out="${1:?--plan-out needs a path}" ;;
             --plan-out=*) plan_out="${1#--plan-out=}" ;;
+            --plan-in) shift; plan_in="${1:?--plan-in needs a path}" ;;
+            --plan-in=*) plan_in="${1#--plan-in=}" ;;
             --constraints) shift; constraints_dir="${1:?--constraints needs a path}" ;;
             --constraints=*) constraints_dir="${1#--constraints=}" ;;
             --all) select_all=1 ;;
@@ -113,6 +138,15 @@ ci-local *args="":
         echo "ci-local: python3 is required (scripts/ci/affected_scope.py); run 'just init'." >&2
         exit 2
     fi
+    # The store is resolved here, at the trigger boundary, and handed to the
+    # planner explicitly: the planner has no default of its own, so CI, which
+    # never passes `--constraints`, cannot read it. The hook derives the
+    # repository from the remote being pushed to; this preview has no push, so
+    # it uses origin's URL — empty without one, which is the store root, where
+    # every repository's records bind.
+    constraints_dir="$(python3 scripts/ci/constraints.py directory \
+        --repository "$(git remote get-url origin 2>/dev/null || true)" \
+        --directory "${constraints_dir}")"
 
     scope_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-scope.XXXXXX")"
     plan_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-plan.XXXXXX")"
@@ -123,10 +157,7 @@ ci-local *args="":
     # One calculation serves both documents: `--plan-out` writes the canonical
     # resolved plan while stdout stays the legacy scope shape the gate loop and
     # `ci.yml` still read. They cannot disagree about what CI will run.
-    scope_args=(--plan-out "${plan_file}")
-    if [[ -n "${constraints_dir}" ]]; then
-        scope_args+=(--constraints "${constraints_dir}")
-    fi
+    scope_args=(--plan-out "${plan_file}" --constraints "${constraints_dir}")
     # `--plan` needs no legacy projection: it runs no gate, so the canonical
     # plan is both what it renders and what `--plan-out` writes.
     if (( show_plan == 1 )); then
@@ -137,7 +168,25 @@ ci-local *args="":
     fi
 
     merge_base=""
-    if (( select_all == 1 )) || (( ${#selectors[@]} > 0 )); then
+    if [[ -n "${plan_in}" ]]; then
+        # A fed plan IS the selection. Its cells already carry the evidence the
+        # caller verified, so the planner never runs here: the legacy shape the
+        # gate loop reads is projected from the plan by `--apply-to` with no
+        # accepted cells, which reads nothing from the checkout.
+        if (( select_all == 1 )) || (( ${#selectors[@]} > 0 )); then
+            echo "ci-local: --plan-in runs the given plan; it cannot be combined with --all or package selectors." >&2
+            exit 2
+        fi
+        if [[ ! -s "${plan_in}" ]]; then
+            echo "ci-local: the plan at '${plan_in}' (--plan-in / BISCUIT_CI_PLAN_IN) is missing or empty." >&2
+            exit 2
+        fi
+        cp "${plan_in}" "${plan_file}"
+        python3 scripts/ci/affected_scope.py --apply-to "${plan_file}" > "${scope_file}"
+        plan_view="${plan_file}"
+        echo
+        echo "Plan supplied by the caller: ${plan_in}"
+    elif (( select_all == 1 )) || (( ${#selectors[@]} > 0 )); then
         python3 scripts/ci/affected_scope.py "${scope_args[@]}" --all > "${scope_file}"
     else
         if ! merge_base="$(git merge-base "${base}" HEAD 2>/dev/null)"; then
@@ -161,10 +210,14 @@ ci-local *args="":
     # `--plan` resolves published evidence first, so a reviewer sees the cells
     # that are already satisfied rather than the cells that would run without
     # them. The accepted set is overlaid on the plan just resolved — the same
-    # operation CI performs on a carried receipt — rather than re-selecting;
-    # it is confined to `--plan` because an ordinary run PRODUCES evidence and
-    # has no reason to consume it. `plan_file` is read and rewritten by the
-    # one Python process, and stdout goes to the separate `scope_file`.
+    # operation CI performs on a carried receipt — rather than re-selecting.
+    # An ordinary working-tree run does not consume evidence: its tree is not
+    # necessarily any committed head's, so nothing can be verified against it.
+    # The run that does consume evidence is the one fed a plan (`--plan-in`),
+    # whose caller — the hook — verified and overlaid the evidence already, so
+    # `merge_base` is empty and this block is skipped for it. `plan_file` is
+    # read and rewritten by the one Python process, and stdout goes to the
+    # separate `scope_file`.
     if (( show_plan == 1 )) && [[ -n "${merge_base}" ]] && [[ -f scripts/ci/local_evidence.py ]]; then
         head_sha="$(git rev-parse HEAD)"
         if python3 scripts/ci/local_evidence.py verify --cells \
@@ -219,6 +272,7 @@ ci-local *args="":
         # renderer. It is a `local-tools` bin rather than something `--plan`
         # compiles on demand: a pre-trigger review must not start a build.
         # Without the prebuilt binary the same cells render as plain lines.
+        echo "Constraint store: ${constraints_dir}"
         plan_bin="${BISCUIT_CI_PLAN_BIN:-scripts/target/release/ci-plan}"
         if [[ -x "${plan_bin}" ]] && "${plan_bin}" "${plan_view}"; then
             :
@@ -277,10 +331,12 @@ ci-local *args="":
     rm -f "${reports_dir}/manifest.jsonl"
     export BISCUIT_JUNIT_STAGE_DIR="${reports_dir}"
 
+    # The host's environment names which of a plan's cells are this run's; a
+    # fed plan needs it for every tier, `--l2` for the backend proof.
     local_environment=""
-    if (( run_l2 == 1 )); then
+    if (( run_l2 == 1 )) || [[ -n "${plan_in}" ]]; then
         if ! command -v sniff > /dev/null 2>&1 || ! command -v jq > /dev/null 2>&1; then
-            echo "ci-local: --l2 requires sniff and jq; run 'just init'." >&2
+            echo "ci-local: --l2 and --plan-in require sniff and jq; run 'just init'." >&2
             exit 2
         fi
         os_json="$(sniff os --json)"
@@ -305,7 +361,7 @@ ci-local *args="":
     # hosted runner. `test_runner_loss.py` derives every producer's composite
     # job label from the shipped workflows, so a rename that would silently
     # kill runner-loss attribution fails here rather than on a dead runner.
-    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py test_runner_loss.py; do
+    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py test_publish_gaps.py test_runner_loss.py; do
         if python3 "scripts/ci/${suite}" > "${selftest_log}" 2>&1; then
             passed+=("ci-infra ${suite}")
         else
@@ -314,6 +370,22 @@ ci-local *args="":
         fi
     done
     rm -f "${selftest_log}"
+
+    # With a fed plan, the L1/L2 cells this host runs: the ones the plan left
+    # executing in this environment, plus the ones reused from a FAILURE, which
+    # are rerun (D2). A cell reused from a pass, omitted, or resolved elsewhere
+    # is skipped and named. Without a plan every gate of every package runs.
+    running_cells=""
+    if [[ -n "${plan_in}" ]]; then
+        running_cells="$(jq -r --arg e "${local_environment}" '.cells[] | select(.environment == $e and (.gate == "L1" or .gate == "L2")) | select(.execution == "execute" or (.execution == "reuse" and .evidence.outcome == "fail")) | "\(.package)/\(.gate)"' "${plan_file}")"
+        echo "Cells for ${local_environment} from the supplied plan:"
+        jq -r --arg e "${local_environment}" '.cells[] | select(.environment == $e and (.gate == "L1" or .gate == "L2")) | if .execution == "execute" then "  run    \(.package)/\(.gate)" elif .execution == "reuse" and .evidence.outcome == "fail" then "  rerun  \(.package)/\(.gate)  (prior evidence is a failure; a fresh result supersedes it)" elif .execution == "reuse" then "  skip   \(.package)/\(.gate)  (reused: \(.origin) \(.evidence.outcome // "") on \((.evidence.evidence.commit // .evidence.commit // "this tree")[0:9]))" else "  skip   \(.package)/\(.gate)  (\(.state))" end' "${plan_file}"
+        echo "------------------------------------------------"
+    fi
+    cell_runs_here() {
+        [[ -z "${plan_in}" ]] && return 0
+        grep -qxF -- "$1/$2" <<< "${running_cells}"
+    }
 
     while IFS= read -r package; do
         [[ -n "${package}" ]] || continue
@@ -338,7 +410,7 @@ ci-local *args="":
                 failed+=("lint ${package}")
             fi
         fi
-        if (( run_test == 1 )) && [[ " ${gates} " == *" test "* ]]; then
+        if (( run_test == 1 )) && [[ " ${gates} " == *" test "* ]] && cell_runs_here "${package}" L1; then
             # shellcheck disable=SC2086
             if just _test "${package}" --no-fail-fast ${test_args}; then
                 passed+=("test ${package}")
@@ -346,7 +418,7 @@ ci-local *args="":
                 failed+=("test ${package}")
             fi
         fi
-        if (( run_l2 == 1 )) && [[ " ${gates} " == *" test "* ]]; then
+        if (( run_l2 == 1 )) && [[ " ${gates} " == *" test "* ]] && cell_runs_here "${package}" L2; then
             has_l2="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .tiers | index("L2") != null' "${scope_file}")"
             l2_here="$(jq -r --arg p "${package}" --arg e "${local_environment}" '.matrix[] | select(.package == $p) | .l2_environments | index($e) != null' "${scope_file}")"
             if [[ "${has_l2}" == "true" ]]; then

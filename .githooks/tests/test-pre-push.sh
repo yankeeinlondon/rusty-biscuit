@@ -44,6 +44,26 @@
 # reproduction: against main it selects nothing, against the parent it selects
 # the package.
 #
+# and its review-5: when the SAME push also updates a pull request's target,
+# the server may apply the two updates in either order, so the run is reviewed
+# in BOTH states — against the target's current remote tip and against the
+# incoming revision — whichever order the ref lines arrive in; a target the
+# push deletes leaves the pull request no base, and that update is refused.
+#
+# and ruling D1 of fixes/2026-09-11-cicd-cleanup: a COMPLETE failing run is
+# published in both modes — strict blocks the branch only after the note is on
+# the remote, so a later `--no-verify` push of the same tree lets CI reuse the
+# known failure.
+#
+# and ruling D2 / audit W1, W10, W14 of the same fix: on a clean checkout the
+# hook feeds HEAD's reviewed, evidence-overlaid plan to `just pre-push`, so
+# the REAL `ci-local` recipe (imported by a harness justfile, its gate recipes
+# answered by the fake `just`) runs only the cells prior passing evidence does
+# not cover, reruns a cell whose newest evidence is a failure, never runs the
+# planner's selection again, and the receipt is recorded against that plan and
+# the reviewed base — a stacked pull request's target tip, not a merge base
+# with origin/main — for the cells that actually ran.
+#
 # and the evidence-retention contract of review-1: a published receipt names
 # a report directory that still exists after the hook exits, with every report
 # it lists readable there, and a failed copy publishes no receipt.
@@ -56,7 +76,9 @@
 #
 # Run directly: ./.githooks/tests/test-pre-push.sh
 # PRE_PUSH_HOOK_UNDER_TEST=<path> runs the suite against another copy of the
-# hook (used to prove a new fixture fails against the hook it was written for).
+# hook (used to prove a new fixture fails against the hook it was written for);
+# CI_LOCAL_RECIPE_UNDER_TEST=<path> does the same for the `ci-local` recipe the
+# plan-fed fixtures run.
 # The suite must stay runnable under Bash 3.2, the stock macOS /bin/bash: no
 # mapfile, no associative arrays, and an empty array expands only through
 # ${a[@]+"${a[@]}"} under `set -u`.
@@ -67,6 +89,11 @@ set -o pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="${PRE_PUSH_HOOK_UNDER_TEST:-$REPO_ROOT/.githooks/pre-push}"
 FIXTURES="$REPO_ROOT/.githooks/tests/fixtures"
+# The plan-fed fixtures run the repository's real `ci-local` recipe through
+# the real `just`; the fake `just` on the harness PATH delegates to it by
+# absolute path and answers the recipe's gate calls itself.
+REAL_JUST="$(command -v just || true)"
+CI_LOCAL_RECIPE="${CI_LOCAL_RECIPE_UNDER_TEST:-$REPO_ROOT/just/ci-local.just}"
 
 if [ ! -x "$HOOK" ]; then
     echo "FAIL: hook not executable at $HOOK" >&2
@@ -190,9 +217,12 @@ run_hook_as_remote() {
         make_publishing_repo "$tmpdir"
         stage_fixture_tools "$tmpdir"
     fi
+    # Both home variables: `constraints.py` reads the default store under
+    # `Path.home()`, which is HOME on Unix and USERPROFILE on native Windows.
     local env_args=(
         "PATH=$tmpdir:/usr/bin:/bin"
         "HOME=$tmpdir/home"
+        "USERPROFILE=$tmpdir/home"
         "TEST_PLANNER_LOG=$tmpdir/planner.log"
     )
     if [ "$mode" != "__UNSET__" ]; then
@@ -503,10 +533,9 @@ run_hook_with_env() {
         "0000000000000000000000000000000000000000" "$@"
 }
 
-# The constraint store's LOCATION is Open Question 2 (recommendation: a
-# per-branch file under ~/.rusty-biscuit/ci-constraints/). Only this helper
-# depends on that choice; the contracts below assert the observable refusal,
-# which holds under every option.
+# The tests below name the store through BISCUIT_CI_CONSTRAINTS_DIR, the
+# override; the default location, `<home>/.rusty-biscuit/ci-constraints/
+# <repository>/`, is covered by the fresh-session test further down.
 write_prohibition() {
     local dir="$1" environment="$2" expiry="$3"
     mkdir -p "$dir"
@@ -711,14 +740,16 @@ test_a_failing_warn_run_reaches_the_publication_block() {
     assert_not_contains "no evidence published" "$tmpdir/out" "cell(s) of evidence" || return 1
 }
 
-# The publication guard is one conjunction; each clause is load-bearing and
-# each is asserted in the hook source so a refactor cannot drop one silently.
+# The publication guard is a chain of clauses that each withhold the receipt
+# and print why; each is load-bearing and each is asserted in the hook source
+# so a refactor cannot drop one silently.
 test_publication_requires_a_clean_exact_tree_and_no_override() {
     local tmpdir="$1"
     local guards=(
-        'PUSHES_HEAD" -eq 1'
-        '-z "$SELECTION"'
+        'PUSHES_HEAD" -ne 1'
+        '-n "$SELECTION"'
         'git status --porcelain'
+        '-z "$HEAD_PLAN_BASE"'
         '-s "$PLAN_FILE"'
     )
     local guard
@@ -728,13 +759,6 @@ test_publication_requires_a_clean_exact_tree_and_no_override() {
             return 1
         fi
     done
-}
-
-test_a_blocked_strict_push_records_locally_but_publishes_nothing() {
-    if ! grep -qF -- 'not published while the push is blocked' "$HOOK"; then
-        echo "  strict mode must not push a notes ref for a branch it just blocked" >&2
-        return 1
-    fi
 }
 
 # ---------- retained reports (review-1: receipts must name reports that exist) --
@@ -828,6 +852,139 @@ test_reports_that_cannot_be_retained_publish_no_receipt() {
         echo "  a receipt was attached although its reports were not retained" >&2
         return 1
     fi
+}
+
+# ---------- complete failing runs (fixes/2026-09-11-cicd-cleanup, D1; AC6/AC7) --
+#
+# A COMPLETE failing run is evidence too. The hook publishes it in BOTH modes:
+# warn continues the push with the note already on the remote, and strict
+# blocks the branch AFTER the note is on the remote, so the `--no-verify` push
+# of the unchanged tree that follows lets CI reuse the known failure instead
+# of re-running it. These fixtures satisfy the whole publication guard for
+# real, like the retained-reports ones, but the gate fails.
+
+# The gate stages one L1 report for `alpha` with a failing test and records a
+# non-zero exit for the cell, so `record-cells` measures a COMPLETE failure
+# (a failure whose report names no failing test would be `partial`).
+make_failing_staging_pre_push() {
+    local tmpdir="$1"
+    cat >"$tmpdir/pre-push.hook" <<EOF
+cp "$FIXTURES/plan-macos-executing.json" "\$BISCUIT_CI_PLAN_OUT"
+mkdir -p "\$BISCUIT_CI_REPORTS_OUT/L1"
+printf '<?xml version="1.0"?><testsuites><testsuite name="alpha" tests="2" failures="1" errors="0" skipped="0"><testcase classname="alpha" name="one"/><testcase classname="alpha" name="two"><failure message="assertion failed">boom</failure></testcase></testsuite></testsuites>' >"\$BISCUIT_CI_REPORTS_OUT/L1/alpha.xml"
+printf '{"tier":"L1","package":"alpha","xml":"L1/alpha.xml","exit_code":1,"environment":"macos-latest","duration_s":3,"report_present":true}\\n' >"\$BISCUIT_CI_REPORTS_OUT/manifest.jsonl"
+EOF
+}
+
+# A failing run in the given mode, pushing a branch that does not yet exist on
+# the remote: the fake `just` stages the failing report and exits 1.
+#
+# Usage: run_failing_publishing_hook <tmpdir> <mode> [env...]
+run_failing_publishing_hook() {
+    local tmpdir="$1" mode="$2"
+    shift 2
+    make_fake_just "$tmpdir" 1 "$FIXTURES/plan-macos-executing.json"
+    make_failing_staging_pre_push "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    run_hook_in_repo "$tmpdir" "$mode" refs/heads/feature \
+        "0000000000000000000000000000000000000000" "$@"
+}
+
+# The macOS receipt for `head` as it sits on the bare remote, read from the
+# notes tree itself: the blocked branch never reached the remote, so the
+# commit is not there to `notes show` against, but the note is.
+remote_macos_receipt() {
+    local bare="$1/origin.git" head="$2"
+    git -C "$bare" cat-file -p "refs/notes/ci-local/macos-latest:$head" 2>/dev/null
+}
+
+assert_remote_receipt_is_a_complete_failure() {
+    local label="$1" tmpdir="$2" head="$3"
+    local receipt
+    if ! receipt="$(remote_macos_receipt "$tmpdir" "$head")"; then
+        echo "  no macos-latest note for $head reached the remote ($label)" >&2
+        git -C "$tmpdir/origin.git" show-ref >&2 || true
+        return 1
+    fi
+    if ! printf '%s' "$receipt" | jq -e --arg head "$head" \
+        '.head == $head and (.cells | length) == 1 and (.cells[0] | .package == "alpha" and .gate == "L1" and .outcome == "fail" and .completion == "complete")' \
+        >/dev/null; then
+        echo "  the remote receipt does not record a complete failing alpha/L1 cell for $head ($label):" >&2
+        printf '%s' "$receipt" | jq '{head, cells}' | sed 's/^/  /' >&2
+        return 1
+    fi
+}
+
+# T2 (D1, AC7): strict blocks the push, the note is already on the remote, and
+# after the developer's `--no-verify` push of the same tree a fresh clone
+# verifying against that note accepts the failed cell and the planner's
+# overlay resolves it to reuse — the failure is rolled up, not re-run.
+test_a_blocked_strict_failure_publishes_its_note_and_ci_reuses_the_failure() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    run_failing_publishing_hook "$tmpdir" strict "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
+    assert_exit "strict failure" "$tmpdir" 1 || return 1
+    assert_contains "push blocked" "$tmpdir/err" "Push blocked by strict mode" || return 1
+    assert_contains "note published before blocking" "$tmpdir/out" "Published 1 macos-latest cell(s)" || return 1
+
+    local repo="$tmpdir/repo" bare="$tmpdir/origin.git" head base
+    head="$(git -C "$repo" rev-parse HEAD)"
+    base="$(git -C "$repo" rev-parse origin/main)"
+    # The hook pushes the notes ref and nothing else: the branch is still
+    # blocked.
+    if git -C "$bare" rev-parse --verify -q refs/heads/feature >/dev/null; then
+        echo "  the blocked branch reached the remote" >&2
+        return 1
+    fi
+    assert_remote_receipt_is_a_complete_failure "strict" "$tmpdir" "$head" || return 1
+
+    # The `--no-verify` push of the unchanged tree, then CI's view of it: a
+    # fresh clone that fetches the notes and verifies with the committed
+    # `local_evidence.py`, knowing nothing of the developer's checkout.
+    git -C "$repo" push -q --no-verify origin feature || return 1
+    git clone -q "$bare" "$tmpdir/ci" || return 1
+    git -C "$tmpdir/ci" fetch -q origin '+refs/notes/ci-local/*:refs/notes/ci-local/*' || return 1
+    if ! (cd "$tmpdir/ci" && python3 scripts/ci/local_evidence.py verify --cells \
+            --plan "$FIXTURES/plan-macos-executing.json" --base "$base" --head "$head" \
+            --rejections "$tmpdir/rejections.json") >"$tmpdir/accepted.json" 2>"$tmpdir/verify.err"; then
+        echo "  verify --cells failed in the clone:" >&2
+        sed 's/^/  /' "$tmpdir/verify.err" >&2
+        return 1
+    fi
+    if ! jq -e 'length == 1 and (.[0] | .package == "alpha" and .environment == "macos-latest" and .gate == "L1" and .outcome == "fail" and .completion == "complete" and .origin == "local")' \
+            "$tmpdir/accepted.json" >/dev/null; then
+        echo "  verification did not accept the failed cell with its outcome retained:" >&2
+        sed 's/^/  /' "$tmpdir/accepted.json" >&2
+        echo "  --- rejections ---" >&2
+        sed 's/^/  /' "$tmpdir/rejections.json" >&2
+        return 1
+    fi
+    # The real overlay (`--apply-to` reads nothing from the checkout) resolves
+    # the cell to reuse of the failure; nothing is left to execute.
+    if ! python3 "$REPO_ROOT/scripts/ci/affected_scope.py" --apply-to "$FIXTURES/plan-macos-executing.json" \
+            --accepted-cells "$tmpdir/accepted.json" --resolved-plan >"$tmpdir/applied.json" 2>"$tmpdir/apply.err"; then
+        echo "  --apply-to failed:" >&2
+        sed 's/^/  /' "$tmpdir/apply.err" >&2
+        return 1
+    fi
+    if ! jq -e '(.cells | length) == 1 and (.cells[0] | .execution == "reuse" and .origin == "local" and .state == "reused" and .evidence.outcome == "fail") and ([.cells[] | select(.execution == "execute")] | length) == 0' \
+            "$tmpdir/applied.json" >/dev/null; then
+        echo "  the overlaid plan does not reuse the failed cell:" >&2
+        jq '.cells' "$tmpdir/applied.json" | sed 's/^/  /' >&2
+        return 1
+    fi
+}
+
+# T1 (AC6): the same complete failure under warn continues the push, and the
+# note is on the remote before the hook returns.
+test_a_complete_warn_failure_publishes_its_note() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    run_failing_publishing_hook "$tmpdir" warn "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
+    assert_exit "warn failure" "$tmpdir" 0 || return 1
+    assert_contains "failure still reported" "$tmpdir/out" "Pre-push validation failed" || return 1
+    assert_contains "note published" "$tmpdir/out" "Published 1 macos-latest cell(s)" || return 1
+    assert_remote_receipt_is_a_complete_failure "warn" "$tmpdir" "$(git -C "$tmpdir/repo" rev-parse HEAD)" || return 1
 }
 
 # ---------- scope evidence (fixes/2026-09-10-local-affected-scope, R1/R2) ----
@@ -1381,17 +1538,34 @@ test_deletions_and_tags_among_branch_updates_are_skipped_by_name() {
 GITHUB_URL="git@github.com:acme/widgets.git"
 
 # A `gh` that logs its argv to gh.log and answers `pr list` with the given
-# `<number> <base branch>` rows (none: no open pull request). A `gh-fail`
-# marker makes it fail the way an unauthenticated `gh` does.
+# `<number> <base branch>` rows (none: no open pull request). A row with a
+# third field, `<number> <base branch> <head branch>`, is answered only when
+# `pr list` asks for that `--head`, so a push carrying several branches can
+# hold a pull request from one of them. A `gh-fail` marker makes it fail the
+# way an unauthenticated `gh` does.
 #
 # Usage: stage_fake_gh <tmpdir> [row...]
 stage_fake_gh() {
     local tmpdir="$1"
     shift
-    local json="[" sep="" row
+    local json="[" sep="" row number rest base head entry existing
+    rm -f "$tmpdir"/gh-reply-*.json
     for row in "$@"; do
-        json="$json$sep{\"number\":${row%% *},\"baseRefName\":\"${row#* }\"}"
-        sep=","
+        number="${row%% *}"
+        rest="${row#* }"
+        base="${rest%% *}"
+        head=""
+        case "$rest" in *" "*) head="${rest#* }" ;; esac
+        entry="{\"number\":$number,\"baseRefName\":\"$base\"}"
+        if [ -z "$head" ]; then
+            json="$json$sep$entry"
+            sep=","
+        elif [ -s "$tmpdir/gh-reply-$head.json" ]; then
+            existing="$(sed 's/]$//' "$tmpdir/gh-reply-$head.json")"
+            printf '%s,%s]' "$existing" "$entry" >"$tmpdir/gh-reply-$head.json"
+        else
+            printf '[%s]' "$entry" >"$tmpdir/gh-reply-$head.json"
+        fi
     done
     printf '%s]' "$json" >"$tmpdir/gh-reply.json"
     cat >"$tmpdir/gh" <<EOF
@@ -1401,18 +1575,31 @@ if [ -f "$tmpdir/gh-fail" ]; then
     echo "gh: To get started with GitHub CLI, please run: gh auth login" >&2
     exit 4
 fi
-cat "$tmpdir/gh-reply.json"
+head=""
+while [ \$# -gt 0 ]; do
+    if [ "\$1" = "--head" ] && [ \$# -gt 1 ]; then
+        head="\$2"
+    fi
+    shift
+done
+if [ -n "\$head" ] && [ -f "$tmpdir/gh-reply-\$head.json" ]; then
+    cat "$tmpdir/gh-reply-\$head.json"
+else
+    cat "$tmpdir/gh-reply.json"
+fi
 EOF
     chmod +x "$tmpdir/gh"
 }
 
 # The review's reproduction: `parent` (from main) changes pkg/alpha/src/lib.rs
 # and is on the remote; `child` (from parent) restores the base contents and
-# is checked out as HEAD. Sets PARENT_SHA and CHILD_SHA.
+# is checked out as HEAD. With `behind`, the remote's `parent` instead still
+# holds main's commit — the parent's change is an update THIS push carries
+# (review-5). Sets MAIN_SHA, PARENT_SHA, and CHILD_SHA.
 #
-# Usage: make_stacked_repo <tmpdir>
+# Usage: make_stacked_repo <tmpdir> [pushed|behind]
 make_stacked_repo() {
-    local tmpdir="$1" repo="$1/repo"
+    local tmpdir="$1" repo="$1/repo" remote_parent="${2:-pushed}"
     local commit=(git -c user.name=hook-test -c user.email=hook@example.com -c commit.gpgsign=false)
     make_publishing_repo "$tmpdir"
     stage_fixture_tools "$tmpdir"
@@ -1420,11 +1607,16 @@ make_stacked_repo() {
     echo "parent lib" >"$repo/pkg/alpha/src/lib.rs"
     "${commit[@]}" -C "$repo" add -A
     "${commit[@]}" -C "$repo" commit -q -m "parent"
-    git -C "$repo" push -q origin parent
+    if [ "$remote_parent" = "behind" ]; then
+        git -C "$repo" push -q origin main:refs/heads/parent
+    else
+        git -C "$repo" push -q origin parent
+    fi
     git -C "$repo" checkout -q -b child parent
     echo "base lib" >"$repo/pkg/alpha/src/lib.rs"
     "${commit[@]}" -C "$repo" add -A
     "${commit[@]}" -C "$repo" commit -q -m "child"
+    MAIN_SHA="$(git -C "$repo" rev-parse main)"
     PARENT_SHA="$(git -C "$repo" rev-parse parent)"
     CHILD_SHA="$(git -C "$repo" rev-parse child)"
 }
@@ -1553,6 +1745,37 @@ test_a_github_branch_with_no_open_pull_request_gets_a_provisional_plan() {
     assert_scope_receipt_base "provisional plan" "$tmpdir" "$main_sha" || return 1
 }
 
+# Review-5: a record written in one session must bind a fresh one that never
+# set BISCUIT_CI_CONSTRAINTS_DIR (`env -i` above guarantees it is unset). The
+# default store is derived from the remote being pushed to — the GitHub URL
+# here, so the directory is `github.com/acme/widgets` — and a record filed
+# under another repository's directory does not bind.
+test_a_record_in_the_default_store_binds_a_fresh_session() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 0
+    stage_fake_gh "$tmpdir"
+    local repo="$tmpdir/repo" head store="$tmpdir/home/.rusty-biscuit/ci-constraints"
+    head="$(git -C "$repo" rev-parse HEAD)"
+    local line="refs/heads/feature $head refs/heads/feature $ZERO_SHA"
+
+    write_scoped_prohibition "$store/github.com/other/repo" other repository "github.com/other/repo"
+    write_prohibition "$store/github.com/acme/widgets" "wsl2-ubuntu" "2099-01-01"
+    run_hook_as_remote "$tmpdir" strict origin "$GITHUB_URL" "$line"
+    assert_exit "fresh session, record in the default store" "$tmpdir" 1 || return 1
+    assert_contains "record named" "$tmpdir/err" "do not rerun WSL for this branch" || return 1
+    assert_log_lacks "no gate ran" "$tmpdir" "pre-push" || return 1
+
+    # Only the other repository's record remains; it lives outside this
+    # repository's directory, so a fresh session is not bound by it.
+    rm -f "$store/github.com/acme/widgets/current.json"
+    reset_run_outputs "$tmpdir"
+    run_hook_as_remote "$tmpdir" strict origin "$GITHUB_URL" "$line"
+    assert_exit "another repository's record" "$tmpdir" 0 || return 1
+    assert_not_contains "no refusal" "$tmpdir/err" "Push blocked" || return 1
+}
+
 test_two_open_pull_requests_from_one_head_are_each_reviewed() {
     local tmpdir="$1"
     make_stacked_repo "$tmpdir"
@@ -1654,6 +1877,414 @@ test_a_non_github_remote_never_asks_gh() {
     assert_scope_receipt_base "bare remote" "$tmpdir" "$(git -C "$tmpdir/repo" rev-parse origin/main)" || return 1
 }
 
+# ---------- the target branch travels in the same push (review-5) ----------
+#
+# A push can carry a pull request's head AND its target. The server applies
+# the two updates in an order this hook cannot know, so the pull request's run
+# may compare against the target's current tip or against the incoming
+# revision. The review's reproduction is a child that restores the ORIGINAL
+# library over a parent that changed it: against the remote's parent (still
+# main's tree) the child selects nothing, against the incoming parent it
+# selects the package. The old hook read the target from the remote alone and
+# let a child-only prohibition through in either ref order.
+
+# The two ref lines of that push, in the given order.
+#
+# Usage: simultaneous_ref_lines <parent first|child first>
+simultaneous_ref_lines() {
+    local parent_line="refs/heads/parent $PARENT_SHA refs/heads/parent $MAIN_SHA"
+    local child_line="refs/heads/child $CHILD_SHA refs/heads/child $ZERO_SHA"
+    if [ "$1" = "parent first" ]; then
+        printf '%s\n%s' "$parent_line" "$child_line"
+    else
+        printf '%s\n%s' "$child_line" "$parent_line"
+    fi
+}
+
+test_a_target_updated_in_the_same_push_is_reviewed_at_its_incoming_revision() {
+    local tmpdir="$1"
+    make_stacked_repo "$tmpdir" behind
+    make_fake_just "$tmpdir" 0 "$FIXTURES/plan-wsl-executing.json"
+    stage_fake_gh "$tmpdir" "12 parent child"
+    write_scoped_prohibition "$tmpdir/constraints" child branch child
+    local order
+    for order in "parent first" "child first"; do
+        reset_run_outputs "$tmpdir"
+        run_hook_as_remote "$tmpdir" strict origin "$GITHUB_URL" "$(simultaneous_ref_lines "$order")" \
+            "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+        assert_exit "$order" "$tmpdir" 1 || return 1
+        # The state the old hook stopped at: the remote's parent is main's
+        # tree, so the child selects nothing there ...
+        assert_planned_with_no_paths "$order, current parent" "$tmpdir" "$MAIN_SHA" "$CHILD_SHA" || return 1
+        # ... and the state it never reviewed: the incoming parent, against
+        # which the child changes the package and the WSL cell would execute.
+        assert_contains "$order, incoming parent planned" "$tmpdir/planner.log" \
+            "--base $PARENT_SHA --head $CHILD_SHA -- pkg/alpha/src/lib.rs" || return 1
+        assert_contains "$order, incoming state named" "$tmpdir/out" \
+            "pull request #12 into parent, the revision this push also writes to parent" || return 1
+        assert_contains "$order, record named" "$tmpdir/err" "do not rerun WSL for branch child" || return 1
+        assert_contains "$order, blocked update named" "$tmpdir/err" \
+            "Blocked while reviewing refs/heads/child -> refs/heads/child" || return 1
+        assert_log_lacks "$order, no gate after refusal" "$tmpdir" "pre-push" || return 1
+        assert_no_leftover_worktree "$order" "$tmpdir" || return 1
+    done
+}
+
+# The control: the same push with nothing prohibited passes in either order,
+# with the child's run reviewed in both states and the parent's provisional
+# plan once. The receipt keeps binding HEAD's first context — the current
+# remote parent — so the run that sees the incoming parent misses it and CI
+# calculates that scope itself.
+test_a_simultaneous_push_with_no_prohibited_work_passes_in_either_order() {
+    local tmpdir="$1"
+    make_stacked_repo "$tmpdir" behind
+    make_fake_just "$tmpdir" 0 "$FIXTURES/plan-wsl-executing.json"
+    stage_fake_gh "$tmpdir" "12 parent child"
+    local order short_child receipt
+    short_child="$(git -C "$tmpdir/repo" rev-parse --short=9 "$CHILD_SHA")"
+    for order in "parent first" "child first"; do
+        reset_run_outputs "$tmpdir"
+        run_hook_as_remote "$tmpdir" scope-only origin "$GITHUB_URL" "$(simultaneous_ref_lines "$order")"
+        assert_exit "$order" "$tmpdir" 0 || return 1
+        if [ "$(grep -c "^Comparison base for $short_child: " "$tmpdir/out")" != "2" ]; then
+            echo "  expected the child's run to be reviewed in two states ($order):" >&2
+            grep '^Comparison base for ' "$tmpdir/out" | sed 's/^/  /' >&2
+            return 1
+        fi
+        assert_contains "$order, both states announced" "$tmpdir/out" \
+            "parent is updated by this push too, so the run of pull request #12 may see either its current tip or the incoming revision as its base" || return 1
+        assert_contains "$order, current state named" "$tmpdir/out" \
+            "pull request #12 into parent, the tip of parent on origin" || return 1
+        assert_contains "$order, incoming state named" "$tmpdir/out" \
+            "pull request #12 into parent, the revision this push also writes to parent" || return 1
+        assert_planned_with_no_paths "$order, current parent" "$tmpdir" "$MAIN_SHA" "$CHILD_SHA" || return 1
+        assert_contains "$order, incoming parent planned" "$tmpdir/planner.log" \
+            "--base $PARENT_SHA --head $CHILD_SHA -- pkg/alpha/src/lib.rs" || return 1
+        # The parent has no pull request of its own: one provisional plan.
+        assert_contains "$order, parent planned provisionally" "$tmpdir/planner.log" \
+            "--base $MAIN_SHA --head $PARENT_SHA -- pkg/alpha/src/lib.rs" || return 1
+        assert_not_contains "$order, no refusal" "$tmpdir/err" "Blocked while reviewing" || return 1
+        assert_contains "$order, receipt scope announced" "$tmpdir/out" "binds its first comparison base only" || return 1
+        if ! receipt="$(scope_receipt "$tmpdir")"; then
+            echo "  no scope receipt is attached to HEAD ($order)" >&2
+            return 1
+        fi
+        if [ "$(printf '%s' "$receipt" | jq -r '.base + " " + .head')" != "$MAIN_SHA $CHILD_SHA" ]; then
+            echo "  the scope receipt does not bind the current remote parent ($order):" >&2
+            printf '%s' "$receipt" | jq '{base, head}' | sed 's/^/  /' >&2
+            return 1
+        fi
+        assert_no_leftover_worktree "$order" "$tmpdir" || return 1
+    done
+}
+
+# A pull request into a branch this push DELETES has no base the hook can
+# establish — the run may fire against the old tip before the deletion lands,
+# and the pull request has no base at all afterwards — so the update is
+# refused by name, in either order, before any plan is resolved.
+test_a_pull_request_into_a_branch_this_push_deletes_is_refused() {
+    local tmpdir="$1"
+    make_stacked_repo "$tmpdir"
+    make_fake_just "$tmpdir" 0 "$FIXTURES/plan-wsl-executing.json"
+    stage_fake_gh "$tmpdir" "12 parent child"
+    local delete_line="(delete) $ZERO_SHA refs/heads/parent $PARENT_SHA"
+    local child_line="refs/heads/child $CHILD_SHA refs/heads/child $ZERO_SHA"
+    local order lines
+    for order in "deletion first" "child first"; do
+        if [ "$order" = "deletion first" ]; then
+            lines="$delete_line"$'\n'"$child_line"
+        else
+            lines="$child_line"$'\n'"$delete_line"
+        fi
+        reset_run_outputs "$tmpdir"
+        run_hook_as_remote "$tmpdir" scope-only origin "$GITHUB_URL" "$lines"
+        assert_exit "$order" "$tmpdir" 2 || return 1
+        assert_contains "$order, pull request named" "$tmpdir/err" \
+            "the base of pull request #12 into parent cannot be established" || return 1
+        assert_contains "$order, deletion named" "$tmpdir/err" \
+            "this push also deletes parent (refs/heads/parent)" || return 1
+        assert_contains "$order, bypass named" "$tmpdir/err" "--no-verify" || return 1
+        if [ -f "$tmpdir/planner.log" ]; then
+            echo "  a plan was resolved for a pull request whose base cannot be established ($order):" >&2
+            sed 's/^/  /' "$tmpdir/planner.log" >&2
+            return 1
+        fi
+        if [ "$order" = "deletion first" ]; then
+            # The deletion itself is still skipped by name, as before.
+            assert_contains "deletion skipped" "$tmpdir/out" "Not reviewing the deletion of refs/heads/parent" || return 1
+        fi
+        assert_no_leftover_worktree "$order" "$tmpdir" || return 1
+    done
+}
+
+# ---------- plan-fed local gates (ruling D2; audit W1, W10, W14) ----------
+#
+# These fixtures run the REAL `just/ci-local.just` from the hook: the fake
+# `just` answers `pre-push` by invoking the real `just` on a harness justfile
+# that imports the repository's recipe, and answers the recipe's own gate
+# calls (`_lint`, `_test`) by logging them and staging a JUnit report the way
+# the canonical tier recipes do. The harness planner logs every call with a
+# `ci-local` prefix, answers `--apply-to` (the projection, which reads nothing
+# from the checkout) with the real planner, and refuses selection outright:
+# a recipe that replanned would fail the run rather than pass unnoticed.
+
+stage_ci_local_harness() {
+    local tmpdir="$1" harness="$1/harness"
+    if [ -z "$REAL_JUST" ]; then
+        echo "  the plan-fed fixtures need the real \`just\` on PATH" >&2
+        return 1
+    fi
+    mkdir -p "$harness/scripts/ci"
+    cp "$CI_LOCAL_RECIPE" "$harness/ci-local.just"
+    printf 'red := ""\ngreen := ""\nreset := ""\nimport "ci-local.just"\n' >"$harness/justfile"
+    cp "$REPO_ROOT/scripts/ci/constraints.py" "$harness/scripts/ci/constraints.py"
+    # The recipe's self-test loop: no-op stubs, since this fixture tests the
+    # recipe's scheduling, not those suites.
+    local suite
+    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py test_publish_gaps.py test_runner_loss.py; do
+        : >"$harness/scripts/ci/$suite"
+    done
+    cat >"$harness/scripts/ci/affected_scope.py" <<EOF
+import os, subprocess, sys
+with open(os.environ["TEST_PLANNER_LOG"], "a", encoding="utf-8") as log:
+    log.write("ci-local " + " ".join(sys.argv[1:]) + "\n")
+if "--apply-to" not in sys.argv:
+    raise SystemExit("ci-local selected scope although the hook fed it a plan")
+raise SystemExit(subprocess.run([sys.executable, "$REPO_ROOT/scripts/ci/affected_scope.py", *sys.argv[1:]], check=False).returncode)
+EOF
+    # `ci-local.just` is a Bash script; the harness PATH would otherwise hand
+    # it the stock macOS Bash 3.2.
+    ln -s "$(command -v bash)" "$tmpdir/bash"
+}
+
+# A fake `just` whose `pre-push` is the real recipe. `_test <pkg>` stages a
+# passing report, or — while "$tmpdir/gate-fail-<pkg>" exists — a report with
+# one failing test and a non-zero exit, so `record-cells` measures a COMPLETE
+# failure for that cell.
+#
+# Usage: make_ci_local_just <tmpdir> [plan_fixture]
+make_ci_local_just() {
+    local tmpdir="$1"
+    local plan_fixture="${2:-$FIXTURES/plan-macos-two-packages.json}"
+    cat >"$tmpdir/just" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$tmpdir/just.log"
+case "\$1" in
+    pre-push)
+        shift
+        exec "$REAL_JUST" --justfile "$tmpdir/harness/justfile" --working-directory "$tmpdir/harness" ci-local --l2 "\$@"
+        ;;
+    _lint)
+        exit 0
+        ;;
+    _test)
+        pkg="\$2"
+        mkdir -p "\$BISCUIT_JUNIT_STAGE_DIR/L1"
+        if [ -f "$tmpdir/gate-fail-\$pkg" ]; then
+            printf '<?xml version="1.0"?><testsuites><testsuite name="%s" tests="2" failures="1" errors="0" skipped="0"><testcase classname="%s" name="one"/><testcase classname="%s" name="two"><failure message="assertion failed">boom</failure></testcase></testsuite></testsuites>' "\$pkg" "\$pkg" "\$pkg" >"\$BISCUIT_JUNIT_STAGE_DIR/L1/\$pkg.xml"
+            printf '{"tier":"L1","package":"%s","xml":"L1/%s.xml","exit_code":1,"environment":"macos-latest","duration_s":3,"report_present":true}\n' "\$pkg" "\$pkg" >>"\$BISCUIT_JUNIT_STAGE_DIR/manifest.jsonl"
+            exit 1
+        fi
+        printf '<?xml version="1.0"?><testsuites><testsuite name="%s" tests="2" failures="0" errors="0" skipped="0"><testcase classname="%s" name="one"/><testcase classname="%s" name="two"/></testsuite></testsuites>' "\$pkg" "\$pkg" "\$pkg" >"\$BISCUIT_JUNIT_STAGE_DIR/L1/\$pkg.xml"
+        printf '{"tier":"L1","package":"%s","xml":"L1/%s.xml","exit_code":0,"environment":"macos-latest","duration_s":3,"report_present":true}\n' "\$pkg" "\$pkg" >>"\$BISCUIT_JUNIT_STAGE_DIR/manifest.jsonl"
+        exit 0
+        ;;
+    *)
+        echo "fake just: unexpected subcommand: \$*" >&2
+        exit 99
+        ;;
+esac
+EOF
+    chmod +x "$tmpdir/just"
+    printf '%s' "$plan_fixture" >"$tmpdir/planner-plan.path"
+}
+
+# The repository, tools, harness, and fake `just` for a plan-fed run: the
+# feature commit adds beta's source beside alpha's, so both packages of the
+# two-package plan exist at HEAD.
+stage_plan_fed_fixture() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir" "pkg/beta/src/lib.rs" "beta lib"
+    stage_fixture_tools "$tmpdir"
+    stage_ci_local_harness "$tmpdir" || return 1
+    make_ci_local_just "$tmpdir"
+}
+
+# Commit one more change on the fixture's feature branch.
+add_follow_up_commit() {
+    local repo="$1/repo" file="$2" content="$3"
+    local commit=(git -c user.name=hook-test -c user.email=hook@example.com -c commit.gpgsign=false)
+    mkdir -p "$(dirname "$repo/$file")"
+    echo "$content" >>"$repo/$file"
+    "${commit[@]}" -C "$repo" add -A
+    "${commit[@]}" -C "$repo" commit -q -m "follow-up: $file"
+}
+
+# The macOS receipt attached to `head` in the fixture repository.
+local_macos_receipt() {
+    git -C "$1/repo" notes --ref refs/notes/ci-local/macos-latest show "$2" 2>/dev/null
+}
+
+# The receipt on `head` records exactly `expected_cells` (a jq array literal
+# of "package/gate" strings, in order) against `expected_base`.
+assert_receipt_records() {
+    local label="$1" tmpdir="$2" head="$3" expected_base="$4" expected_cells="$5"
+    local receipt
+    if ! receipt="$(local_macos_receipt "$tmpdir" "$head")"; then
+        echo "  no macos-latest receipt is attached to $head ($label)" >&2
+        return 1
+    fi
+    if ! printf '%s' "$receipt" | jq -e --arg base "$expected_base" --argjson cells "$expected_cells" \
+        '.base == $base and ([.cells[] | "\(.package)/\(.gate)"] == $cells)' >/dev/null; then
+        echo "  the receipt on $head does not record cells $expected_cells against base $expected_base ($label):" >&2
+        printf '%s' "$receipt" | jq -c '{base, cells: [.cells[] | "\(.package)/\(.gate)/\(.outcome)"]}' | sed 's/^/  /' >&2
+        return 1
+    fi
+}
+
+# The identity `schema.py` gives the plan a scope receipt carries — what a
+# validation receipt bound to that scope must store as `scope_identity`.
+scope_receipt_plan_identity() {
+    python3 -c 'import json, sys; sys.path.insert(0, sys.argv[2]); import schema; print(schema.identity(schema.canonical(json.load(open(sys.argv[1]))["plan"])))' "$1" "$REPO_ROOT/scripts/ci"
+}
+
+# `ci-local` ran the planner exactly once, for the projection, never selecting.
+assert_ci_local_never_selected() {
+    local label="$1" tmpdir="$2"
+    local calls
+    calls="$(grep -c '^ci-local ' "$tmpdir/planner.log" 2>/dev/null || true)"
+    if [ "$calls" = "1" ] && grep -q '^ci-local --apply-to ' "$tmpdir/planner.log"; then
+        return 0
+    fi
+    echo "  expected ci-local's one planner call to be the projection ($label); planner.log:" >&2
+    sed 's/^/  /' "$tmpdir/planner.log" >&2
+    return 1
+}
+
+# W14: commit A is validated and published; commit B changes only a document.
+# alpha declares its build closure, so A's alpha/L1 cell qualifies for B under
+# gate-input equivalence and is not rerun; beta declares none, so it reruns.
+# B's receipt then records beta only.
+test_a_docs_only_follow_up_skips_the_cells_prior_evidence_covers() {
+    local tmpdir="$1"
+    stage_plan_fed_fixture "$tmpdir" || return 1
+    local repo="$tmpdir/repo" main_sha head_a head_b
+    main_sha="$(git -C "$repo" rev-parse origin/main)"
+    head_a="$(git -C "$repo" rev-parse HEAD)"
+    run_hook_in_repo "$tmpdir" strict refs/heads/feature "$ZERO_SHA" "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
+    assert_exit "commit A" "$tmpdir" 0 || return 1
+    assert_contains "A is fed the reviewed plan" "$tmpdir/out" "Running pre-push validation from the reviewed plan" || return 1
+    assert_log_has "A ran alpha" "$tmpdir" "_test alpha" || return 1
+    assert_log_has "A ran beta" "$tmpdir" "_test beta" || return 1
+    assert_ci_local_never_selected "commit A" "$tmpdir" || return 1
+    assert_receipt_records "commit A" "$tmpdir" "$head_a" "$main_sha" '["alpha/L1","beta/L1"]' || return 1
+
+    add_follow_up_commit "$tmpdir" README.md "more documentation"
+    head_b="$(git -C "$repo" rev-parse HEAD)"
+    reset_run_outputs "$tmpdir"
+    run_hook_in_repo "$tmpdir" strict refs/heads/feature "$ZERO_SHA" "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
+    assert_exit "commit B" "$tmpdir" 0 || return 1
+    assert_log_lacks "alpha not rerun" "$tmpdir" "_test alpha" || return 1
+    assert_log_has "beta rerun (no declared closure)" "$tmpdir" "_test beta" || return 1
+    assert_log_has "lint still runs" "$tmpdir" "_lint alpha" || return 1
+    assert_contains "alpha named as skipped" "$tmpdir/out" "skip   alpha/L1" || return 1
+    assert_ci_local_never_selected "commit B" "$tmpdir" || return 1
+    assert_receipt_records "commit B" "$tmpdir" "$head_b" "$main_sha" '["beta/L1"]' || return 1
+}
+
+# The counterpart: B changes alpha's source, so its gate inputs differ from
+# A's and alpha/L1 is rerun.
+test_a_follow_up_changing_a_packages_inputs_reruns_its_cell() {
+    local tmpdir="$1"
+    stage_plan_fed_fixture "$tmpdir" || return 1
+    local repo="$tmpdir/repo" main_sha head_b
+    main_sha="$(git -C "$repo" rev-parse origin/main)"
+    run_hook_in_repo "$tmpdir" strict refs/heads/feature "$ZERO_SHA" "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
+    assert_exit "commit A" "$tmpdir" 0 || return 1
+
+    add_follow_up_commit "$tmpdir" pkg/alpha/src/lib.rs "changed alpha"
+    head_b="$(git -C "$repo" rev-parse HEAD)"
+    reset_run_outputs "$tmpdir"
+    run_hook_in_repo "$tmpdir" strict refs/heads/feature "$ZERO_SHA" "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
+    assert_exit "commit B" "$tmpdir" 0 || return 1
+    assert_log_has "alpha rerun" "$tmpdir" "_test alpha" || return 1
+    assert_contains "inputs named as changed" "$tmpdir/out" "gate-inputs-changed: alpha/macos-latest/L1" || return 1
+    assert_ci_local_never_selected "commit B" "$tmpdir" || return 1
+    assert_receipt_records "commit B" "$tmpdir" "$head_b" "$main_sha" '["alpha/L1","beta/L1"]' || return 1
+}
+
+# D2's implementation assumption: A's note records a COMPLETE failure for
+# alpha/L1; B (docs only) reruns it, and B's passing note supersedes A's.
+test_a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded() {
+    local tmpdir="$1"
+    stage_plan_fed_fixture "$tmpdir" || return 1
+    local repo="$tmpdir/repo" main_sha head_a head_b
+    main_sha="$(git -C "$repo" rev-parse origin/main)"
+    head_a="$(git -C "$repo" rev-parse HEAD)"
+    : >"$tmpdir/gate-fail-alpha"
+    run_hook_in_repo "$tmpdir" warn refs/heads/feature "$ZERO_SHA" "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
+    assert_exit "commit A, warn" "$tmpdir" 0 || return 1
+    assert_receipt_records "commit A" "$tmpdir" "$head_a" "$main_sha" '["alpha/L1","beta/L1"]' || return 1
+    if ! local_macos_receipt "$tmpdir" "$head_a" | jq -e '.cells[] | select(.package == "alpha") | .outcome == "fail" and .completion == "complete"' >/dev/null; then
+        echo "  A's receipt does not record a complete alpha/L1 failure" >&2
+        return 1
+    fi
+
+    rm -f "$tmpdir/gate-fail-alpha"
+    add_follow_up_commit "$tmpdir" README.md "more documentation"
+    head_b="$(git -C "$repo" rev-parse HEAD)"
+    reset_run_outputs "$tmpdir"
+    run_hook_in_repo "$tmpdir" strict refs/heads/feature "$ZERO_SHA" "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
+    assert_exit "commit B" "$tmpdir" 0 || return 1
+    assert_log_has "alpha rerun" "$tmpdir" "_test alpha" || return 1
+    assert_contains "rerun named with its reason" "$tmpdir/out" "rerun  alpha/L1" || return 1
+    assert_receipt_records "commit B" "$tmpdir" "$head_b" "$main_sha" '["alpha/L1","beta/L1"]' || return 1
+    # Newest wins: verifying against B's plan resolves alpha/L1 to B's pass,
+    # not A's failure.
+    git -C "$repo" notes --ref refs/notes/ci-local/scope show "$head_b" | jq '.plan' >"$tmpdir/plan-b.json"
+    if ! (cd "$repo" && python3 scripts/ci/local_evidence.py verify --cells \
+            --plan "$tmpdir/plan-b.json" --base "$main_sha" --head "$head_b") >"$tmpdir/accepted.json" 2>"$tmpdir/verify.err"; then
+        sed 's/^/  /' "$tmpdir/verify.err" >&2
+        return 1
+    fi
+    if ! jq -e --arg b "$head_b" '[.[] | select(.package == "alpha")] | length == 1 and (.[0] | .outcome == "pass" and .evidence.commit == $b)' "$tmpdir/accepted.json" >/dev/null; then
+        echo "  B's pass did not supersede A's failure for alpha/L1:" >&2
+        sed 's/^/  /' "$tmpdir/accepted.json" >&2
+        return 1
+    fi
+}
+
+# W1/W10: a stacked pull request's run compares against its target's tip, so
+# that is the base the receipt records and the plan it is bound to — not a
+# merge base with origin/main. The receipt's scope identity is the identity
+# of the plan the scope receipt carries.
+test_a_stacked_pull_request_records_its_target_tip_as_the_receipt_base() {
+    local tmpdir="$1"
+    make_stacked_repo "$tmpdir"
+    stage_ci_local_harness "$tmpdir" || return 1
+    make_ci_local_just "$tmpdir"
+    stage_fake_gh "$tmpdir" "12 parent"
+    run_stacked_push "$tmpdir" strict "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
+    assert_exit "stacked pull request" "$tmpdir" 0 || return 1
+    assert_contains "trigger named" "$tmpdir/out" "pull request #12 into parent" || return 1
+    assert_ci_local_never_selected "stacked pull request" "$tmpdir" || return 1
+    local repo="$tmpdir/repo" merge_base
+    merge_base="$(git -C "$repo" merge-base origin/main "$CHILD_SHA")"
+    if [ "$merge_base" = "$PARENT_SHA" ]; then
+        echo "  fixture error: the merge base with main equals the parent tip, so the test cannot tell them apart" >&2
+        return 1
+    fi
+    assert_receipt_records "stacked pull request" "$tmpdir" "$CHILD_SHA" "$PARENT_SHA" '["alpha/L1","beta/L1"]' || return 1
+    local recorded expected
+    recorded="$(local_macos_receipt "$tmpdir" "$CHILD_SHA" | jq -r '.scope_identity')"
+    git -C "$repo" notes --ref refs/notes/ci-local/scope show "$CHILD_SHA" >"$tmpdir/scope-receipt.json"
+    expected="$(scope_receipt_plan_identity "$tmpdir/scope-receipt.json")"
+    if [ -z "$expected" ] || [ "$recorded" != "$expected" ]; then
+        echo "  the validation receipt's scope_identity ($recorded) is not the scope receipt's plan identity ($expected)" >&2
+        return 1
+    fi
+}
+
 # ---------- runner ----------
 
 echo ""
@@ -1673,7 +2304,6 @@ run_test "run_hook forwards no selection without an override"        test_run_ho
 run_test "RUSTY_BISCUIT_PRE_PUSH_AREAS override is forwarded verbatim" test_areas_override_is_passed_through
 run_test "a failing warn run reaches the publication block"           test_a_failing_warn_run_reaches_the_publication_block
 run_test "publication requires a clean, exact, unoverridden tree"     test_publication_requires_a_clean_exact_tree_and_no_override
-run_test "a blocked strict push records locally, publishes nothing"   test_a_blocked_strict_push_records_locally_but_publishes_nothing
 run_test "a persisted prohibition blocks the push"                    test_prohibition_blocks_the_push
 run_test "a prohibition refusal states its reason"                    test_prohibition_is_explained
 run_test "an expired prohibition does not block"                      test_expired_prohibition_does_not_block
@@ -1688,6 +2318,8 @@ run_test "a constraint for another branch does not block"             test_a_con
 run_test "the plan fixtures are valid resolved plans"                 test_the_plan_fixtures_are_valid_resolved_plans
 run_test "a published receipt names retained, readable reports"       test_a_published_receipt_names_retained_readable_reports
 run_test "reports that cannot be retained publish no receipt"         test_reports_that_cannot_be_retained_publish_no_receipt
+run_test "a blocked strict failure publishes its note; CI reuses it"  test_a_blocked_strict_failure_publishes_its_note_and_ci_reuses_the_failure
+run_test "a complete warn failure publishes its note"                 test_a_complete_warn_failure_publishes_its_note
 run_test "scope-only publishes committed scope for a push to main"    test_scope_only_publishes_committed_scope_for_a_push_to_main
 run_test "a feature push records the PR base, not its previous tip"   test_a_feature_branch_push_records_the_pull_request_base_not_its_previous_tip
 run_test "a branch-creating push records the remote's main tip, says so" test_a_branch_creating_push_records_the_remote_main_tip_and_says_so
@@ -1709,10 +2341,18 @@ run_test "a stacked pull request is planned against its target's tip"  test_a_st
 run_test "a pull request into main from a restoring child selects nothing" test_a_pull_request_into_main_from_a_restoring_child_selects_nothing
 run_test "an advanced target is read from the remote; no receipt"      test_an_advanced_target_branch_is_read_from_the_remote_and_records_no_receipt
 run_test "no open pull request on GitHub → a provisional plan"          test_a_github_branch_with_no_open_pull_request_gets_a_provisional_plan
+run_test "a record in the default store binds a fresh session"         test_a_record_in_the_default_store_binds_a_fresh_session
 run_test "two open pull requests from one head are each reviewed"     test_two_open_pull_requests_from_one_head_are_each_reviewed
 run_test "a GitHub remote without gh blocks and names it"             test_a_github_remote_without_gh_blocks_and_names_it
 run_test "a failing gh blocks and names the failure"                  test_a_failing_gh_blocks_and_names_the_failure
 run_test "a non-GitHub remote never asks gh"                          test_a_non_github_remote_never_asks_gh
+run_test "a target updated in the same push is reviewed at its incoming revision" test_a_target_updated_in_the_same_push_is_reviewed_at_its_incoming_revision
+run_test "a simultaneous push with nothing prohibited passes in either order" test_a_simultaneous_push_with_no_prohibited_work_passes_in_either_order
+run_test "a pull request into a branch this push deletes is refused"  test_a_pull_request_into_a_branch_this_push_deletes_is_refused
+run_test "a docs-only follow-up skips the cells prior evidence covers"  test_a_docs_only_follow_up_skips_the_cells_prior_evidence_covers
+run_test "a follow-up changing a package's inputs reruns its cell"     test_a_follow_up_changing_a_packages_inputs_reruns_its_cell
+run_test "a cell whose prior evidence is a failure is rerun, superseded" test_a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded
+run_test "a stacked pull request records its target tip as the base"  test_a_stacked_pull_request_records_its_target_tip_as_the_receipt_base
 
 echo ""
 echo "================================================"

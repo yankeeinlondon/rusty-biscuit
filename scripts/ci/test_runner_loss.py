@@ -62,7 +62,7 @@ REAL_FAILURE_JOB = {
 REAL_FAILURE_ANNOTATION = [
     {"annotation_level": "failure", "message": "Process completed with exit code 100."}
 ]
-VERDICT_JOB = {"id": 1, "name": "ci-verdict", "status": "completed", "conclusion": "failure"}
+GATE_JOB = {"id": 1, "name": "ci-gate", "status": "completed", "conclusion": "failure"}
 # The area's own rollup, which fails BECAUSE the producer below lost its
 # runner: its cell is MISSING. Counting it as an unrelated failure is what
 # would disable the one-shot retry.
@@ -103,6 +103,20 @@ UPLOAD_FAILURE_JOB = {
 UPLOAD_FAILURE_ANNOTATION = [
     {"annotation_level": "failure", "message": "Artifact storage quota has been hit."}
 ]
+# A failed gate command under `continue-on-error`: the step is red, the job
+# concludes `success`, and the status artifact says the cell failed. The area
+# rollup judges it; this module must neither attribute it nor let it veto.
+NORMALIZED_FAILURE_JOB = {
+    "id": 5,
+    "name": "area-ci (messenger) / messenger / test (windows-latest)",
+    "status": "completed",
+    "conclusion": "success",
+    "steps": [
+        {"name": "L1 tests", "status": "completed", "conclusion": "failure"},
+        {"name": "Upload L1 JUnit", "status": "completed", "conclusion": "success"},
+        {"name": "Record producer status", "status": "completed", "conclusion": "success"},
+    ],
+}
 
 
 class JobNameTests(unittest.TestCase):
@@ -140,7 +154,7 @@ class JobNameTests(unittest.TestCase):
 
     def test_non_producer_and_archive_jobs_map_to_nothing(self) -> None:
         for name in [
-            "ci-verdict",
+            "ci-gate",
             "Determine affected scope",
             "preflight (windows-latest)",
             "area-ci (playa) / rollup",
@@ -184,8 +198,8 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual([], result["runner_lost"])
         self.assertEqual([REAL_FAILURE_JOB["name"]], result["other_failures"])
 
-    def test_the_verdict_job_never_counts_as_a_failure(self) -> None:
-        result = classify([LOST_WSL_JOB, VERDICT_JOB], {LOST_WSL_JOB["id"]: LOST_ANNOTATION})
+    def test_the_gate_job_never_counts_as_a_failure(self) -> None:
+        result = classify([LOST_WSL_JOB, GATE_JOB], {LOST_WSL_JOB["id"]: LOST_ANNOTATION})
         self.assertEqual([], result["other_failures"])
 
     def test_a_judging_job_never_counts_as_a_failure(self) -> None:
@@ -215,10 +229,40 @@ class ClassifyTests(unittest.TestCase):
     def test_no_running_step_reports_none(self) -> None:
         self.assertIsNone(interrupted_step({"steps": [{"status": "completed", "conclusion": "success"}]}))
 
+    def test_a_normalized_gate_failure_is_neither_lost_nor_a_failure(self) -> None:
+        # The job is green with a red step. Only the area rollup judges it,
+        # so it must not be read as a lost runner (it uploaded its status)
+        # and must not veto the one-shot retry of a job that did lose its
+        # runner: the retry never re-executes a job that concluded success.
+        result = classify(
+            [LOST_WSL_JOB, NORMALIZED_FAILURE_JOB],
+            {LOST_WSL_JOB["id"]: LOST_ANNOTATION},
+        )
+        self.assertEqual([], result["other_failures"])
+        self.assertEqual([], result["failures"])
+        self.assertEqual([LOST_WSL_JOB["name"]], [lost["name"] for lost in result["runner_lost"]])
+        rerun, reason = should_rerun(result, attempt=1)
+        self.assertTrue(rerun, reason)
+        # And a genuinely lost runner during the (normalized) gate step is
+        # still attributed to that step.
+        lost_during_gate = {
+            **NORMALIZED_FAILURE_JOB,
+            "id": 7,
+            "conclusion": "failure",
+            "steps": [{"name": "L1 tests", "status": "in_progress", "conclusion": None}],
+        }
+        result = classify([lost_during_gate], {7: LOST_ANNOTATION})
+        [record] = result["runner_lost"]
+        self.assertEqual("L1 tests", record["step"])
+        self.assertEqual(
+            {"package": "messenger", "job": "L1", "environment": "windows-latest"},
+            record["cell"],
+        )
+
 
 class RerunDecisionTests(unittest.TestCase):
     def lost_only(self) -> dict:
-        return classify([LOST_WSL_JOB, VERDICT_JOB], {LOST_WSL_JOB["id"]: LOST_ANNOTATION})
+        return classify([LOST_WSL_JOB, GATE_JOB], {LOST_WSL_JOB["id"]: LOST_ANNOTATION})
 
     def test_first_attempt_with_only_lost_runners_reruns(self) -> None:
         rerun, reason = should_rerun(self.lost_only(), attempt=1)
