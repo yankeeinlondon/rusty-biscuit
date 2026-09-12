@@ -44,18 +44,39 @@ data:
     - bar
     - baz
 ---
-::loop data
+::loop data fn="i -> i"
 - {i}!
 ::end-loop
 ```
+
+> **Note:** all _functions_ (both loop functions as well as filtering functions) should express themselves as an unknown/inline function but can use either the `->` or `=>` operator to separate the parameter passed in and the functional expression
+
+## Loop Function
+
+You are required to provide a _looping function_ who's responsibility is two fold:
+
+- identifies the _local variable_ to be assigned during the loop
+- allows each value to be mutated into a different shape or type
+
+The most basic function, and the one you'll likely use the most often, is something like `i -> i` which is an _identity_ function that doesn't change the incoming shape/type of the values coming in at all but establishes that `i` is the local variable that will be made available inside the looping block.
+
+However, as the next example illustrates, you can apply any of Darkmatter's expression syntax to modify the input items coming from the iterable list:
+
+```md
+TODO
+```
+
+## Sorting
+
+TODO
 
 ## Loop Filtering
 
 We provide three primitives to use as _filtering_ constructs for the [iterable](../iterables.md) being iterated over:
 
-- `when`
-- `until`
-- `while`
+- `when` - runs each list item through the logical expression and renders when `true`
+- `until` - renders each list item through the logical expression _until_ one of the expressions returns a `true` value
+- `while` - renders each list item through the logical expression _while_ the expressions have all evaluated to `true` but stopping once the first `false` evaluation is encountered
 
 All three primitives, when used, must be assigned to a logical function like:
 
