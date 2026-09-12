@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 import schema  # noqa: E402
+from affected_scope import legacy_scope_document
 from local_evidence import (  # noqa: E402
     NOTES_PREFIX,
     SCOPE_NOTES_REF,
@@ -246,13 +247,20 @@ class ScopeReceiptTests(RepositoryFixture):
     def test_recording_twice_is_byte_identical(self) -> None:
         self.assertEqual(self.receipt(), self.receipt())
 
-    def test_a_non_ancestor_base_cannot_be_recorded(self) -> None:
+    def test_an_advanced_base_is_exactly_bound(self) -> None:
         self.git("checkout", "-q", "-b", "elsewhere", self.base)
         (self.root / "file").write_text("elsewhere\n", encoding="utf-8")
         self.git("commit", "-q", "-am", "elsewhere")
         elsewhere = self.git("rev-parse", "HEAD")
-        with self.assertRaisesRegex(ValueError, "must be an ancestor"):
-            record_scope(str(self.plan_path), str(self.projection_path), elsewhere, self.head)
+        self.plan["base"] = elsewhere
+        self.plan_path.write_text(schema.canonical(self.plan), encoding="utf-8")
+        self.add_scope_note(record_scope(str(self.plan_path), str(self.projection_path), elsewhere, self.head))
+        document, reason = verify_scope(elsewhere, self.head)
+        self.assertEqual("", reason)
+        self.assertEqual(elsewhere, document["base"])
+        document, reason = verify_scope(self.base, self.head)
+        self.assertIsNone(document)
+        self.assertTrue(reason.startswith("scope-base-mismatch:"), reason)
 
     def test_the_exact_identity_is_a_hit_carrying_both_documents(self) -> None:
         self.add_scope_note(self.receipt())
@@ -334,7 +342,7 @@ class ScopeReceiptTests(RepositoryFixture):
                      "scope-tree-mismatch", "scope-base-mismatch", "scope-malformed"):
             self.assertIn(code, schema.SCOPE_REJECTIONS)
 
-    def test_the_cli_hands_off_both_documents_on_a_hit_and_exits_3_on_a_miss(self) -> None:
+    def test_the_cli_projects_the_canonical_plan_on_a_hit_and_exits_3_on_a_miss(self) -> None:
         tool = Path(__file__).resolve().parent / "local_evidence.py"
 
         def run(*args: str) -> subprocess.CompletedProcess:
@@ -358,7 +366,7 @@ class ScopeReceiptTests(RepositoryFixture):
         hit = run("scope-verify", "--base", self.base, "--head", self.head, *outputs)
         self.assertEqual(0, hit.returncode, hit.stderr)
         self.assertEqual(schema.canonical(self.plan), Path("plan-out.json").read_text(encoding="utf-8"))
-        self.assertEqual(schema.canonical(self.projection), Path("scope-out.json").read_text(encoding="utf-8"))
+        self.assertEqual(schema.canonical(legacy_scope_document(self.plan)), Path("scope-out.json").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

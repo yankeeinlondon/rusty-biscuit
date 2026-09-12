@@ -711,17 +711,9 @@ class ResultCompletenessTests(PlannerFixture):
                 f"{label}: a cell whose area never fans out reaches no result slice",
             )
 
-    def test_an_area_whose_every_cell_is_reused_still_owns_a_result_slice(self) -> None:
-        # The completeness hole this class exists for. A receipt covering all
-        # of an area's cells removes every hosted execution from it; if the
-        # area then dropped out of the fan-out, its local-origin results would
-        # be reported nowhere at all, which is the PR #76 failure mode wearing
-        # a different hat.
-        #
-        # playa-cli, not playa: a receipt can never satisfy a check cell, and
-        # the playa library owns one for its unchanged dependents (Open
-        # Question 1, Option B), so only a package with no dependents and no
-        # example/bench kinds can have EVERY cell reused.
+    def test_an_area_with_all_test_cells_reused_still_owns_a_result_slice(self) -> None:
+        # Lint always executes, even when every test cell has prior evidence.
+        # The area's slice must include those local-origin results alongside it.
         plan = self.plan("playa/cli/src/main.rs")
         playa_cells = [cell for cell in self.cells(plan) if cell["area"] == "playa"]
         self.assertTrue(playa_cells, "the fixture must select the playa area")
@@ -736,15 +728,21 @@ class ResultCompletenessTests(PlannerFixture):
         ]
         reused = self.plan("playa/cli/src/main.rs", accepted_cells=accepted)
         states = {
-            cell["state"] for cell in self.cells(reused) if cell["area"] == "playa"
+            cell["state"] for cell in self.cells(reused)
+            if cell["area"] == "playa" and cell["gate"] != "lint"
         }
-        self.assertEqual({"reused"}, states, "the fixture must reuse every cell")
+        self.assertEqual({"reused"}, states, "the fixture must reuse every test cell")
+        lint = [cell for cell in self.cells(reused) if cell["gate"] == "lint"]
+        self.assertEqual(1, len(lint))
+        self.assertEqual("pending", lint[0]["state"])
+        self.assertEqual("ci", lint[0]["origin"])
+        self.assertFalse(lint[0]["reusable"])
 
         scheduled = self.scheduled(reused)
         self.assertIn(
             "playa",
             scheduled["scheduled_areas"],
-            "an all-reused area must still fan out, or its results reach no slice",
+            "an area with reused tests must still fan out, or its results reach no slice",
         )
         matrix = scheduled["area_matrix"]["playa"]["include"]
         self.assertTrue(matrix, "the area must still carry its package matrix")

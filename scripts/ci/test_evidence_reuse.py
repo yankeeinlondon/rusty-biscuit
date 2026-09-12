@@ -1057,17 +1057,22 @@ class ReceiptRecordingTests(EvidenceFixture):
                 report_dir=str(directory),
             )
 
-    def test_a_non_ancestor_base_cannot_be_recorded(self) -> None:
+    def test_an_advanced_base_can_record_measured_cells(self) -> None:
         record = self.staged("alpha")
         directory = self.stage(record)
         self.report(directory, record)
         self.git("checkout", "-q", "-b", "advanced", self.base)
         self.git("commit", "-q", "--allow-empty", "-m", "advance")
         advanced = self.git("rev-parse", "HEAD")
-        with self.assertRaisesRegex(ValueError, "must be an ancestor"):
-            local_evidence.record_cells(
-                str(self.plan_path), str(directory), "macos-latest", advanced, self.head
-            )
+        plan = json.loads(self.plan_path.read_text(encoding="utf-8"))
+        plan["base"] = advanced
+        self.plan_path.write_text(schema.canonical(plan), encoding="utf-8")
+        receipt = json.loads(local_evidence.record_cells(
+            str(self.plan_path), str(directory), "macos-latest", advanced, self.head,
+            report_dir=str(directory),
+        ))
+        self.assertEqual(advanced, receipt["base"])
+        self.assertEqual("pass", receipt["cells"][0]["outcome"])
 
 
 class BackendProofTests(EvidenceFixture):

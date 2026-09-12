@@ -415,7 +415,7 @@ test_invalid_mode_exits_one() {
     assert_exit "invalid" "$tmpdir" 1 || return 1
     assert_contains "invalid mode message" "$tmpdir/err" "Unknown RUSTY_BISCUIT_PRE_PUSH" || return 1
     assert_contains "invalid mode red SGR prefix" "$tmpdir/err" $'\033[31mUnknown RUSTY_BISCUIT_PRE_PUSH' || return 1
-    assert_contains "valid values listed" "$tmpdir/err" "off, warn, or strict" || return 1
+    assert_contains "valid values listed" "$tmpdir/err" "scope-only, warn, or strict" || return 1
     assert_contains "alias explained" "$tmpdir/err" "scope-only" || return 1
 }
 
@@ -740,25 +740,50 @@ test_a_failing_warn_run_reaches_the_publication_block() {
     assert_not_contains "no evidence published" "$tmpdir/out" "cell(s) of evidence" || return 1
 }
 
-# The publication guard is a chain of clauses that each withhold the receipt
-# and print why; each is load-bearing and each is asserted in the hook source
-# so a refactor cannot drop one silently.
+# The gate actually stages a complete report, but an override withholds it.
 test_publication_requires_a_clean_exact_tree_and_no_override() {
     local tmpdir="$1"
-    local guards=(
-        'PUSHES_HEAD" -ne 1'
-        '-n "$SELECTION"'
-        'git status --porcelain'
-        '-z "$HEAD_PLAN_BASE"'
-        '-s "$PLAN_FILE"'
-    )
-    local guard
-    for guard in "${guards[@]}"; do
-        if ! grep -qF -- "$guard" "$HOOK"; then
-            echo "  the publication guard no longer requires: $guard" >&2
-            return 1
-        fi
-    done
+    make_publishing_repo "$tmpdir"
+    run_publishing_hook "$tmpdir" "RUSTY_BISCUIT_PRE_PUSH_AREAS=alpha"
+    assert_exit "override" "$tmpdir" 0 || return 1
+    assert_contains "override reason" "$tmpdir/err" "narrowed the gates to 'alpha'" || return 1
+    if git -C "$tmpdir/origin.git" show-ref --verify --quiet refs/notes/ci-local/macos-latest; then
+        echo "  overridden run published validation evidence" >&2
+        return 1
+    fi
+}
+
+# A gate has already written passing evidence when the hook receives TERM.
+# The child sends the signal at that boundary, avoiding a timing-based race.
+test_an_interrupted_hook_never_publishes_staged_evidence() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_publishing_tools "$tmpdir"
+    cat >>"$tmpdir/pre-push.hook" <<'EOF'
+kill -TERM "$PPID"
+exit 0
+EOF
+    run_hook_in_repo "$tmpdir" strict refs/heads/feature "$ZERO_SHA"
+    assert_exit "interrupted" "$tmpdir" 143 || return 1
+    assert_contains "interruption explained" "$tmpdir/err" "Pre-push interrupted" || return 1
+    if git -C "$tmpdir/origin.git" show-ref --verify --quiet refs/notes/ci-local/macos-latest; then
+        echo "  interrupted run published validation evidence" >&2
+        return 1
+    fi
+}
+
+test_a_gate_exiting_130_never_publishes_staged_evidence() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_publishing_tools "$tmpdir"
+    echo 'exit 130' >>"$tmpdir/pre-push.hook"
+    run_hook_in_repo "$tmpdir" strict refs/heads/feature "$ZERO_SHA"
+    assert_exit "gate interrupted" "$tmpdir" 130 || return 1
+    assert_contains "interruption explained" "$tmpdir/err" "validation was interrupted (exit 130)" || return 1
+    if git -C "$tmpdir/origin.git" show-ref --verify --quiet refs/notes/ci-local/macos-latest; then
+        echo "  interrupted gate published validation evidence" >&2
+        return 1
+    fi
 }
 
 # ---------- retained reports (review-1: receipts must name reports that exist) --
@@ -1677,7 +1702,7 @@ test_a_pull_request_into_main_from_a_restoring_child_selects_nothing() {
     assert_log_has "gates ran" "$tmpdir" "pre-push" || return 1
 }
 
-test_an_advanced_target_branch_is_read_from_the_remote_and_records_no_receipt() {
+test_an_advanced_target_branch_is_read_from_the_remote_and_records_exact_scope() {
     local tmpdir="$1"
     make_publishing_repo "$tmpdir"
     stage_fixture_tools "$tmpdir"
@@ -1705,13 +1730,9 @@ test_an_advanced_target_branch_is_read_from_the_remote_and_records_no_receipt() 
     assert_contains "planned against the remote's tip" "$tmpdir/planner.log" \
         "--base $new_main --head $head -- pkg/alpha/src/lib.rs work.txt" || return 1
     assert_contains "trigger named" "$tmpdir/out" "pull request #7 into main" || return 1
-    # The receipt needs an ancestor base; the reason is printed, not implied.
-    assert_contains "receipt withheld with its reason" "$tmpdir/out" "has advanced past the branch point" || return 1
-    assert_not_contains "nothing published" "$tmpdir/out" "Published scope evidence" || return 1
-    if scope_receipt "$tmpdir" >/dev/null; then
-        echo "  a scope receipt was attached although its base is not an ancestor of HEAD" >&2
-        return 1
-    fi
+    scope_receipt "$tmpdir" >"$tmpdir/receipt.json"
+    jq -e --arg base "$new_main" '.base == $base' "$tmpdir/receipt.json" >/dev/null || return 1
+    assert_contains "scope published" "$tmpdir/out" "Published scope evidence" || return 1
 }
 
 test_a_github_branch_with_no_open_pull_request_gets_a_provisional_plan() {
@@ -2079,6 +2100,17 @@ case "\$1" in
         ;;
     _test)
         pkg="\$2"
+        if [ -f "$tmpdir/gate-interrupt-\$pkg" ]; then
+            if [ "\$(cat "$tmpdir/gate-interrupt-\$pkg")" = malformed ]; then
+                printf '{"tier":' >>"\$BISCUIT_JUNIT_STAGE_DIR/manifest.jsonl"
+                exit 1
+            fi
+            if [ "\$(cat "$tmpdir/gate-interrupt-\$pkg")" = 143 ]; then
+                printf '{"tier":"L1","package":"%s","xml":"L1/%s.xml","exit_code":143,"report_present":false}\n' "\$pkg" "\$pkg" >>"\$BISCUIT_JUNIT_STAGE_DIR/manifest.jsonl"
+                exit 1
+            fi
+            exit 130
+        fi
         mkdir -p "\$BISCUIT_JUNIT_STAGE_DIR/L1"
         if [ -f "$tmpdir/gate-fail-\$pkg" ]; then
             printf '<?xml version="1.0"?><testsuites><testsuite name="%s" tests="2" failures="1" errors="0" skipped="0"><testcase classname="%s" name="one"/><testcase classname="%s" name="two"><failure message="assertion failed">boom</failure></testcase></testsuite></testsuites>' "\$pkg" "\$pkg" "\$pkg" >"\$BISCUIT_JUNIT_STAGE_DIR/L1/\$pkg.xml"
@@ -2285,12 +2317,79 @@ test_a_stacked_pull_request_records_its_target_tip_as_the_receipt_base() {
     fi
 }
 
+test_an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts() {
+    local tmpdir="$1"
+    stage_plan_fed_fixture "$tmpdir" || return 1
+    local repo="$tmpdir/repo" base head advanced
+    base="$(git -C "$repo" rev-parse origin/main)"
+    git -C "$repo" push -q origin "$base:refs/heads/parent"
+    stage_fake_gh "$tmpdir" "12 parent"
+    head="$(git -C "$repo" rev-parse HEAD)"
+    run_hook_as_remote "$tmpdir" strict origin "$GITHUB_URL" \
+        "refs/heads/feature $head refs/heads/feature $ZERO_SHA" "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
+    assert_exit "initial validation" "$tmpdir" 0 || return 1
+    assert_log_has "initial alpha" "$tmpdir" "_test alpha" || return 1
+
+    git clone -q "$tmpdir/origin.git" "$tmpdir/second"
+    git -C "$tmpdir/second" checkout -q parent
+    echo "advanced target" >"$tmpdir/second/README.md"
+    git -C "$tmpdir/second" add README.md
+    git -C "$tmpdir/second" -c user.name=hook-test -c user.email=hook@example.com -c commit.gpgsign=false commit -q -m "advance parent"
+    git -C "$tmpdir/second" push -q origin parent
+    advanced="$(git -C "$tmpdir/second" rev-parse HEAD)"
+    add_follow_up_commit "$tmpdir" docs.md "head documentation"
+    head="$(git -C "$repo" rev-parse HEAD)"
+    reset_run_outputs "$tmpdir"
+    run_hook_as_remote "$tmpdir" strict origin "$GITHUB_URL" \
+        "refs/heads/feature $head refs/heads/feature $ZERO_SHA" "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
+    assert_exit "advanced comparison" "$tmpdir" 0 || return 1
+    assert_log_lacks "alpha not rerun" "$tmpdir" "_test alpha" || return 1
+    assert_log_has "beta ran" "$tmpdir" "_test beta" || return 1
+    assert_log_has "lint ran" "$tmpdir" "_lint alpha" || return 1
+    assert_ci_local_never_selected "advanced comparison" "$tmpdir" || return 1
+    assert_receipt_records "advanced comparison" "$tmpdir" "$head" "$advanced" '["beta/L1"]' || return 1
+    git -C "$tmpdir/origin.git" notes --ref refs/notes/ci-local/scope show "$head" >"$tmpdir/remote-scope.json"
+    jq -e --arg base "$advanced" '.base == $base' "$tmpdir/remote-scope.json" >/dev/null || return 1
+    git -C "$tmpdir/origin.git" notes --ref refs/notes/ci-local/macos-latest show "$head" >"$tmpdir/remote-validation.json"
+    jq -e --arg base "$advanced" '.base == $base and .cells[0].outcome == "pass"' "$tmpdir/remote-validation.json" >/dev/null || return 1
+    local identity
+    identity="$(scope_receipt_plan_identity "$tmpdir/remote-scope.json")"
+    jq -e --arg identity "$identity" '.scope_identity == $identity' "$tmpdir/remote-validation.json" >/dev/null || return 1
+}
+
+test_a_real_recipe_interruption_withholds_earlier_reports() {
+    local tmpdir="$1"
+    stage_plan_fed_fixture "$tmpdir" || return 1
+    local interrupted_status
+    for interrupted_status in malformed 130 143; do
+        echo "$interrupted_status" >"$tmpdir/gate-interrupt-beta"
+        reset_run_outputs "$tmpdir"
+        run_hook_in_repo "$tmpdir" strict refs/heads/feature "$ZERO_SHA"
+        if [ "$(cat "$tmpdir/exit")" = 0 ]; then
+            echo "  interrupted real recipe passed" >&2
+            return 1
+        fi
+        assert_log_has "earlier report staged" "$tmpdir" "_test alpha" || return 1
+        assert_log_has "beta interrupted" "$tmpdir" "_test beta" || return 1
+        assert_contains "marker survived recipe" "$tmpdir/err" "validation marked this run interrupted" || return 1
+        if [ "$interrupted_status" = malformed ]; then
+            assert_contains "unreadable manifest explained" "$tmpdir/err" "cannot establish run completion from the staged manifest" || return 1
+        fi
+        if git -C "$tmpdir/origin.git" show-ref --verify --quiet refs/notes/ci-local/macos-latest; then
+            echo "  interrupted real recipe published its earlier passing report" >&2
+            return 1
+        fi
+    done
+}
+
 # ---------- runner ----------
 
 echo ""
 echo "${C_DIM}Running pre-push hook tests against${C_RESET} $HOOK"
 echo ""
 
+run_test "real recipe interruption withholds earlier evidence" test_a_real_recipe_interruption_withholds_earlier_reports
+run_test "advanced non-main target reuses and publishes exact receipts" test_an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts
 run_test "scope-only runs no gate but resolves scope"                 test_scope_only_runs_no_gate_but_still_resolves_scope
 run_test "off is a deprecated alias of scope-only"                    test_off_mode_is_a_deprecated_alias_of_scope_only
 run_test "invalid mode exits 1 with helpful message"                  test_invalid_mode_exits_one
@@ -2303,6 +2402,8 @@ run_test "default path calls 'just pre-push' with no selection"       test_defau
 run_test "run_hook forwards no selection without an override"        test_run_hook_forwards_no_selection_without_an_override
 run_test "RUSTY_BISCUIT_PRE_PUSH_AREAS override is forwarded verbatim" test_areas_override_is_passed_through
 run_test "a failing warn run reaches the publication block"           test_a_failing_warn_run_reaches_the_publication_block
+run_test "interrupted gate withholds staged evidence" test_a_gate_exiting_130_never_publishes_staged_evidence
+run_test "interrupted hook withholds staged evidence" test_an_interrupted_hook_never_publishes_staged_evidence
 run_test "publication requires a clean, exact, unoverridden tree"     test_publication_requires_a_clean_exact_tree_and_no_override
 run_test "a persisted prohibition blocks the push"                    test_prohibition_blocks_the_push
 run_test "a prohibition refusal states its reason"                    test_prohibition_is_explained
@@ -2339,7 +2440,7 @@ run_test "a renamed refspec binds a record under either branch name"  test_a_ren
 run_test "deletions and tags among branch updates are skipped by name" test_deletions_and_tags_among_branch_updates_are_skipped_by_name
 run_test "a stacked pull request is planned against its target's tip"  test_a_stacked_pull_request_is_planned_against_its_target_branch_tip
 run_test "a pull request into main from a restoring child selects nothing" test_a_pull_request_into_main_from_a_restoring_child_selects_nothing
-run_test "an advanced target is read from the remote; no receipt"      test_an_advanced_target_branch_is_read_from_the_remote_and_records_no_receipt
+run_test "an advanced target records its exact remote comparison"      test_an_advanced_target_branch_is_read_from_the_remote_and_records_exact_scope
 run_test "no open pull request on GitHub → a provisional plan"          test_a_github_branch_with_no_open_pull_request_gets_a_provisional_plan
 run_test "a record in the default store binds a fresh session"         test_a_record_in_the_default_store_binds_a_fresh_session
 run_test "two open pull requests from one head are each reviewed"     test_two_open_pull_requests_from_one_head_are_each_reviewed

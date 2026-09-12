@@ -1853,6 +1853,7 @@ class DependentSeamTests(unittest.TestCase):
             {
                 "dependents": ["beta-app", "gamma-lib"],
                 "check_args": "-p beta-app -p gamma-lib --lib --bins --tests",
+                "native": [],
             },
             records["alpha-core"]["dependent_seam"],
         )
@@ -1866,6 +1867,33 @@ class DependentSeamTests(unittest.TestCase):
         self.assertEqual(
             [], [cell for cell in plan["cells"] if cell["package"] != "alpha-core"]  # type: ignore[union-attr]
         )
+
+    def test_dependent_native_closures_are_carried_only_for_the_owning_check(self) -> None:
+        self.policy["alpha-core"]["native"] = {"ubuntu-latest": ["libalpha-dev"]}
+        self.policy["gamma-lib"]["native"] = {
+            "ubuntu-latest": ["libconsumer-dev", "libalpha-dev"],
+            "macos-latest": ["consumer-macos"],
+        }
+        self.policy["delta-lib"]["native"] = {"ubuntu-latest": ["libtransitive-dev"]}
+        self.policy["excluded-app"]["native"] = {"ubuntu-latest": ["libexcluded-dev"]}
+        plan = self.plan("alpha/lib/src/lib.rs")
+        record = plan["packages"][0]
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        expected = ["libalpha-dev", "libconsumer-dev", "libtransitive-dev"]
+        self.assertEqual(expected, record["dependent_seam"]["native"])
+        self.assertEqual({"ubuntu-latest": ["libalpha-dev"]}, record["native"])
+        projection = legacy_scope_document(plan)["matrix"][0]
+        self.assertEqual(expected, projection["dependents_native"])
+        self.assertEqual(record["native"], projection["native"])
+        self.assertEqual(["ubuntu-latest"], sorted(self.check_cells(plan, "alpha-core")))
+        del record["dependent_seam"]["native"]
+        self.assertTrue(any("native" in error for error in schema.validate_resolved_plan(plan)))
+
+    def test_lint_is_never_marked_reusable(self) -> None:
+        plan = self.plan("alpha/lib/src/lib.rs")
+        lint = [cell for cell in plan["cells"] if cell["gate"] == "lint"]
+        self.assertEqual(1, len(lint))
+        self.assertFalse(lint[0]["reusable"])
 
     def test_a_package_with_no_uncovered_kind_gets_one_linux_check_cell_for_the_seam(self) -> None:
         checks = self.check_cells(self.plan("alpha/lib/src/lib.rs"), "alpha-core")
@@ -2050,7 +2078,7 @@ class DependentSeamFixtureTests(unittest.TestCase):
 
         alpha = plan["packages"][0]
         self.assertEqual(
-            {"dependents": ["beta"], "check_args": "-p beta --bins"}, alpha["dependent_seam"]
+            {"dependents": ["beta"], "check_args": "-p beta --bins", "native": []}, alpha["dependent_seam"]
         )
         checks = {cell["environment"]: cell for cell in plan["cells"] if cell["gate"] == "check"}
         self.assertEqual([DEPENDENTS_ENVIRONMENT], sorted(checks))

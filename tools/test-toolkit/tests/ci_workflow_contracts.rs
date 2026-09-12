@@ -405,7 +405,7 @@ fn the_reusable_workflow_invokes_the_canonical_recipes() {
 #[test]
 fn unchanged_dependents_are_compiled_inside_the_changed_packages_linux_check() {
     let shared = workflow("_package-ci.yml");
-    for input in ["dependents-check-args:", "dependents:"] {
+    for input in ["dependents-check-args:", "dependents:", "dependents-native:"] {
         assert!(
             shared.contains(&format!("      {input}
         description:"))
@@ -417,12 +417,23 @@ fn unchanged_dependents_are_compiled_inside_the_changed_packages_linux_check() {
     let area = workflow("_area-ci.yml");
     assert!(
         area.contains("dependents-check-args: ${{ matrix.dependents_check_args }}")
-            && area.contains("dependents: ${{ toJSON(matrix.dependents) }}"),
+            && area.contains("dependents: ${{ toJSON(matrix.dependents) }}")
+            && area.contains("dependents-native: ${{ toJSON(matrix.dependents_native) }}"),
         "the fan-out must pass the planner's dependents and their check arguments"
     );
 
     let check = job_block("_package-ci.yml", "  check:");
     let steps = steps(&check);
+    let native = step_named(&steps, "Install native prerequisites").expect("check needs native setup");
+    assert!(step_env(native).iter().any(|(key, value)|
+        key == "DEPENDENTS_NATIVE" && value == "${{ inputs.dependents-native }}"
+    ));
+    for job in ["test", "lint", "test-l2", "test-browser"] {
+        assert!(
+            !job_block("_package-ci.yml", &format!("  {job}:")).contains("inputs.dependents-native"),
+            "dependent provisioning belongs only to the owning check"
+        );
+    }
     let step = step_with_id(&steps, "dependents")
         .expect("the check job must carry the `dependents` compile step");
     assert_eq!(step_name(step), "Compile unchanged dependents");
@@ -2793,6 +2804,25 @@ fn a_reused_cell_reaches_its_area_summary_without_being_re_executed() {
         area.contains("native-environments: ${{ toJSON(matrix.native_environments) }}"),
         "the area must forward the planner's executing environment lists verbatim"
     );
+}
+
+#[test]
+fn empty_execution_matrices_skip_before_expansion() {
+    for (job, input) in [
+        ("check", "check-os"),
+        ("test", "native-environments"),
+        ("test-l2", "l2-environments"),
+        ("test-browser", "browser-environments"),
+    ] {
+        let block = job_block("_package-ci.yml", &format!("  {job}:"));
+        let condition = block.lines()
+            .find(|line| line.starts_with("    if:"))
+            .expect("an empty execution matrix needs a job-level guard");
+        assert!(
+            condition.contains(&format!("inputs.{input} != '[]'")),
+            "{job} must skip before expanding an empty {input} matrix: {condition}"
+        );
+    }
 }
 
 /// AC13/spec §7: the concurrency correction survives the scheduling redesign.

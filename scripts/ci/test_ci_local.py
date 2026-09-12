@@ -1620,6 +1620,54 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertNotEqual(SCOPE_MARKER, run.plan["preflight_reason"])
         self.assertEqual(1, len(run.planner_calls), run.planner_calls)
 
+    def test_dispatch_ignores_published_validation_outcomes(self) -> None:
+        run = self.run_step(
+            "workflow_dispatch",
+            scope_receipt=self.local_scope_receipt,
+            evidence=[{"environment": "macos-latest", "outcome": "pass"},
+                      {"environment": "ubuntu-latest", "outcome": "fail"}],
+            verifier_failure="7",
+        )
+        self.assertEqual("true", run.outputs["full_scope"])
+        self.assertTrue(run.plan["cells"])
+        self.assertFalse(any(cell["execution"] == "reuse" for cell in run.plan["cells"]))
+        self.assertEqual([], run.plan["accepted_evidence"])
+        self.assertEqual("n/a (workflow_dispatch runs no verifier)",
+                         run.summary_row("validation environments"))
+        self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+        self.assertNotIn("--apply-to", run.planner_calls[0])
+
+    def test_scope_hit_projects_the_plan_instead_of_stale_legacy_scheduling(self) -> None:
+        def stale_projection(root: Path, base: str, head: str) -> str:
+            document = json.loads(self.local_scope_receipt(root, base, head))
+            document["scope"]["matrix"] = []
+            document["scope"]["scheduled_areas"] = []
+            document["scope"]["area_matrix"] = {}
+            return schema.canonical(document)
+
+        run = self.run_step("pull_request", scope_receipt=stale_projection)
+        self.assertEqual(SCOPE_MARKER, run.plan["preflight_reason"])
+        self.assertEqual([], run.planner_calls)
+        self.assertEqual([], run.rustup_calls)
+        self.assertEqual(legacy_scope_document(run.plan), run.scope)
+        self.assertTrue(run.scope["matrix"])
+        self.assertTrue(run.scope["scheduled_areas"])
+
+    def test_malformed_scope_notes_recalculate_through_the_real_step(self) -> None:
+        for malformed in ("{broken json", "[]"):
+            with self.subTest(note=malformed):
+                run = self.run_step(
+                    "pull_request",
+                    scope_receipt=lambda root, base, head: malformed,
+                )
+                self.assertTrue(run.scope_source().startswith("CI fallback (scope-malformed:"),
+                                run.scope_source())
+                self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+                self.assertEqual(["rustup show"], run.rustup_calls)
+                self.assertNotEqual(SCOPE_MARKER, run.plan["preflight_reason"])
+                self.assertTrue(run.plan["cells"])
+                self.assertFalse(any(cell["execution"] == "reuse" for cell in run.plan["cells"]))
+
     # -- validation evidence on top of scope (review-2, "still recomputed") --
 
     #: What applying evidence may change. Everything else on the carried plan
@@ -1900,6 +1948,66 @@ class StepBashResolverTests(unittest.TestCase):
         first_p1 = next(i for i, c in enumerate(candidates) if c.startswith(str(Path("/p1"))))
         first_p2 = next(i for i, c in enumerate(candidates) if c.startswith(str(Path("/p2"))))
         self.assertLess(first_p1, first_p2)
+
+
+@unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "requires Bash and jq")
+class NativeProvisioningTests(unittest.TestCase):
+    def provision(self, workflow: str, job: str, runner: str, native: dict, dependents: list) -> list[str]:
+        step = next(
+            step for step in workflow_job_run_steps(ROOT / ".github/workflows" / workflow, job)
+            if step.name == "Install native prerequisites"
+        )
+        with tempfile.TemporaryDirectory(prefix="ci-native-") as temporary:
+            output = Path(temporary) / "arguments"
+            environment = os.environ.copy()
+            environment.update(
+                NATIVE=json.dumps(native), RUNNER_KEY=runner,
+                DEPENDENTS_NATIVE=json.dumps(dependents), NATIVE_OUTPUT=str(output),
+            )
+            result = subprocess.run(
+                [shutil.which("bash"), "-c", 'just() { printf "%s\\n" "$@" >> "$NATIVE_OUTPUT"; }\n' + step.script],
+                cwd=temporary, env=environment, capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            return output.read_text().splitlines() if output.exists() else []
+
+    def test_only_the_ubuntu_check_adds_dependent_prerequisites(self) -> None:
+        native = {"ubuntu-latest": ["own-dev"], "macos-latest": ["own-macos"]}
+        dependents = ["own-dev", "consumer-dev", "transitive-dev"]
+        self.assertEqual(
+            ["_ensure-native-libs", "consumer-dev", "own-dev", "transitive-dev"],
+            self.provision("_package-ci.yml", "check", "ubuntu-latest", native, dependents),
+        )
+        self.assertEqual(
+            ["_ensure-native-libs", "own-macos"],
+            self.provision("_package-ci.yml", "check", "macos-latest", native, dependents),
+        )
+        for job in ["test", "lint", "test-l2", "test-browser"]:
+            with self.subTest(job=job):
+                self.assertEqual(
+                    ["_ensure-native-libs", "own-dev"],
+                    self.provision("_package-ci.yml", job, "ubuntu-latest", native, dependents),
+                )
+
+    def test_empty_native_lists_never_invoke_the_whole_workspace_installer(self) -> None:
+        for job in ["check", "test", "lint", "test-l2", "test-browser"]:
+            with self.subTest(job=job):
+                self.assertEqual([], self.provision("_package-ci.yml", job, "ubuntu-latest", {}, []))
+
+    def test_archive_setup_installs_only_the_packages_own_closure(self) -> None:
+        self.assertEqual(
+            ["_ensure-native-libs", "own-dev"],
+            self.provision("_wsl-ci.yml", "archive", "ubuntu-latest",
+                           {"ubuntu-latest": ["own-dev"]}, ["consumer-dev"]),
+        )
+        self.assertEqual([], self.provision("_wsl-ci.yml", "archive", "ubuntu-latest", {}, []))
+
+    def test_native_names_are_passed_as_literal_arguments(self) -> None:
+        self.assertEqual(
+            ["_ensure-native-libs", "literal*name", "name with spaces"],
+            self.provision("_package-ci.yml", "check", "ubuntu-latest",
+                           {"ubuntu-latest": ["literal*name", "name with spaces"]}, []),
+        )
 
 
 if __name__ == "__main__":
