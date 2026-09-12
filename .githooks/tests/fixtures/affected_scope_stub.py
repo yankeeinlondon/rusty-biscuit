@@ -12,6 +12,9 @@ with stdout carrying the legacy projection of that plan. The plan is the fixed
 one-cell `alpha` plan below unless `TEST_PLANNER_PLAN` names a fixture, in
 which case that fixture's plan is emitted with its `base` and `head` rewritten.
 `TEST_PLANNER_FAIL=1` makes the calculation fail, as a real planner error would.
+An empty path set (a `--` with nothing after it and no `--all`) yields the
+empty plan the real planner yields for it — no package, no cell — whatever
+`TEST_PLANNER_PLAN` names, so a base that equals the head selects nothing.
 
 Like the real planner, this one reads policy from its OWN tree: the
 `preflight_reason` of every plan comes from `.github/ci/policy.json` next to
@@ -113,6 +116,21 @@ def fixed_plan(base: str, head: str) -> dict:
     }
 
 
+def empty_plan(base: str, head: str) -> dict:
+    plan = fixed_plan(base, head)
+    plan.update(
+        change_class="documentation",
+        areas=[],
+        packages=[],
+        source_packages=[],
+        cells=[],
+        job_estimate=0,
+        preflight_os=["ubuntu-latest"],
+        preflight_reason="no build/test packages affected; preflight runs on the scope host only",
+    )
+    return plan
+
+
 def projection(plan: dict) -> dict:
     packages = [entry["package"] for entry in plan["packages"]]
     return {
@@ -167,7 +185,9 @@ def main() -> None:
     if os.environ.get("TEST_PLANNER_FAIL") == "1":
         raise SystemExit("stub planner: calculation failed on request")
     options = sys.argv[1:]
+    paths = None
     if "--" in options:
+        paths = options[options.index("--") + 1 :]
         options = options[: options.index("--")]
     values = {}
     flags = set()
@@ -192,7 +212,9 @@ def main() -> None:
         base = values.get("--base", "0" * 40)
         head = values.get("--head", "0" * 40)
         fixture = os.environ.get("TEST_PLANNER_PLAN")
-        if fixture:
+        if paths == [] and "--all" not in flags:
+            plan = empty_plan(base, head)
+        elif fixture:
             text = Path(fixture).read_text(encoding="utf-8")
             try:
                 plan = json.loads(text)

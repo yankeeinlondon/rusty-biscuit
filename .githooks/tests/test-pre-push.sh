@@ -34,6 +34,16 @@
 # refspec binds records under either name, and deletions and tags are skipped
 # by name.
 #
+# and its review-4: each branch update is planned against the base of EVERY
+# run it triggers — the remote's main (`github.event.before`) for a push to
+# main; for any other branch, the CURRENT REMOTE TIP of the target branch of
+# each open pull request whose head it is (listed through a stub `gh` on the
+# harness PATH, since the bare fixture remote can hold no pull request), or a
+# provisional plan against the remote's main when nothing is open. A stacked
+# pull request whose child restores what its parent changed is the review's
+# reproduction: against main it selects nothing, against the parent it selects
+# the package.
+#
 # and the evidence-retention contract of review-1: a published receipt names
 # a report directory that still exists after the hook exits, with every report
 # it lists readable there, and a failed copy publishes no receipt.
@@ -47,6 +57,9 @@
 # Run directly: ./.githooks/tests/test-pre-push.sh
 # PRE_PUSH_HOOK_UNDER_TEST=<path> runs the suite against another copy of the
 # hook (used to prove a new fixture fails against the hook it was written for).
+# The suite must stay runnable under Bash 3.2, the stock macOS /bin/bash: no
+# mapfile, no associative arrays, and an empty array expands only through
+# ${a[@]+"${a[@]}"} under `set -u`.
 
 set -u
 set -o pipefail
@@ -236,8 +249,10 @@ run_hook() {
     if [ "$areas" != "__UNSET__" ]; then
         env_args+=("RUSTY_BISCUIT_PRE_PUSH_AREAS=$areas")
     fi
+    # `"${env_args[@]}"` alone is an unbound-variable abort under Bash 3.2
+    # with `set -u` when the array is empty.
     run_hook_in_repo "$tmpdir" "$mode" refs/heads/feature \
-        "0000000000000000000000000000000000000000" "${env_args[@]}"
+        "0000000000000000000000000000000000000000" ${env_args[@]+"${env_args[@]}"}
 }
 
 # Assertion helpers.
@@ -439,6 +454,21 @@ test_default_delegates_scope_to_pre_push() {
         sed 's/^/  /' "$tmpdir/just.log" >&2
         return 1
     fi
+}
+
+# Harness self-check: with no override, run_hook must hand the hook no
+# selection variable at all, not an empty one, and it must do so under the
+# default shell. run_hook_with_ref_line reads HOOK dynamically, so a local
+# rebinding routes the run to a stub that records its environment.
+test_run_hook_forwards_no_selection_without_an_override() {
+    local tmpdir="$1"
+    printf '#!/usr/bin/env bash\nenv >"%s/hook.env"\n' "$tmpdir" >"$tmpdir/env-dump"
+    chmod +x "$tmpdir/env-dump"
+    local HOOK="$tmpdir/env-dump"
+    run_hook "$tmpdir" "warn"
+    assert_exit "stub hook ran" "$tmpdir" 0 || return 1
+    assert_contains "mode forwarded" "$tmpdir/hook.env" "RUSTY_BISCUIT_PRE_PUSH=warn" || return 1
+    assert_not_contains "no selection variable" "$tmpdir/hook.env" "RUSTY_BISCUIT_PRE_PUSH_AREAS" || return 1
 }
 
 test_areas_override_is_passed_through() {
@@ -804,9 +834,11 @@ test_reports_that_cannot_be_retained_publish_no_receipt() {
 #
 # The scope receipt binds the base the CI event will compare with. A push to
 # main is compared with the remote's current main (`github.event.before`), the
-# remote sha Git hands the hook; every other push is validated by a pull
-# request against the tip of main, which the merge base with origin/main is
-# until main advances.
+# remote sha Git hands the hook; every other push runs once per open pull
+# request, against that pull request's target tip on the remote. The bare
+# fixture remote is not GitHub, so no pull request can be open on it and the
+# hook reviews a provisional plan against the remote's main — which is also
+# what a pull request opened against main next would run.
 
 scope_receipt() {
     git -C "$1/repo" notes --ref refs/notes/ci-local/scope show "$(git -C "$1/repo" rev-parse HEAD)" 2>/dev/null
@@ -875,17 +907,20 @@ test_a_feature_branch_push_records_the_pull_request_base_not_its_previous_tip() 
     run_hook_in_repo "$tmpdir" scope-only refs/heads/feature "$previous"
     assert_exit "feature push" "$tmpdir" 0 || return 1
     # The previous tip is what Git hands the hook, but no CI event compares
-    # against it: the pull request run compares against main.
-    assert_contains "base kind announced" "$tmpdir/out" "merge base with origin/main" || return 1
+    # against it: a pull request run compares against its target's tip, and
+    # with nothing open the provisional plan is against the remote's main.
+    assert_contains "base kind announced" "$tmpdir/out" "provisional: no open pull request" || return 1
     assert_scope_receipt_base "feature push" "$tmpdir" "$main_sha" || return 1
 }
 
-test_a_branch_creating_push_records_the_merge_base_and_says_so() {
+test_a_branch_creating_push_records_the_remote_main_tip_and_says_so() {
     local tmpdir="$1"
     make_publishing_repo "$tmpdir"
     run_publishing_hook "$tmpdir" "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
     assert_exit "new branch" "$tmpdir" 0 || return 1
-    assert_contains "base kind announced" "$tmpdir/out" "merge base with origin/main" || return 1
+    assert_contains "base kind announced" "$tmpdir/out" "provisional: no open pull request" || return 1
+    assert_contains "provisional trigger explained" "$tmpdir/out" \
+        "a pull request opened against main before main advances will run this plan" || return 1
     assert_scope_receipt_base "new branch" "$tmpdir" "$(git -C "$tmpdir/repo" rev-parse origin/main)" || return 1
     # Scope goes out BEFORE the gates run, whatever they then do.
     if [ "$(grep -n 'Published scope evidence' "$tmpdir/out" | cut -d: -f1)" -gt \
@@ -922,7 +957,19 @@ test_a_failed_scope_publication_is_named_and_leaves_the_exit_code_alone() {
     local tmpdir="$1"
     make_publishing_repo "$tmpdir"
     stage_publishing_tools "$tmpdir"
-    git -C "$tmpdir/repo" remote set-url origin "$tmpdir/no-such-origin.git"
+    # The remote stays readable — the review needs its main — and refuses only
+    # the scope notes ref, so exactly the transfer fails.
+    mkdir -p "$tmpdir/origin.git/hooks"
+    cat >"$tmpdir/origin.git/hooks/pre-receive" <<'EOF'
+#!/bin/sh
+while read -r old new ref; do
+    case "$ref" in
+        refs/notes/ci-local/scope) echo "scope notes refused by the fixture remote" >&2; exit 1 ;;
+    esac
+done
+exit 0
+EOF
+    chmod +x "$tmpdir/origin.git/hooks/pre-receive"
     run_hook_in_repo "$tmpdir" scope-only refs/heads/feature "0000000000000000000000000000000000000000"
     assert_exit "unpublishable scope" "$tmpdir" 0 || return 1
     assert_contains "publication failure named" "$tmpdir/err" "Scope evidence PUBLICATION failed" || return 1
@@ -1248,6 +1295,7 @@ test_the_repository_identity_is_the_remote_being_pushed_to() {
     head="$(git -C "$repo" rev-parse HEAD)"
     git init -q --bare "$tmpdir/upstream.git"
     git -C "$repo" remote add upstream "$tmpdir/upstream.git"
+    git -C "$repo" push -q upstream main
     local line="refs/heads/feature $head refs/heads/feature $ZERO_SHA"
 
     # Scoped to upstream: binds a push to upstream even though origin differs.
@@ -1319,6 +1367,293 @@ test_deletions_and_tags_among_branch_updates_are_skipped_by_name() {
     assert_scope_receipt_base "mixed push" "$tmpdir" "$main_sha" || return 1
 }
 
+# ---------- the base of every run the update triggers (review-4) ----------
+#
+# ci.yml fires `push` for main only and `pull_request` for every target
+# branch, and a pull_request run diffs from the TARGET BRANCH TIP at event
+# time. The hook must therefore plan a feature branch against each open pull
+# request's target as it stands on the remote, never against origin/main by
+# assumption. The bare fixture remote cannot hold a pull request, so a stub
+# `gh` on the harness PATH answers `pr list` from a fixture and logs what it
+# was asked, while `origin` keeps pointing at the bare repository the hook
+# fetches from; the GitHub-shaped URL is what Git would report as `$2`.
+
+GITHUB_URL="git@github.com:acme/widgets.git"
+
+# A `gh` that logs its argv to gh.log and answers `pr list` with the given
+# `<number> <base branch>` rows (none: no open pull request). A `gh-fail`
+# marker makes it fail the way an unauthenticated `gh` does.
+#
+# Usage: stage_fake_gh <tmpdir> [row...]
+stage_fake_gh() {
+    local tmpdir="$1"
+    shift
+    local json="[" sep="" row
+    for row in "$@"; do
+        json="$json$sep{\"number\":${row%% *},\"baseRefName\":\"${row#* }\"}"
+        sep=","
+    done
+    printf '%s]' "$json" >"$tmpdir/gh-reply.json"
+    cat >"$tmpdir/gh" <<EOF
+#!/bin/sh
+echo "\$*" >>"$tmpdir/gh.log"
+if [ -f "$tmpdir/gh-fail" ]; then
+    echo "gh: To get started with GitHub CLI, please run: gh auth login" >&2
+    exit 4
+fi
+cat "$tmpdir/gh-reply.json"
+EOF
+    chmod +x "$tmpdir/gh"
+}
+
+# The review's reproduction: `parent` (from main) changes pkg/alpha/src/lib.rs
+# and is on the remote; `child` (from parent) restores the base contents and
+# is checked out as HEAD. Sets PARENT_SHA and CHILD_SHA.
+#
+# Usage: make_stacked_repo <tmpdir>
+make_stacked_repo() {
+    local tmpdir="$1" repo="$1/repo"
+    local commit=(git -c user.name=hook-test -c user.email=hook@example.com -c commit.gpgsign=false)
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    git -C "$repo" checkout -q -b parent main
+    echo "parent lib" >"$repo/pkg/alpha/src/lib.rs"
+    "${commit[@]}" -C "$repo" add -A
+    "${commit[@]}" -C "$repo" commit -q -m "parent"
+    git -C "$repo" push -q origin parent
+    git -C "$repo" checkout -q -b child parent
+    echo "base lib" >"$repo/pkg/alpha/src/lib.rs"
+    "${commit[@]}" -C "$repo" add -A
+    "${commit[@]}" -C "$repo" commit -q -m "child"
+    PARENT_SHA="$(git -C "$repo" rev-parse parent)"
+    CHILD_SHA="$(git -C "$repo" rev-parse child)"
+}
+
+# Push `child` to the GitHub-shaped remote in the given mode.
+run_stacked_push() {
+    local tmpdir="$1" mode="$2"
+    shift 2
+    run_hook_as_remote "$tmpdir" "$mode" origin "$GITHUB_URL" \
+        "refs/heads/child $CHILD_SHA refs/heads/child $ZERO_SHA" "$@"
+}
+
+# A `--base <base> --head <head> --` planner call with NOTHING after the `--`.
+assert_planned_with_no_paths() {
+    local label="$1" tmpdir="$2" base="$3" head="$4"
+    if grep -q -- "--base $base --head $head --\$" "$tmpdir/planner.log"; then
+        return 0
+    fi
+    echo "  expected the planner to be handed an empty path set for base $base ($label):" >&2
+    sed 's/^/  /' "$tmpdir/planner.log" >&2
+    return 1
+}
+
+test_a_stacked_pull_request_is_planned_against_its_target_branch_tip() {
+    local tmpdir="$1"
+    make_stacked_repo "$tmpdir"
+    make_fake_just "$tmpdir" 0 "$FIXTURES/plan-wsl-executing.json"
+    stage_fake_gh "$tmpdir" "12 parent"
+    write_prohibition "$tmpdir/constraints" "wsl2-ubuntu" "2099-01-01"
+    run_stacked_push "$tmpdir" strict "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    # CI diffs parent's tip against child, which selects alpha; the WSL cell
+    # would execute, so the prohibition blocks.
+    assert_exit "stacked pull request" "$tmpdir" 1 || return 1
+    assert_contains "planned against the target's tip" "$tmpdir/planner.log" \
+        "--base $PARENT_SHA --head $CHILD_SHA -- pkg/alpha/src/lib.rs" || return 1
+    assert_contains "trigger named" "$tmpdir/out" "pull request #12 into parent" || return 1
+    assert_contains "gh asked about this head" "$tmpdir/gh.log" "--repo acme/widgets --head child" || return 1
+    assert_contains "reason stated" "$tmpdir/err" "do not rerun WSL for this branch" || return 1
+    assert_log_lacks "no gate after refusal" "$tmpdir" "pre-push" || return 1
+    assert_no_leftover_worktree "stacked pull request" "$tmpdir" || return 1
+}
+
+# The inverse, and what the old hook did for every branch: against main the
+# child's tree is unchanged, so nothing is selected and nothing blocks.
+test_a_pull_request_into_main_from_a_restoring_child_selects_nothing() {
+    local tmpdir="$1"
+    make_stacked_repo "$tmpdir"
+    make_fake_just "$tmpdir" 0 "$FIXTURES/plan-wsl-executing.json"
+    stage_fake_gh "$tmpdir" "12 main"
+    write_prohibition "$tmpdir/constraints" "wsl2-ubuntu" "2099-01-01"
+    local main_sha
+    main_sha="$(git -C "$tmpdir/repo" rev-parse origin/main)"
+    run_stacked_push "$tmpdir" strict "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    assert_exit "pull request into main" "$tmpdir" 0 || return 1
+    assert_planned_with_no_paths "into main" "$tmpdir" "$main_sha" "$CHILD_SHA" || return 1
+    assert_contains "trigger named" "$tmpdir/out" "pull request #12 into main" || return 1
+    assert_not_contains "no refusal" "$tmpdir/err" "Push blocked" || return 1
+    assert_log_has "gates ran" "$tmpdir" "pre-push" || return 1
+}
+
+test_an_advanced_target_branch_is_read_from_the_remote_and_records_no_receipt() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 0
+    stage_fake_gh "$tmpdir" "7 main"
+    local repo="$tmpdir/repo" head new_main
+    local commit=(git -c user.name=hook-test -c user.email=hook@example.com -c commit.gpgsign=false)
+    head="$(git -C "$repo" rev-parse HEAD)"
+    # main advances on the remote through another clone, touching a source
+    # file; the checkout's origin/main is left STALE on purpose.
+    git clone -q "$tmpdir/origin.git" "$tmpdir/second"
+    echo "advanced lib" >"$tmpdir/second/pkg/alpha/src/lib.rs"
+    "${commit[@]}" -C "$tmpdir/second" add -A
+    "${commit[@]}" -C "$tmpdir/second" commit -q -m "advance main"
+    git -C "$tmpdir/second" push -q origin main
+    new_main="$(git -C "$tmpdir/second" rev-parse main)"
+    if [ "$(git -C "$repo" rev-parse origin/main)" = "$new_main" ]; then
+        echo "  fixture error: the tracking ref is not stale, so the test cannot tell the remote from it" >&2
+        return 1
+    fi
+    run_hook_as_remote "$tmpdir" scope-only origin "$GITHUB_URL" \
+        "refs/heads/feature $head refs/heads/feature $ZERO_SHA"
+    assert_exit "advanced target" "$tmpdir" 0 || return 1
+    # CI's two-dot diff from the advanced tip includes main's own change.
+    assert_contains "planned against the remote's tip" "$tmpdir/planner.log" \
+        "--base $new_main --head $head -- pkg/alpha/src/lib.rs work.txt" || return 1
+    assert_contains "trigger named" "$tmpdir/out" "pull request #7 into main" || return 1
+    # The receipt needs an ancestor base; the reason is printed, not implied.
+    assert_contains "receipt withheld with its reason" "$tmpdir/out" "has advanced past the branch point" || return 1
+    assert_not_contains "nothing published" "$tmpdir/out" "Published scope evidence" || return 1
+    if scope_receipt "$tmpdir" >/dev/null; then
+        echo "  a scope receipt was attached although its base is not an ancestor of HEAD" >&2
+        return 1
+    fi
+}
+
+test_a_github_branch_with_no_open_pull_request_gets_a_provisional_plan() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 0
+    stage_fake_gh "$tmpdir"
+    local repo="$tmpdir/repo" head main_sha
+    head="$(git -C "$repo" rev-parse HEAD)"
+    main_sha="$(git -C "$repo" rev-parse origin/main)"
+    local line="refs/heads/feature $head refs/heads/feature $ZERO_SHA"
+
+    # Constrained all the same: the pull request opened next is the trigger.
+    write_prohibition "$tmpdir/constraints" "wsl2-ubuntu" "2099-01-01"
+    run_hook_as_remote "$tmpdir" scope-only origin "$GITHUB_URL" "$line" \
+        "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    assert_exit "provisional plan, prohibited" "$tmpdir" 1 || return 1
+    assert_contains "gh asked" "$tmpdir/gh.log" "--repo acme/widgets --head feature" || return 1
+    assert_contains "provisional named" "$tmpdir/out" \
+        "provisional: no open pull request from feature on acme/widgets" || return 1
+    assert_contains "provisional trigger explained" "$tmpdir/out" \
+        "a pull request opened against main before main advances will run this plan" || return 1
+    assert_contains "reason stated" "$tmpdir/err" "do not rerun WSL for this branch" || return 1
+
+    reset_run_outputs "$tmpdir"
+    run_hook_as_remote "$tmpdir" scope-only origin "$GITHUB_URL" "$line"
+    assert_exit "provisional plan" "$tmpdir" 0 || return 1
+    assert_contains "planned against the remote's main" "$tmpdir/planner.log" \
+        "--base $main_sha --head $head -- work.txt" || return 1
+    assert_scope_receipt_base "provisional plan" "$tmpdir" "$main_sha" || return 1
+}
+
+test_two_open_pull_requests_from_one_head_are_each_reviewed() {
+    local tmpdir="$1"
+    make_stacked_repo "$tmpdir"
+    make_fake_just "$tmpdir" 0 "$FIXTURES/plan-wsl-executing.json"
+    stage_fake_gh "$tmpdir" "12 main" "13 parent"
+    local repo="$tmpdir/repo" main_sha receipt
+    main_sha="$(git -C "$repo" rev-parse origin/main)"
+
+    run_stacked_push "$tmpdir" scope-only
+    assert_exit "two pull requests" "$tmpdir" 0 || return 1
+    if [ "$(grep -c '^Comparison base for ' "$tmpdir/out")" != "2" ]; then
+        echo "  expected one comparison base per open pull request:" >&2
+        grep '^Comparison base for ' "$tmpdir/out" | sed 's/^/  /' >&2
+        return 1
+    fi
+    assert_contains "first trigger named" "$tmpdir/out" "pull request #12 into main" || return 1
+    assert_contains "second trigger named" "$tmpdir/out" "pull request #13 into parent" || return 1
+    assert_planned_with_no_paths "into main" "$tmpdir" "$main_sha" "$CHILD_SHA" || return 1
+    assert_contains "planned against parent" "$tmpdir/planner.log" \
+        "--base $PARENT_SHA --head $CHILD_SHA -- pkg/alpha/src/lib.rs" || return 1
+    # One note holds one receipt: the first context's, and the hook says so.
+    assert_contains "receipt scope announced" "$tmpdir/out" "binds its first comparison base only" || return 1
+    if ! receipt="$(scope_receipt "$tmpdir")"; then
+        echo "  no scope receipt is attached to HEAD" >&2
+        return 1
+    fi
+    if [ "$(printf '%s' "$receipt" | jq -r '.base + " " + .head + " " + .plan.base')" != "$main_sha $CHILD_SHA $main_sha" ]; then
+        echo "  the scope receipt does not bind the first context (main $main_sha):" >&2
+        printf '%s' "$receipt" | jq '{base, head, plan: .plan.base}' | sed 's/^/  /' >&2
+        return 1
+    fi
+
+    # A prohibition only the second context violates still blocks.
+    write_prohibition "$tmpdir/constraints" "wsl2-ubuntu" "2099-01-01"
+    reset_run_outputs "$tmpdir"
+    run_stacked_push "$tmpdir" scope-only "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    assert_exit "second context prohibited" "$tmpdir" 1 || return 1
+    assert_contains "first context passed" "$tmpdir/out" "pull request #12 into main" || return 1
+    assert_contains "second context named" "$tmpdir/out" "pull request #13 into parent" || return 1
+    assert_contains "blocked update named" "$tmpdir/err" "Blocked while reviewing refs/heads/child -> refs/heads/child" || return 1
+    assert_no_leftover_worktree "two pull requests" "$tmpdir" || return 1
+}
+
+test_a_github_remote_without_gh_blocks_and_names_it() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 0
+    local head
+    head="$(git -C "$tmpdir/repo" rev-parse HEAD)"
+    # No `gh` on the private PATH: the pull requests cannot be listed, so the
+    # plan cannot be known, so the push is refused rather than guessed.
+    run_hook_as_remote "$tmpdir" scope-only origin "$GITHUB_URL" \
+        "refs/heads/feature $head refs/heads/feature $ZERO_SHA"
+    assert_exit "no gh" "$tmpdir" 2 || return 1
+    assert_contains "gh named" "$tmpdir/err" "\`gh\` is not installed" || return 1
+    assert_contains "bypass named" "$tmpdir/err" "--no-verify" || return 1
+    if [ -f "$tmpdir/planner.log" ]; then
+        echo "  a plan was resolved without knowing which run it stands for" >&2
+        return 1
+    fi
+}
+
+test_a_failing_gh_blocks_and_names_the_failure() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 0
+    stage_fake_gh "$tmpdir"
+    : >"$tmpdir/gh-fail"
+    local head
+    head="$(git -C "$tmpdir/repo" rev-parse HEAD)"
+    run_hook_as_remote "$tmpdir" scope-only origin "$GITHUB_URL" \
+        "refs/heads/feature $head refs/heads/feature $ZERO_SHA"
+    assert_exit "gh failed" "$tmpdir" 2 || return 1
+    assert_contains "command named" "$tmpdir/err" "\`gh pr list\` failed with: gh: To get started with GitHub CLI, please run: gh auth login" || return 1
+    assert_contains "bypass named" "$tmpdir/err" "--no-verify" || return 1
+    if [ -f "$tmpdir/planner.log" ]; then
+        echo "  a plan was resolved although the pull requests could not be listed" >&2
+        return 1
+    fi
+}
+
+test_a_non_github_remote_never_asks_gh() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 0
+    stage_fake_gh "$tmpdir" "99 main"
+    run_hook_in_repo "$tmpdir" scope-only refs/heads/feature "$ZERO_SHA"
+    assert_exit "bare remote" "$tmpdir" 0 || return 1
+    if [ -f "$tmpdir/gh.log" ]; then
+        echo "  gh was consulted for a remote that can hold no pull request:" >&2
+        sed 's/^/  /' "$tmpdir/gh.log" >&2
+        return 1
+    fi
+    assert_contains "provisional named" "$tmpdir/out" \
+        "provisional: no open pull request, since $tmpdir/origin.git is not a GitHub remote" || return 1
+    assert_scope_receipt_base "bare remote" "$tmpdir" "$(git -C "$tmpdir/repo" rev-parse origin/main)" || return 1
+}
+
 # ---------- runner ----------
 
 echo ""
@@ -1334,6 +1669,7 @@ run_test "strict + passing → exit 0"                                  test_str
 run_test "strict + failing → propagate exit and mention --no-verify"  test_strict_failing_tests_exits_nonzero_with_no_verify_hint
 run_test "unset default is strict"                                    test_unset_default_is_strict
 run_test "default path calls 'just pre-push' with no selection"       test_default_delegates_scope_to_pre_push
+run_test "run_hook forwards no selection without an override"        test_run_hook_forwards_no_selection_without_an_override
 run_test "RUSTY_BISCUIT_PRE_PUSH_AREAS override is forwarded verbatim" test_areas_override_is_passed_through
 run_test "a failing warn run reaches the publication block"           test_a_failing_warn_run_reaches_the_publication_block
 run_test "publication requires a clean, exact, unoverridden tree"     test_publication_requires_a_clean_exact_tree_and_no_override
@@ -1354,7 +1690,7 @@ run_test "a published receipt names retained, readable reports"       test_a_pub
 run_test "reports that cannot be retained publish no receipt"         test_reports_that_cannot_be_retained_publish_no_receipt
 run_test "scope-only publishes committed scope for a push to main"    test_scope_only_publishes_committed_scope_for_a_push_to_main
 run_test "a feature push records the PR base, not its previous tip"   test_a_feature_branch_push_records_the_pull_request_base_not_its_previous_tip
-run_test "a branch-creating push records the merge base and says so"  test_a_branch_creating_push_records_the_merge_base_and_says_so
+run_test "a branch-creating push records the remote's main tip, says so" test_a_branch_creating_push_records_the_remote_main_tip_and_says_so
 run_test "a dirty strict run publishes scope but no validation"       test_a_dirty_strict_run_publishes_scope_but_no_validation_receipt
 run_test "a failed scope publication is named; exit code unchanged"   test_a_failed_scope_publication_is_named_and_leaves_the_exit_code_alone
 run_test "a committed change masked by an unstaged revert is reviewed" test_a_committed_change_masked_by_an_unstaged_revert_is_still_reviewed
@@ -1369,6 +1705,14 @@ run_test "ref updates are reviewed in the order Git supplies them"    test_ref_u
 run_test "the repository identity is the remote being pushed to"      test_the_repository_identity_is_the_remote_being_pushed_to
 run_test "a renamed refspec binds a record under either branch name"  test_a_renamed_refspec_binds_a_record_under_either_branch_name
 run_test "deletions and tags among branch updates are skipped by name" test_deletions_and_tags_among_branch_updates_are_skipped_by_name
+run_test "a stacked pull request is planned against its target's tip"  test_a_stacked_pull_request_is_planned_against_its_target_branch_tip
+run_test "a pull request into main from a restoring child selects nothing" test_a_pull_request_into_main_from_a_restoring_child_selects_nothing
+run_test "an advanced target is read from the remote; no receipt"      test_an_advanced_target_branch_is_read_from_the_remote_and_records_no_receipt
+run_test "no open pull request on GitHub → a provisional plan"          test_a_github_branch_with_no_open_pull_request_gets_a_provisional_plan
+run_test "two open pull requests from one head are each reviewed"     test_two_open_pull_requests_from_one_head_are_each_reviewed
+run_test "a GitHub remote without gh blocks and names it"             test_a_github_remote_without_gh_blocks_and_names_it
+run_test "a failing gh blocks and names the failure"                  test_a_failing_gh_blocks_and_names_the_failure
+run_test "a non-GitHub remote never asks gh"                          test_a_non_github_remote_never_asks_gh
 
 echo ""
 echo "================================================"
