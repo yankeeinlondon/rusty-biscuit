@@ -4,10 +4,17 @@ kind: fixture-plan
 created: 2026-09-12
 for: fixes/2026-09-11-cicd-cleanup/spec.md
 answers: [B5 (branch half), review-6 findings 1 and 7]
-status: awaiting-push-authorization
+status: superseded
+superseded_by: hosted-fixture.md
 ---
 
 # Throwaway-branch fixture plan, 2026-09-12
+
+This historical plan is superseded by [the reduced hosted fixture](hosted-fixture.md).
+Do not execute its push sequence: it schedules prohibited WSL work and requires
+a feature-branch bootstrap whose own trigger plan can violate the restrictions.
+The replacement keeps fixture execution separate from product suites and does
+not require lifting or expiring any execution constraint.
 
 This is the plan for the branch half of ruling B5, not its record. B5
 authorizes a throwaway branch of `rusty-biscuit`; the session that
