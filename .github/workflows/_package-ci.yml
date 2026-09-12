@@ -2,8 +2,8 @@ name: package-ci
 
 # Reusable CI building block for a single Cargo package.
 #
-# The dependency-aware `ci.yml` matrix calls this via `workflow_call`, once per
-# gating impacted package, so platform behavior stays uniform across the
+# `_area-ci.yml` calls this via `workflow_call`, once per gating impacted
+# package in its area, so platform behavior stays uniform across the
 # monorepo. The package is the unit of selection, execution, and result
 # identity: no result-producing job here covers more than one Cargo package.
 #
@@ -20,8 +20,8 @@ name: package-ci
 #
 # Policy this encodes: the canonical per-package recipes (`_test`, `_test_l2`,
 # `_test_browser`, `_lint`) on every applicable environment; `check`, `lint`,
-# and `test` are independent gates with `l2`/`browser` staged behind `test`;
-# no sharding anywhere (compilation is ~85% of a shard and every shard pays it
+# and `test` are independent gates with `test-l2`/`test-browser` staged behind
+# `test`; no sharding anywhere (compilation is ~85% of a shard and every shard pays it
 # in full — see fixes/2026-08-06-cicd/spec.md § Sharding). Cargo artifacts are
 # cached by `Swatinem/rust-cache` only, keyed per package — see
 # docs/kache-strategy.md for why the kache rustc-wrapper was removed from CI.
@@ -39,7 +39,7 @@ on:
         type: string
         required: true
       check-args:
-        description: "Args for the compile-check `cargo check --all-targets` (e.g. '-p sniff --features remote')."
+        description: "Args for the compile-check `cargo check`: the package selector, an explicit selector for each declared target kind no test gate compiles (`--examples`, `--benches`), and the declared features (e.g. '-p sniff --examples --benches --features remote'). Never `--all-targets`."
         type: string
         required: true
       test-args:
@@ -59,9 +59,9 @@ on:
         type: string
         default: '["ubuntu-latest", "windows-latest", "macos-latest"]'
       check-os:
-        description: "JSON array of runner OSes that only compile-check. A compile-check emits no test results, so it has no environment identity."
+        description: "JSON array of native runner OSes whose `check` cell the planner resolved to hosted execution. Empty when the package declares no `example` or `bench` target."
         type: string
-        default: '["windows-latest"]'
+        default: '["ubuntu-latest", "windows-latest", "macos-latest"]'
       l2-environments:
         description: "JSON array of environments where an L2 backend is provisioned. Empty when the package owns no L2 tests."
         type: string
@@ -108,9 +108,13 @@ env:
   NEXTEST_PROFILE: ci
 
 jobs:
-  # Warning-drift gate. What survives of the old "macOS floor" is
-  # `--all-targets`: benches and examples are compiled here and nowhere else,
-  # because the test leg builds only lib/bins/tests.
+  # Compile gate for the target kinds no test gate builds. The test leg
+  # compiles only lib/bins/tests, so the planner credits L1 with those kinds
+  # and schedules this job, on every native environment, solely for a package
+  # declaring `example` or `bench` targets — `check-os` is empty otherwise.
+  # `check-args` carries the explicit `--examples`/`--benches` selectors; the
+  # command adds no target flag of its own, so a blanket `--all-targets` would
+  # recompile what L1 already covered and mislabel the cell's coverage.
   #
   # It deliberately does NOT carry `RUSTFLAGS: -D warnings`. This gate answers
   # "does it COMPILE on this environment", and promoting warnings destroyed that
@@ -126,8 +130,17 @@ jobs:
   # Platform-conditional dead code is the normal shape of cross-platform Rust.
   # `lint` still denies warnings, through clippy inside `_lint`, so `just lint`
   # enforces the same bar off CI.
+  #
+  # No `name:`, here and in every other job below that can be skipped as a
+  # whole. GitHub labels an EXPANDED matrix job from its matrix values
+  # (`check (windows-latest)`) but never evaluates the matrix context for a job
+  # it SKIPS, so a declared `name:` carrying `${{ matrix.os }}` reaches the
+  # Checks tab as raw expression text — 63 such labels in run 34638047631. The
+  # default label degrades to the static, human-readable job id instead (AC10).
+  # The package half of the identity comes from the caller: a called workflow's
+  # jobs render as `<caller job name> / <called job name>`, so this reads
+  # `area-ci (claudine) / claudine-cli / check (windows-latest)`.
   check:
-    name: check (${{ inputs.package }} on ${{ matrix.os }})
     if: ${{ contains(fromJSON(inputs.gates), 'check') }}
     strategy:
       fail-fast: false
@@ -166,13 +179,15 @@ jobs:
         with:
           workspaces: ". -> target"
           shared-key: package-ci-${{ inputs.package }}-check-${{ matrix.os }}
-      - name: cargo check --all-targets
-        run: cargo check --all-targets ${{ inputs.check-args }}
+      - name: cargo check (declared example/bench kinds)
+        run: cargo check ${{ inputs.check-args }}
       # Producer status. This job stages no JUnit, so the status artifact is
       # the ONLY evidence it ran and how it concluded — which is what lets a
       # compile-check become a rollup cell that can be baselined and can still
-      # block. `always()`, so a FAILED job still reports itself; a job that
-      # reports nothing is MISSING, never a pass.
+      # block. It is also why a check cell can never come from a local receipt:
+      # with no report to attribute, the gate is always CI-origin. `always()`,
+      # so a FAILED job still reports itself; a job that reports nothing is
+      # MISSING, never a pass.
       - name: Record producer status
         if: ${{ always() }}
         shell: bash
@@ -199,7 +214,6 @@ jobs:
   # full, so partitioning cost ~3.2x the compute to save ~2.4 minutes
   # (fixes/2026-08-06-cicd/spec.md § Sharding).
   test:
-    name: test (${{ inputs.package }} on ${{ matrix.environment }})
     if: ${{ contains(fromJSON(inputs.gates), 'test') }}
     # Deliberately depends on nothing. Lint is a parallel gate, not a
     # prerequisite: a clippy hint in one package must not delete another
@@ -213,7 +227,7 @@ jobs:
       matrix:
         # Sound ONLY because every native environment name is also its own runner
         # label. `wsl2-ubuntu` is not, and never enters this matrix — it has its
-        # own workflow (see the `wsl` job below).
+        # own workflow (see the `wsl2` job below).
         environment: ${{ fromJSON(inputs.native-environments) }}
     runs-on: ${{ matrix.environment }}
     timeout-minutes: 45
@@ -423,8 +437,11 @@ jobs:
           name: status-${{ inputs.package }}-L1-${{ matrix.environment }}
           path: ${{ runner.temp }}/status
 
+  # This job has no matrix, so a static name is the only label it can have —
+  # and AC10 requires lint to say which environment produced its result, which
+  # the bare job id would not.
   lint:
-    name: lint (${{ inputs.package }})
+    name: lint (ubuntu-latest)
     if: ${{ contains(fromJSON(inputs.gates), 'lint') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -581,8 +598,7 @@ jobs:
   # derived from package policy crossed with the environment capability table,
   # so an L2 tier there is recorded as a POLICY GAP in the rollup instead of
   # appearing as a green 0-run cell.
-  l2:
-    name: test-l2 (${{ inputs.package }} on ${{ matrix.environment }})
+  test-l2:
     # Ordering only: this tier runs AFTER L1 for resource staging, but does not
     # require L1 to have passed. A red L1 used to suppress this leg entirely,
     # so the rollup recorded MISSING and one L1 failure erased the whole tier's
@@ -747,8 +763,7 @@ jobs:
           name: status-${{ inputs.package }}-L2-${{ matrix.environment }}
           path: ${{ runner.temp }}/status
 
-  browser:
-    name: test-browser (${{ inputs.package }})
+  test-browser:
     # Ordering only: this tier runs AFTER L1 for resource staging, but does not
     # require L1 to have passed. A red L1 used to suppress this leg entirely,
     # so the rollup recorded MISSING and one L1 failure erased the whole tier's
@@ -826,8 +841,7 @@ jobs:
   # matrix above, every `runner.os == 'Windows'` branch — native package
   # installation, path handling, shell selection, cache keys, artifact names —
   # would silently apply to a Linux guest.
-  wsl:
-    name: wsl2 (${{ inputs.package }})
+  wsl2:
     # Ordering only: this tier runs AFTER L1 for resource staging, but does not
     # require L1 to have passed. A red L1 used to suppress this leg entirely,
     # so the rollup recorded MISSING and one L1 failure erased the whole tier's
@@ -838,13 +852,18 @@ jobs:
     uses: ./.github/workflows/_wsl-ci.yml
     with:
       package: ${{ inputs.package }}
-      check-args: ${{ inputs.check-args }}
+      # Package and features only: `check-args` carries example/bench
+      # selectors, which would bake those kinds into the archive the guest
+      # runs. The guest's compile coverage is the L1 archive build, nothing more.
+      archive-args: -p ${{ inputs.package }} ${{ inputs.test-args }}
       test-args: ${{ inputs.test-args }}
       l1-include-slow: ${{ inputs.l1-include-slow }}
       runner-tools: ${{ inputs.runner-tools }}
       native: ${{ inputs.native }}
     secrets: inherit
 
-  # THERE IS NO `classify` JOB HERE ANY MORE (retired D15 — see ci.yml's
-  # `ci-verdict`). Every producer job uploads an explicit `status-<package>-<job>`
-  # artifact, which carries the same fact per {package, environment, tier}.
+  # THERE IS NO `classify` JOB HERE ANY MORE (retired D15 — judgement lives in
+  # `_area-ci.yml`'s per-area `rollup`, and transitionally also in ci.yml's
+  # `ci-verdict`). Every producer job uploads an explicit
+  # `status-<package>-<job>` artifact, which carries the same fact per
+  # {package, environment, tier}.

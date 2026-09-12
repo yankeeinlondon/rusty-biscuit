@@ -5,8 +5,9 @@ name: pr-health
 # `pull_request` workflows run against the merge commit `refs/pull/N/merge`.
 # When a PR conflicts with its base, GitHub cannot create that ref and so
 # creates no workflow run — silently. No check suite, no annotation, nothing in
-# the Actions tab. The PR renders exactly like one whose CI has not started yet,
-# and `ci-verdict` never reports, so nothing blocks and nothing explains why.
+# the Actions tab. The PR renders exactly like one whose CI has not started yet:
+# no area reports an outcome, the `ci` run has no conclusion for the merge gate
+# to fold, and nothing blocks or explains why.
 #
 # That is the same defect class the cross-platform CI refactor exists to remove
 # (see `fixes/2026-07-27-refactor/plan.md` §0.2/§1.3): absence of evidence must
@@ -119,8 +120,8 @@ jobs:
               echo "\`pull_request\` workflows execute against the merge commit"
               echo "\`refs/pull/${pr}/merge\`, which GitHub cannot create while the PR"
               echo "conflicts. No check suite is created, so the pull request looks"
-              echo "identical to one whose CI has simply not started yet, and"
-              echo "\`ci-verdict\` never reports a verdict either way."
+              echo "identical to one whose CI has simply not started yet, and no"
+              echo "area ever reports an outcome either way."
               echo
               echo "Merge or rebase the base branch into this one, resolve the"
               echo "conflicts, and push. This check will clear once"

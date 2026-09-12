@@ -6,14 +6,24 @@ name: ci-infra-retry
 # a job whose machine stopped responding — seen three times on 2026-08-27/28,
 # every time on the WSL2 guest-provisioning step under Windows-runner
 # saturation, every time green on a plain rerun. The job uploads no log and no
-# status, so nothing inside the run can retry it: `ci-verdict` is itself part
-# of the run, and the rerun endpoint refuses a run that is still in progress.
+# status, so nothing inside the run can retry it: the jobs that judge the run
+# are themselves part of it, and the rerun endpoint refuses a run that is still
+# in progress.
 #
 # This workflow runs once `ci` has completed and asks `runner_loss.py` the same
-# question `ci-verdict` asked for attribution: did every failed producer lose
-# its runner? If so — and only on attempt 1 — it reruns the failed jobs, which
-# keeps every passing job's evidence and re-runs `ci-verdict` as attempt 2. A
-# genuine test failure never matches; a second loss is left for a human.
+# question each area's rollup asks for attribution: did every failed producer
+# lose its runner? If so — and only on attempt 1 — it reruns the failed jobs,
+# which keeps every passing job's evidence and re-runs the area rollups as
+# attempt 2. A genuine test failure never matches; a second loss is left for a
+# human.
+#
+# The classification is job-level, from each failed job's check-run
+# annotations, so it survived the area restructure — but the job NAMES did not.
+# `runner_loss.parse_job_name` reads the composite
+# `area-ci (<area>) / <package> / <gate> (<environment>)` label from the tail,
+# and every job that judges rather than produces (each area's `rollup`, the
+# advisory summary, and the transitional `ci-verdict`) is excluded, because its
+# failure follows from the lost producer's and would otherwise veto this retry.
 #
 # `workflow_run` executes this file from the default branch, so a change here
 # takes effect only after it merges.

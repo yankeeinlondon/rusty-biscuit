@@ -3,10 +3,13 @@ name: ci
 # Dependency-aware CI for pull requests and pushes to main. A main push reuses
 # successful PR validation only with an identical tested tree and integration
 # base; missing evidence falls back to the normal grid. Source-changed workspace
-# packages receive every gate; their direct reverse dependencies receive a
-# compile-check only. The result is fanned out one job per package, with policy read from each manifest's
-# `[package.metadata.ci]` and environment capabilities from
-# `.github/ci/environments.json`.
+# packages receive every gate; an unchanged direct reverse dependency receives
+# no area, no job, and no result cell, and is reported by name instead. The
+# result is fanned out one caller identity per selected package AREA, with each
+# area's packages underneath it, policy read from each manifest's
+# `[package.metadata.ci]`, and environment capabilities from
+# `.github/ci/environments.json`. Package stays the stored identity of every
+# artifact, baseline entry, and receipt; area is a derived grouping.
 #
 # `pull_request` carries NO `branches:` filter on purpose. Restricting it to
 # `main` meant a stacked pull request — one targeting another feature branch —
@@ -60,7 +63,9 @@ jobs:
     if: ${{ !cancelled() && needs.validation.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     outputs:
-      package_matrix: ${{ steps.scope.outputs.package_matrix }}
+      scheduled_areas: ${{ steps.scope.outputs.scheduled_areas }}
+      area_matrix: ${{ steps.scope.outputs.area_matrix }}
+      area_slugs: ${{ steps.scope.outputs.area_slugs }}
       has_packages: ${{ steps.scope.outputs.has_packages }}
       packages: ${{ steps.scope.outputs.packages }}
       package_names: ${{ steps.scope.outputs.package_names }}
@@ -94,6 +99,12 @@ jobs:
           set -euo pipefail
           scope_args=()
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            # A manual full run has no diff range. Its plan records the
+            # all-zero "no such object" ID as the base, the same identity a
+            # branch-creating push carries in `github.event.before`, and the
+            # tested head; no receipt is verified against that pair.
+            base="0000000000000000000000000000000000000000"
+            head="$PUSH_HEAD"
             scope_args=(--all)
           else
             if [[ "$EVENT_NAME" == "pull_request" ]]; then
@@ -112,8 +123,37 @@ jobs:
             fi
           fi
 
-          scope_args+=(--plan-out resolved-plan.json --base "$base" --head "$head")
-          scope_json="$(python3 scripts/ci/affected_scope.py "${scope_args[@]}")"
+          # Ahead of the file list: after its `--` argparse reads everything,
+          # options included, as a path.
+          scope_args=(--plan-out resolved-plan.json --base "$base" --head "$head" "${scope_args[@]}")
+
+          # A scope receipt on refs/notes/ci-local/scope that binds this
+          # event's exact {base, head, tree} IS the plan: the planner does not
+          # run for selection. Any miss — no note, another schema, head, tree,
+          # or base, or a malformed document — calculates scope exactly as
+          # before. A manual run and a branch-creating push carry no
+          # comparison base and never consult the note.
+          local_scope=0
+          scope_source="CI (no comparison base)"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            scope_source="CI (workflow_dispatch ignores local scope)"
+          elif [[ -n "$base" && ! "$base" =~ ^0+$ ]]; then
+            if python3 scripts/ci/local_evidence.py scope-verify \
+                --base "$base" --head "$head" \
+                --plan-out resolved-plan.json --scope-out scope.json \
+                --reason-out scope-reason.txt; then
+              local_scope=1
+              scope_source="local (refs/notes/ci-local/scope @ ${head:0:9})"
+            else
+              reason="$(cat scope-reason.txt 2>/dev/null || true)"
+              scope_source="CI fallback (${reason:-scope-verify failed})"
+            fi
+          fi
+          if (( local_scope )); then
+            scope_json="$(cat scope.json)"
+          else
+            scope_json="$(python3 scripts/ci/affected_scope.py "${scope_args[@]}")"
+          fi
           if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
             # Per CELL, across every environment's notes ref at once: a macOS
             # receipt and a prior WSL cross-check receipt both contribute.
@@ -127,12 +167,24 @@ jobs:
               --head "$head" \
               --rejections evidence-rejections.json > accepted-cells.json
             if [[ "$(jq -r 'length' accepted-cells.json)" != "0" ]]; then
+              # Resolving the accepted set into plan state is a full planner
+              # run. On a local-scope hit the selection is therefore compared
+              # with the receipt's rather than handed off: a recomputed plan
+              # that selects other areas or packages is a planner/receipt
+              # disagreement and fails here, loudly, instead of one side
+              # silently winning.
+              selection='{areas: [.areas[].area], packages: [.packages[].package]}'
+              local_selection="$(jq -c "$selection" resolved-plan.json)"
               scope_json="$(
                 python3 scripts/ci/affected_scope.py \
                   --accepted-cells accepted-cells.json \
                   --evidence-rejections evidence-rejections.json \
                   "${scope_args[@]}"
               )"
+              if (( local_scope )) && [[ "$(jq -c "$selection" resolved-plan.json)" != "$local_selection" ]]; then
+                echo "::error::the local scope receipt and the planner select different areas or packages for ${head:0:9}: receipt $local_selection, planner $(jq -c "$selection" resolved-plan.json)"
+                exit 1
+              fi
             fi
           fi
           packages="$(jq -c '.packages' <<<"$scope_json")"
@@ -143,20 +195,24 @@ jobs:
           # so `ci-verdict` judges exactly what this run scheduled.
           printf '%s' "$scope_json" > scope.json
 
-          # Every selected gating package fans out directly. There is no canary
-          # stage: the compile check that gates each package's own tests is a
-          # cheaper and strictly better predictor than a sample of two other
-          # packages, and it cannot stall the fan-out because it runs inside it.
-          package_matrix="$(jq -c '{include: .matrix}' <<<"$scope_json")"
+          # One caller identity per selected AREA, each carrying its own
+          # ready-made package matrix. Grouping happens in the planner, not
+          # here, so the shape has test coverage. There is no canary stage: the
+          # compile check that gates each package's own tests is a cheaper and
+          # strictly better predictor than a sample of two other packages, and
+          # it cannot stall the fan-out because it runs inside it.
 
           {
-            echo "package_matrix=$package_matrix"
+            echo "scheduled_areas=$(jq -c '.scheduled_areas' <<<"$scope_json")"
+            echo "area_matrix=$(jq -c '.area_matrix' <<<"$scope_json")"
+            echo "area_slugs=$(jq -c '.area_slugs' <<<"$scope_json")"
             echo "packages=$packages"
             echo "package_names=$(jq -c '.packages' <<<"$scope_json")"
             # Derived from the MATRIX, not the impacted list: a change touching
             # only `gates = false` packages impacts packages but schedules none,
-            # and an empty matrix under `has_packages=true` fails the fan-out at
-            # strategy evaluation.
+            # and an empty area matrix under `has_packages=true` fails the
+            # fan-out at strategy evaluation. `scheduled_areas` is a regrouping
+            # of the same matrix, so the two can never disagree.
             echo "has_packages=$(jq -r '.matrix | length > 0' <<<"$scope_json")"
             echo "full_scope=$(jq -r '.full_scope' <<<"$scope_json")"
             echo "sniff=$(jq -r '.flags.sniff' <<<"$scope_json")"
@@ -175,12 +231,14 @@ jobs:
             echo "| field | value |"
             echo "|---|---|"
             echo "| event | ${EVENT_NAME} |"
+            echo "| scope source | ${scope_source} |"
             echo "| change class | $(jq -r '.change_class' <<<"$scope_json") |"
             echo "| full scope | $(jq -r '.full_scope' <<<"$scope_json") |"
             echo "| full-scope gates | $(jq -rc '.full_scope_gates | join(", ")' <<<"$scope_json") |"
             echo "| reason | $(jq -r '.preflight_reason' <<<"$scope_json") |"
             echo "| preflight OS | $(jq -rc '.preflight_os | join(", ")' <<<"$scope_json") |"
             echo "| selected areas | $(jq -rc '[.areas[].area] | join(", ")' <<<"$scope_json") |"
+            echo "| areas that fan out | $(jq -rc '.scheduled_areas | join(", ")' <<<"$scope_json") |"
             echo "| affected packages | $(jq -r '.packages | length' <<<"$scope_json") |"
             echo "| source-changed packages | $(jq -rc '.source_packages | join(", ")' <<<"$scope_json") |"
             echo "| reported (unselected) reverse dependencies | $(jq -rc '.reverse_dependencies | join(", ")' <<<"$scope_json") |"
@@ -198,16 +256,19 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
-      # The canonical plan, beside the legacy projection it was projected from.
-      # Phases 5 and 6 move the consumers onto it; until then it is what a
-      # reviewer reads to see which cells were reused and which were refused.
+      # The canonical plan, beside the legacy projection derived from it.
+      # `ci-rollup` reads it: it is the only document that says which cells a
+      # receipt already satisfied, and expecting a CI result for one of those
+      # is the PR #76 seven-cell MISSING regression. The projection still
+      # carries the area fan-out this workflow consumes, so it stays until
+      # those consumers read `cells[]` directly.
       - name: Upload the resolved execution plan
         uses: actions/upload-artifact@v6
         with:
           name: ci-resolved-plan
           path: resolved-plan.json
           retention-days: 3
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Record the tested PR merge
         id: receipt
@@ -230,8 +291,12 @@ jobs:
   # the runner OSes its environments land on; a global CI/tooling change runs
   # all three. Package jobs depend on this, so a broken bootstrap produces one
   # actionable failure per selected OS instead of dozens of package failures.
+  # No `name:`. GitHub labels a matrix job it EXPANDS from the matrix values
+  # (`preflight (ubuntu-latest)`) but never evaluates the matrix context for a
+  # job it SKIPS, so a declared `name:` carrying `${{ matrix.os }}` reaches the
+  # Checks tab as raw expression text. The default label degrades to the static,
+  # human-readable job id instead (AC10).
   preflight:
-    name: preflight (${{ matrix.os }})
     needs: scope
     strategy:
       fail-fast: false
@@ -284,45 +349,46 @@ jobs:
       - name: Test runner-loss attribution and retry decision
         run: python3 scripts/ci/test_runner_loss.py
 
-  package-ci:
-    name: ${{ matrix.package }}
+  # One caller identity per selected AREA — the top-level entry a reader sees
+  # for the tested half of the run (AC2). The area's packages, their gates, and
+  # its own rollup all live inside `_area-ci.yml` and render underneath it.
+  #
+  # No `name:`, for the reason `preflight` has none: this job carries `needs:`
+  # and can therefore be skipped as a whole, and a skipped matrix job never has
+  # its matrix context evaluated. The default label is `area-ci` when skipped
+  # and `area-ci (claudine)` when it runs.
+  #
+  # No stage sits in front of the fan-out. A sampled canary was tried and
+  # removed: gating on it erased 20 areas' evidence for one unrelated failure,
+  # and un-gating it left a `needs:` edge that stalled the whole fan-out
+  # whenever its scarcest leg could not get a runner. Each package now gates its
+  # own tests on its own compile check, inside `_package-ci.yml`, where the
+  # predictor is exact and cannot block anything it is unrelated to.
+  area-ci:
     needs: [scope, preflight]
-    # No stage sits in front of this. A sampled canary was tried and removed:
-    # gating on it erased 20 areas' evidence for one unrelated failure, and
-    # un-gating it left a `needs:` edge that stalled the whole fan-out whenever
-    # its scarcest leg could not get a runner. Each package now gates its own
-    # tests on its own compile check, inside `_package-ci.yml`, where the
-    # predictor is exact and cannot block anything it is unrelated to.
     if: >-
       !cancelled() &&
       needs.scope.outputs.has_packages == 'true'
+    # A reusable workflow's GITHUB_TOKEN cannot exceed its CALLER's, so the
+    # area rollup's `actions: read` (artifact overlay, jobs listing) and
+    # `checks: read` (runner-loss annotations) have to be granted here.
+    permissions:
+      contents: read
+      actions: read
+      checks: read
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.scope.outputs.package_matrix) }}
-    uses: ./.github/workflows/_package-ci.yml
+      matrix:
+        # A plain vector, not `include:`. GitHub builds a skipped-and-then-run
+        # job's label from the matrix values, and an `include:` of whole package
+        # records would render that label as the record. The per-area package
+        # matrix is looked up below instead.
+        area: ${{ fromJSON(needs.scope.outputs.scheduled_areas) }}
+    uses: ./.github/workflows/_area-ci.yml
     with:
-      package: ${{ matrix.package }}
-      check-args: ${{ matrix.check_args }}
-      test-args: ${{ matrix.test_args }}
-      # Source packages receive all gates; unchanged direct reverse
-      # dependencies receive compile-check only.
-      gates: ${{ toJSON(matrix.gates) }}
-      l1-include-slow: ${{ matrix.l1_include_slow }}
-      # `native_environments`, `l2_environments`, and `wsl` are DERIVED by
-      # `affected_scope.py` from package policy crossed with the environment
-      # capability table, so the reusable workflow receives pre-split,
-      # un-confusable inputs and cannot route `wsl2-ubuntu` into a `runs-on`
-      # matrix.
-      native-environments: ${{ toJSON(matrix.native_environments) }}
-      check-os: ${{ toJSON(matrix.check_os) }}
-      l2-environments: ${{ toJSON(matrix.l2_environments) }}
-      browser-environments: ${{ toJSON(matrix.browser_environments) }}
-      node-environments: ${{ toJSON(matrix.node_environments) }}
-      backends: ${{ toJSON(matrix.l2_backends) }}
-      runner-tools: ${{ toJSON(matrix.runner_tools) }}
-      companion-suites: ${{ toJSON(matrix.companion_suites) }}
-      native: ${{ toJSON(matrix.native) }}
-      wsl: ${{ matrix.wsl }}
+      area: ${{ matrix.area }}
+      slug: ${{ fromJSON(needs.scope.outputs.area_slugs)[matrix.area] }}
+      packages: ${{ toJSON(fromJSON(needs.scope.outputs.area_matrix)[matrix.area]) }}
     secrets: inherit
 
   # Specialized runtime contract (D12): orchestrated by the primary workflow,
@@ -373,6 +439,15 @@ jobs:
         run: python3 scripts/ci/test_evidence_reuse.py
       - name: Test the execution-constraint store
         run: python3 scripts/ci/test_constraints.py
+      # The workflow-contract suite is the evidence behind the workflow
+      # invariants, but `test-toolkit` is `gates = false` (promotion pending),
+      # so no area job schedules it. Run exactly that binary here; the flag
+      # above also fires on workflow edits and on this file so a regression
+      # the suite would catch cannot merge on a run that never invoked it.
+      - name: Test the workflow contracts
+        run: |
+          export NEXTEST_TEST_THREADS="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
+          cargo nextest run -p test-toolkit --test ci_workflow_contracts
       # `--no-default-features` deselects the crates the other two bins in
       # `scripts/` need and this one does not. Same shape as ci-verdict's build.
       - name: Test the rollup and verdict
@@ -389,14 +464,26 @@ jobs:
           export NEXTEST_TEST_THREADS="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
           cargo nextest run --manifest-path scripts/Cargo.toml --bin ci-plan
 
-  # THE single required branch-protection check (plan 1.3).
+  # THE single required branch-protection check (plan 1.3), for now.
+  #
+  # TRANSITIONAL. Each selected area already owns its outcome in
+  # `_area-ci.yml`'s `rollup` job, which applies that area's baseline, gaps, and
+  # missing-cell rule and nobody else's. This job is retained until ruleset
+  # 19747338 moves its required context (Open Question 3, unruled), because
+  # removing it before the context moves leaves every PR waiting on a check
+  # that never reports. It duplicates the area rollups' judgement over the whole
+  # run; the two cannot disagree, because both read the same plan and the same
+  # artifacts. Five other places change with it: `NON_PRODUCER_JOBS` in
+  # `scripts/ci/runner_loss.py`, the advisory summary's closing line, `just
+  # ci-diff`'s `gh run download -n ci-results`,
+  # `.claudine/scripts/ci-watchdog.ts`'s job lookup, and two pending fixtures.
   #
   # Everything above stays visibly red when it fails, and NONE of it is a
   # required check. That is deliberate: a required producer's failure blocks the
   # merge directly, the baseline is never consulted, and the entire mechanism is
   # bypassed. Only this job gates.
   #
-  # Three properties this job must have, each earned:
+  # Four properties this job must have, each earned:
   #
   #   1. `if: always()` — a failed or cancelled producer must not skip it.
   #      `needs` here is a "wait for, then download from" list, not a gate.
@@ -405,21 +492,26 @@ jobs:
   #      artifacts on disk and that case is invisible by construction, which is
   #      exactly what MISSING exists to catch. A baseline entry outside the
   #      scope is ignored, never counted as a pass.
-  #   3. Evidence, not job names. When `needs:` skips a matrix job GitHub never
+  #   3. `--plan` from the same job — the only document that says which cells a
+  #      verified receipt already satisfied. Expecting a CI result for one of
+  #      those is the PR #76 seven-cell MISSING regression, and it is also
+  #      where each cell's area, origin, and target coverage come from.
+  #   4. Evidence, not job names. When `needs:` skips a matrix job GitHub never
   #      evaluates the matrix context: the whole matrix collapses into ONE
   #      skipped job named with the raw `${{ matrix.os }}` expression (measured,
   #      run 30323254931). Nothing here parses a display name; identity comes
   #      from each artifact's `manifest.jsonl` and `status.json`.
   ci-verdict:
     name: ci-verdict
-    # Every job that can produce a result or status artifact. The `wsl` leg and
-    # each package's `check`/`lint`/`test`/`l2`/`browser` jobs are nested inside
-    # `package-ci`, so they are covered transitively.
+    # Every job that can produce a result or status artifact. Each package's
+    # `check`/`lint`/`test`/`test-l2`/`test-browser`/`wsl2` jobs are nested two
+    # levels down, inside `_area-ci.yml`'s own `package-ci` fan-out, so they are
+    # covered transitively.
     needs:
       - validation
       - scope
       - preflight
-      - package-ci
+      - area-ci
       - biscuit-tui-captured-stdout
       - ci-tooling
     if: always()
@@ -484,6 +576,17 @@ jobs:
         with:
           name: ci-scope
           path: ci-artifacts/ci-scope
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
+      # The plan is what carries each cell's area, origin, target coverage, and
+      # the evidence a receipt supplied. Without it the rollup would expect a CI
+      # result for a cell no job was scheduled for.
+      - name: Download the resolved execution plan
+        if: ${{ needs.validation.outputs.reuse != 'true' }}
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-resolved-plan
+          path: ci-artifacts/ci-resolved-plan
           github-token: ${{ github.token }}
           run-id: ${{ github.run_id }}
       # The in-run artifact service sees the current attempt atomically. Filter
@@ -557,6 +660,7 @@ jobs:
           mkdir -p ci-artifacts
           ./scripts/target/release/ci-rollup rollup \
             --artifacts ci-artifacts \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
             --policy ci-artifacts/ci-scope/scope.json \
             --environments .github/ci/environments.json \
             --scope "$SCOPE" \
@@ -609,9 +713,14 @@ jobs:
   # started passing — so it could and would contradict `ci-verdict`. Plan
   # success criterion 1 asks for a single view; that view is the rollup grid.
   #
-  # Advisory only: this job always succeeds.
+  # ADVISORY. This job always succeeds, and `continue-on-error: true` makes
+  # that structural rather than a property of its script: the merge gate this
+  # repository is moving to (specification OQ3) is a fold of the run's
+  # conclusion, so an advisory job that could ever fail would become a merge
+  # blocker. Every job that is allowed to block is either a tested area's rollup
+  # or a named infrastructure gate.
   summary:
-    name: Unrolled-up job summary
+    name: infrastructure summary (advisory)
     needs:
       - validation
       - scope
@@ -621,14 +730,15 @@ jobs:
     if: ${{ always() && needs.validation.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    continue-on-error: true
     steps:
       - name: Classify the first actionable failure
         shell: bash
         env:
           # Listed in dependency order: an earlier stage's failure is the root
           # cause, and later stages were skipped or would only repeat it.
-          # `package-ci` is absent on purpose — every package gate is a rollup
-          # cell.
+          # `area-ci` is absent on purpose — every package gate is a cell in its
+          # own area's rollup.
           RESULTS: |
             bootstrap (scope calculation):${{ needs.scope.result }}
             bootstrap (preflight):${{ needs.preflight.result }}

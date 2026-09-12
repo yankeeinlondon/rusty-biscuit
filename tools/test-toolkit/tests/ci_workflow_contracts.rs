@@ -298,16 +298,25 @@ fn package_ci_selects_the_ci_nextest_profile_explicitly() {
     );
 }
 
-/// AC10: the matrix is package-derived, never static or directory-derived.
+/// AC2/AC10: both matrices are planner-derived, never static or
+/// directory-derived — the area fan-out in `ci.yml` and the package fan-out
+/// inside `_area-ci.yml`.
 #[test]
 fn the_package_matrix_is_scope_derived_not_static() {
     let ci = workflow("ci.yml");
     assert!(
-        ci.contains("fromJSON(needs.scope.outputs.package_matrix)"),
-        "ci.yml must fan out from the scope-derived package matrix"
+        ci.contains("fromJSON(needs.scope.outputs.scheduled_areas)")
+            && ci.contains("fromJSON(needs.scope.outputs.area_matrix)[matrix.area]"),
+        "ci.yml must fan out one caller identity per planner-selected area, and \
+         hand that area its own planner-built package matrix"
+    );
+    let area = workflow("_area-ci.yml");
+    assert!(
+        area.contains("matrix: ${{ fromJSON(inputs.packages) }}"),
+        "_area-ci.yml must fan out from the area's package matrix"
     );
     assert!(
-        ci.contains("package: ${{ matrix.package }}"),
+        area.contains("package: ${{ matrix.package }}"),
         "the fan-out must name the package from the matrix entry"
     );
     // Every matrix field the reusable workflow consumes is produced by the
@@ -326,7 +335,7 @@ fn the_package_matrix_is_scope_derived_not_static() {
         "native",
     ] {
         assert!(
-            ci.contains(&format!("matrix.{field}")),
+            area.contains(&format!("matrix.{field}")),
             "the fan-out must forward the scope-derived matrix.{field}"
         );
     }
@@ -365,16 +374,51 @@ fn the_reusable_workflow_invokes_the_canonical_recipes() {
         "browser invokes _test_browser"
     );
     assert!(shared.contains("just _lint \"${{ inputs.package }}\""), "lint invokes _lint");
-    // Compile-check stays `cargo check --all-targets -p <package>` (R9): there
-    // is no per-package canonical check recipe.
+    // Compile-check is `cargo check` over the planner's `check_args` (R9,
+    // AC3): there is no per-package canonical check recipe, and the target
+    // selection belongs to the plan, not the workflow.
     assert!(
-        shared.contains("cargo check --all-targets ${{ inputs.check-args }}"),
+        shared.contains("run: cargo check ${{ inputs.check-args }}"),
         "the check job runs cargo check over the passed package selector"
     );
-    let ci = workflow("ci.yml");
+    let area = workflow("_area-ci.yml");
     assert!(
-        ci.contains("check-args: ${{ matrix.check_args }}"),
+        area.contains("check-args: ${{ matrix.check_args }}"),
         "the fan-out must pass the scope-derived check_args"
+    );
+}
+
+/// AC3: the check command's target selection is the planner's explicit
+/// `--examples`/`--benches`, so the workflow may add no blanket flag of its
+/// own — and those selectors must never reach the WSL archive build, whose
+/// guest runs only what the L1 archive compiled.
+#[test]
+fn the_check_command_adds_no_blanket_target_flag() {
+    let source = workflow("_package-ci.yml");
+    let offenders: Vec<String> = jobs(&source)
+        .iter()
+        .flat_map(|job| job.lines())
+        .filter(|line| !line.trim_start().starts_with('#') && line.contains("--all-targets"))
+        .map(|line| line.trim().to_owned())
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "_package-ci.yml runs a blanket target flag outside comments: {offenders:?}"
+    );
+
+    let wsl_delegation = job_block("_package-ci.yml", "  wsl2:");
+    assert!(
+        wsl_delegation.contains("archive-args: -p ${{ inputs.package }} ${{ inputs.test-args }}"),
+        "the WSL archive build must receive package and features, not check-args"
+    );
+    assert!(
+        !wsl_delegation.contains("inputs.check-args"),
+        "check-args carries example/bench selectors that must not reach the guest"
+    );
+    let archive = job_block("_wsl-ci.yml", "  archive:");
+    assert!(
+        archive.contains("${{ inputs.archive-args }}") && !archive.contains("check-args"),
+        "_wsl-ci.yml builds its archive from archive-args alone"
     );
 }
 
@@ -550,7 +594,7 @@ fn packages_declaring_native_deps_are_provisioned_from_the_closure() {
 #[test]
 fn native_prerequisites_are_installed_before_anything_is_built() {
     const BUILD_COMMANDS: [&str; 6] = [
-        "cargo check --all-targets",
+        "cargo check ",
         "cargo llvm-cov",
         "just _test ",
         "just _lint",
@@ -711,7 +755,7 @@ fn messenger_stub_runner_tool_reaches_native_and_wsl2_execution() {
     let native_test = job_block("_package-ci.yml", "  test:");
     let wsl_archive = job_block("_wsl-ci.yml", "  archive:");
     let wsl_test = job_block("_wsl-ci.yml", "  wsl:");
-    let wsl_delegation = job_block("_package-ci.yml", "  wsl:");
+    let wsl_delegation = job_block("_package-ci.yml", "  wsl2:");
     let mut missing = Vec::new();
 
     if native_test.matches("name: Build messenger desktop stubs").count() != 1
@@ -903,7 +947,7 @@ fn required_ci_pins_an_exact_rust_toolchain() {
 
 #[test]
 fn required_ci_honors_the_toolchain_file_without_stable_override() {
-    for name in ["ci.yml", "_package-ci.yml"] {
+    for name in ["ci.yml", "_area-ci.yml", "_package-ci.yml"] {
         let source = workflow(name);
         assert!(
             !source.contains("dtolnay/rust-toolchain@stable"),
@@ -1086,7 +1130,9 @@ fn wsl_is_an_environment_and_never_a_runner_label() {
         "_package-ci.yml must delegate wsl2-ubuntu rather than host it"
     );
     for job in jobs(&package_ci) {
-        if !(job.starts_with("  test:") || job.starts_with("  l2:") || job.starts_with("  browser:"))
+        if !(job.starts_with("  test:")
+            || job.starts_with("  test-l2:")
+            || job.starts_with("  test-browser:"))
         {
             continue;
         }
@@ -1321,9 +1367,9 @@ fn a_declared_node_capability_is_provisioned_verified_and_hard_required() {
         "affected_scope.py must derive node environments from the capability table"
     );
 
-    let ci = workflow("ci.yml");
+    let area = workflow("_area-ci.yml");
     assert_eq!(
-        ci.matches("node-environments: ${{ toJSON(matrix.node_environments) }}")
+        area.matches("node-environments: ${{ toJSON(matrix.node_environments) }}")
             .count(),
         1,
         "the package fan-out must forward the derived node environments"
@@ -1435,8 +1481,8 @@ const PRODUCER_STATUS: [(&str, &str, &str); 6] = [
     ("_package-ci.yml", "  check:", "JOB: check"),
     ("_package-ci.yml", "  test:", "JOB: L1"),
     ("_package-ci.yml", "  lint:", "JOB: lint"),
-    ("_package-ci.yml", "  l2:", "JOB: L2"),
-    ("_package-ci.yml", "  browser:", "JOB: browser"),
+    ("_package-ci.yml", "  test-l2:", "JOB: L2"),
+    ("_package-ci.yml", "  test-browser:", "JOB: browser"),
     ("_wsl-ci.yml", "  wsl:", "JOB: L1"),
 ];
 
@@ -1531,7 +1577,7 @@ fn ci_verdict_is_the_single_required_check() {
     for producer in [
         "scope",
         "preflight",
-        "package-ci",
+        "area-ci",
         "biscuit-tui-captured-stdout",
         "ci-tooling",
     ] {
@@ -1552,6 +1598,14 @@ fn ci_verdict_is_the_single_required_check() {
     assert!(
         verdict.contains("--policy ci-artifacts/ci-scope/scope.json"),
         "ci-verdict must read the resolved package policy the scope job uploaded"
+    );
+    // AC6: the plan is the only document that says which cells a receipt
+    // already satisfied. Rolling up without it expects a CI result for a cell
+    // no job was scheduled for, which is the PR #76 regression.
+    assert!(
+        verdict.contains("--plan ci-artifacts/ci-resolved-plan/resolved-plan.json")
+            && verdict.contains("name: ci-resolved-plan"),
+        "the rollup must read the resolved execution plan the scope job uploaded"
     );
     assert!(
         verdict.contains("--environments .github/ci/environments.json"),
@@ -1581,11 +1635,16 @@ fn ci_verdict_is_the_single_required_check() {
         "the verdict must be taken against the machine-readable baseline"
     );
 
+    // Two named downloads (policy, plan), then the current-attempt evidence and
+    // the newest run-wide overlay. The named lookups and the overlay each need
+    // the token; the in-run pattern download deliberately does not.
     assert!(
         verdict.contains("name: ci-scope")
+            && verdict.contains("name: ci-resolved-plan")
             && verdict.matches("pattern: '{junit-*,status-*}'").count() == 2
-            && verdict.matches("github-token: ${{ github.token }}").count() == 2,
-        "ci-verdict must combine exact policy, current-attempt evidence, and the newest run-wide evidence"
+            && verdict.matches("github-token: ${{ github.token }}").count() == 3,
+        "ci-verdict must combine exact policy, the resolved plan, current-attempt \
+         evidence, and the newest run-wide evidence"
     );
     assert!(
         !ci.contains("baseline-failures.txt"),
@@ -1650,8 +1709,9 @@ fn only_ci_verdict_makes_a_run_level_claim() {
         "the advisory summary must make no run-level green claim"
     );
     assert!(
-        !summary.contains("needs.package-ci.result"),
-        "every package gate is a rollup cell; the advisory summary must not report them a second time"
+        !summary.contains("needs.area-ci.result"),
+        "every package gate is a cell in its own area's rollup; the advisory \
+         summary must not report them a second time"
     );
     assert!(
         summary.contains("ci-verdict"),
@@ -2017,8 +2077,9 @@ fn the_fan_out_gate_derives_from_the_matrix_not_the_impacted_list() {
 fn ci_tooling_changes_schedule_the_tooling_leg() {
     let policy = read("scripts/ci/affected_scope.py");
     assert!(
-        policy.contains(r#"CI_TOOLING_PREFIXES = ("scripts/", ".github/ci/")"#),
-        "affected_scope.py must map scripts/ and .github/ci/ to the ci_tooling flag"
+        policy
+            .contains(r#"CI_TOOLING_PREFIXES = ("scripts/", ".github/ci/", ".github/workflows/")"#),
+        "affected_scope.py must map scripts/, .github/ci/, and .github/workflows/ to the ci_tooling flag"
     );
 
     let ci = workflow("ci.yml");
@@ -2047,6 +2108,28 @@ fn ci_tooling_changes_schedule_the_tooling_leg() {
     );
 }
 
+/// This suite is the evidence behind AC10, AC11, and AC14–AC17, but
+/// `test-toolkit` is `gates = false`, so no area job schedules it. Until it is
+/// promoted, the tooling leg must invoke exactly this binary, and the scope
+/// calculator must select that leg for a change to this file (the workflow
+/// prefix is asserted by `ci_tooling_changes_schedule_the_tooling_leg`).
+#[test]
+fn ci_tooling_leg_runs_the_workflow_contract_suite() {
+    let leg = job_block("ci.yml", "  ci-tooling:");
+    assert!(
+        leg.contains("cargo nextest run -p test-toolkit --test ci_workflow_contracts"),
+        "the ci-tooling leg must run the ci_workflow_contracts test binary"
+    );
+
+    let policy = read("scripts/ci/affected_scope.py");
+    assert!(
+        policy.contains(
+            r#"CI_TOOLING_PATHS = {"tools/test-toolkit/tests/ci_workflow_contracts.rs"}"#
+        ),
+        "affected_scope.py must map this suite's source file to the ci_tooling flag"
+    );
+}
+
 /// B3/B4: the WSL guest must have `jq` before its native-prerequisites step
 /// parses with it, and the package's declared L1 slow-test contract must reach
 /// the guest or darkmatter's L1 suite silently narrows on wsl2-ubuntu only.
@@ -2063,7 +2146,7 @@ fn the_wsl_leg_provisions_jq_and_forwards_the_slow_test_contract() {
         "_wsl-ci.yml must accept and export the package's l1-include-slow contract"
     );
 
-    let wsl_job = job_block("_package-ci.yml", "  wsl:");
+    let wsl_job = job_block("_package-ci.yml", "  wsl2:");
     assert!(
         wsl_job.contains("l1-include-slow: ${{ inputs.l1-include-slow }}"),
         "the WSL leg must receive the package's declared L1 slow-test policy"
@@ -2071,13 +2154,13 @@ fn the_wsl_leg_provisions_jq_and_forwards_the_slow_test_contract() {
 }
 
 // ---------------------------------------------------------------------------
-// Frozen contracts for the area-owned CI presentation
+// The area-owned CI presentation
 //
-// Phase 2 of `fixes/2026-09-11-cicd-cleanup/plan.md` freezes these before
-// Phase 6 restructures scheduling. `pending_workflow_contract` asserts that a
-// target behavior currently fails for its recorded reason and keeps the failure
-// message as the implementation oracle; the Python twin is
-// `scripts/ci/pending_contracts.py`.
+// Phase 2 of `fixes/2026-09-11-cicd-cleanup/plan.md` froze these as pending
+// contracts; Phase 6 implemented them, so they are now ordinary assertions and
+// a regression fails this suite. `pending_workflow_contract` survives for the
+// ones still gated on a ruling (AC9's `checks: write`, AC11's `ci-verdict`
+// removal); the Python twin is `scripts/ci/pending_contracts.py`.
 // ---------------------------------------------------------------------------
 
 /// Run `body`, requiring it to fail with a message containing `oracle`.
@@ -2117,7 +2200,8 @@ fn pending_workflow_contract(criterion: &str, reason: &str, oracle: &str, body: 
 
 /// The workflows whose job names reach a reader through the Actions graph and
 /// the PR Checks tab.
-const READER_FACING_WORKFLOWS: [&str; 3] = ["ci.yml", "_package-ci.yml", "_wsl-ci.yml"];
+const READER_FACING_WORKFLOWS: [&str; 4] =
+    ["ci.yml", "_area-ci.yml", "_package-ci.yml", "_wsl-ci.yml"];
 
 /// A job's declared `name:`, when it has one.
 fn job_name(block: &str) -> Option<String> {
@@ -2150,105 +2234,229 @@ fn skippable_jobs_with_expression_names() -> Vec<String> {
     offenders
 }
 
+/// AC10.
 #[test]
 fn no_skippable_job_is_labelled_with_an_unresolved_expression() {
-    pending_workflow_contract(
-        "AC10",
-        "tier selection is decided inside the reusable workflows with `if:`, so \
-         every matrix job that is not scheduled collapses into one skipped job \
-         named with its raw expression",
-        "labelled with an unresolved expression",
-        || {
-            let offenders = skippable_jobs_with_expression_names();
-            assert!(
-                offenders.is_empty(),
-                "{} job(s) are skippable and labelled with an unresolved \
-                 expression:\n  {}",
-                offenders.len(),
-                offenders.join("\n  ")
-            );
-        },
-    );
-}
-
-#[test]
-fn the_unresolved_label_defect_is_present_and_measured() {
-    // Non-pending: pins the defect so the contract above cannot be satisfied by
-    // a fixture that stopped looking at the right workflows.
     let offenders = skippable_jobs_with_expression_names();
     assert!(
-        offenders.len() >= 5,
-        "expected the known unresolved-label defect across the reader-facing \
-         workflows, found {}: {offenders:#?}",
-        offenders.len()
+        offenders.is_empty(),
+        "{} job(s) are skippable and labelled with an unresolved \
+         expression:\n  {}",
+        offenders.len(),
+        offenders.join("\n  ")
     );
 }
 
+/// AC10, from the other side: a skippable job must still be *identifiable*.
+///
+/// Dropping `name:` is what makes the label static, because GitHub falls back
+/// to the job id (and appends the matrix values when the job does expand). A
+/// job that instead kept a static but uninformative name would satisfy the
+/// test above and tell a reader nothing.
+#[test]
+fn every_skippable_job_has_a_static_human_readable_identity() {
+    let mut checked = 0;
+    for file in READER_FACING_WORKFLOWS {
+        let source = workflow(file);
+        for block in jobs(&source) {
+            let id = block
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .trim_end_matches(':')
+                .to_owned();
+            if !(block.contains("\n    if:") || block.contains("\n    needs:")) {
+                continue;
+            }
+            checked += 1;
+            let label = job_name(&block).unwrap_or_else(|| id.clone());
+            assert!(
+                label.len() >= 4 && label.chars().any(|c| c.is_ascii_alphabetic()),
+                "{file}: skippable job `{id}` collapses to the label {label:?}, \
+                 which names nothing a reader can act on"
+            );
+        }
+    }
+    assert!(
+        checked >= 8,
+        "expected the reader-facing workflows to contain skippable jobs; found {checked}"
+    );
+}
+
+/// AC10: lint runs on exactly one environment and its label has to say so.
 #[test]
 fn lint_and_check_labels_identify_their_environment() {
-    pending_workflow_contract(
-        "AC10",
-        "the lint job runs on a single hard-coded runner and its name says \
-         nothing about which environment produced the result",
-        "does not identify its environment",
-        || {
-            let lint = job_block("_package-ci.yml", "  lint:");
-            let name = job_name(&lint).unwrap_or_default();
-            assert!(
-                ["ubuntu", "linux", "macos", "windows", "environment"]
-                    .iter()
-                    .any(|marker| name.to_lowercase().contains(marker)),
-                "the lint job name {name:?} does not identify its environment"
-            );
-        },
+    let lint = job_block("_package-ci.yml", "  lint:");
+    let name = job_name(&lint).unwrap_or_default();
+    assert!(
+        ["ubuntu", "linux", "macos", "windows", "environment"]
+            .iter()
+            .any(|marker| name.to_lowercase().contains(marker)),
+        "the lint job name {name:?} does not identify its environment"
+    );
+    // `check` has a matrix, so GitHub appends the environment itself — but
+    // only while the job keeps no `name:` of its own.
+    let check = job_block("_package-ci.yml", "  check:");
+    assert!(
+        job_name(&check).is_none() && check.contains("os: ${{ fromJSON(inputs.check-os) }}"),
+        "check must take its environment label from its matrix, not from a `name:`"
     );
 }
 
+/// AC2: the area, not the package, is the top-level identity of the fan-out.
 #[test]
 fn the_area_is_the_top_level_identity_of_the_package_fan_out() {
-    pending_workflow_contract(
-        "AC2",
-        "`package-ci` fans out one caller identity per PACKAGE \
-         (`name: ${{ matrix.package }}`), so a library and its CLI appear as two \
-         unrelated top-level entries",
-        "fans out per package, not per area",
-        || {
-            let ci = workflow("ci.yml");
-            let fan_out = job_block("ci.yml", "  package-ci:");
-            assert!(
-                fan_out.contains("matrix.area") || ci.contains("area_matrix"),
-                "the package fan-out fans out per package, not per area: the \
-                 caller job's name is {:?}",
-                job_name(&fan_out).unwrap_or_default()
-            );
-        },
+    let ci = workflow("ci.yml");
+    let fan_out = job_block("ci.yml", "  area-ci:");
+    assert!(
+        fan_out.contains("area: ${{ fromJSON(needs.scope.outputs.scheduled_areas) }}")
+            && fan_out.contains("uses: ./.github/workflows/_area-ci.yml"),
+        "ci.yml's tested fan-out must be one caller identity per selected area"
+    );
+    assert!(
+        !jobs(&ci).iter().any(|block| block.starts_with("  package-ci:")),
+        "a package-level fan-out in ci.yml would put packages back at the top level"
+    );
+    // The package stays the identity underneath (Design Decision 1).
+    let area = workflow("_area-ci.yml");
+    assert!(
+        area.contains("name: ${{ matrix.package }}")
+            && area.contains("uses: ./.github/workflows/_package-ci.yml"),
+        "each area must delegate package execution to _package-ci.yml, keyed by package"
     );
 }
 
+/// AC11: each selected area owns its own outcome, and only its own.
 #[test]
 fn every_selected_area_owns_an_always_rollup_job() {
-    pending_workflow_contract(
-        "AC11",
-        "one standalone `ci-verdict` job judges every area together; there is no \
-         per-area rollup",
-        "no per-area rollup job",
-        || {
-            let ci = workflow("ci.yml");
-            assert!(
-                ci.contains("area-rollup") || ci.contains("area_rollup"),
-                "ci.yml declares no per-area rollup job, so no area can own its \
-                 own outcome"
-            );
-        },
+    let rollup = job_block("_area-ci.yml", "  rollup:");
+    assert!(
+        rollup.contains("needs: package-ci") && rollup.contains("if: always()"),
+        "the area rollup must wait for its own producers and run even when they failed"
+    );
+    assert!(
+        rollup.contains(r#"--area "$AREA""#),
+        "the area rollup must narrow the rollup to its own area"
+    );
+    assert!(
+        rollup.contains("ci-rollup verdict") && rollup.contains("--baseline"),
+        "the area rollup must apply its own baseline and fail closed"
+    );
+    // Package stays the stored identity: only the artifact NAME carries the
+    // area, and it carries the slug so a nested area is a legal artifact name.
+    assert!(
+        rollup.contains("name: ci-results-${{ inputs.slug }}"),
+        "each area must publish its own result slice under an artifact-safe name"
     );
 }
 
+/// AC11/spec §5: runner-loss attribution moved into the per-area path.
+#[test]
+fn runner_loss_attribution_is_narrowed_to_the_owning_area() {
+    let rollup = job_block("_area-ci.yml", "  rollup:");
+    assert!(
+        rollup.contains("runner_loss.py attribute") && rollup.contains("--package"),
+        "an area must synthesize statuses only for its own packages; a job name \
+         carries no area, so the narrowing is expressed as a package list"
+    );
+    assert!(
+        rollup.contains(r#"jq -r '[.include[].package] | join(",")'"#),
+        "the package list must come from the area's own matrix, not be hand-written"
+    );
+}
+
+/// AC4: a reused cell is published without any runner work for it.
+#[test]
+fn a_reused_cell_reaches_its_area_summary_without_being_re_executed() {
+    let area = workflow("_area-ci.yml");
+    let rollup = job_block("_area-ci.yml", "  rollup:");
+    // The rollup renders the reused cells (`render_grid`'s "Reused results"
+    // table) into the area's step summary, and it is the only job in the area
+    // workflow that is not a package execution.
+    assert!(
+        rollup.contains("ci-rollup rollup") && rollup.contains("--plan "),
+        "the area rollup must read the plan, which is what says a cell was reused"
+    );
+    for forbidden in ["just _test", "cargo nextest", "install-action@nextest"] {
+        assert!(
+            !rollup.contains(forbidden),
+            "the area rollup runs `{forbidden}`; publishing a reused cell must \
+             invoke no setup, build, archive, or test step"
+        );
+    }
+    // And the scheduling half: the environment lists the area hands each
+    // package are the planner's EXECUTING set, so no runner is scheduled for a
+    // cell a receipt satisfied.
+    assert!(
+        area.contains("native-environments: ${{ toJSON(matrix.native_environments) }}"),
+        "the area must forward the planner's executing environment lists verbatim"
+    );
+}
+
+/// AC13/spec §7: the concurrency correction survives the scheduling redesign.
+#[test]
+fn the_worker_policy_survives_the_area_restructure() {
+    let ci = workflow("ci.yml");
+    let package_ci = workflow("_package-ci.yml");
+    assert!(
+        ci.contains("just _test_threads"),
+        "the CI worker policy must still come from the shared `_test_threads` recipe"
+    );
+    let l2 = job_block("_package-ci.yml", "  test-l2:");
+    assert!(
+        l2.contains("l2-parallel-self-spawn") && l2.contains("BISCUIT_L2_THREADS"),
+        "only a declared self-isolating L2 suite may use the shared worker budget"
+    );
+    assert!(
+        package_ci.contains("BISCUIT_TEST_REQUIRED_BACKENDS"),
+        "backend execution proof must survive the restructure"
+    );
+    assert!(
+        package_ci.contains("companion-suites") && package_ci.contains("homelab-frontend"),
+        "declared companion suites must survive the restructure"
+    );
+}
+
+/// AC11 (Phase 7): a failure-classifying job must not fail the run.
+#[test]
+fn advisory_jobs_cannot_fail_the_run_and_gates_are_not_advisory() {
+    let summary = job_block("ci.yml", "  summary:");
+    assert!(
+        summary.contains("continue-on-error: true"),
+        "the advisory summary must be structurally unable to fail the run: the \
+         merge gate this repository is moving to folds the run's conclusion"
+    );
+    // The converse. Anything that is allowed to block must not silently opt
+    // out of blocking.
+    for (file, header) in [
+        ("ci.yml", "  scope:"),
+        ("ci.yml", "  preflight:"),
+        ("ci.yml", "  ci-tooling:"),
+        ("_area-ci.yml", "  rollup:"),
+    ] {
+        let block = job_block(file, header);
+        let executable: String = block
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !executable.contains("\n    continue-on-error:"),
+            "{file}: `{}` is a gate and must not be job-level continue-on-error",
+            header.trim()
+        );
+    }
+}
+
+/// AC11: the standalone global verdict is Phase 7's to remove.
 #[test]
 fn no_standalone_global_verdict_job_remains() {
     pending_workflow_contract(
         "AC11",
-        "`ci-verdict` is still the single required check and the only merge \
-         authority",
+        "`ci-verdict` is retained until Phase 7 moves the required context off \
+         it; removing it first leaves every PR waiting on a check that never \
+         reports",
         "still declares a standalone `ci-verdict` job",
         || {
             let ci = workflow("ci.yml");
@@ -2260,20 +2468,208 @@ fn no_standalone_global_verdict_job_remains() {
     );
 }
 
+/// AC11: the job's removal is atomic with its consumers'.
+///
+/// Two readers outside the workflows key on `ci-verdict` by name and on the
+/// single whole-run `ci-results` artifact it uploads. They are not in the
+/// specification's migration checklist, and rewiring them early would break
+/// them while the job still exists — so they are pinned here instead, and the
+/// removal is not complete until both this fixture and
+/// `no_standalone_global_verdict_job_remains` are deleted together.
+#[test]
+fn the_verdict_consumers_are_rewired_when_the_job_goes() {
+    pending_workflow_contract(
+        "AC11",
+        "`just ci-diff` downloads the whole-run `ci-results` artifact by name \
+         and the CI watchdog looks for a job called `ci-verdict`; both stop \
+         working the moment the job is removed, so they move in the same change",
+        "still reads the whole-run verdict",
+        || {
+            let ci_diff = read("just/devops.just");
+            let watchdog = read(".claudine/scripts/ci-watchdog.ts");
+            assert!(
+                !ci_diff.contains("-n ci-results ") && !watchdog.contains("\"ci-verdict\""),
+                "the tooling still reads the whole-run verdict: `just ci-diff` \
+                 downloads one `ci-results` artifact and the watchdog waits for \
+                 a `ci-verdict` job"
+            );
+        },
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7 — the seams the merge-authority migration moves across
+//
+// The ruleset edit itself is Ken's (OQ3/B3), but the properties the migration
+// depends on are static and testable now: the run conclusion must already be a
+// faithful conjunction, every area's results must already be published, and
+// the transitional `ci-verdict` must judge the same inputs as the area rollups
+// so the two cannot disagree while both exist.
+// ---------------------------------------------------------------------------
+
+/// Spec §5: `reuse_validation.py`, `release-plz.yml`, and `ci-infra-retry.yml`
+/// all key on the `ci` run's conclusion, which after the migration is also
+/// what branch protection folds.
+#[test]
+fn every_downstream_consumer_reads_the_same_ci_run_conclusion() {
+    for file in ["release-plz.yml", "ci-infra-retry.yml"] {
+        let source = workflow(file);
+        assert!(
+            source.contains("workflow_run:"),
+            "{file}: must key on a `ci` run, not race it"
+        );
+        assert!(
+            source.contains("workflows: [ci]") || source.contains(r#"workflows: ["ci"]"#),
+            "{file}: must watch the `ci` workflow by name"
+        );
+        assert!(
+            source.contains("github.event.workflow_run.conclusion"),
+            "{file}: must read the run conclusion, not a named check"
+        );
+    }
+    let reuse = read("scripts/ci/reuse_validation.py");
+    assert!(
+        reuse.contains(r#"run.get("status") != "completed""#)
+            && reuse.contains(r#"run.get("conclusion") != "success""#),
+        "reuse_validation must accept only a completed, successful run; a \
+         failure, a cancellation, or an in-flight run must fall back to \
+         normal CI"
+    );
+    assert!(
+        reuse.contains(r#"run.get("path") == ".github/workflows/ci.yml""#),
+        "reuse_validation must pin the run to this repository's ci.yml"
+    );
+}
+
+/// Spec §5: a `continue-on-error` job is invisible to the run conclusion, so
+/// exactly one job — the advisory summary — may carry it.
+#[test]
+fn only_the_advisory_summary_is_excluded_from_the_run_conclusion() {
+    let mut advisory = Vec::new();
+    for file in READER_FACING_WORKFLOWS {
+        let source = workflow(file);
+        for block in jobs(&source) {
+            let header = block.lines().next().unwrap_or("").trim().to_owned();
+            let executable: String = block
+                .lines()
+                .filter(|line| !line.trim_start().starts_with('#'))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if executable.contains("\n    continue-on-error: true") {
+                advisory.push(format!("{file}:{header}"));
+            }
+        }
+    }
+    assert_eq!(
+        vec!["ci.yml:summary:".to_owned()],
+        advisory,
+        "only the advisory summary may opt out of the run conclusion; every \
+         other job's failure has to reach the gate that folds it"
+    );
+}
+
+/// Spec §5: the per-area result slices are the machine-readable results that
+/// survive `ci-verdict`'s removal, so a blocked area must still publish one.
+#[test]
+fn a_blocked_area_still_publishes_its_result_slice() {
+    let rollup = job_block("_area-ci.yml", "  rollup:");
+    let upload = rollup
+        .find("name: Upload this area's result slice")
+        .expect("the area rollup must upload its result slice");
+    let judge = rollup
+        .find("name: Judge this area")
+        .expect("the area rollup must judge its area");
+    assert!(
+        upload < judge,
+        "the slice must be uploaded BEFORE the verdict step, so a blocked \
+         area's results are still available for reporting and future reuse"
+    );
+    assert!(
+        rollup[upload..judge].contains("if: always()"),
+        "the upload must be unconditional; a cancelled producer must not take \
+         the area's results with it"
+    );
+    // Written, uploaded, and judged under one name, so the artifact a reader
+    // downloads is the document the verdict was taken against.
+    for usage in [
+        r#"--out "ci-results-${{ inputs.slug }}.json""#,
+        r#"path: ci-results-${{ inputs.slug }}.json"#,
+        r#"--results "ci-results-${{ inputs.slug }}.json""#,
+    ] {
+        assert!(
+            rollup.contains(usage),
+            "the rollup must write, upload, and judge one slice file: `{usage}`"
+        );
+    }
+}
+
+/// Phase 7 task 2: the compatibility revision. While both exist, the
+/// transitional `ci-verdict` and every area rollup read the same plan, the
+/// same policy, and the same baseline, so they cannot reach opposing verdicts.
+#[test]
+fn the_transitional_verdict_and_the_area_rollups_judge_the_same_inputs() {
+    let verdict = job_block("ci.yml", "  ci-verdict:");
+    let rollup = job_block("_area-ci.yml", "  rollup:");
+    for input in [
+        "name: ci-scope",
+        "name: ci-resolved-plan",
+        "--environments .github/ci/environments.json",
+        ".github/ci/ci-baseline.toml",
+        "pattern: '{junit-*,status-*}'",
+    ] {
+        assert!(
+            verdict.contains(input),
+            "ci-verdict must still read `{input}` while it is the required check"
+        );
+        assert!(
+            rollup.contains(input),
+            "the area rollup must read `{input}`, or it could disagree with the \
+             check that currently gates"
+        );
+    }
+    // The area path exists underneath it: removing `ci-verdict` must be a
+    // deletion, never a migration of behavior that lives only here.
+    assert!(
+        verdict.contains("      - area-ci\n"),
+        "ci-verdict must wait on the area fan-out so its artifacts are downloadable"
+    );
+}
+
+/// Every `uses: ./.github/workflows/…` edge reachable from an entry workflow.
+fn reusable_workflow_depth(entry: &str, seen: &mut Vec<String>) -> usize {
+    if seen.iter().any(|name| name == entry) {
+        panic!("reusable-workflow cycle through {entry}: {seen:?}");
+    }
+    seen.push(entry.to_owned());
+    let source = workflow(entry);
+    let deepest = source
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("uses: ./.github/workflows/"))
+        .map(|called| reusable_workflow_depth(called.trim(), seen))
+        .max()
+        .unwrap_or(0);
+    seen.pop();
+    1 + deepest
+}
+
 #[test]
 fn the_reusable_workflow_chain_stays_within_githubs_four_levels() {
-    // Non-pending, and the tightest constraint Phase 6 has. The chain is
-    // already ci.yml -> _package-ci.yml -> _wsl-ci.yml, which is three levels
-    // including the caller. An area-level workflow makes four, GitHub's
-    // maximum, leaving no margin for a later insertion.
-    let ci = workflow("ci.yml");
-    let package_ci = workflow("_package-ci.yml");
-    let wsl_ci = workflow("_wsl-ci.yml");
-
-    assert!(ci.contains("uses: ./.github/workflows/_package-ci.yml"));
-    assert!(package_ci.contains("uses: ./.github/workflows/_wsl-ci.yml"));
+    // The tightest constraint Phase 6 had. `ci.yml -> _area-ci.yml ->
+    // _package-ci.yml -> _wsl-ci.yml` is four levels including the caller,
+    // GitHub's maximum, so no margin remains for a later insertion.
+    let depth = reusable_workflow_depth("ci.yml", &mut Vec::new());
     assert!(
-        !wsl_ci.contains("uses: ./.github/workflows/"),
+        depth <= 4,
+        "the reusable-workflow chain from ci.yml is {depth} levels deep; GitHub \
+         allows four including the caller"
+    );
+    assert_eq!(
+        depth, 4,
+        "the chain is expected to sit exactly at GitHub's ceiling; a different \
+         depth means the area or WSL level moved and this contract needs rereading"
+    );
+    assert!(
+        !workflow("_wsl-ci.yml").contains("uses: ./.github/workflows/"),
         "_wsl-ci.yml is the last level the chain can afford; it must call no \
          further reusable workflow"
     );
@@ -2284,7 +2680,7 @@ fn the_gap_publishing_job_holds_the_checks_write_permission_it_needs() {
     pending_workflow_contract(
         "AC9",
         "no job in ci.yml holds `checks: write`; the top-level grant is \
-         `contents: read` and the two widened jobs take read scopes only",
+         `contents: read` and the widened jobs take read scopes only",
         "no job holds `checks: write`",
         || {
             let ci = workflow("ci.yml");
@@ -2299,15 +2695,17 @@ fn the_gap_publishing_job_holds_the_checks_write_permission_it_needs() {
 
 #[test]
 fn the_rollup_binary_is_still_built_without_the_monorepo_crates() {
-    // Non-pending. `scripts/Cargo.toml`'s `local-tools` feature exists so the
-    // always-runs required check does not pay for gix, duckdb, and the terminal
-    // renderer. Phase 4's `--plan` renderer and Phase 5's per-area rollup must
-    // both stay out of this invocation.
-    let ci = workflow("ci.yml");
-    assert!(
-        ci.contains("--no-default-features") && ci.contains("--bin ci-rollup"),
-        "ci.yml must build ci-rollup with --no-default-features"
-    );
+    // `scripts/Cargo.toml`'s `local-tools` feature exists so the always-runs
+    // required check does not pay for gix, duckdb, and the terminal renderer.
+    // Phase 4's `--plan` renderer stays out of this invocation, and so does
+    // every per-area rollup.
+    for file in ["ci.yml", "_area-ci.yml"] {
+        let source = workflow(file);
+        assert!(
+            source.contains("--no-default-features") && source.contains("--bin ci-rollup"),
+            "{file} must build ci-rollup with --no-default-features"
+        );
+    }
     let rollup = read("scripts/ci-rollup.rs");
     assert!(
         !rollup.contains("biscuit_terminal"),
@@ -2404,4 +2802,100 @@ fn the_plan_renderer_is_local_tools_gated() {
         !recipe.contains("cargo build") && !recipe.contains("cargo run"),
         "`--plan` is a pre-trigger review and must not start a build"
     );
+}
+
+/// AC14: the reader-facing CI documentation states the implemented behavior and
+/// no longer states the behavior this fix retired.
+///
+/// ## Notes
+///
+/// This guard exists because two claims in the `os` skill went false silently:
+/// "the current verifier/calculator supports only one excluded environment per
+/// run" and "the proposed scope-only mode … is not implemented yet". Both were
+/// true when written and both survived the changes that falsified them, because
+/// prose has no compiler. The retired phrases below are matched literally, so a
+/// future change that reintroduces one fails here rather than misleading a
+/// reader into skipping a required environment.
+///
+/// Deliberately narrow: it asserts the claims this fix moved, not doc style.
+#[test]
+fn the_ci_documentation_states_the_implemented_behavior() {
+    /// (file, phrase, why it is wrong now)
+    const RETIRED: &[(&str, &str, &str)] = &[
+        (
+            ".claude/skills/os/SKILL.md",
+            "only one excluded environment",
+            "evidence is verified and omitted per cell across every environment's notes ref",
+        ),
+        (
+            ".claude/skills/os/SKILL.md",
+            "is not implemented yet",
+            "scope-only is implemented; `off` is its deprecated alias",
+        ),
+        (
+            ".claude/skills/rust-devops/ci-cd.md",
+            "reverse dependency receives compile-check only",
+            "an unchanged reverse dependent receives no area, job, or cell",
+        ),
+        (
+            "docs/topics/ci-cd.md",
+            "direct reverse dependencies for compile-check only",
+            "an unchanged reverse dependent receives no area, job, or cell",
+        ),
+        (
+            "docs/topics/ci-cd.md",
+            "direct reverse dependencies receive only the Windows compile-check",
+            "a check cell exists only where example or bench targets are declared",
+        ),
+        (
+            ".github/ci/README.md",
+            "Phase 6 measures it against a real run",
+            "the package-scoped cache key has not been measured against a real run",
+        ),
+    ];
+    for (file, phrase, why) in RETIRED {
+        let source = read(file);
+        assert!(
+            !source.contains(phrase),
+            "{file} still claims {phrase:?}; {why}"
+        );
+    }
+
+    // The live facts a reader must be able to find. Each is load-bearing: a
+    // reader who misses it either reruns a proven environment, or trusts an
+    // area-keyed identity that does not exist.
+    const REQUIRED: &[(&str, &str)] = &[
+        (".github/ci/README.md", "Package is the stored identity"),
+        ("docs/topics/ci-cd.md", "Area groups; package identifies"),
+        ("docs/topics/ci-cd.md", "BISCUIT_CI_CONSTRAINTS_DIR"),
+        ("docs/topics/ci-cd.md", "ACCEPTED GAP"),
+        ("docs/topics/ci-cd.md", "compile_coverage_from"),
+        ("CLAUDE.md", "BISCUIT_CI_CONSTRAINTS_DIR"),
+        ("CLAUDE.md", "Area groups, package identifies"),
+        (".claude/skills/rust-devops/ci-cd.md", "ACCEPTED GAP"),
+        (".claude/skills/os/SKILL.md", "BISCUIT_CI_CONSTRAINTS_DIR"),
+        (".claude/skills/os/ci-runners.md", "gate-input identity"),
+    ];
+    for (file, phrase) in REQUIRED {
+        let source = read(file);
+        assert!(
+            source.contains(phrase),
+            "{file} must state {phrase:?} — see fixes/2026-09-11-cicd-cleanup/spec.md AC14"
+        );
+    }
+
+    // `ci-verdict` is still the required context. Documentation that describes
+    // it as already removed is as wrong as documentation that never mentions
+    // the migration, so the transitional wording is asserted in both files a
+    // reader consults before touching branch protection.
+    for file in [
+        ".claude/skills/rust-devops/ci-cd.md",
+        "docs/topics/ci-cd.md",
+    ] {
+        let source = read(file);
+        assert!(
+            source.contains("ci-verdict") && source.contains("transitional"),
+            "{file} must describe `ci-verdict` as the transitional required check"
+        );
+    }
 }

@@ -49,8 +49,8 @@ on:
         description: "Cargo package name; the unit of selection, execution, and result identity (e.g. sniff-cli)."
         type: string
         required: true
-      check-args:
-        description: "Cargo package selector and declared features for the archive build (e.g. '-p sniff --features remote')."
+      archive-args:
+        description: "Cargo package selector and declared features for the archive build (e.g. '-p sniff --features remote'). Never a target selector: the guest runs what the L1 archive built."
         type: string
         required: true
       test-args:
@@ -80,7 +80,7 @@ on:
         type: string
         required: true
         default: sniff
-      check-args:
+      archive-args:
         description: "Cargo package selector and features for the archive build."
         type: string
         required: true
@@ -199,7 +199,7 @@ jobs:
           cargo nextest archive \
             --archive-file "$RUNNER_TEMP/$ARCHIVE_NAME" \
             --target x86_64-unknown-linux-gnu \
-            ${{ inputs.check-args }}
+            ${{ inputs.archive-args }}
       - name: Build messenger desktop stub sidecar
         if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
         shell: bash
@@ -235,8 +235,11 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  # A static name: this job carries `needs:`, so a skip would otherwise reach
+  # the Checks tab as the raw `${{ inputs.package }}` expression (AC10). The
+  # package comes from the caller's job label.
   wsl:
-    name: test (${{ inputs.package }} on wsl2-ubuntu)
+    name: test (wsl2-ubuntu)
     needs: archive
     runs-on: windows-latest
     timeout-minutes: 60
