@@ -115,7 +115,7 @@ case "$MODE" in
         ;;
     *)
         printf "\033[31mUnknown RUSTY_BISCUIT_PRE_PUSH value: %s\033[0m\n" "$MODE" >&2
-        printf "Expected: off, warn, or strict\n" >&2
+        printf "Expected: scope-only, warn, or strict\n" >&2
         printf "(off is a deprecated alias of scope-only)\n" >&2
         exit 1
         ;;
@@ -182,6 +182,10 @@ remove_trigger_worktree() {
 }
 # shellcheck disable=SC2086  # the list is of mktemp paths, deliberately split
 trap 'rm -f $TEMP_FILES; rm -rf "$REPORTS_DIR"; remove_trigger_worktree' EXIT
+# A signal is not a complete run, even if an earlier gate staged a report.
+trap 'echo "Pre-push interrupted; no validation receipt is published." >&2; exit 130' INT
+trap 'echo "Pre-push interrupted; no validation receipt is published." >&2; exit 143' TERM
+trap 'echo "Pre-push interrupted; no validation receipt is published." >&2; exit 129' HUP
 
 # Attach a receipt to the outgoing head on a notes ref, on top of the remote's
 # copy of that ref so the local note never overwrites another host's.
@@ -399,29 +403,13 @@ render_trigger_plan() {
     fi
 }
 
-# Scope evidence (fixes/2026-09-10-local-affected-scope, R1/R2): the plan and
-# projection the trigger review resolved for HEAD's FIRST context, recorded
-# while HEAD's own committed tree is still materialized and published in every
-# mode before any gate, dirty tree or not — but only after every update has
-# passed review. One note holds one receipt, and the receipt requires an
-# ancestor base, so an advanced target or an all-zero base records none.
-# Neither a recording failure nor a publication failure changes the exit code:
-# CI detects the missing receipt and calculates scope itself.
-#
-# The same context's plan is what the local gates run from and what the
-# validation receipt is recorded against (see "Local gates" above), so it is
-# kept here — the raw plan for the receipt, the evidence-overlaid one for the
-# run — before a later update's review overwrites the working files. The same
-# ancestor rule applies: `record-cells` refuses any other base, so a context
-# that records no scope receipt feeds no plan either and the gates replan.
+# Keep the reviewed plan independently of recording/publication success: gates
+# consume the exact comparison even when CI must fall back to recalculation.
+# One note binds HEAD's first context; other contexts calculate their own scope.
 record_scope_evidence() {
     SHORT_HEAD="$(git rev-parse --short=9 "$HEAD_SHA")"
     if is_zero_oid "$SCOPE_BASE"; then
         echo "No scope receipt for $SHORT_HEAD: a branch-creating push of main carries no comparison base, so CI calculates full scope itself."
-        return 0
-    fi
-    if ! git merge-base --is-ancestor "$SCOPE_BASE" "$HEAD_SHA" 2>/dev/null; then
-        echo "No scope receipt for $SHORT_HEAD: its comparison base $SHORT_BASE ($SCOPE_BASE_KIND) has advanced past the branch point, so CI calculates scope itself."
         return 0
     fi
     if cp "$SCOPE_PLAN_FILE" "$HEAD_PLAN_FILE" && cp "$PLAN_REVIEW_FILE" "$HEAD_REVIEW_FILE"; then
@@ -618,7 +606,7 @@ elif [ -n "$HEAD_PLAN_BASE" ]; then
     echo "(cells that qualifying prior evidence already covers are skipped; a cell whose newest evidence is a failure is rerun)"
 else
     echo "Running pre-push validation for source-changed packages, replanned from the working tree"
-    echo "(no reviewed plan with an ancestor base exists for HEAD; nothing is published)"
+    echo "(no reviewed comparison plan exists for HEAD; nothing is published)"
 fi
 echo "------------------------------------------------"
 echo ""
@@ -643,14 +631,18 @@ EXIT_CODE=$?
 # published note (audit W10).
 SHORT_HEAD="$(git rev-parse --short=9 "$HEAD_SHA")"
 WITHHELD=""
-if [ "$PUSHES_HEAD" -ne 1 ]; then
+if [ -f "$REPORTS_DIR/interrupted" ]; then
+    WITHHELD="validation marked this run interrupted; earlier staged reports are not complete-run evidence"
+elif [ "$EXIT_CODE" -ge 128 ]; then
+    WITHHELD="validation was interrupted (exit $EXIT_CODE), so staged reports do not prove a complete run"
+elif [ "$PUSHES_HEAD" -ne 1 ]; then
     WITHHELD="this push does not carry HEAD, and the gates ran on HEAD's tree"
 elif [ -n "$SELECTION" ]; then
     WITHHELD="RUSTY_BISCUIT_PRE_PUSH_AREAS narrowed the gates to '$SELECTION', which proves only those packages"
 elif [ -n "$(git status --porcelain)" ]; then
     WITHHELD="the checkout has uncommitted changes (before or after the gates), so the run is not this tree's"
 elif [ -z "$HEAD_PLAN_BASE" ]; then
-    WITHHELD="the gates replanned from the working tree because no reviewed plan with an ancestor base exists for HEAD"
+    WITHHELD="the gates replanned from the working tree because no reviewed comparison plan exists for HEAD"
 elif [ ! -s "$PLAN_FILE" ]; then
     WITHHELD="the local run wrote no plan, so what it ran cannot be tied to the outgoing tree"
 elif ! command -v sniff >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then

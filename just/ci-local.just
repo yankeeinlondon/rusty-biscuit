@@ -330,6 +330,30 @@ ci-local *args="":
     mkdir -p "${reports_dir}"
     rm -f "${reports_dir}/manifest.jsonl"
     export BISCUIT_JUNIT_STAGE_DIR="${reports_dir}"
+    rm -f "${reports_dir}/interrupted"
+    # Just may normalize a recipe's exit status; the marker preserves the
+    # incomplete-run decision across the outer recipe and hook processes.
+    abort_if_interrupted() {
+        local status="$1"
+        # Tier recipes may fold TERM's status into 1 after recording the raw
+        # child status. Preserve that interruption decision from the manifest.
+        if (( status < 128 )) && [[ -s "${reports_dir}/manifest.jsonl" ]]; then
+            if ! status="$(jq -r -s '[.[] | .exit_code // 0 | select(. >= 128)] | max // 0' "${reports_dir}/manifest.jsonl")"; then
+                printf '%s\n' "unreadable manifest" > "${reports_dir}/interrupted"
+                echo "ci-local: cannot establish run completion from the staged manifest; validation publication is withheld." >&2
+                exit 1
+            fi
+        fi
+        if (( status >= 128 )); then
+            printf '%s\n' "${status}" > "${reports_dir}/interrupted"
+            echo "ci-local: interrupted; later gates and validation publication are skipped." >&2
+            exit "${status}"
+        fi
+    }
+    trap 'abort_if_interrupted 130' INT
+    trap 'abort_if_interrupted 143' TERM
+    trap 'abort_if_interrupted 129' HUP
+
 
     # The host's environment names which of a plan's cells are this run's; a
     # fed plan needs it for every tier, `--l2` for the backend proof.
@@ -400,6 +424,7 @@ ci-local *args="":
             if cargo check ${check_args}; then
                 passed+=("check ${package} (check-only selection)")
             else
+                abort_if_interrupted "$?"
                 failed+=("check ${package} (check-only selection)")
             fi
         fi
@@ -407,6 +432,7 @@ ci-local *args="":
             if just _lint "${package}"; then
                 passed+=("lint ${package}")
             else
+                abort_if_interrupted "$?"
                 failed+=("lint ${package}")
             fi
         fi
@@ -415,6 +441,7 @@ ci-local *args="":
             if just _test "${package}" --no-fail-fast ${test_args}; then
                 passed+=("test ${package}")
             else
+                abort_if_interrupted "$?"
                 failed+=("test ${package}")
             fi
         fi
@@ -453,6 +480,7 @@ ci-local *args="":
                     if BISCUIT_L2_THREADS="${l2_threads}" BISCUIT_TEST_REQUIRED_BACKENDS="${required_csv}" just _test_l2 "${package}" ${test_args}; then
                         passed+=("L2 ${package} (${required_csv})")
                     else
+                        abort_if_interrupted "$?"
                         failed+=("L2 ${package} (${required_csv})")
                     fi
                 fi

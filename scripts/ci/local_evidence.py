@@ -17,12 +17,11 @@ document on `refs/notes/ci-local/scope`: what the planner selected for one
 exact `{base, head, tree}`, which CI takes as its plan on an exact match and
 otherwise recomputes.
 
-`verified_environment` and `record` are that predecessor, kept because
-`schema_version: 1` notes are already published against open branches. Spec
-section 3.6 makes those notes exact-tree, pass-only, whole-environment, and
-never upgraded in place, so they are read through the old comparison and expire
-naturally as their heads do. Nothing writes a version-1 note any more:
-`record_cells` writes version 2.
+`verified_environment` and `record` preserve the predecessor's CLI contract.
+Current per-cell verification reads version-1 notes through `_accept_legacy`
+without calling that legacy CLI path. Spec section 3.6 makes those notes
+exact-tree, pass-only, whole-environment, and never upgraded in place. Current
+producers use `record_cells`, which writes version 2.
 """
 
 from __future__ import annotations
@@ -465,13 +464,12 @@ def record_scope(plan_path: str, scope_path: str, base: str, head: str) -> str:
 
     ## Errors
 
-    Raises ``ValueError`` when `base` is not an ancestor of `head`, or when the
-    assembled document would not validate.
+    Raises ``ValueError`` when a revision does not resolve or the assembled
+    document would not validate. The comparison base may be an advanced PR
+    target; verification still requires this exact base, head, and tree.
     """
     head_sha = revision(head)
     base_sha = revision(base)
-    if git("merge-base", base_sha, head_sha) != base_sha:
-        raise ValueError("the scope base must be an ancestor of the outgoing head")
     plan = load_plan(plan_path)
     document = {
         "schema_version": schema.SCOPE_RECEIPT_SCHEMA_VERSION,
@@ -722,15 +720,13 @@ def record_cells(
 
     ## Errors
 
-    Raises ``ValueError`` when the tested base is not an ancestor of the
-    outgoing head, when the run staged no recordable gate, when `report_dir`
-    is empty or does not retain every report a complete cell names, or when
+    Raises ``ValueError`` when a revision does not resolve, when the run
+    staged no recordable gate, when `report_dir` is empty or does not retain
+    every report a complete cell names, or when
     the assembled document would not validate — publishing an invalid receipt
     is worse than publishing none, because CI would reject it silently later.
     """
     head_sha = revision(head)
-    if git("merge-base", base, head_sha) != revision(base):
-        raise ValueError("the tested base must be an ancestor of the outgoing head")
     plan = load_plan(plan_path)
     problems = schema.validate_resolved_plan(plan)
     if problems:
@@ -1121,7 +1117,10 @@ def main() -> None:
             print(f"scope-verify: {reason}", file=sys.stderr)
             raise SystemExit(3)
         Path(args.plan_out).write_text(schema.canonical(receipt["plan"]), encoding="utf-8")
-        Path(args.scope_out).write_text(schema.canonical(receipt["scope"]), encoding="utf-8")
+        Path(args.scope_out).write_text(
+            schema.canonical(affected_scope.legacy_scope_document(receipt["plan"])),
+            encoding="utf-8",
+        )
         return
     if args.command == "cross-check":
         try:

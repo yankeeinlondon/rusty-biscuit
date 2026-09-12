@@ -77,6 +77,7 @@ jobs:
       # The unchanged direct dependents the planner attributed to this package,
       # compiled inside its own Linux check cell (Open Question 1, Option B).
       dependents-check-args: ${{ matrix.dependents_check_args }}
+      dependents-native: ${{ toJSON(matrix.dependents_native) }}
       dependents: ${{ toJSON(matrix.dependents) }}
       test-args: ${{ matrix.test_args }}
       gates: ${{ toJSON(matrix.gates) }}

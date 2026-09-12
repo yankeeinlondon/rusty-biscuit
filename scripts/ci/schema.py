@@ -291,14 +291,13 @@ SCOPE_RECEIPT_FIELDS: dict[str, bool] = {
     "plan_schema_version": True,
     #: The canonical resolved plan, exactly as `--plan-out` writes it.
     "plan": True,
-    #: The legacy `scope.json` projection of that plan. Carried because
-    #: `ci.yml` still fans out from it, and CI must not re-project on a hit.
+    #: Legacy wire projection retained for receipt-schema compatibility;
+    #: consumers derive scheduling projections from the canonical plan.
     "scope": True,
 }
 
-#: The keys of the legacy projection that `ci.yml` reads on a scope hit. A
-#: receipt whose `scope` lacks one would fail the workflow after the planner
-#: was already skipped, so its presence is checked here instead.
+#: Required keys of the retained legacy wire projection. Scheduling consumers
+#: re-project from `plan`; validation preserves the receipt schema contract.
 SCOPE_PROJECTION_FIELDS = (
     "packages",
     "areas",
@@ -581,10 +580,11 @@ def _dependent_seam(package: str, seam: Any) -> list[str]:
     where = f"package {package} dependent_seam"
     if not isinstance(seam, dict):
         return [f"malformed-receipt: {where} must be an object"]
-    problems = _keys(where, seam, {"dependents": True, "check_args": True})
+    problems = _keys(where, seam, {"dependents": True, "check_args": True, "native": True})
     if problems:
         return problems
     problems += _str_list(f"{where} dependents", seam["dependents"])
+    problems += _str_list(f"{where} native", seam["native"])
     if not seam["dependents"]:
         problems.append(
             f"malformed-receipt: {where} names no dependent; a record with none "

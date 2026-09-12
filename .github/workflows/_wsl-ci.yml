@@ -178,9 +178,13 @@ jobs:
           NATIVE: ${{ inputs.native }}
         run: |
           set -euo pipefail
-          packages="$(jq -r '."ubuntu-latest" // [] | join(" ")' <<<"$NATIVE")"
-          if [ -n "$packages" ]; then
-            just _ensure-native-libs $packages
+          packages="$(jq -r '."ubuntu-latest" // [] | .[]' <<<"$NATIVE")"
+          native_args=()
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then native_args+=("$package"); fi
+          done <<<"$packages"
+          if [ ${#native_args[@]} -gt 0 ]; then
+            just _ensure-native-libs "${native_args[@]}"
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
@@ -467,9 +471,13 @@ jobs:
           # host process, and `wsl-bash` forwards only WSLENV-listed variables
           # into the guest — an `env:`-sourced $NATIVE is unbound here.
           cd "${{ env.GUEST_ROOT }}"
-          packages="$(jq -r '."ubuntu-latest" // [] | join(" ")' <<<'${{ inputs.native }}')"
-          if [ -n "$packages" ]; then
-            just _ensure-native-libs $packages
+          packages="$(jq -r '."ubuntu-latest" // [] | .[]' <<<'${{ inputs.native }}')"
+          native_args=()
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then native_args+=("$package"); fi
+          done <<<"$packages"
+          if [ ${#native_args[@]} -gt 0 ]; then
+            just _ensure-native-libs "${native_args[@]}"
           fi
       # DIAGNOSTIC ONLY — nothing below changes what runs or how it is reported.
       #

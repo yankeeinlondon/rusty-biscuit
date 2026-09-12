@@ -60,6 +60,10 @@ on:
         description: "Args for the `cargo check` of this package's UNCHANGED direct reverse dependencies, compiled inside its own check cell on ubuntu-latest only (Open Question 1, Option B): one `-p` per dependent plus the explicit `--lib`/`--bins`/`--tests` selectors their declared kinds need (e.g. '-p dmls -p darkmatter-cli --lib --bins --tests'). Empty when the planner attributed none, which skips the step."
         type: string
         required: true
+      dependents-native:
+        description: "JSON array of Ubuntu prerequisites for the dependent build closures, installed only in the owning Ubuntu check."
+        type: string
+        required: true
       dependents:
         description: "JSON array of the dependents `dependents-check-args` compiles, by package name, recorded in the check cell's status so the rollup can render them. Empty when `dependents-check-args` is."
         type: string
@@ -166,7 +170,7 @@ jobs:
   # jobs render as `<caller job name> / <called job name>`, so this reads
   # `area-ci (claudine) / claudine-cli / check (windows-latest)`.
   check:
-    if: ${{ contains(fromJSON(inputs.gates), 'check') }}
+    if: ${{ inputs.check-os != '[]' && contains(fromJSON(inputs.gates), 'check') }}
     strategy:
       fail-fast: false
       matrix:
@@ -190,13 +194,16 @@ jobs:
         env:
           NATIVE: ${{ inputs.native }}
           RUNNER_KEY: ${{ matrix.os }}
+          DEPENDENTS_NATIVE: ${{ inputs.dependents-native }}
         run: |
           set -euo pipefail
-          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | join(" ")' <<<"$NATIVE")"
-          if [ -n "$packages" ]; then
-            # Explicit list: the dependency-closure union computed by the scope
-            # job. No argument would install EVERY package's libraries.
-            just _ensure-native-libs $packages
+          packages="$(jq -r --arg k "$RUNNER_KEY" --argjson dependents "$DEPENDENTS_NATIVE" '((.[$k] // []) + (if $k == "ubuntu-latest" then $dependents else [] end)) | unique | .[]' <<<"$NATIVE")"
+          native_args=()
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then native_args+=("$package"); fi
+          done <<<"$packages"
+          if [ ${#native_args[@]} -gt 0 ]; then
+            just _ensure-native-libs "${native_args[@]}"
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
@@ -281,7 +288,7 @@ jobs:
   # full, so partitioning cost ~3.2x the compute to save ~2.4 minutes
   # (fixes/2026-08-06-cicd/spec.md § Sharding).
   test:
-    if: ${{ contains(fromJSON(inputs.gates), 'test') }}
+    if: ${{ inputs.native-environments != '[]' && contains(fromJSON(inputs.gates), 'test') }}
     # Deliberately depends on nothing. Lint is a parallel gate, not a
     # prerequisite: a clippy hint in one package must not delete another
     # package's L1 evidence. Nor does this job export RUSTFLAGS=-D warnings,
@@ -325,9 +332,13 @@ jobs:
           RUNNER_KEY: ${{ matrix.environment }}
         run: |
           set -euo pipefail
-          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | join(" ")' <<<"$NATIVE")"
-          if [ -n "$packages" ]; then
-            just _ensure-native-libs $packages
+          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | .[]' <<<"$NATIVE")"
+          native_args=()
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then native_args+=("$package"); fi
+          done <<<"$packages"
+          if [ ${#native_args[@]} -gt 0 ]; then
+            just _ensure-native-libs "${native_args[@]}"
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
@@ -542,9 +553,13 @@ jobs:
           RUNNER_KEY: ubuntu-latest
         run: |
           set -euo pipefail
-          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | join(" ")' <<<"$NATIVE")"
-          if [ -n "$packages" ]; then
-            just _ensure-native-libs $packages
+          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | .[]' <<<"$NATIVE")"
+          native_args=()
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then native_args+=("$package"); fi
+          done <<<"$packages"
+          if [ ${#native_args[@]} -gt 0 ]; then
+            just _ensure-native-libs "${native_args[@]}"
           fi
       # clippy + rustfmt come from rust-toolchain.toml (the single authority).
       - name: Set up the pinned Rust toolchain
@@ -715,9 +730,13 @@ jobs:
           RUNNER_KEY: ${{ matrix.environment }}
         run: |
           set -euo pipefail
-          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | join(" ")' <<<"$NATIVE")"
-          if [ -n "$packages" ]; then
-            just _ensure-native-libs $packages
+          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | .[]' <<<"$NATIVE")"
+          native_args=()
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then native_args+=("$package"); fi
+          done <<<"$packages"
+          if [ ${#native_args[@]} -gt 0 ]; then
+            just _ensure-native-libs "${native_args[@]}"
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
@@ -891,9 +910,13 @@ jobs:
           RUNNER_KEY: ${{ matrix.environment }}
         run: |
           set -euo pipefail
-          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | join(" ")' <<<"$NATIVE")"
-          if [ -n "$packages" ]; then
-            just _ensure-native-libs $packages
+          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | .[]' <<<"$NATIVE")"
+          native_args=()
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then native_args+=("$package"); fi
+          done <<<"$packages"
+          if [ ${#native_args[@]} -gt 0 ]; then
+            just _ensure-native-libs "${native_args[@]}"
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show

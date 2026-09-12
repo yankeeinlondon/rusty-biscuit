@@ -1540,6 +1540,7 @@ def package_cells(
         # plan's. Crediting it here would claim coverage nothing asserts.
         "",
         f"lint gate for {package}, hosted on {LINT_ENVIRONMENT}",
+        reusable=False,
     )
 
     unchecked = uncovered_target_kinds(target_kinds)
@@ -1653,12 +1654,9 @@ def matrix_record(
 ) -> dict[str, Any]:
     """The workflow-facing shape of one gating package's plan record.
 
-    Transitional: `ci.yml`, `just/ci-local.just`, and `ci-rollup` still consume
-    this shape, and Phases 5 and 6 of `fixes/2026-09-11-cicd-cleanup/plan.md`
-    move them onto the resolved plan's cells. Until then this is a projection
-    *of* those cells — `executing` is the `{environment, gate}` set the plan
-    resolved to hosted execution — so the two documents cannot disagree about
-    what CI will run.
+    `executing` is the `{environment, gate}` set the canonical plan resolved
+    to hosted execution. This projection adapts those cells to workflow
+    inputs without selecting work again.
 
     `record` is the plan's package record and `environments` the plan's own
     table: the projection reads nothing the plan does not carry, which is what
@@ -1678,6 +1676,7 @@ def matrix_record(
         "check_args": record["check_args"],
         "dependents": record.get("dependent_seam", {}).get("dependents", []),
         "dependents_check_args": record.get("dependent_seam", {}).get("check_args", ""),
+        "dependents_native": record.get("dependent_seam", {}).get("native", []),
         "test_args": record["test_args"],
         "l1_include_slow": record["l1_include_slow"],
         "tiers": tiers,
@@ -1921,6 +1920,13 @@ def calculate_scope(
             ),
         }
         if seam:
+            seam["native"] = sorted({
+                prerequisite
+                for dependent in seam["dependents"]
+                for prerequisite in native_closure(
+                    packages_by_name[dependent]["id"], metadata, packages, policy
+                ).get(DEPENDENTS_ENVIRONMENT, [])
+            })
             package_record["dependent_seam"] = seam
         package_records.append(package_record)
 
