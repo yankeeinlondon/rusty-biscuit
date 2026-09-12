@@ -32,6 +32,16 @@ closure, and the planner is the only thing that knows it; without the field
 there is nowhere for a verifier to learn which paths a cell's identity covers.
 Both are optional, so every version-1 document already written stays valid and
 the version again stayed 1.
+
+Version 2 makes the plan self-sufficient for the two operations CI performs on
+a carried scope receipt without re-selecting anything: applying verified
+evidence (`affected_scope.apply_accepted_cells`) and projecting the legacy
+`scope.json` (`legacy_scope_document`). It adds the plan-level `environments`
+table the cells were resolved against, per-package `l1_include_slow` and the
+non-gating `exclusion`, and per-cell `reusable`. They are required, and the
+version moved, because a version-1 receipt lacks them: it now misses as
+`scope-schema` and CI calculates scope itself, which the receipt contract
+permits, rather than hitting and then having to re-run selection to finish.
 """
 
 from __future__ import annotations
@@ -46,7 +56,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / ".github" / "ci" / "schemas" / "contract.json"
 
-RESOLVED_PLAN_SCHEMA_VERSION = 1
+RESOLVED_PLAN_SCHEMA_VERSION = 2
 RECEIPT_SCHEMA_VERSION = 2
 
 #: The scope receipt: what the planner selected for one exact `{base, head,
@@ -162,6 +172,11 @@ RESOLVED_PLAN_FIELDS: dict[str, bool] = {
     #: NOT select. Reported so a reader can see the seam OQ1 governs; they
     #: receive no area, package record, or cell under any OQ1 option.
     "reverse_dependencies": True,
+    #: The `.github/ci/environments.json` records the cells were resolved
+    #: against, verbatim. Evidence application and the legacy projection need
+    #: runner labels, native keys, and capabilities; carrying them is what
+    #: lets CI act on a receipt without consulting the checkout's table.
+    "environments": True,
     "cells": True,
     "accepted_evidence": True,
     #: Why each rejected receipt cell was refused, one coded reason per entry.
@@ -194,7 +209,14 @@ PACKAGE_FIELDS: dict[str, bool] = {
     "l2_backends": True,
     "runner_tools": True,
     "companion_suites": True,
+    #: The package's `l1-include-slow` policy, forwarded to the test job
+    #: through the legacy matrix; it is projected, never re-read.
+    "l1_include_slow": True,
     "native": True,
+    #: The governance of a `gates = false` package: exclusion class, owner,
+    #: reason, expiry. Present exactly when `gates` is empty, because the
+    #: rollup's policy document is projected from the plan and reads it there.
+    "exclusion": False,
     #: Repository-relative manifest directories of the package's build closure,
     #: dev-dependencies included. The gate-input identity of spec section 3.3
     #: is computed over these plus the gate's global inputs. Optional: a plan
@@ -211,6 +233,11 @@ CELL_FIELDS: dict[str, bool] = {
     "execution": True,
     "origin": True,
     "state": True,
+    #: Whether a local receipt may ever satisfy this cell. False for `check`
+    #: (no receipt records one) and for an L1 host a companion suite needs;
+    #: decided by policy at resolution time so applying evidence later needs
+    #: no policy.
+    "reusable": True,
     "target_kinds": True,
     "compile_coverage_from": True,
     "selection_reason": True,
@@ -456,6 +483,23 @@ def validate_resolved_plan(document: Any) -> list[str]:
             problems += _str_list(
                 f"package {entry['package']} input_paths", entry["input_paths"]
             )
+        if not isinstance(entry.get("l1_include_slow"), bool):
+            problems.append(
+                f"malformed-receipt: package {entry['package']} l1_include_slow must be a boolean"
+            )
+        if ("exclusion" in entry) != (entry.get("gates") == []):
+            problems.append(
+                f"malformed-receipt: package {entry['package']} carries an exclusion "
+                "exactly when it gates nothing"
+            )
+
+    if not isinstance(document["environments"], list) or not all(
+        isinstance(environment, dict) and isinstance(environment.get("name"), str)
+        for environment in document["environments"]
+    ):
+        problems.append(
+            "malformed-receipt: resolved plan environments must be a list of named records"
+        )
 
     problems += _str_list("resolved plan source_packages", document["source_packages"])
     problems += _str_list(
@@ -509,6 +553,12 @@ def _cell_consistency(label: str, entry: dict[str, Any]) -> list[str]:
     """The cross-field rules a reader relies on when acting on a cell."""
     problems: list[str] = []
     execution, origin, state = entry.get("execution"), entry.get("origin"), entry.get("state")
+    if not isinstance(entry.get("reusable"), bool):
+        problems.append(f"malformed-receipt: {label} reusable must be a boolean")
+    if execution == "reuse" and entry.get("reusable") is False:
+        problems.append(
+            f"malformed-receipt: {label} is reused although no evidence may satisfy it"
+        )
     if execution == "reuse" and origin not in ("local", "prior-local"):
         problems.append(
             f"malformed-receipt: {label} is reused but its origin is {origin!r}; "

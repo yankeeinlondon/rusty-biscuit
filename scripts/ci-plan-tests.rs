@@ -22,7 +22,7 @@ fn plan_json(prohibited: bool) -> String {
     };
     format!(
         r#"{{
-        "schema_version":1,"base":"{a}","head":"{b}","change_class":"package",
+        "schema_version":2,"base":"{a}","head":"{b}","change_class":"package",
         "full_scope":false,"full_scope_gates":[],
         "areas":[{{"area":"pkg","selection_reason":"source change","packages":["alpha"]}}],
         "packages":[],"source_packages":["alpha"],"reverse_dependencies":[],

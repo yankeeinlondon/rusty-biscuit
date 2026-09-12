@@ -128,11 +128,12 @@ jobs:
           scope_args=(--plan-out resolved-plan.json --base "$base" --head "$head" "${scope_args[@]}")
 
           # A scope receipt on refs/notes/ci-local/scope that binds this
-          # event's exact {base, head, tree} IS the plan: the planner does not
-          # run for selection. Any miss — no note, another schema, head, tree,
-          # or base, or a malformed document — calculates scope exactly as
-          # before. A manual run and a branch-creating push carry no
-          # comparison base and never consult the note.
+          # event's exact {base, head, tree} IS the plan: selection never runs
+          # again for it, with or without validation evidence. Any miss — no
+          # note, another schema, head, tree, or base, or a malformed document
+          # — calculates scope exactly as before. A manual run and a
+          # branch-creating push carry no comparison base and never consult
+          # the note.
           local_scope=0
           scope_source="CI (no comparison base)"
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
@@ -167,24 +168,20 @@ jobs:
               --head "$head" \
               --rejections evidence-rejections.json > accepted-cells.json
             if [[ "$(jq -r 'length' accepted-cells.json)" != "0" ]]; then
-              # Resolving the accepted set into plan state is a full planner
-              # run. On a local-scope hit the selection is therefore compared
-              # with the receipt's rather than handed off: a recomputed plan
-              # that selects other areas or packages is a planner/receipt
-              # disagreement and fails here, loudly, instead of one side
-              # silently winning.
-              selection='{areas: [.areas[].area], packages: [.packages[].package]}'
-              local_selection="$(jq -c "$selection" resolved-plan.json)"
+              # One evidence path for both scope sources: the accepted set is
+              # overlaid on the plan already in hand — the receipt's on a hit,
+              # this run's own calculation on a miss — and the projection is
+              # re-derived from the result. `--apply-to` performs no
+              # selection and reads nothing from the checkout, so a receipt's
+              # areas, packages, gates, targets, features, and environment
+              # policy reach the fan-out exactly as the hook resolved them.
               scope_json="$(
                 python3 scripts/ci/affected_scope.py \
+                  --apply-to resolved-plan.json \
                   --accepted-cells accepted-cells.json \
                   --evidence-rejections evidence-rejections.json \
-                  "${scope_args[@]}"
+                  --plan-out resolved-plan.json
               )"
-              if (( local_scope )) && [[ "$(jq -c "$selection" resolved-plan.json)" != "$local_selection" ]]; then
-                echo "::error::the local scope receipt and the planner select different areas or packages for ${head:0:9}: receipt $local_selection, planner $(jq -c "$selection" resolved-plan.json)"
-                exit 1
-              fi
             fi
           fi
           packages="$(jq -c '.packages' <<<"$scope_json")"

@@ -67,7 +67,7 @@ const EXPECTED_MANIFEST_SCHEMA_VERSION: u32 = 1;
 
 /// Version of the resolved execution plan this tool reads
 /// (`scripts/ci/schema.py::RESOLVED_PLAN_SCHEMA_VERSION`).
-const PLAN_SCHEMA_VERSION: u32 = 1;
+const PLAN_SCHEMA_VERSION: u32 = 2;
 
 /// Process exit codes. A verdict gates merging — today through the
 /// transitional whole-run `ci-verdict` job, and per area through each

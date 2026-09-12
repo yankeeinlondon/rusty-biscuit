@@ -1,6 +1,6 @@
 {
   "resolved_plan": {
-    "schema_version": 1,
+    "schema_version": 2,
     "document": {
       "schema_version": true,
       "base": true,
@@ -12,6 +12,7 @@
       "packages": true,
       "source_packages": true,
       "reverse_dependencies": true,
+      "environments": true,
       "cells": true,
       "accepted_evidence": true,
       "evidence_rejections": false,
@@ -39,7 +40,9 @@
       "l2_backends": true,
       "runner_tools": true,
       "companion_suites": true,
+      "l1_include_slow": true,
       "native": true,
+      "exclusion": false,
       "input_paths": false,
       "dependent_seam": false
     },
@@ -51,6 +54,7 @@
       "execution": true,
       "origin": true,
       "state": true,
+      "reusable": true,
       "target_kinds": true,
       "compile_coverage_from": true,
       "selection_reason": true,

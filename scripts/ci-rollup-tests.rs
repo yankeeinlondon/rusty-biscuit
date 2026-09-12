@@ -2764,7 +2764,7 @@ fn pr76_cells_from_the_plan() -> Vec<Cell> {
         ));
     }
     let plan = plan_of(cells);
-    let expected = plan_expected_cells(&plan).expect("the plan is version 1");
+    let expected = plan_expected_cells(&plan).expect("the plan is the current generation");
     classify_simple(&expected, &pr76_records())
 }
 
@@ -2844,7 +2844,7 @@ fn plan_of(cells: Vec<serde_json::Value>) -> ResolvedPlan {
         .map(|cell| cell["package"].as_str().unwrap_or_default().to_owned())
         .collect();
     let document = serde_json::json!({
-        "schema_version": 1,
+        "schema_version": PLAN_SCHEMA_VERSION,
         "packages": packages
             .iter()
             .map(|package| serde_json::json!({"package": package}))
@@ -3061,7 +3061,7 @@ fn a_prior_local_receipt_is_distinguishable_from_the_outgoing_head() {
     cell["origin"] = serde_json::json!("prior-local");
     cell["evidence"]["origin"] = serde_json::json!("prior-local");
     let plan = plan_of(vec![cell]);
-    let expected = plan_expected_cells(&plan).expect("version 1");
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
     let cell = only_cell(classify_simple(&expected, &[]));
 
     assert_eq!(cell.state, CellState::Pass);
@@ -3083,7 +3083,7 @@ fn a_version_one_receipt_renders_its_measurements_as_unrecorded() {
         "evidence": "refs/notes/ci-local/macos-latest",
     });
     let plan = plan_of(vec![cell]);
-    let expected = plan_expected_cells(&plan).expect("version 1");
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
     let cell = only_cell(classify_simple(&expected, &[]));
 
     assert_eq!(cell.state, CellState::Pass);
@@ -3099,7 +3099,7 @@ fn a_reused_cell_that_also_produced_ci_evidence_reports_the_executed_result() {
     // The executed result is the one with a report behind it, and the
     // disagreement is stated rather than hidden.
     let plan = plan_of(vec![plan_cell_json("claudine", "macos-latest", "L1", true)]);
-    let expected = plan_expected_cells(&plan).expect("version 1");
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
     let mut record = record("claudine", "macos-latest", Tier::L1);
     record.counts = Counts {
         total: 2,
@@ -3129,7 +3129,7 @@ fn a_complete_failed_local_result_stays_a_failure() {
     let mut cell = plan_cell_json("claudine", "macos-latest", "L1", true);
     cell["evidence"] = receipt_evidence("claudine", "L1", "fail", 2, 1);
     let plan = plan_of(vec![cell]);
-    let expected = plan_expected_cells(&plan).expect("version 1");
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
     let cell = only_cell(classify_simple(&expected, &[]));
 
     assert_eq!(cell.state, CellState::Fail);
@@ -3276,7 +3276,7 @@ fn a_prohibited_cell_is_missing_and_names_the_constraint() {
         "expiry": "2026-10-01",
     });
     let plan = plan_of(vec![cell]);
-    let expected = plan_expected_cells(&plan).expect("version 1");
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
     let cell = only_cell(classify_simple(&expected, &[]));
 
     assert_eq!(cell.state, CellState::Missing);
@@ -3318,7 +3318,7 @@ fn accepted_gap_cell_json(governed: bool, expiry: &str) -> serde_json::Value {
 
 fn accepted_gap_cell(governed: bool, expiry: &str) -> Cell {
     let plan = plan_of(vec![accepted_gap_cell_json(governed, expiry)]);
-    let expected = plan_expected_cells(&plan).expect("version 1");
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
     only_cell(classify_simple(&expected, &[]))
 }
 
@@ -3454,7 +3454,7 @@ fn an_accepted_gap_state_with_no_policy_entry_blocks() {
 fn a_real_failure_outranks_an_accepted_gap() {
     // A gap declaration can never suppress evidence: something ran and failed.
     let plan = plan_of(vec![accepted_gap_cell_json(true, "2027-01-31")]);
-    let expected = plan_expected_cells(&plan).expect("version 1");
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
     let mut record = record("claudine-cli", "windows-latest", Tier::L2);
     record.counts = Counts {
         total: 1,
@@ -3512,7 +3512,7 @@ fn a_status_gate_reports_the_target_coverage_the_plan_scheduled_it_for() {
     check["target_kinds"] = serde_json::json!(["bench"]);
     check["compile_coverage_from"] = serde_json::json!("check");
     let plan = plan_of(vec![check]);
-    let expected = plan_expected_cells(&plan).expect("version 1");
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
     let statuses = vec![ProducerStatus {
         package: "claudine".to_owned(),
         job: "check".to_owned(),
@@ -3540,7 +3540,7 @@ fn a_status_gate_reports_the_target_coverage_the_plan_scheduled_it_for() {
 #[test]
 fn a_scheduled_gate_that_uploaded_no_status_is_missing_not_absent() {
     let plan = plan_of(vec![plan_cell_json("claudine", "ubuntu-latest", "lint", false)]);
-    let expected = plan_expected_cells(&plan).expect("version 1");
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
 
     let cells = status_cells(
         &[],
@@ -3865,7 +3865,7 @@ fn the_command_surface_writes_reads_and_judges_one_areas_slice() {
     fs::write(
         &plan,
         serde_json::json!({
-            "schema_version": 1,
+            "schema_version": PLAN_SCHEMA_VERSION,
             "packages": [{"package": "claudine"}, {"package": "playa"}],
             "cells": cells,
         })
@@ -4008,7 +4008,7 @@ fn a_non_gating_packages_governed_cells_survive_the_plan_path() {
     fs::write(
         &plan,
         serde_json::json!({
-            "schema_version": 1,
+            "schema_version": PLAN_SCHEMA_VERSION,
             "packages": [{"package": "claudine"}, {"package": "tabby"}],
             "cells": [plan_cell_json("claudine", "ubuntu-latest", "L1", false)],
         })

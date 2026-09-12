@@ -9,14 +9,18 @@ identity. Package policy lives in each package's own Cargo manifest under
 scope is emitted.
 
 `calculate_scope` returns the canonical resolved plan that
-`scripts/ci/schema.py` defines and validates. `legacy_scope_document` projects
-it into the shape `ci.yml`, `just/ci-local.just`, and `ci-rollup` still read,
-and goes away with Phases 5 and 6 of `fixes/2026-09-11-cicd-cleanup/plan.md`.
+`scripts/ci/schema.py` defines and validates. `apply_accepted_cells` overlays
+verified evidence on a plan that already exists — the operation CI performs on
+a matching scope receipt, which is never re-selected. `legacy_scope_document`
+projects a plan into the shape `ci.yml`, `just/ci-local.just`, and `ci-rollup`
+still read, and goes away with Phases 5 and 6 of
+`fixes/2026-09-11-cicd-cleanup/plan.md`.
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import subprocess
@@ -1362,6 +1366,37 @@ def whole_environment_evidence(
     }
 
 
+def cell_evidence(
+    cell: dict[str, Any],
+    accepted: dict[tuple[str, str, str], dict[str, Any]],
+    accepted_environments: dict[str, dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """The verified evidence that satisfies `cell`, or None.
+
+    A per-cell acceptance wins over the version-1 whole-environment form so a
+    reused cell always carries the most specific measurement available.
+    """
+    return accepted.get((cell["package"], cell["environment"], cell["gate"])) or (
+        accepted_environments or {}
+    ).get(cell["environment"])
+
+
+def mark_reused(cell: dict[str, Any], evidence: dict[str, Any]) -> None:
+    """Resolve `cell` to reuse of `evidence`, in place.
+
+    The one place a reused cell's shape is decided: `package_cells` reaches it
+    while resolving from scratch and `apply_accepted_cells` while overlaying
+    evidence on a carried plan, so the two cannot drift. A prohibition is
+    dropped because a constraint stops an EXECUTION, and a reused cell
+    consumes none of the host the constraint protects.
+    """
+    cell["execution"] = "reuse"
+    cell["origin"] = evidence.get("origin", "local")
+    cell["state"] = "reused"
+    cell["evidence"] = evidence
+    cell.pop("prohibition", None)
+
+
 def package_cells(
     record: dict[str, Any],
     area: str,
@@ -1379,6 +1414,10 @@ def package_cells(
     it. That is what makes the PR #76 regression unrepresentable: omitting an
     *execution* no longer omits the *cell*, so the rollup still expects a
     result for it instead of reporting MISSING.
+
+    Each cell records whether local evidence may ever satisfy it (`reusable`),
+    so evidence verified after the plan was resolved can be applied to the
+    carried document without re-deriving the policy that decided it.
     """
     package = record["package"]
     cells: list[dict[str, Any]] = []
@@ -1401,6 +1440,7 @@ def package_cells(
             "execution": "execute",
             "origin": "ci",
             "state": "pending",
+            "reusable": reusable and gap is None,
             "target_kinds": kinds,
             "compile_coverage_from": coverage,
             "selection_reason": reason,
@@ -1412,14 +1452,9 @@ def package_cells(
             if gap["governed"]:
                 cell["state"] = "accepted-gap"
         elif reusable:
-            evidence = accepted.get((package, environment, gate)) or (
-                accepted_environments or {}
-            ).get(environment)
+            evidence = cell_evidence(cell, accepted, accepted_environments)
             if evidence is not None:
-                cell["execution"] = "reuse"
-                cell["origin"] = evidence.get("origin", "local")
-                cell["state"] = "reused"
-                cell["evidence"] = evidence
+                mark_reused(cell, evidence)
         # A recorded constraint stops an EXECUTION, never a satisfied cell: a
         # reused or governed cell consumes none of the host the constraint is
         # protecting. The prohibited cell stays a cell, so `--plan` can name
@@ -1527,14 +1562,11 @@ def package_cells(
 
 def matrix_record(
     record: dict[str, Any],
-    native: dict[str, list[str]],
     environments: list[dict[str, Any]],
     gates: set[str] | frozenset[str] = frozenset(GATES),
     executing: set[tuple[str, str]] | None = None,
-    area: str = "",
-    target_kinds: Sequence[str] = ("lib",),
 ) -> dict[str, Any]:
-    """The workflow-facing shape of one gating package's policy.
+    """The workflow-facing shape of one gating package's plan record.
 
     Transitional: `ci.yml`, `just/ci-local.just`, and `ci-rollup` still consume
     this shape, and Phases 5 and 6 of `fixes/2026-09-11-cicd-cleanup/plan.md`
@@ -1542,9 +1574,11 @@ def matrix_record(
     *of* those cells — `executing` is the `{environment, gate}` set the plan
     resolved to hosted execution — so the two documents cannot disagree about
     what CI will run.
+
+    `record` is the plan's package record and `environments` the plan's own
+    table: the projection reads nothing the plan does not carry, which is what
+    lets CI project a carried receipt without consulting the checkout.
     """
-    features = feature_args(record, record["package"])
-    check_args = check_arguments(record["package"], target_kinds, features)
     testing = "test" in gates
     tiers = record["tiers"] if testing else []
     companion_suites = record["companion_suites"] if testing else []
@@ -1554,16 +1588,16 @@ def matrix_record(
 
     return {
         "package": record["package"],
-        "area": area,
+        "area": record["area"],
         "gates": sorted(gates, key=GATES.index),
-        "check_args": check_args,
-        "test_args": features,
+        "check_args": record["check_args"],
+        "test_args": record["test_args"],
         "l1_include_slow": record["l1_include_slow"],
         "tiers": tiers,
         "l2_backends": record["l2_backends"],
         "runner_tools": record["runner_tools"],
         "companion_suites": companion_suites,
-        "native": native,
+        "native": record["native"],
         "native_environments": [
             environment["name"]
             for environment in native_environments(environments)
@@ -1640,9 +1674,8 @@ def estimate_jobs(
 def policy_record(
     record: dict[str, Any],
     gates: set[str] | frozenset[str] = frozenset(GATES),
-    area: str = "",
 ) -> dict[str, Any]:
-    """The rollup-facing shape of one impacted package's policy.
+    """The rollup-facing shape of one impacted package's plan record.
 
     The rollup expects one evidence cell per declared test tier, so a package
     selected without its test gate declares no tiers here — otherwise the
@@ -1658,8 +1691,10 @@ def policy_record(
     testing = "test" in gates
     shaped = {
         "package": record["package"],
-        "area": area,
-        "gates": record["gates"],
+        "area": record["area"],
+        # A gating package always owns at least its lint cell, so an empty
+        # gate list is exactly `gates = false`.
+        "gates": bool(record["gates"]),
         "tiers": record["tiers"] if testing else [],
         "l2_backends": record["l2_backends"],
         # The rollup needs to know a companion suite was DECLARED: a green
@@ -1775,6 +1810,7 @@ def calculate_scope(
                 "l2_backends": record["l2_backends"],
                 "runner_tools": record["runner_tools"],
                 "companion_suites": record["companion_suites"],
+                "l1_include_slow": record["l1_include_slow"],
                 "native": native_closure(package_id, metadata, packages, policy),
                 "input_paths": closure_directories(
                     package_id, root, metadata, packages
@@ -1789,9 +1825,7 @@ def calculate_scope(
             f"{MATRIX_LIMIT}-job matrix ceiling; the fan-out must be grouped"
         )
 
-    change_class, preflight_os, preflight_reason = classify_preflight(
-        cells, gating, full_scope, environments
-    )
+    outcomes = outcome_fields(cells, gating, full_scope, environments, evidence_rejections)
 
     # Area flags drive test-shaped specialized jobs and therefore follow only
     # source changes (or an explicit full-scope request).
@@ -1814,7 +1848,7 @@ def calculate_scope(
         "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
         "base": base,
         "head": head,
-        "change_class": change_class,
+        "change_class": outcomes["change_class"],
         "full_scope": full_scope,
         "full_scope_gates": sorted(full_gates, key=GATES.index),
         "areas": area_records(package_records, full_scope),
@@ -1825,7 +1859,37 @@ def calculate_scope(
         "reverse_dependencies": sorted(
             packages[package_id]["name"] for package_id in reverse_ids
         ),
+        "environments": environments,
         "cells": cells,
+        "accepted_evidence": outcomes["accepted_evidence"],
+        "evidence_rejections": outcomes["evidence_rejections"],
+        "policy_gaps": outcomes["policy_gaps"],
+        "prohibited_cells": outcomes["prohibited_cells"],
+        "job_estimate": outcomes["job_estimate"],
+        "preflight_os": outcomes["preflight_os"],
+        "preflight_reason": outcomes["preflight_reason"],
+        "flags": flags,
+    }
+
+
+def outcome_fields(
+    cells: list[dict[str, Any]],
+    gating: list[dict[str, Any]],
+    full_scope: bool,
+    environments: list[dict[str, Any]],
+    evidence_rejections: list[str] | None,
+) -> dict[str, Any]:
+    """The plan fields that are a function of the resolved cells alone.
+
+    Everything here is derived, never selected: it is recomputed whenever a
+    cell's execution changes, whether the planner resolved the cells from
+    scratch or `apply_accepted_cells` overlaid evidence on a carried plan.
+    """
+    change_class, preflight_os, preflight_reason = classify_preflight(
+        cells, gating, full_scope, environments
+    )
+    return {
+        "change_class": change_class,
         "accepted_evidence": [
             cell["evidence"] for cell in cells if cell["execution"] == "reuse"
         ],
@@ -1849,8 +1913,67 @@ def calculate_scope(
         "job_estimate": estimate_jobs(cells, environments),
         "preflight_os": preflight_os,
         "preflight_reason": preflight_reason,
-        "flags": flags,
     }
+
+
+def apply_accepted_cells(
+    plan: dict[str, Any],
+    accepted_cells: list[dict[str, Any]] | None,
+    evidence_rejections: list[str] | None,
+    accepted_environments: list[str] | None = None,
+) -> dict[str, Any]:
+    """The resolved plan with verified evidence applied, selection untouched.
+
+    The plan a scope receipt carries is authoritative for one exact
+    `{base, head, tree}` (fixes/2026-09-10-local-affected-scope, R3): CI may
+    add the evidence it verified after the receipt was written, but it may not
+    re-select areas, packages, gates, targets, features, or environment
+    policy. This is the only operation CI performs on a carried plan, and it
+    reads nothing from the checkout — no `cargo metadata`, no manifest policy,
+    no environment table — because the plan carries what it needs.
+
+    A cell is resolved to reuse when it is `reusable`, is pending execution or
+    prohibited, and the accepted set names it. Every other cell is left
+    exactly as carried, and the cell-derived fields are recomputed from the
+    result.
+
+    ## Returns
+
+    A new document; `plan` is not modified. For a plan the planner resolved
+    without evidence, the result is byte-identical to the planner resolving
+    the same inputs with the same evidence.
+
+    ## Errors
+
+    Raises ``RuntimeError`` when `plan` does not validate: a document from
+    another schema generation lacks the facts this overlay depends on.
+    """
+    problems = schema.validate_resolved_plan(plan)
+    if problems:
+        raise RuntimeError(f"the plan to apply evidence to is invalid: {problems[0]}")
+    applied = copy.deepcopy(plan)
+    accepted = {
+        (entry["package"], entry["environment"], entry["gate"]): entry
+        for entry in (accepted_cells or [])
+    }
+    whole_environments = whole_environment_evidence(accepted_environments)
+    for cell in applied["cells"]:
+        if not cell["reusable"] or cell["state"] not in ("pending", "prohibited"):
+            continue
+        evidence = cell_evidence(cell, accepted, whole_environments)
+        if evidence is not None:
+            mark_reused(cell, evidence)
+    gating = [entry for entry in applied["packages"] if entry["gates"]]
+    applied.update(
+        outcome_fields(
+            applied["cells"],
+            gating,
+            applied["full_scope"],
+            applied["environments"],
+            evidence_rejections,
+        )
+    )
+    return applied
 
 
 def non_gating_package_record(
@@ -1861,6 +1984,8 @@ def non_gating_package_record(
     `gates = false` is an owned, dated exclusion, so the package stays visible
     in its area with an empty gate list and no cells. Dropping it would hide a
     governed absence; giving it cells would demand results nothing produces.
+    The exclusion rides on the record because the rollup's policy document is
+    projected from the plan, and that is the only place the governance is read.
     """
     return {
         "package": record["package"],
@@ -1874,7 +1999,9 @@ def non_gating_package_record(
         "l2_backends": [],
         "runner_tools": [],
         "companion_suites": [],
+        "l1_include_slow": record["l1_include_slow"],
         "native": {},
+        "exclusion": record["exclusion"],
     }
 
 
@@ -1993,11 +2120,7 @@ def classify_preflight(
 # ---------------------------------------------------------------------------
 
 
-def legacy_scope_document(
-    plan: dict[str, Any],
-    policy: dict[str, dict[str, Any]],
-    environments: list[dict[str, Any]],
-) -> dict[str, Any]:
+def legacy_scope_document(plan: dict[str, Any]) -> dict[str, Any]:
     """Today's `scope.json` shape, projected from the resolved plan.
 
     `ci.yml`, `just/ci-local.just`, and `ci-rollup` still read the package
@@ -2007,13 +2130,15 @@ def legacy_scope_document(
     leaving the workflow reading a document that no longer exists.
 
     It is a projection, never a second calculation: every environment list
-    below is read back out of the plan's cells.
+    below is read back out of the plan's cells, and the plan is its only
+    input, so CI can project a carried receipt without touching the checkout.
 
     `area_matrix` groups the same package records by area, one ready-made
     `{"include": [...]}` per area, so `ci.yml` fans out one caller identity per
     selected area and `_area-ci.yml` fans out its packages underneath. Grouping
     happens here rather than in workflow `jq` so the shape is testable.
     """
+    environments = plan["environments"]
     executing: dict[str, set[tuple[str, str]]] = {}
     for cell in plan["cells"]:
         if cell["execution"] == "execute":
@@ -2029,13 +2154,10 @@ def legacy_scope_document(
         gates = {gate if gate in ("lint", "check") else "test" for gate in entry["gates"]}
         matrix.append(
             matrix_record(
-                policy[entry["package"]],
-                entry["native"],
+                entry,
                 environments,
                 gates,
                 executing=executing.get(entry["package"], set()),
-                area=entry["area"],
-                target_kinds=entry["targets"],
             )
         )
 
@@ -2058,11 +2180,7 @@ def legacy_scope_document(
         "preflight_reason": plan["preflight_reason"],
         "matrix": matrix,
         "policy": [
-            policy_record(
-                policy[entry["package"]],
-                {"test"} if entry["tiers"] else set(),
-                entry["area"],
-            )
+            policy_record(entry, {"test"} if entry["tiers"] else set())
             for entry in plan["packages"]
         ],
         "job_estimate": plan["job_estimate"],
@@ -2073,6 +2191,15 @@ def legacy_scope_document(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--all", action="store_true", help="select the full workspace")
+    parser.add_argument(
+        "--apply-to",
+        metavar="FILE",
+        help=(
+            "apply the accepted cells and rejections to this already-resolved "
+            "plan instead of selecting scope; reads no manifest, policy, or "
+            "environment table, and excludes --all, --constraints, and files"
+        ),
+    )
     parser.add_argument(
         "--accepted-cells",
         metavar="FILE",
@@ -2124,7 +2251,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base", default=NULL_OID, help="base revision under test")
     parser.add_argument("--head", default=NULL_OID, help="head revision under test")
     parser.add_argument("files", nargs="*", help="changed repository-relative paths")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.apply_to and (args.all or args.files or args.constraints):
+        parser.error(
+            "--apply-to applies evidence to a carried plan and performs no "
+            "selection: it cannot be combined with --all, --constraints, or a file list"
+        )
+    return args
 
 
 def read_accepted_cells(source: str | None) -> list[dict[str, Any]]:
@@ -2183,30 +2316,40 @@ def read_evidence_rejections(source: str | None) -> list[str]:
 
 def main() -> None:
     args = parse_args()
-    environments = load_environments(ENVIRONMENTS_CONFIG)
-    runner_labels = {environment["runner"] for environment in environments}
-    metadata = load_metadata(ROOT)
-    validate_no_shadow_workspaces(metadata, ROOT)
-    policy = package_ci_policy(workspace_packages(metadata), runner_labels, ROOT)
-    plan = calculate_scope(
-        args.files,
-        ROOT,
-        metadata,
-        environments,
-        policy,
-        args.all,
-        accepted_cells=read_accepted_cells(args.accepted_cells),
-        accepted_environments=args.accepted_environment,
-        prohibitions=read_prohibitions(args.constraints),
-        evidence_rejections=read_evidence_rejections(args.evidence_rejections),
-        base=args.base,
-        head=args.head,
-    )
+    accepted_cells = read_accepted_cells(args.accepted_cells)
+    evidence_rejections = read_evidence_rejections(args.evidence_rejections)
+    if args.apply_to:
+        # The carried plan is the selection. Nothing from the checkout is
+        # consulted here, so a receipt CI accepted cannot be second-guessed.
+        plan = apply_accepted_cells(
+            json.loads(Path(args.apply_to).read_text(encoding="utf-8")),
+            accepted_cells,
+            evidence_rejections,
+            accepted_environments=args.accepted_environment,
+        )
+    else:
+        environments = load_environments(ENVIRONMENTS_CONFIG)
+        runner_labels = {environment["runner"] for environment in environments}
+        metadata = load_metadata(ROOT)
+        validate_no_shadow_workspaces(metadata, ROOT)
+        policy = package_ci_policy(workspace_packages(metadata), runner_labels, ROOT)
+        plan = calculate_scope(
+            args.files,
+            ROOT,
+            metadata,
+            environments,
+            policy,
+            args.all,
+            accepted_cells=accepted_cells,
+            accepted_environments=args.accepted_environment,
+            prohibitions=read_prohibitions(args.constraints),
+            evidence_rejections=evidence_rejections,
+            base=args.base,
+            head=args.head,
+        )
     if args.plan_out:
         Path(args.plan_out).write_text(schema.canonical(plan), encoding="utf-8")
-    document = (
-        plan if args.resolved_plan else legacy_scope_document(plan, policy, environments)
-    )
+    document = plan if args.resolved_plan else legacy_scope_document(plan)
     print(json.dumps(document, separators=(",", ":")))
 
 

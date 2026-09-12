@@ -42,13 +42,18 @@
 # Not replicated: L3/browser tiers, WSL archives, companion suites, and other
 # operating systems. `--l2` adds the source packages' hostable L2 tier.
 #
-# `--plan` is the pre-trigger review surface (spec section 4). It resolves the
-# canonical plan — every `{package, environment, gate}` cell with its execution,
-# origin, and state — prints it, and exits non-zero when a recorded execution
-# constraint would still be violated. It runs no gate and builds nothing, so it
-# is safe to run before every push. `BISCUIT_CI_CONSTRAINTS_DIR` names the
-# constraint store; `--plan-out` keeps the canonical JSON as the machine
-# interface alongside the rendered table.
+# `--plan` is the developer's WORKING-TREE preview of the pre-trigger review
+# (spec section 4). It resolves the canonical plan — every `{package,
+# environment, gate}` cell with its execution, origin, and state — for the
+# files that differ from the base ref in the checkout, prints it, and exits
+# non-zero when a recorded execution constraint would still be violated. It
+# runs no gate and builds nothing, so it is safe to run before every push.
+# `BISCUIT_CI_CONSTRAINTS_DIR` names the constraint store; `--plan-out` keeps
+# the canonical JSON as the machine interface alongside the rendered table.
+# The pre-push hook does NOT call this: it reviews the OUTGOING REVISION's
+# committed tree with the planner, manifests, and policy committed there, so
+# the two differ exactly when the checkout is dirty (a committed change masked
+# by an unstaged revert is absent here and present in the hook's review).
 #
 # Usage:
 #   just ci-local                       affected packages vs origin/main
@@ -151,19 +156,20 @@ ci-local *args="":
 
     # `--plan` resolves published evidence first, so a reviewer sees the cells
     # that are already satisfied rather than the cells that would run without
-    # them. A second pass is what turns the accepted set into plan state; it is
-    # confined to `--plan` because an ordinary run PRODUCES evidence and has no
-    # reason to consume it.
+    # them. The accepted set is overlaid on the plan just resolved — the same
+    # operation CI performs on a carried receipt — rather than re-selecting;
+    # it is confined to `--plan` because an ordinary run PRODUCES evidence and
+    # has no reason to consume it. `plan_file` is read and rewritten by the
+    # one Python process, and stdout goes to the separate `scope_file`.
     if (( show_plan == 1 )) && [[ -n "${merge_base}" ]] && [[ -f scripts/ci/local_evidence.py ]]; then
         head_sha="$(git rev-parse HEAD)"
         if python3 scripts/ci/local_evidence.py verify --cells \
             --plan "${plan_view}" --base "${merge_base}" --head "${head_sha}" \
             --rejections "${rejected_file}" > "${accepted_file}" 2>/dev/null; then
-            # shellcheck disable=SC2086
-            python3 scripts/ci/affected_scope.py "${scope_args[@]}" \
+            python3 scripts/ci/affected_scope.py --apply-to "${plan_file}" \
                 --accepted-cells "${accepted_file}" \
                 --evidence-rejections "${rejected_file}" \
-                ${changed} > "${scope_file}"
+                --resolved-plan --plan-out "${plan_file}" > "${scope_file}"
         fi
     fi
 
