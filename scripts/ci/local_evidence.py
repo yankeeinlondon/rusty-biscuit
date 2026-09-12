@@ -3,12 +3,14 @@
 
 Two generations live here on purpose.
 
-`verify_cells` is the current contract: it reads **every**
-`refs/notes/ci-local/<environment>` note reachable from the outgoing head,
-returns the accepted `{package, environment, gate}` cells from all of them
-together, and returns a coded reason for every cell it refused. Evidence from
-macOS and from a prior WSL cross-check therefore combine in one run, which the
-environment-at-a-time predecessor could never express.
+`verify_cells` is the current contract: it reads **every** note on every
+`refs/notes/ci-local/<environment>` ref between the merge base and the
+outgoing head, resolves each `{package, environment, gate}` cell from the
+newest note that qualifies for it, and returns a coded reason for every
+candidate it refused. Evidence from macOS and from a prior WSL cross-check
+therefore combine in one run, and two partial receipts on one environment
+combine across commits, which the environment-at-a-time predecessor could
+never express.
 
 `record_scope` and `verify_scope` carry the *scope* receipt, a separate
 document on `refs/notes/ci-local/scope`: what the planner selected for one
@@ -180,13 +182,30 @@ def candidate_commits(base: str, head: str) -> list[str]:
     return commits
 
 
-def latest_note(environment: str, commits: list[str]) -> tuple[str, str] | None:
-    """The newest note on `commits` for `environment`, with its commit."""
+def candidate_notes(environment: str, commits: list[str]) -> list[tuple[str, str]]:
+    """Every note on `commits` for `environment`, in `commits` order.
+
+    One `git notes list` per ref, then a read per hit: a branch of a hundred
+    commits over four refs would otherwise cost four hundred `git notes show`
+    calls that mostly answer "no note", and both the hook and CI pay it.
+    """
+    listing = git_optional("notes", "--ref", f"{NOTES_PREFIX}/{environment}", "list")
+    if not listing:
+        return []
+    annotated: dict[str, str] = {}
+    for line in listing.splitlines():
+        fields = line.split()
+        if len(fields) == 2:
+            annotated[fields[1]] = fields[0]
+    notes = []
     for commit in commits:
-        note = git_optional("notes", "--ref", f"{NOTES_PREFIX}/{environment}", "show", commit)
-        if note:
-            return commit, note
-    return None
+        blob = annotated.get(commit)
+        if blob is None:
+            continue
+        text = git_optional("cat-file", "-p", blob)
+        if text:
+            notes.append((commit, text))
+    return notes
 
 
 def verify_cells(
@@ -206,6 +225,24 @@ def verify_cells(
     all fail safe: the cell is simply not accepted, so it stays scheduled.
 
     ## Notes
+
+    Every note on an environment's ref between the merge base and the head is
+    a candidate, walked newest commit first, and a cell is resolved by the
+    **newest candidate whose cell for it qualifies**: complete, credited to
+    the ref it sits under, describing the commit it is attached to, and on the
+    head's exact tree or gate-input-equivalent to it. Once resolved, a cell is
+    never changed by an older candidate — an older pass never overrides a
+    newer complete failure, since a failure is evidence too. A candidate that
+    does not qualify for a cell (malformed, incomplete, mismatched, changed
+    inputs, no declared closure) is reported with its code, naming its commit,
+    and does not stop an older candidate from resolving that cell; so a
+    rejection describes one candidate, not the cell's final outcome. A note
+    that never mentions a wanted cell contributes nothing to it and is not a
+    refusal, and a cell no candidate covers is reported nowhere: it simply
+    stays scheduled. Version-1 notes take part in the same walk under their
+    own narrower rules and claim every wanted cell of their environment, so a
+    version-1 note on the head shadows older version-2 notes and a version-2
+    note on the head shadows older version-1 notes.
 
     Equivalence recomputes the identity over **both** trees rather than
     trusting the identity the receipt stored. A stored string is an unverified
@@ -234,74 +271,76 @@ def verify_cells(
         (cell["package"], cell["environment"], cell["gate"]) for cell in plan["cells"]
     }
     commits = candidate_commits(merge_base, head_sha)
-    seen: set[tuple[str, str, str]] = set()
+    resolved: set[tuple[str, str, str]] = set()
 
     for environment in ENVIRONMENTS:
-        found = latest_note(environment, commits)
-        if found is None:
-            continue
-        note_commit, note_text = found
-        try:
-            document = json.loads(note_text)
-        except json.JSONDecodeError:
-            rejections.append(
-                f"malformed-receipt: the {environment} note on {note_commit[:9]} is not JSON"
-            )
-            continue
-        if not isinstance(document, dict):
-            rejections.append(
-                f"malformed-receipt: the {environment} note on {note_commit[:9]} is not an object"
-            )
-            continue
-
-        if document.get("schema_version") == schema.LEGACY_RECEIPT_SCHEMA_VERSION:
-            legacy_accepted, legacy_rejections = _accept_legacy(
-                document, environment, note_commit, head_tree, wanted, seen
-            )
-            accepted.extend(legacy_accepted)
-            rejections.extend(legacy_rejections)
-            continue
-
-        cells, cell_rejections = schema.reusable_cells(document)
-        rejections.extend(cell_rejections)
-        if not cells:
-            continue
-
-        mismatch = _environment_mismatch(document, environment, note_commit) or (
-            _revision_mismatch(document, note_commit)
-        )
-        if mismatch:
-            rejections.append(mismatch)
-            continue
-
-        exact = document["tree"] == head_tree
-        for cell in cells:
-            key = (cell["package"], environment, cell["gate"])
-            if key not in wanted or key in seen:
+        for note_commit, note_text in candidate_notes(environment, commits):
+            try:
+                document = json.loads(note_text)
+            except json.JSONDecodeError:
+                rejections.append(
+                    f"malformed-receipt: the {environment} note on {note_commit[:9]} is not JSON"
+                )
                 continue
-            label = "/".join(key)
-            if exact:
-                origin = "local"
-            else:
-                paths = cell_input_paths(plan, cell["package"], cell["gate"])
-                if paths is None:
-                    rejections.append(
-                        f"gate-inputs-changed: {label} was tested on {note_commit[:9]}, "
-                        "and the plan declares no build closure for it, so equivalence "
-                        "with this head cannot be established"
-                    )
+            if not isinstance(document, dict):
+                rejections.append(
+                    f"malformed-receipt: the {environment} note on {note_commit[:9]} "
+                    "is not an object"
+                )
+                continue
+
+            if document.get("schema_version") == schema.LEGACY_RECEIPT_SCHEMA_VERSION:
+                legacy_accepted, legacy_rejections = _accept_legacy(
+                    document, environment, note_commit, head_tree, wanted, resolved
+                )
+                accepted.extend(legacy_accepted)
+                rejections.extend(legacy_rejections)
+                continue
+
+            cells, cell_rejections = schema.reusable_cells(document)
+            rejections.extend(
+                f"{reason} (note on {note_commit[:9]})" for reason in cell_rejections
+            )
+            if not cells:
+                continue
+
+            mismatch = _environment_mismatch(document, environment, note_commit) or (
+                _revision_mismatch(document, note_commit)
+            )
+            if mismatch:
+                rejections.append(mismatch)
+                continue
+
+            exact = document["tree"] == head_tree
+            for cell in cells:
+                key = (cell["package"], environment, cell["gate"])
+                if key not in wanted or key in resolved:
                     continue
-                if gate_input_identity(paths, note_commit) != gate_input_identity(
-                    paths, head_sha
-                ):
-                    rejections.append(
-                        f"gate-inputs-changed: {label} was tested on {note_commit[:9]}, "
-                        "whose gate inputs differ from this head's"
-                    )
-                    continue
-                origin = "prior-local"
-            seen.add(key)
-            accepted.append(_accepted_cell(cell, environment, origin, note_commit, document))
+                label = "/".join(key)
+                if exact:
+                    origin = "local"
+                else:
+                    paths = cell_input_paths(plan, cell["package"], cell["gate"])
+                    if paths is None:
+                        rejections.append(
+                            f"gate-inputs-changed: {label} was tested on {note_commit[:9]}, "
+                            "and the plan declares no build closure for it, so equivalence "
+                            "with this head cannot be established"
+                        )
+                        continue
+                    if gate_input_identity(paths, note_commit) != gate_input_identity(
+                        paths, head_sha
+                    ):
+                        rejections.append(
+                            f"gate-inputs-changed: {label} was tested on {note_commit[:9]}, "
+                            "whose gate inputs differ from this head's"
+                        )
+                        continue
+                    origin = "prior-local"
+                resolved.add(key)
+                accepted.append(
+                    _accepted_cell(cell, environment, origin, note_commit, document)
+                )
 
     return accepted, rejections
 
@@ -372,29 +411,32 @@ def _accept_legacy(
     note_commit: str,
     head_tree: str,
     wanted: set[tuple[str, str, str]],
-    seen: set[tuple[str, str, str]],
+    resolved: set[tuple[str, str, str]],
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Accept a version-1 note under the narrow rules of spec section 3.6.
 
     Exact tree identity only, pass-only, and whole-environment — the same
     breadth the environment-at-a-time verifier granted, so a legacy receipt
     neither gains reach nor is silently upgraded. Its measurements render as
-    [`schema.UNRECORDED_MEASUREMENT`] because the document has none.
+    [`schema.UNRECORDED_MEASUREMENT`] because the document has none. It claims
+    only the wanted cells still unresolved by newer candidates, and adds those
+    to `resolved`, so it neither overrides a newer note nor is overridden by
+    an older one.
     """
     mismatch = _environment_mismatch(document, environment, note_commit)
     if mismatch:
         return [], [mismatch]
     if document.get("tree") != head_tree:
         return [], [
-            f"v1-not-equivalence-eligible: the {environment} version-1 receipt tested "
-            f"tree {str(document.get('tree'))[:9]}, and a version-1 receipt is reusable "
-            "only on exact tree identity"
+            f"v1-not-equivalence-eligible: the {environment} version-1 receipt on "
+            f"{note_commit[:9]} tested tree {str(document.get('tree'))[:9]}, and a "
+            "version-1 receipt is reusable only on exact tree identity"
         ]
     accepted = []
     for package, env, gate in sorted(wanted):
-        if env != environment or (package, env, gate) in seen:
+        if env != environment or (package, env, gate) in resolved:
             continue
-        seen.add((package, env, gate))
+        resolved.add((package, env, gate))
         accepted.append(
             {
                 "package": package,
