@@ -108,11 +108,23 @@ class LoadTests(StoreFixture):
 
     def test_a_branch_scoped_constraint_binds_only_that_branch(self) -> None:
         self.write("current", self.constraint(branch="feat/unifi"))
-        self.assertEqual(1, len(self.load(branch="feat/unifi")[0]))
-        self.assertEqual([], self.load(branch="main")[0])
+        self.assertEqual(1, len(self.load(branches=["feat/unifi"])[0]))
+        self.assertEqual([], self.load(branches=["main"])[0])
         # An unnamed branch means "this checkout is not claiming to be another",
         # so an unfiltered caller still sees it.
         self.assertEqual(1, len(self.load()[0]))
+
+    def test_a_branch_scoped_constraint_binds_when_any_supplied_name_matches(self) -> None:
+        # A renamed refspec (`git push origin feature:other`) is validated under
+        # `other` but was restricted under `feature`; both names are supplied
+        # and the record binds on either.
+        self.write("current", self.constraint(branch="feature"))
+        self.assertEqual(1, len(self.load(branches=["other", "feature"])[0]))
+        self.assertEqual(1, len(self.load(branches=["feature", "other"])[0]))
+        self.assertEqual([], self.load(branches=["other", "main"])[0])
+        # An empty name is no identity and neither matches nor exempts.
+        self.assertEqual(1, len(self.load(branches=[""])[0]))
+        self.assertEqual([], self.load(branches=["", "main"])[0])
 
     def test_a_repository_scoped_constraint_matches_every_spelling_of_its_remote(self) -> None:
         self.write("current", self.constraint(repository="github.com/yankeeinlondon/rusty-biscuit"))
@@ -324,6 +336,25 @@ class CommandTests(StoreFixture):
         self.assertEqual(0, result.returncode, result.stderr)
         result = self.run_check("--plan", str(plan), "--branch", "main")
         self.assertNotEqual(0, result.returncode)
+
+    def test_a_repeated_branch_option_binds_a_record_under_any_of_the_names(self) -> None:
+        self.write("renamed", self.constraint(branch="feature"))
+        plan = self.store.parent / "plan.json"
+        plan.write_text(
+            json.dumps(
+                {"cells": [{"environment": "wsl2-ubuntu", "gate": "L1", "execution": "execute"}]}
+            ),
+            encoding="utf-8",
+        )
+        # The matching name comes FIRST: a parser that kept only the last value
+        # would exempt this push.
+        result = self.run_check("--plan", str(plan), "--branch", "feature", "--branch", "other")
+        self.assertNotEqual(0, result.returncode, "a record under the first name must still bind")
+        self.assertIn("wsl2-ubuntu", result.stderr)
+        result = self.run_check("--plan", str(plan), "--branch", "other", "--branch", "feature")
+        self.assertNotEqual(0, result.returncode, "a record under the last name must still bind")
+        result = self.run_check("--plan", str(plan), "--branch", "other", "--branch", "main")
+        self.assertEqual(0, result.returncode, result.stderr)
 
     def test_environments_lists_the_planner_input(self) -> None:
         self.write("current", self.constraint())

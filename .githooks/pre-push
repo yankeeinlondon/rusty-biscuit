@@ -24,24 +24,31 @@
 # RUSTY_BISCUIT_PRE_PUSH_AREAS (space-separated package or area names) replaces
 # the computed scope with a fixed selection for the local gates only.
 #
-# Trigger review. Every mode first resolves the plan CI would run for the
-# OUTGOING REVISION — the committed base..head path set, planned by the
-# committed tree's own planner, manifests, and policy — applies published
-# evidence to it, prints it, and decides the persisted execution constraints
-# from it: a prohibited environment blocks the push only when a cell there
-# would still EXECUTE. Reused or absent cells satisfy the constraint. The store
-# is the one `scripts/ci/constraints.py` resolves (BISCUIT_CI_CONSTRAINTS_DIR,
-# else its default); a plan that cannot be resolved, verified, or read blocks.
-# The reviewed plan and the published scope receipt are one planner output.
+# Trigger review. Every mode first reviews EACH BRANCH UPDATE the push
+# carries, in the order Git supplies them, before any note is published or any
+# gate runs. For each update the hook resolves the plan CI would run for THAT
+# REVISION — its committed base..head path set, planned by its own committed
+# planner, manifests, and policy — applies published evidence to it, prints
+# it, and decides the persisted execution constraints from it: a prohibited
+# environment blocks the push only when a cell there would still EXECUTE.
+# Reused or absent cells satisfy the constraint. The store is the one
+# `scripts/ci/constraints.py` resolves (BISCUIT_CI_CONSTRAINTS_DIR, else its
+# default); a plan that cannot be resolved, verified, or read blocks. The first
+# update that fails blocks the whole push and is named. The reviewed plan of
+# HEAD and the published scope receipt are one planner output.
 # `just ci-local --plan` previews the WORKING TREE instead; the two differ
 # exactly when the checkout is dirty.
 #
-# The reviewed revision is HEAD when the push carries it (or when Git hands
-# the hook no ref line); otherwise it is the last non-deleted local sha the
-# push carries. A push that only deletes refs triggers no run and is not
-# reviewed. When that revision is not the clean checkout, its committed tree
-# is materialized in a temporary detached worktree for the duration of the
-# hook (about three seconds on a 10k-file checkout) and removed on exit.
+# A constraint is matched against the update's own identity, never the
+# checkout's: the repository is the remote URL Git hands this hook, and the
+# branch is the REMOTE branch the update writes. When the refspec renames
+# (local `feature` pushed as `other`), a record under either name applies —
+# whoever recorded "no WSL on feature" still meant it — and both names are
+# printed. Deletions, tags, and other non-branch refs trigger no run and are
+# named as skipped. When a reviewed revision is not the clean checkout, its
+# committed tree is materialized in a temporary detached worktree for the
+# duration of its review (about three seconds on a 10k-file checkout) and
+# removed before the next update is reviewed, or on exit.
 #
 # A published receipt names where its JUnit reports are retained on this host:
 # $BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/, with the root defaulting
@@ -87,28 +94,18 @@ SELECTION="${RUSTY_BISCUIT_PRE_PUSH_AREAS:-}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 HEAD_SHA="$(git rev-parse HEAD)"
 REMOTE_NAME="${1:-origin}"
+# Git passes the remote's URL second; a harness that passes only the name gets
+# the same identity from the configuration. Empty means "unknown", which
+# `constraints.py` treats as matching every repository-scoped record.
+REMOTE_URL="${2:-$(git remote get-url "$REMOTE_NAME" 2>/dev/null)}"
+CHECKOUT_DIRTY="$(git status --porcelain)"
 PUSHES_HEAD=0
-REMOTE_REF=""
-REMOTE_SHA=""
-REF_LINES=0
-LAST_PUSHED_SHA=""
-while read -r _local_ref local_sha remote_ref remote_sha; do
-    REF_LINES=$((REF_LINES + 1))
-    if [ "$local_sha" = "$HEAD_SHA" ]; then
-        PUSHES_HEAD=1
-        REMOTE_REF="$remote_ref"
-        REMOTE_SHA="$remote_sha"
-    fi
-    if printf '%s' "$local_sha" | grep -q '[^0]'; then
-        LAST_PUSHED_SHA="$local_sha"
-    fi
-done
-if [ "$PUSHES_HEAD" -eq 1 ] || [ "$REF_LINES" -eq 0 ]; then
-    TRIGGER_SHA="$HEAD_SHA"
-else
-    TRIGGER_SHA="$LAST_PUSHED_SHA"
-fi
+REVIEWED=0
+SCOPE_RECORDED=0
+HEAD_SCOPE_BASE=""
+UPDATE_LABEL=""
 
+REF_UPDATES_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-updates.XXXXXX")"
 SCOPE_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope.XXXXXX")"
 PLAN_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-plan.XXXXXX")"
 PLAN_REVIEW_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-review.XXXXXX")"
@@ -119,8 +116,12 @@ SCOPE_RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-receipt.XXX
 ACCEPTED_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-accepted.XXXXXX")"
 REJECTED_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-rejected.XXXXXX")"
 REPORTS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/biscuit-pre-push-reports.XXXXXX")"
-TEMP_FILES="$SCOPE_FILE $PLAN_FILE $PLAN_REVIEW_FILE $RECEIPT_FILE $SCOPE_PLAN_FILE $SCOPE_DOC_FILE $SCOPE_RECEIPT_FILE $ACCEPTED_FILE $REJECTED_FILE"
+TEMP_FILES="$REF_UPDATES_FILE $SCOPE_FILE $PLAN_FILE $PLAN_REVIEW_FILE $RECEIPT_FILE $SCOPE_PLAN_FILE $SCOPE_DOC_FILE $SCOPE_RECEIPT_FILE $ACCEPTED_FILE $REJECTED_FILE"
 TRIGGER_WORKTREE=""
+# Git feeds one `<local ref> <local sha> <remote ref> <remote sha>` line per
+# ref update. Captured before the review so nothing the review spawns can
+# swallow the lines still unread.
+cat >"$REF_UPDATES_FILE"
 
 # shellcheck disable=SC2329  # invoked from the EXIT traps
 remove_trigger_worktree() {
@@ -144,7 +145,7 @@ push_note() {
 }
 
 block_trigger_review() {
-    printf "\033[31mTrigger review failed: %s\033[0m\n" "$1" >&2
+    printf "\033[31mTrigger review failed for %s: %s\033[0m\n" "$UPDATE_LABEL" "$1" >&2
     echo "The plan this push would trigger cannot be reviewed against the recorded execution constraints, so the push is blocked." >&2
     exit 2
 }
@@ -188,20 +189,27 @@ render_trigger_plan() {
 }
 
 # Scope evidence (fixes/2026-09-10-local-affected-scope, R1/R2): the plan and
-# projection the trigger review resolved for HEAD, published in every mode
-# before any gate, dirty tree or not. Neither a recording failure nor a
-# publication failure changes the exit code: CI detects the missing receipt
-# and calculates scope itself.
-publish_scope_evidence() {
-    SCOPE_NOTES_REF="refs/notes/ci-local/scope"
+# projection the trigger review resolved for HEAD, recorded while HEAD's own
+# committed tree is still materialized and published in every mode before any
+# gate, dirty tree or not — but only after every update has passed review.
+# Neither a recording failure nor a publication failure changes the exit code:
+# CI detects the missing receipt and calculates scope itself.
+record_scope_evidence() {
     SHORT_HEAD="$(git rev-parse --short=9 "$HEAD_SHA")"
-    SHORT_BASE="$(git rev-parse --short=9 "$SCOPE_BASE")"
     if ! python3 "$TRIGGER_ROOT/scripts/ci/local_evidence.py" scope-record \
             --plan "$SCOPE_PLAN_FILE" --scope "$SCOPE_DOC_FILE" \
             --base "$SCOPE_BASE" --head "$HEAD_SHA" >"$SCOPE_RECEIPT_FILE"; then
         echo "Scope evidence RECORDING failed for $SHORT_HEAD; nothing is published and CI will calculate scope itself." >&2
         return 0
     fi
+    SCOPE_RECORDED=1
+    HEAD_SCOPE_BASE="$SCOPE_BASE"
+}
+
+publish_scope_evidence() {
+    SCOPE_NOTES_REF="refs/notes/ci-local/scope"
+    SHORT_HEAD="$(git rev-parse --short=9 "$HEAD_SHA")"
+    SHORT_BASE="$(git rev-parse --short=9 "$HEAD_SCOPE_BASE")"
     if attach_note "$SCOPE_NOTES_REF" "$SCOPE_RECEIPT_FILE" && push_note "$SCOPE_NOTES_REF"; then
         echo "Published scope evidence for $SHORT_HEAD (base $SHORT_BASE) on $SCOPE_NOTES_REF."
     else
@@ -210,25 +218,43 @@ publish_scope_evidence() {
     return 0
 }
 
-echo ""
-if [ "$MODE" = "scope-only" ]; then
-    echo "Calculating pre-push scope only; no gate will run."
-else
-    echo "Resolving the plan this push would trigger"
-fi
-echo "------------------------------------------------"
-echo ""
-if [ -z "$TRIGGER_SHA" ]; then
-    echo "This push only deletes refs; it triggers no run, so there is no plan to review."
-else
-    # The base is the comparison base the CI event for this push will carry. A
-    # push to main is validated by a push event whose `github.event.before` is
-    # the remote's current main — the remote sha Git hands this hook. Any other
-    # ref is validated by a pull_request event against the tip of main, which
-    # the merge base with origin/main equals until main advances (and a base
-    # advance is meant to invalidate local scope). A branch-creating push
-    # carries no base at all, so it too records the merge base for the pull
-    # request run to find.
+# One ref update: `<local ref> <local sha> <remote ref> <remote sha>`. Exits
+# the hook on the first failure; returns on a skip or a pass.
+review_ref_update() {
+    LOCAL_REF="$1"
+    TRIGGER_SHA="$2"
+    REMOTE_REF="$3"
+    REMOTE_SHA="$4"
+    UPDATE_LABEL="$LOCAL_REF -> $REMOTE_REF"
+    if ! printf '%s' "$TRIGGER_SHA" | grep -q '[^0]'; then
+        echo "Not reviewing the deletion of $REMOTE_REF: it triggers no run."
+        return 0
+    fi
+    if [ "$TRIGGER_SHA" = "$HEAD_SHA" ]; then
+        PUSHES_HEAD=1
+    fi
+    case "$REMOTE_REF" in
+        refs/heads/*) ;;
+        *)
+            echo "Not reviewing $UPDATE_LABEL: only a branch update triggers a run."
+            return 0
+            ;;
+    esac
+    REVIEWED=$((REVIEWED + 1))
+    SHORT_TRIGGER="$(git rev-parse --short=9 "$TRIGGER_SHA")"
+    echo ""
+    echo "Reviewing $UPDATE_LABEL ($SHORT_TRIGGER)"
+
+    # The base is the comparison base the CI event for this update will carry.
+    # A push to main is validated by a push event whose `github.event.before`
+    # is the remote's current main — the remote sha Git hands this hook. Any
+    # other branch is validated by a pull_request event against the tip of
+    # main, which the merge base with origin/main equals until main advances
+    # (and a base advance is meant to invalidate local scope). A
+    # branch-creating push carries no base at all, so it too records the merge
+    # base for the pull request run to find. Pull requests open against
+    # origin, so origin/main stays the base even when this push goes to
+    # another remote.
     if [ "$REMOTE_REF" = "refs/heads/main" ] \
         && printf '%s' "$REMOTE_SHA" | grep -q '[^0]' \
         && git cat-file -e "$REMOTE_SHA^{commit}" 2>/dev/null; then
@@ -239,15 +265,30 @@ else
     else
         block_trigger_review "origin/main does not resolve, so there is no comparison base; fetch origin and push again"
     fi
-    SHORT_TRIGGER="$(git rev-parse --short=9 "$TRIGGER_SHA")"
     SHORT_BASE="$(git rev-parse --short=9 "$SCOPE_BASE")"
-    echo "Scope evidence base for $SHORT_TRIGGER: $SHORT_BASE ($SCOPE_BASE_KIND)"
+    echo "Comparison base for $SHORT_TRIGGER: $SHORT_BASE ($SCOPE_BASE_KIND)"
+
+    # CI validates the REMOTE branch; a renamed refspec keeps the local name
+    # in force too, so a constraint recorded under either name is not lost.
+    REMOTE_BRANCH="${REMOTE_REF#refs/heads/}"
+    set -- --branch "$REMOTE_BRANCH"
+    case "$LOCAL_REF" in
+        refs/heads/*) LOCAL_BRANCH="${LOCAL_REF#refs/heads/}" ;;
+        *) LOCAL_BRANCH="" ;;
+    esac
+    if [ -n "$LOCAL_BRANCH" ] && [ "$LOCAL_BRANCH" != "$REMOTE_BRANCH" ]; then
+        set -- "$@" --branch "$LOCAL_BRANCH"
+        echo "Branch identity: $REMOTE_BRANCH (pushed from $LOCAL_BRANCH; a constraint recorded under either name applies)"
+    else
+        echo "Branch identity: $REMOTE_BRANCH"
+    fi
+    echo "Remote: $REMOTE_NAME ($REMOTE_URL)"
 
     # The checkout serves as the committed tree only when it IS that tree.
     TRIGGER_ROOT="$REPO_ROOT"
     if [ "$TRIGGER_SHA" != "$HEAD_SHA" ]; then
-        TRIGGER_TREE_WHY="the push does not carry HEAD"
-    elif [ -n "$(git status --porcelain)" ]; then
+        TRIGGER_TREE_WHY="$SHORT_TRIGGER is not HEAD"
+    elif [ -n "$CHECKOUT_DIRTY" ]; then
         TRIGGER_TREE_WHY="the checkout has uncommitted changes"
     else
         TRIGGER_TREE_WHY=""
@@ -262,13 +303,12 @@ else
     fi
 
     # Execution constraints bind the trigger, not the gates, so they are decided
-    # before any work — from the plan CI would resolve for the outgoing
-    # revision, never from a selection override, which narrows only the local
-    # gates. The store is kept out of this resolution so that the constraint
-    # check below is the single decision point: the planner cannot filter by
-    # repository or branch, and a cell it had already resolved to `prohibited`
-    # would no longer show as executing. CI never reads the store (Design
-    # Decision 8).
+    # before any work — from the plan CI would resolve for this revision, never
+    # from a selection override, which narrows only the local gates. The store
+    # is kept out of this resolution so that the constraint check below is the
+    # single decision point: the planner cannot filter by repository or branch,
+    # and a cell it had already resolved to `prohibited` would no longer show
+    # as executing. CI never reads the store (Design Decision 8).
     if ! plan_trigger_scope >"$SCOPE_DOC_FILE"; then
         block_trigger_review "the planner could not resolve the committed scope of $SHORT_TRIGGER"
     fi
@@ -284,13 +324,35 @@ else
     fi
     render_trigger_plan
     if ! python3 "$REPO_ROOT/scripts/ci/constraints.py" check \
-        --plan "$PLAN_REVIEW_FILE" \
-        --repository "$(git remote get-url origin 2>/dev/null)" \
-        --branch "$(git rev-parse --abbrev-ref HEAD)"; then
+        --plan "$PLAN_REVIEW_FILE" --repository "$REMOTE_URL" "$@"; then
+        echo "Blocked while reviewing $UPDATE_LABEL." >&2
         exit 1
     fi
+    if [ "$TRIGGER_SHA" = "$HEAD_SHA" ]; then
+        record_scope_evidence
+    fi
+    remove_trigger_worktree
+    TRIGGER_WORKTREE=""
+}
+
+echo ""
+if [ "$MODE" = "scope-only" ]; then
+    echo "Calculating pre-push scope only; no gate will run."
+else
+    echo "Resolving the plan this push would trigger"
 fi
-if [ "$PUSHES_HEAD" -eq 1 ]; then
+echo "------------------------------------------------"
+# The body's stdin is cut off from the update list it is iterating.
+while read -r local_ref local_sha remote_ref remote_sha; do
+    if [ -n "$local_sha" ]; then
+        review_ref_update "$local_ref" "$local_sha" "$remote_ref" "$remote_sha" </dev/null
+    fi
+done <"$REF_UPDATES_FILE"
+if [ "$REVIEWED" -eq 0 ]; then
+    echo ""
+    echo "This push updates no branch, so it triggers no run and there is no plan to review."
+fi
+if [ "$SCOPE_RECORDED" -eq 1 ]; then
     publish_scope_evidence
 fi
 if [ "$MODE" = "scope-only" ]; then

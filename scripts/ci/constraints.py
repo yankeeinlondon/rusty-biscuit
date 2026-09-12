@@ -12,12 +12,18 @@ coverage.
 
 ## Notes
 
-A record's optional `repository` is the `origin` remote URL with its scheme,
-credentials, and `.git` suffix removed — `github.com/yankeeinlondon/rusty-biscuit`
-for this repository — so the SSH and HTTPS spellings of one remote, and every
-worktree of one clone, share an identity. Both the record and the checkout are
-normalized by [`repository_identity`]. A checkout without an `origin` matches
-every repository-scoped record: an unknown identity cannot prove exemption.
+A record's optional `repository` is a remote URL with its scheme, credentials,
+and `.git` suffix removed — `github.com/yankeeinlondon/rusty-biscuit` for this
+repository — so the SSH and HTTPS spellings of one remote, and every worktree
+of one clone, share an identity. Both the record and the checked remote are
+normalized by [`repository_identity`]. The hook checks the remote the push
+actually targets; an unknown remote matches every repository-scoped record,
+because an unknown identity cannot prove exemption.
+
+A record's optional `branch` is matched against every branch name the caller
+supplies (`--branch` may repeat): the hook names the REMOTE branch an update
+writes and, when the refspec renames it, the local branch too, so a record
+under either name binds.
 
 Where the store LIVES is Open Question 2 and is not yet ruled (blocker B2 in
 `fixes/2026-09-11-cicd-cleanup/open-questions-and-blockers.md`). This module
@@ -34,7 +40,7 @@ import os
 import sys
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 
 #: A constraint record's fields. `environment` and `reason` are the refusal a
@@ -108,20 +114,24 @@ class Constraint:
     def gate(self) -> str:
         return str(self.document.get("gate", "")) if isinstance(self.document, dict) else ""
 
-    def applies_to(self, repository: str, branch: str) -> bool:
-        """Whether this constraint governs the given checkout.
+    def applies_to(self, repository: str, branches: Sequence[str]) -> bool:
+        """Whether this constraint governs a push to `repository` under any of `branches`.
 
         An unset `repository` or `branch` means "everywhere", so the common
-        case — one prohibition, one branch, one host — needs neither field.
+        case — one prohibition, one branch, one host — needs neither field. An
+        empty `repository` or an empty `branches` is an unknown identity, which
+        cannot prove exemption either.
         """
         if not isinstance(self.document, dict):
             return True
-        for field, actual in (("repository", repository), ("branch", branch)):
-            declared = self.document.get(field)
-            if field == "repository":
-                declared, actual = repository_identity(str(declared or "")), repository_identity(actual)
-            if declared and actual and declared != actual:
-                return False
+        declared_repository = repository_identity(str(self.document.get("repository") or ""))
+        actual_repository = repository_identity(repository)
+        if declared_repository and actual_repository and declared_repository != actual_repository:
+            return False
+        declared_branch = self.document.get("branch")
+        names = [name for name in branches if name]
+        if declared_branch and names and declared_branch not in names:
+            return False
         return True
 
     def expired(self, today: date) -> bool:
@@ -138,7 +148,12 @@ class Constraint:
         )
 
 
-def load(directory: str, repository: str = "", branch: str = "", today: date | None = None):
+def load(
+    directory: str,
+    repository: str = "",
+    branches: Sequence[str] = (),
+    today: date | None = None,
+):
     """Split a constraint store into the prohibitions that bind and those that do not.
 
     ## Returns
@@ -167,7 +182,7 @@ def load(directory: str, repository: str = "", branch: str = "", today: date | N
         constraint = Constraint(path, document)
         if constraint.problem is not None:
             malformed.append(constraint)
-        elif not constraint.applies_to(repository, branch):
+        elif not constraint.applies_to(repository, branches):
             continue
         elif constraint.expired(today):
             expired.append(constraint)
@@ -236,14 +251,21 @@ def parse_args() -> argparse.Namespace:
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--directory", default=directory_from_environment())
         subparser.add_argument("--plan", default="", help="resolved plan JSON; unreadable blocks")
-        subparser.add_argument("--repository", default="", help="origin remote URL, any spelling")
-        subparser.add_argument("--branch", default="")
+        subparser.add_argument(
+            "--repository", default="", help="URL of the remote being pushed to, any spelling"
+        )
+        subparser.add_argument(
+            "--branch",
+            action="append",
+            default=None,
+            help="branch the push writes; repeatable, a record under any given name applies",
+        )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    active, expired, malformed = load(args.directory, args.repository, args.branch)
+    active, expired, malformed = load(args.directory, args.repository, args.branch or ())
 
     if args.command == "environments":
         # The planner's input: every environment a recorded constraint forbids,

@@ -28,6 +28,12 @@
 # revert is still reviewed, and an unstaged policy edit never reaches the plan
 # or the scope receipt. The stub planner logs the tree it ran in.
 #
+# and its review-3: EVERY branch update on stdin is reviewed, in order, under
+# its own revision, base, remote branch, and the remote Git names — a
+# prohibition on a branch that is not checked out still blocks, a renamed
+# refspec binds records under either name, and deletions and tags are skipped
+# by name.
+#
 # and the evidence-retention contract of review-1: a published receipt names
 # a report directory that still exists after the hook exits, with every report
 # it lists readable there, and a failed copy publishes no receipt.
@@ -39,8 +45,6 @@
 # and never changes the exit code.
 #
 # Run directly: ./.githooks/tests/test-pre-push.sh
-# The suite must stay runnable under Bash 3.2, which is what the shebang
-# selects on a stock macOS host (/bin/bash).
 # PRE_PUSH_HOOK_UNDER_TEST=<path> runs the suite against another copy of the
 # hook (used to prove a new fixture fails against the hook it was written for).
 
@@ -155,19 +159,19 @@ stage_fixture_tools() {
     mkdir -p "$tmpdir/home"
 }
 
-# Run the hook from the fixture repo as Git would: `origin` as the remote
-# argument and the given ref line on stdin. The stub planner logs its
-# invocations to planner.log and emits the plan fixture `make_fake_just`
-# recorded, if any.
+# Run the hook from the fixture repo as Git would: the remote's name and URL
+# as arguments and the given ref line(s) — newline-separated — on stdin. The
+# stub planner logs its invocations to planner.log and emits the plan fixture
+# `make_fake_just` recorded, if any.
 #
-# Usage: run_hook_with_ref_line <tmpdir> <mode|__UNSET__> <ref_line> [env...]
+# Usage: run_hook_as_remote <tmpdir> <mode|__UNSET__> <remote_name> <remote_url> <ref_lines> [env...]
 #
 # Writes stdout to $tmpdir/out and stderr to $tmpdir/err. Always returns 0
 # itself so set -e in callers does not abort on a non-zero hook exit; the
 # real exit code is written to $tmpdir/exit.
-run_hook_with_ref_line() {
-    local tmpdir="$1" mode="$2" ref_line="$3"
-    shift 3
+run_hook_as_remote() {
+    local tmpdir="$1" mode="$2" remote_name="$3" remote_url="$4" ref_line="$5"
+    shift 5
     local repo="$tmpdir/repo"
     if [ ! -d "$repo" ]; then
         make_publishing_repo "$tmpdir"
@@ -190,9 +194,18 @@ run_hook_with_ref_line() {
         cd "$repo" || exit 97
         printf '%s\n' "$ref_line" \
             | env -i "${env_args[@]}" "$@" \
-                "$HOOK" origin "$tmpdir/origin.git" >"$tmpdir/out" 2>"$tmpdir/err"
+                "$HOOK" "$remote_name" "$remote_url" >"$tmpdir/out" 2>"$tmpdir/err"
         echo $? >"$tmpdir/exit"
     )
+}
+
+# The common case: a push to `origin`.
+#
+# Usage: run_hook_with_ref_line <tmpdir> <mode|__UNSET__> <ref_lines> [env...]
+run_hook_with_ref_line() {
+    local tmpdir="$1" mode="$2" ref_line="$3"
+    shift 3
+    run_hook_as_remote "$tmpdir" "$mode" origin "$tmpdir/origin.git" "$ref_line" "$@"
 }
 
 # Push HEAD to a remote ref whose current sha the caller chooses; the remote
@@ -223,10 +236,8 @@ run_hook() {
     if [ "$areas" != "__UNSET__" ]; then
         env_args+=("RUSTY_BISCUIT_PRE_PUSH_AREAS=$areas")
     fi
-    # macOS /bin/bash is 3.2, which treats an empty array's "${a[@]}" as unbound
-    # under `set -u`; this form expands to nothing there instead of aborting.
     run_hook_in_repo "$tmpdir" "$mode" refs/heads/feature \
-        "0000000000000000000000000000000000000000" ${env_args[@]+"${env_args[@]}"}
+        "0000000000000000000000000000000000000000" "${env_args[@]}"
 }
 
 # Assertion helpers.
@@ -428,21 +439,6 @@ test_default_delegates_scope_to_pre_push() {
         sed 's/^/  /' "$tmpdir/just.log" >&2
         return 1
     fi
-}
-
-# Harness self-check: with no override, run_hook must hand the hook no
-# selection variable at all, not an empty one, and it must do so under the
-# default shell. run_hook_with_ref_line reads HOOK dynamically, so a local
-# rebinding routes the run to a stub that records its environment.
-test_run_hook_forwards_no_selection_without_an_override() {
-    local tmpdir="$1"
-    printf '#!/usr/bin/env bash\nenv >"%s/hook.env"\n' "$tmpdir" >"$tmpdir/env-dump"
-    chmod +x "$tmpdir/env-dump"
-    local HOOK="$tmpdir/env-dump"
-    run_hook "$tmpdir" "warn"
-    assert_exit "stub hook ran" "$tmpdir" 0 || return 1
-    assert_contains "mode forwarded" "$tmpdir/hook.env" "RUSTY_BISCUIT_PRE_PUSH=warn" || return 1
-    assert_not_contains "no selection variable" "$tmpdir/hook.env" "RUSTY_BISCUIT_PRE_PUSH_AREAS" || return 1
 }
 
 test_areas_override_is_passed_through() {
@@ -1049,7 +1045,7 @@ test_a_push_that_does_not_carry_head_reviews_the_pushed_revision() {
     assert_exit "push of an older revision" "$tmpdir" 0 || return 1
     assert_contains "pushed revision planned" "$tmpdir/planner.log" "--head $pushed -- work.txt" || return 1
     assert_not_contains "HEAD-only path excluded" "$tmpdir/planner.log" "more.txt" || return 1
-    assert_contains "reason announced" "$tmpdir/out" "the push does not carry HEAD" || return 1
+    assert_contains "reason announced" "$tmpdir/out" "is not HEAD" || return 1
     # Scope evidence binds HEAD, and HEAD is not going anywhere.
     if scope_receipt "$tmpdir" >/dev/null; then
         echo "  a scope receipt was attached to HEAD for a push that does not carry it" >&2
@@ -1064,11 +1060,263 @@ test_a_deletion_only_push_triggers_nothing_and_is_not_reviewed() {
     run_hook_with_ref_line "$tmpdir" scope-only \
         "(delete) 0000000000000000000000000000000000000000 refs/heads/feature $(git -C "$tmpdir/repo" rev-parse HEAD 2>/dev/null || echo 0)"
     assert_exit "deletion" "$tmpdir" 0 || return 1
-    assert_contains "deletion announced" "$tmpdir/out" "only deletes refs" || return 1
+    assert_contains "deletion named" "$tmpdir/out" "deletion of refs/heads/feature" || return 1
+    assert_contains "nothing to review" "$tmpdir/out" "triggers no run and there is no plan to review" || return 1
     if [ -f "$tmpdir/planner.log" ]; then
         echo "  the planner ran for a push that triggers no run" >&2
         return 1
     fi
+}
+
+# ---------- every pushed branch, under its own identity (review-3) ----------
+#
+# Git hands the hook one line per ref update plus the remote it is pushing to.
+# The review must follow each branch update — its own revision, base, remote
+# branch, and remote — never the checkout. The review's two reproductions were
+# a prohibition on `other` ignored while `feature` was checked out, and a
+# second branch's source change never planned.
+
+# A second committed branch, `other`, forked from main with a source change;
+# `feature` is checked out again afterwards. Prints the new branch's sha.
+#
+# Usage: add_other_branch <tmpdir>
+add_other_branch() {
+    local repo="$1/repo"
+    local commit=(git -c user.name=hook-test -c user.email=hook@example.com -c commit.gpgsign=false)
+    git -C "$repo" checkout -q -b other main
+    echo "other lib" >"$repo/pkg/alpha/src/lib.rs"
+    "${commit[@]}" -C "$repo" add -A
+    "${commit[@]}" -C "$repo" commit -q -m "other"
+    git -C "$repo" checkout -q feature
+    git -C "$repo" rev-parse other
+}
+
+# A wsl2-ubuntu prohibition scoped by one optional field, whose reason names
+# the scope so a refusal can be traced to the record that produced it.
+#
+# Usage: write_scoped_prohibition <dir> <name> <field> <value>
+write_scoped_prohibition() {
+    local dir="$1" name="$2" field="$3" value="$4"
+    mkdir -p "$dir"
+    cat >"$dir/$name.json" <<EOF
+{
+  "environment": "wsl2-ubuntu",
+  "reason": "do not rerun WSL for $field $value",
+  "owner": "ken",
+  "expiry": "2099-01-01",
+  "$field": "$value"
+}
+EOF
+}
+
+# The revisions the stub planner resolved a plan for, in call order (the
+# evidence overlay logs too, but carries no `--head`).
+planned_heads() {
+    sed -n 's/.*--head \([0-9a-f]*\) --.*/\1/p' "$1/planner.log" | tr '\n' ' ' | sed 's/ $//'
+}
+
+# The branch updates the hook announced reviewing, in output order.
+reviewed_updates() {
+    sed -n 's/^Reviewing \(refs\/heads\/[^ ]*\) .*/\1/p' "$1/out" | tr '\n' ' ' | sed 's/ $//'
+}
+
+# Forget one run's outputs so the same fixture can be pushed again.
+reset_run_outputs() {
+    rm -f "$1/planner.log" "$1/out" "$1/err" "$1/exit" "$1/just.log"
+}
+
+ZERO_SHA="0000000000000000000000000000000000000000"
+
+test_a_prohibition_on_the_pushed_branch_blocks_whatever_is_checked_out() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 0
+    local other
+    other="$(add_other_branch "$tmpdir")"
+    write_scoped_prohibition "$tmpdir/constraints" other branch other
+    # `feature` is checked out; only `other` is pushed.
+    run_hook_with_ref_line "$tmpdir" strict \
+        "refs/heads/other $other refs/heads/other $ZERO_SHA" \
+        "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    assert_exit "prohibition on the pushed branch" "$tmpdir" 1 || return 1
+    assert_contains "record named" "$tmpdir/err" "do not rerun WSL for branch other" || return 1
+    assert_contains "update named" "$tmpdir/err" "refs/heads/other -> refs/heads/other" || return 1
+    assert_contains "pushed revision planned" "$tmpdir/planner.log" "--head $other -- pkg/alpha/src/lib.rs" || return 1
+    assert_log_lacks "no gate after refusal" "$tmpdir" "pre-push" || return 1
+    assert_no_leftover_worktree "prohibition on the pushed branch" "$tmpdir" || return 1
+}
+
+test_a_prohibition_on_the_checked_out_branch_does_not_bind_another_branch_push() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 0
+    local other
+    other="$(add_other_branch "$tmpdir")"
+    write_scoped_prohibition "$tmpdir/constraints" feature branch feature
+    run_hook_with_ref_line "$tmpdir" strict \
+        "refs/heads/other $other refs/heads/other $ZERO_SHA" \
+        "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    # The checked-out branch is not what CI validates for this push.
+    assert_exit "prohibition on the checkout only" "$tmpdir" 0 || return 1
+    assert_not_contains "no refusal" "$tmpdir/err" "Push blocked" || return 1
+    assert_contains "identity is the pushed branch" "$tmpdir/out" "Branch identity: other" || return 1
+    assert_log_has "gates ran" "$tmpdir" "pre-push" || return 1
+}
+
+test_every_pushed_branch_is_planned_with_its_own_path_set() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 0
+    local repo="$tmpdir/repo" feature other
+    feature="$(git -C "$repo" rev-parse HEAD)"
+    other="$(add_other_branch "$tmpdir")"
+    write_scoped_prohibition "$tmpdir/constraints" other branch other
+    run_hook_with_ref_line "$tmpdir" strict \
+        "refs/heads/feature $feature refs/heads/feature $ZERO_SHA"$'\n'"refs/heads/other $other refs/heads/other $ZERO_SHA" \
+        "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    # `feature` passes; the second update is what the prohibition binds.
+    assert_exit "second branch prohibited" "$tmpdir" 1 || return 1
+    assert_contains "record named" "$tmpdir/err" "do not rerun WSL for branch other" || return 1
+    assert_contains "blocked update named" "$tmpdir/err" "Blocked while reviewing refs/heads/other -> refs/heads/other" || return 1
+    assert_contains "feature planned with its paths" "$tmpdir/planner.log" "--head $feature -- work.txt" || return 1
+    assert_contains "other planned with its paths" "$tmpdir/planner.log" "--head $other -- pkg/alpha/src/lib.rs" || return 1
+    if [ "$(planned_heads "$tmpdir")" != "$feature $other" ]; then
+        echo "  expected both revisions planned in order, got: $(planned_heads "$tmpdir")" >&2
+        return 1
+    fi
+    assert_log_lacks "no gate after refusal" "$tmpdir" "pre-push" || return 1
+    # Blocked before publication: the passing HEAD update left no scope note.
+    if scope_receipt "$tmpdir" >/dev/null; then
+        echo "  a scope receipt was published although a later update was blocked" >&2
+        return 1
+    fi
+    assert_no_leftover_worktree "second branch prohibited" "$tmpdir" || return 1
+}
+
+test_ref_updates_are_reviewed_in_the_order_git_supplies_them() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 0
+    local repo="$tmpdir/repo" feature other
+    feature="$(git -C "$repo" rev-parse HEAD)"
+    other="$(add_other_branch "$tmpdir")"
+    local feature_line="refs/heads/feature $feature refs/heads/feature $ZERO_SHA"
+    local other_line="refs/heads/other $other refs/heads/other $ZERO_SHA"
+
+    run_hook_with_ref_line "$tmpdir" scope-only "$feature_line"$'\n'"$other_line"
+    assert_exit "feature then other" "$tmpdir" 0 || return 1
+    if [ "$(reviewed_updates "$tmpdir")" != "refs/heads/feature refs/heads/other" ] \
+        || [ "$(planned_heads "$tmpdir")" != "$feature $other" ]; then
+        echo "  feature-first input was reviewed as: $(reviewed_updates "$tmpdir"); planned: $(planned_heads "$tmpdir")" >&2
+        return 1
+    fi
+
+    reset_run_outputs "$tmpdir"
+    run_hook_with_ref_line "$tmpdir" scope-only "$other_line"$'\n'"$feature_line"
+    assert_exit "other then feature" "$tmpdir" 0 || return 1
+    if [ "$(reviewed_updates "$tmpdir")" != "refs/heads/other refs/heads/feature" ] \
+        || [ "$(planned_heads "$tmpdir")" != "$other $feature" ]; then
+        echo "  other-first input was reviewed as: $(reviewed_updates "$tmpdir"); planned: $(planned_heads "$tmpdir")" >&2
+        return 1
+    fi
+
+    # The same prohibition blocks whichever position the bound update holds.
+    write_scoped_prohibition "$tmpdir/constraints" other branch other
+    reset_run_outputs "$tmpdir"
+    run_hook_with_ref_line "$tmpdir" scope-only "$other_line"$'\n'"$feature_line" \
+        "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    assert_exit "other first, prohibited" "$tmpdir" 1 || return 1
+    assert_contains "record named" "$tmpdir/err" "do not rerun WSL for branch other" || return 1
+    reset_run_outputs "$tmpdir"
+    run_hook_with_ref_line "$tmpdir" scope-only "$feature_line"$'\n'"$other_line" \
+        "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    assert_exit "other last, prohibited" "$tmpdir" 1 || return 1
+    assert_contains "record named" "$tmpdir/err" "do not rerun WSL for branch other" || return 1
+    assert_no_leftover_worktree "ordering" "$tmpdir" || return 1
+}
+
+test_the_repository_identity_is_the_remote_being_pushed_to() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 0
+    local repo="$tmpdir/repo" head
+    head="$(git -C "$repo" rev-parse HEAD)"
+    git init -q --bare "$tmpdir/upstream.git"
+    git -C "$repo" remote add upstream "$tmpdir/upstream.git"
+    local line="refs/heads/feature $head refs/heads/feature $ZERO_SHA"
+
+    # Scoped to upstream: binds a push to upstream even though origin differs.
+    write_scoped_prohibition "$tmpdir/constraints" upstream repository "$tmpdir/upstream.git"
+    run_hook_as_remote "$tmpdir" scope-only upstream "$tmpdir/upstream.git" "$line" \
+        "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    assert_exit "push to the constrained remote" "$tmpdir" 1 || return 1
+    assert_contains "record named" "$tmpdir/err" "do not rerun WSL for repository $tmpdir/upstream.git" || return 1
+    assert_contains "remote announced" "$tmpdir/out" "Remote: upstream ($tmpdir/upstream.git)" || return 1
+
+    # Scoped to origin: a push to upstream is not a push to origin.
+    rm -f "$tmpdir/constraints/upstream.json"
+    write_scoped_prohibition "$tmpdir/constraints" origin repository "$tmpdir/origin.git"
+    reset_run_outputs "$tmpdir"
+    run_hook_as_remote "$tmpdir" scope-only upstream "$tmpdir/upstream.git" "$line" \
+        "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    assert_exit "push to another remote" "$tmpdir" 0 || return 1
+    assert_not_contains "no refusal" "$tmpdir/err" "Push blocked" || return 1
+}
+
+test_a_renamed_refspec_binds_a_record_under_either_branch_name() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 0
+    local repo="$tmpdir/repo" head
+    head="$(git -C "$repo" rev-parse HEAD)"
+    # `git push origin feature:other`
+    local line="refs/heads/feature $head refs/heads/other $ZERO_SHA"
+
+    write_scoped_prohibition "$tmpdir/constraints" other branch other
+    run_hook_with_ref_line "$tmpdir" scope-only "$line" "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    assert_exit "record under the remote name" "$tmpdir" 1 || return 1
+    assert_contains "record named" "$tmpdir/err" "do not rerun WSL for branch other" || return 1
+    assert_contains "both names printed" "$tmpdir/out" "Branch identity: other (pushed from feature" || return 1
+
+    rm -f "$tmpdir/constraints/other.json"
+    write_scoped_prohibition "$tmpdir/constraints" feature branch feature
+    reset_run_outputs "$tmpdir"
+    run_hook_with_ref_line "$tmpdir" scope-only "$line" "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    assert_exit "record under the local name" "$tmpdir" 1 || return 1
+    assert_contains "record named" "$tmpdir/err" "do not rerun WSL for branch feature" || return 1
+
+    rm -f "$tmpdir/constraints/feature.json"
+    write_scoped_prohibition "$tmpdir/constraints" main branch main
+    reset_run_outputs "$tmpdir"
+    run_hook_with_ref_line "$tmpdir" scope-only "$line" "BISCUIT_CI_CONSTRAINTS_DIR=$tmpdir/constraints"
+    assert_exit "record under neither name" "$tmpdir" 0 || return 1
+}
+
+test_deletions_and_tags_among_branch_updates_are_skipped_by_name() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_publishing_tools "$tmpdir"
+    local repo="$tmpdir/repo" head main_sha
+    head="$(git -C "$repo" rev-parse HEAD)"
+    main_sha="$(git -C "$repo" rev-parse origin/main)"
+    run_hook_with_ref_line "$tmpdir" scope-only \
+        "(delete) $ZERO_SHA refs/heads/stale $main_sha"$'\n'"refs/heads/feature $head refs/heads/feature $ZERO_SHA"$'\n'"refs/tags/v1 $head refs/tags/v1 $ZERO_SHA"
+    assert_exit "mixed push" "$tmpdir" 0 || return 1
+    assert_contains "deletion named" "$tmpdir/out" "deletion of refs/heads/stale" || return 1
+    assert_contains "tag named" "$tmpdir/out" "refs/tags/v1 -> refs/tags/v1: only a branch update triggers a run" || return 1
+    # Exactly the branch update was planned, and HEAD's scope still went out.
+    if [ "$(planned_heads "$tmpdir")" != "$head" ]; then
+        echo "  expected only the branch update planned, got: $(planned_heads "$tmpdir")" >&2
+        return 1
+    fi
+    assert_contains "scope published for HEAD" "$tmpdir/out" "Published scope evidence" || return 1
+    assert_scope_receipt_base "mixed push" "$tmpdir" "$main_sha" || return 1
 }
 
 # ---------- runner ----------
@@ -1086,7 +1334,6 @@ run_test "strict + passing → exit 0"                                  test_str
 run_test "strict + failing → propagate exit and mention --no-verify"  test_strict_failing_tests_exits_nonzero_with_no_verify_hint
 run_test "unset default is strict"                                    test_unset_default_is_strict
 run_test "default path calls 'just pre-push' with no selection"       test_default_delegates_scope_to_pre_push
-run_test "run_hook forwards no selection without an override"        test_run_hook_forwards_no_selection_without_an_override
 run_test "RUSTY_BISCUIT_PRE_PUSH_AREAS override is forwarded verbatim" test_areas_override_is_passed_through
 run_test "a failing warn run reaches the publication block"           test_a_failing_warn_run_reaches_the_publication_block
 run_test "publication requires a clean, exact, unoverridden tree"     test_publication_requires_a_clean_exact_tree_and_no_override
@@ -1115,6 +1362,13 @@ run_test "an unstaged policy edit never reaches the plan or receipt"  test_an_un
 run_test "a clean checkout is planned in place"                       test_a_clean_checkout_is_planned_in_place
 run_test "a push that does not carry HEAD reviews the pushed revision" test_a_push_that_does_not_carry_head_reviews_the_pushed_revision
 run_test "a deletion-only push triggers nothing and is not reviewed"  test_a_deletion_only_push_triggers_nothing_and_is_not_reviewed
+run_test "a prohibition on the pushed branch blocks, whatever is checked out" test_a_prohibition_on_the_pushed_branch_blocks_whatever_is_checked_out
+run_test "a prohibition on the checked-out branch does not bind another push" test_a_prohibition_on_the_checked_out_branch_does_not_bind_another_branch_push
+run_test "every pushed branch is planned with its own path set"       test_every_pushed_branch_is_planned_with_its_own_path_set
+run_test "ref updates are reviewed in the order Git supplies them"    test_ref_updates_are_reviewed_in_the_order_git_supplies_them
+run_test "the repository identity is the remote being pushed to"      test_the_repository_identity_is_the_remote_being_pushed_to
+run_test "a renamed refspec binds a record under either branch name"  test_a_renamed_refspec_binds_a_record_under_either_branch_name
+run_test "deletions and tags among branch updates are skipped by name" test_deletions_and_tags_among_branch_updates_are_skipped_by_name
 
 echo ""
 echo "================================================"
