@@ -2506,11 +2506,20 @@ fn the_fan_out_gate_derives_from_the_matrix_not_the_impacted_list() {
 #[test]
 fn ci_tooling_changes_schedule_the_tooling_leg() {
     let policy = read("scripts/ci/affected_scope.py");
-    assert!(
-        policy
-            .contains(r#"CI_TOOLING_PREFIXES = ("scripts/", ".github/ci/", ".github/workflows/")"#),
-        "affected_scope.py must map scripts/, .github/ci/, and .github/workflows/ to the ci_tooling flag"
-    );
+    // Membership, not the exact tuple: the leg also owns suites no Cargo
+    // package selects (the test-audit tool and the pnpm workspace it resolves
+    // through), so the list grows. These three are the ones this contract owns.
+    let declared = policy
+        .split_once("CI_TOOLING_PREFIXES = (")
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .map(|(block, _)| block)
+        .expect("affected_scope.py must declare CI_TOOLING_PREFIXES");
+    for prefix in [r#""scripts/""#, r#"".github/ci/""#, r#"".github/workflows/""#] {
+        assert!(
+            declared.contains(prefix),
+            "affected_scope.py must map {prefix} to the ci_tooling flag"
+        );
+    }
 
     let ci = workflow("ci.yml");
     assert!(

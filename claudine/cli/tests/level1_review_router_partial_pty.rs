@@ -1,4 +1,4 @@
-//! Level 2 PTY tests for provided-partial resolution through the shipped review router.
+//! Level 1 PTY tests for provided-partial resolution through the shipped review router.
 //!
 //! From `fixes/2026-09-10-no-interactive-completion`: a supplied `spec=` partial
 //! must be offered for completion *before* the router's first `initialize` guard
@@ -11,17 +11,24 @@
 //!
 //! These tests prove ordering and data flow through manufactured bytes; what a
 //! terminal emulator draws for the same flow is
-//! `level2_provided_partial_file_capture.rs`'s job. The plain single/zero-match
-//! confirmation flow, which no emulator participates in either, is Level 1 —
-//! see `level1_provided_partial_file_pty.rs`.
+//! `level2_provided_partial_file_capture.rs`'s job. The single/zero-match
+//! confirmation flow this one builds on is
+//! `level1_provided_partial_file_pty.rs`.
 //!
-//! Gating is `#![cfg(unix)]` (`expectrl`'s `OsSession` is Unix-only) plus
-//! `require_level!(Level::L2, pty_available(), ...)`.
+//! ## Tier
+//!
+//! **Level 1**, and gating mirrors `level1_provided_partial_file_pty.rs`:
+//! `#![cfg(unix)]` is the only exclusion, because `expectrl`'s `OsSession` is
+//! Unix-only. On a selected platform `expect_level!(Level::L1, pty_available(),
+//! ...)` **fails** when the PTY is missing rather than skipping: Level 1 is the
+//! mandatory suite, where a skip is indistinguishable from a pass. `expectrl`
+//! opens `/dev/ptmx` and the test manufactures every byte the child reads; no
+//! terminal emulator participates.
 //!
 //! Run via the canonical recipe:
 //!
 //! ```text
-//! just test-l2
+//! just test
 //! ```
 
 #![cfg(unix)]
@@ -31,7 +38,7 @@ use expectrl::session::OsSession;
 use std::fs;
 use std::io::Write;
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Level, expect_level};
 
 mod common;
 use common::pty::*;
@@ -131,8 +138,8 @@ fn wait_for_confirmation_input(session: &OsSession) {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_review_router_partial_yolo_confirms_before_initialize_and_survives_proxy() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_review_router_partial_yolo_confirms_before_initialize_and_survives_proxy() {
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let (fixture, router) = review_router_fixture(false);
     let mut session = review_router_session(&fixture, &router);
     // Only the in-area spec is a candidate, so the flow must reach the
@@ -173,8 +180,8 @@ fn level2_review_router_partial_yolo_confirms_before_initialize_and_survives_pro
 /// directory), and the confirmation assertion would pass vacuously.
 #[test]
 #[serial_test::serial(pty)]
-fn level2_review_router_partial_repo_root_launch_widens_candidates_to_the_chooser() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_review_router_partial_repo_root_launch_widens_candidates_to_the_chooser() {
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let (fixture, router) = review_router_fixture(false);
     let repo_root = fixture.cwd().to_path_buf();
     let mut session = review_router_session_in(&fixture, &router, &repo_root);
@@ -202,8 +209,8 @@ fn level2_review_router_partial_repo_root_launch_widens_candidates_to_the_choose
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_review_router_partial_chooser_keeps_selected_identity_in_proxy() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_review_router_partial_chooser_keeps_selected_identity_in_proxy() {
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let (fixture, router) = review_router_fixture(true);
     let mut session = review_router_session(&fixture, &router);
     let transcript = wait_for_marker(&mut session, "did not match a file directly", Duration::from_secs(15));
@@ -223,8 +230,8 @@ fn level2_review_router_partial_chooser_keeps_selected_identity_in_proxy() {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_review_router_partial_decline_and_cancel_stop_before_initialize() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_review_router_partial_decline_and_cancel_stop_before_initialize() {
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     for multiple in [false, true] {
         let (fixture, router) = review_router_fixture(multiple);
         let mut session = review_router_session(&fixture, &router);
@@ -247,8 +254,8 @@ fn level2_review_router_partial_decline_and_cancel_stop_before_initialize() {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_proxy_target_schema_resolves_partial_once_before_its_initialize() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_proxy_target_schema_resolves_partial_once_before_its_initialize() {
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let (fixture, _) = review_router_fixture(false);
     let entry = fixture.cwd().join("prompts/entry.md");
     common::write(

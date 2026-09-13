@@ -650,7 +650,7 @@ fn both_command_surfaces_keep_audio_out_of_the_developers_machine() {
         );
         assert_same_dir(
             recorded["PLAYA_SPOOL_DIR"].trim_matches(['[', ']']),
-            &fixture.workspace_path().join("playa-spool"),
+            &fixture.audio_spool(),
             "the {surface} surface must point the spool at the fixture, not at \
              the shared per-user root",
         );
