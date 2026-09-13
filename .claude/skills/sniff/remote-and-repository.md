@@ -42,8 +42,10 @@ Ordinary aggregate projection reuses worktree metadata and opens zero linked
 repositories. Focused inspection may open a registered target to validate it:
 
 - Current/main/linked valid targets are reported.
-- An absent registered target is stale and omitted.
-- A path that exists but is a corrupt repository is an error.
+- A registered target whose directory or `.git` file is absent is stale and
+  omitted, matching what `git worktree list` marks as prunable.
+- A target whose `.git` file exists but does not open as a repository is
+  corrupt and is an error.
 - Ahead/behind work follows the focused detail request and does not widen the
   aggregate path.
 

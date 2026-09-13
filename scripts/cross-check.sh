@@ -32,6 +32,28 @@
 # --all-features, --no-default-features) go to the archive build; every other
 # extra arg goes to the run.
 #
+# The remote run never reads the developer's `~/.config`. On the WSL guest
+# that directory is a CIFS mount of the Synology NAS, and when the NAS is down
+# `git` dies on its global config and cargo's package-file listing (gitoxide,
+# honoring the global excludes at `$XDG_CONFIG_HOME/git/ignore`) dies with
+# "Host is down" — before a single test runs (2026-09-10). The Unix preamble
+# therefore sets GIT_CONFIG_GLOBAL=/dev/null (fetch/reset/clean/checkout/apply
+# need no identity) and points XDG_CONFIG_HOME at an empty local directory.
+#
+# A WSL run whose tested tree IS the outgoing head's tree, on a clean remote
+# worktree, with no test filter, becomes a published `wsl2-ubuntu` validation
+# receipt — so "prior WSL evidence" is an ordinary receipt CI can reuse rather
+# than a log someone remembers. Every other run publishes nothing and prints
+# the reason: this script ships the developer's LOCAL tree, uncommitted work
+# included, so most of its runs test something no head names.
+#
+# BISCUIT_TEST_REQUIRED_BACKENDS is forwarded from the caller's environment to
+# every remote run when set. Without it a Level 2 test whose backend is absent
+# on the host skips, and nextest prints PASS in ~0.02 s — indistinguishable
+# from evidence unless you read the duration. Name the backend you expect
+# (e.g. `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just cross-check --os wsl …
+# --features terminal-tests level2_`) and the skip becomes a failure.
+#
 # The standing clones and their target dirs persist between runs so compile
 # caches are warm:
 #   $BUILD_LINUX   ~/ci-verification/rusty-biscuit
@@ -139,6 +161,14 @@ for arg in "${extra_args[@]}"; do
     esac
 done
 
+# Forwarded verbatim into each remote script, so it is validated here rather
+# than quoted for two shells: comma-separated backend identifiers only.
+required_backends="${BISCUIT_TEST_REQUIRED_BACKENDS:-}"
+if [[ -n "${required_backends}" && ! "${required_backends}" =~ ^[A-Za-z0-9_,-]+$ ]]; then
+    echo "cross-check: BISCUIT_TEST_REQUIRED_BACKENDS must be comma-separated backend names, got: ${required_backends}" >&2
+    exit 2
+fi
+
 cd "$(git rev-parse --show-toplevel)"
 origin_url="$(git remote get-url origin)"
 branch="$(git rev-parse --abbrev-ref HEAD)"
@@ -187,6 +217,11 @@ unix_prelude() {
 set -euo pipefail
 base="\$HOME/ci-verification"
 repo="\$HOME/${UNIX_DIR}"
+# Never touch the developer's ~/.config (a network mount on the WSL guest).
+export GIT_CONFIG_GLOBAL=/dev/null
+export XDG_CONFIG_HOME="\$base/.xdg-empty"
+mkdir -p "\$XDG_CONFIG_HOME"
+${required_backends:+export BISCUIT_TEST_REQUIRED_BACKENDS='${required_backends}'}
 lock="\$base/.cross-check.lock"
 patch="\$base/cross-check-${run_id}.patch"
 self="\$base/cross-check-${run_id}.sh"
@@ -237,17 +272,39 @@ unix_run_archive() {
     cat <<EOF
 archive="\$base/${package}.tar.zst"
 extract="\$(mktemp -d "\$base/extract.XXXXXX")"
+report="\$base/cross-check-${run_id}-report.xml"
 # Hide the builder's target dir so a compile-time build-host path cannot
 # resolve; restore it on every exit so the cache survives.
 extra_cleanup() {
     cd "\$repo" 2> /dev/null && if [ -d target.hold ]; then mv target.hold target; fi
     rm -rf "\$extract" "\$archive"
 }
+# What the remote actually tested. Printed rather than assumed: a receipt for
+# this run is only publishable when this tree IS the outgoing head's tree and
+# the worktree was clean (spec section 3.8).
+echo "cross-check-tree: \$(git rev-parse HEAD^{tree})"
+echo "cross-check-dirty: \$(git status --porcelain | wc -l | tr -d ' ')"
+export NEXTEST_PROFILE="\${NEXTEST_PROFILE:-ci}"
+started=\$(date +%s)
 cargo nextest archive -p '${package}' --archive-file "\$archive" ${archive_args[*]@Q}
 mv target target.hold
+set +e
 cargo nextest run --archive-file "\$archive" \\
     --workspace-remap "\$repo" --extract-to "\$extract" \\
     --no-fail-fast ${run_args[*]@Q}
+run_code=\$?
+set -e
+echo "cross-check-exit: \$run_code"
+echo "cross-check-duration: \$(( \$(date +%s) - started ))"
+# The archive run's target directory is the extraction root, so that is where
+# the JUnit report lands. The builder's own target dir is checked too, because
+# a future nextest could place it there. If neither exists the run publishes
+# nothing and says so locally — it never invents a measurement.
+for candidate in "\$extract/target/nextest/\$NEXTEST_PROFILE/test-results.xml" \\
+    "\$repo/target.hold/nextest/\$NEXTEST_PROFILE/test-results.xml"; do
+    if [ -f "\$candidate" ]; then cp "\$candidate" "\$report"; break; fi
+done
+exit \$run_code
 EOF
 }
 
@@ -262,8 +319,74 @@ run_unix() {
     [[ "${patch_lines}" != "0" ]] && ship+=("${patch_file}")
     "${SSH[@]}" "${host}" 'mkdir -p "$HOME/ci-verification"'
     "${SCP[@]}" "${ship[@]}" "${host}:ci-verification/"
-    # A login shell is what puts cargo on PATH on every Unix host.
+    # A login shell is what puts cargo on PATH on every Unix host. The WSL leg's
+    # output is teed so its `cross-check-*:` markers can be read afterwards
+    # without hiding the run from the terminal.
+    if [[ "${os}" == "wsl" ]]; then
+        "${SSH[@]}" "${host}" "bash -l \"\$HOME/ci-verification/cross-check-${run_id}.sh\"" \
+            2>&1 | tee "${work_dir}/wsl.log"
+        return "${PIPESTATUS[0]}"
+    fi
     "${SSH[@]}" "${host}" "bash -l \"\$HOME/ci-verification/cross-check-${run_id}.sh\""
+}
+
+# Turn a qualifying WSL archive run into a `wsl2-ubuntu` validation receipt.
+#
+# "Qualifying" is `local_evidence.py cross-check`'s decision, not this script's:
+# exact outgoing tree, clean remote worktree, unfiltered run, and a real report.
+# Anything else prints the reason and publishes nothing (spec section 3.8).
+publish_wsl_receipt() {
+    local log="${work_dir}/wsl.log"
+    [[ -f "${log}" ]] || return 0
+    local tested_tree dirty exit_code duration
+    tested_tree="$(sed -n 's/^cross-check-tree: //p' "${log}" | tail -n1)"
+    dirty="$(sed -n 's/^cross-check-dirty: //p' "${log}" | tail -n1)"
+    exit_code="$(sed -n 's/^cross-check-exit: //p' "${log}" | tail -n1)"
+    duration="$(sed -n 's/^cross-check-duration: //p' "${log}" | tail -n1)"
+
+    local report="${work_dir}/wsl-report.xml"
+    if ! "${SCP[@]}" "${HOST[wsl]}:ci-verification/cross-check-${run_id}-report.xml" \
+        "${report}" 2> /dev/null; then
+        echo "cross-check: publishing no receipt — the remote run produced no JUnit report"
+        return 0
+    fi
+
+    local plan="${work_dir}/plan.json" receipt="${work_dir}/receipt.json"
+    local head_sha merge_base
+    head_sha="$(git rev-parse HEAD)"
+    if ! merge_base="$(git merge-base origin/main "${head_sha}" 2> /dev/null)"; then
+        echo "cross-check: publishing no receipt — no merge base with origin/main"
+        return 0
+    fi
+    local -a changed=()
+    while IFS= read -r changed_path; do
+        [[ -n "${changed_path}" ]] && changed+=("${changed_path}")
+    done < <(git diff --name-only "${merge_base}")
+    if ! python3 scripts/ci/affected_scope.py --resolved-plan \
+        --base "${merge_base}" --head "${head_sha}" \
+        "${changed[@]}" > "${plan}" 2> /dev/null; then
+        echo "cross-check: publishing no receipt — the resolved plan could not be calculated"
+        return 0
+    fi
+
+    local -a extra=()
+    [[ -n "${run_args[*]:-}" ]] && extra=(--run-filters "${run_args[*]}")
+    [[ "${dirty:-1}" != "0" ]] && extra+=(--remote-dirty)
+    if ! python3 scripts/ci/local_evidence.py cross-check \
+        --plan "${plan}" --package "${package}" --report "${report}" \
+        --exit-code "${exit_code:-1}" --duration "${duration:-0}" \
+        --tested-tree "${tested_tree:-}" --base "${merge_base}" --head "${head_sha}" \
+        --host-label "WSL2 (${HOST[wsl]}, cross-check archive mode)" \
+        "${extra[@]}" > "${receipt}"; then
+        return 0
+    fi
+    git notes --ref refs/notes/ci-local/wsl2-ubuntu add -f -F "${receipt}" "${head_sha}"
+    if git push --no-verify origin \
+        refs/notes/ci-local/wsl2-ubuntu:refs/notes/ci-local/wsl2-ubuntu > /dev/null 2>&1; then
+        echo "cross-check: published a wsl2-ubuntu receipt for ${package} at ${head_sha:0:9}."
+    else
+        echo "cross-check: recorded a wsl2-ubuntu receipt locally; it could not be pushed."
+    fi
 }
 
 run_windows() {
@@ -275,6 +398,7 @@ run_windows() {
     cat > "${script}" <<EOF
 \$base = '${WIN_BASE}'
 \$repo = '${WIN_DIR}'
+${required_backends:+\$env:BISCUIT_TEST_REQUIRED_BACKENDS = '${required_backends}'}
 \$lock = "\$base\\.cross-check.lock"
 \$patch = "\$base\\cross-check-${run_id}.patch"
 \$self = "\$base\\cross-check-${run_id}.ps1"
@@ -342,6 +466,10 @@ for os in "${ORDER[@]}"; do
         if run_unix "${os}"; then results[${os}]="pass"; else results[${os}]="FAIL"; fi
     fi
 done
+
+if [[ -n "${want[wsl]:-}" ]]; then
+    publish_wsl_receipt || true
+fi
 
 echo
 echo "cross-check summary for ${package}:"

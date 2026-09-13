@@ -1,0 +1,8 @@
+kind: schema
+types:
+    log: file(required; eager; match(**implementation**.md)) -> the implementation log file location
+    kind: enum(initial-spec-implementation, spec-review-implementation, review-implementation, review-implementation-followup; required; eager) -> identifies what _kind_ of implementation this is
+    spec: file -> pass in a spec file when this implementation is based on a spec
+    design: file -> pass in a design file when the implementation is partially based on a design document
+    iteration: number -> a number describing what iteration in a review/fix loop this implementation was in (where that is appropriate)
+    review: file -> optionally pass in the review file that this implementation was based on

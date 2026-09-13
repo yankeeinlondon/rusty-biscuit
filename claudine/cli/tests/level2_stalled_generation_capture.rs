@@ -100,6 +100,28 @@ fn agent_error_row_has_red(raw: &str) -> bool {
         .any(|form| row.contains(form))
 }
 
+fn fixture_command(workspace: &std::path::Path, command: &str) -> (String, String) {
+    static SEQUENCE: AtomicU32 = AtomicU32::new(0);
+    let marker = format!(
+        "OPENCODE_{}_{}",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed),
+    );
+    // A shared pane may still occupy a previous test's deleted directory.
+    // Reset both its launch origin and viewport before executing this fixture.
+    let script = format!(
+        "cd {} && {{ printf '\\033[2J\\033[H'; {command}; }} \
+         && printf '\\n{marker}:ok\\n' || printf '\\n{marker}:failed\\n'",
+        common::sh_quote(&workspace.to_string_lossy()),
+    );
+    (format!("/bin/sh -c {}", common::sh_quote(&script)), marker)
+}
+
+fn completion_status<'a>(plain: &'a str, marker: &str) -> Option<&'a str> {
+    let prefix = format!("{marker}:");
+    plain.lines().find_map(|line| line.trim().strip_prefix(&prefix))
+}
+
 /// Drive a wrapped OpenCode run whose fake provider emits the stalled-generation
 /// retry-churn fingerprint, force the guard to trip via a tiny `stall_timeout`,
 /// and assert the rendered `AgentNative` stalled-generation block.
@@ -191,7 +213,10 @@ done
         .iter()
         .map(|(k, v)| format!("{k}='{}' ", v.replace('\'', "'\\''")))
         .collect();
-    let cmd = format!("{env_prefix}{claudine} opencode 'describe the thing'");
+    let (cmd, completion) = fixture_command(
+        workspace.path(),
+        &format!("{env_prefix}{} opencode 'describe the thing'", common::sh_quote(claudine)),
+    );
     harness
         .send_command_with_env(&cmd, &[])
         .expect("send wrapper command");
@@ -201,6 +226,11 @@ done
     // the test from racing the wrapper's spawn.
     let marker_deadline = Instant::now() + Duration::from_secs(30);
     while !ready_marker.exists() {
+        let frame = harness.capture().expect("capture provider startup");
+        if completion_status(&frame.plain, &completion).is_some() && !ready_marker.exists() {
+            kill_session_by_name(&session);
+            panic!("wrapper exited before the provider started:\n{}", frame.plain);
+        }
         if Instant::now() >= marker_deadline {
             kill_session_by_name(&session);
             panic!("fake provider never reached its run loop within 30s");
@@ -208,11 +238,8 @@ done
         std::thread::sleep(Duration::from_millis(25));
     }
 
-    // Poll the captured frame for the rendered stalled-generation block. The
-    // guard trips after the fourth-plus streamed generation crosses the 0.1s
-    // budget, so the block appears within a few churn intervals. Poll on the
-    // single word `stalled` (the message and label both word-wrap inside the
-    // rendered BlockQuote, so a multi-word needle could straddle a wrap).
+    // Wait for this command's exit so the error block is complete, including
+    // the diagnostic context and styling asserted below.
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut last_raw = String::new();
     let mut last_plain = String::new();
@@ -221,8 +248,8 @@ done
         if let Ok(frame) = harness.capture() {
             last_raw = frame.raw;
             last_plain = frame.plain;
-            if last_plain.contains("stalled") {
-                rendered = true;
+            if completion_status(&last_plain, &completion).is_some() {
+                rendered = last_plain.contains("stalled");
                 break;
             }
         }
@@ -334,10 +361,30 @@ printf '%s\n' '{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"stat
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let _ = harness.resize(100, 60);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+    let previous_cwd = workspace.path().join("previous-fixture");
+    fs::create_dir(&previous_cwd).unwrap();
+    let entered = format!("PREVIOUS_CWD_{}", std::process::id());
+    harness.send_text(format!(
+        "cd {} && printf '\\n{entered}\\n'\n",
+        common::sh_quote(&previous_cwd.to_string_lossy()),
+    ).as_bytes()).expect("enter previous fixture directory");
+    let enter_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let frame = harness.capture().expect("capture previous directory marker");
+        if frame.plain.lines().any(|line| line.trim() == entered) {
+            break;
+        }
+        assert!(Instant::now() < enter_deadline, "previous cwd marker missing:\n{}", frame.plain);
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    fs::remove_dir(&previous_cwd).unwrap();
     let claudine = common::claudine_bin();
     let home = workspace.path().to_string_lossy().into_owned();
     let path = augmented_path(&path_dir).to_string_lossy().into_owned();
-    let command = format!("{claudine} opencode 'run one tool'; echo claudine_tool_rc:$?");
+    let (command, completion) = fixture_command(
+        workspace.path(),
+        &format!("{} opencode 'run one tool'", common::sh_quote(claudine)),
+    );
     harness
         .send_command_with_env(
             &command,
@@ -353,7 +400,8 @@ printf '%s\n' '{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"stat
     let deadline = Instant::now() + Duration::from_secs(30);
     let plain = loop {
         let frame = harness.capture().expect("capture pane");
-        if frame.plain.contains("claudine_tool_rc:0") {
+        if let Some(status) = completion_status(&frame.plain, &completion) {
+            assert_eq!(status, "ok", "OpenCode fixture failed:\n{}", frame.plain);
             break frame.plain;
         }
         assert!(
@@ -363,6 +411,7 @@ printf '%s\n' '{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"stat
         );
         harness.settle();
     };
+    assert!(!plain.contains(&entered), "previous fixture output leaked:\n{plain}");
     assert_eq!(plain.matches('←').count(), 1, "{plain}");
     assert_eq!(plain.matches('→').count(), 0, "{plain}");
 }

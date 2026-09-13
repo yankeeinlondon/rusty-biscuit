@@ -33,6 +33,11 @@ path = "drift.rs"
 required-features = ["local-tools"]
 
 [[bin]]
+name = "ci-plan"
+path = "ci-plan.rs"
+required-features = ["local-tools"]
+
+[[bin]]
 name = "ci-rollup"
 path = "ci-rollup.rs"
 

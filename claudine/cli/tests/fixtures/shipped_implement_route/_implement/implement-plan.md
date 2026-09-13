@@ -14,18 +14,49 @@ plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
-total_phases: "{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 0 : 0 }}"
-spec: "{{ file_exists(plan) ? file_exists(dirname(plan) + '/spec.md') ? dirname(plan) + '/spec.md'  :  null : null }}"
-# initialize:
-#     stack:
-#         - when: "phase >= total_phases"
-#           action: 
-#               - warn: "There was an attempt to implement a phase **<yellow>{{phase}}</yellow>** of the plan which is **too large**. This plan only has **<yellow>{{total_phases}}</yellow>** total phases!"
+total_phases: |-
+    {{
+        file_exists(plan)
+            ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 0
+            : 0
+    }}
+spec: |-
+    {{
+        file_exists(plan)
+            ? file_exists(dirname(plan) + '/spec.md')
+                ? dirname(plan) + '/spec.md'
+                :  null
+            : null
+    }}
+initialize:
+    stack:
+        - when: "!total_phases || total_phases <= 0"
+          action:
+              - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
+              - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
+              - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
 start:
     message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{area}}, **agent:** {{ctx.agent}}/{{ctx.model}})"
 success: 
     message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
     success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
+    stack:
+        - when: "ctx.dirty_files && !commit_message"
+          action:
+            - message: |-
+                staging all files from phase **#{{phase}}** in preparation for the git commit:
+
+                {{ as_unordered_list(ctx.dirty_files) }}
+        - when: "ctx.dirty_files && commit_message"
+          action:
+            - message: |-
+                staging all files from phase **#{{phase}}** in preparation for the git commit:
+
+                {{ as_unordered_list(ctx.dirty_files) }}
+        - when: "!ctx.dirty_files"
+          action:
+              - message: phase {{phase}} of the plan made no file changes!
+              - warn: phase {{phase}} of the plan made no file changes!
 blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:

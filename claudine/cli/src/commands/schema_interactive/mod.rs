@@ -42,8 +42,10 @@ use crate::completion::scopes::{self, ScopeContext};
 use crate::log;
 
 mod status;
+mod supplied;
 
 pub use status::render_status_report;
+pub(crate) use supplied::resolve_supplied_file_inputs;
 use status::escape_prose;
 
 /// Resolve [`InteractiveSchemaOptions`] from the user config plus
@@ -112,9 +114,9 @@ pub fn pre_validate_with_interactive_collection(
     // Caller records need canonical projection before a file-schema verdict:
     // this pre-validator has only raw setters and cannot preserve their
     // authoring context in a failure. The caller may therefore defer a plain
-    // schema verdict to preparation; interactive collection below still runs
-    // here, and its own outcomes (a resolved partial, a zero-match failure)
-    // are never deferred.
+    // schema verdict to preparation. Only that verdict defers: missing-value
+    // collection below still runs here, as does the partial-file fallback for
+    // the shapes `resolve_supplied_file_inputs` left unresolved.
     if defer_schema_verdict && matches!(err, CompositionError::SchemaValidation { .. }) {
         return Ok(PreValidatedSchema {
             source: source.clone(),
@@ -188,6 +190,11 @@ pub fn pre_validate_with_interactive_collection(
 /// launch area, filter by the provided substring, and drive a confirmation
 /// dialog (single match) or chooser (multiple). On selection, rewrite the
 /// property override and re-run [`pre_validate_schema`] once.
+///
+/// This is the residual path: a caller-supplied partial is normally completed
+/// earlier by `resolve_supplied_file_inputs`, which reaches only shapes whose
+/// file metadata is unambiguous. Root-level unions with zero or several
+/// applicable arms, and unions with referenced arms, still arrive here.
 ///
 /// The original error is preserved unchanged when the session is not
 /// interactive, when zero candidates match the partial, or when the user
@@ -275,7 +282,24 @@ fn resolve_provided_file_reference(
     is_array: bool,
 ) -> io::Result<Option<serde_json::Value>> {
     let ctx = ScopeContext::discover();
-    let candidates = provided_partial_candidates(patterns, provided, &ctx);
+    let Some(path) = choose_provided_file_reference(property, provided, patterns, &ctx)? else {
+        return Ok(None);
+    };
+    let value = resolve_file_value(&path)?;
+    if is_array {
+        Ok(Some(serde_json::Value::Array(vec![value])))
+    } else {
+        Ok(Some(value))
+    }
+}
+
+fn choose_provided_file_reference(
+    property: &str,
+    provided: &str,
+    patterns: &[String],
+    ctx: &ScopeContext,
+) -> io::Result<Option<std::path::PathBuf>> {
+    let candidates = provided_partial_candidates(patterns, provided, ctx);
     if candidates.is_empty() {
         return Ok(None);
     }
@@ -286,7 +310,7 @@ fn resolve_provided_file_reference(
             let detail = extract_file_detail(path);
             // As in `collect_file`: `match(...)` candidates routinely share a
             // basename, so the visible label is the cwd/repo-relative path.
-            let label = path_label(path, &ctx);
+            let label = path_label(path, ctx);
             ChoiceOption::new(label.clone(), label, detail)
         })
         .collect();
@@ -310,15 +334,7 @@ fn resolve_provided_file_reference(
         _ => choose_one_file(options)?,
     };
 
-    let Some(detail) = selected else {
-        return Ok(None);
-    };
-    let value = resolve_file_value(&detail.path)?;
-    if is_array {
-        Ok(Some(serde_json::Value::Array(vec![value])))
-    } else {
-        Ok(Some(value))
-    }
+    Ok(selected.map(|detail| detail.path))
 }
 
 /// Glob candidates filtered by the provided partial substring.

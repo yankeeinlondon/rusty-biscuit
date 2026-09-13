@@ -353,6 +353,9 @@ fn build_player_command(
     options: &PlaybackOptions,
     probed: Option<ProbedAudioMetadata>,
 ) -> Result<Command, PlaybackError> {
+    if options.requires_volume_control() && !metadata.supports_volume_control {
+        return Err(PlaybackError::UnsupportedVolume { player });
+    }
     let mut command = Command::new(metadata.binary_name());
 
     match player {
@@ -450,19 +453,19 @@ fn build_player_command(
         // Tier 3: Stream only (no volume/speed control)
         AudioPlayer::Mpg123 => {
             command.arg("-q");
-            // Note: volume/speed options ignored (not supported)
+            // Speed control is unavailable; explicit volume was rejected above.
             source.apply(&mut command);
         }
         AudioPlayer::Ogg123 => {
             command.arg("-q");
-            // Note: volume/speed options ignored (not supported)
+            // Speed control is unavailable; explicit volume was rejected above.
             source.apply(&mut command);
         }
 
         // Tier 4: No controllability
         AudioPlayer::AlsaAplay => {
             command.arg("-q");
-            // Note: volume/speed options ignored (not supported)
+            // Speed control is unavailable; explicit volume was rejected above.
             source.apply(&mut command);
         }
 
@@ -704,6 +707,9 @@ fn build_player_args(
     options: &PlaybackOptions,
     probed: Option<ProbedAudioMetadata>,
 ) -> Result<(&'static str, Vec<OsString>), PlaybackError> {
+    if options.requires_volume_control() && !metadata.supports_volume_control {
+        return Err(PlaybackError::UnsupportedVolume { player });
+    }
     let mut args: Vec<OsString> = Vec::new();
 
     match player {
@@ -901,6 +907,50 @@ mod tests {
 
     fn get_metadata(player: AudioPlayer) -> &'static crate::player::Player {
         PLAYER_LOOKUP.get(&player).unwrap()
+    }
+
+    #[test]
+    fn explicit_volume_rejects_incapable_players_before_command_creation() {
+        for (&player, metadata) in PLAYER_LOOKUP.iter() {
+            if metadata.supports_volume_control {
+                continue;
+            }
+            for volume in [0.0, 0.5, 1.0] {
+                let options = PlaybackOptions::new().with_volume(volume);
+                assert!(matches!(
+                    build_player_command(player, metadata, &mock_source(), &options, None),
+                    Err(PlaybackError::UnsupportedVolume { player: rejected }) if rejected == player
+                ));
+                #[cfg(feature = "async")]
+                assert!(matches!(
+                    build_player_args(player, metadata, &mock_source(), &options, None),
+                    Err(PlaybackError::UnsupportedVolume { player: rejected }) if rejected == player
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn supported_players_preserve_mute_in_sync_and_async_commands() {
+        for (&player, metadata) in PLAYER_LOOKUP.iter() {
+            if !metadata.supports_volume_control {
+                continue;
+            }
+            let options = PlaybackOptions::new().with_volume(0.0);
+            let command = build_player_command(player, metadata, &mock_source(), &options, None)
+                .expect("volume-capable player should accept mute");
+            let args: Vec<_> = command.get_args().map(OsStr::to_os_string).collect();
+            assert!(args.iter().any(|arg| {
+                matches!(arg.to_str(), Some("0" | "--volume=0" | "--gain=0"))
+            }), "{player:?} omitted mute: {args:?}");
+            #[cfg(feature = "async")]
+            {
+                let (_, async_args) = build_player_args(
+                    player, metadata, &mock_source(), &options, None,
+                ).expect("async volume-capable player should accept mute");
+                assert_eq!(args, async_args, "{player:?} changed mute across APIs");
+            }
+        }
     }
 
     #[test]

@@ -38,18 +38,28 @@ prompt: |-
 
     - Make sure the body of this document is idiomatic and standards based Markdown (CommonMark + GFM).
     - If you want to provide a visualization, use Mermaid code blocks to represent the visualization
-last_updated: 2026-06-02
+last_updated: 2026-09-10
 ---
 # Deploying Rust Binaries to Package Managers
 
-Rust compiles to self-contained native binaries, which is a gift for distribution: there is no runtime to ship and no interpreter to match. The challenge is **reach** — getting a release in front of users with the least friction, on whatever platform and package manager they already trust. This document enumerates the realistic deployment targets for a Rust CLI, explains what each one requires, flags the review/approval queues that can delay availability, and ends with a concrete, phased rollout plan for the `claudine` and `md` (Darkmatter) CLIs in this monorepo.
+> **Research snapshot, not repository policy.** This survey captures options as
+> of 2026-06-02. Verify changing versions, service requirements, and review
+> rules against primary sources. For the live rusty-biscuit release contract,
+> read `docs/topics/ci-cd.md` and [CI/CD and releases](./ci-cd.md).
+
+Rust can produce native binaries without a language runtime, but target-specific
+native libraries, signing, packaging, and installer conventions still shape
+distribution. This document enumerates realistic deployment targets for a Rust
+CLI, explains what each one requires, flags the review/approval queues that can
+delay availability, and ends with a proposed phased rollout for the `claudine`
+and `md` (Darkmatter) CLIs in this monorepo.
 
 ## TL;DR
 
 - **One artifact source feeds almost everything.** Build per-platform binaries once, attach them to a **GitHub Release**, and the majority of package managers become thin manifests that point at those assets. Invest here first.
-- **`cargo-dist` (now `dist`) generates the long tail for free** — shell/PowerShell installers, a Homebrew tap formula, an npm wrapper package, and a Windows MSI — all from one config block.
+- **`cargo-dist` (now `dist`) can generate much of the long tail** — shell/PowerShell installers, a Homebrew tap formula, an npm wrapper package, and a Windows MSI — from one config block. It is an option, not an adopted rusty-biscuit authority.
 - **Neon is the wrong tool for shipping a CLI to npm.** Neon builds native *Node addons* (libraries called from JS). A standalone CLI ships to npm as a tiny JS shim plus per-platform binary packages — the `esbuild`/`biome`/`ruff` pattern. No FFI required.
-- **crates.io (`cargo install`) is *not* a quick win for this repo** because every crate uses `path =` dependencies; publishing requires versioning and publishing the entire dependency graph first.
+- **crates.io (`cargo install`) is *not* a quick win for this repo** because publishable targets depend on an internal path-based crate graph; publishing requires explicit versions and a topological release plan.
 - **Community registries (Homebrew core, nixpkgs, winget, Fedora, Debian) gate on review.** Your own tap/bucket/flake/apt-repo is instant and fully under your control; the official channels add reach but cost weeks and notability thresholds.
 
 ## The Landscape of Deployment Targets
@@ -223,7 +233,13 @@ Everything below assumes these release assets exist.
 
 **Wrappers/config.** Each crate needs `description`, `license`, and `repository` in `[package]`. The binary crate is what users install.
 
-**The blocker for this monorepo.** crates.io **forbids `path` dependencies** in published crates — every dependency must resolve to a published, version-pinned crate. `claudine-cli` and `darkmatter-cli` depend on ~15 internal `path =` crates each (`biscuit-file`, `biscuit-terminal`, `sniff`, `darkmatter`, …), which themselves have internal path deps. Publishing requires topologically publishing the **entire internal graph** with real version numbers. That is exactly why `release-plz.toml` sets `publish = false` today. It is achievable but a project in itself (see milestones).
+**The blocker for this monorepo.** A packaged crate cannot rely on an unpublished
+path-only dependency. Internal dependencies need published versions and
+publish-compatible manifest entries, and their dependency graph must be
+released in topological order. `claudine-cli` and `darkmatter-cli` each depend
+on many internal crates, which themselves have internal dependencies. That is
+why `release-plz.toml` sets `publish = false` today. It is achievable but a
+project in itself (see milestones).
 
 ```bash
 # Publish order matters: leaves of the dependency graph first.
@@ -570,7 +586,12 @@ flowchart LR
 
 ## Recommendations for `claudine` and `md`
 
-The repo already has the hardest 60% done: `release-plz` cuts versioned GitHub Releases on every merge to `main`. The single missing primitive is **binary artifacts on those releases**. Add that, and a wide set of targets unlock with thin, automatable manifests.
+The repo already uses `release-plz`: successful CI on `main` opens or updates a
+draft release PR, and merging a PR labeled `release` creates versioned tags and
+GitHub releases. It does not publish on every merge to `main`. General CLI
+binary artifacts are a separate, unadopted distribution decision; the existing
+release-triggered integration workflow covers only its named integration
+packages.
 
 A few repo-specific notes that shape the plan:
 
@@ -612,7 +633,7 @@ Goal: real, auto-updating installs on every major platform with **no external re
 
 ```mermaid
 flowchart TD
-    M0[Now: release-plz cuts source-only GitHub Releases]
+    M0[Now: release-plz PR then labeled merge creates GitHub Releases]
     M1[M1: Binaries attached to every release]
     M2[M2: brew tap + Scoop bucket + npm + install scripts live]
     M3[M3: PyPI/uv + apt repo + COPR + AUR + Nix flake + winget]

@@ -15,10 +15,10 @@
 //! - `say:` is a direct `biscuit_speaks` library call with no configuration
 //!   gate, so a test running the shipped file speaks aloud on the host.
 //! - `effect: sad-trombone` plays audio through `playa`, likewise ungated.
-//! - `shell: "git add ."` / `shell: "just commit"` are denied without an
-//!   interactive approval handler, which diverts the run to `blocked` +
-//!   `finalize` before the loop's second iteration — so the shipped file could
-//!   not demonstrate multi-phase execution even if the audio were tolerable.
+//! - The success-stack shell actions are denied without an interactive
+//!   approval handler, which diverts the run to `blocked` + `finalize` before
+//!   the loop's second iteration — so the shipped file could not demonstrate
+//!   multi-phase execution even if the audio were tolerable.
 //!
 //! The fixture is therefore the shipped target minus exactly those three
 //! side-effect properties. Everything the requirement *is* about — the `$schema`

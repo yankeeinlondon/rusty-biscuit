@@ -1,0 +1,18 @@
+chore(memory): record A-only-restructure leftover-tracking risk
+
+- add a `Content Patterns` entry in `.claudine/memory/commits.md` covering
+  the case where a commit subject describes a structural move but the
+  staging only adds the new path with no `D` or `R` for the old: the
+  pre-commit diff against HEAD will not surface the leftover because
+  nothing is staged for it; detect with `git ls-files <old-glob>` and
+  either re-stage the deletes or flag the tracked leftovers in the
+  commit body as a follow-up
+- note the giveaway signal: a batch of `A`-only entries alongside a
+  single `R` — the rename collapses a `D + A` into one index fact but
+  every other plain `A` is a tracked-path addition, not a move
+- motivated by this batch's GitNexus skill restructure: five new
+  top-level `A`s were staged plus one rename of `gitnexus-guide`, but
+  the old nested `gitnexus/{cli,debugging,exploring,impact-analysis,
+  refactoring}/SKILL.md` files were never staged for deletion and
+  remain tracked; Claude Code can still find them under their old
+  paths and load them in preference to the new top-level skills

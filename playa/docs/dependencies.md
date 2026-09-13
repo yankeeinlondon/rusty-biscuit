@@ -62,4 +62,7 @@ published records on Windows.
 The CLI uses `biscuit-file`'s `FileReference` resolver at its authored-path
 boundary and its portable-path renderer for redacted spool status. `tracing-test`
 and `serial_test` are test-only dependencies for warning-count and isolated
-environment tests.
+environment tests. The CLI's detached publication tests take the spool's worker
+and queue locks through `test-toolkit`'s `LockedAudioSpool` fixture, which is the
+workspace's one publication guard; its own `fs4` dev dependency remains for the
+scheduler-exit probe.

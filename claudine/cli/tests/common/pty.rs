@@ -43,7 +43,7 @@ const DSR_REPLY: &[u8] = b"\x1b[1;1R";
 /// It is written for BOTH inline and fullscreen prompts, so — unlike
 /// [`ALT_SCREEN_ENTER`], which only fullscreen prompts emit — it is the
 /// universal proof that raw mode is active. See [`wait_for_raw_mode`].
-const KBD_ENHANCEMENT_PUSH: &str = "\x1b[>11u";
+pub(crate) const KBD_ENHANCEMENT_PUSH: &str = "\x1b[>11u";
 
 /// The OSC colour queries `biscuit_terminal::Terminal` construction writes to
 /// `/dev/tty` — foreground (OSC 10) and background (OSC 11) — paired with the

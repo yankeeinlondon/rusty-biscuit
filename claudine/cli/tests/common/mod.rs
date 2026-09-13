@@ -39,6 +39,12 @@
 //! per-user root. `detached_audio.rs`, whose subject is the worker itself, is
 //! the one file that opts back in.
 //!
+//! Shipped prompts carry live `say:`/`effect:` actions, so a test that executes
+//! one through a fake provider still reaches the real speech and playback
+//! boundary. [`CliProcessFixture::audio_spool`] is never created by a dry run:
+//! a test that executes a shipped document proves its silence by asserting that
+//! directory is still absent afterwards.
+//!
 //! ### The inheritance contract
 //!
 //! A child inherits the parent's whole environment by default, so the builder
@@ -139,6 +145,7 @@ pub(crate) mod host_tools;
 pub(crate) mod incomplete_subagents;
 #[cfg(unix)]
 pub(crate) mod pty;
+pub(crate) mod review_router;
 pub(crate) mod source_scan;
 pub(crate) mod wrap;
 
@@ -374,6 +381,15 @@ impl CliProcessFixture {
         self.workspace.path()
     }
 
+    /// Where the default command sends detached audio jobs.
+    ///
+    /// The default `PLAYA_DRY_RUN=1` publishes nothing, so this directory is
+    /// created only if a child escaped the dry run; its absence after a run is
+    /// the proof that no lifecycle audio was published.
+    pub fn audio_spool(&self) -> PathBuf {
+        self.workspace.path().join("audio-spool")
+    }
+
     /// A `claudine` command with the hermetic defaults described in the module
     /// docs.
     pub fn command(&self) -> assert_cmd::Command {
@@ -570,10 +586,7 @@ impl<'fixture> ClaudineCommandBuilder<'fixture> {
             ("CLAUDINE_RENDEZVOUS_REPORT", "false".into()),
             ("NO_COLOR", "1".into()),
             ("PLAYA_DRY_RUN", "1".into()),
-            (
-                "PLAYA_SPOOL_DIR",
-                self.fixture.workspace_path().join("playa-spool").into(),
-            ),
+            ("PLAYA_SPOOL_DIR", self.fixture.audio_spool().into()),
         ] {
             ops.push(EnvironmentOp::Set(key.into(), value));
         }
@@ -907,6 +920,50 @@ pub fn clear_no_color<H: biscuit_test_harness::TerminalHarness>(harness: &mut H)
         .send_text(b"unset NO_COLOR\n")
         .expect("unset NO_COLOR");
     let _ = biscuit_test_harness::wait_for_prompt(harness);
+}
+
+/// Poll the pane until `expected` is drawn, returning that frame.
+pub fn wait_for_pane_text(
+    harness: &mut impl biscuit_test_harness::TerminalHarness,
+    expected: &str,
+    timeout: std::time::Duration,
+) -> biscuit_test_harness::CapturedFrame {
+    let deadline = std::time::Instant::now() + timeout;
+    let mut frame = harness.capture().expect("initial capture");
+    while std::time::Instant::now() < deadline {
+        if frame.plain.contains(expected) {
+            return frame;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        frame = harness.capture().expect("poll terminal content");
+    }
+    panic!("expected terminal content {expected:?} never rendered; plain:\n{}", frame.plain);
+}
+
+/// Poll the pane until a row starting with `<marker>:` is drawn, returning
+/// that frame and whatever followed the colon (the exit status the command's
+/// trailer echoed).
+pub fn wait_for_exit_marker(
+    harness: &mut impl biscuit_test_harness::TerminalHarness,
+    marker: &str,
+    timeout: std::time::Duration,
+) -> (biscuit_test_harness::CapturedFrame, String) {
+    let prefix = format!("{marker}:");
+    let deadline = std::time::Instant::now() + timeout;
+    let mut frame = harness.capture().expect("initial capture");
+    while std::time::Instant::now() < deadline {
+        if let Some(status) = frame
+            .plain
+            .lines()
+            .find_map(|line| line.trim().strip_prefix(&prefix))
+        {
+            let status = status.trim().to_string();
+            return (frame, status);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        frame = harness.capture().expect("poll for exit marker");
+    }
+    panic!("command exit marker {marker:?} never rendered; plain:\n{}", frame.plain);
 }
 
 /// Assert that the captured pane row carrying `needle` is itself styled.

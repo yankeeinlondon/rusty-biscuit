@@ -1,6 +1,6 @@
 # Rusty Biscuit Monorepo
 
-## Language 
+## Language
 
 - always prefer **US English (en-US)** over other English variants such as UK English (en-GB) when creating symbol names or writing documentation
 
@@ -17,24 +17,69 @@
     - load it before claiming an OS cannot be tested from the current host, before touching `#[cfg(windows)]` or path-comparison code, and whenever a test is red on exactly one CI environment
     - when you learn a new OS-specific fact the hard way, add it to that skill in the same change
 
+## CI Structure
+
+- **Area groups, package identifies.** CI fans out one top-level entry per
+  selected package _area_, but every stored name — artifact, JUnit manifest
+  record, baseline entry, receipt cell — stays keyed on
+  `{package, environment, tier}`. Area is derived from the manifest directory,
+  never re-keyed onto anything, and never folded into a parent for nested areas
+  like `claudine/rendezvous`. Do not introduce an area-keyed store.
+- `scripts/ci/affected_scope.py` emits **one** canonical resolved plan with a
+  `{package, environment, gate}` cell per unit of work. Every consumer reads
+  that document; nothing recalculates scope.
+- **Compile coverage is per target kind.** L1 covers `lib`, `bin`, and `test`; a
+  `check` cell exists where `example` or `bench` targets are declared, and on
+  `ubuntu-latest` for a package with unchanged direct reverse dependencies,
+  which it compiles inside that cell. An unchanged reverse dependency is
+  reported by name and scheduled nowhere.
+- **Each area audits its planned coverage.** Its `coverage-audit` renders every
+  result and, when producers are green, enforces exact skips, governed gaps,
+  and missing-cell rules for that area alone. Producer failures reach the gate
+  directly and do not create a second red audit check. A governed, unexpired
+  capability gap is a distinct `ACCEPTED GAP` state decided by the planner — it
+  is never inferred from a GitHub conclusion, never baselined, published
+  immediately as one `neutral` check run per cell by the only job holding
+  `checks: write`, and a real failure outranks it.
+- **The merge gate is `ci-gate`,** a policy-free fold of every blocking job's
+  `needs.*.result` (`success` and `skipped` pass; `failure` and `cancelled`
+  block). It reads no plan, baseline, or artifact; `MISSING` is each area's
+  coverage audit to catch. Until the `protect-your-bacon` required context is
+  switched from `ci-verdict` to `ci-gate` — Ken's separate approval, after
+  this branch's own run is green — every PR shows `ci-verdict — Expected` and
+  cannot merge. Load the `rust-devops` skill before changing CI scope,
+  evidence reuse, or the gate.
+
+## Evidence Reuse and Execution Constraints
+
+- Reuse qualifying passing evidence for each required cell on every OS. When
+  qualifying passing evidence is absent, run the required tests. A request to
+  avoid duplicate passing tests does not establish an environment ban.
+- Only a separately explicit execution ban belongs in
+  `<home>/.rusty-biscuit/ci-constraints/<repository>/`, overridden by
+  `BISCUIT_CI_CONSTRAINTS_DIR`. Review `just ci-local --plan` before pushing.
+  The hook enforces those bans; CI does not read the store and cannot silently
+  skip required coverage because of a local constraint.
+
 ## Just Runner
 
-- we use the `just` runner extensively throughout this monorepo. 
+- we use the `just` runner extensively throughout this monorepo.
 - you will find a justfile at the root of this monorepo and a justfile in each of the _package areas_
 - shared recipes for just can be found in the @just/ directory
+- recipes you should find in nearly every package-area include:
+    - `just test` - runs all L1 tests for this package area
+    - `just test-l2` - runs all L2 tests for this package area
+    - `just lint` - runs linter over source code in this package area
+    - `just install` - install the primary binary in the package area (if there is one)
+    - etc.
 
 ## Git Identity and Signing
 
-- all commits must use the author `Ken Snyder <ken@ken.net>` and must be
-  OpenPGP-signed
-- the current host is expected to have the correct signing keys available; a
-  signing failure is an environment or configuration problem and must not be
-  bypassed with `--no-gpg-sign`
-- commit messages must not include agent attribution, co-authorship, or
-  co-signing trailers such as `Co-authored-by`, `Generated-by`, or similar
-  agent-identifying metadata
-- repository-local Git configuration should set `user.name`, `user.email`,
-  `user.signingkey`, and `commit.gpgsign`; verify these values before committing
+- all commits must use the author's name/email (NOT the agent used)
+- all commits must be signed (look for OpenPGP signing key; should be present and not needing Github CLI authentication)
+- the current host is expected to have the correct signing keys available; a signing failure is an environment or configuration problem and must not be bypassed with `--no-gpg-sign`
+- commit messages must not include agent attribution, co-authorship, or co-signing trailers such as `Co-authored-by`, `Generated-by`, or similar agent-identifying metadata
+- repository-local Git configuration should set `user.name`, `user.email`, `user.signingkey`, and `commit.gpgsign`; verify these values before committing
 - verify every new commit with `git verify-commit HEAD` before reporting success
 
 ## Code Comment Quality
@@ -60,7 +105,7 @@ Positive criteria — comments worth their length:
 
 **Scope discipline.** Comment-only cleanup commits must contain no behavior changes. If `git diff` of the commit shows non-comment line changes (rendering, format strings, constants, glyphs), split the behavior change into a separate commit before requesting review.
 
-- When in doubt, ask: *would deleting this comment lose information a future reader needs?* If no, delete.
+- When in doubt, ask: _would deleting this comment lose information a future reader needs?_ If no, delete.
 - when drift between comments and code is detected, always assume the code is correct and the comment is wrong (unless instructed otherwise); take appropriate actions and communicate that this drift was detected and how it was resolved
 
 ## Drift Maintenance
@@ -75,13 +120,13 @@ Update alongside code changes:
 ## Rules
 
 - **Rule 1** — Think Before Coding.
-    No silent assumptions. State what you're assuming. Surface trade-offs. Ask before guessing. Push back when a simpler approach exists.
+  No silent assumptions. State what you're assuming. Surface trade-offs. Ask before guessing. Push back when a simpler approach exists.
 - **Rule 2** — Simplicity First.
-    Minimum code that solves the problem. No speculative features. No abstractions for single-use code. If a senior engineer would call it overcomplicated — simplify.
+  Minimum code that solves the problem. No speculative features. No abstractions for single-use code. If a senior engineer would call it overcomplicated — simplify.
 - **Rule 3** — Surgical Changes.
-    Touch only what you must. Don't "improve" adjacent code, comments, or formatting. Don't refactor what isn't broken. Match existing style.
+  Touch only what you must. Don't "improve" adjacent code, comments, or formatting. Don't refactor what isn't broken. Match existing style.
 - **Rule 4** — Goal-Driven Execution.
-    Define success criteria. Loop until verified. Don't tell Claude what steps to follow, tell it what success looks like and let it iterate.
+  Define success criteria. Loop until verified. Don't tell Claude what steps to follow, tell it what success looks like and let it iterate.
 
 ## Features and Fixes
 
@@ -95,9 +140,10 @@ Update alongside code changes:
     - when a feature/fix is completed it is moved to `_completed`
 
 <!-- gitnexus:start -->
+
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **rusty-biscuit** (161106 symbols, 337377 relationships, 798 execution flows).
+This project is indexed by GitNexus as **rusty-biscuit** (158905 symbols, 335372 relationships, 815 execution flows).
 
 > Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
 
@@ -119,22 +165,22 @@ This project is indexed by GitNexus as **rusty-biscuit** (161106 symbols, 337377
 
 ## Resources
 
-| Resource | Use for |
-| --- | --- |
-| `gitnexus://repo/rusty-biscuit/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/rusty-biscuit/clusters` | All functional areas |
-| `gitnexus://repo/rusty-biscuit/processes` | All execution flows |
-| `gitnexus://repo/rusty-biscuit/process/{name}` | Step-by-step execution trace |
+| Resource                                       | Use for                                  |
+| ---------------------------------------------- | ---------------------------------------- |
+| `gitnexus://repo/rusty-biscuit/context`        | Codebase overview, check index freshness |
+| `gitnexus://repo/rusty-biscuit/clusters`       | All functional areas                     |
+| `gitnexus://repo/rusty-biscuit/processes`      | All execution flows                      |
+| `gitnexus://repo/rusty-biscuit/process/{name}` | Step-by-step execution trace             |
 
 ## CLI
 
-| Task | Read this skill file |
-| --- | --- |
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus-cli/SKILL.md` |
+| Task                                         | Read this skill file                               |
+| -------------------------------------------- | -------------------------------------------------- |
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus-exploring/SKILL.md`       |
+| Blast radius / "What breaks if I change X?"  | `.claude/skills/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?"             | `.claude/skills/gitnexus-debugging/SKILL.md`       |
+| Rename / extract / split / refactor          | `.claude/skills/gitnexus-refactoring/SKILL.md`     |
+| Tools, resources, schema reference           | `.claude/skills/gitnexus-guide/SKILL.md`           |
+| Index, status, clean, wiki CLI commands      | `.claude/skills/gitnexus-cli/SKILL.md`             |
 
 <!-- gitnexus:end -->

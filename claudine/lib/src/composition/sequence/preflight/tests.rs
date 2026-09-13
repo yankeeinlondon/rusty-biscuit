@@ -95,7 +95,7 @@ mod loading {
             &[("sequence", json!([{ "name": "external", "task": task_ref }]))],
             "Sequence body.\n",
         );
-        let source = crate::composition::resolve_composition_source(&source_path).unwrap();
+        let source = crate::composition::resolve_fixture_source(&source_path).unwrap();
         let plan = resolve_sequence_plan(&source)
             .unwrap()
             .expect("fixture declares a sequence");
@@ -194,7 +194,7 @@ mod loading {
             )],
             "Body.\n",
         );
-        let resolved = crate::composition::resolve_composition_source(&source).unwrap();
+        let resolved = crate::composition::resolve_fixture_source(&source).unwrap();
         let plan = resolve_sequence_plan(&resolved)
             .unwrap()
             .expect("fixture declares a sequence");

@@ -1,0 +1,16 @@
+#!/bin/sh
+# Installed in Git's shared hooks directory. Resolve the worktree at invocation
+# time so linked worktrees execute the hook version they actually checked out.
+set -eu
+
+worktree="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "Rusty Biscuit pre-push dispatcher: cannot resolve the active worktree" >&2
+    exit 1
+}
+hook="$worktree/.githooks/pre-push"
+if [ ! -x "$hook" ]; then
+    echo "Rusty Biscuit pre-push dispatcher: hook is missing or not executable: $hook" >&2
+    exit 1
+fi
+
+exec "$hook" "$@"

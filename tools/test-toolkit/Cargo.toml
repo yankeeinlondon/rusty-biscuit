@@ -9,6 +9,13 @@ description = "Shared test lifecycle helpers for the Rusty Biscuit workspace"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
+# `spool` takes Playa's cross-process worker/queue locks. Kept unconditional
+# rather than feature-gated like `clap`/`sysinfo` below: `fs4` resolves to
+# `rustix`/`windows-sys`, which every dev-dependent already builds, so it adds
+# no crate to the graph, and gating it would force `required-features` on this
+# crate's own tests.
+fs4 = "0.13"
+
 # Pulled in only for the `leak-sweep` binary (feature-gated) so the many crates
 # that depend on this crate as a dev-dependency do not inherit them.
 clap = { version = "4", features = ["derive"], optional = true }
