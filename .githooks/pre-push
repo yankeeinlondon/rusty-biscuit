@@ -51,8 +51,9 @@
 # evidence already covers is skipped, a cell whose newest prior evidence is a
 # FAILURE is rerun (ruling D2), and lint runs as always. The validation
 # receipt is then recorded against that context's plan and base — never a
-# merge base with origin/main — for the cells that actually ran, so its scope
-# identity is the scope receipt's. A dirty checkout or an
+# merge base with origin/main. On a same-head retry, newly run cells replace
+# their earlier outcomes while compatible cells that were skipped remain in
+# the cumulative receipt. A dirty checkout or an
 # RUSTY_BISCUIT_PRE_PUSH_AREAS override replans from the working tree instead
 # (wider feedback, deliberately) and publishes no validation receipt.
 #
@@ -94,8 +95,9 @@
 #
 # A published receipt names where its JUnit reports are retained on this host:
 # $BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/, with the root defaulting
-# to ~/.rusty-biscuit/ci-evidence. The reports are copied there BEFORE the
-# receipt is written, and no receipt is published if that copy fails.
+# to ~/.rusty-biscuit/ci-evidence. Retry reports overlay that directory so the
+# reports of reused cells survive. Reports are copied there BEFORE the receipt
+# is written, and no receipt is published if that copy fails.
 #
 # Install the worktree-aware dispatcher into Git's shared hooks directory:
 #   just init
@@ -153,6 +155,7 @@ SCOPE_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope.XXXXXX")"
 PLAN_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-plan.XXXXXX")"
 PLAN_REVIEW_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-review.XXXXXX")"
 RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-receipt.XXXXXX")"
+PRIOR_RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-prior-receipt.XXXXXX")"
 SCOPE_PLAN_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-plan.XXXXXX")"
 SCOPE_DOC_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-doc.XXXXXX")"
 SCOPE_RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-receipt.XXXXXX")"
@@ -165,7 +168,7 @@ PR_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-prs.XXXXXX")"
 PR_ERROR_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-prs-err.XXXXXX")"
 TARGET_STATES_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-target.XXXXXX")"
 REPORTS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/biscuit-pre-push-reports.XXXXXX")"
-TEMP_FILES="$REF_UPDATES_FILE $SCOPE_FILE $PLAN_FILE $PLAN_REVIEW_FILE $RECEIPT_FILE $SCOPE_PLAN_FILE $SCOPE_DOC_FILE $SCOPE_RECEIPT_FILE $HEAD_PLAN_FILE $HEAD_REVIEW_FILE $ACCEPTED_FILE $REJECTED_FILE $CONTEXTS_FILE $PR_LIST_FILE $PR_ERROR_FILE $TARGET_STATES_FILE"
+TEMP_FILES="$REF_UPDATES_FILE $SCOPE_FILE $PLAN_FILE $PLAN_REVIEW_FILE $RECEIPT_FILE $PRIOR_RECEIPT_FILE $SCOPE_PLAN_FILE $SCOPE_DOC_FILE $SCOPE_RECEIPT_FILE $HEAD_PLAN_FILE $HEAD_REVIEW_FILE $ACCEPTED_FILE $REJECTED_FILE $CONTEXTS_FILE $PR_LIST_FILE $PR_ERROR_FILE $TARGET_STATES_FILE"
 ZERO_OID="0000000000000000000000000000000000000000"
 TRIGGER_WORKTREE=""
 # Git feeds one `<local ref> <local sha> <remote ref> <remote sha>` line per
@@ -187,8 +190,7 @@ trap 'echo "Pre-push interrupted; no validation receipt is published." >&2; exit
 trap 'echo "Pre-push interrupted; no validation receipt is published." >&2; exit 143' TERM
 trap 'echo "Pre-push interrupted; no validation receipt is published." >&2; exit 129' HUP
 
-# Attach a receipt to the outgoing head on a notes ref, on top of the remote's
-# copy of that ref so the local note never overwrites another host's.
+# Attach a document to the outgoing head after refreshing the notes ref.
 attach_note() {
     git fetch --no-tags "$REMOTE_NAME" "+$1:$1" >/dev/null 2>&1 || true
     git notes --ref "$1" add -f -F "$2" "$HEAD_SHA"
@@ -621,11 +623,10 @@ EXIT_CODE=$?
 # the note reaches the remote before the hook returns, and a later
 # `--no-verify` push of this tree causes CI to reject and rerun the failed
 # cell. An override proves only the named packages, and a dirty tree means the
-# test process did not necessarily
-# execute the outgoing tree; neither is exact-tree evidence. The receipt is
-# recorded against the reviewed plan and base the gates ran from, and only
-# for the cells that ran: `record-cells` reads the staged manifest, so a cell
-# the plan reused is absent from the receipt rather than recorded as anything.
+# test process did not necessarily execute the outgoing tree; neither is
+# exact-tree evidence. The receipt is recorded against the reviewed plan and
+# base the gates ran from. `record-cells` reads the staged manifest and merges
+# those cells into any compatible receipt already attached to the same head.
 # Every reason evidence is withheld is printed; a silent gap looked like a
 # published note (audit W10).
 SHORT_HEAD="$(git rev-parse --short=9 "$HEAD_SHA")"
@@ -679,7 +680,10 @@ else
             *) EVIDENCE_ROOT="$PWD/$EVIDENCE_ROOT" ;;
         esac
         REPORT_DIR="$EVIDENCE_ROOT/$HEAD_SHA/$ENVIRONMENT"
-        if rm -rf "$REPORT_DIR" && mkdir -p "$REPORT_DIR" && cp -R "$REPORTS_DIR/." "$REPORT_DIR/"; then
+        NOTES_REF="refs/notes/ci-local/$ENVIRONMENT"
+        git fetch --no-tags "$REMOTE_NAME" "+$NOTES_REF:$NOTES_REF" >/dev/null 2>&1 || true
+        git notes --ref "$NOTES_REF" show "$HEAD_SHA" >"$PRIOR_RECEIPT_FILE" 2>/dev/null || : >"$PRIOR_RECEIPT_FILE"
+        if mkdir -p "$REPORT_DIR" && cp -R "$REPORTS_DIR/." "$REPORT_DIR/"; then
             RETAINED=1
         else
             # Keep the staging directory so the run's reports can still be read.
@@ -696,9 +700,9 @@ else
         if python3 "$REPO_ROOT/scripts/ci/local_evidence.py" record-cells \
             --plan "$HEAD_PLAN_FILE" --stage "$REPORTS_DIR" --base "$BASE_SHA" \
             --head "$HEAD_SHA" --environment "$ENVIRONMENT" \
-            --report-dir "$REPORT_DIR" >"$RECEIPT_FILE"; then
-            NOTES_REF="refs/notes/ci-local/$ENVIRONMENT"
-            attach_note "$NOTES_REF" "$RECEIPT_FILE"
+            --report-dir "$REPORT_DIR" --prior-receipt "$PRIOR_RECEIPT_FILE" \
+            >"$RECEIPT_FILE"; then
+            git notes --ref "$NOTES_REF" add -f -F "$RECEIPT_FILE" "$HEAD_SHA"
             CELLS="$(jq -r '.cells | length' "$RECEIPT_FILE")"
             if push_note "$NOTES_REF"; then
                 echo "Published $CELLS $ENVIRONMENT cell(s) of evidence for $SHORT_HEAD (base $(git rev-parse --short=9 "$BASE_SHA")). Reports retained under $REPORT_DIR."

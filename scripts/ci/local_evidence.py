@@ -722,6 +722,7 @@ def record_cells(
     head: str,
     completion: str = "complete",
     report_dir: str = "",
+    prior_receipt_path: str = "",
 ) -> str:
     """The version-2 receipt for a finished local run, as canonical bytes.
 
@@ -763,15 +764,22 @@ def record_cells(
             "are retained, and the staging directory does not outlive the hook"
         )
     retained = Path(report_dir)
-    for cell in cells:
+    current = json.loads(
+        assemble_receipt(
+            plan, environment, base, head_sha, cells, completion, report_dir
+        )
+    )
+    document = merge_prior_receipt(current, prior_receipt_path)
+    for cell in document["cells"]:
         if cell["completion"] == "complete" and not (retained / cell["report"]).is_file():
             raise ValueError(
                 f"{report_dir} does not retain {cell['report']}; a receipt must not "
                 "name reports that are not there"
             )
-    return assemble_receipt(
-        plan, environment, base, head_sha, cells, completion, report_dir
-    )
+    problems = schema.validate_receipt(document)
+    if problems:
+        raise ValueError(f"the merged receipt is invalid: {problems[0]}")
+    return schema.canonical(document)
 
 
 def assemble_receipt(
@@ -817,6 +825,58 @@ def assemble_receipt(
     if problems:
         raise ValueError(f"the assembled receipt is invalid: {problems[0]}")
     return schema.canonical(document)
+
+
+def merge_prior_receipt(current: dict[str, Any], prior_receipt_path: str) -> dict[str, Any]:
+    """Merge a compatible same-head receipt into a retry's partial result.
+
+    The current run wins for every `{package, gate}` it executed. A prior
+    receipt is accepted only when its complete execution context and report
+    directory match, so carried cells retain truthful provenance.
+
+    ## Errors
+
+    Raises ``ValueError`` when a non-empty prior receipt is malformed,
+    invalid, or belongs to another execution context.
+    """
+    if not prior_receipt_path:
+        return current
+    text = Path(prior_receipt_path).read_text(encoding="utf-8").strip()
+    if not text:
+        return current
+    try:
+        prior = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ValueError("the prior receipt is not valid JSON") from error
+    if not isinstance(prior, dict):
+        raise ValueError("the prior receipt is not an object")
+    problems = schema.validate_receipt(prior)
+    if problems:
+        raise ValueError(f"the prior receipt is invalid: {problems[0]}")
+    bindings = (
+        "schema_version",
+        "environment",
+        "base",
+        "head",
+        "tree",
+        "scope_identity",
+        "completion",
+        "host",
+    )
+    mismatched = [field for field in bindings if prior.get(field) != current.get(field)]
+    if mismatched:
+        raise ValueError(
+            "the prior receipt does not match the current " + ", ".join(mismatched)
+        )
+    merged = {
+        (cell["package"], cell["gate"]): cell
+        for cell in prior["cells"]
+    }
+    merged.update(
+        {(cell["package"], cell["gate"]): cell for cell in current["cells"]}
+    )
+    current["cells"] = [merged[key] for key in sorted(merged)]
+    return current
 
 
 # ---------------------------------------------------------------------------
@@ -1046,6 +1106,11 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="the durable directory the staged reports were copied to",
     )
+    cells.add_argument(
+        "--prior-receipt",
+        default="",
+        help="compatible receipt whose unexecuted same-head cells must be retained",
+    )
 
     cross = subparsers.add_parser(
         "cross-check", help="emit a receipt for a qualifying cross-check run"
@@ -1116,6 +1181,7 @@ def main() -> None:
                 args.head,
                 args.completion,
                 args.report_dir,
+                args.prior_receipt,
             )
         )
         return

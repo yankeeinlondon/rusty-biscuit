@@ -990,6 +990,44 @@ class ReceiptRecordingTests(EvidenceFixture):
         self.assertEqual(first, second)
         self.assertEqual(first, schema.canonical(json.loads(second)))
 
+    def test_a_same_head_retry_replaces_its_cell_and_preserves_prior_cells(self) -> None:
+        alpha = self.staged("alpha", exit_code=100)
+        beta = self.staged("beta")
+        directory = self.stage(alpha, beta)
+        self.report(directory, alpha, failures=["boom"])
+        self.report(directory, beta)
+        prior = local_evidence.record_cells(
+            str(self.plan_path),
+            str(directory),
+            "macos-latest",
+            self.base,
+            self.head,
+            report_dir=str(directory),
+        )
+        prior_path = self.root / "prior-receipt.json"
+        prior_path.write_text(prior, encoding="utf-8")
+
+        rerun = self.staged("alpha", duration_s=7)
+        self.stage(rerun)
+        self.report(directory, rerun)
+        merged = json.loads(
+            local_evidence.record_cells(
+                str(self.plan_path),
+                str(directory),
+                "macos-latest",
+                self.base,
+                self.head,
+                report_dir=str(directory),
+                prior_receipt_path=str(prior_path),
+            )
+        )
+
+        cells = {cell["package"]: cell for cell in merged["cells"]}
+        self.assertEqual(["alpha", "beta"], sorted(cells))
+        self.assertEqual("pass", cells["alpha"]["outcome"])
+        self.assertEqual(7, cells["alpha"]["duration_s"])
+        self.assertEqual("pass", cells["beta"]["outcome"])
+
     def test_a_complete_failure_is_published_for_diagnosis(self) -> None:
         record = self.staged("alpha", exit_code=100)
         directory = self.stage(record)

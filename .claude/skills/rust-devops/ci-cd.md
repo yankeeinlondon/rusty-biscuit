@@ -144,6 +144,13 @@ deprecated alias of `scope-only`. A receipt's
 `record-cells` refuses an empty or non-retaining directory rather than
 inventing one.
 
+Same-head retries must update that evidence cumulatively. The planner skips
+the already-passing cells, so replacing the note or clearing the retained
+report directory with only the retry's staged files silently discards exactly
+the evidence that caused those skips. Overlay the report directory, merge only
+a receipt with identical execution bindings and host provenance, and let the
+new run replace the cells it actually reran.
+
 The rollup consumes that evidence. `ci-rollup rollup --plan` reads the resolved
 execution plan, so a cell a receipt satisfied is reported as a completed
 local-origin result with its counts, duration, and the notes ref behind it —

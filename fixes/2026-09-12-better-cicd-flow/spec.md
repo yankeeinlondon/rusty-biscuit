@@ -86,6 +86,12 @@ Only a complete passing receipt with equivalent gate inputs may produce
 leaves the cell as `execute`. This applies independently to macOS, Linux,
 native Windows, and WSL2.
 
+A same-head retry is cumulative. It overlays the newly executed cell outcomes
+onto the compatible prior receipt and preserves both the receipt entries and
+retained reports for cells the planner reused. The new outcome wins for a cell
+that reran. A prior receipt with different plan bindings, host provenance, or
+report directory must not be merged.
+
 The planner must never remove a required cell merely because it removes that
 cell's hosted execution.
 
