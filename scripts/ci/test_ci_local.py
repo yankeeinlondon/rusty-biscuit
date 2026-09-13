@@ -50,7 +50,17 @@ def thread_policy_recipe() -> str:
 
 def clean_policy_environment() -> dict[str, str]:
     environment = os.environ.copy()
-    for key in ("CI", "GITHUB_ACTIONS", "BISCUIT_CI_ENVIRONMENT", "NEXTEST_TEST_THREADS"):
+    for key in (
+        "CI",
+        "GITHUB_ACTIONS",
+        "BISCUIT_CI_ENVIRONMENT",
+        "BISCUIT_CI_REPORTS_OUT",
+        "BISCUIT_CI_TARGET_DIR",
+        "BISCUIT_JUNIT_TARGET_DIR",
+        "BISCUIT_JUNIT_WORKSPACE_ROOT",
+        "NEXTEST_PROFILE",
+        "NEXTEST_TEST_THREADS",
+    ):
         environment.pop(key, None)
     return environment
 
@@ -126,7 +136,12 @@ class CiLocalTests(unittest.TestCase):
                     "with open(os.environ['TEST_CALL_LOG'], 'a', encoding='utf-8') as log:\n"
                     "    log.write(json.dumps({'args': sys.argv[1:], "
                     "'threads': os.environ.get('BISCUIT_L2_THREADS'), "
-                    "'backends': os.environ.get('BISCUIT_TEST_REQUIRED_BACKENDS')}) + '\\n')\n"
+                    "'backends': os.environ.get('BISCUIT_TEST_REQUIRED_BACKENDS'), "
+                    "'target_dir': os.environ.get('CARGO_TARGET_DIR'), "
+                    "'rustc_wrapper': os.environ.get('RUSTC_WRAPPER'), "
+                    "'junit_target_dir': os.environ.get('BISCUIT_JUNIT_TARGET_DIR'), "
+                    "'junit_workspace_root': os.environ.get('BISCUIT_JUNIT_WORKSPACE_ROOT'), "
+                    "'nextest_profile': os.environ.get('NEXTEST_PROFILE')}) + '\\n')\n"
                 ),
                 "tmux": "raise SystemExit('tmux must only be detected, never started')\n",
                 "cargo": "raise SystemExit('Rust builds are forbidden in this test')\n",
@@ -139,6 +154,8 @@ class CiLocalTests(unittest.TestCase):
             relocate_home(environment, root / "home")
             environment.update({
                 "PATH": str(bin_dir) + os.pathsep + environment.get("PATH", ""),
+                "CARGO_TARGET_DIR": str(root / "polluted-target"),
+                "RUSTC_WRAPPER": "kache",
                 "TEST_CALL_LOG": str(root / "calls.jsonl"),
                 "TEST_CORES": str(cores),
                 "TEST_REAL_JUST": JUST,
@@ -173,6 +190,19 @@ class CiLocalTests(unittest.TestCase):
                     else []
                 )
             return [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
+
+    def test_gates_use_local_evidence_profile_and_an_unwrapped_reserved_target(self) -> None:
+        calls = self.run_recipe()
+        self.assertTrue(calls)
+        for call in calls:
+            self.assertTrue(call["target_dir"].endswith("/target/ci-local"), call)
+            self.assertEqual("", call["rustc_wrapper"])
+            self.assertEqual("local-evidence", call["nextest_profile"])
+            self.assertTrue(call["junit_target_dir"].endswith("/target"), call)
+            self.assertEqual(
+                call["junit_target_dir"].removesuffix("/target"),
+                call["junit_workspace_root"],
+            )
 
     def test_parallel_policy_is_bounded_and_does_not_leak_to_other_gates(self) -> None:
         calls = self.run_recipe()
@@ -1538,7 +1568,6 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertIn("--apply-to", run.planner_calls[0])
         self.assertEqual("consulted: macos-latest; matched: macos-latest", run.summary_row("validation environments"))
         self.assertEqual("1: biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
-        self.assertEqual("none", run.summary_row("reused failing cells"))
         self.assertEqual("none", run.summary_row("cells retained (evidence incomplete or rejected)"))
 
     # -- the summary's evidence provenance (2026-09-10 spec R9, AC15) --------
@@ -1561,10 +1590,9 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertEqual([], run.rustup_calls)
         self.assertEqual("consulted: macos-latest; matched: none", run.summary_row("validation environments"))
         self.assertEqual("none", run.summary_row("reused passing cells"))
-        self.assertEqual("none", run.summary_row("reused failing cells"))
         self.assertEqual("1 rejection(s): incomplete-run (1)", run.summary_row("cells retained (evidence incomplete or rejected)"))
 
-    def test_reused_passing_and_failing_cells_are_listed_separately(self) -> None:
+    def test_passing_cells_are_reused_and_failing_cells_are_retained(self) -> None:
         run = self.run_step(
             "pull_request",
             scope_receipt=self.local_scope_receipt,
@@ -1575,12 +1603,11 @@ class WorkflowScopeStepTests(unittest.TestCase):
             (cell["environment"], cell["evidence"]["outcome"])
             for cell in run.plan["cells"] if cell["execution"] == "reuse"
         }
-        self.assertEqual({("macos-latest", "pass"), ("ubuntu-latest", "fail")}, reused)
-        self.assertEqual("consulted: macos-latest, ubuntu-latest; matched: macos-latest, ubuntu-latest",
+        self.assertEqual({("macos-latest", "pass")}, reused)
+        self.assertEqual("consulted: macos-latest, ubuntu-latest; matched: macos-latest",
                          run.summary_row("validation environments"))
         self.assertEqual("1: biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
-        self.assertEqual("1: biscuit-hash/ubuntu-latest/L1", run.summary_row("reused failing cells"))
-        self.assertEqual("none", run.summary_row("cells retained (evidence incomplete or rejected)"))
+        self.assertEqual("1 rejection(s): failed-cell (1)", run.summary_row("cells retained (evidence incomplete or rejected)"))
         self.assertEqual([], run.rustup_calls)
 
     def test_a_receipt_declaring_another_head_or_tree_falls_back(self) -> None:
@@ -1752,7 +1779,6 @@ class WorkflowScopeStepTests(unittest.TestCase):
         # The provenance rows describe the unmodified plan, honestly.
         self.assertEqual("consulted: macos-latest; matched: none", run.summary_row("validation environments"))
         self.assertEqual("none", run.summary_row("reused passing cells"))
-        self.assertEqual("none", run.summary_row("reused failing cells"))
         self.assertEqual("none", run.summary_row("cells retained (evidence incomplete or rejected)"))
 
     def test_a_crashing_verifier_retains_the_plan_and_reuses_nothing(self) -> None:

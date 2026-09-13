@@ -1863,6 +1863,7 @@ def calculate_scope(
     accepted = {
         (entry["package"], entry["environment"], entry["gate"]): entry
         for entry in (accepted_cells or [])
+        if entry.get("outcome") == "pass"
     }
     whole_environments = whole_environment_evidence(accepted_environments)
 
@@ -2045,9 +2046,10 @@ def apply_accepted_cells(
     no environment table — because the plan carries what it needs.
 
     A cell is resolved to reuse when it is `reusable`, is pending execution or
-    prohibited, and the accepted set names it. Every other cell is left
-    exactly as carried, and the cell-derived fields are recomputed from the
-    result.
+    prohibited, and the accepted set names a passing result for it. Failing
+    results are diagnostic records, never execution substitutes. Every other
+    cell is left exactly as carried, and the cell-derived fields are
+    recomputed from the result.
 
     ## Returns
 
@@ -2067,6 +2069,7 @@ def apply_accepted_cells(
     accepted = {
         (entry["package"], entry["environment"], entry["gate"]): entry
         for entry in (accepted_cells or [])
+        if entry.get("outcome") == "pass"
     }
     whole_environments = whole_environment_evidence(accepted_environments)
     for cell in applied["cells"]:

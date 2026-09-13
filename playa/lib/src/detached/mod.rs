@@ -609,6 +609,7 @@ fn replace_path(source: &Path, destination: &Path) -> Result<(), PlaybackError> 
 #[cfg(windows)]
 fn replace_path(source: &Path, destination: &Path) -> Result<(), PlaybackError> {
     use std::os::windows::ffi::OsStrExt as _;
+    use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION};
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
@@ -623,18 +624,36 @@ fn replace_path(source: &Path, destination: &Path) -> Result<(), PlaybackError> 
         .encode_wide()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
-    let success = unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if success == 0 {
-        Err(std::io::Error::last_os_error().into())
-    } else {
-        Ok(())
+    for attempt in 0..40 {
+        let success = unsafe {
+            MoveFileExW(
+                source.as_ptr(),
+                destination.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if success != 0 {
+            return Ok(());
+        }
+
+        let error = std::io::Error::last_os_error();
+        let transient_handle_conflict = matches!(
+            error.raw_os_error(),
+            Some(code)
+                if code == ERROR_ACCESS_DENIED as i32
+                    || code == ERROR_SHARING_VIOLATION as i32
+        );
+        if !transient_handle_conflict || attempt == 39 {
+            return Err(error.into());
+        }
+
+        // Hosted Windows scanners and concurrent readers can briefly open a
+        // spool record without delete sharing. Retrying preserves the atomic
+        // replacement contract; deleting the destination first would not.
+        std::thread::sleep(Duration::from_millis(25));
     }
+
+    unreachable!("the bounded replacement loop returns on its final attempt")
 }
 
 fn unique_neighbor(path: &Path, label: &str) -> PathBuf {

@@ -2,7 +2,7 @@
 """Publish each accepted policy gap as a `neutral` check run on the tested head.
 
 Specification section 6 wants an accepted gap to appear IMMEDIATELY, explained,
-without a test or archive build starting for it. The area rollup renders the
+without a test or archive build starting for it. The area coverage audit renders the
 gap too, but only after every producer in the area has finished. This tool
 runs from a job that waits on nothing: it reads the resolved plan the scope job
 already published, selects the area's `accepted-gap` cells, and creates one
@@ -10,7 +10,7 @@ check run per cell through the Checks API.
 
 Presentation only (Design Decision 10). The machine-readable `ACCEPTED GAP`
 state is decided by the planner and carried in the plan and the area's result
-slice; nothing here is read back by the rollup, the gate, or the retry logic.
+slice; nothing here is read back by the audit, the gate, or the retry logic.
 `neutral` is Open Question 4's ruling (2026-09-12): it leaves a pull request
 CLEAN and never alters the run's conclusion, where `cancelled` would mark the
 PR UNSTABLE and collide with the one meaning `cancelled` already has —
@@ -18,7 +18,7 @@ interruption.
 
 Fail closed. A cell in state `accepted-gap` whose governance record is absent,
 ungoverned, incomplete, or expired is refused with exit 2: publishing `neutral`
-for it would present a cell the rollup is about to BLOCK on as harmless. An
+for it would present a cell the coverage audit is about to BLOCK on as harmless. An
 unreadable plan is exit 1. Refusal is the tool's, so the workflow never spells
 a conclusion of its own.
 """
@@ -189,7 +189,7 @@ def check_run(
             "Edit that entry to change its `owner`, `expiry`, `reason`, or `closes`. "
             "Remove the entry, or set `available: true` once the environment can host "
             "the tier, to revoke it. An absent, incomplete, or expired entry is a "
-            "blocking `POLICY GAP`, not an accepted one: the area's rollup fails until "
+            "blocking `POLICY GAP`, not an accepted one: the area's coverage audit fails until "
             "the coverage exists or the acceptance is renewed.",
             "",
             "## Coverage that closes this gap",
@@ -202,7 +202,7 @@ def check_run(
             f"`{policy_path}` before any job ran and is carried in the resolved plan "
             f"and this area's result slice. A `{CONCLUSION}` conclusion is neither a "
             "pass nor a test failure and never alters the run's conclusion; the "
-            f"area's `rollup` job owns the outcome for `{area}`.",
+            f"area's `coverage-audit` job owns completeness and exception policy for `{area}`.",
         ]
     )
     return {

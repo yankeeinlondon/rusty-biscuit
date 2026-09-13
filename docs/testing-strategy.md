@@ -649,10 +649,10 @@ For a clean outgoing tree the hook uses the reviewed plan for local gates,
 skipping cells covered by qualifying passing evidence. It publishes a Git-note
 receipt with each completed package, environment, and tier outcome, including
 failures. CI verifies exact identity or unchanged gate inputs on an older head,
-combines receipts across environments, and omits only proven cells. Lint and
-check always remain CI-origin. Reused failures join the owning area's verdict;
-other environments continue running. Incomplete or rejected evidence leaves
-its cells scheduled. `just ci-local --plan` shows execution, evidence, and
+combines receipts across environments, and omits only proven passing cells.
+Lint and check always remain CI-origin. Failures remain available for diagnosis
+but are rejected for reuse and rerun; other environments continue running.
+Incomplete or rejected evidence leaves its cells scheduled. `just ci-local --plan` shows execution, evidence, and
 persistent constraints before any gates run; the hook enforces those
 constraints against each pushed branch's committed trigger plan.
 
@@ -686,10 +686,10 @@ exact failure on the matching host first, then push once.
 Scope evidence records the canonical plan for an exact base, head, and tree.
 CI adopts a matching receipt without recalculating selection or initializing
 Rust; a missing or malformed receipt falls back to CI calculation. Validation
-evidence overlays measured cell outcomes without changing selection. A
+evidence overlays qualifying passing cells without changing selection. A
 `workflow_dispatch` run deliberately ignores both and selects the full
-workspace. The scope summary reports provenance, reused passing and failing
-cells, and rejection reasons. These mechanisms are implemented under
+workspace. The scope summary reports provenance, reused passing cells, and
+rejection reasons (including diagnostic failures). These mechanisms are implemented under
 `fixes/2026-09-11-cicd-cleanup/spec.md`, which absorbed the September 10
 local-affected-scope specification; hosted rollout verification remains a
 separate obligation.
@@ -749,11 +749,11 @@ Other things worth knowing about the matrix:
   profiles set `retries = 0`, so a deterministic failure runs exactly once. CI
   marks a test slow at thirty seconds and kills it at ninety, which is the line
   between "slow under contention" and "hung".
-- **Every configured Level 1 leg reaches its area's verdict.** Gate commands
-  use step-level `continue-on-error` so producers can publish failed cell
-  outcomes. The area rollup applies the baseline and blocks on unaccepted
-  failures; setup and artifact failures still fail jobs directly. The policy-free
-  `ci-gate` folds all blocking jobs. Known failures stay counted and visible.
+- **Every configured Level 1 leg reaches its area's verdict.** A failed gate
+  command fails its producer visibly. Status and JUnit uploads use `always()`
+  or `!cancelled()` so the area rollup still provides cell-level diagnosis,
+  while `fail-fast: false` lets sibling OS legs finish. The policy-free
+  `ci-gate` folds all blocking jobs.
 - **Sharding was removed.** Compiling the test binaries is most of a shard's
   cost and every shard pays it in full, so four shards cost roughly three times
   the compute to save a couple of minutes. Level 1 runs with `--no-fail-fast`

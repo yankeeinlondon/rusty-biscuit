@@ -60,6 +60,13 @@ committed mapping file.
 
 ## Local scope and validation evidence
 
+Linked worktrees share one Git hooks directory. Never install `pre-push` as a
+symlink to one checkout's tracked hook: whichever worktree last ran the
+installer would make every sibling execute that checkout's version. `just
+init` installs the stable `.githooks/pre-push-dispatcher` as a regular file;
+at invocation it resolves `git rev-parse --show-toplevel` and executes the
+active worktree's `.githooks/pre-push`.
+
 Parallel test workers default to `max(1, logical_cores - 2)` locally. CI uses
 all logical cores on runners with four or fewer, otherwise `logical_cores - 2`.
 The policy preserves capacity on developer and larger shared hosts without
@@ -96,18 +103,18 @@ semantics:
   reports `scope source` in its summary with the miss code on a fallback;
   `rustup show` runs only on that miss, right before selection, so a hit
   sets up no toolchain, and the summary's `validation environments`,
-  `reused passing cells`, `reused failing cells`, and `cells retained
-  (evidence incomplete or rejected)` rows come from the written plan.
+  `reused passing cells`, and `cells retained (evidence incomplete or
+  rejected)` rows come from the written plan.
   Validation evidence never reopens selection: on a hit with accepted cells,
   `affected_scope.py --apply-to` overlays them on the carried plan and
   re-projects `scope.json` from it, reading nothing from the checkout. The
   plan is schema version 2 so that it can — it carries its `environments`
   table, per-package `l1_include_slow`/`exclusion`, and per-cell `reusable`;
   a version-1 receipt misses as `scope-schema`.
-- A complete host run is reusable whether it passed or failed. CI omits only
-  the host cells for which the receipt supplies terminal outcomes and feeds
-  those outcomes into the normal rollup. A failed local outcome must make the
-  final verdict fail without preventing the other OS jobs from running.
+- Only a complete passing cell is reusable. CI omits exactly those host cells;
+  a complete failure remains published for diagnosis but is rejected with
+  `failed-cell` and scheduled again. This rule is enforced by both the
+  receipt verifier and the planner boundary.
 - An interrupted run, an unavailable required backend, dirty outgoing state,
   or an explicit package override is not complete exact-tree evidence. CI runs
   any cells that are not proven.
@@ -125,9 +132,12 @@ coverage. Audit W9 records an explicit B0 deferral of alignment with the
 absorbed September 10 specification's browser-reuse exclusion; it is not a
 new user ruling or authorization to expand browser scheduling.
 
-These semantics are live as of 2026-09-11. The receipt is version 2, keyed per
+These semantics are live as of 2026-09-12. Version 1 is the legacy
+whole-environment receipt: exact-tree-only, pass-only, and unable to carry
+per-cell measurements or gate-input equivalence. Version 2 is keyed per
 `{package, environment, gate}`; `strict` and `warn` both publish a complete run,
-passing or failing; `off` is a deprecated alias of `scope-only`. A receipt's
+passing or failing, but only passing cells qualify for reuse. `off` is a
+deprecated alias of `scope-only`. A receipt's
 `host.report_dir` is where the hook retained the run's JUnit reports —
 `$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`, root default
 `~/.rusty-biscuit/ci-evidence` — copied there before the receipt exists;
@@ -138,7 +148,7 @@ The rollup consumes that evidence. `ci-rollup rollup --plan` reads the resolved
 execution plan, so a cell a receipt satisfied is reported as a completed
 local-origin result with its counts, duration, and the notes ref behind it —
 not as `MISSING`. Result documents are `schema_version: 3` and are refused
-across generations; the baseline keeps its own version 2. `--area` on `rollup`
+across generations; the skip-only baseline keeps its own version 3. `--area` on `rollup`
 and `verdict` narrows a document to one area's slice (cells, scope, scheduled
 set, and accepted evidence together), and `summarize` folds slices into a view
 that applies no policy.
@@ -158,13 +168,14 @@ Two cases worth knowing before reading a result:
 planner's `scheduled_areas`) into `_area-ci.yml`, which fans out the area's
 packages into `_package-ci.yml`, which delegates the WSL2 cell to
 `_wsl-ci.yml` — four levels including the caller, GitHub's maximum, with no
-margin for another. Each area's own `rollup` job (`if: always()`, behind that
-area's producers) runs `ci-rollup rollup --area` and `verdict --area` and
-narrows `runner_loss.py attribute --package` to its own packages: a failure
-blocks its own area and no other, and another area's baseline entry cannot
-excuse it. Area is a grouping, not an identity: the only stored name carrying it
-is the per-area slice `ci-results-<slug>`, with `/` spelled `--`, because
-GitHub rejects `/` in an artifact name.
+margin for another. Each area's `coverage-audit` job runs `if: always()` behind
+its producers, renders the result slice, and narrows runner-loss attribution to
+that area's packages. It runs `verdict --area` only when every producer
+succeeded: an ordinary producer failure already reaches `ci-gate`, while the
+audit remains fail-closed for missing or unscheduled evidence, invalid gaps,
+and exact-skip violations. This avoids two red checks for one test failure.
+Area remains a grouping, not an identity; only the per-area slice artifact name
+contains it (`ci-results-<slug>`, with `/` spelled `--`).
 
 **An all-reused area must still fan out.** If a receipt covers every cell an
 area owns and the area then dropped out of `scheduled_areas`, no
@@ -191,17 +202,13 @@ Two rules the presentation depends on, both cheap to break:
   `needs.*.result`, and `continue-on-error` turns a failed job's result into
   `success` for that fold, so it is exactly what keeps a reporting job out of
   the gate — and exactly why no blocking job may carry it.
-- A failed gate command is a failed CELL, not a failed job. Each test, lint,
-  and compile step in `_package-ci.yml` and `_wsl-ci.yml` is a step-level
-  `continue-on-error` with an `id:`; the `Record producer status` step folds
-  the outcomes into the status artifact's `result` and annotates the job. The
-  producer, `area-ci`, and the fold stay green, and only the area's rollup —
-  after its baseline — can block on it, so a hosted failure and the same
-  failure reused from local evidence are judged identically. Setup, upload,
-  and cancellation still fail the job directly. The normalized-step set is
-  pinned exactly by `only_gate_commands_are_normalized_never_setup_or_upload`,
-  and `the_status_fold_reports_a_failed_gate_on_a_green_job` runs each
-  shipped status script under Bash.
+- A failed gate command fails both the cell and its producer job. Status and
+  JUnit publication run under `always()` or `!cancelled()`, so the area
+  coverage audit still provides the package/environment/gate diagnosis.
+  Every matrix uses `fail-fast: false`, so one OS failure does not cancel
+  sibling cells that still require execution. Only recovery, diagnostic, and
+  advisory steps may carry `continue-on-error`; workflow contract tests pin
+  these properties.
 
 ## The merge gate
 
@@ -212,7 +219,7 @@ organization-only, so the fixed-name conjunction job was selected and proven in
 every blocking top-level job, runs `if: always()`, and passes only when each
 `needs.*.result` is `success` or `skipped`. An unselected area's skipped job
 does not block; `failure` and `cancelled` do; a `MISSING` cell is caught by
-its area's rollup, never by the fold. It reads no plan, policy, baseline, or
+its area's coverage audit, never by the fold. It reads no plan, policy, baseline, or
 artifact — `ci_gate_is_the_single_required_check` in
 `tools/test-toolkit/tests/ci_workflow_contracts.rs` pins that, and
 `WorkflowGateStepTests` in `scripts/ci/test_ci_local.py` runs the extracted
@@ -242,7 +249,7 @@ A tier a package owns tests for that an environment cannot host is governed
 the tracked work that ends the gap. A plain `false` is an *ungoverned* absence.
 
 - A governed, unexpired gap is a distinct machine-readable **`ACCEPTED GAP`**
-  state: neither a pass nor a test failure, and it does not block. The rollup
+  state: neither a pass nor a test failure, and it does not block. The coverage audit
   renders its owner, expiry, policy entry, `closes` link, and revocation
   instructions where a reader sees the cell.
 - It is also published **immediately** — before any producer runs — as one
@@ -254,12 +261,12 @@ the tracked work that ends the gap. A plain `false` is an *ungoverned* absence.
   conclusion; the tool refuses an ungoverned or expired cell rather than
   present it as harmless. That job is the only one holding `checks: write`:
   `ci.yml`'s `area-ci` carries the grant as a cap (a called workflow's token
-  cannot exceed its caller's) and `package-ci`/`rollup` stay read-only.
+  cannot exceed its caller's) and `package-ci`/`coverage-audit` stay read-only.
 - An absent, incomplete, or expired acceptance is a blocking `POLICY GAP`.
 - The state is decided by the planner before the run and is **never inferred
   from a GitHub cancellation conclusion**. A real failure outranks it.
-- Do not baseline a policy gap in `ci-baseline.toml`; a baselined entry is only
-  accepted against a `FAIL`, so it would not work anyway.
+- Do not put a policy gap in `ci-baseline.toml`; gaps are planner-owned
+  governance records, while the baseline contains only exact skip budgets.
 
 A `gates = false` package owns no plan cells at all. Its governed
 `NOT SCHEDULED` entries come from the resolved-package policy document, which is
@@ -301,6 +308,12 @@ measurements as `not recorded (v1 receipt)`.
 A gate that staged no JUnit report is recorded `partial`: it has an exit code
 and nothing to attribute it to, so it is published and refused for reuse rather
 than credited as a tested cell. That is how a compile failure stays a CI job.
+For local evidence, Nextest still resolves the configured relative JUnit path
+under the workspace `target/nextest/<profile>/` tree even when
+`CARGO_TARGET_DIR` isolates build artifacts elsewhere. `just ci-local` therefore
+sets `BISCUIT_JUNIT_TARGET_DIR` to the workspace target explicitly and uses the
+`local-evidence` profile: it emits the report without inheriting the CI-only
+Claudine concurrency caps.
 
 ## Execution constraints before a push
 
@@ -329,9 +342,10 @@ note on every environment's notes ref between the merge base and the outgoing
 head, so a macOS receipt from this push and a prior WSL receipt combine in one
 run. Within one environment each cell is resolved by the **newest note that
 qualifies for it**, so a later run that covered fewer packages does not hide an
-older, still-equivalent receipt for the rest, and an older pass never overrides
-a newer complete failure. Each refusal describes one candidate note, carries a
-code from `schema.REJECTIONS`, and is published with the plan.
+older, still-equivalent passing receipt for the rest. Complete failures are
+diagnostic records and never enter the accepted set. Each refusal describes
+one candidate note, carries a code from `schema.REJECTIONS`, and is published
+with the plan.
 
 `scripts/cross-check.sh` publishes a `wsl2-ubuntu` receipt only when its WSL leg
 ran the outgoing head's exact tree on a clean remote worktree with no test
@@ -413,15 +427,14 @@ Mode intent is:
 
 | Mode | Push after local failure | Scope evidence | Complete host outcomes | CI host cells |
 |---|---:|---:|---:|---|
-| `strict` | No | Yes, before the gates | Pass or fail | Omit proven cells |
-| `warn` | Yes | Yes, before the gates | Pass or fail | Omit proven cells; roll up their outcomes |
+| `strict` | No | Yes, before the gates | Pass or fail | Omit qualifying passes; rerun failures |
+| `warn` | Yes | Yes, before the gates | Pass or fail | Omit qualifying passes; rerun failures |
 | `scope-only` | No tests run | Yes; plan resolved and printed | No | Run all |
 | `--no-verify` | Yes; hook does not run | No new evidence | No new evidence | Existing valid receipts still apply |
 
 Do not implement a failing local-evidence job as an upstream dependency that
-causes the remaining matrix to skip. Represent local outcomes through the same
-status/rollup contract as hosted producers, or otherwise ensure every remaining
-OS continues before the final verdict fails.
+causes the remaining matrix to skip. Keep failures diagnostic-only and ensure
+every remaining OS continues before the final verdict fails.
 
 ## Release contract
 

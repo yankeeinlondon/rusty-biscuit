@@ -201,6 +201,7 @@ class AffectedScopeTests(unittest.TestCase):
                 "environment": environment,
                 "gate": gate,
                 "origin": "local",
+                "outcome": "pass",
                 "evidence": f"refs/notes/ci-local/{environment}",
             }
             for package, environment, gate in cells
@@ -234,6 +235,7 @@ class AffectedScopeTests(unittest.TestCase):
                     "environment": "macos-latest",
                     "gate": "L1",
                     "origin": "local",
+                    "outcome": "pass",
                     "evidence": "refs/notes/ci-local/macos-latest",
                 }
             ],
@@ -2158,14 +2160,15 @@ class ApplyFixture(unittest.TestCase):
              "origin": "local", "outcome": "pass", "evidence": {"ref": "refs/notes/ci-local/macos-latest"}},
             {"package": "alpha-core", "environment": "wsl2-ubuntu", "gate": "L1",
              "origin": "prior-local", "outcome": "pass", "evidence": {"ref": "refs/notes/ci-local/wsl2-ubuntu"}},
-            {"package": "web-server", "environment": "macos-latest", "gate": "L1",
-             "origin": "local", "outcome": "fail", "evidence": {"ref": "refs/notes/ci-local/macos-latest"}},
             # Never reusable, whatever a receipt claims:
             {"package": "alpha-core", "environment": "macos-latest", "gate": "check", "origin": "local"},
             {"package": "web-server", "environment": "ubuntu-latest", "gate": "L1", "origin": "local"},
             {"package": "alpha-core", "environment": "windows-latest", "gate": "L2", "origin": "local"},
         ]
-        self.rejections = ["gate-inputs-changed: alpha-core/ubuntu-latest/L1"]
+        self.rejections = [
+            "gate-inputs-changed: alpha-core/ubuntu-latest/L1",
+            "failed-cell: web-server/macos-latest/L1 failed; failing evidence is diagnostic only",
+        ]
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
@@ -2208,7 +2211,7 @@ class ApplyAcceptedCellsTests(ApplyFixture):
         # The fixture exercises every eligibility rule, not just the happy path.
         states = self.dispositions(applied)
         self.assertEqual(("reuse", "reused"), states["alpha-core/macos-latest/L1"])
-        self.assertEqual(("reuse", "reused"), states["web-server/macos-latest/L1"])
+        self.assertEqual(("execute", "pending"), states["web-server/macos-latest/L1"])
         self.assertEqual(("reuse", "reused"), states["alpha-core/wsl2-ubuntu/L1"], "evidence satisfies the prohibition")
         self.assertEqual(("execute", "pending"), states["alpha-core/macos-latest/check"])
         self.assertEqual(("execute", "pending"), states["web-server/ubuntu-latest/L1"], "companion host")
@@ -2217,7 +2220,7 @@ class ApplyAcceptedCellsTests(ApplyFixture):
         self.assertEqual(("omit", "prohibited"), states["web-server/wsl2-ubuntu/L1"], "no evidence, still prohibited")
         self.assertEqual(["web-server/wsl2-ubuntu/L1"], applied["prohibited_cells"])
         self.assertEqual(self.rejections, applied["evidence_rejections"])
-        self.assertEqual(3, len(applied["accepted_evidence"]))
+        self.assertEqual(2, len(applied["accepted_evidence"]))
         self.assertNotIn("prohibition", next(
             cell for cell in applied["cells"]  # type: ignore[union-attr]
             if cell["environment"] == "wsl2-ubuntu" and cell["gate"] == "L1"
@@ -2231,6 +2234,20 @@ class ApplyAcceptedCellsTests(ApplyFixture):
         self.assertEqual(before, schema.canonical(applied))
         apply_accepted_cells(plan, self.accepted, self.rejections)
         self.assertEqual(before, schema.canonical(plan), "the input plan must not be mutated")
+
+    def test_a_failed_cell_cannot_be_injected_as_accepted_evidence(self) -> None:
+        failure = {
+            "package": "web-server",
+            "environment": "macos-latest",
+            "gate": "L1",
+            "origin": "local",
+            "outcome": "fail",
+        }
+        applied = apply_accepted_cells(self.plan(), [failure], [])
+        self.assertEqual(
+            ("execute", "pending"),
+            self.dispositions(applied)["web-server/macos-latest/L1"],
+        )
 
     def test_an_already_reused_cell_is_left_as_carried(self) -> None:
         first = apply_accepted_cells(self.plan(), self.accepted[:1], [])

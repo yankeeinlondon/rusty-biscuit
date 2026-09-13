@@ -4,8 +4,8 @@
 # Runs lint, L1, and hostable L2 for source-changed packages. An unchanged
 # reverse dependency is reported by name and gates nothing. A COMPLETE run —
 # passing or failing — is attached to the outgoing commit as a per-cell
-# validation receipt on an OS-specific Git notes ref; CI then omits the
-# execution of each proven cell while still expecting a result for it.
+# validation receipt on an OS-specific Git notes ref. CI omits only qualifying
+# passing cells; failing receipts remain diagnostic and are rerun.
 #
 # Separately, and in every mode, the COMMITTED scope of the outgoing head is
 # published as a scope receipt on refs/notes/ci-local/scope before any gate
@@ -97,8 +97,8 @@
 # to ~/.rusty-biscuit/ci-evidence. The reports are copied there BEFORE the
 # receipt is written, and no receipt is published if that copy fails.
 #
-# Link this hook into your local git hooks:
-#   ln -s ../../.githooks/pre-push .git/hooks/pre-push
+# Install the worktree-aware dispatcher into Git's shared hooks directory:
+#   just init
 
 # Mode selection — resolved first so the no-gate modes short-circuit early.
 MODE="${RUSTY_BISCUIT_PRE_PUSH:-strict}"
@@ -616,13 +616,12 @@ just pre-push $SELECTION
 EXIT_CODE=$?
 
 # Publish before returning, whichever way the run went and whichever mode is
-# in force. A COMPLETE failing run is evidence: CI omits its execution and
-# rolls the failure up, instead of re-running a suite this host already proved
-# red (spec section 3.5). A strict failure blocks the branch, not the note
-# (ruling D1): the note reaches the remote now, so the `--no-verify` push of
-# this same tree that typically follows lets CI reuse the known failure and
-# run only the other environments. An override proves only the named
-# packages, and a dirty tree means the test process did not necessarily
+# in force. A COMPLETE failure is retained for diagnosis but never suppresses
+# CI execution. A strict failure blocks the branch, not the note (ruling D1):
+# the note reaches the remote before the hook returns, and a later
+# `--no-verify` push of this tree causes CI to reject and rerun the failed
+# cell. An override proves only the named packages, and a dirty tree means the
+# test process did not necessarily
 # execute the outgoing tree; neither is exact-tree evidence. The receipt is
 # recorded against the reviewed plan and base the gates ran from, and only
 # for the cells that ran: `record-cells` reads the staged manifest, so a cell

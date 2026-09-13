@@ -231,7 +231,8 @@ def verify_cells(
     the ref it sits under, describing the commit it is attached to, and on the
     head's exact tree or gate-input-equivalent to it. Once resolved, a cell is
     never changed by an older candidate — an older pass never overrides a
-    newer complete failure, since a failure is evidence too. A candidate that
+    newer complete failure. The failure is retained for diagnosis and forces
+    execution rather than entering the accepted set. A candidate that
     does not qualify for a cell (malformed, incomplete, mismatched, changed
     inputs, no declared closure) is reported with its code, naming its commit,
     and does not stop an older candidate from resolving that cell; so a
@@ -296,11 +297,21 @@ def verify_cells(
                 rejections.extend(legacy_rejections)
                 continue
 
+            receipt_valid = not schema.validate_receipt(document)
             cells, cell_rejections = schema.reusable_cells(document)
             rejections.extend(
                 f"{reason} (note on {note_commit[:9]})" for reason in cell_rejections
             )
-            if not cells:
+            if not receipt_valid:
+                continue
+            terminal_cells = cells
+            if document["completion"] == "complete":
+                terminal_cells = cells + [
+                    cell
+                    for cell in document["cells"]
+                    if cell["completion"] == "complete" and cell["outcome"] == "fail"
+                ]
+            if not terminal_cells:
                 continue
 
             mismatch = _environment_mismatch(document, environment, note_commit) or (
@@ -311,7 +322,7 @@ def verify_cells(
                 continue
 
             exact = document["tree"] == head_tree
-            for cell in cells:
+            for cell in terminal_cells:
                 key = (cell["package"], environment, cell["gate"])
                 if key not in wanted or key in resolved:
                     continue
@@ -337,6 +348,8 @@ def verify_cells(
                         continue
                     origin = "prior-local"
                 resolved.add(key)
+                if cell["outcome"] == "fail":
+                    continue
                 accepted.append(
                     _accepted_cell(cell, environment, origin, note_commit, document)
                 )

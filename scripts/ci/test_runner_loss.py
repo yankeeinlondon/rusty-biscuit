@@ -63,14 +63,28 @@ REAL_FAILURE_ANNOTATION = [
     {"annotation_level": "failure", "message": "Process completed with exit code 100."}
 ]
 GATE_JOB = {"id": 1, "name": "ci-gate", "status": "completed", "conclusion": "failure"}
-# The area's own rollup, which fails BECAUSE the producer below lost its
-# runner: its cell is MISSING. Counting it as an unrelated failure is what
-# would disable the one-shot retry.
-AREA_ROLLUP_JOB = {
+# A coverage-audit failure is independent: its enforcement step runs only when
+# every producer succeeded.
+AREA_AUDIT_JOB = {
     "id": 4,
-    "name": "area-ci (playa) / rollup",
+    "name": "area-ci (playa) / coverage-audit",
     "status": "completed",
     "conclusion": "failure",
+    "steps": [
+        {
+            "name": "Enforce coverage completeness and exceptions",
+            "status": "completed",
+            "conclusion": "failure",
+        }
+    ],
+}
+# Before the coverage-audit change, the rollup itself failed for a producer
+# that lost its runner. Retry classification must remain compatible with those
+# already-recorded runs.
+LEGACY_AREA_ROLLUP_JOB = {
+    **AREA_AUDIT_JOB,
+    "id": 8,
+    "name": "area-ci (playa) / rollup",
     "steps": [{"name": "Judge this area", "status": "completed", "conclusion": "failure"}],
 }
 ADVISORY_SUMMARY_JOB = {
@@ -103,14 +117,13 @@ UPLOAD_FAILURE_JOB = {
 UPLOAD_FAILURE_ANNOTATION = [
     {"annotation_level": "failure", "message": "Artifact storage quota has been hit."}
 ]
-# A failed gate command under `continue-on-error`: the step is red, the job
-# concludes `success`, and the status artifact says the cell failed. The area
-# rollup judges it; this module must neither attribute it nor let it veto.
-NORMALIZED_FAILURE_JOB = {
+# A failed gate command fails its producer visibly. Its status artifact still
+# gives the area coverage audit the cell-level diagnosis.
+VISIBLE_GATE_FAILURE_JOB = {
     "id": 5,
     "name": "area-ci (messenger) / messenger / test (windows-latest)",
     "status": "completed",
-    "conclusion": "success",
+    "conclusion": "failure",
     "steps": [
         {"name": "L1 tests", "status": "completed", "conclusion": "failure"},
         {"name": "Upload L1 JUnit", "status": "completed", "conclusion": "success"},
@@ -157,7 +170,7 @@ class JobNameTests(unittest.TestCase):
             "ci-gate",
             "Determine affected scope",
             "preflight (windows-latest)",
-            "area-ci (playa) / rollup",
+            "area-ci (playa) / coverage-audit",
             "area-ci (playa) / playa-cli / wsl2 / archive (playa-cli for wsl2)",
             "biscuit-tui-captured-stdout / biscuit-tui / captured-stdout / windows",
         ]:
@@ -203,17 +216,15 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual([], result["other_failures"])
 
     def test_a_judging_job_never_counts_as_a_failure(self) -> None:
-        # The area rollup and the advisory summary judge the run. Their
-        # failures FOLLOW from the lost producer's, so treating either as an
-        # unrelated failure would veto the one-shot retry — the whole point of
-        # the classification.
-        for judge in (AREA_ROLLUP_JOB, ADVISORY_SUMMARY_JOB):
+        # The legacy area rollup and advisory summary can fail only because the
+        # run already failed elsewhere, so neither vetoes a runner-loss retry.
+        for judge in (LEGACY_AREA_ROLLUP_JOB, ADVISORY_SUMMARY_JOB):
             self.assertTrue(is_non_producer(judge["name"]), judge["name"])
         result = classify(
-            [LOST_WSL_JOB, AREA_ROLLUP_JOB, ADVISORY_SUMMARY_JOB],
+            [LOST_WSL_JOB, LEGACY_AREA_ROLLUP_JOB, ADVISORY_SUMMARY_JOB],
             {
                 LOST_WSL_JOB["id"]: LOST_ANNOTATION,
-                AREA_ROLLUP_JOB["id"]: [],
+                LEGACY_AREA_ROLLUP_JOB["id"]: [],
                 ADVISORY_SUMMARY_JOB["id"]: [],
             },
         )
@@ -222,6 +233,16 @@ class ClassifyTests(unittest.TestCase):
         rerun, reason = should_rerun(result, attempt=1)
         self.assertTrue(rerun, reason)
 
+    def test_a_coverage_audit_failure_vetoes_a_runner_loss_retry(self) -> None:
+        result = classify(
+            [LOST_WSL_JOB, AREA_AUDIT_JOB],
+            {LOST_WSL_JOB["id"]: LOST_ANNOTATION, AREA_AUDIT_JOB["id"]: []},
+        )
+        self.assertEqual([AREA_AUDIT_JOB["name"]], result["other_failures"])
+        self.assertEqual("other", result["failures"][0]["stage"])
+        rerun, reason = should_rerun(result, attempt=1)
+        self.assertFalse(rerun, reason)
+
     def test_a_producer_is_never_mistaken_for_a_judge(self) -> None:
         self.assertFalse(is_non_producer(REAL_FAILURE_JOB["name"]))
         self.assertFalse(is_non_producer("area-ci (playa) / playa-cli / test (ubuntu-latest)"))
@@ -229,24 +250,20 @@ class ClassifyTests(unittest.TestCase):
     def test_no_running_step_reports_none(self) -> None:
         self.assertIsNone(interrupted_step({"steps": [{"status": "completed", "conclusion": "success"}]}))
 
-    def test_a_normalized_gate_failure_is_neither_lost_nor_a_failure(self) -> None:
-        # The job is green with a red step. Only the area rollup judges it,
-        # so it must not be read as a lost runner (it uploaded its status)
-        # and must not veto the one-shot retry of a job that did lose its
-        # runner: the retry never re-executes a job that concluded success.
+    def test_a_visible_gate_failure_vetoes_a_runner_loss_retry(self) -> None:
         result = classify(
-            [LOST_WSL_JOB, NORMALIZED_FAILURE_JOB],
+            [LOST_WSL_JOB, VISIBLE_GATE_FAILURE_JOB],
             {LOST_WSL_JOB["id"]: LOST_ANNOTATION},
         )
-        self.assertEqual([], result["other_failures"])
-        self.assertEqual([], result["failures"])
+        self.assertEqual([VISIBLE_GATE_FAILURE_JOB["name"]], result["other_failures"])
+        self.assertEqual("test", result["failures"][0]["stage"])
         self.assertEqual([LOST_WSL_JOB["name"]], [lost["name"] for lost in result["runner_lost"]])
         rerun, reason = should_rerun(result, attempt=1)
-        self.assertTrue(rerun, reason)
-        # And a genuinely lost runner during the (normalized) gate step is
-        # still attributed to that step.
+        self.assertFalse(rerun, reason)
+        # A genuinely lost runner during the gate step is still attributed to
+        # that step rather than classified as a test failure.
         lost_during_gate = {
-            **NORMALIZED_FAILURE_JOB,
+            **VISIBLE_GATE_FAILURE_JOB,
             "id": 7,
             "conclusion": "failure",
             "steps": [{"name": "L1 tests", "status": "in_progress", "conclusion": None}],
@@ -504,13 +521,16 @@ class JobNameCorpusTests(unittest.TestCase):
             {"check", "test", "lint", "test-l2", "test-browser", "wsl"}, found
         )
 
-    def test_the_areas_own_rollup_is_recognized_as_a_judge(self) -> None:
-        rollup = jobs_in("_area-ci.yml")["rollup"]
+    def test_the_areas_coverage_audit_is_not_a_cell_but_can_veto_retry(self) -> None:
+        audit = jobs_in("_area-ci.yml")["coverage-audit"]
         label = self.area_prefix().split(" / ")[0] + " / " + job_label(
-            "rollup", rollup, self.PACKAGE, self.ENVIRONMENT
+            "coverage-audit", audit, self.PACKAGE, self.ENVIRONMENT
         )
-        self.assertTrue(is_non_producer(label), label)
+        self.assertFalse(is_non_producer(label), label)
         self.assertIsNone(parse_job_name(label), label)
+
+    def test_the_legacy_area_rollup_label_remains_non_producer(self) -> None:
+        self.assertTrue(is_non_producer("area-ci (playa) / rollup"))
 
     def test_the_advisory_summary_is_recognized_as_a_judge(self) -> None:
         summary = jobs_in("ci.yml")["summary"]

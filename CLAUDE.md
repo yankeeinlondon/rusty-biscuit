@@ -33,16 +33,18 @@
   `ubuntu-latest` for a package with unchanged direct reverse dependencies,
   which it compiles inside that cell. An unchanged reverse dependency is
   reported by name and scheduled nowhere.
-- **Each area owns its outcome.** An area's rollup applies its own baseline,
-  governed gaps, and missing-cell rule and nobody else's. A governed, unexpired
+- **Each area audits its planned coverage.** Its `coverage-audit` renders every
+  result and, when producers are green, enforces exact skips, governed gaps,
+  and missing-cell rules for that area alone. Producer failures reach the gate
+  directly and do not create a second red audit check. A governed, unexpired
   capability gap is a distinct `ACCEPTED GAP` state decided by the planner — it
   is never inferred from a GitHub conclusion, never baselined, published
   immediately as one `neutral` check run per cell by the only job holding
   `checks: write`, and a real failure outranks it.
 - **The merge gate is `ci-gate`,** a policy-free fold of every blocking job's
   `needs.*.result` (`success` and `skipped` pass; `failure` and `cancelled`
-  block). It reads no plan, baseline, or artifact; `MISSING` is each area
-  rollup's to catch. Until the `protect-your-bacon` required context is
+  block). It reads no plan, baseline, or artifact; `MISSING` is each area's
+  coverage audit to catch. Until the `protect-your-bacon` required context is
   switched from `ci-verdict` to `ci-gate` — Ken's separate approval, after
   this branch's own run is green — every PR shows `ci-verdict — Expected` and
   cannot merge. Load the `rust-devops` skill before changing CI scope,

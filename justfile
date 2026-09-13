@@ -120,8 +120,12 @@ cross-check *args:
 test-pre-push-hook:
     @./.githooks/tests/test-pre-push.sh
 
+# prove the shared hook directory dispatches to each linked worktree's hook
+test-pre-push-dispatcher:
+    @./.githooks/tests/test-pre-push-dispatcher.sh
+
 # run Level 1 tests for every versioned git hook
-test-githooks: test-pre-push-hook
+test-githooks: test-pre-push-dispatcher test-pre-push-hook
 
 # run doctests (all workspace crates, or specific areas: just doctest claudine playa)
 doctest *args="": _storage_preflight
@@ -1362,23 +1366,28 @@ _orchestrate recipe *args="":
 audio-reset:
     sudo killall coreaudiod
 
-# install the versioned pre-push hook into this checkout's hook directory
+# install the versioned pre-push dispatcher into Git's shared hook directory
 #
-# A symlink (copy on hosts without symlink rights) rather than
-# `core.hooksPath = .githooks`: switching the hooks path would silently disable
-# any unversioned hooks already living in .git/hooks (e.g. commit-msg).
+# Linked worktrees share that directory, so an absolute symlink to one
+# checkout's hook executes the wrong protocol from every other worktree. The
+# dispatcher resolves the active worktree when Git invokes it. Copying it also
+# survives removal of whichever worktree last ran `just init` and preserves
+# other unversioned hooks in the directory (e.g. commit-msg).
 _ensure-git-hooks:
     #!/usr/bin/env bash
     set -euo pipefail
     hooks_dir="$(git rev-parse --git-path hooks)"
-    source="$(git rev-parse --show-toplevel)/.githooks/pre-push"
+    source="$(git rev-parse --show-toplevel)/.githooks/pre-push-dispatcher"
     target="${hooks_dir}/pre-push"
-    if [[ -e "${target}" ]] && cmp -s "${source}" "${target}"; then
+    if [[ ! -L "${target}" && -e "${target}" ]] && cmp -s "${source}" "${target}"; then
         exit 0
     fi
     mkdir -p "${hooks_dir}"
-    if ! ln -sf "${source}" "${target}" 2>/dev/null; then
-        cp "${source}" "${target}"
-    fi
-    chmod +x "${target}"
-    echo "Git hooks: installed .githooks/pre-push -> ${target} (host L1/L2 evidence for source changes; RUSTY_BISCUIT_PRE_PUSH=off|warn|strict)"
+    staged="${target}.tmp.$$"
+    trap 'rm -f "${staged}"' EXIT
+    cp "${source}" "${staged}"
+    chmod +x "${staged}"
+    rm -f "${target}"
+    mv "${staged}" "${target}"
+    trap - EXIT
+    echo "Git hooks: installed worktree-aware pre-push dispatcher at ${target} (host L1/L2 evidence for source changes; RUSTY_BISCUIT_PRE_PUSH=scope-only|warn|strict)"

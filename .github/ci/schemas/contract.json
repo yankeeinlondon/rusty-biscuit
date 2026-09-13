@@ -205,6 +205,7 @@
       "revision-mismatch",
       "gate-inputs-changed",
       "incomplete-run",
+      "failed-cell",
       "conflicting-evidence",
       "dirty-tree",
       "v1-requires-exact-tree",

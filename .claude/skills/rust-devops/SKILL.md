@@ -6,8 +6,6 @@ description: |
   build storage, or programmatic Git through git2/libgit2 and gitoxide/gix.
   In rusty-biscuit, load this before changing CI scope, local-validation reuse,
   release automation, or repository-wide Rust build caching.
-hash: 9fa043b64ab27813-fe3042e2e9114ef7
-last_updated: 2026-09-10
 ---
 # Rust DevOps
 

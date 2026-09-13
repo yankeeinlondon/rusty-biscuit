@@ -101,7 +101,12 @@ Compare against that, never against `to_string_lossy()`.
   `inline_compose_hash.rs`.
 - **Open handles block delete and rename.** A `File`, temp dir, mmap, or
   child that still holds a handle makes cleanup assertions fail on Windows
-  only. Drop before asserting.
+  only. Drop before asserting. Even after owned handles are closed, Playa's
+  detached-journal atomic publication can transiently receive
+  `ERROR_ACCESS_DENIED` or `ERROR_SHARING_VIOLATION` from a concurrent
+  reader or host scanner during `MoveFileExW(REPLACE_EXISTING)`. Retry those
+  two errors for a short bounded interval while preserving atomic replacement;
+  never delete the destination first.
 - **Ctrl+C and the exit-130 contract are Unix-only in Claudine today.** The
   Windows termination path is a bare `child.wait()` with no console control
   handler, and the child sits in `CREATE_NEW_PROCESS_GROUP`. Do not accept a

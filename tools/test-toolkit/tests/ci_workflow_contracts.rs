@@ -929,12 +929,12 @@ fn retired_packages_reach_verdict_through_package_evidence() {
             missing.push(format!("ci-gate still depends on {retired_job}"));
         }
     }
-    let rollup = job_block("_area-ci.yml", "  rollup:");
+    let rollup = job_block("_area-ci.yml", "  coverage-audit:");
     if !rollup.contains("uses: actions/download-artifact@")
         || !rollup.contains("ci-rollup rollup")
         || !rollup.contains("ci-rollup verdict")
     {
-        missing.push("artifact-driven area rollup consumption".to_owned());
+        missing.push("artifact-driven area coverage-audit consumption".to_owned());
     }
 
     assert!(
@@ -1334,11 +1334,11 @@ fn wsl_provisioning_retries_with_a_delay_and_the_test_step_never_does() {
         .nth(1)
         .expect("_wsl-ci.yml must define the L1 test step");
     let l1 = &l1[..l1.find("\n      - name:").unwrap_or(l1.len())];
-    // Non-fatal to the JOB, never retried: the outcome reaches the status
-    // artifact as the cell's `result`, which is where a failed suite is judged.
+    // Never retried and visible on the job. The status artifact independently
+    // preserves the cell-level diagnosis.
     assert!(
-        l1.contains("continue-on-error: true"),
-        "the L1 test step's failure belongs to the cell, not the job"
+        !l1.contains("continue-on-error"),
+        "the L1 test step must fail its producer visibly"
     );
 }
 
@@ -1624,12 +1624,11 @@ fn every_producer_job_emits_an_explicit_status_artifact() {
     }
 }
 
-// --- producer normalization: the area's rollup owns a gate command's failure --
+// --- truthful producers and retained cell evidence ---------------------------
 
 /// Every gate-command step, as `(file, job header, step id, step name)`. A
-/// gate command is the test, lint, or compile command whose failure is a CELL
-/// failure — judged by the area's rollup against its baseline (specification
-/// section 5) — rather than a failure of the job that ran it.
+/// gate command is a test, lint, or compile command whose failure must fail the
+/// producer while its status artifact retains the cell-level diagnosis.
 const GATE_STEPS: [(&str, &str, &str, &str); 10] = [
     ("_package-ci.yml", "  check:", "check", "cargo check (declared example/bench kinds)"),
     ("_package-ci.yml", "  check:", "dependents", "Compile unchanged dependents"),
@@ -1710,18 +1709,11 @@ fn step_script(step: &str) -> String {
         .join("\n")
 }
 
-/// Review 6, finding 1: a failed test, lint, or compile command used to fail
-/// its producer job, which failed `area-ci` and blocked `ci-gate` before the
-/// area's rollup — the only place the baseline is applied — was consulted. A
-/// baselined hosted failure therefore blocked the merge while the same failure
-/// supplied by local evidence was accepted.
-///
-/// Each gate command is now a `continue-on-error` step whose outcome the status
-/// step folds into the cell's `result`, so the artifact says the cell FAILED
-/// while the job (and so the area, and so the fold) stays green. Only the
-/// rollup's verdict can then block on it, exactly as for a reused cell.
+/// A failed test, lint, or compile command must be visible as a failed producer
+/// job. Its status artifact still records the same failed cell so the area
+/// coverage audit can render the precise package/environment/tier diagnosis.
 #[test]
-fn a_failed_gate_command_is_normalized_so_its_area_owns_the_outcome() {
+fn a_failed_gate_command_fails_its_producer_and_is_still_reported() {
     for (file, header, id, name) in GATE_STEPS {
         let job = job_block(file, header);
         let steps = steps(&job);
@@ -1733,9 +1725,9 @@ fn a_failed_gate_command_is_normalized_so_its_area_owns_the_outcome() {
             "{file}: the `{id}` step must be the `{name}` gate command"
         );
         assert!(
-            executable_lines(gate).contains("\n        continue-on-error: true\n"),
-            "{file}: `{name}` must be continue-on-error — a failed gate command is the CELL's \
-             failure, and only the area rollup may turn it into a blocked merge"
+            !executable_lines(gate).contains("\n        continue-on-error: true\n"),
+            "{file}: `{name}` must fail its producer visibly; fail-fast:false preserves the \
+             other unevidenced matrix cells"
         );
 
         let status = step_named(&steps, "Record producer status")
@@ -1761,19 +1753,17 @@ fn a_failed_gate_command_is_normalized_so_its_area_owns_the_outcome() {
         );
         let script = step_script(status);
         assert!(
-            script.contains("result=failure") && script.contains("::error title="),
-            "{file}: the status step must fold a failed gate into `result=failure` and \
-             annotate the green job with an `::error` so the failure stays visible"
+            script.contains("result=failure"),
+            "{file}: the status step must retain a defensive failed-gate fold so the \
+             artifact cannot claim success if job.status is observed during always()"
         );
     }
 }
 
-/// The normalization is confined to the gate commands. A setup, archive, or
-/// upload step that failed silently would leave the job green with no report,
-/// and the rollup would render MISSING for a failure that should have named
-/// itself — so the set of normalized steps is pinned exactly.
+/// Only bounded recovery and diagnostic steps may ignore an error. Gate,
+/// setup, staging, and upload failures must remain producer failures.
 #[test]
-fn only_gate_commands_are_normalized_never_setup_or_upload() {
+fn only_recovery_and_diagnostic_steps_ignore_errors() {
     let normalized = |file: &str, header: &str| -> Vec<String> {
         steps(&job_block(file, header))
             .iter()
@@ -1782,40 +1772,33 @@ fn only_gate_commands_are_normalized_never_setup_or_upload() {
             .collect()
     };
     for header in ["  check:", "  test:", "  lint:", "  test-l2:", "  test-browser:"] {
-        let expected: Vec<&str> = GATE_STEPS
-            .iter()
-            .filter(|(file, job, _, _)| *file == "_package-ci.yml" && *job == header)
-            .map(|(_, _, _, name)| *name)
-            .collect();
         assert_eq!(
             normalized("_package-ci.yml", header),
-            expected,
-            "_package-ci.yml: `{}` may normalize exactly its gate commands",
+            Vec::<String>::new(),
+            "_package-ci.yml: `{}` may not hide any step failure",
             header.trim()
         );
     }
-    // The WSL leg also normalizes its first provisioning attempt (so the
-    // bounded retry is reachable) and its post-mortem diagnostics (which must
-    // never fail a job whose tests already reported). Nothing else.
+    // The WSL leg ignores only its first provisioning attempt (so the bounded
+    // retry is reachable) and diagnostics that must not overwrite a test result.
     assert_eq!(
         normalized("_wsl-ci.yml", "  wsl:"),
         vec![
             "Provision the WSL2 guest",
             "Census the Windows host before extraction",
-            "L1 tests from the archive",
             "Guest post-mortem",
             "Host post-mortem",
         ],
-        "_wsl-ci.yml: `wsl` may normalize its gate command, the first provisioning \
-         attempt, and its diagnostics — never staging or upload"
+        "_wsl-ci.yml: `wsl` may ignore only the first provisioning attempt and \
+         diagnostics — never tests, staging, or upload"
     );
-    // The area rollup's own exit 2 is normalized so the verdict step can still
-    // run and explain the block; `package-ci` is a `uses:` job with no steps.
+    // The audit tool's own exit 2 is normalized so its enforcement step can
+    // explain a coverage block; `package-ci` is a `uses:` job with no steps.
     assert!(normalized("_area-ci.yml", "  package-ci:").is_empty());
     assert_eq!(
-        normalized("_area-ci.yml", "  rollup:"),
+        normalized("_area-ci.yml", "  coverage-audit:"),
         vec!["Roll up this area's cells"],
-        "_area-ci.yml: `rollup` may normalize only its grid rendering, never its verdict"
+        "_area-ci.yml: `coverage-audit` may normalize only grid rendering, never enforcement"
     );
 }
 
@@ -1841,13 +1824,13 @@ fn no_reusable_workflow_call_is_advisory() {
 }
 
 /// The fold, run for real: each producer's status script is executed under
-/// every combination of job status and gate outcome that the workflow can
-/// produce, and the artifact it writes is read back. Unix only because the
+/// the job/gate outcome combinations its `always()` step may observe, and the
+/// artifact it writes is read back. Unix only because the
 /// scripts declare `shell: bash` and the assertion is about Bash semantics,
 /// not about the host; CI's `ci-tooling` job is Linux.
 #[cfg(unix)]
 #[test]
-fn the_status_fold_reports_a_failed_gate_on_a_green_job() {
+fn the_status_fold_preserves_every_failure_shape() {
     /// (file, job header, principal gate step id)
     const PRODUCERS: [(&str, &str, &str); 7] = [
         ("_package-ci.yml", "  check:", "check"),
@@ -1861,7 +1844,8 @@ fn the_status_fold_reports_a_failed_gate_on_a_green_job() {
     /// (job.status, principal gate outcome, companion outcome, expected result)
     const CASES: [(&str, &str, &str, &str); 6] = [
         ("success", "success", "success", "success"),
-        // The finding: a failed gate command on a healthy job is a FAILED cell.
+        // Defensive: even if job.status is sampled as healthy during always(),
+        // the gate outcome keeps the cell failed.
         ("success", "failure", "success", "failure"),
         // A companion suite is a gate command too.
         ("success", "success", "failure", "failure"),
@@ -1942,8 +1926,8 @@ fn the_status_fold_reports_a_failed_gate_on_a_green_job() {
             assert_eq!(
                 stdout.contains("::error title="),
                 normalized,
-                "{case}: a failure hidden from the job's conclusion must be annotated on it, \
-                 and nothing else may be; stdout was:\n{stdout}"
+                "{case}: only a failure not already represented by job.status needs a \
+                 workflow-command annotation; stdout was:\n{stdout}"
             );
         }
     }
@@ -2156,7 +2140,7 @@ fn only_ci_gate_makes_a_run_level_claim() {
     );
     assert!(
         !summary.contains("needs.area-ci.result"),
-        "every package gate is a cell in its own area's rollup; the advisory \
+        "every package gate is covered by its own area's workflow; the advisory \
          summary must not report them a second time"
     );
     assert!(
@@ -2741,19 +2725,26 @@ fn the_area_is_the_top_level_identity_of_the_package_fan_out() {
 
 /// AC11: each selected area owns its own outcome, and only its own.
 #[test]
-fn every_selected_area_owns_an_always_rollup_job() {
-    let rollup = job_block("_area-ci.yml", "  rollup:");
+fn every_selected_area_owns_an_always_coverage_audit() {
+    let rollup = job_block("_area-ci.yml", "  coverage-audit:");
     assert!(
         rollup.contains("needs: package-ci") && rollup.contains("if: always()"),
-        "the area rollup must wait for its own producers and run even when they failed"
+        "the area coverage audit must wait for its producers and render even when they failed"
     );
     assert!(
         rollup.contains(r#"--area "$AREA""#),
-        "the area rollup must narrow the rollup to its own area"
+        "the area coverage audit must narrow the rollup tool to its own area"
     );
     assert!(
         rollup.contains("ci-rollup verdict") && rollup.contains("--baseline"),
-        "the area rollup must apply its own baseline and fail closed"
+        "the area coverage audit must apply its own baseline and fail closed"
+    );
+    let audit_steps = steps(&rollup);
+    let enforcement = step_named(&audit_steps, "Enforce coverage completeness and exceptions")
+        .expect("the coverage audit must have one explicit enforcement step");
+    assert!(
+        enforcement.contains("if: needs.package-ci.result == 'success'"),
+        "an ordinary producer failure must not create a second red coverage-audit check"
     );
     // Package stays the stored identity: only the artifact NAME carries the
     // area, and it carries the slug so a nested area is a legal artifact name.
@@ -2766,7 +2757,7 @@ fn every_selected_area_owns_an_always_rollup_job() {
 /// AC11/spec §5: runner-loss attribution moved into the per-area path.
 #[test]
 fn runner_loss_attribution_is_narrowed_to_the_owning_area() {
-    let rollup = job_block("_area-ci.yml", "  rollup:");
+    let rollup = job_block("_area-ci.yml", "  coverage-audit:");
     assert!(
         rollup.contains("runner_loss.py attribute") && rollup.contains("--package"),
         "an area must synthesize statuses only for its own packages; a job name \
@@ -2782,18 +2773,18 @@ fn runner_loss_attribution_is_narrowed_to_the_owning_area() {
 #[test]
 fn a_reused_cell_reaches_its_area_summary_without_being_re_executed() {
     let area = workflow("_area-ci.yml");
-    let rollup = job_block("_area-ci.yml", "  rollup:");
+    let rollup = job_block("_area-ci.yml", "  coverage-audit:");
     // The rollup renders the reused cells (`render_grid`'s "Reused results"
     // table) into the area's step summary, and it is the only job in the area
     // workflow that is not a package execution.
     assert!(
         rollup.contains("ci-rollup rollup") && rollup.contains("--plan "),
-        "the area rollup must read the plan, which is what says a cell was reused"
+        "the area coverage audit must read the plan, which says a cell was reused"
     );
     for forbidden in ["just _test", "cargo nextest", "install-action@nextest"] {
         assert!(
             !rollup.contains(forbidden),
-            "the area rollup runs `{forbidden}`; publishing a reused cell must \
+            "the area coverage audit runs `{forbidden}`; publishing a reused cell must \
              invoke no setup, build, archive, or test step"
         );
     }
@@ -2865,7 +2856,7 @@ fn advisory_jobs_cannot_fail_the_run_and_gates_are_not_advisory() {
         ("ci.yml", "  preflight:"),
         ("ci.yml", "  ci-tooling:"),
         ("ci.yml", "  ci-gate:"),
-        ("_area-ci.yml", "  rollup:"),
+        ("_area-ci.yml", "  coverage-audit:"),
     ] {
         let block = job_block(file, header);
         let executable: String = block
@@ -2897,7 +2888,7 @@ fn no_standalone_global_verdict_job_remains() {
         }
         assert!(
             !block.contains("ci-rollup verdict"),
-            "`{header}` re-judges the run; only each area's rollup may run the verdict"
+            "`{header}` re-judges the run; only each area's coverage audit may run the verdict"
         );
     }
 }
@@ -2935,7 +2926,7 @@ fn the_verdict_consumers_are_rewired_when_the_job_goes() {
 // The ruleset edit itself is Ken's (OQ3/B3), but the properties the migration
 // depends on are static and testable now: the run conclusion must already be a
 // faithful conjunction, every area's results must already be published, and
-// every area rollup must judge from the plan, the policy, and the baseline.
+// every area coverage audit must read the plan, policy, and baseline.
 // ---------------------------------------------------------------------------
 
 /// Spec §5: `reuse_validation.py`, `release-plz.yml`, and `ci-infra-retry.yml`
@@ -3002,14 +2993,14 @@ fn only_the_advisory_summary_is_excluded_from_the_run_conclusion() {
 /// Spec §5: the per-area result slices are the only machine-readable results
 /// a run produces, so a blocked area must still publish one.
 #[test]
-fn a_blocked_area_still_publishes_its_result_slice() {
-    let rollup = job_block("_area-ci.yml", "  rollup:");
+fn a_coverage_blocked_area_still_publishes_its_result_slice() {
+    let rollup = job_block("_area-ci.yml", "  coverage-audit:");
     let upload = rollup
         .find("name: Upload this area's result slice")
-        .expect("the area rollup must upload its result slice");
+        .expect("the area coverage audit must upload its result slice");
     let judge = rollup
-        .find("name: Judge this area")
-        .expect("the area rollup must judge its area");
+        .find("name: Enforce coverage completeness and exceptions")
+        .expect("the area coverage audit must enforce its policy");
     assert!(
         upload < judge,
         "the slice must be uploaded BEFORE the verdict step, so a blocked \
@@ -3029,16 +3020,16 @@ fn a_blocked_area_still_publishes_its_result_slice() {
     ] {
         assert!(
             rollup.contains(usage),
-            "the rollup must write, upload, and judge one slice file: `{usage}`"
+            "the coverage audit must write, upload, and judge one slice file: `{usage}`"
         );
     }
 }
 
-/// Spec §5: with no whole-run verdict, each area's rollup is the only reader of
-/// the plan, the policy, the environment table, and the baseline.
+/// The coverage audit is the only reader of the plan, policy, environment
+/// table, and baseline after execution.
 #[test]
-fn the_area_rollup_judges_from_the_plan_policy_and_baseline() {
-    let rollup = job_block("_area-ci.yml", "  rollup:");
+fn the_area_coverage_audit_reads_plan_policy_and_baseline() {
+    let rollup = job_block("_area-ci.yml", "  coverage-audit:");
     for input in [
         "name: ci-scope",
         "name: ci-resolved-plan",
@@ -3048,12 +3039,12 @@ fn the_area_rollup_judges_from_the_plan_policy_and_baseline() {
     ] {
         assert!(
             rollup.contains(input),
-            "the area rollup must read `{input}`; nothing else judges the run"
+            "the area coverage audit must read `{input}`"
         );
     }
     assert!(
         job_block("ci.yml", "  ci-gate:").contains("      - area-ci\n"),
-        "ci-gate must wait on the area fan-out so every rollup's result reaches the fold"
+        "ci-gate must wait on the area fan-out so producer and audit failures reach the fold"
     );
 }
 
@@ -3181,10 +3172,10 @@ fn the_gap_publisher_is_the_only_job_holding_checks_write() {
     assert!(publisher.contains("contents: read"), "checkout needs contents: read");
 
     // The read-only siblings.
-    let rollup = executable_lines(&job_block("_area-ci.yml", "  rollup:"));
+    let rollup = executable_lines(&job_block("_area-ci.yml", "  coverage-audit:"));
     assert!(
         rollup.contains("checks: read") && !rollup.contains("checks: write"),
-        "the rollup stays at `checks: read`"
+        "the coverage audit stays at `checks: read`"
     );
     let package_ci = executable_lines(&job_block("_area-ci.yml", "  package-ci:"));
     assert!(
@@ -3219,7 +3210,7 @@ fn the_rollup_binary_is_still_built_without_the_monorepo_crates() {
     // `scripts/Cargo.toml`'s `local-tools` feature exists so the always-runs
     // required check does not pay for gix, duckdb, and the terminal renderer.
     // Phase 4's `--plan` renderer stays out of this invocation, and so does
-    // every per-area rollup.
+    // every per-area coverage audit.
     for file in ["ci.yml", "_area-ci.yml"] {
         let source = workflow(file);
         assert!(

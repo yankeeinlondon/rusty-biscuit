@@ -128,9 +128,9 @@ nothing to attribute it to, so it is published (the run happened) and refused
 for reuse (`incomplete-run`), rather than being made unpublishable or silently
 credited as a tested cell.
 
-A `complete` failing run is reusable evidence and stays a failure. An
+A `complete` failing run is diagnostic evidence and is rejected for reuse. An
 `interrupted` run contributes nothing; an interrupted *cell* inside a complete
-run is rejected alone and leaves its siblings reusable.
+run is rejected alone and leaves its completed passing siblings reusable.
 
 ### Version-1 receipts
 

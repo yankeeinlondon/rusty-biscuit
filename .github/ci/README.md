@@ -9,7 +9,7 @@ cell — is keyed on `{package, environment, tier}`.
   it.
 - **Environment capabilities** live in `environments.json` (below). One
   versioned, schema-validated table.
-- **Known-red legs** live in `ci-baseline.toml`, keyed by package.
+- **Approved exact-test skips** live in `ci-baseline.toml`, keyed by package.
 
 There is no per-directory policy store. **Package is the stored identity** of
 every artifact, JUnit record, baseline entry, and receipt cell. **Area is a
@@ -138,10 +138,10 @@ materializes the pinned Rust toolchain (`rustup show`) only on that miss,
 immediately before the selection run that reads `cargo metadata`; a hit is
 Python and jq end to end and sets up no toolchain (R9). Whichever way the
 scope was sourced, the summary's `validation environments`, `reused passing
-cells`, `reused failing cells`, and `cells retained (evidence incomplete or
-rejected)` rows report which `refs/notes/ci-local/<environment>` refs the
-verifier consulted and which matched, the cells reused from a pass and from a
-failure, and the refusals by code — read from the written plan, so they
+cells`, and `cells retained (evidence incomplete or rejected)` rows report
+which `refs/notes/ci-local/<environment>` refs the verifier consulted and
+which matched, the cells reused from a pass, and the refusals by code — read
+from the written plan, so they
 describe exactly what the fan-out sees. `workflow_dispatch` never consults it. When a matching receipt is combined
 with accepted validation cells, selection still never runs: the accepted set is
 applied to the carried plan (`affected_scope.py --apply-to`, which reads no
@@ -176,9 +176,11 @@ producing host under `$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`
 `host.report_dir` names that directory; the copy happens before the receipt is
 written, and a copy that fails publishes no receipt.
 
-A **complete** run is evidence whether it passed or failed. `strict` and `warn`
-both record one; a gate that produced no report is recorded `partial` and is
-not reusable, so a compile failure cannot pass for a tested cell. An override
+A **complete** run is recorded whether it passed or failed. `strict` and
+`warn` both publish one, but only complete passing cells are reusable. A
+failure is retained for diagnosis and refused with `failed-cell`; a gate that
+produced no report is recorded `partial` and is not reusable, so a compile
+failure cannot pass for a tested cell. An override
 (`RUSTY_BISCUIT_PRE_PUSH_AREAS`) or a dirty tree publishes no validation
 receipt (the scope receipt still goes out), and so does a run in which every
 recordable cell was already covered; every withheld receipt is announced with
@@ -300,14 +302,14 @@ Linux-hosted — are now declared once, here, with full governance.
 A cell whose gap is governed and unexpired is an **`ACCEPTED GAP`** in the
 results: a distinct machine-readable state, decided by the planner before the
 run and never inferred from a GitHub cancellation conclusion. It is neither a
-pass nor a test failure, and the rollup renders its owner, expiry, policy entry,
+pass nor a test failure, and the coverage audit renders its owner, expiry, policy entry,
 `closes` link, and revocation instructions where a reader sees the cell. An
 absent, incomplete, or expired acceptance is a blocking `POLICY GAP` instead.
 The two current L2-backend gaps name
 `features/_unscheduled/windows-l2-ci-leg` and
 `features/_unscheduled/wsl2-l2-ci-leg` as what closes them.
 
-**Published immediately, as a `neutral` check run per cell.** The rollup's
+**Published immediately, as a `neutral` check run per cell.** The audit's
 grid arrives only after the area's producers finish, so `_area-ci.yml`'s
 `accepted-gaps` job — which `needs` nothing — reads the plan the scope job
 uploaded and runs `scripts/ci/publish_gaps.py`, which creates one check run
@@ -323,7 +325,7 @@ links the policy entry's line at the tested head. The conclusion is `neutral`
 the run's conclusion, and `cancelled` keeps its single meaning of
 interruption. The publisher refuses — exit 2, job red — a cell whose record is
 ungoverned, incomplete, or expired, because a `neutral` check for a cell the
-rollup is about to block on would misrepresent it; an area with no accepted
+coverage audit is about to block on would misrepresent it; an area with no accepted
 gap skips the job on the scope job's `gap_areas` output. Presentation only:
 nothing reads the check back.
 
@@ -331,7 +333,7 @@ nothing reads the check back.
 capped by its caller's, so `ci.yml`'s `area-ci` job carries the grant as a
 cap; `_area-ci.yml` then confines it — `package-ci` declares `contents: read`
 (which `_package-ci.yml` and `_wsl-ci.yml` inherit; neither uses the token)
-and `rollup` stays at `checks: read`. The workflow-contract suite pins all of
+and `coverage-audit` stays at `checks: read`. The workflow-contract suite pins all of
 that.
 
 An L2 tier is hostable where ANY of its declared backends is: each backend is
@@ -445,7 +447,7 @@ command surface:
 Messenger and the three Rendezvous packages use the ordinary package grid as
 their coverage authority. Their native and `wsl2-ubuntu` L1 evidence is keyed
 by `{package, environment, tier}` and consumed from JUnit plus producer-status
-artifacts by their area's rollup; no specialized workflow or job name stands in
+artifacts by their area's coverage audit; no specialized workflow or job name stands in
 for a package result.
 
 ### Companion suites
@@ -492,28 +494,19 @@ the apt name mapped to `dnf` / `pacman` / `apk` in that recipe's table.
 
 ## The results baseline — `ci-baseline.toml`
 
-`ci-baseline.toml` records known-red legs and the approved skip budget, keyed
-by `{package, environment, tier}`. `scripts/ci-rollup.rs` enforces it:
-
-- a failure **not** listed blocks
-- a listed entry that is scheduled and **passes** blocks, forcing cleanup
-- an entry outside the run's affected scope is **ignored** — never a pass
-- a scheduled entry that is cancelled, missing, or emits no result stays
-  blocking; it cannot be accepted as a known test failure
-- an entry past its `expiry` blocks
+`ci-baseline.toml` records the approved exact-test skip budget, keyed by
+`{package, environment, tier}`. Test, lint, and compile failures always block;
+schema version 3 rejects the former `[[failure]]` entries because a visibly red
+producer has already reached `ci-gate` before the rollup runs.
 
 Every entry needs `owner`, `reason`, and `source_run`. `expiry` is optional
 but strongly encouraged. The file is currently **empty on purpose** — the
 area-keyed predecessor recorded no skips, and inventing entries from an
 unmeasured guess would defeat the mechanism.
 
-An entry is applied by the area that owns its `package` and by no other:
-another area's rollup can neither block on it nor be excused by it. A cell
-satisfied by verified local evidence is a normal result cell with
-`origin: local`, so a complete local *failure* is matched against this file
-exactly as a hosted one is. Policy gaps are **not** baselined here — they are
-governed once in `environments.json`, and a baselined entry is only accepted
-against a `FAIL` anyway.
+An entry is applied by the area that owns its `package` and by no other.
+Policy gaps are **not** baselined here — they are governed once in
+`environments.json`.
 
 ## The area fan-out
 
@@ -547,15 +540,17 @@ back to the job id, which is static when the job is skipped and gains the
 matrix values when it runs. `lint` has no matrix, so it keeps a static
 `lint (ubuntu-latest)` — its environment has to be visible.
 
-## Each area owns its outcome
+## Each area audits its planned coverage
 
-`_area-ci.yml`'s `rollup` job runs `if: always()` behind that area's producers
-and runs `ci-rollup rollup --area` then `ci-rollup verdict --area`. It applies
-that area's baseline, its governed policy gaps, and the missing-cell rule, and
-nobody else's: another area's red cell cannot block it and another area's
-baseline entry cannot excuse it. It also narrows runner-loss attribution to its
-own packages (`runner_loss.py attribute --package`), because a job name carries
-no area.
+`_area-ci.yml`'s `coverage-audit` job runs `if: always()` behind that area's
+producers and always renders `ci-rollup rollup --area`. It enforces
+`ci-rollup verdict --area` only when every producer succeeded. A producer
+failure already makes the area and `ci-gate` red, so the audit does not emit a
+second red check for the same failure. When producers are green, the audit
+fails closed on missing or unscheduled evidence, invalid governed gaps, and
+exact-skip violations. Another area's evidence or exception cannot affect it.
+It also narrows runner-loss attribution to its own packages
+(`runner_loss.py attribute --package`), because a job name carries no area.
 
 Its step summary is where a reused cell becomes visible: the grid's "Reused
 results" table names the receipt's evidence ref, counts, duration, and host. No
@@ -573,27 +568,20 @@ accepted by design — an unselected area's job is skipped through its `if:`,
 and on a reused validation every downstream job is — while `failure` and
 `cancelled` block. Because `needs` names static job ids, a cell the plan
 scheduled and no job produced (`MISSING`) is invisible to the fold; each
-area's own rollup catches it. `continue-on-error` turns a failed job's result
+area's own coverage audit catches it. `continue-on-error` turns a failed job's result
 into `success` for the fold, so it is reserved for the advisory summary and no
 blocking job may carry it. All of this was measured in a scratch repository:
 `fixes/2026-09-11-cicd-cleanup/fixtures/scratch-2026-09-12.md`.
 
-A producer — `check`, `lint`, `test`, `test-l2`, `test-browser`, `wsl2` —
-does **not** fail its job when its gate command fails. Every test, lint, and
-compile command runs as a step-level `continue-on-error` with an `id:`, and
-the job's `Record producer status` step folds the step outcomes into the
-cell's `result` (`failure` on an otherwise healthy job; `job.status` unchanged
-otherwise) and annotates the green job with `::error`. The job, `area-ci`, and
-the fold therefore stay green for a test failure, and the area's rollup is the
-only job that can turn it into a block — after applying the area's baseline
-(review 6, finding 1: a red producer job reached the fold before the baseline
-was consulted, so a baselined hosted failure blocked while the same failure
-reused from local evidence did not). Setup, provisioning, the JUnit and status
-uploads, and cancellation are not normalized: they fail the producer, the
-area, and the gate directly, and no baseline may excuse them. Judgement — the
-baseline, the governed gaps, the missing-cell rule, `--scope`, `--policy`, and
-`--plan` — lives in each area's rollup and nowhere else, and no producer may be
-a required check.
+A producer — `check`, `lint`, `test`, `test-l2`, `test-browser`, `wsl2` — fails
+visibly when its gate command fails. The command keeps an `id:` and the job's
+`always()` status step still publishes the cell result, while JUnit and status
+uploads remain reachable through explicit status predicates. Every matrix uses
+`fail-fast: false`, so one red cell does not cancel any other OS cell still
+scheduled after evidence reuse. The area's coverage audit remains
+authoritative for missing cells, exact skip budgets, and governed gaps when
+producers are green; ordinary failures reach `ci-gate` directly through the
+producer's truthful job result.
 
 **Required-context transition.** Ruleset `protect-your-bacon` (id 19747338)
 still names `ci-verdict`, which was the required check until 2026-09-12.
@@ -607,8 +595,9 @@ slices (there is no whole-run `ci-results` artifact any more) and
 
 ### The result document
 
-`ci-results.json` is `schema_version: 3`, versioned independently of the
-baseline's 2. Identity is still `{package, environment, tier}`; each cell also
+`ci-results.json` and the skip-only baseline are independently versioned; both
+currently use `schema_version: 3`. Identity is still
+`{package, environment, tier}`; each cell also
 carries its derived `area`, its `origin` (`ci`, `local`, `prior-local`, or
 `none`), the `evidence` behind a reused result, its measured `duration_s`, and
 the `target_kinds` and `compile_coverage_from` the plan assigned it. The
@@ -642,11 +631,10 @@ overwritten by each nextest invocation. **The manifest is the identity
 source.** Artifact-name parsing was retired with the area model: a staged XML
 with no covering manifest record has no trustworthy identity and is dropped.
 
-`result` is the cell's conclusion: `failure` when a gate command failed on an
-otherwise healthy job (the gate steps are `continue-on-error`, so `job.status`
-alone would read `success`), else GitHub's own `job.status`. The status step
-and its upload both carry `if: ${{ always() }}` so a job that failed in setup
-or was cancelled still reports itself; a job that reports nothing at all is
+`result` is the cell's conclusion. A failed gate command also fails its
+producer job visibly; the status document preserves the exact cell identity
+and diagnosis. The status step and its upload carry `if: ${{ always() }}`, so
+a job that failed in setup or was cancelled still reports itself; a job that reports nothing at all is
 `MISSING`, never a pass. A package that
 declares a companion suite also records the companion step's `companion`
 outcome on every run — not only on failure — because a *skipped* companion
@@ -700,8 +688,8 @@ for them. The plan record's `dependent_seam` carries the sorted names and one
 `cargo check` argument string — one `-p` per dependent plus the explicit
 `--lib`/`--bins`/`--tests` selectors their declared kinds need (the kinds that
 consume the public API; never their examples or benches, never
-`--all-targets`, no feature flags). `_package-ci.yml` runs it as a second
-normalized step, `Compile unchanged dependents`, and the cell's status records
+`--all-targets`, no feature flags). `_package-ci.yml` runs it as a second gate
+step, `Compile unchanged dependents`, and the cell's status records
 the names plus which half failed; the rollup renders "also compiled N
 dependent(s): …" on the cell. The local `just ci-local` runs do not execute
 check cells, this half included.

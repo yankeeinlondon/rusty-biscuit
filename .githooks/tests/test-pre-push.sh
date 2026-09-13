@@ -906,12 +906,12 @@ test_reports_that_cannot_be_retained_publish_no_receipt() {
 
 # ---------- complete failing runs (fixes/2026-09-11-cicd-cleanup, D1; AC6/AC7) --
 #
-# A COMPLETE failing run is evidence too. The hook publishes it in BOTH modes:
-# warn continues the push with the note already on the remote, and strict
-# blocks the branch AFTER the note is on the remote, so the `--no-verify` push
-# of the unchanged tree that follows lets CI reuse the known failure instead
-# of re-running it. These fixtures satisfy the whole publication guard for
-# real, like the retained-reports ones, but the gate fails.
+# A COMPLETE failing run is retained as diagnostic evidence. The hook publishes
+# it in BOTH modes: warn continues the push with the note already on the remote,
+# and strict blocks the branch AFTER the note is on the remote. CI refuses that
+# result for reuse and reruns the cell if the branch is pushed with
+# `--no-verify`. These fixtures satisfy the whole publication guard for real,
+# like the retained-reports ones, but the gate fails.
 
 # The gate stages one L1 report for `alpha` with a failing test and records a
 # non-zero exit for the cell, so `record-cells` measures a COMPLETE failure
@@ -965,11 +965,10 @@ assert_remote_receipt_is_a_complete_failure() {
     fi
 }
 
-# T2 (D1, AC7): strict blocks the push, the note is already on the remote, and
-# after the developer's `--no-verify` push of the same tree a fresh clone
-# verifying against that note accepts the failed cell and the planner's
-# overlay resolves it to reuse — the failure is rolled up, not re-run.
-test_a_blocked_strict_failure_publishes_its_note_and_ci_reuses_the_failure() {
+# T2 (D1, AC7): strict blocks the push and the diagnostic note is already on
+# the remote. After a `--no-verify` push of the same tree, CI refuses the failed
+# cell for reuse and keeps it scheduled.
+test_a_blocked_strict_failure_publishes_its_note_but_ci_reruns_the_cell() {
     local tmpdir="$1"
     make_publishing_repo "$tmpdir"
     run_failing_publishing_hook "$tmpdir" strict "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
@@ -1001,25 +1000,28 @@ test_a_blocked_strict_failure_publishes_its_note_and_ci_reuses_the_failure() {
         sed 's/^/  /' "$tmpdir/verify.err" >&2
         return 1
     fi
-    if ! jq -e 'length == 1 and (.[0] | .package == "alpha" and .environment == "macos-latest" and .gate == "L1" and .outcome == "fail" and .completion == "complete" and .origin == "local")' \
-            "$tmpdir/accepted.json" >/dev/null; then
-        echo "  verification did not accept the failed cell with its outcome retained:" >&2
+    if ! jq -e 'length == 0' "$tmpdir/accepted.json" >/dev/null; then
+        echo "  verification accepted a failed cell:" >&2
         sed 's/^/  /' "$tmpdir/accepted.json" >&2
-        echo "  --- rejections ---" >&2
+        return 1
+    fi
+    if ! jq -e 'length == 1 and (.[0] | startswith("failed-cell: alpha/macos-latest/L1 failed; failing evidence is diagnostic only"))' \
+            "$tmpdir/rejections.json" >/dev/null; then
+        echo "  verification did not explain why the failed cell was refused:" >&2
         sed 's/^/  /' "$tmpdir/rejections.json" >&2
         return 1
     fi
-    # The real overlay (`--apply-to` reads nothing from the checkout) resolves
-    # the cell to reuse of the failure; nothing is left to execute.
+    # The real overlay (`--apply-to` reads nothing from the checkout) leaves
+    # the refused cell assigned to CI.
     if ! python3 "$REPO_ROOT/scripts/ci/affected_scope.py" --apply-to "$FIXTURES/plan-macos-executing.json" \
             --accepted-cells "$tmpdir/accepted.json" --resolved-plan >"$tmpdir/applied.json" 2>"$tmpdir/apply.err"; then
         echo "  --apply-to failed:" >&2
         sed 's/^/  /' "$tmpdir/apply.err" >&2
         return 1
     fi
-    if ! jq -e '(.cells | length) == 1 and (.cells[0] | .execution == "reuse" and .origin == "local" and .state == "reused" and .evidence.outcome == "fail") and ([.cells[] | select(.execution == "execute")] | length) == 0' \
+    if ! jq -e '(.cells | length) == 1 and (.cells[0] | .execution == "execute" and .origin == "ci" and .state == "pending")' \
             "$tmpdir/applied.json" >/dev/null; then
-        echo "  the overlaid plan does not reuse the failed cell:" >&2
+        echo "  the overlaid plan did not leave the failed cell scheduled:" >&2
         jq '.cells' "$tmpdir/applied.json" | sed 's/^/  /' >&2
         return 1
     fi
@@ -2301,7 +2303,8 @@ test_a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded() {
     run_hook_in_repo "$tmpdir" strict refs/heads/feature "$ZERO_SHA" "BISCUIT_CI_EVIDENCE_DIR=$tmpdir/evidence"
     assert_exit "commit B" "$tmpdir" 0 || return 1
     assert_log_has "alpha rerun" "$tmpdir" "_test alpha" || return 1
-    assert_contains "rerun named with its reason" "$tmpdir/out" "rerun  alpha/L1" || return 1
+    assert_contains "failed evidence is rejected" "$tmpdir/out" "failed-cell: alpha/macos-latest/L1" || return 1
+    assert_contains "alpha stays scheduled" "$tmpdir/out" "run    alpha/L1" || return 1
     assert_receipt_records "commit B" "$tmpdir" "$head_b" "$main_sha" '["alpha/L1","beta/L1"]' || return 1
     # Newest wins: verifying against B's plan resolves alpha/L1 to B's pass,
     # not A's failure.
@@ -2451,7 +2454,7 @@ run_test "a constraint for another branch does not block"             test_a_con
 run_test "the plan fixtures are valid resolved plans"                 test_the_plan_fixtures_are_valid_resolved_plans
 run_test "a published receipt names retained, readable reports"       test_a_published_receipt_names_retained_readable_reports
 run_test "reports that cannot be retained publish no receipt"         test_reports_that_cannot_be_retained_publish_no_receipt
-run_test "a blocked strict failure publishes its note; CI reuses it"  test_a_blocked_strict_failure_publishes_its_note_and_ci_reuses_the_failure
+run_test "a blocked strict failure publishes its note; CI reruns it"  test_a_blocked_strict_failure_publishes_its_note_but_ci_reruns_the_cell
 run_test "a complete warn failure publishes its note"                 test_a_complete_warn_failure_publishes_its_note
 run_test "scope-only publishes committed scope for a push to main"    test_scope_only_publishes_committed_scope_for_a_push_to_main
 run_test "a feature push records the PR base, not its previous tip"   test_a_feature_branch_push_records_the_pull_request_base_not_its_previous_tip

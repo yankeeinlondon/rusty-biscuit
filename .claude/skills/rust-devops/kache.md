@@ -220,6 +220,19 @@ store and `target/` share an APFS volume; Linux on only when a clone probe from 
 (never reinstalling), `.github/kache-min-version` is the version floor, `just kache-status`
 reports the host, and a `target/` is always wrapped or never wrapped. See `docs/kache-strategy.md`.
 
+A restored hardlinked artifact can be read-only in `target/`. If a later Cargo
+invocation changes the build fingerprint and tries to replace that same path,
+rustc fails with `output file ... is not writeable`. Do not `chmod` the target
+artifact: the inode may also be the cache blob. For an isolated diagnostic run,
+use a fresh target directory on the build volume and clear `RUSTC_WRAPPER`; the
+normal repository target remains untouched and the result is independent of
+the cache. The repository's `just ci-local` path enforces that isolation with
+the unwrapped `target/ci-local` directory (relocatable only through
+`BISCUIT_CI_TARGET_DIR`). Its `local-evidence` Nextest profile preserves local
+parallelism while emitting CI-compatible JUnit. Nextest writes that report
+under the workspace target rather than the isolated Cargo target, so the hook
+points JUnit staging at the workspace target explicitly.
+
 ### Credential resolution
 
 1. `KACHE_S3_ACCESS_KEY` + `KACHE_S3_SECRET_KEY` (explicit env vars)

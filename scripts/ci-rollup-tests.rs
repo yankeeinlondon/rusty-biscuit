@@ -216,31 +216,11 @@ fn rollup_of(cells: Vec<Cell>, scope: &[&str]) -> Rollup {
     }
 }
 
-/// A rollup that knows exactly which legs policy scheduled.
-fn rollup_scheduling(cells: Vec<Cell>, scope: &[&str], scheduled: Vec<CellKey>) -> Rollup {
-    Rollup {
-        scheduled: Some(scheduled),
-        ..rollup_of(cells, scope)
-    }
-}
-
 fn cell_key(package: &str, environment: &str, tier: Tier) -> CellKey {
     CellKey {
         package: package.to_owned(),
         environment: environment.to_owned(),
         tier,
-    }
-}
-
-fn failure_entry(package: &str, environment: &str, tier: Tier) -> FailureEntry {
-    FailureEntry {
-        package: package.to_owned(),
-        environment: environment.to_owned(),
-        tier,
-        owner: "@owner".to_owned(),
-        reason: "known".to_owned(),
-        source_run: "1".to_owned(),
-        expiry: None,
     }
 }
 
@@ -1464,7 +1444,7 @@ fn an_unlisted_failure_blocks() {
 }
 
 #[test]
-fn a_listed_failure_is_accepted() {
+fn a_failure_always_blocks() {
     let cells = classify_simple(
         &[expectation("sniff", "macos-latest", Tier::L1)],
         &[{
@@ -1474,233 +1454,8 @@ fn a_listed_failure_is_accepted() {
             rec
         }],
     );
-    let baseline = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("sniff", "macos-latest", Tier::L1)],
-        skip: Vec::new(),
-    };
-
-    let findings = verdict(&rollup_of(cells, &["sniff"]), &baseline, None);
-    assert!(!any_block(&findings), "unexpected blocks: {findings:#?}");
-}
-
-#[test]
-fn messenger_l1_failure_requires_an_exact_package_keyed_baseline() {
-    let mut record = passing_record("messenger", "windows-latest", Tier::L1);
-    record.counts.failed = 1;
-    record.counts.total += 1;
-    record.failed_tests = vec!["messenger::desktop::notification".into()];
-    let cell = only_cell(classify_simple(
-        &[expectation("messenger", "windows-latest", Tier::L1)],
-        &[record],
-    ));
-
-    assert_eq!(cell.key.package, "messenger");
-    assert_eq!(cell.key.environment, "windows-latest");
-    assert_eq!(cell.key.tier, Tier::L1);
-    assert_eq!(cell.state, CellState::Fail);
-
-    let rollup = rollup_of(vec![cell], &["messenger"]);
-    let wrong_environment = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("messenger", "ubuntu-latest", Tier::L1)],
-        skip: Vec::new(),
-    };
-    let findings = verdict(&rollup, &wrong_environment, None);
+    let findings = verdict(&rollup_of(cells, &["sniff"]), &Baseline::default(), None);
     assert!(blocks_with_rule(&findings, "cell-failed"));
-
-    let exact = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("messenger", "windows-latest", Tier::L1)],
-        skip: Vec::new(),
-    };
-    let findings = verdict(&rollup, &exact, None);
-    assert!(!any_block(&findings), "unexpected blocks: {findings:#?}");
-    assert!(findings.iter().any(|finding| {
-        finding.rule == "baseline-accepted" && finding.subject.contains("messenger")
-    }));
-}
-
-#[test]
-fn rendezvous_l1_missing_evidence_stays_package_keyed_and_blocks() {
-    let cell = only_cell(classify_simple(
-        &[expectation(
-            "rendezvous-daemon",
-            "wsl2-ubuntu",
-            Tier::L1,
-        )],
-        &[],
-    ));
-
-    assert_eq!(cell.key.package, "rendezvous-daemon");
-    assert_eq!(cell.key.environment, "wsl2-ubuntu");
-    assert_eq!(cell.key.tier, Tier::L1);
-    assert_eq!(cell.state, CellState::Missing);
-
-    let baseline = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry(
-            "rendezvous-daemon",
-            "wsl2-ubuntu",
-            Tier::L1,
-        )],
-        skip: Vec::new(),
-    };
-    let findings = verdict(
-        &rollup_of(vec![cell], &["rendezvous-daemon"]),
-        &baseline,
-        None,
-    );
-    assert!(blocks_with_rule(&findings, "baseline-no-result"));
-}
-
-#[test]
-fn a_listed_entry_that_now_passes_blocks_to_force_cleanup() {
-    let cells = classify_simple(
-        &[expectation("biscuit-speaks", "ubuntu-latest", Tier::L1)],
-        &[passing_record("biscuit-speaks", "ubuntu-latest", Tier::L1)],
-    );
-    let baseline = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("biscuit-speaks", "ubuntu-latest", Tier::L1)],
-        skip: Vec::new(),
-    };
-
-    let findings = verdict(&rollup_of(cells, &["biscuit-speaks"]), &baseline, None);
-    assert!(blocks_with_rule(&findings, "baseline-now-passing"));
-}
-
-#[test]
-fn an_out_of_scope_entry_is_ignored_and_not_treated_as_a_pass() {
-    let baseline = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("homelab", "ubuntu-latest", Tier::L1)],
-        skip: Vec::new(),
-    };
-
-    let findings = verdict(&rollup_of(Vec::new(), &["sniff"]), &baseline, None);
-    assert!(!any_block(&findings), "out-of-scope must not block");
-    assert!(
-        findings
-            .iter()
-            .any(|f| f.rule == "baseline-out-of-scope" && f.severity == Severity::Note),
-        "out-of-scope must be visible, not silent"
-    );
-}
-
-#[rstest]
-#[case(CellState::Missing)]
-#[case(CellState::Skip)]
-#[case(CellState::NothingToRun)]
-#[case(CellState::PolicyGap)]
-fn a_scheduled_entry_with_no_test_result_stays_blocking(#[case] state: CellState) {
-    let cell = Cell {
-        state,
-        scheduled: true,
-        ..blank_cell(cell_key("claudine", "ubuntu-latest", Tier::L1))
-    };
-    let baseline = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("claudine", "ubuntu-latest", Tier::L1)],
-        skip: Vec::new(),
-    };
-
-    let findings = verdict(&rollup_of(vec![cell], &["claudine"]), &baseline, None);
-    assert!(
-        blocks_with_rule(&findings, "baseline-no-result"),
-        "state {state:?} must not be accepted as a known test failure: {findings:#?}"
-    );
-}
-
-/// Scope is per gate (2026-09-09): a package reached only through a
-/// lint-global input is in scope with no test tier scheduled. A baselined
-/// test leg of that package is a leg this run said nothing about — the
-/// standing of an out-of-scope entry, not a vanished result.
-#[test]
-fn a_baselined_leg_the_run_did_not_schedule_is_ignored_with_a_note() {
-    let baseline = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("claudine", "windows-latest", Tier::L1)],
-        skip: Vec::new(),
-    };
-    // A lint-only run: claudine is in scope, its lint status cell passed, and
-    // policy scheduled no test tier for it.
-    let lint = cell_key("claudine", "ubuntu-latest", Tier::parse("lint"));
-    let rollup = rollup_scheduling(
-        vec![Cell {
-            state: CellState::Pass,
-            scheduled: true,
-            ..blank_cell(lint.clone())
-        }],
-        &["claudine"],
-        vec![lint],
-    );
-    let findings = verdict(&rollup, &baseline, None);
-    assert!(!any_block(&findings), "an unscheduled leg must not block: {findings:#?}");
-    assert!(
-        findings
-            .iter()
-            .any(|finding| finding.rule == "baseline-unscheduled" && finding.severity == Severity::Note),
-        "the ignored leg must be visible as a note: {findings:#?}"
-    );
-}
-
-/// The excusal is for legs policy KNOWINGLY did not schedule. A leg policy
-/// scheduled and the rollup nevertheless has no cell for is still the
-/// "vanished result" the blocking rule exists to catch.
-#[test]
-fn a_baselined_leg_the_run_scheduled_but_has_no_cell_for_still_blocks() {
-    let baseline = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("claudine", "windows-latest", Tier::L1)],
-        skip: Vec::new(),
-    };
-    let rollup = rollup_scheduling(
-        Vec::new(),
-        &["claudine"],
-        vec![cell_key("claudine", "windows-latest", Tier::L1)],
-    );
-    let findings = verdict(&rollup, &baseline, None);
-    assert!(blocks_with_rule(&findings, "baseline-no-result"));
-}
-
-/// A document that predates the schedule field cannot say whether the leg
-/// was scheduled, and "cannot say" fails closed.
-#[test]
-fn a_baselined_package_that_produced_no_cell_at_all_blocks() {
-    let baseline = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("claudine", "windows-latest", Tier::L1)],
-        skip: Vec::new(),
-    };
-    let findings = verdict(&rollup_of(Vec::new(), &["claudine"]), &baseline, None);
-    assert!(blocks_with_rule(&findings, "baseline-no-result"));
-}
-
-#[test]
-fn an_expired_entry_blocks() {
-    let cells = classify_simple(
-        &[expectation("sniff", "macos-latest", Tier::L1)],
-        &[{
-            let mut rec = passing_record("sniff", "macos-latest", Tier::L1);
-            rec.counts.failed = 1;
-            rec
-        }],
-    );
-    let mut entry = failure_entry("sniff", "macos-latest", Tier::L1);
-    entry.expiry = Some("2026-01-01".to_owned());
-    let baseline = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![entry],
-        skip: Vec::new(),
-    };
-
-    let findings = verdict(
-        &rollup_of(cells, &["sniff"]),
-        &baseline,
-        Some("2026-07-27"),
-    );
-    assert!(blocks_with_rule(&findings, "baseline-expired"));
 }
 
 #[test]
@@ -1911,7 +1666,6 @@ fn skip_cell(skips: &[&str]) -> Cell {
 fn skip_budget(tests: &[&str]) -> Baseline {
     Baseline {
         schema_version: BASELINE_SCHEMA_VERSION,
-        failure: Vec::new(),
         skip: vec![SkipEntry {
             package: "biscuit-terminal".to_owned(),
             environment: "ubuntu-latest".to_owned(),
@@ -2022,7 +1776,7 @@ fn the_checked_in_baseline_parses_and_every_entry_is_well_formed() {
         .join("ci-baseline.toml");
     let baseline = load_baseline(&path).expect("the checked-in baseline is valid");
 
-    for entry in &baseline.failure {
+    for entry in &baseline.skip {
         assert!(!entry.owner.is_empty(), "{} has no owner", entry.package);
         assert!(!entry.reason.is_empty(), "{} has no reason", entry.package);
         assert!(!entry.source_run.is_empty(), "{} has no source run", entry.package);
@@ -2042,7 +1796,8 @@ fn a_baseline_from_the_future_is_refused() {
 }
 
 /// The v1 baseline was keyed by `{area, environment, tier, shard}`. Reading it
-/// as v2 would silently mis-key every entry, so the error names the migration.
+/// as package-keyed would silently mis-key every entry, so the error names the
+/// migration.
 #[test]
 fn an_area_keyed_baseline_is_refused_with_a_migration_error() {
     let dir = std::env::temp_dir().join(format!("ci-rollup-v1-{}", std::process::id()));
@@ -2053,6 +1808,23 @@ fn an_area_keyed_baseline_is_refused_with_a_migration_error() {
     let err = load_baseline(&path).expect_err("the area-keyed baseline must be refused");
     let message = format!("{err:#}");
     assert!(message.contains("area-keyed"), "unhelpful error: {message}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_known_failure_baseline_is_refused() {
+    let dir = std::env::temp_dir().join(format!("ci-rollup-v2-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("v2.toml");
+    fs::write(
+        &path,
+        "schema_version = 2\n[[failure]]\npackage = \"a\"\nenvironment = \"ubuntu-latest\"\ntier = \"L1\"\n",
+    )
+    .unwrap();
+
+    let err = load_baseline(&path).expect_err("known-failure baselines are no longer supported");
+    let message = format!("{err:#}");
+    assert!(message.contains("known-failure entries are unsupported"), "{message}");
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -2081,8 +1853,8 @@ fn an_invalid_expiry_is_refused() {
     let path = dir.join("bad.toml");
     fs::write(
         &path,
-        "schema_version = 2\n[[failure]]\npackage = \"a\"\nenvironment = \"ubuntu-latest\"\ntier = \"L1\"\n\
-         owner = \"@o\"\nreason = \"r\"\nsource_run = \"1\"\nexpiry = \"soon\"\n",
+        "schema_version = 3\n[[skip]]\npackage = \"a\"\nenvironment = \"ubuntu-latest\"\ntier = \"L1\"\n\
+         backend = \"tmux\"\ntests = [\"a::test\"]\nowner = \"@o\"\nreason = \"r\"\nsource_run = \"1\"\nexpiry = \"soon\"\n",
     )
     .unwrap();
 
@@ -2100,8 +1872,8 @@ fn a_version_less_baseline_is_refused() {
     let path = dir.join("versionless.toml");
     fs::write(
         &path,
-        "[[failure]]\npackage = \"a\"\nenvironment = \"ubuntu-latest\"\ntier = \"L1\"\n\
-         owner = \"@o\"\nreason = \"r\"\nsource_run = \"1\"\n",
+        "[[skip]]\npackage = \"a\"\nenvironment = \"ubuntu-latest\"\ntier = \"L1\"\n\
+         backend = \"tmux\"\ntests = [\"a::test\"]\nowner = \"@o\"\nreason = \"r\"\nsource_run = \"1\"\n",
     )
     .unwrap();
 
@@ -2113,7 +1885,7 @@ fn a_version_less_baseline_is_refused() {
     fs::remove_dir_all(&dir).ok();
 }
 
-/// AC11: a v2 entry carrying a stale area/shard key (`shard = "1/4"`,
+/// AC11: an entry carrying a stale area/shard key (`shard = "1/4"`,
 /// `area = …`) must be rejected, not silently parsed away.
 #[test]
 fn a_baseline_entry_with_a_stale_shard_key_is_refused() {
@@ -2122,8 +1894,8 @@ fn a_baseline_entry_with_a_stale_shard_key_is_refused() {
     let path = dir.join("stray.toml");
     fs::write(
         &path,
-        "schema_version = 2\n[[failure]]\npackage = \"a\"\nenvironment = \"ubuntu-latest\"\n\
-         tier = \"L1\"\nowner = \"@o\"\nreason = \"r\"\nsource_run = \"1\"\nshard = \"1/4\"\n",
+        "schema_version = 3\n[[skip]]\npackage = \"a\"\nenvironment = \"ubuntu-latest\"\n\
+         tier = \"L1\"\nbackend = \"tmux\"\ntests = [\"a::test\"]\nowner = \"@o\"\nreason = \"r\"\nsource_run = \"1\"\nshard = \"1/4\"\n",
     )
     .unwrap();
 
@@ -2133,71 +1905,6 @@ fn a_baseline_entry_with_a_stale_shard_key_is_refused() {
         "the error must name the stray key: {err:#}"
     );
     fs::remove_dir_all(&dir).ok();
-}
-
-/// A `tier = "lint"` baseline entry excuses a lint FAIL exactly like a
-/// JUnit-backed entry: lint cells come from producer status, and the synthetic
-/// producers will eventually ride this path.
-#[test]
-fn a_lint_baseline_entry_excuses_a_lint_failure() {
-    let statuses = vec![ProducerStatus {
-        package: "homelab-server".to_owned(),
-        job: "lint".to_owned(),
-        result: "failure".to_owned(),
-        environment: None,
-        detail: None,
-        companion: None,
-        dependents: Vec::new(),
-    }];
-    let cells = status_cells(
-        &statuses,
-        &scope_of(&["homelab-server"]),
-        &[],
-        &[policy("homelab-server")],
-        &[],
-    );
-    assert_eq!(cells.len(), 1);
-    assert_eq!(cells[0].state, CellState::Fail);
-
-    let baseline = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry(
-            "homelab-server",
-            "ubuntu-latest",
-            Tier::parse("lint"),
-        )],
-        skip: Vec::new(),
-    };
-    let findings = verdict(&rollup_of(cells, &["homelab-server"]), &baseline, None);
-    assert!(!any_block(&findings), "unexpected blocks: {findings:#?}");
-    assert!(
-        findings.iter().any(|f| f.rule == "baseline-accepted"),
-        "the excusal must stay visible: {findings:#?}"
-    );
-}
-
-/// A synthetic identity (`claudine-gen-drift` is the checked-in one) is carried
-/// forward outside every package scope: reported out-of-scope BY NAME, never
-/// blocking, never passing.
-#[test]
-fn synthetic_baseline_identities_report_out_of_scope_by_name() {
-    let baseline = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![
-            failure_entry("claudine-gen-drift", "ubuntu-latest", Tier::parse("lint")),
-            failure_entry("some-other-synthetic", "ubuntu-latest", Tier::parse("lint")),
-        ],
-        skip: Vec::new(),
-    };
-
-    let findings = verdict(&rollup_of(Vec::new(), &["sniff"]), &baseline, None);
-    assert!(!any_block(&findings), "out-of-scope must not block: {findings:#?}");
-    let note = findings
-        .iter()
-        .find(|f| f.rule == "baseline-out-of-scope")
-        .expect("the synthetic entries must be reported out of scope");
-    assert!(note.detail.contains("claudine-gen-drift"));
-    assert!(note.detail.contains("some-other-synthetic"));
 }
 
 #[rstest]
@@ -3335,27 +3042,6 @@ fn narrowing_keeps_only_the_areas_own_cells_scope_and_evidence() {
 }
 
 #[test]
-fn another_areas_baseline_entry_is_out_of_scope_in_this_slice() {
-    // The entry names a package this slice says nothing about. Ignoring it is
-    // right; counting it as a pass or as a vanished result is not.
-    let baseline = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("claudine", "ubuntu-latest", Tier::L1)],
-        skip: Vec::new(),
-    };
-    let playa = two_area_rollup().narrowed(&["playa".to_owned()].into_iter().collect());
-
-    let findings = verdict(&playa, &baseline, None);
-    assert!(!any_block(&findings), "{findings:#?}");
-    assert!(
-        findings
-            .iter()
-            .any(|finding| finding.rule == "baseline-out-of-scope"),
-        "the other area's entry must be visibly ignored: {findings:#?}"
-    );
-}
-
-#[test]
 fn a_missing_cell_blocks_its_own_area() {
     let cells = vec![Cell {
         area: "claudine".to_owned(),
@@ -3768,13 +3454,12 @@ fn a_result_document_from_the_previous_generation_is_refused() {
 
 #[test]
 fn the_result_and_baseline_schemas_version_independently() {
-    // The baseline is hand-edited policy and does not move when the generated
-    // result document gains fields.
+    // The baseline is hand-edited policy and versions its own semantic changes.
     assert_eq!(RESULT_SCHEMA_VERSION, 3);
-    assert_eq!(BASELINE_SCHEMA_VERSION, 2);
+    assert_eq!(BASELINE_SCHEMA_VERSION, 3);
     let baseline = load_baseline(&repo_root().join(".github/ci/ci-baseline.toml"))
         .expect("the shipped baseline loads");
-    assert!(baseline.failure.len() + baseline.skip.len() > 0 || true);
+    assert!(baseline.skip.is_empty());
 }
 
 #[test]
@@ -4067,7 +3752,7 @@ fn the_command_surface_writes_reads_and_judges_one_areas_slice() {
     );
 
     let baseline = temp.path().join("ci-baseline.toml");
-    fs::write(&baseline, "schema_version = 2\n").unwrap();
+    fs::write(&baseline, "schema_version = 3\n").unwrap();
     let verdict_args = Args::parse(
         [
             "--results",
@@ -4235,7 +3920,7 @@ fn a_failing_slice_makes_its_own_verdict_block() {
     );
     fs::write(&results, serde_json::to_string(&rollup).unwrap()).unwrap();
     let baseline = temp.path().join("ci-baseline.toml");
-    fs::write(&baseline, "schema_version = 2\n").unwrap();
+    fs::write(&baseline, "schema_version = 3\n").unwrap();
 
     let args = Args::parse(
         [
@@ -4279,10 +3964,9 @@ fn no_area_flag_leaves_the_document_whole() {
 // Review 6, finding 1: a failed gate command on a healthy producer job
 // ---------------------------------------------------------------------------
 
-/// The artifact a normalized producer writes — the gate command failed under
-/// `continue-on-error`, the job stayed green, and the status step folded the
-/// step outcome into `result` — read from disk exactly as the rollup reads it,
-/// so the shipped JSON shape is what is judged.
+/// The producer status records a gate failure independently of the job's
+/// visible conclusion. Read it from disk exactly as the rollup does so the
+/// shipped JSON shape is what is judged.
 fn normalized_failure_status(root: &Path, package: &str, job: &str, environment: &str) {
     let dir = root.join(format!("status-{package}-{job}-{environment}"));
     fs::create_dir_all(&dir).unwrap();
@@ -4295,13 +3979,11 @@ fn normalized_failure_status(root: &Path, package: &str, job: &str, environment:
     .unwrap();
 }
 
-/// A status-only gate (`check`) whose command failed on a green job is a FAIL
-/// cell: it blocks with no baseline, and an exact `{package, environment,
-/// tier}` entry — nothing wider — accepts it. The area's baseline is then the
-/// only thing between that failure and the merge, because the job it ran in
-/// no longer reaches `ci-gate` red.
+/// A status-only gate (`check`) whose command failed is a FAIL cell and always
+/// blocks. The producer job independently reaches `ci-gate` red; the rollup
+/// keeps the package/environment/tier diagnosis authoritative.
 #[test]
-fn a_failed_check_command_on_a_green_job_is_judged_by_the_baseline_alone() {
+fn a_failed_check_command_is_always_blocking() {
     let temp = TempDir::new("normalized-check");
     normalized_failure_status(temp.path(), "sniff", "check", "windows-latest");
     let statuses = read_producer_statuses(temp.path()).unwrap();
@@ -4315,21 +3997,6 @@ fn a_failed_check_command_on_a_green_job_is_judged_by_the_baseline_alone() {
     let findings = verdict(&rollup, &Baseline::default(), None);
     assert!(blocks_with_rule(&findings, "cell-failed"));
 
-    let wrong_environment = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("sniff", "ubuntu-latest", Tier::parse("check"))],
-        skip: Vec::new(),
-    };
-    assert!(blocks_with_rule(&verdict(&rollup, &wrong_environment, None), "cell-failed"));
-
-    let exact = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("sniff", "windows-latest", Tier::parse("check"))],
-        skip: Vec::new(),
-    };
-    let findings = verdict(&rollup, &exact, None);
-    assert!(!any_block(&findings), "unexpected blocks: {findings:#?}");
-    assert!(findings.iter().any(|f| f.rule == "baseline-accepted" && f.subject.contains("sniff")));
 }
 
 /// Open Question 1, Option B: a check producer that also compiled the changed
@@ -4439,10 +4106,10 @@ fn write_status(root: &Path, package: &str, job: &str, environment: &str, json: 
     fs::write(dir.join("status.json"), json).unwrap();
 }
 
-/// The L1 shape of the same finding: the suite ran, the JUnit names the failing
-/// test, and the folded status confirms the failure. Judged identically.
+/// The L1 shape of the same rule: the suite ran, the JUnit names the failing
+/// test, and the producer status confirms the failure.
 #[test]
-fn a_failed_l1_command_on_a_green_job_is_judged_by_the_baseline_alone() {
+fn a_failed_l1_command_is_always_blocking() {
     let temp = TempDir::new("normalized-l1");
     normalized_failure_status(temp.path(), "messenger", "L1", "windows-latest");
     let statuses = read_producer_statuses(temp.path()).unwrap();
@@ -4461,13 +4128,6 @@ fn a_failed_l1_command_on_a_green_job_is_judged_by_the_baseline_alone() {
 
     let rollup = rollup_of(vec![cell], &["messenger"]);
     assert!(blocks_with_rule(&verdict(&rollup, &Baseline::default(), None), "cell-failed"));
-    let exact = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("messenger", "windows-latest", Tier::L1)],
-        skip: Vec::new(),
-    };
-    let findings = verdict(&rollup, &exact, None);
-    assert!(!any_block(&findings), "unexpected blocks: {findings:#?}");
 }
 
 /// A green JUnit under a folded `failure` status (the backend-proof bracket or
@@ -4493,12 +4153,10 @@ fn a_folded_failure_status_downgrades_a_green_report_without_a_detail() {
     );
 }
 
-/// Normalization changes what the JOB concludes, never what the rollup
-/// requires: a gate command that failed to build (exit 101, no report) is
-/// MISSING under a folded `failure` status exactly as before, and a cell with
-/// neither report nor status is MISSING too. Neither can be baselined.
+/// A gate command that failed to build (exit 101, no report) is MISSING under
+/// a `failure` status, and a cell with neither report nor status is MISSING too.
 #[test]
-fn a_normalized_producer_with_no_report_is_missing_and_no_baseline_excuses_it() {
+fn a_failed_producer_with_no_report_is_missing() {
     let temp = TempDir::new("normalized-missing");
     normalized_failure_status(temp.path(), "queue", "L1", "windows-latest");
     let statuses = read_producer_statuses(temp.path()).unwrap();
@@ -4513,12 +4171,7 @@ fn a_normalized_producer_with_no_report_is_missing_and_no_baseline_excuses_it() 
         expected_tests: &BTreeMap::new(),
     }));
     assert_eq!(cell.state, CellState::Missing);
-    let excused_anyway = Baseline {
-        schema_version: BASELINE_SCHEMA_VERSION,
-        failure: vec![failure_entry("queue", "windows-latest", Tier::L1)],
-        skip: Vec::new(),
-    };
-    let findings = verdict(&rollup_of(vec![cell], &["queue"]), &excused_anyway, None);
+    let findings = verdict(&rollup_of(vec![cell], &["queue"]), &Baseline::default(), None);
     assert!(blocks_with_rule(&findings, "cell-missing"), "{findings:#?}");
 
     // Neither a status nor a report: the producer never got as far as the
@@ -4530,6 +4183,6 @@ fn a_normalized_producer_with_no_report_is_missing_and_no_baseline_excuses_it() 
         expected_tests: &BTreeMap::new(),
     }));
     assert_eq!(cell.state, CellState::Missing);
-    let findings = verdict(&rollup_of(vec![cell], &["queue"]), &excused_anyway, None);
+    let findings = verdict(&rollup_of(vec![cell], &["queue"]), &Baseline::default(), None);
     assert!(blocks_with_rule(&findings, "cell-missing"), "{findings:#?}");
 }

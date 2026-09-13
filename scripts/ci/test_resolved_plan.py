@@ -443,6 +443,7 @@ class TargetCoverageTests(PlannerFixture):
                 "package": "biscuit-speaks",
                 "environment": "macos-latest",
                 "gate": "L1",
+                "outcome": "pass",
                 "origin": "local",
             }
         ]
@@ -646,6 +647,7 @@ class ProhibitionTests(PlannerFixture):
                 "package": "claudine",
                 "environment": "wsl2-ubuntu",
                 "gate": gate,
+                "outcome": "pass",
                 "origin": "prior-local",
             }
             for gate in sorted(wsl_gates)
@@ -722,6 +724,7 @@ class ResultCompletenessTests(PlannerFixture):
                 "package": cell["package"],
                 "environment": cell["environment"],
                 "gate": cell["gate"],
+                "outcome": "pass",
                 "origin": "local",
             }
             for cell in playa_cells

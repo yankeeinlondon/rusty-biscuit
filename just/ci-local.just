@@ -79,6 +79,13 @@
 # checkout or an RUSTY_BISCUIT_PRE_PUSH_AREAS override keeps the working-tree
 # replan below, which is wider feedback and never published as evidence.
 #
+# Gate execution uses a report-producing local Nextest profile and an unwrapped
+# target directory reserved for local CI. Kache restores immutable hardlinks
+# into the normal target directory; a later feature-set change can make rustc
+# try to overwrite one and fail before any test runs. `BISCUIT_CI_TARGET_DIR`
+# may relocate the reserved directory, but it must remain exclusive to
+# unwrapped local-CI runs.
+#
 # Usage:
 #   just ci-local                       affected packages vs origin/main
 #   just ci-local --lint-only           clippy gates only
@@ -138,6 +145,15 @@ ci-local *args="":
         echo "ci-local: python3 is required (scripts/ci/affected_scope.py); run 'just init'." >&2
         exit 2
     fi
+    ci_repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+    export CARGO_TARGET_DIR="${BISCUIT_CI_TARGET_DIR:-${ci_repo_root}/target/ci-local}"
+    export RUSTC_WRAPPER=""
+    export NEXTEST_PROFILE="local-evidence"
+    # Nextest resolves relative JUnit paths below the workspace target even
+    # when Cargo builds into CARGO_TARGET_DIR. Tell the staging helper where
+    # that report actually lives so passing cells cannot become partial.
+    export BISCUIT_JUNIT_WORKSPACE_ROOT="${ci_repo_root}"
+    export BISCUIT_JUNIT_TARGET_DIR="${ci_repo_root}/target"
     # The store is resolved here, at the trigger boundary, and handed to the
     # planner explicitly: the planner has no default of its own, so CI, which
     # never passes `--constraints`, cannot read it. The hook derives the
@@ -328,7 +344,12 @@ ci-local *args="":
         trap 'rm -f "${scope_file}" "${plan_file}" "${accepted_file}" "${rejected_file}"; rm -rf "${reports_dir}"' EXIT
     fi
     mkdir -p "${reports_dir}"
-    rm -f "${reports_dir}/manifest.jsonl"
+    rm -f \
+        "${reports_dir}/manifest.jsonl" \
+        "${reports_dir}/gate-backends.jsonl" \
+        "${reports_dir}/backend-executions.jsonl" \
+        "${reports_dir}/isolation-burn-down.jsonl" \
+        "${reports_dir}/spawn-site-burn-down.jsonl"
     export BISCUIT_JUNIT_STAGE_DIR="${reports_dir}"
     rm -f "${reports_dir}/interrupted"
     # Just may normalize a recipe's exit status; the marker preserves the

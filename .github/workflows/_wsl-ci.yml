@@ -544,13 +544,11 @@ jobs:
             free -m
             swapon --show 2>&1 || true
           } 2>&1 | tee "$workspace/wsl-diag/guest-census.txt"
-      # Gate command: normalized exactly as in `_package-ci.yml` (see its
-      # header). A failed suite is the CELL's failure, folded into the status
-      # below and judged by the area rollup; the job stays green so the
-      # baseline, not `area-ci`'s job result, decides whether it blocks.
+      # Gate command: a failed suite fails this producer visibly. The status
+      # and report steps below still run when the job was not cancelled, so
+      # the area rollup can render the cell-level diagnosis.
       - name: L1 tests from the archive
         id: l1
-        continue-on-error: true
         shell: wsl-bash {0}
         run: |
           set -euo pipefail
@@ -680,7 +678,7 @@ jobs:
       # must not be allowed to overwrite the tier's real outcome.
       - name: Guest post-mortem
         id: guest_postmortem
-        if: ${{ steps.l1.outcome == 'failure' }}
+        if: ${{ !cancelled() && steps.l1.outcome == 'failure' }}
         continue-on-error: true
         shell: wsl-bash {0}
         run: |
@@ -697,7 +695,7 @@ jobs:
             dmesg -T 2>&1 | tail -120
           } 2>&1 | tee "$workspace/wsl-diag/guest-postmortem.txt"
       - name: Host post-mortem
-        if: ${{ steps.l1.outcome == 'failure' }}
+        if: ${{ !cancelled() && steps.l1.outcome == 'failure' }}
         continue-on-error: true
         shell: pwsh
         run: |
@@ -738,7 +736,7 @@ jobs:
           }
           $report | Tee-Object -FilePath wsl-diag/host-postmortem.txt
       - name: Upload WSL2 diagnostics
-        if: ${{ steps.l1.outcome == 'failure' }}
+        if: ${{ !cancelled() && steps.l1.outcome == 'failure' }}
         uses: actions/upload-artifact@v6
         with:
           # A prefix `ci-rollup` does not walk: this is evidence for a human
@@ -768,15 +766,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/status"
-          # `result` is the CELL's conclusion, not the job's: the test step is
-          # `continue-on-error`, so a failed suite leaves `job.status` at
-          # `success` and only `L1` can say the cell failed. Everything else
-          # that fails the job (provisioning, staging, upload, cancellation)
-          # arrives in JOB_STATUS unchanged.
+          # `result` is the CELL's conclusion. The test step fails the producer
+          # directly; folding L1 remains defensive and keeps the status format
+          # correct if GitHub reports a healthy job during an `always()` step.
           result="$JOB_STATUS"
           if [ "$result" = "success" ] && [ "$L1" = "failure" ]; then
             result=failure
-            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::the L1 suite failed in the WSL2 guest. The job completes so the area rollup judges the cell against its baseline; a failure the baseline does not accept blocks there."
+            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::the L1 suite failed in the WSL2 guest."
           fi
           # Name WHY no evidence exists, when that is the case.
           #

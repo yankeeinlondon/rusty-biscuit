@@ -12,7 +12,7 @@ time green on a plain rerun.
 
 Two consumers, one classification:
 
-- The rollup job runs `attribute` before rolling up. For every runner-lost job
+- The coverage-audit job runs `attribute` before rolling up. For every runner-lost job
   it synthesizes the `status-<package>-<job>[-<environment>]/status.json` the
   dead producer would have written, with `detail` naming the step that was
   running, so the grid reads `MISSING — … the hosted runner lost communication
@@ -30,14 +30,11 @@ A job whose tests passed and whose artifact upload then failed is a
 regression and rerunning the suite would prove nothing (spec section 4, and the
 repository's own classification rule).
 
-A failed test, lint, or compile COMMAND is not a failed job at all: the
-producers run their gate commands under `continue-on-error` and fold the
-outcome into the status artifact, so such a job concludes `success` with a
-red step and is classified nowhere here — it is neither a lost runner nor a
-failure that vetoes the retry. That is deliberate. The failure is judged by
-the area's rollup against its baseline; if it is accepted, a rerun of the
-lost job is exactly what turns the run green, and if it is not, the rerun
-re-executes only the lost job, never the failed suite.
+A failed test, lint, or compile command fails its producer visibly and is an
+ordinary non-runner-loss failure here. If another job also loses its runner,
+that real gate failure vetoes the automatic retry. The producer still uploads
+its status and report when possible so the area's coverage audit can attribute the
+cell precisely.
 
 Both read the same GitHub data — the run's jobs and each failed job's check-run
 annotations — through `gh api`, and the classification itself is pure so the
@@ -91,19 +88,19 @@ NAME_TOKEN = re.compile(r"[A-Za-z0-9_.-]+")
 # cell belongs to the package one segment further up.
 WSL_DELEGATION_SEGMENT = "wsl2"
 
-# Jobs that judge the run rather than produce evidence. Their failure follows
-# from the producers' and must not veto a retry — an area rollup fails BECAUSE
-# its producer's runner died, so counting it as an unrelated failure would
-# disable the one-shot retry entirely. `ci-gate` is the policy-free fold of
-# every blocking job's result (`ci.yml`), so it fails whenever any producer
-# did.
+# Jobs that only fold or summarize the run rather than produce evidence. Their
+# failure follows from producers and must not veto a retry. The legacy `rollup`
+# spelling remains recognized because runs created before the coverage-audit
+# change could fail it for a lost producer. A new `coverage-audit` failure is
+# not ignored: its enforcement runs only after every producer succeeded, so it
+# represents an independent completeness or exception-policy failure.
 NON_PRODUCER_JOBS = {"ci-gate", "infrastructure summary (advisory)"}
-AREA_ROLLUP_JOB = re.compile(r"^area-ci \(.+\) / rollup$")
+LEGACY_AREA_ROLLUP_JOB = re.compile(r"^area-ci \(.+\) / rollup$")
 
 
 def is_non_producer(name: str) -> bool:
     """Whether a job judges the run instead of producing a result cell."""
-    return name in NON_PRODUCER_JOBS or AREA_ROLLUP_JOB.match(name) is not None
+    return name in NON_PRODUCER_JOBS or LEGACY_AREA_ROLLUP_JOB.match(name) is not None
 
 
 def parse_job_name(name: str) -> dict[str, str | None] | None:
@@ -272,7 +269,7 @@ def synthesize_status(
 
     `packages`, when given, is the owning area's package set: an area-owned
     rollup attributes its own producers and leaves another area's to that
-    area's rollup. Package, not area, because package is the stored identity of
+    area's coverage audit. Package, not area, because package is the stored identity of
     every cell (Design Decision 1) and a job name carries no area.
     """
     written: list[str] = []

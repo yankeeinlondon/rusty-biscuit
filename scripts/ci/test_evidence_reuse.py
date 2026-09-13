@@ -428,9 +428,9 @@ class NoteAttachmentTests(EvidenceFixture):
 
 
 class OutcomeTests(EvidenceFixture):
-    """AC8: a complete failure is evidence and stays a failure."""
+    """Only a complete passing cell may suppress execution."""
 
-    def test_a_complete_failure_is_accepted_as_a_failed_cell(self) -> None:
+    def test_a_complete_failure_is_retained_for_diagnosis_only(self) -> None:
         failing = self.receipt_cell(
             "alpha", outcome="fail", exit_code=100, failed_tests=["alpha::boom"]
         )
@@ -438,9 +438,14 @@ class OutcomeTests(EvidenceFixture):
         accepted, rejections = target("verify_cells")(
             str(self.plan_path), self.base, self.head
         )
-        self.assertEqual(["alpha/macos-latest/L1"], self.keys(accepted))
-        self.assertEqual("fail", accepted[0]["outcome"])
-        self.assertEqual([], rejections)
+        self.assertEqual([], accepted)
+        self.assertEqual(1, len(rejections), rejections)
+        self.assertTrue(
+            rejections[0].startswith(
+                "failed-cell: alpha/macos-latest/L1 failed; failing evidence is diagnostic only"
+            ),
+            rejections,
+        )
 
     def test_an_interrupted_run_yields_no_reusable_cell(self) -> None:
         self.add_note(
@@ -742,11 +747,10 @@ class SuccessiveReceiptTests(EvidenceFixture):
         accepted, rejections = target("verify_cells")(
             str(self.plan_path), self.base, self.head
         )
-        self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.keys(accepted))
-        self.assertEqual("fail", accepted[0]["outcome"])
-        self.assertEqual("local", accepted[0]["origin"])
-        self.assertEqual(second, accepted[0]["evidence"]["commit"])
-        self.assertEqual([], rejections)
+        self.assertEqual([], accepted)
+        self.assertEqual(1, len(rejections), rejections)
+        self.assertTrue(rejections[0].startswith("failed-cell: alpha/wsl2-ubuntu/L1"), rejections)
+        self.assertIn(second[:9], rejections[0])
 
     def test_a_newer_pass_shadows_an_older_failure_too(self) -> None:
         # Precedence is recency, not outcome: the newest qualifying candidate
@@ -764,7 +768,9 @@ class SuccessiveReceiptTests(EvidenceFixture):
         self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.keys(accepted))
         self.assertEqual("pass", accepted[0]["outcome"])
         self.assertEqual(second, accepted[0]["evidence"]["commit"])
-        self.assertEqual([], rejections)
+        self.assertEqual(1, len(rejections), rejections)
+        self.assertTrue(rejections[0].startswith("failed-cell: alpha/wsl2-ubuntu/L1"), rejections)
+        self.assertIn(first[:9], rejections[0])
 
     def test_an_older_v1_note_does_not_claim_a_cell_a_newer_v2_note_resolved(self) -> None:
         # An empty commit keeps the tree, so the older v1 note is exact-tree
@@ -984,7 +990,7 @@ class ReceiptRecordingTests(EvidenceFixture):
         self.assertEqual(first, second)
         self.assertEqual(first, schema.canonical(json.loads(second)))
 
-    def test_a_complete_failure_is_published_and_stays_a_failure(self) -> None:
+    def test_a_complete_failure_is_published_for_diagnosis(self) -> None:
         record = self.staged("alpha", exit_code=100)
         directory = self.stage(record)
         self.report(directory, record, failures=["boom"])
@@ -1000,10 +1006,9 @@ class ReceiptRecordingTests(EvidenceFixture):
         accepted, rejections = target("verify_cells")(
             str(self.plan_path), self.base, self.head
         )
-        self.assertEqual(["alpha/macos-latest/L1"], self.keys(accepted))
-        self.assertEqual("fail", accepted[0]["outcome"])
-        self.assertEqual(["alpha::boom"], accepted[0]["failed_tests"])
-        self.assertEqual([], rejections)
+        self.assertEqual([], accepted)
+        self.assertEqual(1, len(rejections), rejections)
+        self.assertTrue(rejections[0].startswith("failed-cell: alpha/macos-latest/L1"), rejections)
 
     def test_a_gate_that_produced_no_report_is_not_reusable(self) -> None:
         # A compile failure: nextest emits no XML, so the run has an exit code

@@ -231,7 +231,7 @@ jobs:
           # The full scope document is also the rollup's policy source: it
           # carries every impacted package's resolved `[package.metadata.ci]`
           # policy (gating and `gates = false` alike). Uploaded as an artifact
-          # so each area's rollup judges exactly what this run scheduled.
+          # so each area's coverage audit sees exactly what this run scheduled.
           printf '%s' "$scope_json" > scope.json
 
           # One caller identity per selected AREA, each carrying its own
@@ -284,7 +284,6 @@ jobs:
             | "\(.package)/\(.environment)/\(.gate)"]
             | if length == 0 then "none" else "\(length): \(join(", "))" end;'
           reused_passing="$(jq -r "$reuse_row"' cells(.execution == "reuse" and .evidence.outcome == "pass")' resolved-plan.json)"
-          reused_failing="$(jq -r "$reuse_row"' cells(.execution == "reuse" and .evidence.outcome == "fail")' resolved-plan.json)"
           retained="$(jq -r '(.evidence_rejections // []) as $rejections
             | if ($rejections | length) == 0 then "none"
               else "\($rejections | length) rejection(s): \(
@@ -316,7 +315,6 @@ jobs:
             fi
             echo "| validation environments | ${validation_environments} |"
             echo "| reused passing cells | ${reused_passing} |"
-            echo "| reused failing cells | ${reused_failing} |"
             echo "| cells retained (evidence incomplete or rejected) | ${retained} |"
             echo "| change class | $(jq -r '.change_class' <<<"$scope_json") |"
             echo "| full scope | $(jq -r '.full_scope' <<<"$scope_json") |"
@@ -458,11 +456,11 @@ jobs:
       !cancelled() &&
       needs.scope.outputs.has_packages == 'true'
     # A reusable workflow's GITHUB_TOKEN cannot exceed its CALLER's, so the
-    # area rollup's `actions: read` (artifact overlay, jobs listing) and the
+    # area coverage audit's `actions: read` (artifact overlay, jobs listing) and the
     # gap publisher's `checks: write` (accepted-gap check runs) have to be
     # granted here. This is a CAP, not a grant: it is the most any job in
     # `_area-ci.yml` may hold, and that workflow hands `checks: write` to its
-    # `accepted-gaps` job alone while `package-ci` and `rollup` declare
+    # `accepted-gaps` job alone while `package-ci` and `coverage-audit` declare
     # read-only sets of their own.
     permissions:
       contents: read
@@ -544,7 +542,7 @@ jobs:
           export NEXTEST_TEST_THREADS="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
           cargo nextest run -p test-toolkit --test ci_workflow_contracts
       # `--no-default-features` deselects the crates the other two bins in
-      # `scripts/` need and this one does not. Same shape as the area rollup's build.
+      # `scripts/` need and this one does not. Same shape as the coverage audit's build.
       - name: Test the rollup and verdict
         run: |
           export NEXTEST_TEST_THREADS="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
@@ -561,9 +559,10 @@ jobs:
 
   # THE single required branch-protection check: a policy-free fold.
   #
-  # Every selected area already owns its outcome in `_area-ci.yml`'s `rollup`
-  # job, which applies that area's baseline, governed gaps, and missing-cell
-  # rule and nobody else's. This job re-evaluates NOTHING: its only step reads
+  # Every selected area already owns its coverage audit in `_area-ci.yml`.
+  # That job applies the area's skip baseline, governed gaps, and missing-cell
+  # rule only when producers are otherwise green. This job re-evaluates
+  # NOTHING: its only step reads
   # `needs.*.result` for the jobs whose failure must block a merge and fails
   # unless every one is `success` or `skipped`. No `ci-rollup`, no baseline,
   # no plan, no artifact download — a second whole-run policy evaluation is
@@ -581,18 +580,15 @@ jobs:
   #     the fold run at all in that case, and when every producer failed.
   #   - MISSING (a cell the plan scheduled and no job produced) cannot be seen
   #     here: `needs` names static job ids, and a matrix that never created an
-  #     area's job reads as `skipped`. The per-area rollup owns MISSING.
+  #     area's job reads as `skipped`. The per-area coverage audit owns MISSING.
   #   - `continue-on-error` turns a failed job's `needs.<job>.result` into
   #     `success`, so it hides that failure from this fold. It is reserved for
   #     advisory jobs; no job listed below may carry it.
-  #   - A failed TEST, LINT, or COMPILE COMMAND never reaches this fold as a
-  #     red job. `_package-ci.yml` and `_wsl-ci.yml` run each gate command as
-  #     a step-level `continue-on-error` and fold its outcome into the cell's
-  #     status artifact, so `area-ci` stays green and the area's `rollup` is
-  #     the ONLY job that can turn that failure into a block — after applying
-  #     the area's baseline (review 6, finding 1). A producer job is still red,
-  #     and `area-ci` with it, for setup, provisioning, upload, or
-  #     cancellation, which no baseline may excuse.
+  #   - A failed TEST, LINT, or COMPILE COMMAND fails its producer job. Matrix
+  #     strategies disable fail-fast, and status/report steps still run when
+  #     possible, so sibling OS cells finish and the coverage audit retains the
+  #     detailed diagnosis. The failed reusable workflow reaches this fold as
+  #     `failure` without relying on the coverage audit to reveal it.
   #
   # Ruleset `protect-your-bacon` (id 19747338) still names the context
   # `ci-verdict`. Until Ken switches it to `ci-gate` (Validation and Rollout
@@ -602,7 +598,7 @@ jobs:
     name: ci-gate
     # Every top-level job whose failure must block. Each package's gates are
     # nested inside `area-ci`'s `_area-ci.yml` → `_package-ci.yml` fan-out and
-    # reach this list through their area's rollup. The advisory `summary` is
+    # reach this list through the area workflow. The advisory `summary` is
     # deliberately absent.
     needs:
       - validation
@@ -646,7 +642,7 @@ jobs:
           fi
           echo "ci-gate: every blocking job succeeded or was skipped"
 
-  # Navigation aid for the jobs no area rollup can see, and ONLY those.
+  # Navigation aid for the jobs no area coverage audit can see, and ONLY those.
   #
   # `ci-rollup` covers every package in the run's resolved policy. It cannot
   # cover the bootstrap stages or the specialized workflows: those emit no
@@ -658,7 +654,7 @@ jobs:
   # It deliberately makes NO run-level claim. The old "No gate reported a
   # failure" line was a green verdict computed from job results alone, which
   # cannot see a MISSING cell, a cancelled producer, or a baselined entry that
-  # started passing — so it could and would contradict an area's rollup. Plan
+  # started passing — so it could and would contradict an area's audit. Plan
   # success criterion 1 asks for a single view; that view is each area's
   # rollup grid.
   #
@@ -666,7 +662,7 @@ jobs:
   # that structural rather than a property of its script: `ci-gate` folds
   # `needs.*.result`, and `continue-on-error` is exactly what keeps a
   # reporting job's failure out of that fold. Every job that is allowed to
-  # block is either a tested area's rollup or a named infrastructure gate.
+  # block is either a tested area's workflow or a named infrastructure gate.
   #
   # Two notes the retired whole-run verdict used to write live here now,
   # because both are reporting rather than judgement: the link to reused PR
@@ -699,7 +695,7 @@ jobs:
             echo "[Original validation]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$VALIDATED_RUN)"
           } >>"$GITHUB_STEP_SUMMARY"
       # Success criterion 7: a docs-only change schedules no test leg anywhere,
-      # so no area rollup runs and nothing renders a grid. Stated out loud
+      # so no area coverage audit runs and nothing renders a grid. Stated out loud
       # rather than left as a silently green run.
       - name: No package was scheduled
         if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' && needs.scope.outputs.has_packages != 'true' }}
@@ -708,7 +704,7 @@ jobs:
           {
             echo "## No package was scheduled"
             echo ""
-            echo "The affected-scope calculation selected no package, so this run scheduled no test leg: there is no area rollup and no baseline comparison. \`ci-gate\` still folds the bootstrap jobs above."
+            echo "The affected-scope calculation selected no package, so this run scheduled no test leg: there is no area coverage audit and no skip comparison. \`ci-gate\` still folds the bootstrap jobs above."
           } >>"$GITHUB_STEP_SUMMARY"
       - name: Classify the first actionable failure
         if: ${{ needs.validation.outputs.reuse != 'true' }}
@@ -717,7 +713,7 @@ jobs:
           # Listed in dependency order: an earlier stage's failure is the root
           # cause, and later stages were skipped or would only repeat it.
           # `area-ci` is absent on purpose — every package gate is a cell in its
-          # own area's rollup.
+          # own area's coverage audit.
           RESULTS: |
             bootstrap (scope calculation):${{ needs.scope.result }}
             bootstrap (preflight):${{ needs.preflight.result }}
@@ -741,12 +737,12 @@ jobs:
           done <<<"$RESULTS"
 
           if [ -z "$first" ]; then
-            echo "No bootstrap or specialized workflow failed. **The run's gate is \`ci-gate\`, not this line** — it folds every blocking job's result, and package results live in each area's rollup grid." >>"$GITHUB_STEP_SUMMARY"
+            echo "No bootstrap or specialized workflow failed. **The run's gate is \`ci-gate\`, not this line** — it folds every blocking job's result, and package results live in each area's coverage-audit grid." >>"$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
           {
             echo "**First actionable failure class: ${first}**"
             echo ""
-            echo "This stage emits no result artifacts, so no area rollup can see it; \`ci-gate\` blocks on its result directly. Open that job first — later red jobs are usually the same root cause."
+            echo "This stage emits no result artifacts, so no area coverage audit can see it; \`ci-gate\` blocks on its result directly. Open that job first — later red jobs are usually the same root cause."
           } >>"$GITHUB_STEP_SUMMARY"

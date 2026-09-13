@@ -1,7 +1,7 @@
 name: area-ci
 
-# One package AREA's whole CI slice: its packages' gates, and the rollup that
-# owns their combined outcome.
+# One package AREA's whole CI slice: its packages' gates, and the coverage
+# audit that reconciles planned cells with their evidence.
 #
 # `ci.yml` calls this once per selected area, which is what makes the area the
 # top-level identity in the Actions graph and the Checks tab. A called
@@ -13,7 +13,7 @@ name: area-ci
 # Area is a GROUPING, never an identity (Design Decision 1). Nothing here
 # re-keys an artifact, a baseline entry, or a receipt by area: the package
 # fan-out below is keyed by package exactly as before, and `--area` narrows the
-# rollup rather than renaming what it reads.
+# audit rather than renaming what it reads.
 #
 # Chain depth: ci.yml -> _area-ci.yml -> _package-ci.yml -> _wsl-ci.yml is
 # four levels, GitHub's maximum. No level here may call a further reusable
@@ -41,7 +41,7 @@ on:
 
 env:
   # The repository tracks no rustc wrapper; cleared explicitly so a stray
-  # environment value cannot silently intercept the rollup's build. A called
+  # environment value cannot silently intercept the audit tool's build. A called
   # workflow does not inherit this, and `_package-ci.yml` clears it itself.
   RUSTC_WRAPPER: ""
 
@@ -52,12 +52,10 @@ jobs:
   # result identity — as the label a reader sees under the area.
   #
   # This job's result is what `ci.yml`'s `area-ci` — and so `ci-gate` — sees
-  # of the producers, so it must fail ONLY for what no baseline may excuse. A
-  # failed gate command does not fail a producer job: `_package-ci.yml` runs
-  # every test, lint, and compile command under step-level `continue-on-error`
-  # and folds the outcome into the cell's status artifact, which `rollup`
-  # below judges. Setup, provisioning, uploads, and cancellation still fail
-  # the producer, this job, and the gate directly.
+  # of the producers. A failed gate command therefore fails visibly here too.
+  # Every matrix keeps `fail-fast: false`, and the coverage audit below runs under
+  # `always()`, so one red cell does not cancel the remaining unevidenced OS
+  # cells or suppress the area's final evidence grid.
   package-ci:
     name: ${{ matrix.package }}
     # A `uses:` job accepts `permissions`, and this one CONFINES the token:
@@ -87,7 +85,7 @@ jobs:
       # capability table, and narrowed to the cells the plan resolved to hosted
       # EXECUTION. A cell a verified receipt already satisfied is absent from
       # these lists — no runner is scheduled for it — while staying a cell in
-      # the plan, so the rollup below reports its local-origin result instead of
+      # the plan, so the audit below reports its local-origin result instead of
       # MISSING. That difference is the PR #76 regression.
       native-environments: ${{ toJSON(matrix.native_environments) }}
       check-os: ${{ toJSON(matrix.check_os) }}
@@ -112,15 +110,15 @@ jobs:
   # revoke instructions and the `closes` work, `details_url` on the policy
   # entry. The workflow itself spells no conclusion, and the tool refuses a
   # cell whose acceptance is ungoverned or expired rather than publish a
-  # `neutral` check for a cell the rollup is about to block on.
+  # `neutral` check for a cell the coverage audit is about to block on.
   #
   # The check runs land on the PULL REQUEST HEAD: on a `pull_request` event
   # `github.sha` is the merge commit, and a check created there never appears
   # in the PR's checks list. On a push the two are the same commit.
   #
   # The only job in this workflow holding `checks: write`; `package-ci` and
-  # `rollup` stay read-only. Presentation only (Design Decision 10): the
-  # rollup, the gate, and runner-loss never read what this job publishes.
+  # coverage audit stays read-only. Presentation only (Design Decision 10):
+  # the audit, the gate, and runner-loss never read what this job publishes.
   #
   # `if:` makes this job skippable, so it carries no `name:` and is labelled
   # `accepted-gaps` whether it runs or not (AC10).
@@ -133,7 +131,7 @@ jobs:
       checks: write
     steps:
       - uses: actions/checkout@v5
-      # The plain in-run download, not the `run-id` overlay the rollup uses:
+      # The plain in-run download, not the `run-id` overlay the audit uses:
       # that form needs `actions: read`, which this job deliberately lacks,
       # and the plan is among the first artifacts the run produces.
       - name: Download the resolved execution plan
@@ -163,19 +161,18 @@ jobs:
   # required cells failed, is missing, or is an unexcused gap. Another area's
   # red cell cannot block it and another area's baseline entry cannot excuse
   # it: `--area` narrows the cells, the scope, the scheduled set, and the
-  # accepted evidence together. It is also the ONLY path by which a failed
-  # test, lint, or compile command reaches `ci-gate`: the producers fold that
-  # failure into their status artifacts rather than their job results, so a
-  # hosted failure and the same failure reused from local evidence are judged
-  # here identically.
+  # accepted evidence together. Failed producers are visibly red and reach
+  # `ci-gate` through this reusable workflow. This audit adds the authoritative
+  # package/environment/gate diagnosis and blocks only when otherwise-green
+  # producers left incomplete or policy-invalid coverage.
   #
   # `if: always()` for the same reason `ci-gate` has it: a producer that
   # failed or was cancelled must not skip the job that reports it. `needs:` is
   # a "wait for, then download from" list, not a gate.
   #
   # No `name:`, so the whole-job skip that a cancelled run produces is labelled
-  # `rollup` rather than an unresolved expression (AC10).
-  rollup:
+  # `coverage-audit` rather than an unresolved expression (AC10).
+  coverage-audit:
     needs: package-ci
     if: always()
     runs-on: ubuntu-latest
@@ -290,10 +287,14 @@ jobs:
           name: ci-results-${{ inputs.slug }}
           path: ci-results-${{ inputs.slug }}.json
           if-no-files-found: ignore
-      # THE area's gate. Exit 2 = this area is blocked, exit 1 = the tool could
-      # not read its input (including a rollup that never wrote its slice).
-      # Both are non-zero, so the area fails closed.
-      - name: Judge this area
+      # The audit blocks only when the producers themselves were green. A red
+      # producer has already reached `ci-gate`; judging its parsed FAILURE again
+      # would create a second red check for one problem. With green producers,
+      # exit 2 means missing/unscheduled evidence, an invalid policy gap, or an
+      # exact-skip violation; exit 1 means the audit could not read its inputs.
+      # Both fail closed because no producer failure already represents them.
+      - name: Enforce coverage completeness and exceptions
+        if: needs.package-ci.result == 'success'
         shell: bash
         env:
           AREA: ${{ inputs.area }}

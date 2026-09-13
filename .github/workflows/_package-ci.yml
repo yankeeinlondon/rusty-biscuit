@@ -31,19 +31,13 @@ name: package-ci
 # `native` requirements across this package's dependency closure, as computed
 # by the scope job from `[package.metadata.ci.native]` declarations.
 #
-# A FAILED GATE COMMAND DOES NOT FAIL ITS JOB. Every test, lint, and compile
-# command below is a `continue-on-error` step with an `id:`, and the job's
-# `Record producer status` step folds those outcomes into the cell's `result`:
-# `failure` when the job is otherwise healthy but a gate command failed, else
-# `job.status` unchanged. The cell's outcome is then judged ONLY by the area's
-# rollup (`_area-ci.yml`), which applies the area's baseline — a failure it
-# accepts leaves the area green, one it does not blocks the area and so
-# `ci-gate`. A red job here would reach `ci-gate` through `area-ci`'s own
-# result before that judgement and bypass the baseline (review 6, finding 1),
-# which is what the normalization prevents. Setup, provisioning, the JUnit and
-# status uploads, and cancellation are NOT normalized: they still fail the
-# job, the area, and the gate directly. The status step annotates a
-# normalized failure with `::error` so the green job still shows it.
+# A FAILED GATE COMMAND FAILS ITS PRODUCER JOB. The command keeps an `id:` so
+# `Record producer status` can publish the cell outcome even after failure;
+# JUnit/status uploads use explicit status predicates for the same reason.
+# Every matrix has `fail-fast: false`, so a red producer does not cancel the
+# other OS cells that still lack qualifying evidence. The area's rollup still
+# owns missing-cell, skip-budget, and governed-gap policy, while `ci-gate`
+# truthfully sees a producer failure through the reusable workflow result.
 
 on:
   workflow_call:
@@ -211,10 +205,9 @@ jobs:
         with:
           workspaces: ". -> target"
           shared-key: package-ci-${{ inputs.package }}-check-${{ matrix.os }}
-      # Gate command: normalized, see the header. Its outcome is the cell.
+      # Gate command. Its outcome is both the producer and cell outcome.
       - name: cargo check (declared example/bench kinds)
         id: check
-        continue-on-error: true
         run: cargo check ${{ inputs.check-args }}
       # The second half of the same cell: this package's UNCHANGED direct
       # reverse dependencies, compiled against its new public API (Open
@@ -227,13 +220,12 @@ jobs:
       # its `skipped` outcome folds as a pass below.
       - name: Compile unchanged dependents
         id: dependents
-        if: ${{ matrix.os == 'ubuntu-latest' && inputs.dependents-check-args != '' }}
-        continue-on-error: true
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && inputs.dependents-check-args != '' }}
         run: cargo check ${{ inputs.dependents-check-args }}
       # Producer status. This job stages no JUnit, so the status artifact is
       # the ONLY evidence it ran and how it concluded — which is what lets a
-      # compile-check become a rollup cell that can be baselined and can still
-      # block. It is also why a check cell can never come from a local receipt:
+      # compile-check become a rollup cell that can still block. It is also why
+      # a check cell can never come from a local receipt:
       # with no report to attribute, the gate is always CI-origin. `always()`,
       # so a FAILED job still reports itself; a job that reports nothing is
       # MISSING, never a pass. `dependents` names what the second step compiled
@@ -266,7 +258,7 @@ jobs:
           fi
           if [ -n "$detail" ]; then
             result=failure
-            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::${detail}. The job completes so the area rollup judges the cell against its baseline; a failure the baseline does not accept blocks there."
+            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::${detail}."
           fi
           # jq, not printf: dependent names come from the plan and belong in a
           # JSON array, and `detail` is present only when there is one.
@@ -293,9 +285,7 @@ jobs:
     # prerequisite: a clippy hint in one package must not delete another
     # package's L1 evidence. Nor does this job export RUSTFLAGS=-D warnings,
     # which re-coupled them through the back door by failing the test build on
-    # any plain rustc warning. Every leg is blocking — a red one is a red run,
-    # and known-red legs belong in the results baseline, never in a mechanism
-    # that erases them from the verdict.
+    # any plain rustc warning. Every leg is blocking — a red one is a red run.
     strategy:
       fail-fast: false
       matrix:
@@ -437,10 +427,9 @@ jobs:
           set -euo pipefail
           node --version
           pnpm --version
-      # Gate command: normalized, see the header. Its outcome is the cell.
+      # Gate command. Its outcome is both the producer and cell outcome.
       - name: L1 tests
         id: l1
-        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -455,7 +444,6 @@ jobs:
       - name: Companion suite homelab-frontend
         id: companion
         if: ${{ !cancelled() && contains(fromJSON(inputs.companion-suites), 'homelab-frontend') && contains(fromJSON(inputs.node-environments), matrix.environment) }}
-        continue-on-error: true
         shell: bash
         run: cd homelab && just test-frontend
       # Per-package/environment JUnit. The artifact name carries the
@@ -498,7 +486,7 @@ jobs:
           result="$JOB_STATUS"
           if [ "$result" = "success" ] && { [ "$GATE" = "failure" ] || [ "$COMPANION" = "failure" ]; }; then
             result=failure
-            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::L1 tests: ${GATE}; companion suite: ${COMPANION}. The job completes so the area rollup judges the cell against its baseline; a failure the baseline does not accept blocks there."
+            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::L1 tests: ${GATE}; companion suite: ${COMPANION}."
           fi
           # A DECLARED companion suite always records its step outcome, not
           # only on failure: a SKIPPED companion leaves no other evidence, and
@@ -626,21 +614,18 @@ jobs:
           set -euo pipefail
           node --version
           pnpm --version
-      # Gate commands: normalized, see the header. Their outcomes are the cell.
+      # Gate commands. Their outcomes are both producer and cell outcomes.
       - name: Lint
         id: clippy
-        continue-on-error: true
         run: just _lint "${{ inputs.package }}"
       - name: Verify the Zed extension package
         id: zed
         if: ${{ !cancelled() && contains(fromJSON(inputs.runner-tools), 'zed-extension') }}
-        continue-on-error: true
         shell: bash
         run: cd darkmatter && just zed-verify
       - name: Companion suite homelab-frontend lint
         id: companion
         if: ${{ !cancelled() && contains(fromJSON(inputs.companion-suites), 'homelab-frontend') && contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
-        continue-on-error: true
         shell: bash
         run: cd homelab && just lint-frontend
       # `lint` emits no JUnit, so this artifact is the sole basis for its
@@ -665,7 +650,7 @@ jobs:
           result="$JOB_STATUS"
           if [ "$result" = "success" ] && { [ "$GATE" = "failure" ] || [ "$ZED" = "failure" ] || [ "$COMPANION" = "failure" ]; }; then
             result=failure
-            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::clippy: ${GATE}; Zed extension: ${ZED}; companion lint: ${COMPANION}. The job completes so the area rollup judges the cell against its baseline; a failure the baseline does not accept blocks there."
+            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::clippy: ${GATE}; Zed extension: ${ZED}; companion lint: ${COMPANION}."
           fi
           companion_json=""
           if [ "$(jq -r 'length' <<<"$COMPANION_SUITES")" -gt 0 ]; then
@@ -819,10 +804,9 @@ jobs:
           shared-key: package-ci-${{ inputs.package }}-test-${{ matrix.environment }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
-      # Gate command: normalized, see the header. Its outcome is the cell.
+      # Gate command. Its outcome is both the producer and cell outcome.
       - name: L2 tests
         id: l2
-        continue-on-error: true
         shell: bash
         env:
           RUNNER_TOOLS: ${{ inputs.runner-tools }}
@@ -870,7 +854,7 @@ jobs:
           result="$JOB_STATUS"
           if [ "$result" = "success" ] && [ "$GATE" = "failure" ]; then
             result=failure
-            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::the L2 tests failed. The job completes so the area rollup judges the cell against its baseline; a failure the baseline does not accept blocks there."
+            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::the L2 tests failed."
           fi
           printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
             "$PACKAGE" "$JOB" "$ENVIRONMENT" "$result" \
@@ -926,10 +910,9 @@ jobs:
           shared-key: package-ci-${{ inputs.package }}-test-${{ matrix.environment }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
-      # Gate command: normalized, see the header. Its outcome is the cell.
+      # Gate command. Its outcome is both the producer and cell outcome.
       - name: Browser tests
         id: browser
-        continue-on-error: true
         run: just _test_browser "${{ inputs.package }}" ${{ inputs.test-args }}
       # The staging directory, so the manifest travels with the reports. See
       # the L1 upload for why the single overwritten file is not enough.
@@ -956,7 +939,7 @@ jobs:
           result="$JOB_STATUS"
           if [ "$result" = "success" ] && [ "$GATE" = "failure" ]; then
             result=failure
-            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::the browser tests failed. The job completes so the area rollup judges the cell against its baseline; a failure the baseline does not accept blocks there."
+            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::the browser tests failed."
           fi
           printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
             "$PACKAGE" "$JOB" "$ENVIRONMENT" "$result" \

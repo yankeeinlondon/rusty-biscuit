@@ -8,8 +8,8 @@
 //!   (or, transitionally, the legacy package policy) and the environment
 //!   capability table, and emits both a Markdown grid (for
 //!   `GITHUB_STEP_SUMMARY`) and a machine-readable result document.
-//! - `verdict` diffs that result document against `.github/ci/ci-baseline.toml`,
-//!   rules on the capability-derived policy gaps the rollup recorded, and exits
+//! - `verdict` applies `.github/ci/ci-baseline.toml`'s exact skip budget, rules
+//!   on the capability-derived policy gaps the rollup recorded, and exits
 //!   non-zero when the run must not merge. It must run even when every producer
 //!   job failed.
 //! - `summarize` folds several area result documents into one reader-facing
@@ -17,8 +17,8 @@
 //!
 //! The split is observation versus judgement. `rollup` never consults the
 //! baseline and never excuses anything: its grid shows every cell that is not
-//! green, including ones the verdict will go on to accept. All merge policy —
-//! baselined failures and governed policy gaps alike — lives in `verdict`.
+//! green. Skip budgets, governed policy gaps, and missing-cell policy live in
+//! `verdict`; test, lint, and compile failures are never excused.
 //!
 //! ## Notes
 //!
@@ -57,10 +57,10 @@ use serde::{Deserialize, Serialize};
 /// reads a higher version must refuse to interpret it.
 const RESULT_SCHEMA_VERSION: u32 = 3;
 
-/// Version of `.github/ci/ci-baseline.toml`. Deliberately its own constant: the
-/// baseline is hand-edited policy keyed on `{package, environment, tier}` and
-/// does not move when the machine-generated result document gains fields.
-const BASELINE_SCHEMA_VERSION: u32 = 2;
+/// Version of `.github/ci/ci-baseline.toml`. Version 3 removed known-failure
+/// entries: producer jobs now fail visibly, so a downstream rollup cannot
+/// consistently pardon them. The remaining skip budget stays package-keyed.
+const BASELINE_SCHEMA_VERSION: u32 = 3;
 
 /// Version of an expected-test manifest (`just/devops.just::_expected_manifest`).
 const EXPECTED_MANIFEST_SCHEMA_VERSION: u32 = 1;
@@ -557,16 +557,6 @@ struct Rollup {
 }
 
 impl Rollup {
-    /// Whether policy scheduled `key` for this run. `None` when the document
-    /// predates the schedule field and cannot say.
-    fn scheduled(&self, key: &CellKey) -> Option<bool> {
-        self.scheduled.as_ref().map(|keys| keys.contains(key))
-    }
-
-    fn cell(&self, key: &CellKey) -> Option<&Cell> {
-        self.cells.iter().find(|cell| &cell.key == key)
-    }
-
     /// This document narrowed to one area's own slice.
     ///
     /// ## Notes
@@ -672,11 +662,9 @@ struct ProducerStatus {
     package: String,
     job: String,
     /// The producer's conclusion for the CELL: `success`, `failure`,
-    /// `cancelled`, `skipped`. The gate commands are `continue-on-error`
-    /// steps, so a failed test, lint, or compile leaves GitHub's `job.status`
-    /// at `success`; the status step folds the step outcomes in and writes
-    /// `failure` here. Only this document — never the producer job's
-    /// conclusion — can therefore tell the rollup a gate command failed.
+    /// `cancelled`, `skipped`. The status artifact preserves cell identity
+    /// and detail for the rollup; a failed gate command also fails the producer
+    /// job visibly.
     result: String,
     #[serde(default)]
     environment: Option<String>,
@@ -2406,36 +2394,25 @@ fn produced_a_result(inputs: &ClassifyInputs<'_>, indices: &[usize], test: &str)
 /// (`results.json`) goes the other way for the same reason — nothing hand-edits
 /// it.
 #[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Baseline {
     // Required, not defaulted: a version-less file must die here as a missing
     // field rather than silently assume the current schema generation and
     // skip the migration-error path on the next bump.
     schema_version: u32,
     #[serde(default)]
-    failure: Vec<FailureEntry>,
-    #[serde(default)]
     skip: Vec<SkipEntry>,
 }
 
-/// A known-red leg, keyed by stable identity — never by a GitHub display name.
-/// `deny_unknown_fields`: a stale area/shard key (`shard = "1/4"`, `area = …`)
-/// must be rejected, not silently parsed away (AC11).
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FailureEntry {
-    package: String,
-    environment: String,
-    tier: Tier,
-    owner: String,
-    reason: String,
-    source_run: String,
-    #[serde(default)]
-    expiry: Option<String>,
+#[derive(Deserialize)]
+struct BaselineVersion {
+    schema_version: u32,
 }
 
 /// An approved skip budget. `tests` carries exact identities so one removed
 /// skip cannot mask one newly-added skip.
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SkipEntry {
     package: String,
     environment: String,
@@ -2456,28 +2433,37 @@ struct SkipEntry {
 fn load_baseline(path: &Path) -> Result<Baseline> {
     let text = fs::read_to_string(path)
         .with_context(|| format!("failed to read baseline {}", path.display()))?;
-    let baseline: Baseline =
+    let version: BaselineVersion =
         toml::from_str(&text).with_context(|| format!("invalid baseline {}", path.display()))?;
 
-    if baseline.schema_version > BASELINE_SCHEMA_VERSION {
+    if version.schema_version > BASELINE_SCHEMA_VERSION {
         bail!(
             "baseline schema_version {} is newer than this tool understands \
              ({BASELINE_SCHEMA_VERSION})",
-            baseline.schema_version
+            version.schema_version
         );
     }
-    if baseline.schema_version < BASELINE_SCHEMA_VERSION {
+    if version.schema_version == 1 {
         bail!(
             "baseline {} is schema_version {} (area-keyed); this tool reads \
-             schema_version {BASELINE_SCHEMA_VERSION} (package-keyed). Re-key the entries \
-             to packages — see fixes/2026-08-06-cicd/plan.md (Phase 4)",
+             schema_version {BASELINE_SCHEMA_VERSION} (package-keyed skip budget). Re-key \
+             skip entries to packages — see fixes/2026-08-06-cicd/plan.md (Phase 4)",
             path.display(),
-            baseline.schema_version
+            version.schema_version
         );
     }
-    for entry in &baseline.failure {
-        validate_date(entry.expiry.as_deref(), "failure", &entry.package)?;
+    if version.schema_version < BASELINE_SCHEMA_VERSION {
+        bail!(
+            "baseline {} is schema_version {}; this tool reads schema_version \
+             {BASELINE_SCHEMA_VERSION}, where known-failure entries are unsupported. \
+             Remove every [[failure]] entry; producer failures must remain visible and blocking",
+            path.display(),
+            version.schema_version
+        );
     }
+    let baseline: Baseline =
+        toml::from_str(&text).with_context(|| format!("invalid baseline {}", path.display()))?;
+    debug_assert_eq!(baseline.schema_version, version.schema_version);
     for entry in &baseline.skip {
         validate_date(entry.expiry.as_deref(), "skip", &entry.package)?;
     }
@@ -2557,120 +2543,12 @@ impl Finding {
 /// a package outside it is *ignored* — neither accepted as a pass nor counted
 /// as a block — because the run produced no information about it either way.
 ///
-/// Two independent excusal paths feed the blocking-cell loop, and they never
-/// overlap: `.github/ci/ci-baseline.toml` excuses a `FAIL`, and a governed,
-/// unexpired capability-table gap excuses a `POLICY GAP` (see
-/// [`policy_gap_findings`]). Both leave the cell's state untouched and both
-/// report a `note`, so an excused cell is never invisible.
+/// A governed, unexpired capability-table gap may excuse a `POLICY GAP` (see
+/// [`policy_gap_findings`]). Test, lint, and compile failures always block; the
+/// baseline supplies only the exact skip budget applied below.
 fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Finding> {
     let scope: BTreeSet<&String> = rollup.scope.iter().collect();
     let mut findings = Vec::new();
-    let mut excused_cells: BTreeSet<CellKey> = BTreeSet::new();
-    let mut out_of_scope: BTreeSet<String> = BTreeSet::new();
-    let mut unscheduled: BTreeSet<String> = BTreeSet::new();
-
-    for entry in &baseline.failure {
-        let key = CellKey {
-            package: entry.package.clone(),
-            environment: entry.environment.clone(),
-            tier: entry.tier.clone(),
-        };
-        let subject = key.to_string();
-
-        if !scope.contains(&entry.package) {
-            out_of_scope.insert(entry.package.clone());
-            continue;
-        }
-
-        if let Some(expiry) = &entry.expiry {
-            if let Some(today) = today {
-                if expiry.as_str() < today {
-                    findings.push(Finding::block(
-                        "baseline-expired",
-                        subject.clone(),
-                        format!(
-                            "entry expired on {expiry} (owner {}); re-justify it or fix the failure",
-                            entry.owner
-                        ),
-                    ));
-                }
-            }
-        }
-
-        let Some(cell) = rollup.cell(&key) else {
-            // Scope is per gate: a package reached only through a lint-global
-            // input is in scope with no test tier scheduled, and the run
-            // produced no information about this leg either way — the same
-            // standing as an out-of-scope entry. Only a KNOWN unscheduled
-            // leg is excused; a document that cannot say fails closed.
-            if rollup.scheduled(&key) == Some(false) {
-                unscheduled.insert(subject);
-                continue;
-            }
-            findings.push(Finding::block(
-                "baseline-no-result",
-                subject,
-                "in scope but the rollup has no cell for it; a baselined entry \
-                 that emits no result stays blocking",
-            ));
-            continue;
-        };
-
-        match cell.state {
-            CellState::Fail => {
-                excused_cells.insert(key);
-                findings.push(Finding::note(
-                    "baseline-accepted",
-                    subject,
-                    format!(
-                        "known failure ({}), owner {}, first recorded in run {}",
-                        entry.reason, entry.owner, entry.source_run
-                    ),
-                ));
-            }
-            CellState::Pass => findings.push(Finding::block(
-                "baseline-now-passing",
-                subject,
-                format!(
-                    "baselined leg now PASSES; remove the entry (owner {})",
-                    entry.owner
-                ),
-            )),
-            other => findings.push(Finding::block(
-                "baseline-no-result",
-                subject,
-                format!(
-                    "scheduled but rendered {other}; a baselined entry that is \
-                     cancelled, missing, or emits no result stays blocking"
-                ),
-            )),
-        }
-    }
-
-    if !unscheduled.is_empty() {
-        findings.push(Finding::note(
-            "baseline-unscheduled",
-            format!("{} leg(s)", unscheduled.len()),
-            format!(
-                "in scope, but policy scheduled no such leg for this run (scope is \
-                 per gate); ignored, not treated as a pass: {}",
-                unscheduled.iter().cloned().collect::<Vec<_>>().join(", ")
-            ),
-        ));
-    }
-
-    // Collapsed to one line. Most of the baseline is out of scope on any
-    // narrow run, and one note per entry buries the blocks that matter.
-    if !out_of_scope.is_empty() {
-        findings.push(Finding::note(
-            "baseline-out-of-scope",
-            format!("{} package(s)", out_of_scope.len()),
-            format!(
-                "outside this run's affected scope; ignored, not treated as a pass: {}",
-                out_of_scope.iter().cloned().collect::<Vec<_>>().join(", ")
-            ),
-        ));
-    }
 
     // A cell that produced evidence policy never scheduled means the resolved
     // package policy disagrees with what CI actually ran. Blocking is what
@@ -2698,9 +2576,6 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
 
     for cell in &rollup.cells {
         if !cell.state.blocks() {
-            continue;
-        }
-        if cell.state == CellState::Fail && excused_cells.contains(&cell.key) {
             continue;
         }
         if cell.state.is_gap() && ruled_on_gaps.contains(&cell.key) {
@@ -2736,8 +2611,8 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
 /// Acknowledged is not acceptable, and neither is invisible. A gap cell renders
 /// in the grid with its governance — `classify` decided its state and nothing
 /// here can change it — and appears in the verdict table as a `note` naming its
-/// owner, expiry, policy entry, and what closes it, exactly as an accepted
-/// baseline failure does. Acceptance buys one thing: the run may merge. This is
+/// owner, expiry, policy entry, and what closes it. Acceptance buys one thing:
+/// the run may merge. This is
 /// deliberately *not* `soft_os`, which removed the leg from the verdict
 /// altogether (plan §1.4).
 ///
@@ -2748,8 +2623,7 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
 /// because the verdict runs `if: always()` and must catch an expiry that lapsed
 /// after the plan was written.
 ///
-/// Three things forfeit acceptance, and each maps to a rule the plan already
-/// states for baselined failures:
+/// Three things forfeit acceptance:
 ///
 /// - **ungoverned** — the capability table records the absence as a plain
 ///   `false`, with no owner, reason, or expiry. This is the case that catches a
@@ -2761,10 +2635,10 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
 ///
 /// A gap whose cell produced real *failures* never reaches this function:
 /// `classify` ranks `Fail` above `PolicyGap`, so the cell is `FAIL` and is
-/// judged by the baseline. A gap declaration can never suppress evidence.
+/// judged as an ordinary failure. A gap declaration can never suppress evidence.
 ///
-/// There is deliberately **no** `policy-gap-now-executing` rule, tempting as
-/// the analogy to `baseline-now-passing` is. A `require_level!` gate that skips
+/// There is deliberately **no** `policy-gap-now-executing` rule. A
+/// `require_level!` gate that skips
 /// because its backend is absent early-returns, and nextest records that as a
 /// JUnit **pass** — so on this evidence a passing count is exactly what a
 /// correctly-governed gap looks like, and such a rule would block the case it
@@ -3265,8 +3139,8 @@ fn render_verdict(findings: &[Finding], blocked: bool) -> String {
     out.push_str(if blocked {
         "**BLOCKED** — this run must not merge.\n\n"
     } else {
-        "**CLEAR** — every non-green cell is accepted by the baseline, covered by an \
-         owned and unexpired policy gap, or out of scope.\n\n"
+        "**CLEAR** — every required cell passed or is covered by an exact skip budget or \
+         an owned and unexpired policy gap.\n\n"
     });
 
     if findings.is_empty() {

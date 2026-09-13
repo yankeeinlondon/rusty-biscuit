@@ -4,6 +4,7 @@ $schema:
     design: file(match(**/*design*.md)) -> the design file (_optional_) that compliments the spec
     iteration: number -> the review's iteration number
     review: file -> the review file which will be created based on this prompt's execution
+    spec_name: string -> the name of the spec (which is really just the spec's folder name)
 description: |-
     Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.
 
@@ -12,7 +13,9 @@ dir: "{{dirname(spec)}}"
 design: "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
 iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
 review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
-previous: "{{ iteration < 2 ? null : decrement_file_index(review) }}"
+previous: "{{ iteration > 1 ? decrement_file_index(review) : null }}"
+spec_name: "{{ parent_dir(spec) }}"
+
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
     message: "👓 starting {{feature_or_fix}} review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
@@ -61,7 +64,17 @@ failure:
 
 ## Context
 
-You are performing a review of the functionality defined by the following document(s):
+You are performing a review of the functionality defined by the `{{spec-name}}` spec:
+
+::block when="previous"
+- This is the #{{iteration}} iteration of the review/fix cycle for this specification
+- The first thing you will need to check is whether the _findings_ in the review's `## Unblocked Findings` section were all implemented
+    - this is the most obvious thing that the last implementation was supposed to have addressed
+- The second thing you will need to check is whether:
+    - any of the _
+    - any of the _findings_ in the review's `## Blocked Findings` were _unblocked_ prior to the last implementation's
+::end-block
+
 
 ::block when="spec"
 - **Specification:** "@{{spec}}"
@@ -69,6 +82,8 @@ You are performing a review of the functionality defined by the following docume
 ::block when="design"
 - **Technical Design:** "@{{design}}"
 ::end-block
+
+
 
 ::block when="And(spec, design)"
 Read both the specification and design documents and then perform a review on the implementation:

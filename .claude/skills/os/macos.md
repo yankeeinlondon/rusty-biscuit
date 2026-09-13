@@ -51,6 +51,14 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
 
 ## Host conditions that look like repo failures
 
+- **Claudine currently shadows the login home for agent sessions on this
+  host.** An agent can inherit `HOME=/Users/ken/.claudine` even though the
+  login home and OpenPGP keyring are under `/Users/ken`. A signed Git command
+  then looks in the wrong keyring or opens pinentry despite the Keychain-backed
+  signing key needing no interaction. Run commit, verification, and push with
+  both `HOME=/Users/ken` and `GNUPGHOME=/Users/ken/.gnupg`. If a wrong-home
+  agent was already started, kill and relaunch `gpg-agent` with those same two
+  values; setting only one did not prevent the dialog on 2026-09-12.
 - **A shell prompt inside a captured L2 frame.** The L2 WezTerm harness
   spawns an interactive login shell, so anything the host's shell startup
   does interactively lands in the pane. A first-run tool prompt (seen with

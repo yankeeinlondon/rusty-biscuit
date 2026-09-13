@@ -58,7 +58,7 @@ scope job takes a matching receipt as its plan without running the planner or se
 toolchain, falls back to its own calculation on any miss (materializing the toolchain only then)
 and says which (`scope-missing`, `scope-base-mismatch`, ...), and ignores it on
 `workflow_dispatch`. Its summary also lists the validation environments consulted and matched, the
-cells reused from a pass and from a failure, and the refusals by code. The base is the one the CI event will compare with: the remote's
+cells reused from passing evidence and the refusals by code. A failing receipt is retained for diagnosis but never suppresses execution. The base is the one the CI event will compare with: the remote's
 current `main` for a push to `main` (`github.event.before`); otherwise — `ci.yml` fires
 `pull_request` for every target branch — the current remote tip of each open pull request's target
 branch (listed with `gh pr list` on a GitHub remote; a missing, unauthenticated, or failing `gh`
@@ -161,11 +161,17 @@ four concurrent tests, Claudine CLI L1 allows one, and Sniff L1 on Windows
 allows one. These caps still apply when the overall worker budget is larger.
 
 `RUSTY_BISCUIT_PRE_PUSH_AREAS` (package names or area directories) replaces the computed scope with
-a fixed selection. Install the hook once with:
+a fixed selection. Install the hook dispatcher with:
 
 ```bash
-ln -s ../../.githooks/pre-push .git/hooks/pre-push
+just init
 ```
+
+Linked worktrees share one Git hooks directory, so the installed file is a
+stable dispatcher rather than a symlink to one checkout. At invocation it
+resolves `git rev-parse --show-toplevel` and executes that worktree's
+`.githooks/pre-push`; this prevents an older checkout's receipt schema from
+silently replacing the branch's current evidence protocol.
 
 Run the hook's local regression suite with
 `bash .githooks/tests/test-pre-push.sh` when changing its contract.
@@ -222,13 +228,14 @@ so a declared `name:` containing `${{ matrix.… }}` reaches the Checks tab as r
 `job-id (matrix values)` when it runs. `lint` has no matrix, so it keeps a static
 `lint (ubuntu-latest)` — its environment has to be visible.
 
-### Each area owns its outcome
+### Each area audits its planned coverage
 
-`_area-ci.yml`'s `rollup` job runs `if: always()` behind that area's producers and runs
-`ci-rollup rollup --area` then `ci-rollup verdict --area`. It applies that area's baseline, its
-governed policy gaps, and the missing-cell rule, and nobody else's: another area's red cell cannot
-block it and another area's baseline entry cannot excuse it. It also narrows runner-loss
-attribution to its own packages, because a job name carries no area.
+`_area-ci.yml`'s `coverage-audit` job runs `if: always()` behind that area's producers and always
+renders `ci-rollup rollup --area`. It runs `ci-rollup verdict --area` only when every producer
+succeeded. Producer failures already reach `ci-gate`; the audit therefore creates no second red
+check for the same failure. With green producers it fails closed on missing or unscheduled
+evidence, invalid governed gaps, and exact-skip violations, scoped to that area alone. It also
+narrows runner-loss attribution to its own packages, because a job name carries no area.
 `ci-rollup summarize --results <slice>…` folds the slices into one view and applies no policy at
 all.
 
@@ -256,7 +263,7 @@ the `closes` work; `details_url` links the policy entry. `neutral` leaves the PR
 alters the run's conclusion — `cancelled` keeps its one meaning, interruption — and the tool
 refuses an ungoverned or expired cell rather than publish it as harmless. That job is the only
 one holding `checks: write`; `ci.yml`'s `area-ci` carries the grant as a cap and `package-ci` and
-`rollup` declare read-only sets of their own.
+`coverage-audit` declares a read-only set of its own.
 
 ### The merge gate
 
@@ -264,14 +271,22 @@ one holding `checks: write`; `ci.yml`'s `area-ci` carries the grant as a cap and
 blocking top-level job, runs `if: always()`, and passes only when each `needs.*.result` is
 `success` or `skipped` — an unselected area's job is skipped and must not block, while `failure`
 and `cancelled` do. It reads no plan, policy, baseline, or artifact; a `MISSING` cell is caught by
-its area's own rollup, which is the only place judgement lives. `continue-on-error` hides a failure
-from the fold, so exactly one job (`ci.yml`'s advisory summary) carries it. The semantics were
+its area's own coverage audit. `continue-on-error` hides a failure from the fold, so
+exactly one job (`ci.yml`'s advisory summary) carries it. The semantics were
 proven in a scratch repository (`fixes/2026-09-11-cicd-cleanup/fixtures/scratch-2026-09-12.md`).
+
+Test, lint, and compile steps fail their producer jobs visibly. Their
+`always()` status steps still publish package/environment/tier evidence for the
+coverage audit, and every matrix uses `fail-fast: false`, so one failure does not
+cancel the remaining cells that lack qualifying local evidence. `ci-baseline.toml`
+is a skip budget only; failures cannot be pardoned downstream after the
+producer has truthfully reached the gate.
 The `protect-your-bacon` ruleset still names `ci-verdict`, the required check until 2026-09-12;
 until Ken switches that context to `ci-gate` — after this change's own run is green — every PR
 shows `ci-verdict — Expected` and cannot merge.
 
-`ci-results.json` is `schema_version: 3`, versioned independently of the baseline's 2. Identity is
+`ci-results.json` and the skip-only baseline are independently versioned; both
+currently use `schema_version: 3`. Identity is
 still `{package, environment, tier}`; each cell also carries its derived `area`, its `origin`
 (`ci`, `local`, `prior-local`, or `none`), the `evidence` behind a reused result, its measured
 `duration_s`, and the `target_kinds` and `compile_coverage_from` the plan assigned it. The
@@ -299,7 +314,7 @@ all-feature coverage and the closed `messenger-desktop-stubs` runner tool. The
 native workflow builds and verifies all six helpers once before L1 and exports
 `MESSENGER_STUB_BIN_DIR`; the WSL2 archive workflow ships Linux helpers as a
 sidecar to its toolchain-free guest. JUnit and producer-status artifacts retain
-the package/environment/tier identity consumed by their area's rollup.
+the package/environment/tier identity consumed by their area's coverage audit.
 `sniff-performance.yml`
 stays independent because its PR leg is artifact-only and its scheduled leg measures work counts,
 not correctness. `build-integrations.yml` stays release-triggered.

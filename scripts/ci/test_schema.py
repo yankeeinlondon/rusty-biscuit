@@ -448,13 +448,16 @@ class ReusableCellsTests(unittest.TestCase):
         self.assertEqual([entry["package"] for entry in accepted], ["claudine"])
         self.assertEqual(rejected, [])
 
-    def test_a_complete_failure_is_still_reusable_evidence(self):
+    def test_a_complete_failure_is_diagnostic_only(self):
         failing = receipt(
             cells=[receipt_cell(outcome="fail", exit_code=100, failed_tests=["boom"])]
         )
         accepted, rejected = schema.reusable_cells(failing)
-        self.assertEqual(rejected, [])
-        self.assertEqual(accepted[0]["outcome"], "fail")
+        self.assertEqual(accepted, [])
+        self.assertEqual(
+            rejected,
+            ["failed-cell: claudine/macos-latest/L1 failed; failing evidence is diagnostic only"],
+        )
 
     def test_an_interrupted_run_contributes_nothing(self):
         accepted, rejected = schema.reusable_cells(receipt(completion="interrupted"))

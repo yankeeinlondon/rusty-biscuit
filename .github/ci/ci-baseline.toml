@@ -1,46 +1,32 @@
-# CI baseline — known-red legs and the approved skip budget.
+# CI baseline — approved exact-test skip budget.
 #
 # Keyed by stable identity (`package`, `environment`, `tier`), never by a
 # GitHub display name or a shard. Enforced by `ci-rollup verdict`, which runs
-# once per selected area inside `_area-ci.yml`'s `rollup` job (`--area`). The
-# required branch-protection check, `ci.yml`'s `ci-gate`, folds those rollups'
-# job results and never reads this file.
+# once per selected area inside `_area-ci.yml`'s `coverage-audit` job
+# (`--area`) when all producers succeeded. The required branch-protection
+# check, `ci.yml`'s `ci-gate`, folds the area workflows' job results and never
+# reads this file.
 #
 # AREA GROUPS, PACKAGE IDENTIFIES. Nothing here is re-keyed by area. An entry
 # is applied by the area that owns its `package`, and by no other: another
-# area's rollup can neither block on it nor be excused by it.
+# area's coverage audit can neither block on it nor be excused by it.
 #
 # Why TOML: this file is hand-edited policy. An owner adds an entry, explains
 # why, and dates its expiry — all of which want comments and readable
 # multi-line strings. The machine-generated rollup (`results.json`) goes the
 # other way, for the same reason: nothing hand-edits it.
 #
-# Rules enforced by `ci-rollup verdict`:
-#
-#   - a failure NOT listed here blocks
-#   - a listed entry that is scheduled and PASSES blocks, forcing cleanup
-#   - an entry outside the run's affected scope is ignored — never counted as
-#     a pass
-#   - a scheduled entry that is cancelled, missing, or emits no result stays
-#     blocking; it cannot be accepted as a known test failure
-#   - an entry past its `expiry` blocks
-#
-# A cell satisfied by verified local evidence is a normal result cell with
-# `origin: local`, not an absence: a complete local FAILURE is a failure and is
-# matched against this file exactly as a hosted one is. Only an INCOMPLETE
-# local gate stays scheduled, so a baselined entry can never be quietly
-# discharged by a receipt.
-#
-# Every entry needs `owner`, `reason`, and `source_run`. `expiry` is optional
-# but strongly encouraged.
+# Test, lint, and compile failures always block and cannot be listed here.
+# Schema version 3 removed `[[failure]]`: producer jobs now fail visibly, so a
+# downstream rollup could not pardon a hosted failure without contradicting
+# the merge gate. Every skip entry needs `owner`, `reason`, and `source_run`;
+# `expiry` is optional but strongly encouraged.
 #
 # POLICY GAPS ARE NOT BASELINED HERE. A tier a package owns tests for that an
 # environment cannot host is governed once in `.github/ci/environments.json`,
 # and `ci-rollup verdict` applies the same shape of rule to it: a governed,
 # unexpired gap is accepted as a `note` and does not block, while an
-# ungoverned, unowned, undated, or expired one blocks. Do not add a `[[failure]]`
-# entry to paper over a POLICY GAP cell — it would not work anyway, because a
-# baselined entry is only accepted against a `FAIL`.
+# ungoverned, unowned, undated, or expired one blocks.
 #
 # `tier` values: `L1`, `L2`, `browser` (JUnit-producing test tiers) and `lint`
 # / `check` (producer-status jobs that emit no JUnit; their cells come from the
@@ -51,7 +37,7 @@
 # `ubuntu-latest` only, for a package whose unchanged direct reverse
 # dependencies are compiled inside its own check.
 
-schema_version = 2
+schema_version = 3
 
 # ---------------------------------------------------------------------------
 # Approved skip budget

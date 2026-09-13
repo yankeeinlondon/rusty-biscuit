@@ -121,6 +121,7 @@ REJECTIONS = (
     "revision-mismatch",
     "gate-inputs-changed",
     "incomplete-run",
+    "failed-cell",
     "conflicting-evidence",
     "dirty-tree",
     "v1-requires-exact-tree",
@@ -806,8 +807,9 @@ def reusable_cells(receipt: dict[str, Any]) -> tuple[list[dict[str, Any]], list[
     reasons the rest may not.
 
     An interrupted whole receipt contributes nothing: the run did not execute
-    the tree it claims. An interrupted *cell* inside a complete run is rejected
-    alone, leaving its completed siblings reusable (spec section 3.4).
+    the tree it claims. An interrupted or failing *cell* inside a complete run
+    is rejected alone, leaving its completed passing siblings reusable (spec
+    section 3.4).
     """
     problems = validate_receipt(receipt)
     if problems:
@@ -819,8 +821,13 @@ def reusable_cells(receipt: dict[str, Any]) -> tuple[list[dict[str, Any]], list[
         ]
     accepted, rejected = [], []
     for cell in receipt["cells"]:
-        if cell["completion"] == "complete":
+        if cell["completion"] == "complete" and cell["outcome"] == "pass":
             accepted.append(cell)
+        elif cell["completion"] == "complete":
+            rejected.append(
+                f"failed-cell: {cell['package']}/{receipt['environment']}/"
+                f"{cell['gate']} failed; failing evidence is diagnostic only"
+            )
         else:
             rejected.append(
                 f"incomplete-run: {cell['package']}/{receipt['environment']}/"
