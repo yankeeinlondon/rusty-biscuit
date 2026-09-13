@@ -3,7 +3,7 @@
     "Frozen expectations for the Claudine compatibility replays in",
     "tools/test-audit/tests/*-claudine-compat.test.ts. Every number was recorded",
     "by the first-generation scripts in",
-    "claudine/fixes/2026-09-07-faster-claudine-tests/ at revision 9fc5151a0 and",
+    "claudine/fixes/_completed/2026-09-07-faster-claudine-tests/ at revision 9fc5151a0 and",
     "published in that fix's attribution.md and inventory.md. They are copied",
     "here, not read from those documents, because the replays consume frozen",
     "inputs (the nextest listings under enumeration/9fc5151a0/ and the gate logs",

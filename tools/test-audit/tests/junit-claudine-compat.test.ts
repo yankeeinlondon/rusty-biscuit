@@ -12,7 +12,7 @@ import type { CommandIo } from "../src/command.ts";
 import { EXIT } from "../src/errors.ts";
 import { haveStoredBaselineRuns } from "./claudine-compat-inputs.ts";
 
-const CLAUDINE_ROOT = join(__dirname, "../../../claudine/fixes/2026-09-07-faster-claudine-tests");
+const CLAUDINE_ROOT = join(__dirname, "../../../claudine/fixes/_completed/2026-09-07-faster-claudine-tests");
 const BASELINE_DIR = join(CLAUDINE_ROOT, "baseline");
 
 /**

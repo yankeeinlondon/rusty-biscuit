@@ -1,7 +1,7 @@
 {
   "version": 1,
   "area": "claudine",
-  "root": "../../..",
+  "root": "../../../..",
   "evidenceDir": ".",
   "notes": [
     "Compatibility configuration for the shared `test-audit` tool: it reproduces what the first-generation scripts in this directory hard-coded (package roots, the four-leg matrix, the required timeout-shaped tests and their floors). The wrappers junit-metrics.ts, inventory-reconciler.ts, attribution.ts, and measurement.ts beside it delegate to the shared tool with this file.",

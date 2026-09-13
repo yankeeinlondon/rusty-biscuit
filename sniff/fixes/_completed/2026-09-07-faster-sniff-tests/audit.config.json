@@ -1,7 +1,7 @@
 {
   "version": 1,
   "area": "sniff",
-  "root": "../../..",
+  "root": "../../../..",
   "evidenceDir": ".",
   "notes": [
     "Configuration for the shared `test-audit` tool (tools/test-audit). Paths are relative to this file.",

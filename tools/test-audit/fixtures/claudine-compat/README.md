@@ -10,7 +10,7 @@ they are that fix's evidence and are far too large to duplicate:
 
 | Input | Path |
 |---|---|
-| nextest listings, 16 selections | `claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/` |
+| nextest listings, 16 selections | `claudine/fixes/_completed/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/` |
 | `just test` / `just test-l2` gate logs | `…/baseline/local-gates/` |
 | `just test-rendezvous` gate log | `…/enumeration/recipes/` |
 

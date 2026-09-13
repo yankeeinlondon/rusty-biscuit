@@ -89,9 +89,9 @@ describe("area configuration", () => {
   });
 
   it.each([
-    "darkmatter/fixes/2026-09-07-faster-darkmatter-tests/audit.config.json",
-    "sniff/fixes/2026-09-07-faster-sniff-tests/audit.config.json",
-    "claudine/fixes/2026-09-07-faster-claudine-tests/audit.config.json",
+    "darkmatter/fixes/_completed/2026-09-07-faster-darkmatter-tests/audit.config.json",
+    "sniff/fixes/_completed/2026-09-07-faster-sniff-tests/audit.config.json",
+    "claudine/fixes/_completed/2026-09-07-faster-claudine-tests/audit.config.json",
   ])("the shipped area configuration %s loads and points at the repository root", (relative) => {
     const config = loadConfig(join(REPO, relative));
     expect(config.repoRoot).toBe(REPO);
@@ -102,7 +102,7 @@ describe("area configuration", () => {
   });
 
   it("the Darkmatter configuration keeps the local and CI-selected L1 populations as separate cohorts", () => {
-    const config = loadConfig(join(REPO, "darkmatter/fixes/2026-09-07-faster-darkmatter-tests/audit.config.json"));
+    const config = loadConfig(join(REPO, "darkmatter/fixes/_completed/2026-09-07-faster-darkmatter-tests/audit.config.json"));
     const local = config.cohorts.find((c) => c.id === "l1-local");
     const ci = config.cohorts.find((c) => c.id === "l1-ci");
     expect(local?.population).toBe("local");
@@ -116,7 +116,7 @@ describe("area configuration", () => {
   });
 
   it("the Sniff configuration distinguishes remote, network, and test-fixtures selections and declares the caching boundary", () => {
-    const config = loadConfig(join(REPO, "sniff/fixes/2026-09-07-faster-sniff-tests/audit.config.json"));
+    const config = loadConfig(join(REPO, "sniff/fixes/_completed/2026-09-07-faster-sniff-tests/audit.config.json"));
     const features = new Map(config.selections.map((s) => [s.label, s.features]));
     expect(features.get("lib-remote")).toEqual(["remote"]);
     expect(features.get("lib-network")).toEqual(["network"]);

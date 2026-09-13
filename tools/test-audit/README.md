@@ -42,9 +42,9 @@ relative to the file). It declares what the engine may not guess:
 checks (unknown packages, routes, selections; pending legs without a reason;
 absent routes claiming to execute). Shipped configurations:
 
-- `darkmatter/fixes/2026-09-07-faster-darkmatter-tests/audit.config.json`
-- `sniff/fixes/2026-09-07-faster-sniff-tests/audit.config.json`
-- `claudine/fixes/2026-09-07-faster-claudine-tests/audit.config.json` (compatibility)
+- `darkmatter/fixes/_completed/2026-09-07-faster-darkmatter-tests/audit.config.json`
+- `sniff/fixes/_completed/2026-09-07-faster-sniff-tests/audit.config.json`
+- `claudine/fixes/_completed/2026-09-07-faster-claudine-tests/audit.config.json` (compatibility)
 
 ## Commands
 
