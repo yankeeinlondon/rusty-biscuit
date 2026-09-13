@@ -2,6 +2,8 @@
 //!
 //! Uses the `espeak-ng` or `espeak` command for text-to-speech.
 //! Common on Linux systems, also available on macOS and Windows.
+//! Amplitude follows the [eSpeak command reference](https://espeak.sourceforge.net/commands.html):
+//! 100 is unity gain; the higher 200 setting is amplification.
 
 use std::process::Stdio;
 
@@ -99,6 +101,11 @@ impl ESpeakProvider {
         format!("{}{}", lang, gender_suffix)
     }
 
+    // eSpeak amplitude 100 is unity gain; 200 is amplification, not full scale.
+    fn amplitude(volume: crate::types::VolumeLevel) -> u32 {
+        (volume.value() * 100.0).round() as u32
+    }
+
     /// Resolve voice to a Voice struct with full metadata.
     fn resolve_voice_full(&self, config: &TtsConfig) -> Voice {
         let voice_arg = self.build_voice_arg(config);
@@ -125,6 +132,8 @@ impl TtsExecutor for ESpeakProvider {
         if let Some(rate) = Self::resolve_rate(config.speed) {
             cmd.arg("-s").arg(rate.to_string());
         }
+
+        cmd.arg("-a").arg(Self::amplitude(config.volume).to_string());
 
         // Use stdin for text input
         cmd.stdin(Stdio::piped());
@@ -206,6 +215,10 @@ impl TtsExecutor for ESpeakProvider {
         if let Some(rate) = Self::resolve_rate(config.speed) {
             args.extend(["-s".into(), rate.to_string().into()]);
         }
+        args.extend([
+            "-a".into(),
+            Self::amplitude(config.volume).to_string().into(),
+        ]);
         args.push(text.into());
         crate::playa_bridge::command_job(&self.binary, args)
     }

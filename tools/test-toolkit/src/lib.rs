@@ -40,6 +40,9 @@
 
 pub mod backend;
 pub mod evidence;
+pub mod spool;
+
+pub use spool::LockedAudioSpool;
 
 pub use backend::{
     BISCUIT_TEST_REQUIRED_BACKENDS, Backend, BackendParseError, HarnessSpec, RequiredBackendsError,

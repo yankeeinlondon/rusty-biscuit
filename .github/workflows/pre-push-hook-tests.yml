@@ -1,14 +1,12 @@
 name: pre-push-hook-tests
 
 # Path-filtered test workflow for the .githooks/ shell hooks and the
-# `just` recipes that orchestrate them. Runs whenever the hook, its
-# tests, or shared just recipes change so the R3 hook-mode contract
-# (off / warn / strict / invalid, --no-verify hint, red failure styling,
-# selection override, lint-only delegation to `just pre-push`) cannot
-# regress silently.
+# `just` recipes that orchestrate them. Feature branches run through the PR
+# event only, avoiding duplicate checks for one push. Main retains push coverage.
 
 on:
   push:
+    branches: [main]
     paths:
       - ".githooks/**"
       - "justfile"
@@ -32,9 +30,12 @@ concurrency:
   group: pre-push-hook-tests-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    name: Hook tests
+    name: Hook tests (Ubuntu)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -51,4 +52,14 @@ jobs:
         uses: extractions/setup-just@v4
 
       - name: Run pre-push hook tests
+        env:
+          PRE_PUSH_TEST_REPORT_DIR: ${{ runner.temp }}/hook-test-results
         run: just test-pre-push-hook
+
+      - name: Upload hook test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hook-test-results
+          path: ${{ runner.temp }}/hook-test-results/
+          if-no-files-found: error

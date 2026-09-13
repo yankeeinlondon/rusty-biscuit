@@ -339,12 +339,42 @@ fn stale_linked_worktree_registration_does_not_derail_requested_repo() {
 }
 
 #[test]
+fn linked_worktree_missing_its_git_file_is_omitted_as_stale() {
+    let dir = TempDir::new().unwrap();
+    builder::build_git_repo_with_worktrees(dir.path(), 1);
+
+    // Matches the state `git worktree list` reports as prunable ("gitdir file
+    // points to non-existent location"): the checkout directory survives but
+    // its `.git` pointer file is gone, as happens when macOS sweeps `/tmp`.
+    let wt_path = dir.path().join("_wt").join("wt000");
+    std::fs::remove_file(wt_path.join(".git")).expect("remove linked checkout .git file");
+    assert!(wt_path.exists(), "linked checkout target should remain");
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let worktrees = handle
+        .worktrees()
+        .expect("a stale registration must not fail worktree enumeration");
+    assert!(
+        worktrees.is_empty(),
+        "stale registration should be omitted, got {worktrees:?}"
+    );
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .expect("full Git detection must succeed despite the stale registration")
+        .expect("requested repository should remain discoverable");
+    assert!(info.worktrees.is_empty(), "stale worktree should be omitted");
+}
+
+#[test]
 fn worktree_trusted_open_failure_is_propagated() {
     let dir = TempDir::new().unwrap();
     builder::build_git_repo_with_worktrees(dir.path(), 1);
 
+    // A `.git` file that exists but cannot be followed is corruption, not a
+    // prunable registration, and must still surface.
     let wt_path = dir.path().join("_wt").join("wt000");
-    std::fs::remove_file(wt_path.join(".git")).expect("remove linked checkout .git file");
+    std::fs::write(wt_path.join(".git"), "invalid gitdir\n")
+        .expect("corrupt linked checkout .git file");
     assert!(wt_path.exists(), "linked checkout target should remain");
 
     let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
@@ -354,7 +384,10 @@ fn worktree_trusted_open_failure_is_propagated() {
         "GitRepo::worktrees must report the corrupt checkout, got {worktrees:?}"
     );
 
-    let full_detection = detect_git_with_request(dir.path(), &GitRequest::full());
+    let full_detection = detect_git_with_request(
+        dir.path(),
+        &GitRequest::full().full_worktree_details(true),
+    );
     assert!(
         full_detection.is_err(),
         "full Git detection must report the corrupt checkout, got {full_detection:?}"

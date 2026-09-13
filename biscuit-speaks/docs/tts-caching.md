@@ -50,12 +50,13 @@ Whether speed is included in the cache key depends on how the provider handles s
 | gTTS        | No           | Playa adjusts playback speed at play time |
 | EchoGarden  | Yes          | Speed baked into audio via `--speed` flag |
 | ElevenLabs  | Yes          | Speed baked into audio via API parameter |
+| Say (detached) | Yes       | Speed baked into PCM WAV by `say -r` |
 
 Providers where playa handles speed can share a single cached file across different speed settings. Providers that bake speed into the generated audio need separate cache entries per speed value.
 
 ### Provider Integration
 
-Each provider that generates audio files implements a `generate_to_cache` method following the same pattern:
+Kokoro, gTTS, EchoGarden, and ElevenLabs implement a `generate_to_cache` method following the same pattern:
 
 1. Build a `CacheKey` from provider-specific inputs
 2. Call `cache_exists()` -- if `true`, return `(cache_path, true)` immediately
@@ -71,9 +72,16 @@ Providers that use audio caching:
 - **EchoGarden** -- generates WAV via `echogarden speak-to-file`, writes directly to cache path
 - **ElevenLabs** -- fetches MP3 bytes from API, uses `write_atomic()` to persist
 
+Say synthesizes a temporary PCM WAV to preserve the selected voice and rate
+while applying volume at playback. Foreground playback removes the temporary
+file on completion or failure. Detached preparation atomically stores it in the
+audio cache before publishing the ready job. Named or gender-selected voices
+reuse a cache key containing the resolved voice and exact integer words per
+minute. An unspecified OS default voice or rate uses a unique synthesis identity
+and is never reused, since those defaults can change independently of the request.
+
 Providers that do **not** use audio caching:
 
-- **Say** (macOS) -- speaks directly through the audio system, no intermediate file
 - **eSpeak** -- speaks directly through the audio system, no intermediate file
 - **SAPI** (Windows) -- speaks directly through the audio system, no intermediate file
 
@@ -85,7 +93,7 @@ The `write_atomic()` function in `audio_cache.rs` prevents partial writes from c
 2. `sync_all()` to flush to disk
 3. `rename()` to the final path (atomic on POSIX filesystems)
 
-ElevenLabs uses this for API response bytes. Other providers write directly to the cache path via their CLI tools' `--output` flags.
+ElevenLabs uses this for API response bytes; Say uses it for detached PCM WAV. Other providers write directly to the cache path via their CLI tools' `--output` flags.
 
 ### Cache Lifetime
 

@@ -841,10 +841,11 @@ pub(crate) fn populate_recent_commit_remotes_from_snapshot(
 /// default for [`GitRequest::full()`] and keeps enumeration fast on checkouts
 /// with many linked worktrees.
 ///
-/// Registered worktrees whose checkout target is absent are omitted. Git
-/// intentionally retains these stale registrations until they are pruned. An
-/// existing target that does not open as a repository is corrupt and fails a
-/// focused request.
+/// Registered worktrees whose checkout directory or `.git` file is absent are
+/// stale and omitted, matching what `git worktree list` marks as prunable. Git
+/// intentionally retains these registrations until they are pruned. A target
+/// whose `.git` file exists but does not open as a repository is corrupt and
+/// fails a focused request.
 ///
 /// `current_worktree_path` should be the canonical (or at least absolute) path
 /// to the worktree the calling process is running inside. `None` means "no
@@ -953,14 +954,14 @@ pub(crate) fn get_worktrees_from_snapshot(
                 .workdir()
                 .map(|path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
             let base_is_worktree = base_workdir.as_deref() == Some(metadata.path.as_path());
-            if !base_is_worktree && !compute_full && !metadata.path.join(".git").is_file() {
-                return Err(SniffError::git(
-                    "open",
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "registered worktree is missing its .git file",
-                    ),
-                ));
+            // A checkout directory that has lost its `.git` file is what
+            // `git worktree list` reports as prunable ("gitdir file points to
+            // non-existent location"), so it is stale like an absent
+            // directory, not corrupt. macOS sweeps unaccessed files out of
+            // `/tmp` while leaving populated directories behind, which makes
+            // this state routine for temporary worktrees.
+            if !base_is_worktree && !metadata.path.join(".git").is_file() {
+                return Ok(None);
             }
             let mut opened_worktree = if !base_is_worktree && compute_full {
                 performance::increment_counter(counters::GIT_WORKTREE_OPENS, 1);
@@ -2240,6 +2241,26 @@ mod tests {
 
         assert!(!worktrees.contains_key("feature"));
         assert!(worktrees.contains_key("other"));
+    }
+
+    #[test]
+    fn get_worktrees_omits_a_registration_missing_its_git_file() {
+        let (dir, _repo) = setup_repo_with_worktrees();
+        std::fs::remove_file(dir.path().join("feature").join(".git")).unwrap();
+        let gix_repo = gix::open(dir.path()).unwrap();
+
+        for full_details in [false, true] {
+            let worktrees = get_worktrees(&gix_repo, full_details, None).unwrap();
+
+            assert!(
+                !worktrees.contains_key("feature"),
+                "full_details={full_details}: prunable registration must be omitted"
+            );
+            assert!(
+                worktrees.contains_key("other"),
+                "full_details={full_details}: healthy worktree must still be reported"
+            );
+        }
     }
 
     #[test]

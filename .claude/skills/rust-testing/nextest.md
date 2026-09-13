@@ -176,8 +176,9 @@ In this monorepo, PR CI always validates the affected packages. A subsequent
 push to `main` may reuse that successful run only when its recorded Git tree
 and integration base match exactly. `scripts/ci/reuse_validation.py` verifies
 the PR association, latest run result, and unexpired receipt before skipping
-the grid; missing evidence falls back to normal CI. The existing `ci-verdict`
-check links the original validation and still gates release automation.
+the grid; missing evidence falls back to normal CI. The required `ci-gate`
+check folds the skipped jobs and passes, the advisory summary links the
+original validation, and the run's conclusion still gates release automation.
 Use `workflow_dispatch` to force a fresh full-grid run. See
 `.github/ci/README.md` for the receipt contract and local verification commands.
 

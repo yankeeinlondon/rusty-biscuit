@@ -22,3 +22,27 @@ Additional expectations for the Claudine test suite:
 - Benchmarks are opt-in and non-gating: `cargo bench -p claudine --bench runtime_hot_paths`
 - CLI integration helpers live under `claudine/cli/tests/common/mod.rs`
 - Inline unit tests are preferred for private library logic such as harness, sequence, dispatch, and TUI reducers
+
+## Silent audio fixtures
+
+Use clear speech such as “This is a test message.” and explicit zero volume for
+real playback. Pin test providers and voices; these tests do not validate the
+operator's personal Claudine speech configuration. A fake agent does not disable
+lifecycle TTS or sound effects in a real prompt template.
+
+`CliProcessFixture::command()` already sets child-only `PLAYA_DRY_RUN=1` and a
+private `PLAYA_SPOOL_DIR` (`fixture.audio_spool()`); a test that executes a
+shipped prompt asserts that directory is never created. This preserves normal
+lifecycle evaluation while suppressing audio publication. `detached_audio.rs`,
+whose subject is publication, removes the dry-run key on its built command.
+Publication tests retain real handoff with the workspace-shared
+`test_toolkit::LockedAudioSpool` fixture: it holds `worker.lock` for its whole
+lifetime and takes `queue.lock` before scanning and removing pending jobs, so a
+publisher or preparation helper cannot commit behind the scan. Destruction runs
+the same cleanup while unwinding, and releases `worker.lock` while still holding
+`queue.lock` — the order `run_scheduler_with` uses — so no publisher can commit
+between the final scan and the release of worker ownership. A cleanup failure is
+reported on stderr and retains worker ownership instead of exposing what it
+could not remove; it also panics unless the thread is already panicking.
+Tests that execute helpers must release blocked fixtures and observe completion
+before removing their spool. Never use the operator's real queue for test cleanup.

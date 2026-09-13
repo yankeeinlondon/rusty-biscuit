@@ -694,6 +694,46 @@ mod tests {
             assert_eq!(fixture.seam_calls(), 2);
         }
 
+        #[cfg(unix)]
+        #[test]
+        fn native_failure_preserves_mute_in_host_command() {
+            let fixture = HostFixture::new(|| Err(NativePlaybackError::DeviceOpenTimeout(5)));
+            std::fs::write(
+                fixture.dir.join("mpv"),
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"${0%/*}/args\"\n",
+            ).expect("recording player should write");
+
+            let report = crate::playa_explicit_with_options_and_report(
+                wav(), fixture.audio(), PlaybackOptions::new().with_volume(0.0),
+            ).expect("native failure should fall back to the recording player");
+
+            assert_eq!(report.route, PlaybackRoute::Host(AudioPlayer::Mpv));
+            assert_eq!(fixture.seam_calls(), 1);
+            let args = std::fs::read_to_string(fixture.dir.join("args")).unwrap();
+            assert!(args.lines().any(|arg| arg == "--volume=0"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn native_failure_excludes_host_without_volume_control() {
+            let fixture = HostFixture::new(|| Err(NativePlaybackError::DeviceOpenTimeout(5)));
+            std::fs::copy(fixture.dir.join("mpv"), fixture.dir.join("aplay"))
+                .expect("incapable fixture player should be discoverable");
+            std::fs::write(
+                fixture.dir.join("aplay"),
+                "#!/bin/sh\nprintf reached > \"${0%/*}/invoked\"\n",
+            ).unwrap();
+            assert!(match_available_players(wav()).contains(&AudioPlayer::AlsaAplay));
+
+            let result = crate::playa_explicit_with_options_and_report(
+                wav(), fixture.audio(), PlaybackOptions::new().with_volume(0.0),
+            );
+
+            assert_eq!(result.unwrap().route, PlaybackRoute::Host(AudioPlayer::Mpv));
+            assert_eq!(fixture.seam_calls(), 1);
+            assert!(!fixture.dir.join("invoked").exists());
+        }
+
         #[cfg(feature = "async")]
         #[tokio::test]
         async fn free_functions_take_native_route_when_available_async() {

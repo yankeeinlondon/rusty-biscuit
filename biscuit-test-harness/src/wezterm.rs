@@ -279,7 +279,7 @@ impl WezTermHarness {
     pub fn capture_scrollback(&mut self, lines: u32) -> io::Result<CapturedFrame> {
         let id = self.pane_id().to_string();
         let start = format!("-{lines}");
-        let mut cmd = Command::new("wezterm");
+        let (mut cmd, _config) = wezterm_command()?;
         cmd.args([
             "cli",
             "get-text",
@@ -312,7 +312,9 @@ impl WezTermHarness {
     /// any error (best effort).
     fn kill_pane(&mut self) {
         if let Some(id) = self.pane_id.take() {
-            let mut cmd = Command::new("wezterm");
+            let Ok((mut cmd, _config)) = wezterm_command() else {
+                return;
+            };
             cmd.args(["cli", "kill-pane", "--pane-id", &id])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
@@ -335,7 +337,9 @@ impl WezTermHarness {
     fn tag_spawned_pane(&self) {
         let id = self.pane_id();
         let title = self.unique_window_title();
-        let mut cmd = Command::new("wezterm");
+        let Ok((mut cmd, _config)) = wezterm_command() else {
+            return;
+        };
         cmd.args(["cli", "set-tab-title", "--pane-id", id, &title])
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -356,7 +360,7 @@ impl WezTermHarness {
     /// when the active pane id is not present in its output.
     pub fn pane_size(&self) -> io::Result<PaneSize> {
         let id = self.pane_id();
-        let mut cmd = Command::new("wezterm");
+        let (mut cmd, _config) = wezterm_command()?;
         cmd.args(["cli", "list", "--format", "json"]);
         let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
@@ -471,7 +475,7 @@ impl WezTermHarness {
         let title = self.unique_window_title();
 
         // 1. Stamp a unique title we can target precisely.
-        let mut cmd = Command::new("wezterm");
+        let (mut cmd, _config) = wezterm_command()?;
         cmd.args(["cli", "set-tab-title", "--pane-id", id, &title]);
         let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
@@ -482,7 +486,7 @@ impl WezTermHarness {
         }
 
         // 2. Activate intra-WezTerm pane focus.
-        let mut cmd = Command::new("wezterm");
+        let (mut cmd, _config) = wezterm_command()?;
         cmd.args(["cli", "activate-pane", "--pane-id", id]);
         let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
@@ -671,7 +675,9 @@ impl Drop for WezTermHarness {
 /// instances were leaked in a different process. Best-effort: any error
 /// is swallowed.
 pub fn kill_pane_by_id(pane_id: &str) {
-    let mut cmd = Command::new("wezterm");
+    let Ok((mut cmd, _config)) = wezterm_command() else {
+        return;
+    };
     cmd.args(["cli", "kill-pane", "--pane-id", pane_id])
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -694,11 +700,9 @@ impl TerminalHarness for WezTermHarness {
             CLEANUP_ONCE.call_once(cleanup_stale_wezterm_panes);
         }
         let shell = super::detect_shell();
-        let mut cmd = Command::new("wezterm");
+        let (mut cmd, _config) = wezterm_command()?;
         cmd.args(["cli", "spawn", "--new-window"]);
-        if self.spawn_visibility == SpawnVisibility::Background {
-            cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
-        }
+        push_workspace_args(&mut cmd, self.spawn_visibility == SpawnVisibility::Background);
         cmd.arg("--");
         let bin_dir = super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"));
         super::configure_login_shell(&mut cmd, &shell, bin_dir.as_deref());
@@ -737,11 +741,9 @@ impl TerminalHarness for WezTermHarness {
         if self.spawn_visibility == SpawnVisibility::Background {
             CLEANUP_ONCE.call_once(cleanup_stale_wezterm_panes);
         }
-        let mut cmd = Command::new("wezterm");
+        let (mut cmd, _config) = wezterm_command()?;
         cmd.args(["cli", "spawn", "--new-window"]);
-        if self.spawn_visibility == SpawnVisibility::Background {
-            cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
-        }
+        push_workspace_args(&mut cmd, self.spawn_visibility == SpawnVisibility::Background);
         cmd.arg("--");
         cmd.arg(program);
         for a in args {
@@ -766,7 +768,7 @@ impl TerminalHarness for WezTermHarness {
 
     fn send_text(&mut self, bytes: &[u8]) -> io::Result<()> {
         let id = self.pane_id().to_string();
-        let mut cmd = Command::new("wezterm");
+        let (mut cmd, _config) = wezterm_command()?;
         cmd.args(["cli", "send-text", "--pane-id", &id, "--no-paste"]);
         let out = run_with_stdin_timeout(&mut cmd, bytes, SEND_TIMEOUT)?;
         if !out.status.success() {
@@ -780,7 +782,7 @@ impl TerminalHarness for WezTermHarness {
 
     fn capture(&mut self) -> io::Result<CapturedFrame> {
         let id = self.pane_id().to_string();
-        let mut cmd = Command::new("wezterm");
+        let (mut cmd, _config) = wezterm_command()?;
         cmd.args(["cli", "get-text", "--pane-id", &id, "--escapes"]);
         let out = run_with_timeout(&mut cmd, CAPTURE_TIMEOUT)?;
         if !out.status.success() {
@@ -802,11 +804,69 @@ impl TerminalHarness for WezTermHarness {
 /// not tag background panes; when the background workspace has grown past a
 /// conservative limit, this function also removes untagged panes from that
 /// workspace to recover from historical leaks.
+/// Route a background spawn into the off-screen workspace.
+fn push_workspace_args(cmd: &mut Command, background: bool) {
+    if background {
+        cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
+    }
+}
+
+/// Every `wezterm` process the harness starts.
+///
+/// The client evaluates the developer's `wezterm.lua` before some subcommands
+/// (`spawn` does; `list` does not), and that evaluation is not the harness's
+/// business: it only ever talks to the mux named by `WEZTERM_UNIX_SOCKET`,
+/// which [`WezTermHarness::available`] requires, so no config value can change
+/// what `list`, `spawn -- <prog>`, `send-text`, `get-text`, or `kill-pane` do.
+/// It can only stall them, fail them, or add log noise. On the Windows build
+/// host it stalls them: the shared config is `dofile`d from a UNC path that is
+/// unreachable outside an interactive logon, and each evaluation blocks for the
+/// SMB connect timeout — 21 s per `spawn` from a test, against a 15 s
+/// [`SPAWN_TIMEOUT`] (2026-09-10). So the client gets an empty config unless
+/// the caller has chosen one.
+fn wezterm_command() -> io::Result<(Command, Option<tempfile::NamedTempFile>)> {
+    wezterm_command_with_config(env::var_os("WEZTERM_CONFIG_FILE"))
+}
+
+// The caller retains the file guard until its synchronous client invocation
+// finishes. A shared pathname can be truncated by another process or precreated
+// by another user; a process-global guard would never run its Drop cleanup.
+fn wezterm_command_with_config(
+    inherited: Option<std::ffi::OsString>,
+) -> io::Result<(Command, Option<tempfile::NamedTempFile>)> {
+    let mut cmd = Command::new("wezterm");
+    let config = match inherited {
+        Some(path) => {
+            cmd.env("WEZTERM_CONFIG_FILE", path);
+            None
+        }
+        None => {
+            let config = empty_config_file()?;
+            cmd.env("WEZTERM_CONFIG_FILE", config.path());
+            Some(config)
+        }
+    };
+    Ok((cmd, config))
+}
+
+fn empty_config_file() -> io::Result<tempfile::NamedTempFile> {
+    use std::io::Write;
+
+    let mut file = tempfile::Builder::new()
+        .prefix("biscuit-wezterm-")
+        .suffix(".lua")
+        .tempfile()?;
+    file.write_all(b"return {}\n")?;
+    Ok(file)
+}
+
 pub fn cleanup_stale_wezterm_panes() {
     if !WezTermHarness::available() {
         return;
     }
-    let mut cmd = Command::new("wezterm");
+    let Ok((mut cmd, _config)) = wezterm_command() else {
+        return;
+    };
     cmd.args(["cli", "list", "--format", "json"]);
     let Ok(out) = run_with_timeout(&mut cmd, QUERY_TIMEOUT) else {
         return;
@@ -859,7 +919,9 @@ fn string_field<'a>(entry: &'a serde_json::Value, field: &str) -> Option<&'a str
 }
 
 fn kill_wezterm_pane(pane_id: u64) {
-    let mut cmd = Command::new("wezterm");
+    let Ok((mut cmd, _config)) = wezterm_command() else {
+        return;
+    };
     cmd.args(["cli", "kill-pane", "--pane-id", &pane_id.to_string()])
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -957,7 +1019,9 @@ fn which(bin: &str) -> bool {
 /// helper's contract is "run the probe and report its outcome", so
 /// callers can unit-test the probe surface in isolation.
 fn wezterm_gui_reachable() -> bool {
-    let mut cmd = Command::new("wezterm");
+    let Ok((mut cmd, _config)) = wezterm_command() else {
+        return false;
+    };
     cmd.args(["cli", "list", "--format", "json"]);
     match run_with_timeout(&mut cmd, AVAILABLE_PROBE_TIMEOUT) {
         Ok(out) => out.status.success(),
@@ -969,6 +1033,55 @@ fn wezterm_gui_reachable() -> bool {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn isolated_configs_are_unique_readable_and_removed_after_clients_finish() {
+        let clients: Vec<_> = (0..8)
+            .map(|_| std::thread::spawn(|| wezterm_command_with_config(None).unwrap()))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect();
+        let mut paths = std::collections::HashSet::new();
+        for (command, guard) in &clients {
+            let path = guard.as_ref().unwrap().path();
+            assert!(paths.insert(path.to_path_buf()));
+            let configured = command.get_envs()
+                .find(|(key, _)| *key == "WEZTERM_CONFIG_FILE")
+                .and_then(|(_, value)| value)
+                .unwrap();
+            assert_eq!(configured, path.as_os_str());
+            // Reopen by name, as the client does, while the guard owns its handle.
+            assert_eq!(std::fs::read(path).unwrap(), b"return {}\n");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(std::fs::metadata(path).unwrap().permissions().mode() & 0o077, 0);
+            }
+        }
+        drop(clients);
+        assert!(paths.iter().all(|path| !path.exists()));
+    }
+
+    #[test]
+    fn isolated_config_preserves_explicit_caller_configuration() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("caller.lua");
+        std::fs::write(&path, "return { scrollback_lines = 42 }\n").unwrap();
+        for inherited in [path.into_os_string(), std::ffi::OsString::new()] {
+            let (command, guard) = wezterm_command_with_config(Some(inherited.clone())).unwrap();
+            assert!(guard.is_none());
+            let configured = command.get_envs()
+                .find(|(key, _)| *key == "WEZTERM_CONFIG_FILE")
+                .and_then(|(_, value)| value)
+                .unwrap();
+            assert_eq!(configured, inherited);
+        }
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("caller.lua")).unwrap(),
+            "return { scrollback_lines = 42 }\n",
+        );
+    }
 
     /// `available()` must return `false` when `WEZTERM_UNIX_SOCKET` is
     /// unset, regardless of whether the `wezterm` binary is on `$PATH`
@@ -1146,7 +1259,7 @@ mod tests {
         // first `available()` was a false positive (e.g. the env var
         // was set but the GUI just happened to answer), this would
         // surface as a hang or non-zero exit.
-        let mut cmd = Command::new("wezterm");
+        let (mut cmd, _config) = wezterm_command().expect("prepare isolated WezTerm config");
         cmd.args(["cli", "list", "--format", "json"]);
         let out = run_with_timeout(&mut cmd, AVAILABLE_PROBE_TIMEOUT)
             .expect("reachable per available(); wezterm cli list must succeed within probe budget");

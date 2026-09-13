@@ -13,6 +13,9 @@
         - Need for a Human Review
             - this may indeed be a gate on this functionality before it can be released, but
             - we will treat human based reviews as being an external process to this review that will happen _after_ we've completed the review/fix cycle
+- if `ready` was set to `false` then you will need to set the `findings` frontmatter property:
+    - the prose/body of the review should already have a set of _findings_ which are given a title along with priority before providing details about the finding
+    - the `findings` frontmatter property should be a list of the titles and priority (not the details) of each finding
 - set `human_review` to a boolean value to indicate whether human review is required prior to this specification being fully complete
     - the goal of this flag is to allow agents to do as much work as possible (aka, until the `ready` flag has been set to true) before they need to involve the human in review
     - you should not assume that _every_ specification requires human review; rather only those which require important design decisions, or involve activities and tests that only the human can do (versus an agent) 

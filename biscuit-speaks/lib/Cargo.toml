@@ -33,7 +33,6 @@ reqwest = "0.13"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "fs"] }
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
-fs4 = "0.13"
 
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
 [package.metadata.benchmarks]

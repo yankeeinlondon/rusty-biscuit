@@ -77,13 +77,17 @@ pub(crate) fn trusted_open(path: &Path) -> Result<gix::Repository> {
     gix::open_opts(path, opts).map_err(|e| SniffError::git("open", e))
 }
 
-/// Open a registered worktree target, omitting an absent checkout.
+/// Open a registered worktree target, omitting a stale checkout.
 ///
 /// Linked-worktree registrations can outlive their checkouts until Git prunes
-/// them. A target that exists but does not open as a repository is corrupt, not
-/// stale; trust, permission, I/O, and repository-open failures remain errors.
+/// them. Staleness is keyed on the checkout's `.git` file, as `git worktree
+/// list --porcelain` does when it reports `prunable`: a missing directory or a
+/// missing `.git` file is stale and yields `Ok(None)`. A `.git` file that
+/// exists but does not open as a repository is corrupt, not stale; trust,
+/// permission, I/O, and repository-open failures remain errors.
 pub(crate) fn trusted_open_registered_worktree(path: &Path) -> Result<Option<gix::Repository>> {
     if !path
+        .join(".git")
         .try_exists()
         .map_err(|error| SniffError::git("open", error))?
     {

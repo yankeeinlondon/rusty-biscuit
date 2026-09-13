@@ -33,7 +33,7 @@ const DSR_REPLY: &[u8] = b"\x1b[1;1R";
 /// It is written for BOTH inline and fullscreen prompts, so — unlike
 /// [`ALT_SCREEN_ENTER`], which only fullscreen prompts emit — it is the
 /// universal proof that raw mode is active. See [`wait_for_raw_mode`].
-const KBD_ENHANCEMENT_PUSH: &str = "\x1b[>11u";
+pub(crate) const KBD_ENHANCEMENT_PUSH: &str = "\x1b[>11u";
 
 /// Reply to every not-yet-answered [`DSR_QUERY`] in `data`, advancing
 /// `answered` so each query is answered exactly once across repeated calls

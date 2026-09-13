@@ -20,7 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{FileResolutionContext, PathPosition};
+use biscuit_file::{FileResolutionContext, PathPosition, to_portable_string};
 use sniff::filesystem::repo::{RepoInfo, detect_repo_structure};
 
 /// The composition command the scopes are being resolved for.
@@ -107,18 +107,25 @@ pub(crate) fn property_value_root(ctx: &ScopeContext) -> &Path {
 
 /// Case-insensitive substring match of a candidate path against a query.
 ///
-/// `query_lower` must already be lowercased by the caller (it is compared
-/// against the lowercased full path string). An empty query matches every
-/// path. Shared by the ENTER-path operation-file autocomplete and the
-/// provided-partial `file(match)` resolver so both apply the exact same
+/// `query_lower` must already be lowercased by the caller. An empty query
+/// matches every path. Shared by the ENTER-path operation-file autocomplete and
+/// the provided-partial `file(match)` resolver so both apply the exact same
 /// substring predicate.
+///
+/// Both sides are compared in portable (`/`) spelling. The candidates come from
+/// a directory walk and so carry the host's native separators, while the query
+/// is whatever the user typed — `fixes/2026-09-10-local` on every platform, or
+/// the same with `\` on Windows. Comparing native text made every `/`-spelled
+/// partial miss every candidate on Windows (2026-09-10), so the typed failure
+/// fired where macOS offered the confirmation.
 pub(crate) fn path_matches_query(path: &Path, query_lower: &str) -> bool {
     if query_lower.is_empty() {
         return true;
     }
-    path.to_str()
-        .map(|s| s.to_ascii_lowercase().contains(query_lower))
-        .unwrap_or(false)
+    let query = query_lower.replace('\\', "/");
+    to_portable_string(path)
+        .to_ascii_lowercase()
+        .contains(&query)
 }
 
 /// Ordered scope set for a composition command.

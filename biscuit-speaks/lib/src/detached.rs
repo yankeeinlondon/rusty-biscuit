@@ -85,6 +85,9 @@ pub(crate) async fn cached_job(
     config: &TtsConfig,
 ) -> Result<Option<playa::detached::SpoolJob>, TtsError> {
     match provider {
+        TtsProvider::Host(HostTtsProvider::Say) => {
+            SayProvider.cached_detached_job(text, config).await
+        }
         TtsProvider::Host(HostTtsProvider::KokoroTts) => {
             KokoroTtsProvider::new().cached_detached_job(text, config).await
         }
@@ -106,7 +109,8 @@ pub(crate) fn requires_preparation(provider: TtsProvider) -> bool {
     matches!(
         provider,
         TtsProvider::Host(
-            HostTtsProvider::KokoroTts
+            HostTtsProvider::Say
+                | HostTtsProvider::KokoroTts
                 | HostTtsProvider::EchoGarden
                 | HostTtsProvider::Gtts
         ) | TtsProvider::Cloud(CloudTtsProvider::ElevenLabs)

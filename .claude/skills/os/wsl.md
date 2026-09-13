@@ -32,9 +32,17 @@ as one environment ([ci-runners.md](ci-runners.md)).
 
 ## Faithful reproduction on the WSL host
 
-A test that is green natively but red only on `wsl2-ubuntu` is almost always
-an archive-mode failure. Reproduce it on the guest declared by `BUILD_WSL`
-(if unset, this machine has no WSL host; say so and use CI):
+First identify the failing step and read the test summary. A red WSL job can
+mean provisioning, test execution, or artifact publication failed. Passing
+tests followed by an upload/finalization error are not evidence of a test
+regression; do not rerun the suite just to diagnose that upload failure.
+
+For an actual WSL-only test failure, archive-mode path and toolchain assumptions
+are useful first checks. Reproduce it on the guest declared by `BUILD_WSL`
+within the user's authorized test scope. An instruction not to rerun WSL
+applies to cross-check commands and CI jobs triggered by pushes alike. If the
+host is unset or the evidence is insufficient, explain the gap before launching
+another run. When reproduction is authorized:
 
 ```bash
 just cross-check <package> --os wsl <test-name-substring>
@@ -99,4 +107,41 @@ There is no Level 2 terminal backend in the WSL2 CI environment (recorded as a
 policy gap with owner and expiry in `.github/ci/environments.json`). This is
 temporary. Do not write it into a spec as an authorized exclusion; record the
 criterion as unmet and name provisioning as the required change. Locally,
-the guest can run tmux-backed L2 suites when tmux is installed.
+the guest can run tmux-backed L2 suites when tmux is installed — and it does:
+on 2026-09-10 the claudine partial-file family (tmux capture, the `expectrl`
+PTY suite, and its L1 neighbors) passed 17/17 inside the guest in archive
+mode with `--features terminal-tests`. The recipe is
+`just cross-check claudine-cli --os wsl --features terminal-tests <filters>`;
+add `BISCUIT_TEST_REQUIRED_BACKENDS=tmux` when running by hand so a skip
+cannot print as a pass (a WezTerm test skips in the guest in ~0.03 s and
+nextest still says PASS).
+
+## The guest's `~/.config` is a network share
+
+`~/.config` in the guest is a CIFS mount of `//192.168.100.97/config`, a
+share on the Synology NAS — the same share the Windows side's `wezterm.lua`
+reaches for. When the NAS is down (`ping -c1 -W2 192.168.100.97` from the
+guest), two things fail before any test runs:
+
+- **Every `git` command** dies with `fatal: unable to access
+  '/home/ken/.config/git/config': Host is down`, so `cross-check --os wsl`
+  fails at its first `git fetch`. `GIT_CONFIG_GLOBAL=/dev/null` bypasses it;
+  fetch/reset/clean/checkout/apply need no identity.
+- **`cargo nextest archive` (any cargo build)** dies with `failed to determine
+  package fingerprint for build script for playa` → `Could not read
+  repository exclude` → `Host is down`. Cargo lists package files through
+  gitoxide, which honors the global excludes at `$XDG_CONFIG_HOME/git/ignore`
+  — on the dead mount — and `GIT_CONFIG_GLOBAL` does not reach it. Point
+  `XDG_CONFIG_HOME` at an empty local directory for the build.
+
+Nothing the tests read lives on that share, so both bypasses are safe for a
+run, and since 2026-09-11 `scripts/cross-check.sh` sets both in its Unix
+preamble — the recipe survives the NAS being down. A login shell in the
+guest is still slow while the share is down (profile tooling stats paths
+under `~/.config`), which shows up as a 20-second-plus first tmux capture;
+that is the host, not the test.
+
+`cross-check` also forwards `BISCUIT_TEST_REQUIRED_BACKENDS` from your shell
+to every remote run, so `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just cross-check
+claudine-cli --os wsl --features terminal-tests level2_` cannot pass by
+skipping.

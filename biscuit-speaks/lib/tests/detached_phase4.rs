@@ -1,7 +1,6 @@
 #![cfg(feature = "playa")]
 
 use std::ffi::OsString;
-use std::fs::OpenOptions;
 
 use biscuit_speaks::{
     CloudTtsProvider, ESpeakProvider, EchogardenProvider, ElevenLabsProvider, Gender,
@@ -9,7 +8,6 @@ use biscuit_speaks::{
     SpeakResult, SpeedLevel, TtsConfig, TtsError, TtsExecutor, TtsFailoverStrategy, TtsProvider,
     Voice, VolumeLevel, run_if_worker,
 };
-use fs4::fs_std::FileExt as _;
 use playa::detached::{OsValue, SpoolJob};
 use playa::{AudioPlayer, PlaybackReport, PlaybackRoute, PlaybackVerdict};
 
@@ -57,7 +55,7 @@ async fn espeak_detached_job_preserves_original_text_and_arguments() {
         .with_gender(Gender::Female)
         .with_speed(SpeedLevel::Fast)
         .with_volume(VolumeLevel::Soft);
-    let original = "Phase 1 of the plan in the claudine package area, was implemented successfully";
+    let original = "This is a test message.";
 
     let job = provider
         .detached_job(original, &config)
@@ -74,7 +72,7 @@ async fn espeak_detached_job_preserves_original_text_and_arguments() {
         .unwrap();
     assert_eq!(
         args,
-        ["-v", "en+f3", "-s", "219", original]
+        ["-v", "en+f3", "-s", "219", "-a", "50", original]
             .into_iter()
             .map(OsString::from)
             .collect::<Vec<_>>()
@@ -124,33 +122,46 @@ fn shipped_preparation_config_corpus_remains_compatible() {
 
 #[cfg(target_os = "macos")]
 #[tokio::test]
+#[serial_test::serial]
 async fn say_detached_job_preserves_lossless_arguments() {
     use biscuit_speaks::SayProvider;
+    use std::os::unix::fs::PermissionsExt;
 
-    let original = "quoted 'speech' and unicode 世界";
-    let config = TtsConfig::new()
-        .with_voice("Samantha")
-        .with_speed(SpeedLevel::Slow);
-    let SpoolJob::Command { program, args } = SayProvider
-        .detached_job(original, &config)
-        .await
-        .unwrap()
-    else {
-        panic!("say must produce a direct command job");
-    };
-    assert!(std::path::PathBuf::from(program.to_os_string().unwrap()).is_absolute());
-    let args = args
-        .iter()
-        .map(OsValue::to_os_string)
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    assert_eq!(
-        args,
-        ["-v", "Samantha", "-r", "131", original]
-            .into_iter()
-            .map(OsString::from)
-            .collect::<Vec<_>>()
-    );
+    let temp = tempfile::tempdir().unwrap();
+    let script = temp.path().join("say");
+    std::fs::write(&script, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SAY_TEST_ARGS\"\n/bin/cat > \"$SAY_TEST_TEXT\"\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _path = test_toolkit::EnvGuard::set_safe("PATH", temp.path());
+    let args_file = temp.path().join("args");
+    let text_file = temp.path().join("text");
+    let _args = test_toolkit::EnvGuard::set_safe("SAY_TEST_ARGS", &args_file);
+    let _text = test_toolkit::EnvGuard::set_safe("SAY_TEST_TEXT", &text_file);
+    let original = format!("This is a test message: quoted 'speech' and unicode 世界 {}", std::process::id());
+    for volume in [0.0, 0.42] {
+        let config = TtsConfig::new().with_voice("Samantha")
+            .with_speed(SpeedLevel::Slow).with_volume(VolumeLevel::Explicit(volume));
+        let SpoolJob::PlayFile { path, playback, delete_after } = SayProvider
+            .detached_job(&original, &config).await.unwrap() else {
+                panic!("say must synthesize a volume-controlled file job");
+            };
+        let path = std::path::PathBuf::from(path.to_os_string().unwrap());
+        assert_eq!(std::fs::read_to_string(&text_file).unwrap(), original);
+        let args = std::fs::read_to_string(&args_file).unwrap();
+        let recorded: Vec<_> = args.lines().collect();
+        assert_eq!(recorded[0], "-o");
+        assert_eq!(&recorded[2..], ["--file-format=WAVE", "--data-format=LEI16", "-v", "Samantha", "-r", "131"]);
+        assert_eq!(playback.options.volume, Some(volume));
+        assert_eq!(playback.options.speed, Some(1.0));
+        assert!(!delete_after);
+        assert!(!std::path::Path::new(args.lines().nth(1).unwrap()).exists());
+        let cached = SayProvider.cached_detached_job(&original, &config).await.unwrap().unwrap();
+        let SpoolJob::PlayFile { playback, .. } = cached else { panic!("expected cache job") };
+        assert_eq!(playback.options.volume, Some(volume));
+        assert_eq!(playback.options.speed, Some(1.0));
+        assert!(SayProvider.cached_detached_job(&original, &config.clone().with_voice("Alex")).await.unwrap().is_none());
+        assert!(SayProvider.cached_detached_job(&original, &config.clone().with_speed(SpeedLevel::Fast)).await.unwrap().is_none());
+        std::fs::remove_file(path).unwrap();
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -158,16 +169,19 @@ async fn say_detached_job_preserves_lossless_arguments() {
 async fn sapi_detached_job_is_direct_and_lossless() {
     use biscuit_speaks::SapiProvider;
 
-    let original = "quoted 'speech' and unicode 世界";
-    let SpoolJob::Command { program, args } = SapiProvider::new()
-        .detached_job(original, &TtsConfig::new())
-        .await
-        .unwrap()
-    else {
-        panic!("SAPI must produce a direct command job");
-    };
-    assert!(std::path::PathBuf::from(program.to_os_string().unwrap()).is_absolute());
-    assert!(args.iter().any(|arg| arg.to_os_string().unwrap() == original));
+    let original = "This is a test message: quoted 'speech' and unicode 世界";
+    for volume in [0.0, 0.42] {
+        let config = TtsConfig::new().with_voice("test voice").with_volume(VolumeLevel::Explicit(volume));
+        let SpoolJob::Command { program, args } = SapiProvider::new()
+            .detached_job(original, &config).await.unwrap() else {
+                panic!("SAPI must produce a direct command job");
+            };
+        assert!(std::path::PathBuf::from(program.to_os_string().unwrap()).is_absolute());
+        let args: Vec<_> = args.iter().map(|arg| arg.to_os_string().unwrap()).collect();
+        assert!(args.iter().any(|arg| arg == original));
+        assert_eq!(args.last().unwrap(), &std::ffi::OsString::from(volume.to_string()));
+        assert!(args[3].to_string_lossy().contains("$s.Volume = [Math]::Round([double]$args[3] * 100.0)"));
+    }
 }
 
 fn assert_cached_file(job: SpoolJob, expected: &std::path::Path) {
@@ -180,7 +194,7 @@ fn assert_cached_file(job: SpoolJob, expected: &std::path::Path) {
         panic!("file producer must return a play-file job");
     };
     assert_eq!(path.to_os_string().unwrap(), expected.as_os_str());
-    assert_eq!(playback.options.volume, Some(0.75));
+    assert_eq!(playback.options.volume, Some(0.0));
     assert_eq!(playback.options.speed, Some(1.0));
     assert!(!delete_after);
 }
@@ -188,14 +202,14 @@ fn assert_cached_file(job: SpoolJob, expected: &std::path::Path) {
 #[tokio::test]
 async fn detached_file_provider_table_returns_ready_cache_jobs() {
     let text = format!(
-        "Phase 4 cache provider table {} {}",
+        "This is a test message: cache provider table {} {}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
     );
-    let config = TtsConfig::new().with_voice("af_heart");
+    let config = TtsConfig::new().with_voice("af_heart").with_volume(VolumeLevel::Explicit(0.0));
     let cases = [
         (
             biscuit_speaks::audio_cache::CacheKey::new("kokoro", "af_heart", &text, "wav"),
@@ -244,10 +258,10 @@ async fn detached_file_provider_table_returns_ready_cache_jobs() {
 #[serial_test::serial]
 async fn elevenlabs_cached_job_is_ready_without_network() {
     let _api_key = test_toolkit::EnvGuard::set_safe("ELEVEN_LABS_API_KEY", "phase-4-test-key");
-    let text = format!("Phase 4 ElevenLabs cache {}", std::process::id());
+    let text = format!("This is a test message: ElevenLabs cache {}", std::process::id());
     let config = TtsConfig::new()
         .with_voice("voice-id")
-        .with_model("model-id");
+        .with_model("model-id").with_volume(VolumeLevel::Explicit(0.0));
     let key = biscuit_speaks::audio_cache::CacheKey::new(
         "elevenlabs",
         "voice-id-model-id",
@@ -320,28 +334,16 @@ async fn play_detached_uses_foreground_specific_provider_selection() {
     .unwrap();
     let _path = test_toolkit::EnvGuard::set_safe("PATH", path);
     let root = temp.path().join("spool");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt as _;
-        std::fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
-    }
-    #[cfg(windows)]
-    std::fs::create_dir(&root).unwrap();
+    // The fixture owns worker exclusion for the rest of the test and removes
+    // every runnable record under `queue.lock`, including on unwind.
+    let locked_spool = test_toolkit::LockedAudioSpool::new(&root);
     std::fs::create_dir(root.join("files")).unwrap();
     std::fs::create_dir(root.join("requests")).unwrap();
-    let worker = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(root.join("worker.lock"))
-        .unwrap();
-    assert!(worker.try_lock_exclusive().unwrap());
     let _spool = test_toolkit::EnvGuard::set_safe("PLAYA_SPOOL_DIR", &root);
     let _dry_run = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
     assert_eq!(run_if_worker().await, None);
 
-    let text = format!("specific cached Kokoro {}", std::process::id());
+    let text = format!("This is a test message: specific cached Kokoro {}", std::process::id());
     let config: TtsConfig = serde_json::from_str(include_str!(
         "fixtures/v1-preparation-config.json"
     ))
@@ -361,11 +363,59 @@ async fn play_detached_uses_foreground_specific_provider_selection() {
     assert_eq!(snapshot.pending[0].source_kind, playa::detached::JournalSourceKind::File);
 
     std::fs::remove_file(cache).unwrap();
-    for entry in std::fs::read_dir(&root).unwrap().filter_map(Result::ok) {
-        let name = entry.file_name();
-        if name.to_string_lossy().ends_with(".pending.json") {
-            std::fs::remove_file(entry.path()).unwrap();
-        }
+    locked_spool
+        .clear_pending()
+        .expect("pending work should be removed while owned");
+    assert!(playa::detached::snapshot().unwrap().pending.is_empty());
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+#[serial_test::serial]
+async fn say_cache_separates_system_rate_and_exact_synthesized_wpm() {
+    use biscuit_speaks::SayProvider;
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let script = temp.path().join("say");
+    std::fs::write(&script, r#"#!/bin/sh
+rate=system-default
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) output="$2"; shift 2 ;;
+    -r) rate="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+/bin/cat > /dev/null
+printf '%s' "$rate" > "$output"
+"#).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _path = test_toolkit::EnvGuard::set_safe("PATH", temp.path());
+    let text = format!("This is a test message: rate identity {}", std::process::id());
+    let base = TtsConfig::new().with_voice("Samantha").with_volume(VolumeLevel::Explicit(0.0));
+    let mut paths = Vec::new();
+    for (speed, expected) in [
+        (SpeedLevel::Normal, "system-default"),
+        (SpeedLevel::Explicit(1.0), "175"),
+        (SpeedLevel::Explicit(1.0028), "175"),
+        (SpeedLevel::Explicit(1.0029), "176"),
+    ] {
+        let config = base.clone().with_speed(speed);
+        let SpoolJob::PlayFile { path, playback, .. } = SayProvider.detached_job(&text, &config).await.unwrap() else {
+            panic!("expected synthesized file");
+        };
+        let path = std::path::PathBuf::from(path.to_os_string().unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), expected);
+        assert_eq!(playback.options.volume, Some(0.0));
+        assert_eq!(playback.options.speed, Some(1.0));
+        paths.push(path);
     }
-    fs4::fs_std::FileExt::unlock(&worker).unwrap();
+    assert_ne!(paths[0], paths[1]);
+    assert_eq!(paths[1], paths[2]);
+    assert_ne!(paths[2], paths[3]);
+    assert!(SayProvider.cached_detached_job(&text, &base).await.unwrap().is_none());
+    for path in paths.into_iter().collect::<std::collections::HashSet<_>>() {
+        std::fs::remove_file(path).unwrap();
+    }
 }

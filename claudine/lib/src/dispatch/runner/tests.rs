@@ -1,3 +1,6 @@
+#[cfg(unix)]
+use test_toolkit::LockedAudioSpool;
+
 use std::collections::HashMap;
 
 use chrono::Utc;
@@ -217,8 +220,7 @@ async fn execute_actions_message_action_with_canonical_config() {
 #[tokio::test]
 #[serial_test::serial]
 async fn audio_actions_publish_in_order_and_return_before_worker_execution() {
-    use fs4::fs_std::FileExt as _;
-    use std::fs::{self, OpenOptions};
+    use std::fs;
     use std::os::unix::fs::PermissionsExt as _;
     use std::time::{Duration, Instant};
 
@@ -242,16 +244,7 @@ async fn audio_actions_publish_in_order_and_return_before_worker_execution() {
     let _dry_run = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
     assert_eq!(biscuit_speaks::run_if_worker().await, None);
 
-    fs::create_dir(&spool).unwrap();
-    fs::set_permissions(&spool, fs::Permissions::from_mode(0o700)).unwrap();
-    let worker = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(spool.join("worker.lock"))
-        .unwrap();
-    worker.lock_exclusive().unwrap();
+    let _audio_spool = LockedAudioSpool::new(&spool);
 
     let config = claudine_config_with_tts(TtsValue::Config(
         crate::config::tts::TtsConfigSettings {
@@ -262,14 +255,14 @@ async fn audio_actions_publish_in_order_and_return_before_worker_execution() {
     ));
     let actions = vec![
         HookAction::Speak {
-            message: "Phase 1 of the plan in the claudine package area, was implemented successfully".to_string(),
+            message: "This is a test message.".to_string(),
             voice: None,
             gender: None,
             when: None,
         },
         HookAction::SoundEffect {
             effect: "doorbell-2".to_string(),
-            volume: 0.5,
+            volume: 0.0,
             speed: 1.25,
             when: None,
         },
@@ -304,6 +297,15 @@ async fn audio_actions_publish_in_order_and_return_before_worker_execution() {
             (2, playa::detached::JournalSourceKind::File),
         ]
     );
+    let effect = fs::read_dir(&spool)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".pending.json"))
+        .map(|entry| serde_json::from_slice::<serde_json::Value>(&fs::read(entry.path()).unwrap()).unwrap())
+        .find(|job| job["sequence"] == 2)
+        .unwrap();
+    assert_eq!(effect["payload"]["playback"]["volume"], 0.0);
+    assert_eq!(effect["payload"]["playback"]["speed"], 1.25);
 }
 
 #[tokio::test]
@@ -366,7 +368,7 @@ async fn speak_action_warns_once_when_handoff_fails() {
         },
     ));
     let actions = vec![HookAction::Speak {
-        message: "Phase 1 of the plan in the claudine package area, was implemented successfully".to_string(),
+        message: "This is a test message.".to_string(),
         voice: None,
         gender: None,
         when: None,
