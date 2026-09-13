@@ -62,12 +62,12 @@
 
 mod common;
 
+use common::CliProcessFixture;
 use std::fs;
 use std::os::windows::process::CommandExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
-use tempfile::tempdir;
 
 /// `CREATE_NEW_PROCESS_GROUP` — makes Claudine's pid a console process-group id
 /// that `GenerateConsoleCtrlEvent` can target without hitting this test.
@@ -163,29 +163,23 @@ fn await_all_tasks_running(workspace: &Path) {
 
 #[test]
 fn sequence_ctrl_c_fans_out_to_parallel_children_on_windows() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    common::wrap::seed_minimal_config(workspace.path());
-    write_fake_goose(&path_dir);
+    let fixture = CliProcessFixture::named("sequence-ctrl-c-windows");
+    fixture.seed_user_config();
+    write_fake_goose(fixture.bin_dir());
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(&md_file, sequence_document()).unwrap();
 
-    let path = format!(
-        "{};{}",
-        path_dir.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
-
-    let mut claudine = Command::new(common::claudine_bin())
+    // The orchestrator has to stay alive to receive the console event, so this
+    // is the builder's raw-command surface. The call site keeps only its
+    // subject: `CREATE_NEW_PROCESS_GROUP`, the targeted console signal, the
+    // heartbeat poll, and the reaping. The fixture supplies the rest — the
+    // `CLAUDINE_*` scrub included, so an inherited `CLAUDINE_TIMEOUT` cannot
+    // end the run early and turn the fan-out assertion into a false pass.
+    let mut claudine = fixture
+        .command_std()
         .args(["sequence", "--goose", "--yolo"])
         .arg(&md_file)
-        .current_dir(workspace.path())
-        .env("PATH", path)
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("USERPROFILE", workspace.path())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -193,7 +187,7 @@ fn sequence_ctrl_c_fans_out_to_parallel_children_on_windows() {
         .spawn()
         .expect("spawn claudine sequence");
 
-    await_all_tasks_running(workspace.path());
+    await_all_tasks_running(fixture.cwd());
 
     let sent = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, claudine.id()) };
     assert_ne!(sent, 0, "GenerateConsoleCtrlEvent failed");
@@ -216,7 +210,7 @@ fn sequence_ctrl_c_fans_out_to_parallel_children_on_windows() {
     // Every task tree stopped: two heartbeat samples three seconds apart (the
     // loop ticks about once a second) must be identical.
     let ticks = |name: &str| {
-        fs::metadata(heartbeat(workspace.path(), name))
+        fs::metadata(heartbeat(fixture.cwd(), name))
             .expect("heartbeat file")
             .len()
     };
@@ -231,7 +225,7 @@ fn sequence_ctrl_c_fans_out_to_parallel_children_on_windows() {
     }
 
     assert!(
-        !workspace.path().join("later-step-ran.txt").exists(),
+        !fixture.cwd().join("later-step-ran.txt").exists(),
         "the step after the interrupted group ran",
     );
 

@@ -25,6 +25,21 @@ pub fn new_live_metrics() -> LiveMetrics {
     Arc::new(Mutex::new(LiveMetricsState::default()))
 }
 
+/// Which clock the current stream-silence age is measured from.
+///
+/// The silence rule has one reference instant: the newest of the child's
+/// spawn instant, `last_event_at`, and `last_byte_at`. `Launch` says the
+/// child has produced nothing at all yet and the age therefore runs from
+/// spawn; `Activity` says real output arrived and the age runs from it.
+/// Consumers use this to word the breach and warning diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SilenceOrigin {
+    /// No semantic event and no non-whitespace byte has been observed.
+    Launch,
+    /// At least one event or non-whitespace byte has been observed.
+    Activity,
+}
+
 /// A tool invocation the parser has started but not yet seen a result for.
 #[derive(Debug, Clone)]
 pub struct InFlightTool {
@@ -61,9 +76,9 @@ pub struct LiveMetricsState {
     /// Latest known cost-in-USD for the session.
     pub cost_usd: Option<f64>,
     /// Wall-clock time of the most recent observed event of any kind (tool
-    /// start, tool end, or assistant text delta). The step-timeout warning
-    /// compares against this to measure silence; a stale value means the
-    /// provider has gone quiet.
+    /// start, tool end, or assistant text delta). One of the three inputs to
+    /// [`silence_reference`](Self::silence_reference); a stale value means
+    /// the provider's structured stream has gone quiet.
     pub last_event_at: Option<Instant>,
     /// Wall-clock time of the most recent non-empty byte chunk read from
     /// the wrapped child's stdout or stderr — refreshed **before** the bytes
@@ -75,20 +90,22 @@ pub struct LiveMetricsState {
     pub last_byte_at: Option<Instant>,
     /// Wall-clock time of the most recent stalled-stream warning emission.
     /// Used by [`should_warn_stall`] to dedupe warnings within a single
-    /// stall episode — once activity resumes (`last_event_at` advances past
-    /// this value), the next stall is allowed to warn again.
+    /// stall episode — once activity resumes
+    /// ([`silence_reference`](Self::silence_reference) advances past this
+    /// value), the next stall is allowed to warn again.
     pub last_stall_warning_at: Option<Instant>,
     /// Last observed provider step-completion status (e.g. OpenCode's
     /// `step_finish.reason`: `"stop"`, `"tool-calls"`, `"length"`, …).
     /// Populated from `SemanticEvent::Info` payloads carrying
-    /// `extra.step_phase = "finish"`. Used by the wrapper's silence-rule
-    /// guard for sparse-stream providers (notably OpenCode) so a session
-    /// that has not yet crossed any step boundary cannot trip
-    /// `step_timeout` during slow startup or a slow first turn.
+    /// `extra.step_phase = "finish"`. `None` means no step has ever
+    /// completed; the wrapper uses that to word an OpenCode `step_timeout`
+    /// breach as a stall before the first step boundary. It does not exempt
+    /// the run from the silence budget.
     pub provider_status: Option<String>,
     /// Whether a provider step is currently in flight (between
-    /// `step_start` and the next `step_finish`). OpenCode-specific:
-    /// the silence rule is suppressed while this flag is true.
+    /// `step_start` and the next `step_finish`). OpenCode-specific: the
+    /// silence rule is suppressed while this flag is true *and* at least one
+    /// activity clock is still within the budget.
     pub step_in_flight: bool,
 }
 
@@ -156,6 +173,26 @@ impl LiveMetricsState {
             (Some(a), None) => Some(a),
             (None, Some(b)) => Some(b),
             (None, None) => None,
+        }
+    }
+
+    /// The single instant every stream-silence budget is measured from:
+    /// the newest of `spawned_at`, `last_event_at`, and `last_byte_at`.
+    ///
+    /// `spawned_at` is the child's monotonic spawn instant. It is only the
+    /// answer until real output exists, which is what bounds a provider
+    /// that starts successfully and then emits nothing at all.
+    pub fn silence_reference(&self, spawned_at: Instant) -> Instant {
+        self.last_activity_at()
+            .map_or(spawned_at, |activity| activity.max(spawned_at))
+    }
+
+    /// Whether [`silence_reference`](Self::silence_reference) is currently
+    /// the spawn instant or a real activity instant.
+    pub fn silence_origin(&self) -> SilenceOrigin {
+        match self.last_activity_at() {
+            Some(_) => SilenceOrigin::Activity,
+            None => SilenceOrigin::Launch,
         }
     }
 
@@ -318,32 +355,34 @@ impl LiveMetricsState {
 
 /// Decide whether the step-silence warning should emit.
 ///
-/// Returns `true` when:
-/// - some activity has been observed (`last_event_at.is_some()`),
-/// - the elapsed time since that last activity meets or exceeds
-///   `stall_threshold`, AND
-/// - no warning has been emitted yet during this stall episode (i.e.
-///   `last_stall_warning_at` is `None` or strictly older than
-///   `last_event_at`).
+/// Shares [`LiveMetricsState::silence_reference`] with the kill rule, so the
+/// warning measures exactly the silence the kill would measure — including
+/// the startup case, where the reference is `spawned_at` because the child
+/// has produced neither an event nor a non-whitespace byte.
+///
+/// Returns `true` when the elapsed time since that reference meets or
+/// exceeds `stall_threshold` and no warning has been emitted yet during this
+/// stall episode (`last_stall_warning_at` is `None` or strictly older than
+/// the reference).
 ///
 /// Callers are expected to set `last_stall_warning_at = Some(now)` after a
 /// successful warning emission so the same stall does not re-fire on every
-/// subsequent timing tick. Once activity resumes, `last_event_at`
-/// naturally advances past the stored warning timestamp and the next stall
-/// is again eligible to warn.
+/// subsequent timing tick. A startup stall therefore warns once: the
+/// reference stays pinned at `spawned_at` while nothing arrives. Once
+/// activity resumes the reference advances past the stored warning
+/// timestamp and the next stall is again eligible to warn.
 pub fn should_warn_stall(
     state: &LiveMetricsState,
     now: Instant,
     stall_threshold: Duration,
+    spawned_at: Instant,
 ) -> bool {
-    let Some(last_event) = state.last_event_at else {
-        return false;
-    };
-    if now.saturating_duration_since(last_event) < stall_threshold {
+    let reference = state.silence_reference(spawned_at);
+    if now.saturating_duration_since(reference) < stall_threshold {
         return false;
     }
     match state.last_stall_warning_at {
-        Some(warned_at) => warned_at < last_event,
+        Some(warned_at) => warned_at < reference,
         None => true,
     }
 }

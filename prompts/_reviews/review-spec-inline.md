@@ -10,15 +10,22 @@ start:
     message: "👀 reviewing the specification file: `{{spec}}`"
 success:
     say: |-
+        {{
         ctx.area
             ? "The review of the draft specification file in {{ctx.area}} has completed"
-            : "The review of the draft specification file in the {{ctx.repo.name}} repo has completed"
+            : "The review of the draft specification file in the {{ctx.repo_name}} repo has completed"
+        }}
     message: "✅  review of the draft specification `{{ link(spec) }}` has completed"
 failure:
-    say: "The inline review of the draft specification in {{ctx.area}} failed to complete!"
+    say: |-
+        {{
+        ctx.area
+            ? "The inline review of the draft specification {{ title_case(without_date(parent_dir(spec))) }} in the {{ctx.area}} package area failed to complete!"
+            : "The inline review {{ title_case(without_date(parent_dir(spec))) }} in the {{ctx.repo_name}} repo failed to complete!"
+        }}
     message: "💥  failed to complete the inline review of `{{parent_dir(spec)}}` spec in **{{ctx.area}}**!"
 ---
-You are expected to review a draft specification document located at {{spec}}. This will be an "inline review" so instead of just writing a review file your task includes updating the underlying specification file with your suggestions.
+You are expected to review a draft specification document located at {{spec}}. This will be an "inline review" so instead of just writing a review file, your task is updating the underlying specification file inline with your suggested changes.
 
 > Context: 
 > 

@@ -658,6 +658,14 @@ archive jobs deliberately REUSE the `test` key for their environment: they
 compile the same crates as the L1 leg, so one warm cache serves every tier
 instead of three cold ones.
 
+The L1 job prepares both nested test-cache directories before the cache action's
+post-job cleanup when `target/tests` exists. `trybuild` creates only
+`target/tests/trybuild`, but rust-cache v2 also opens `target/tests/target`
+without awaiting the resulting rejection. This produced ENOENT annotations
+after passing `model_id` tests on all three platforms in run 34510204615.
+The workaround preserves artifacts and runs even after a failed test; remove it
+when the action handles absent nested targets ([upstream cleanup implementation](https://github.com/Swatinem/rust-cache/blob/6323deb102c322ba6fcbdcafc7e3dddab59af2b6/src/cleanup.ts)).
+
 The per-package unit made the old per-directory key wrong, and the choice is
 the single biggest influence on whether this work reduces runtime at all:
 compilation is ~85% of a test job. **The package-scoped key has not been

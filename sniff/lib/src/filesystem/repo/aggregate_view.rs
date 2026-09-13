@@ -21,10 +21,10 @@ use crate::filesystem::git::recent_commits::CommitDescSet;
 use crate::filesystem::git::types::GitAggregateEvidence;
 use crate::filesystem::git::{BranchInfo, FileStatus, GitInfo, WorktreeEntry};
 use crate::filesystem::path_kind::is_source_code_path;
+use crate::filesystem::repo::RepoIdentity;
 use crate::filesystem::repo::detection::canonicalize_path;
 use crate::filesystem::repo::ownership::PackageOwnershipIndex;
 use crate::filesystem::repo::types::RepoInfo;
-use crate::filesystem::repo::RepoIdentity;
 use crate::performance;
 use crate::request::{
     FilesystemRequest, GitMetadataRequest, GitRequest, RepoDetailRequest, RepoRequest,
@@ -132,11 +132,9 @@ pub fn detect_repo_aggregate(dir: &Path) -> Result<RepoAggregateObservation> {
     let started = collecting.then(Instant::now);
     let request = FilesystemRequest::new()
         .git(
-            GitRequest::full().commit_count(10).metadata(
-                GitMetadataRequest::none()
-                    .remotes(true)
-                    .config(true),
-            ),
+            GitRequest::full()
+                .commit_count(10)
+                .metadata(GitMetadataRequest::none().remotes(true).config(true)),
         )
         .repo(RepoRequest::focused(RepoDetailRequest::all()))
         .without_file_inventory()
@@ -196,11 +194,7 @@ fn project_repo_aggregate(
     let mut commits = evidence.commits.clone();
     commits.attribute_from_repo(repo.as_ref());
 
-    let context = observe_cwd_context(
-        dir,
-        repo.as_ref(),
-        Some(detected_git),
-    );
+    let context = observe_cwd_context(dir, repo.as_ref(), Some(detected_git));
 
     Ok(RepoAggregate {
         identity: identity_from_detected(detected_git, repo.as_ref(), version.as_deref()),
@@ -259,7 +253,9 @@ fn collapse_detected_repo_version(repo: Option<&RepoInfo>) -> Option<String> {
         .iter()
         .filter_map(|package| package.version.as_deref());
     let first = versions.next()?;
-    versions.all(|version| version == first).then(|| first.to_string())
+    versions
+        .all(|version| version == first)
+        .then(|| first.to_string())
 }
 
 /// Resolve the cwd-relative `context` facts for one aggregate observation.
@@ -326,12 +322,9 @@ fn area_change_facts(repo: &RepoInfo, area: &str, git: Option<&GitInfo>) -> (boo
             path.starts_with(area_path)
         } else {
             !repo.packages.as_ref().is_some_and(|packages| {
-                packages
-                    .iter()
-                    .any(|p| {
-                        p.package_area != "root"
-                            && path.starts_with(Path::new(&p.package_area))
-                    })
+                packages.iter().any(|p| {
+                    p.package_area != "root" && path.starts_with(Path::new(&p.package_area))
+                })
             })
         }
     };
@@ -342,17 +335,8 @@ fn area_change_facts(repo: &RepoInfo, area: &str, git: Option<&GitInfo>) -> (boo
         .dirty
         .iter()
         .map(|d| d.filepath.as_path())
-        .chain(
-            status
-                .untracked
-                .iter()
-                .map(|u| u.filepath.as_path()),
-        )
-        .chain(
-            git.file_changes
-                .iter()
-                .map(|change| change.path.as_path()),
-        );
+        .chain(status.untracked.iter().map(|u| u.filepath.as_path()))
+        .chain(git.file_changes.iter().map(|change| change.path.as_path()));
     for path in paths {
         if in_area(path) {
             dirty = true;
@@ -591,8 +575,8 @@ mod tests {
         //! underlying status and linked-worktree behavior in isolation.
 
         use super::*;
-        use crate::filesystem::{FilesystemRequest, detect_filesystem_with_request};
         use crate::filesystem::git::GitRepo;
+        use crate::filesystem::{FilesystemRequest, detect_filesystem_with_request};
         use crate::performance::{counters, testing::measure};
         use crate::request::{GitMetadataRequest, GitRequest};
         use std::sync::Arc;
@@ -653,8 +637,7 @@ mod tests {
                 );
 
                 let counter = InfoStageCounter(Arc::clone(&events));
-                let _guard =
-                    tracing::dispatcher::set_default(&tracing::Dispatch::new(counter));
+                let _guard = tracing::dispatcher::set_default(&tracing::Dispatch::new(counter));
                 detect_repo_aggregate(dir.path()).expect("aggregate detection succeeds");
             });
 
@@ -730,8 +713,7 @@ mod tests {
             let dir = fixture();
             let repo = git2::Repository::open(dir.path()).unwrap();
             let linked_path = dir.path().join("current-linked");
-            repo.worktree("current-linked", &linked_path, None)
-                .unwrap();
+            repo.worktree("current-linked", &linked_path, None).unwrap();
             (dir, linked_path)
         }
 
@@ -748,7 +730,7 @@ mod tests {
                         .commit_count(10)
                         .metadata(GitMetadataRequest::none().config(true)),
                 )
-                    .expect("git detection succeeds")
+                .expect("git detection succeeds")
             });
 
             assert_eq!(
@@ -766,8 +748,7 @@ mod tests {
         fn linked_worktree_aggregate_walks_status_and_discovers_once() {
             let (_dir, linked_path) = linked_fixture();
             let (_, counts) = measure(|| {
-                detect_repo_aggregate(&linked_path)
-                    .expect("aggregate detection succeeds")
+                detect_repo_aggregate(&linked_path).expect("aggregate detection succeeds")
             });
 
             assert_eq!(
@@ -828,7 +809,11 @@ mod tests {
             let (fs, _) = detect_repo_aggregate(dir.path())
                 .expect("detection succeeds")
                 .into_parts();
-            let changes = &fs.git.as_ref().expect("fixture is a repository").file_changes;
+            let changes = &fs
+                .git
+                .as_ref()
+                .expect("fixture is a repository")
+                .file_changes;
 
             let names = |scope| -> Vec<String> {
                 scope_paths(changes, scope)
@@ -1003,8 +988,7 @@ mod tests {
         fn area_membership_compares_whole_path_components() {
             let (_temp, root) = workspace_fixture();
             std::fs::create_dir_all(root.join("alpha2")).unwrap();
-            std::fs::write(root.join("alpha2/collision.rs"), "pub fn collision() {}\n")
-                .unwrap();
+            std::fs::write(root.join("alpha2/collision.rs"), "pub fn collision() {}\n").unwrap();
             let (_, in_alpha) = detect(&root.join("alpha/pkg-a"));
             assert!(!in_alpha.context.is_current_package_area_dirty);
             assert!(!in_alpha.context.package_area_has_source_code_changes);
@@ -1019,18 +1003,15 @@ mod tests {
             let (_temp, root) = workspace_fixture();
             let request = FilesystemRequest::new()
                 .git(
-                    GitRequest::full().metadata(
-                        GitMetadataRequest::none()
-                            .remotes(true)
-                            .config(true),
-                    ),
+                    GitRequest::full()
+                        .metadata(GitMetadataRequest::none().remotes(true).config(true)),
                 )
                 .without_repo()
                 .without_docs()
                 .without_formatting()
                 .without_file_inventory();
-            let filesystem = detect_filesystem_with_request(&root, &request)
-                .expect("detection succeeds");
+            let filesystem =
+                detect_filesystem_with_request(&root, &request).expect("detection succeeds");
 
             let evidence = empty_evidence();
             let aggregate = project_repo_aggregate(&root, Some(&filesystem), &evidence)
@@ -1067,8 +1048,8 @@ mod tests {
             });
 
             let evidence = empty_evidence();
-            let aggregate = project_repo_aggregate(root, Some(&fs), &evidence)
-                .expect("observation succeeds");
+            let aggregate =
+                project_repo_aggregate(root, Some(&fs), &evidence).expect("observation succeeds");
             let context = &aggregate.context;
 
             assert_eq!(context.package, "solo");

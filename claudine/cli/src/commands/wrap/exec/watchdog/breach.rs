@@ -7,6 +7,8 @@
 
 use std::time::{Duration, Instant};
 
+use claudine::stream::progress::SilenceOrigin;
+
 use super::super::subagent_watchdog::{ActiveSubagentSnapshot, RecentSubagentInfo};
 use super::super::termination::WatchdogTermination;
 use super::super::super::stream_io::StreamOutput;
@@ -18,11 +20,20 @@ use super::super::super::stream_io::StreamOutput;
 pub(crate) struct OpenCodeBreachContext {
     pub(crate) subagent_done_count: u32,
     pub(crate) step_in_flight: bool,
+    /// Whether any `step_finish` boundary was ever observed. `false` means
+    /// the run stalled before OpenCode completed its first step, which is a
+    /// different operator problem from a stall between steps.
+    pub(crate) first_step_completed: bool,
     pub(crate) recent_subagents: std::collections::VecDeque<RecentSubagentInfo>,
     pub(crate) now: Instant,
 }
 
 /// Format the human-readable breach message for a `step_timeout` event.
+///
+/// `origin` distinguishes the two silences the one rule now covers: a
+/// child that has produced nothing since it launched
+/// ([`SilenceOrigin::Launch`]) versus one that produced output and then
+/// went quiet ([`SilenceOrigin::Activity`]).
 ///
 /// When `outstanding` is non-empty the message enumerates the subagents
 /// that were still in flight at the moment the silence rule fired
@@ -35,19 +46,32 @@ pub(crate) struct OpenCodeBreachContext {
 ///
 /// For OpenCode, when `outstanding` is empty, `opencode_context` provides
 /// enriched diagnostics: subagent completion count, whether a step was in
-/// flight, and the most recent completed subagents from the ring-buffer.
+/// flight, whether any step ever completed, and the most recent completed
+/// subagents from the ring-buffer.
 pub(crate) fn format_step_timeout_breach_message(
     silence: Duration,
+    origin: SilenceOrigin,
     outstanding: &[ActiveSubagentSnapshot],
     stuck_tools: &[claudine::stream::progress::InFlightTool],
     stuck_subagents: &[claudine::stream::progress::InFlightSubagent],
     opencode_context: Option<OpenCodeBreachContext>,
 ) -> String {
     let silence_text = format_duration(silence);
+    let lead = match origin {
+        SilenceOrigin::Launch => {
+            format!("no output since the wrapped process launched {silence_text} ago")
+        }
+        SilenceOrigin::Activity => format!("no stream activity for {silence_text}"),
+    };
     if outstanding.is_empty() && stuck_tools.is_empty() && stuck_subagents.is_empty() {
-        let mut msg =
-            format!("no stream activity for {silence_text}; terminating due to step_timeout");
+        let mut msg = format!("{lead}; terminating due to step_timeout");
         if let Some(ctx) = opencode_context {
+            if origin == SilenceOrigin::Activity && !ctx.first_step_completed {
+                msg.push_str(
+                    " OpenCode produced activity but never completed a step, so it stalled \
+                     before its first step boundary.",
+                );
+            }
             if ctx.subagent_done_count > 0 {
                 let plural = if ctx.subagent_done_count == 1 {
                     "subagent"
@@ -89,8 +113,7 @@ pub(crate) fn format_step_timeout_breach_message(
         return msg;
     }
 
-    let mut lines =
-        format!("no stream activity for {silence_text}. The wrapped process was terminated.");
+    let mut lines = format!("{lead}. The wrapped process was terminated.");
 
     if !stuck_tools.is_empty() {
         let count = stuck_tools.len();

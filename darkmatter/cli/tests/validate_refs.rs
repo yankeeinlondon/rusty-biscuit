@@ -1,14 +1,17 @@
 mod common;
 
-use common::{baseline, md_cmd};
+use common::{CliProcessFixture, baseline};
 
 #[test]
 fn validate_refs_text_output() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let md_path = dir.path().join("test.md");
+    let fixture = CliProcessFixture::named("validate_refs_text_output");
+    assert!(fixture.initialize_repository());
+    let dir = fixture.cwd();
+    let md_path = dir.join("test.md");
     std::fs::write(&md_path, "# Heading\n\n[link](https://example.com)\n").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .arg("validate")
         .arg("refs")
         .arg(&md_path)
@@ -18,11 +21,14 @@ fn validate_refs_text_output() {
 
 #[test]
 fn validate_refs_json_output() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let md_path = dir.path().join("test.md");
+    let fixture = CliProcessFixture::named("validate_refs_json_output");
+    assert!(fixture.initialize_repository());
+    let dir = fixture.cwd();
+    let md_path = dir.join("test.md");
     std::fs::write(&md_path, "[link](https://example.com)\n").unwrap();
 
-    let output = md_cmd()
+    let output = fixture
+        .command()
         .arg("validate")
         .arg("refs")
         .arg(&md_path)
@@ -41,11 +47,14 @@ fn validate_refs_json_output() {
 
 #[test]
 fn validate_refs_nonzero_exit_on_errors() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let md_path = dir.path().join("test.md");
+    let fixture = CliProcessFixture::named("validate_refs_nonzero_exit_on_errors");
+    assert!(fixture.initialize_repository());
+    let dir = fixture.cwd();
+    let md_path = dir.join("test.md");
     std::fs::write(&md_path, "[broken](./nonexistent.md)\n").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .arg("validate")
         .arg("refs")
         .arg(&md_path)
@@ -55,11 +64,14 @@ fn validate_refs_nonzero_exit_on_errors() {
 
 #[test]
 fn validate_refs_with_fragments() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let md_path = dir.path().join("test.md");
+    let fixture = CliProcessFixture::named("validate_refs_with_fragments");
+    assert!(fixture.initialize_repository());
+    let dir = fixture.cwd();
+    let md_path = dir.join("test.md");
     std::fs::write(&md_path, "# Hello\n\n[link](#hello)\n").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .arg("validate")
         .arg("refs")
         .arg(&md_path)
@@ -70,11 +82,14 @@ fn validate_refs_with_fragments() {
 
 #[test]
 fn validate_refs_graph_mermaid() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let md_path = dir.path().join("test.md");
+    let fixture = CliProcessFixture::named("validate_refs_graph_mermaid");
+    assert!(fixture.initialize_repository());
+    let dir = fixture.cwd();
+    let md_path = dir.join("test.md");
     std::fs::write(&md_path, "# Test\n\n[link](https://example.com)\n").unwrap();
 
-    let output = md_cmd()
+    let output = fixture
+        .command()
         .arg("validate")
         .arg("refs")
         .arg(&md_path)
@@ -92,11 +107,14 @@ fn validate_refs_graph_mermaid() {
 
 #[test]
 fn validate_refs_graph_dot() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let md_path = dir.path().join("test.md");
+    let fixture = CliProcessFixture::named("validate_refs_graph_dot");
+    assert!(fixture.initialize_repository());
+    let dir = fixture.cwd();
+    let md_path = dir.join("test.md");
     std::fs::write(&md_path, "# Test\n\n[link](https://example.com)\n").unwrap();
 
-    let output = md_cmd()
+    let output = fixture
+        .command()
         .arg("validate")
         .arg("refs")
         .arg(&md_path)
@@ -132,8 +150,13 @@ fn validate_refs_graph_dot() {
 /// printed to stdout before the process exits). The baseline fixtures
 /// capture both the success and the error shape, so we must not require
 /// `status.success()` here.
-fn assert_json_matches_baseline(input: &std::path::Path, baseline_name: &str) {
-    let output = md_cmd()
+fn assert_json_matches_baseline(
+    fixture: &CliProcessFixture,
+    input: &std::path::Path,
+    baseline_name: &str,
+) {
+    let output = fixture
+        .command()
         .arg("validate")
         .arg("refs")
         .arg(input)
@@ -145,15 +168,14 @@ fn assert_json_matches_baseline(input: &std::path::Path, baseline_name: &str) {
     // The CLI always prints the JSON report to stdout even when the
     // subsequent validation summary errors out and sets a non-zero exit.
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let actual: serde_json::Value =
-        serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
-            panic!(
-                "md validate refs --json did not produce valid JSON: {e}\n\
+    let actual: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+        panic!(
+            "md validate refs --json did not produce valid JSON: {e}\n\
                  status: {:?}\nstderr: {}\nstdout: {stdout}",
-                output.status.code(),
-                String::from_utf8_lossy(&output.stderr),
-            )
-        });
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr),
+        )
+    });
 
     let parent = input.parent().expect("input has a parent dir");
     let redact = baseline::paths_to_redact(parent);
@@ -164,7 +186,8 @@ fn assert_json_matches_baseline(input: &std::path::Path, baseline_name: &str) {
     let expected_norm = baseline::normalize(expected, &redact_refs);
 
     assert_eq!(
-        actual_norm, expected_norm,
+        actual_norm,
+        expected_norm,
         "md validate refs --json output did not match baseline {baseline_name}\n\
          status: {:?}\nraw output:\n{stdout}",
         output.status.code(),
@@ -173,32 +196,55 @@ fn assert_json_matches_baseline(input: &std::path::Path, baseline_name: &str) {
 
 #[test]
 fn validate_refs_json_local_baseline() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path();
-    std::fs::write(root.join("local.md"), "# Local Test\n\n[local link](./other.md)\n![local image](./img.png)\n::file other.md\n").unwrap();
+    let fixture = CliProcessFixture::named("validate_refs_json_local_baseline");
+    assert!(fixture.initialize_repository());
+    let dir = fixture.cwd();
+    let root = dir;
+    std::fs::write(
+        root.join("local.md"),
+        "# Local Test\n\n[local link](./other.md)\n![local image](./img.png)\n::file other.md\n",
+    )
+    .unwrap();
     // `other.md` exists so the hyperlink and the `::file` transclusion are
     // both valid; only the image reference at `./img.png` is broken.
     std::fs::write(root.join("other.md"), "# Other\n").unwrap();
-    assert_json_matches_baseline(&root.join("local.md"), "validate_refs_local.json");
+    assert_json_matches_baseline(&fixture, &root.join("local.md"), "validate_refs_local.json");
 }
 
 #[test]
 fn validate_refs_json_remote_baseline() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path();
-    std::fs::write(root.join("remote.md"), "# Remote\n\n[remote](https://example.com)\n").unwrap();
-    assert_json_matches_baseline(&root.join("remote.md"), "validate_refs_remote.json");
+    let fixture = CliProcessFixture::named("validate_refs_json_remote_baseline");
+    assert!(fixture.initialize_repository());
+    let dir = fixture.cwd();
+    let root = dir;
+    std::fs::write(
+        root.join("remote.md"),
+        "# Remote\n\n[remote](https://example.com)\n",
+    )
+    .unwrap();
+    assert_json_matches_baseline(
+        &fixture,
+        &root.join("remote.md"),
+        "validate_refs_remote.json",
+    );
 }
 
 #[test]
 fn validate_refs_json_fragment_baseline() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path();
-    std::fs::write(root.join("fragment.md"), "# Fragment\n\n[fragment](#fragment)\n").unwrap();
+    let fixture = CliProcessFixture::named("validate_refs_json_fragment_baseline");
+    assert!(fixture.initialize_repository());
+    let dir = fixture.cwd();
+    let root = dir;
+    std::fs::write(
+        root.join("fragment.md"),
+        "# Fragment\n\n[fragment](#fragment)\n",
+    )
+    .unwrap();
 
     // Fragment validation requires `--fragments`, which the baseline
     // capture also used; run the CLI directly to mirror that flag.
-    let output = md_cmd()
+    let output = fixture
+        .command()
         .arg("validate")
         .arg("refs")
         .arg(root.join("fragment.md"))
@@ -211,15 +257,14 @@ fn validate_refs_json_fragment_baseline() {
     // The CLI always prints the JSON report to stdout even when the
     // subsequent validation summary errors out and sets a non-zero exit.
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let actual: serde_json::Value =
-        serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
-            panic!(
-                "md validate refs --json --fragments did not produce valid JSON: {e}\n\
+    let actual: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+        panic!(
+            "md validate refs --json --fragments did not produce valid JSON: {e}\n\
                  status: {:?}\nstderr: {}\nstdout: {stdout}",
-                output.status.code(),
-                String::from_utf8_lossy(&output.stderr),
-            )
-        });
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr),
+        )
+    });
     let redact = baseline::paths_to_redact(root);
     let redact_refs: Vec<&str> = redact.iter().map(|s| s.as_str()).collect();
     let actual_norm = baseline::normalize(actual, &redact_refs);
@@ -236,20 +281,28 @@ fn validate_refs_json_fragment_baseline() {
 
 #[test]
 fn validate_refs_json_datauri_baseline() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path();
+    let fixture = CliProcessFixture::named("validate_refs_json_datauri_baseline");
+    assert!(fixture.initialize_repository());
+    let dir = fixture.cwd();
+    let root = dir;
     std::fs::write(
         root.join("datauri.md"),
         "# Data\n\n![data](data:image/png;base64,abc)\n",
     )
     .unwrap();
-    assert_json_matches_baseline(&root.join("datauri.md"), "validate_refs_datauri.json");
+    assert_json_matches_baseline(
+        &fixture,
+        &root.join("datauri.md"),
+        "validate_refs_datauri.json",
+    );
 }
 
 #[test]
 fn validate_refs_json_inline_baseline() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path();
+    let fixture = CliProcessFixture::named("validate_refs_json_inline_baseline");
+    assert!(fixture.initialize_repository());
+    let dir = fixture.cwd();
+    let root = dir;
     std::fs::write(
         root.join("inline.md"),
         "# Inline\n\n<style>.x{color:red}</style>\n\n<script src=\"app.js\"></script>\n",
@@ -258,15 +311,29 @@ fn validate_refs_json_inline_baseline() {
     // The baseline capture treats the `<script src>` as a valid local
     // reference because `app.js` exists next to the document.
     std::fs::write(root.join("app.js"), "// inline script target\n").unwrap();
-    assert_json_matches_baseline(&root.join("inline.md"), "validate_refs_inline.json");
+    assert_json_matches_baseline(
+        &fixture,
+        &root.join("inline.md"),
+        "validate_refs_inline.json",
+    );
 }
 
 #[test]
 fn validate_refs_json_errors_baseline() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path();
-    std::fs::write(root.join("errors.md"), "# Errors\n\n[missing](./missing.md)\n").unwrap();
+    let fixture = CliProcessFixture::named("validate_refs_json_errors_baseline");
+    assert!(fixture.initialize_repository());
+    let dir = fixture.cwd();
+    let root = dir;
+    std::fs::write(
+        root.join("errors.md"),
+        "# Errors\n\n[missing](./missing.md)\n",
+    )
+    .unwrap();
     // Note: no `missing.md` is written — the test asserts the missing
     // target produces exactly the baseline error shape.
-    assert_json_matches_baseline(&root.join("errors.md"), "validate_refs_errors.json");
+    assert_json_matches_baseline(
+        &fixture,
+        &root.join("errors.md"),
+        "validate_refs_errors.json",
+    );
 }

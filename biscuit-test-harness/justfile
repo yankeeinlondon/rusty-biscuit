@@ -57,11 +57,12 @@ sanity:
 test *args="":
     @just _test {{ LIBRARY }} {{ args }}
 
-# not applicable: this crate *provides* the Level-2 harness; its own tests
-# exercise backend selection and teardown in-process and carry no `level2_`
-# prefix. The consumer areas own the real-terminal tier.
-test-l2:
-    @echo "test-l2: not applicable for biscuit-test-harness"
+# Level-2 tests for the library. Most of this crate's own coverage is
+# in-process, but the harness's contract with the *host shell* is only
+# observable in a real pane, so those cases live here. The consumer areas still
+# own the rendering tier.
+test-l2 *args="":
+    @just _test_l2 {{ LIBRARY }} {{ args }}
 
 # not applicable: biscuit-test-harness has no OS-keyboard-injection (Level-3) tests
 test-l3:

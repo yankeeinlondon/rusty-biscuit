@@ -4,10 +4,10 @@ use std::path::Path;
 
 use biscuit_file::toml_crate;
 
+use crate::Result;
 use crate::package::{DependencyEntry, DependencyKind};
 use crate::performance;
 use crate::performance::counters;
-use crate::Result;
 
 use super::detection::{DetectorOutcome, ManifestStore, RepoEvidence, probe_exists};
 use super::glob::expand_membership_globs;
@@ -305,11 +305,7 @@ fn repo_relative_manifest_path(path: &Path, repo_root: &Path) -> String {
         .ok()
         .and_then(|p| p.to_str())
         .map(|s| s.replace('\\', "/"))
-        .unwrap_or_else(|| {
-            path.to_str()
-                .map(|s| s.to_string())
-                .unwrap_or_default()
-        })
+        .unwrap_or_else(|| path.to_str().map(|s| s.to_string()).unwrap_or_default())
 }
 
 /// Extracts the feature-flag names from a parsed Cargo.toml `[features]` section.

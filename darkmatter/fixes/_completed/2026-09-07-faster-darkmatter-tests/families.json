@@ -1,0 +1,1153 @@
+{
+  "families": [
+    {
+      "id": "lib-unit-compose-core",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "modules": [
+          "markdown::compose"
+        ]
+      },
+      "exclude": {
+        "modules": [
+          "markdown::compose::shell_expansion",
+          "markdown::compose::frontmatter_shell_expansion",
+          "markdown::compose::shell_blocks",
+          "markdown::compose::tests::shell",
+          "markdown::compose::remote_fetch",
+          "markdown::compose::remote",
+          "markdown::compose::tests::provider_network",
+          "markdown::compose::tests::transclusion_tests::remote_transclusion_tests",
+          "markdown::compose::context",
+          "markdown::compose::preflight::acceptance_tests",
+          "markdown::compose::tests::rendering"
+        ],
+        "tests": [
+          "markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code",
+          "markdown::compose::shell_expansion::alias::tests::resolve_alias_ll",
+          "markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-compose-shell",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "modules": [
+          "markdown::compose::shell_expansion",
+          "markdown::compose::frontmatter_shell_expansion",
+          "markdown::compose::shell_blocks",
+          "markdown::compose::tests::shell"
+        ]
+      },
+      "exclude": {
+        "tests": [
+          "markdown::compose::shell_expansion::alias::tests::resolve_alias_ll"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-ignored-host-shell",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "tests": [
+          "markdown::compose::shell_expansion::alias::tests::resolve_alias_ll"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-compose-remote",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "modules": [
+          "markdown::compose::remote_fetch",
+          "markdown::compose::remote",
+          "markdown::compose::tests::provider_network",
+          "markdown::compose::tests::transclusion_tests::remote_transclusion_tests"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-compose-context",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "modules": [
+          "markdown::compose::context"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-compose-preflight-acceptance",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "modules": [
+          "markdown::compose::preflight::acceptance_tests"
+        ]
+      },
+      "exclude": {
+        "tests": [
+          "markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions"
+        ]
+      }
+    },
+    {
+      "id": "lib-override-preflight-proptest",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "tests": [
+          "markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-compose-cleanup-rendering",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "modules": [
+          "markdown::compose::tests::rendering"
+        ]
+      },
+      "exclude": {
+        "tests": [
+          "markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code"
+        ]
+      }
+    },
+    {
+      "id": "lib-override-slow-cleanup",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "tests": [
+          "markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-schemas",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "modules": [
+          "markdown::schemas"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-markdown-rest",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "modules": [
+          "markdown"
+        ]
+      },
+      "exclude": {
+        "modules": [
+          "markdown::compose",
+          "markdown::schemas"
+        ],
+        "tests": [
+          "markdown::cleanup::perf_profile::f25_cleanup_profile_raw_samples",
+          "markdown::render_tree::build_context::finding_35_7::f35_7_link_policy_raw_samples",
+          "markdown::render_tree::code_renderer::tests::f23_code_surface_raw_samples",
+          "layout::page::tests::finding_35_6::f35_6_rhythm_raw_samples",
+      "layout::page::tests::render_browser_captured_light_terminal_wins_over_dark_default",
+      "layout::page::tests::render_browser_code_block_honors_code_block_mode",
+      "layout::page::tests::render_browser_code_markup_contrasts_with_panel_background",
+      "layout::page::tests::render_browser_code_markup_theme_follows_page_mode",
+      "layout::page::tests::render_browser_code_panel_inverts_against_terminal_not_option_in_transparent_default",
+      "layout::page::tests::render_browser_code_panel_separates_from_page_surface_in_dark_terminal",
+      "layout::page::tests::render_browser_code_panel_separates_from_page_surface_in_light_terminal",
+      "layout::page::tests::render_browser_component_color_emits_per_component_css",
+      "layout::page::tests::render_browser_component_opacity_preserved_as_rgba",
+      "layout::page::tests::render_browser_css_special_colors_passthrough",
+      "layout::page::tests::render_browser_default_fallback_mode_is_dark",
+      "layout::page::tests::render_browser_hr_bg_color_targets_rendered_element",
+      "layout::page::tests::render_browser_hr_color_emits_rule_for_svg_target",
+      "layout::page::tests::render_browser_list_selectors_emit_separate_rules_with_colors",
+      "layout::page::tests::render_browser_opacity_preserved_as_rgba",
+      "layout::page::tests::render_browser_page_bg_color_overrides_page_background_css",
+      "layout::page::tests::render_browser_page_color_emits_inheriting_root_div",
+      "layout::page::tests::render_browser_authored_side_margins_suppress_centering",
+      "layout::page::tests::render_browser_error_for_margins_exceed_width",
+      "layout::page::tests::render_browser_error_for_max_width_zero",
+      "layout::page::tests::render_browser_with_margin_padding_bg_wraps",
+      "layout::page::tests::render_browser_with_max_width",
+      "layout::page::tests::render_browser_with_pronounced_bg",
+      "layout::page::tests::render_browser_with_unmatched_alignment_policy_adds_no_wrapper",
+      "layout::page::tests::render_browser_with_unmatched_fill_policy_adds_no_wrapper",
+      "layout::page::tests::render_browser_selectors_split_for_lists",
+      "layout::page::tests::render_browser_ul_left_margin_css",
+      "layout::page::tests::render_browser_unmatched_component_policy_matches_no_policy",
+      "markdown::code_block::tests::render_browser_emits_rust_language_class",
+      "markdown::code_block::tests::render_browser_honors_code_theme_env_when_no_override",
+      "markdown::code_block::tests::render_browser_honors_theme_env_when_no_override",
+      "markdown::code_block::tests::render_browser_override_wins_over_theme_env",
+      "markdown::render_tree::code_renderer::tests::render_browser_code_does_not_promote_mermaid",
+      "markdown::render_tree::code_renderer::tests::render_browser_code_emits_language_class",
+      "markdown::render_tree::code_renderer::tests::render_browser_code_emits_title_and_line_numbers_from_meta",
+      "markdown::render_tree::code_renderer::tests::render_browser_code_inverts_theme_for_page_contrast",
+      "markdown::render_tree::code_renderer::tests::render_browser_mermaid_returns_svg_or_none_never_silent_code_block",
+      "markdown::render_tree::code_renderer::tests::render_browser_resolves_code_surface_once_per_render",
+      "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_defaults_raw_html_to_escape",
+      "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_lowers_hr_css_variables_without_styles",
+      "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_maps_mermaid_image_to_static_svg",
+      "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_maps_mermaid_off_to_code",
+      "render_browser_target_renders_nested_disclosures",
+      "render_browser_target_uses_native_details_summary"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-style",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "modules": [
+          "style"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-layout",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "modules": [
+          "layout"
+        ]
+      },
+      "exclude": {
+        "tests": [
+          "markdown::cleanup::perf_profile::f25_cleanup_profile_raw_samples",
+          "markdown::render_tree::build_context::finding_35_7::f35_7_link_policy_raw_samples",
+          "markdown::render_tree::code_renderer::tests::f23_code_surface_raw_samples",
+          "layout::page::tests::finding_35_6::f35_6_rhythm_raw_samples",
+          "layout::page::tests::render_browser_captured_light_terminal_wins_over_dark_default",
+          "layout::page::tests::render_browser_code_block_honors_code_block_mode",
+          "layout::page::tests::render_browser_code_markup_contrasts_with_panel_background",
+          "layout::page::tests::render_browser_code_markup_theme_follows_page_mode",
+          "layout::page::tests::render_browser_code_panel_inverts_against_terminal_not_option_in_transparent_default",
+          "layout::page::tests::render_browser_code_panel_separates_from_page_surface_in_dark_terminal",
+          "layout::page::tests::render_browser_code_panel_separates_from_page_surface_in_light_terminal",
+          "layout::page::tests::render_browser_component_color_emits_per_component_css",
+          "layout::page::tests::render_browser_component_opacity_preserved_as_rgba",
+          "layout::page::tests::render_browser_css_special_colors_passthrough",
+          "layout::page::tests::render_browser_default_fallback_mode_is_dark",
+          "layout::page::tests::render_browser_hr_bg_color_targets_rendered_element",
+          "layout::page::tests::render_browser_hr_color_emits_rule_for_svg_target",
+          "layout::page::tests::render_browser_list_selectors_emit_separate_rules_with_colors",
+          "layout::page::tests::render_browser_opacity_preserved_as_rgba",
+          "layout::page::tests::render_browser_page_bg_color_overrides_page_background_css",
+          "layout::page::tests::render_browser_page_color_emits_inheriting_root_div",
+          "layout::page::tests::render_browser_authored_side_margins_suppress_centering",
+          "layout::page::tests::render_browser_error_for_margins_exceed_width",
+          "layout::page::tests::render_browser_error_for_max_width_zero",
+          "layout::page::tests::render_browser_with_margin_padding_bg_wraps",
+          "layout::page::tests::render_browser_with_max_width",
+          "layout::page::tests::render_browser_with_pronounced_bg",
+          "layout::page::tests::render_browser_with_unmatched_alignment_policy_adds_no_wrapper",
+          "layout::page::tests::render_browser_with_unmatched_fill_policy_adds_no_wrapper",
+          "layout::page::tests::render_browser_selectors_split_for_lists",
+          "layout::page::tests::render_browser_ul_left_margin_css",
+          "layout::page::tests::render_browser_unmatched_component_policy_matches_no_policy",
+          "markdown::code_block::tests::render_browser_emits_rust_language_class",
+          "markdown::code_block::tests::render_browser_honors_code_theme_env_when_no_override",
+          "markdown::code_block::tests::render_browser_honors_theme_env_when_no_override",
+          "markdown::code_block::tests::render_browser_override_wins_over_theme_env",
+          "markdown::render_tree::code_renderer::tests::render_browser_code_does_not_promote_mermaid",
+          "markdown::render_tree::code_renderer::tests::render_browser_code_emits_language_class",
+          "markdown::render_tree::code_renderer::tests::render_browser_code_emits_title_and_line_numbers_from_meta",
+          "markdown::render_tree::code_renderer::tests::render_browser_code_inverts_theme_for_page_contrast",
+          "markdown::render_tree::code_renderer::tests::render_browser_mermaid_returns_svg_or_none_never_silent_code_block",
+          "markdown::render_tree::code_renderer::tests::render_browser_resolves_code_surface_once_per_render",
+          "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_defaults_raw_html_to_escape",
+          "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_lowers_hr_css_variables_without_styles",
+          "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_maps_mermaid_image_to_static_svg",
+          "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_maps_mermaid_off_to_code",
+          "render_browser_target_renders_nested_disclosures",
+          "render_browser_target_uses_native_details_summary"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-support-modules",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "modules": [
+          "render",
+          "mermaid",
+          "diff",
+          "terminal",
+          "catalog",
+          "editor",
+          "effects",
+          "testing"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-ignored-perf-harness",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter"
+        ],
+        "tests": [
+          "markdown::cleanup::perf_profile::f25_cleanup_profile_raw_samples",
+          "markdown::render_tree::build_context::finding_35_7::f35_7_link_policy_raw_samples",
+          "markdown::render_tree::code_renderer::tests::f23_code_surface_raw_samples",
+          "layout::page::tests::finding_35_6::f35_6_rhythm_raw_samples"
+        ]
+      }
+    },
+    {
+      "id": "lib-shipped-schema-corpus",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::base_schema_end_to_end",
+          "darkmatter::meta_schema_phase1",
+          "darkmatter::meta_schema_phase4",
+          "darkmatter::meta_schema_phase5",
+          "darkmatter::meta_schema_phase6",
+          "darkmatter::meta_schema_repo_schemas",
+          "darkmatter::predict_conflicts"
+        ]
+      }
+    },
+    {
+      "id": "lib-fixture-tables",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::schemas_detect_table",
+          "darkmatter::schemas_validate_table"
+        ]
+      }
+    },
+    {
+      "id": "lib-passive-schema",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::meta_schema_phase3",
+          "darkmatter::meta_schema_reference_graph",
+          "darkmatter::schemas_literal_expression",
+          "darkmatter::schemas_source_projection",
+          "darkmatter::suggest_constraint_phase1",
+          "darkmatter::suggest_constraint_phase2",
+          "darkmatter::suggest_constraint_phase3",
+          "darkmatter::suggest_constraint_phase4"
+        ]
+      }
+    },
+    {
+      "id": "lib-proptest",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::schema_quoting_safety",
+          "darkmatter::schemas_grammar_proptest"
+        ]
+      }
+    },
+    {
+      "id": "lib-snapshots-insta",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::cutover_reference",
+          "darkmatter::horizontal_rule_snapshots",
+          "darkmatter::render_tree_hr_snapshots",
+          "darkmatter::schemas_convert_snapshots"
+        ]
+      }
+    },
+    {
+      "id": "lib-snapshots-layout-env",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::layout_snapshots"
+        ]
+      }
+    },
+    {
+      "id": "lib-error-snapshots",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::error_snapshots"
+        ]
+      }
+    },
+    {
+      "id": "lib-compose-e2e",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::compose_reuse_phase5",
+          "darkmatter::compose_phase6",
+          "darkmatter::expression_regression",
+          "darkmatter::link_interpolation_integration",
+          "darkmatter::more_is_more_literals_and_indexes",
+          "darkmatter::set_overlay_integration",
+          "darkmatter::ternary_integration",
+          "darkmatter::yaml_block_parity",
+          "darkmatter::disclosure_transclusion_integration",
+          "darkmatter::inline_envelope_prototype",
+          "darkmatter::span_compat",
+          "darkmatter::tree_features_characterization"
+        ]
+      },
+      "exclude": {
+        "suites": [
+          "darkmatter::expression_regression"
+        ],
+        "tests": [
+          "regression_ctx_agent_in_interpolation",
+          "regression_page_block_with_has_skill"
+        ]
+      }
+    },
+    {
+      "id": "lib-compose-e2e-env-serial",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::expression_regression"
+        ],
+        "tests": [
+          "regression_ctx_agent_in_interpolation",
+          "regression_page_block_with_has_skill"
+        ]
+      }
+    },
+    {
+      "id": "lib-compose-e2e-windows-only",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::declined_path_transclusion"
+        ]
+      },
+      "expectEmpty": "whole binary is #![cfg(windows)]; three identities exist only on windows-latest (see cfg/feature exclusions)"
+    },
+    {
+      "id": "lib-compose-shell-e2e",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::shell_block_integration",
+          "darkmatter::shell_expansion_coordinates",
+          "darkmatter::interpolation_literal_pipeline"
+        ]
+      }
+    },
+    {
+      "id": "lib-override-ambient-capture",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::ambient_ctx_capture"
+        ]
+      }
+    },
+    {
+      "id": "lib-git-context",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::git_context_integration"
+        ]
+      }
+    },
+    {
+      "id": "lib-reference-integration",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::reference_integration"
+        ]
+      }
+    },
+    {
+      "id": "lib-work-counters",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::clean_counters"
+        ]
+      }
+    },
+    {
+      "id": "lib-effects-integration",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::effects_integration"
+        ]
+      }
+    },
+    {
+      "id": "lib-render-e2e",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::render_comparison",
+          "darkmatter::render_invariants",
+          "darkmatter::render_tree_roundtrip",
+          "darkmatter::disclosure_render_targets",
+          "darkmatter::horizontal_rule_integration",
+          "darkmatter::html_inversion",
+          "darkmatter::blockquote_list_spacing",
+          "darkmatter::prose_wrap_parity",
+          "darkmatter::layout_matrix",
+          "darkmatter::style_features_baseline",
+          "darkmatter::style_features_phase5",
+          "darkmatter::style_frontmatter_parity",
+          "darkmatter::debug_test"
+        ]
+      },
+      "exclude": {
+        "tests": [
+          "layout::page::tests::render_browser_captured_light_terminal_wins_over_dark_default",
+          "layout::page::tests::render_browser_code_block_honors_code_block_mode",
+          "layout::page::tests::render_browser_code_markup_contrasts_with_panel_background",
+          "layout::page::tests::render_browser_code_markup_theme_follows_page_mode",
+          "layout::page::tests::render_browser_code_panel_inverts_against_terminal_not_option_in_transparent_default",
+          "layout::page::tests::render_browser_code_panel_separates_from_page_surface_in_dark_terminal",
+          "layout::page::tests::render_browser_code_panel_separates_from_page_surface_in_light_terminal",
+          "layout::page::tests::render_browser_component_color_emits_per_component_css",
+          "layout::page::tests::render_browser_component_opacity_preserved_as_rgba",
+          "layout::page::tests::render_browser_css_special_colors_passthrough",
+          "layout::page::tests::render_browser_default_fallback_mode_is_dark",
+          "layout::page::tests::render_browser_hr_bg_color_targets_rendered_element",
+          "layout::page::tests::render_browser_hr_color_emits_rule_for_svg_target",
+          "layout::page::tests::render_browser_list_selectors_emit_separate_rules_with_colors",
+          "layout::page::tests::render_browser_opacity_preserved_as_rgba",
+          "layout::page::tests::render_browser_page_bg_color_overrides_page_background_css",
+          "layout::page::tests::render_browser_page_color_emits_inheriting_root_div",
+          "layout::page::tests::render_browser_authored_side_margins_suppress_centering",
+          "layout::page::tests::render_browser_error_for_margins_exceed_width",
+          "layout::page::tests::render_browser_error_for_max_width_zero",
+          "layout::page::tests::render_browser_with_margin_padding_bg_wraps",
+          "layout::page::tests::render_browser_with_max_width",
+          "layout::page::tests::render_browser_with_pronounced_bg",
+          "layout::page::tests::render_browser_with_unmatched_alignment_policy_adds_no_wrapper",
+          "layout::page::tests::render_browser_with_unmatched_fill_policy_adds_no_wrapper",
+          "layout::page::tests::render_browser_selectors_split_for_lists",
+          "layout::page::tests::render_browser_ul_left_margin_css",
+          "layout::page::tests::render_browser_unmatched_component_policy_matches_no_policy",
+          "markdown::code_block::tests::render_browser_emits_rust_language_class",
+          "markdown::code_block::tests::render_browser_honors_code_theme_env_when_no_override",
+          "markdown::code_block::tests::render_browser_honors_theme_env_when_no_override",
+          "markdown::code_block::tests::render_browser_override_wins_over_theme_env",
+          "markdown::render_tree::code_renderer::tests::render_browser_code_does_not_promote_mermaid",
+          "markdown::render_tree::code_renderer::tests::render_browser_code_emits_language_class",
+          "markdown::render_tree::code_renderer::tests::render_browser_code_emits_title_and_line_numbers_from_meta",
+          "markdown::render_tree::code_renderer::tests::render_browser_code_inverts_theme_for_page_contrast",
+          "markdown::render_tree::code_renderer::tests::render_browser_mermaid_returns_svg_or_none_never_silent_code_block",
+          "markdown::render_tree::code_renderer::tests::render_browser_resolves_code_surface_once_per_render",
+          "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_defaults_raw_html_to_escape",
+          "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_lowers_hr_css_variables_without_styles",
+          "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_maps_mermaid_image_to_static_svg",
+          "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_maps_mermaid_off_to_code",
+          "render_browser_target_renders_nested_disclosures",
+          "render_browser_target_uses_native_details_summary"
+        ]
+      }
+    },
+    {
+      "id": "lib-shipped-example-docs",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::style_frontmatter"
+        ]
+      }
+    },
+    {
+      "id": "lib-structural-guards",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::as_block_error_registry",
+          "darkmatter::prelude_exports",
+          "darkmatter::benchmark_fixtures"
+        ]
+      }
+    },
+    {
+      "id": "lib-browser-prefixed-inprocess",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter",
+          "darkmatter::disclosure_render_targets"
+        ],
+        "tests": [
+          "layout::page::tests::render_browser_captured_light_terminal_wins_over_dark_default",
+          "layout::page::tests::render_browser_code_block_honors_code_block_mode",
+          "layout::page::tests::render_browser_code_markup_contrasts_with_panel_background",
+          "layout::page::tests::render_browser_code_markup_theme_follows_page_mode",
+          "layout::page::tests::render_browser_code_panel_inverts_against_terminal_not_option_in_transparent_default",
+          "layout::page::tests::render_browser_code_panel_separates_from_page_surface_in_dark_terminal",
+          "layout::page::tests::render_browser_code_panel_separates_from_page_surface_in_light_terminal",
+          "layout::page::tests::render_browser_component_color_emits_per_component_css",
+          "layout::page::tests::render_browser_component_opacity_preserved_as_rgba",
+          "layout::page::tests::render_browser_css_special_colors_passthrough",
+          "layout::page::tests::render_browser_default_fallback_mode_is_dark",
+          "layout::page::tests::render_browser_hr_bg_color_targets_rendered_element",
+          "layout::page::tests::render_browser_hr_color_emits_rule_for_svg_target",
+          "layout::page::tests::render_browser_list_selectors_emit_separate_rules_with_colors",
+          "layout::page::tests::render_browser_opacity_preserved_as_rgba",
+          "layout::page::tests::render_browser_page_bg_color_overrides_page_background_css",
+          "layout::page::tests::render_browser_page_color_emits_inheriting_root_div",
+          "layout::page::tests::render_browser_authored_side_margins_suppress_centering",
+          "layout::page::tests::render_browser_error_for_margins_exceed_width",
+          "layout::page::tests::render_browser_error_for_max_width_zero",
+          "layout::page::tests::render_browser_with_margin_padding_bg_wraps",
+          "layout::page::tests::render_browser_with_max_width",
+          "layout::page::tests::render_browser_with_pronounced_bg",
+          "layout::page::tests::render_browser_with_unmatched_alignment_policy_adds_no_wrapper",
+          "layout::page::tests::render_browser_with_unmatched_fill_policy_adds_no_wrapper",
+          "layout::page::tests::render_browser_selectors_split_for_lists",
+          "layout::page::tests::render_browser_ul_left_margin_css",
+          "layout::page::tests::render_browser_unmatched_component_policy_matches_no_policy",
+          "markdown::code_block::tests::render_browser_emits_rust_language_class",
+          "markdown::code_block::tests::render_browser_honors_code_theme_env_when_no_override",
+          "markdown::code_block::tests::render_browser_honors_theme_env_when_no_override",
+          "markdown::code_block::tests::render_browser_override_wins_over_theme_env",
+          "markdown::render_tree::code_renderer::tests::render_browser_code_does_not_promote_mermaid",
+          "markdown::render_tree::code_renderer::tests::render_browser_code_emits_language_class",
+          "markdown::render_tree::code_renderer::tests::render_browser_code_emits_title_and_line_numbers_from_meta",
+          "markdown::render_tree::code_renderer::tests::render_browser_code_inverts_theme_for_page_contrast",
+          "markdown::render_tree::code_renderer::tests::render_browser_mermaid_returns_svg_or_none_never_silent_code_block",
+          "markdown::render_tree::code_renderer::tests::render_browser_resolves_code_surface_once_per_render",
+          "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_defaults_raw_html_to_escape",
+          "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_lowers_hr_css_variables_without_styles",
+          "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_maps_mermaid_image_to_static_svg",
+          "markdown::render_tree::entrypoints::tests::render_browser_options_mapping_maps_mermaid_off_to_code",
+          "render_browser_target_renders_nested_disclosures",
+          "render_browser_target_uses_native_details_summary"
+        ]
+      }
+    },
+    {
+      "id": "lib-l2-terminal",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::level2_render_tree_terminal"
+        ]
+      }
+    },
+    {
+      "id": "lib-l2-binary-unprefixed",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::image_pixel_classification"
+        ],
+        "tests": [
+          "pixel_classification_distinguishes_magenta_from_black"
+        ]
+      }
+    },
+    {
+      "id": "lib-l3-os-input",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::level3_image_painting",
+          "darkmatter::level3_popover"
+        ]
+      }
+    },
+    {
+      "id": "lib-browser",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::browser_render"
+        ]
+      },
+      "exclude": {
+        "tests": [
+      "browser_sanitized_real_mermaid_retains_diagram_geometry"
+        ]
+      }
+    },
+    {
+      "id": "lib-browser-binary-unprefixed",
+      "package": "darkmatter",
+      "match": {
+        "suites": [
+          "darkmatter::browser_render"
+        ],
+        "tests": [
+          "browser_sanitized_real_mermaid_retains_diagram_geometry"
+        ]
+      }
+    },
+    {
+      "id": "cli-unit",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli"
+        ]
+      }
+    },
+    {
+      "id": "cli-fixture-contract",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli::md_process_fixture"
+        ]
+      }
+    },
+    {
+      "id": "cli-spawn-guard",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli::spawn_site_guard"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-private-helpers",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli::schema_detect",
+          "darkmatter-cli::schema_validate",
+          "darkmatter-cli::compose_schema",
+          "darkmatter-cli::compose_schema_file_rewrite",
+          "darkmatter-cli::schema_about",
+          "darkmatter-cli::code_block",
+          "darkmatter-cli::schema_triggers"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-inline-spawn-baseline",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli::schema_validate_baseline"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-clean-hash-frontmatter",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli::clean",
+          "darkmatter-cli::clean_frontmatter",
+          "darkmatter-cli::clean_json",
+          "darkmatter-cli::clean_schema",
+          "darkmatter-cli::hash",
+          "darkmatter-cli::hash_directory",
+          "darkmatter-cli::hash_kind_save_diff",
+          "darkmatter-cli::get_set_rm",
+          "darkmatter-cli::rm"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-compose-render-graph",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli::compose_base_schema",
+          "darkmatter-cli::compose_basic",
+          "darkmatter-cli::compose_interpolation",
+          "darkmatter-cli::compose_layout",
+          "darkmatter-cli::compose_page_blocks",
+          "darkmatter-cli::compose_refs_and_missing",
+          "darkmatter-cli::compose_state_set",
+          "darkmatter-cli::compose_transclusion",
+          "darkmatter-cli::delta",
+          "darkmatter-cli::graph",
+          "darkmatter-cli::help",
+          "darkmatter-cli::render_basic",
+          "darkmatter-cli::toc",
+          "darkmatter-cli::validate_refs",
+          "darkmatter-cli::layout_flags",
+          "darkmatter-cli::layout_style_frontmatter",
+          "darkmatter-cli::layout_fill"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-layout-inprocess",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli::layout_alignment"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-compose-shell",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli::compose_shell"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-compose-remote-http",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli::compose_remote_caching"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-compose-diagnostics",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli::compose_perf",
+          "darkmatter-cli::compose_terminal_detection"
+        ]
+      }
+    },
+    {
+      "id": "cli-l2-render-capture",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli::level2_code_block_styling",
+          "darkmatter-cli::level2_disclosure_blocks",
+          "darkmatter-cli::level2_errors",
+          "darkmatter-cli::level2_frontmatter_images",
+          "darkmatter-cli::level2_frontmatter_tables",
+          "darkmatter-cli::level2_horizontal_rules",
+          "darkmatter-cli::level2_layout_dimensions",
+          "darkmatter-cli::level2_ordered_lists",
+          "darkmatter-cli::level2_schema_validate"
+        ]
+      }
+    },
+    {
+      "id": "cli-l2-tmux-schema-about",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli::level2_schema_about"
+        ]
+      }
+    },
+    {
+      "id": "cli-l2-harness-integrity",
+      "package": "darkmatter-cli",
+      "match": {
+        "suites": [
+          "darkmatter-cli::level2_harness_integrity"
+        ]
+      }
+    },
+    {
+      "id": "dmls-unit",
+      "package": "dmls",
+      "match": {
+        "suites": [
+          "dmls"
+        ]
+      }
+    },
+    {
+      "id": "dmls-bin-args",
+      "package": "dmls",
+      "match": {
+        "suites": [
+          "dmls::bin/dmls"
+        ]
+      }
+    },
+    {
+      "id": "dmls-l1-lsp-session",
+      "package": "dmls",
+      "match": {
+        "suites": [
+          "dmls::lsp_session",
+          "dmls::suggest_constraint_phase1"
+        ]
+      }
+    },
+    {
+      "id": "dmls-l1-passive-proof",
+      "package": "dmls",
+      "match": {
+        "suites": [
+          "dmls::no_side_effects"
+        ]
+      }
+    },
+    {
+      "id": "dmls-l1-workspace-fixtures",
+      "package": "dmls",
+      "match": {
+        "suites": [
+          "dmls::level1_graph_index",
+          "dmls::level1_wiki"
+        ]
+      }
+    },
+    {
+      "id": "dmls-l1-stdio-subprocess",
+      "package": "dmls",
+      "match": {
+        "suites": [
+          "dmls::stdio_subprocess"
+        ]
+      }
+    },
+    {
+      "id": "dmls-l1-packaging-contracts",
+      "package": "dmls",
+      "match": {
+        "suites": [
+          "dmls::packaging_contract",
+          "dmls::zed_extension_contract"
+        ]
+      }
+    },
+    {
+      "id": "dmls-l2-neovim",
+      "package": "dmls",
+      "match": {
+        "suites": [
+          "dmls::level2_editor_neovim"
+        ]
+      }
+    },
+    {
+      "id": "zed-cli-unit",
+      "package": "zed-dmls-cli",
+      "match": {
+        "suites": [
+          "zed-dmls-cli"
+        ]
+      }
+    },
+    {
+      "id": "zed-cli-bin-args",
+      "package": "zed-dmls-cli",
+      "match": {
+        "suites": [
+          "zed-dmls-cli::bin/zed-dmls"
+        ]
+      }
+    },
+    {
+      "id": "zed-cli-raw-spawn",
+      "package": "zed-dmls-cli",
+      "match": {
+        "suites": [
+          "zed-dmls-cli::cli"
+        ]
+      }
+    }
+  ],
+  "exclusions": [
+    {
+      "package": "darkmatter",
+      "name": "comparison_key_equates_legacy_and_verbatim_unc",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "comparison_key_keeps_unpaired_surrogates_distinct",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "safe_repo_root_contains_declined_long_verbatim_descendant",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "unsafe_components_do_not_survive_namespace_removal",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "non_unicode_component_does_not_survive_namespace_removal",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "component_length_is_measured_in_utf16_units",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "repo_anchor_preserves_every_unsafe_category",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "anchored_over_max_path_destination_still_normalizes",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "env_anchor_preserves_every_unsafe_category",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "home_anchor_preserves_every_unsafe_category",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "env_anchored_over_max_path_destination_still_normalizes",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "home_anchored_over_max_path_destination_still_normalizes",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "declined_absolute_destination_is_preserved_and_warned",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "declined_resolved_destination_errors_before_transclusion",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "link_local_destination_arms_reject_declined_paths",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "windows_caller_file_native_and_presentation_values_share_one_identity",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "transcluded_child_under_a_declined_path_becomes_a_visible_notice",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "fail_fast_surfaces_the_declined_child_link_as_an_error",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter",
+      "name": "transcluded_child_under_an_ordinary_path_still_composes",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter-cli",
+      "name": "unc_directory_candidate_stays_native",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter-cli",
+      "name": "declined_directory_completes_without_mixing_separators",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "darkmatter-cli",
+      "name": "compose_redirected_appearance_defaults_probe_is_macos_only",
+      "gate": "#[cfg(not(target_os = \"macos\"))]",
+      "route": "ubuntu-latest, windows-latest and wsl2-ubuntu L1; its macOS twin `compose_redirected_does_not_spawn_appearance_defaults` runs on macos-latest and this host"
+    },
+    {
+      "package": "dmls",
+      "name": "windows_paths_serialize_with_a_drive_letter_and_forward_slashes",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "dmls",
+      "name": "test_uri_to_file_path_windows_drive_letter",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    },
+    {
+      "package": "zed-dmls-cli",
+      "name": "junction_registration_survives_source_worktree_removal_on_windows",
+      "gate": "#[cfg(windows)]",
+      "route": "windows-latest L1 (`_package-ci.yml` test job); compiled nowhere else"
+    }
+  ]
+}

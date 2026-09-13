@@ -15,13 +15,99 @@
 //! the child, so the test can never hang the suite.
 
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use biscuit_test_harness::bin_exe;
 use serde_json::{Value, json};
+use wait_timeout::ChildExt;
+
+struct ChildGuard {
+    child: Option<Child>,
+}
+
+impl ChildGuard {
+    fn new(child: Child) -> Self {
+        Self { child: Some(child) }
+    }
+
+    fn child_mut(&mut self) -> &mut Child {
+        self.child.as_mut().expect("child already reaped")
+    }
+
+    fn wait_timeout(&mut self, timeout: Duration) -> std::io::Result<Option<ExitStatus>> {
+        let status = self.child_mut().wait_timeout(timeout)?;
+        if status.is_some() {
+            self.child.take();
+        }
+        Ok(status)
+    }
+
+    fn terminate(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        self.terminate();
+    }
+}
+
+const CANCELLATION_READY: &str = "DMLS_CANCELLATION_READY";
+const CANCELLATION_FINISHED: &str = "DMLS_CANCELLATION_FINISHED";
+
+#[test]
+fn child_guard_cancellation_probe() {
+    let (Ok(ready), Ok(finished)) = (
+        std::env::var(CANCELLATION_READY),
+        std::env::var(CANCELLATION_FINISHED),
+    ) else {
+        return;
+    };
+    std::fs::write(ready, b"ready").unwrap();
+    thread::sleep(Duration::from_millis(250));
+    std::fs::write(finished, b"finished").unwrap();
+}
+
+#[test]
+fn child_guard_reaps_process_during_unwind() {
+    let dir = tempfile::tempdir().unwrap();
+    let ready = dir.path().join("ready");
+    let finished = dir.path().join("finished");
+    let result = std::panic::catch_unwind(|| {
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "child_guard_cancellation_probe", "--nocapture"])
+            .env(CANCELLATION_READY, &ready)
+            .env(CANCELLATION_FINISHED, &finished)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn cancellation probe");
+        let _guard = ChildGuard::new(child);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !ready.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(ready.exists(), "cancellation probe did not start");
+        panic!("simulate a panicking assertion");
+    });
+    assert!(result.is_err(), "the cancellation path must unwind");
+
+    // The child would write this marker after 250 ms if the guard detached it.
+    // Waiting beyond that floor is the observable cancellation contract.
+    thread::sleep(Duration::from_millis(350));
+    assert!(
+        !finished.exists(),
+        "the child survived the parent assertion panic"
+    );
+}
 
 /// Frames a JSON-RPC message with the LSP `Content-Length` header.
 fn write_message(stdin: &mut impl Write, message: &Value) {
@@ -66,9 +152,19 @@ fn await_response(reader: &mut impl BufRead, id: i64) -> Option<Value> {
 
 #[test]
 fn native_binary_speaks_lsp_over_stdio() {
-    let mut child = Command::new(bin_exe!("dmls"))
+    let fixture = tempfile::tempdir().expect("create isolated dmls process root");
+    for name in ["home", "cache", "config", "data"] {
+        std::fs::create_dir(fixture.path().join(name)).unwrap();
+    }
+    let child = Command::new(bin_exe!("dmls"))
         // `--stdio` is a no-op the binary accepts for editor compatibility.
         .arg("--stdio")
+        .current_dir(fixture.path())
+        .env("HOME", fixture.path().join("home"))
+        .env("USERPROFILE", fixture.path().join("home"))
+        .env("XDG_CACHE_HOME", fixture.path().join("cache"))
+        .env("XDG_CONFIG_HOME", fixture.path().join("config"))
+        .env("XDG_DATA_HOME", fixture.path().join("data"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         // Discard the log stream so it can never fill a pipe or trip the
@@ -76,9 +172,10 @@ fn native_binary_speaks_lsp_over_stdio() {
         .stderr(Stdio::null())
         .spawn()
         .expect("spawn the compiled dmls binary");
+    let mut child = ChildGuard::new(child);
 
-    let mut stdin = child.stdin.take().expect("child stdin");
-    let stdout = child.stdout.take().expect("child stdout");
+    let mut stdin = child.child_mut().stdin.take().expect("child stdin");
+    let stdout = child.child_mut().stdout.take().expect("child stdout");
 
     // Run the whole conversation on a worker so the main thread can enforce a
     // hard timeout and kill the child if the server ever stalls.
@@ -97,7 +194,9 @@ fn native_binary_speaks_lsp_over_stdio() {
             }),
         );
         let Some(initialize) = await_response(&mut reader, 1) else {
-            let _ = tx.send(Err("stream ended before the initialize response".to_string()));
+            let _ = tx.send(Err(
+                "stream ended before the initialize response".to_string()
+            ));
             return;
         };
 
@@ -124,25 +223,19 @@ fn native_binary_speaks_lsp_over_stdio() {
 
     let outcome = rx.recv_timeout(Duration::from_secs(20));
     if outcome.is_err() {
-        let _ = child.kill();
+        child.terminate();
     }
 
-    // Reap the child within a bounded window so a wedged process never hangs the
-    // suite (and never leaks past nextest's leak-timeout).
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break;
-            }
-            Ok(None) => thread::sleep(Duration::from_millis(20)),
-            Err(_) => break,
-        }
-    }
     let _ = worker.join();
+
+    let status = child
+        .wait_timeout(Duration::from_secs(10))
+        .expect("wait for dmls process")
+        .unwrap_or_else(|| {
+            child.terminate();
+            panic!("dmls did not exit within 10 seconds after the exit notification")
+        });
+    assert!(status.success(), "dmls exited unsuccessfully: {status}");
 
     let initialize = outcome
         .expect("dmls answered the handshake before the timeout")

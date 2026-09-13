@@ -22,7 +22,7 @@
 
 
 mod common;
-use common::{TestWorkspace, augmented_path, strip_ansi, write, write_executable};
+use common::{CliProcessFixture, strip_ansi, write, write_executable};
 
 #[cfg(windows)]
 fn shim_name(name: &str) -> String {
@@ -54,9 +54,9 @@ fn failing_provider_shim() -> String {
 /// Run `claudine compose --claude <doc>` in an isolated workspace, returning
 /// plain (escape-stripped) stderr.
 fn compose_stderr(doc_body: &str, extra_args: &[&str]) -> String {
-    let workspace = TestWorkspace::named("claudine-effective-diagnostic");
-    let root = workspace.path();
-    let bin_dir = root.join("bin");
+    let fixture = CliProcessFixture::named("claudine-effective-diagnostic");
+    let root = fixture.cwd();
+    let bin_dir = fixture.bin_dir();
     write_executable(&bin_dir.join(shim_name("claude")), PROVIDER_SHIM);
 
     let doc = root.join("route.md");
@@ -67,10 +67,8 @@ fn compose_stderr(doc_body: &str, extra_args: &[&str]) -> String {
     let doc_arg = doc.to_str().unwrap().to_string();
     args.push(&doc_arg);
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("PATH", augmented_path(&bin_dir))
-        .current_dir(root)
+    let output = fixture
+        .command()
         .args(&args)
         .output()
         .expect("spawn claudine");
@@ -189,9 +187,9 @@ Body
 /// mechanism, which is why it survived Phase 5.
 #[test]
 fn terminal_proxy_resolution_failure_renders_a_status_block() {
-    let workspace = TestWorkspace::named("claudine-terminal-proxy");
-    let root = workspace.path();
-    let bin_dir = root.join("bin");
+    let fixture = CliProcessFixture::named("claudine-terminal-proxy");
+    let root = fixture.cwd();
+    let bin_dir = fixture.bin_dir();
     // Exit non-zero so the `failure` stack — and its proxy hand-off — runs.
     write_executable(&bin_dir.join(shim_name("claude")), &failing_provider_shim());
 
@@ -208,10 +206,8 @@ Body
 "#,
     );
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("PATH", augmented_path(&bin_dir))
-        .current_dir(root)
+    let output = fixture
+        .command()
         .args(["compose", "--claude", doc.to_str().unwrap()])
         .output()
         .expect("spawn claudine");
@@ -246,19 +242,17 @@ Body
 #[test]
 fn status_block_is_plain_and_informative_when_piped() {
     let raw = {
-        let workspace = TestWorkspace::named("claudine-effective-diagnostic-plain");
-        let root = workspace.path();
-        let bin_dir = root.join("bin");
+        let fixture = CliProcessFixture::named("claudine-effective-diagnostic-plain");
+        let root = fixture.cwd();
+        let bin_dir = fixture.bin_dir();
         write_executable(&bin_dir.join(shim_name("claude")), PROVIDER_SHIM);
         let doc = root.join("route.md");
         write(
             &doc,
             "---\ntitle: t\ninitialize:\n  stack:\n    - action: {proxy: \"no/such/target.md\"}\n---\nBody\n",
         );
-        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
-            .env("PATH", augmented_path(&bin_dir))
-            .current_dir(root)
+        let output = fixture
+            .command()
             .args(["compose", "--claude", doc.to_str().unwrap()])
             .output()
             .expect("spawn claudine");

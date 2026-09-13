@@ -42,6 +42,10 @@ build *args="":
     @just _build {{ DAEMON }} "Rendezvous Daemon" {{ args }}
     @just _build {{ CLIENT }} "Rendezvous Test Client" {{ args }}
 
+# Fast confidence subset (lib + bins, !slow) across all three crates.
+sanity:
+    @just _sanity_all "{{ CORE }} {{ DAEMON }} {{ CLIENT }}"
+
 # Test all three rendezvous crates.
 test *args="":
     @just _test_all "{{ CORE }} {{ DAEMON }} {{ CLIENT }}" {{ args }}
@@ -49,6 +53,51 @@ test *args="":
 # Level-2 (real-terminal) tests are not applicable to rendezvous.
 test-l2 *args="":
     @echo "test-l2: not applicable for rendezvous"
+
+# not applicable: rendezvous injects no OS keyboard or mouse input.
+test-l3:
+    @echo "test-l3: not applicable for rendezvous"
+
+# not applicable: rendezvous serves gRPC over a local endpoint, not HTML.
+test-browser:
+    @echo "test-browser: not applicable for rendezvous"
+
+# opt-in real_ tier: `rendezvous-daemon::peer_discovery`'s two mDNS identities
+# bind a real multicast responder to this host's network and discover a second
+# daemon over it. They are named `real_*`, so every other recipe's tier filter
+# excludes them — before this recipe existed they compiled on every run and
+# executed on none.
+test-real *args="":
+    @just _test_real {{ DAEMON }} {{ args }}
+
+# Doctests for all three rendezvous crates.
+doctest *args="":
+    @just _doctest {{ CORE }} {{ args }}
+    @just _doctest {{ DAEMON }} {{ args }}
+    @just _doctest {{ CLIENT }} {{ args }}
+
+# not applicable: rendezvous declares no criterion benchmark targets.
+bench:
+    @echo "bench: not applicable for rendezvous"
+
+# Per-crate LCOV coverage.
+coverage *args="":
+    @just _coverage {{ CORE }} {{ args }}
+    @just _coverage {{ DAEMON }} {{ args }}
+    @just _coverage {{ CLIENT }} {{ args }}
+
+# not applicable: rendezvous has no cargo-fuzz targets.
+fuzz:
+    @echo "fuzz: not applicable for rendezvous"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
 
 # Lint all three rendezvous crates.
 lint:

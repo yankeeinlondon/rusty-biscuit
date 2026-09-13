@@ -9,6 +9,16 @@ use tracing::info_span;
 ///
 /// ## Notes
 ///
+/// A completed attempt is a success only when the provider both exited 0 **and**
+/// its stream parser judged the session clean. Exit code 0 alone proves nothing:
+/// a provider can force-stop its own sub-agents, finish the parent turn, and
+/// exit 0, and Claude Code did exactly that in the 2026-08-31 incident. So a
+/// `Completed` attempt is an [`FailureEvent::AgentFailure`] when *either*
+/// `exit_code != 0` *or* `is_error` is set. This is the general
+/// provider-agnostic semantic-error contract, not a Claude special case — any
+/// parser that truthfully reports `is_error` now routes through failure, which
+/// may surface pre-existing failures that used to look successful.
+///
 /// `ProcessTermination::Aborted` (a claudine content-guard trip —
 /// exit-expression, runaway-repetition, or volume-cap) deliberately maps
 /// to [`FailureEvent::AgentFailure`] rather than [`FailureEvent::Timeout`]:
@@ -22,6 +32,7 @@ pub fn classify_failure(outcome: &AttemptOutcome) -> Option<FailureEvent> {
         "harness_classify_failure",
         termination = %outcome.termination,
         exit_code = outcome.exit_code,
+        is_error = outcome.is_error,
         attempt = outcome.attempt,
     )
     .entered();
@@ -31,7 +42,7 @@ pub fn classify_failure(outcome: &AttemptOutcome) -> Option<FailureEvent> {
         ProcessTermination::LaunchFailed => Some(FailureEvent::AgentFailure),
         ProcessTermination::Aborted => Some(FailureEvent::AgentFailure),
         ProcessTermination::Completed => {
-            if outcome.exit_code != 0 {
+            if outcome.exit_code != 0 || outcome.is_error {
                 Some(FailureEvent::AgentFailure)
             } else {
                 None // Success, no failure event
@@ -50,6 +61,7 @@ pub fn build_attempt_outcome(
         attempt,
         termination = %termination,
         exit_code = summary.exit_code,
+        is_error = summary.is_error,
         has_session_id = summary.session_id.is_some(),
     )
     .entered();
@@ -58,6 +70,10 @@ pub fn build_attempt_outcome(
         session_id: summary.session_id.clone(),
         final_response: summary.assistant_text.clone(),
         exit_code: summary.exit_code,
+        // The parser's semantic verdict is authoritative even when the
+        // process exited 0; dropping it here is what let a run with
+        // force-stopped sub-agents fire the success lifecycle stack.
+        is_error: summary.is_error,
         termination,
         stderr_text: summary.stderr_text.clone(),
         // Preserve the synthesized per-guard label so the failure-handler

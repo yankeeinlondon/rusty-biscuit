@@ -140,11 +140,7 @@ impl RepoDocuments {
 
     /// Returns metadata for all markdown documents in the repository.
     pub fn documents(&self) -> Vec<MarkdownMeta> {
-        collect_markdown_files_with_index(
-            &self.repo_root,
-            &self.packages,
-            &self.ownership_index,
-        )
+        collect_markdown_files_with_index(&self.repo_root, &self.packages, &self.ownership_index)
     }
 
     /// Returns metadata for markdown documents that have a "prompt" property set.
@@ -596,7 +592,7 @@ where
                 entry
                     .path()
                     .strip_prefix(repo_root)
-                .map(|rel| path_filter(&rel.to_string_lossy().replace('\\', "/")))
+                    .map(|rel| path_filter(&rel.to_string_lossy().replace('\\', "/")))
                     .unwrap_or(false)
             })
             .map(|entry| entry.path().to_path_buf())
@@ -676,13 +672,7 @@ pub(crate) fn parse_markdown_meta_with_mode(
 ) -> Option<MarkdownMeta> {
     let ownership_index = (!packages.is_empty())
         .then(|| PackageOwnershipIndex::from_relative_paths(repo_root, packages));
-    parse_markdown_meta_with_ownership(
-        path,
-        repo_root,
-        packages,
-        ownership_index.as_ref(),
-        mode,
-    )
+    parse_markdown_meta_with_ownership(path, repo_root, packages, ownership_index.as_ref(), mode)
 }
 
 fn parse_markdown_meta_with_ownership(
@@ -1351,18 +1341,12 @@ mod tests {
 
             let packages = vec![
                 ("parent".to_string(), PathBuf::from("crates/pkg-a")),
-                (
-                    "nested".to_string(),
-                    PathBuf::from("crates/pkg-a/nested"),
-                ),
+                ("nested".to_string(), PathBuf::from("crates/pkg-a/nested")),
                 ("sibling".to_string(), PathBuf::from("crates/pkg-a2")),
             ];
 
             assert_eq!(
-                determine_package(
-                    Path::new("crates/pkg-a/nested/docs/design.md"),
-                    &packages,
-                ),
+                determine_package(Path::new("crates/pkg-a/nested/docs/design.md"), &packages,),
                 Some("nested".to_string())
             );
             assert_eq!(

@@ -15,20 +15,17 @@
 
 #![cfg(unix)]
 
-#[allow(deprecated)]
-use assert_cmd::cargo::cargo_bin;
 use expectrl::Session;
 use expectrl::process::unix::WaitStatus;
 use expectrl::session::OsSession;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
-use tempfile::tempdir;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Level, expect_level};
 
 mod common;
-use common::{augmented_path, pty_available, strip_ansi, write_executable};
+use common::{CliProcessFixture, pty_available, strip_ansi, write_executable};
 
 const MAX_CANDIDATES: usize = 500;
 
@@ -62,56 +59,52 @@ fn drain_available(session: &mut OsSession, total_deadline: Duration) -> String 
 /// - Empty user config so the first-run wizard does not intercept input.
 /// - A fake `goose` provider that records any launch with a marker file and
 ///   stderr output (so the test can prove the provider was never reached).
-fn stage_workspace() -> (tempfile::TempDir, PathBuf, PathBuf) {
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    let prompts_dir = workspace.path().join("prompts");
-    fs::create_dir_all(&bin_dir).unwrap();
+fn stage_workspace() -> (CliProcessFixture, PathBuf) {
+    let fixture = CliProcessFixture::named("level1-compose-autocomplete-pty");
+    let prompts_dir = fixture.cwd().join("prompts");
     fs::create_dir_all(&prompts_dir).unwrap();
-    fs::create_dir_all(workspace.path().join(".git")).unwrap();
+    fs::create_dir_all(fixture.cwd().join(".git")).unwrap();
 
-    let claudine_dir = workspace.path().join(".claudine");
+    let claudine_dir = fixture.home().join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
     fs::write(claudine_dir.join("config.json"), "{}").unwrap();
 
-    let marker = workspace.path().join("provider-launched.flag");
+    let marker = fixture.cwd().join("provider-launched.flag");
     write_executable(
-        &bin_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho 'PROVIDER_WAS_LAUNCHED' > {marker}\nexit 1\n",
             marker = marker.display()
         ),
     );
 
-    (workspace, bin_dir, prompts_dir)
+    (fixture, prompts_dir)
 }
 
 /// Build a PTY-spawnable `claudine compose --goose <query>` command inside the
 /// staged workspace.
-fn compose_command(workspace: &Path, bin_dir: &Path, query: &str) -> Command {
-    let mut cmd = Command::new(cargo_bin("claudine"));
+///
+/// `expectrl` needs a live `std::process::Command`, so this is the builder's
+/// raw surface; the call site keeps only what the PTY itself requires.
+fn compose_command(fixture: &CliProcessFixture, query: &str) -> Command {
+    let mut cmd = fixture.command_std();
     cmd.args(["compose", "--goose", query]);
-    cmd.env("HOME", workspace);
-    cmd.env("PATH", augmented_path(bin_dir));
-    cmd.env("NO_COLOR", "1");
     cmd.env("TERM", "xterm-256color");
     cmd.env("TERM_WIDTH", "80");
     cmd.env_remove("CLAUDINE_PLAIN");
     cmd.env_remove("CI");
-    cmd.current_dir(workspace);
     cmd
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level1_pty_compose_autocomplete_no_match_errors() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let (workspace, bin_dir, prompts_dir) = stage_workspace();
+    let (fixture, prompts_dir) = stage_workspace();
     fs::write(prompts_dir.join("alpha.md"), "---\n---\nbody\n").unwrap();
     fs::write(prompts_dir.join("beta.md"), "---\n---\nbody\n").unwrap();
 
-    let cmd = compose_command(workspace.path(), &bin_dir, "nomatch");
+    let cmd = compose_command(&fixture, "nomatch");
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
     let transcript = drain_available(&mut session, Duration::from_secs(5));
 
@@ -132,7 +125,7 @@ fn level1_pty_compose_autocomplete_no_match_errors() {
         "expected query name in no-match error; transcript:\n{plain}"
     );
 
-    let marker = workspace.path().join("provider-launched.flag");
+    let marker = fixture.cwd().join("provider-launched.flag");
     assert!(
         !marker.exists(),
         "provider must not launch when autocomplete finds no matches"
@@ -144,17 +137,16 @@ fn level1_pty_compose_autocomplete_no_match_errors() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level1_pty_compose_autocomplete_over_cap_errors() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let (workspace, bin_dir, prompts_dir) = stage_workspace();
+    let (fixture, prompts_dir) = stage_workspace();
     for i in 0..MAX_CANDIDATES + 1 {
         let name = format!("match{:03}.md", i + 1);
         fs::write(prompts_dir.join(&name), "---\n---\nbody\n").unwrap();
     }
 
-    let cmd = compose_command(workspace.path(), &bin_dir, "match");
+    let cmd = compose_command(&fixture, "match");
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
     let transcript = drain_available(&mut session, Duration::from_secs(10));
 
@@ -183,7 +175,7 @@ fn level1_pty_compose_autocomplete_over_cap_errors() {
         "expected narrowing hint in over-cap error; transcript:\n{plain}"
     );
 
-    let marker = workspace.path().join("provider-launched.flag");
+    let marker = fixture.cwd().join("provider-launched.flag");
     assert!(
         !marker.exists(),
         "provider must not launch when autocomplete exceeds the candidate cap"

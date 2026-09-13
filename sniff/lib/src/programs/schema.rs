@@ -299,12 +299,13 @@ pub trait ProgramMetadata: Sized {
             });
         }
 
-        let output = process::run_with_timeout(path, args, timeouts::PROGRAM_SCHEMA).map_err(
-            |e| ProgramError::ExecutionFailed {
-                program: info.binary_name.to_string(),
-                source: e.into(),
-            },
-        )?;
+        let output =
+            process::run_with_timeout(path, args, timeouts::PROGRAM_SCHEMA).map_err(|e| {
+                ProgramError::ExecutionFailed {
+                    program: info.binary_name.to_string(),
+                    source: e.into(),
+                }
+            })?;
 
         // Some programs print --version to stderr — fall back when stdout is empty.
         let text = if output.stdout.is_empty() {

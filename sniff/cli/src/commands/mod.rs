@@ -98,10 +98,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if matches!(cli.command.as_ref(), Some(Commands::Runtime)) {
         let runtime = sniff::os::detect_runtime_environment();
         if cli.json {
-            output::print_json_value(
-                serde_json::to_value(runtime)?,
-                perf.build_report().as_ref(),
-            );
+            output::print_json_value(serde_json::to_value(runtime)?, perf.build_report().as_ref());
         } else {
             output::emit_text(&output::render_runtime_environment(runtime), cli.plain);
             perf.emit_stdout(None);
@@ -831,8 +828,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // Count the canonical catalog so a recognized standalone project
                 // reports `1` rather than `0`. `RepoIdentity::package_count` is
                 // only populated for monorepos, so it cannot serve this path.
-                let root =
-                    sniff::filesystem::repo_root(dir)?.unwrap_or_else(|| dir.to_path_buf());
+                let root = sniff::filesystem::repo_root(dir)?.unwrap_or_else(|| dir.to_path_buf());
                 let count = sniff::filesystem::repo::detect_repo_structure_or_root_package(&root)?
                     .and_then(|info| info.packages)
                     .map_or(0, |packages| packages.len());
@@ -2173,11 +2169,7 @@ fn select_git_request(
         // post-detection rediscovery or another status walk.
         GitRequest::full()
             .commit_count(history_count)
-            .metadata(
-                GitMetadataRequest::none()
-                    .remotes(true)
-                    .config(true),
-            )
+            .metadata(GitMetadataRequest::none().remotes(true).config(true))
     } else if lightweight {
         GitRequest::summary()
     } else if changes_only {
@@ -2273,10 +2265,9 @@ mod tests {
         std::fs::write(dir.path().join("tracked.rs"), "fn changed() {}\n").unwrap();
 
         let collector = sniff::performance::PerformanceCollector::new_shared();
-        let aggregate = sniff::performance::with_current_collector(
-            Some(collector.clone()),
-            || sniff::filesystem::repo::detect_repo_aggregate(dir.path()),
-        )
+        let aggregate = sniff::performance::with_current_collector(Some(collector.clone()), || {
+            sniff::filesystem::repo::detect_repo_aggregate(dir.path())
+        })
         .expect("aggregate command path succeeds");
         let counters = collector.snapshot(std::time::Duration::ZERO).counters;
 
@@ -2349,7 +2340,9 @@ mod tests {
         index
             .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
             .unwrap();
-        index.add_path(std::path::Path::new(".editorconfig")).unwrap();
+        index
+            .add_path(std::path::Path::new(".editorconfig"))
+            .unwrap();
         index.write().unwrap();
         let tree_id = index.write_tree().unwrap();
         {
@@ -2360,11 +2353,11 @@ mod tests {
         std::fs::write(root.join("tracked.rs"), "fn changed() {}\n").unwrap();
 
         let collector = sniff::performance::PerformanceCollector::new_shared();
-        let observation = sniff::performance::with_current_collector(
-            Some(collector.clone()),
-            || sniff::filesystem::repo::detect_repo_aggregate(root),
-        )
-        .expect("aggregate command path succeeds");
+        let observation =
+            sniff::performance::with_current_collector(Some(collector.clone()), || {
+                sniff::filesystem::repo::detect_repo_aggregate(root)
+            })
+            .expect("aggregate command path succeeds");
         let counters = collector.snapshot(std::time::Duration::ZERO).counters;
         let count = |name: &str| counters.get(name).copied().unwrap_or(0);
 

@@ -1,7 +1,7 @@
 #![cfg(feature = "network")]
 
-use biscuit_file::FetchPolicy;
 use base64::Engine;
+use biscuit_file::FetchPolicy;
 use serial_test::serial;
 use sniff::SniffError;
 use sniff::filesystem::git::{branch_exists_on_remote_at, remote_vendor_at};
@@ -20,7 +20,8 @@ fn advertisement(refs: &[&str]) -> Vec<u8> {
     let mut body = Vec::new();
     for (index, reference) in refs.iter().enumerate() {
         let capabilities = if index == 0 { "\0multi_ack" } else { "" };
-        let packet = format!("0000000000000000000000000000000000000000 {reference}{capabilities}\n");
+        let packet =
+            format!("0000000000000000000000000000000000000000 {reference}{capabilities}\n");
         body.extend_from_slice(format!("{:04x}", packet.len() + 4).as_bytes());
         body.extend_from_slice(packet.as_bytes());
     }
@@ -48,10 +49,10 @@ async fn branch_observation_reads_live_advertisement_without_local_mutation() {
     Mock::given(method("GET"))
         .and(path("/acme/project.git/info/refs"))
         .and(query_param("service", "git-upload-pack"))
-        .respond_with(ResponseTemplate::new(200).set_body_bytes(advertisement(&[
-            "refs/heads/main",
-            "refs/heads/release",
-        ])))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(advertisement(&["refs/heads/main", "refs/heads/release"])),
+        )
         .expect(3)
         .mount(&server)
         .await;
@@ -62,24 +63,42 @@ async fn branch_observation_reads_live_advertisement_without_local_mutation() {
 
     let root = directory.path().to_path_buf();
     let policy_copy = policy.clone();
-    assert!(tokio::task::spawn_blocking(move || {
-        branch_exists_on_remote_at(&root, Some("release"), None, &policy_copy)
-    }).await.unwrap().unwrap());
+    assert!(
+        tokio::task::spawn_blocking(move || {
+            branch_exists_on_remote_at(&root, Some("release"), None, &policy_copy)
+        })
+        .await
+        .unwrap()
+        .unwrap()
+    );
     let root = directory.path().to_path_buf();
-    assert!(!tokio::task::spawn_blocking(move || {
-        branch_exists_on_remote_at(&root, Some("missing"), None, &policy)
-    }).await.unwrap().unwrap());
+    assert!(
+        !tokio::task::spawn_blocking(move || {
+            branch_exists_on_remote_at(&root, Some("missing"), None, &policy)
+        })
+        .await
+        .unwrap()
+        .unwrap()
+    );
     let root = directory.path().to_path_buf();
-    assert!(tokio::task::spawn_blocking(move || {
-        branch_exists_on_remote_at(
-            &root,
-            Some("refs/heads/release"),
-            None,
-            &FetchPolicy::deny_all().allow_host("127.0.0.1"),
-        )
-    }).await.unwrap().unwrap());
+    assert!(
+        tokio::task::spawn_blocking(move || {
+            branch_exists_on_remote_at(
+                &root,
+                Some("refs/heads/release"),
+                None,
+                &FetchPolicy::deny_all().allow_host("127.0.0.1"),
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap()
+    );
 
-    assert_eq!(std::fs::read_to_string(repository.path().join("config")).unwrap(), config_before);
+    assert_eq!(
+        std::fs::read_to_string(repository.path().join("config")).unwrap(),
+        config_before
+    );
     assert_eq!(repository.references().unwrap().count(), refs_before);
 }
 
@@ -95,8 +114,17 @@ async fn invalid_branch_is_rejected_before_any_request() {
             None,
             &FetchPolicy::deny_all().allow_host("127.0.0.1"),
         )
-    }).await.unwrap().unwrap_err();
-    assert!(matches!(error, SniffError::Git { operation: "remote_branch_name", .. }));
+    })
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        SniffError::Git {
+            operation: "remote_branch_name",
+            ..
+        }
+    ));
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 
@@ -107,7 +135,10 @@ async fn deny_policy_rejects_before_any_request() {
     let root = directory.path().to_path_buf();
     let error = tokio::task::spawn_blocking(move || {
         branch_exists_on_remote_at(&root, Some("main"), None, &FetchPolicy::deny_all())
-    }).await.unwrap().unwrap_err();
+    })
+    .await
+    .unwrap()
+    .unwrap_err();
     assert!(matches!(error, SniffError::RemotePolicyDenied { .. }));
     assert!(server.received_requests().await.unwrap().is_empty());
 }
@@ -152,11 +183,16 @@ async fn redirect_and_rate_limit_errors_remain_distinct() {
                 None,
                 &FetchPolicy::deny_all().allow_host("127.0.0.1"),
             )
-        }).await.unwrap().unwrap_err();
+        })
+        .await
+        .unwrap()
+        .unwrap_err();
         if rate_limited {
             assert!(matches!(error, SniffError::RateLimited { .. }));
         } else {
-            assert!(matches!(error, SniffError::RemoteUnreachable { ref message, .. } if message.contains("redirect")));
+            assert!(
+                matches!(error, SniffError::RemoteUnreachable { ref message, .. } if message.contains("redirect"))
+            );
         }
     }
 }
@@ -186,7 +222,10 @@ async fn vendor_detection_is_local_when_unambiguous_and_allowlisted_when_probed(
             None,
             &FetchPolicy::deny_all().allow_host("127.0.0.1"),
         )
-    }).await.unwrap().unwrap();
+    })
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(vendor, "forgejo");
 
     let (github_directory, _) = repository("https://github.com/acme/project.git");
@@ -199,14 +238,26 @@ async fn vendor_detection_is_local_when_unambiguous_and_allowlisted_when_probed(
 #[tokio::test]
 async fn ambiguous_discovery_distinguishes_all_six_server_flavors() {
     let cases = [
-        ("/api/v3/meta", serde_json::json!({ "installed_version": "3.16.1" }), "github"),
+        (
+            "/api/v3/meta",
+            serde_json::json!({ "installed_version": "3.16.1" }),
+            "github",
+        ),
         (
             "/api/v4/version",
             serde_json::json!({ "version": "17.2.0", "revision": "a1b2c3d4" }),
             "gitlab",
         ),
-        ("/api/v1/version", serde_json::json!({ "version": "1.25.0" }), "gitea"),
-        ("/api/v1/version", serde_json::json!({ "version": "Forgejo 14.0.0" }), "forgejo"),
+        (
+            "/api/v1/version",
+            serde_json::json!({ "version": "1.25.0" }),
+            "gitea",
+        ),
+        (
+            "/api/v1/version",
+            serde_json::json!({ "version": "Forgejo 14.0.0" }),
+            "forgejo",
+        ),
         (
             "/rest/api/1.0/application-properties",
             serde_json::json!({ "displayName": "Bitbucket", "version": "9.4.1" }),
@@ -389,14 +440,17 @@ async fn ambiguous_discovery_keeps_credentials_host_and_provider_bound() {
     );
     for request in &requests {
         assert!(!request.headers.contains_key("authorization"));
-        if request.url.path() != "/api/v4/version"
-            || !request.headers.contains_key("private-token")
+        if request.url.path() != "/api/v4/version" || !request.headers.contains_key("private-token")
         {
             assert!(!request.headers.contains_key("private-token"));
         }
         let rendered = format!("{:?}", request.headers);
         for (_, secret) in global_tokens {
-            assert!(!rendered.contains(secret), "global credential reached {}", request.url);
+            assert!(
+                !rendered.contains(secret),
+                "global credential reached {}",
+                request.url
+            );
         }
     }
 
@@ -471,7 +525,10 @@ async fn unsigned_authentication_challenges_use_only_one_host_bound_provider_cre
         ("GH_TOKEN", "unsigned-global-github-secret"),
         ("GITHUB_TOKEN", "unsigned-global-github-fallback-secret"),
         ("GITLAB_TOKEN", "unsigned-global-gitlab-secret"),
-        ("GITLAB_PRIVATE_TOKEN", "unsigned-global-gitlab-fallback-secret"),
+        (
+            "GITLAB_PRIVATE_TOKEN",
+            "unsigned-global-gitlab-fallback-secret",
+        ),
         ("GITEA_TOKEN", "unsigned-global-gitea-secret"),
         ("FORGEJO_TOKEN", "unsigned-global-forgejo-secret"),
         ("CODEBERG_TOKEN", "unsigned-global-codeberg-secret"),
@@ -683,7 +740,10 @@ async fn host_bound_discovery_uses_each_providers_exact_authentication_header() 
         ("GH_TOKEN", "matrix-global-github-secret"),
         ("GITHUB_TOKEN", "matrix-global-github-fallback-secret"),
         ("GITLAB_TOKEN", "matrix-global-gitlab-secret"),
-        ("GITLAB_PRIVATE_TOKEN", "matrix-global-gitlab-fallback-secret"),
+        (
+            "GITLAB_PRIVATE_TOKEN",
+            "matrix-global-gitlab-fallback-secret",
+        ),
         ("GITEA_TOKEN", "matrix-global-gitea-secret"),
         ("FORGEJO_TOKEN", "matrix-global-forgejo-secret"),
         ("CODEBERG_TOKEN", "matrix-global-codeberg-secret"),
@@ -730,7 +790,11 @@ async fn host_bound_discovery_uses_each_providers_exact_authentication_header() 
                         || request.headers.contains_key("private-token")
                 })
                 .collect::<Vec<_>>();
-            assert_eq!(authenticated.len(), 1, "{expected} signed={signed_challenge}");
+            assert_eq!(
+                authenticated.len(),
+                1,
+                "{expected} signed={signed_challenge}"
+            );
             assert_eq!(
                 authenticated[0].headers[header_name].to_str().unwrap(),
                 header_value,
@@ -738,7 +802,10 @@ async fn host_bound_discovery_uses_each_providers_exact_authentication_header() 
             );
             let rendered = format!("{requests:?}");
             for (_, secret) in global_tokens {
-                assert!(!rendered.contains(secret), "global credential reached {expected}");
+                assert!(
+                    !rendered.contains(secret),
+                    "global credential reached {expected}"
+                );
             }
         }
 
@@ -756,7 +823,10 @@ async fn host_bound_discovery_uses_each_providers_exact_authentication_header() 
         assert!(!format!("{error:?}\n{error}").contains(&invalid_token));
         let rendered = format!("{:?}", server.received_requests().await.unwrap());
         for (_, secret) in global_tokens {
-            assert!(!rendered.contains(secret), "global credential reached {expected}");
+            assert!(
+                !rendered.contains(secret),
+                "global credential reached {expected}"
+            );
         }
     }
 }

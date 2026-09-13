@@ -362,16 +362,60 @@ mod tests {
             .unwrap_or(false)
     }
 
+    /// Two absolute roots that exist only as values.
+    ///
+    /// `std::env::temp_dir()` is absolute on every supported platform, and
+    /// nothing here opens either path — they are joined onto and compared.
+    fn synthetic_roots() -> (PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join("claudine-provider-skill-paths");
+        (base.join("home"), base.join("repo"))
+    }
+
+    /// A path table over [`synthetic_roots`].
+    ///
+    /// The tests below assert what capability metadata derives — which provider
+    /// gets which directory, at which scope. `ProviderSkillPaths::new()` answers
+    /// that identically, but first resolves the *ambient* repository root, which
+    /// under `cargo nextest` is the monorepo checkout: a full topology walk,
+    /// measured at 0.59 s against 0.00 s from an empty directory, paid once per
+    /// test. Discovery is not any of their subjects, so they do not buy it —
+    /// [`new_roots_the_table_at_the_process_home_and_the_resolved_repository`]
+    /// is the one case that keeps it, because the wiring *is* its subject.
+    fn synthetic_paths() -> ProviderSkillPaths {
+        let (home_dir, repo_root) = synthetic_roots();
+        ProviderSkillPaths::from_roots(home_dir, repo_root)
+    }
+
+    #[test]
+    fn new_roots_the_table_at_the_process_home_and_the_resolved_repository() {
+        let paths = ProviderSkillPaths::new();
+        let cwd = std::env::current_dir().expect("the test process has a working directory");
+
+        assert_eq!(
+            paths.home_dir,
+            dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")),
+            "`new` must root user-scope paths at the process home"
+        );
+        assert!(
+            paths.repo_root.is_absolute() && cwd.starts_with(&paths.repo_root),
+            "`new` must root repo-scope paths at a repository containing the launch \
+             directory; got {} for cwd {}",
+            paths.repo_root.display(),
+            cwd.display()
+        );
+        assert_eq!(paths.for_scope(ResourceScope::User).len(), ALL_PROVIDERS.len());
+    }
+
     #[test]
     fn new_populates_all_providers() {
-        let paths = ProviderSkillPaths::new();
+        let paths = synthetic_paths();
         let user_scope = paths.for_scope(ResourceScope::User);
         assert_eq!(user_scope.len(), ALL_PROVIDERS.len());
     }
 
     #[test]
     fn for_scope_contains_expected_skills_dirs() {
-        let paths = ProviderSkillPaths::new();
+        let paths = synthetic_paths();
         let user_scope = paths.for_scope(ResourceScope::User);
 
         let providers: Vec<Provider> = user_scope.iter().map(|(provider, _)| *provider).collect();
@@ -382,7 +426,7 @@ mod tests {
 
     #[test]
     fn commands_for_scope_uses_capability_metadata() {
-        let paths = ProviderSkillPaths::new();
+        let paths = synthetic_paths();
         let commands = paths.commands_for_scope(ResourceScope::User);
         let providers: Vec<Provider> = commands.iter().map(|(provider, _)| *provider).collect();
 
@@ -398,25 +442,39 @@ mod tests {
 
     #[test]
     fn opencode_also_reads_from_claude_for_skills() {
-        let paths = ProviderSkillPaths::new();
+        let (_, repo_root) = synthetic_roots();
+        let paths = synthetic_paths();
         let reads = paths.also_reads_from(
             Provider::OpenCode,
             LinkableResource::Skill,
             ResourceScope::Repo,
         );
-        assert!(reads.iter().any(|path| path.ends_with(".claude/skills")));
+        assert!(
+            reads.contains(&repo_root.join(".claude/skills")),
+            "OpenCode must read repo-scope skills from Claude's directory *under the \
+             repository root*; got {reads:?}"
+        );
     }
 
     #[test]
-    fn repo_scope_target_paths_are_absolute() {
-        let paths = ProviderSkillPaths::new();
-        let repo_target = paths.target_dir(
-            Provider::Claude,
-            LinkableResource::Skill,
-            ResourceScope::Repo,
-        );
-        assert!(repo_target.is_some());
-        assert!(repo_target.unwrap().is_absolute());
+    fn repo_scope_target_paths_are_rooted_at_the_repository() {
+        // Was `repo_scope_target_paths_are_absolute`, which a bare
+        // `PathBuf::from("/.claude/skills")` would also satisfy. The contract
+        // the linker relies on is that a repo-scope target is the *repository
+        // root* joined with the provider's directory, so relinking from another
+        // working directory still lands in the same tree.
+        let (_, repo_root) = synthetic_roots();
+        let paths = synthetic_paths();
+        let repo_target = paths
+            .target_dir(
+                Provider::Claude,
+                LinkableResource::Skill,
+                ResourceScope::Repo,
+            )
+            .expect("Claude supports Markdown skills at repo scope");
+
+        assert_eq!(repo_target, repo_root.join(".claude/skills"));
+        assert!(repo_target.is_absolute());
     }
 
     #[test]
@@ -449,7 +507,7 @@ mod tests {
 
     #[test]
     fn agents_for_scope_contains_markdown_providers() {
-        let paths = ProviderSkillPaths::new();
+        let paths = synthetic_paths();
         let agents = paths.agents_for_scope(ResourceScope::User);
         let providers: Vec<Provider> = agents.iter().map(|(p, _)| *p).collect();
 
@@ -459,25 +517,29 @@ mod tests {
 
     #[test]
     fn target_dir_resolves_agent_paths() {
-        let paths = ProviderSkillPaths::new();
-        let target = paths.target_dir(
-            Provider::Claude,
-            LinkableResource::Agent,
-            ResourceScope::User,
-        );
-        assert!(target.is_some());
-        assert!(target.unwrap().ends_with(".claude/agents"));
+        let (home_dir, _) = synthetic_roots();
+        let paths = synthetic_paths();
+        let target = paths
+            .target_dir(
+                Provider::Claude,
+                LinkableResource::Agent,
+                ResourceScope::User,
+            )
+            .expect("Claude supports Markdown agents at user scope");
+        assert_eq!(target, home_dir.join(".claude/agents"));
     }
 
     #[test]
     fn resource_dir_resolves_non_markdown_custom_paths() {
-        let paths = ProviderSkillPaths::new();
-        let gemini_cmds = paths.resource_dir(
-            Provider::Gemini,
-            LinkableResource::Command,
-            ResourceScope::User,
-        );
-        assert!(gemini_cmds.is_some());
-        assert!(gemini_cmds.unwrap().ends_with(".gemini/commands"));
+        let (home_dir, _) = synthetic_roots();
+        let paths = synthetic_paths();
+        let gemini_cmds = paths
+            .resource_dir(
+                Provider::Gemini,
+                LinkableResource::Command,
+                ResourceScope::User,
+            )
+            .expect("Gemini declares a user-scope command directory");
+        assert_eq!(gemini_cmds, home_dir.join(".gemini/commands"));
     }
 }

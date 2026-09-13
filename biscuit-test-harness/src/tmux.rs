@@ -13,8 +13,8 @@
 
 #![allow(dead_code)]
 
-use std::ffi::OsString;
 use std::io;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Once;
 use std::time::Duration;
@@ -45,21 +45,55 @@ pub fn spawn_shell_session_with_env(
     rows: u32,
     environment: &[(&str, &str)],
 ) -> io::Result<()> {
-    let shell_cmd = format!("{} -l", super::detect_shell());
     let mut cmd = Command::new("tmux");
-    cmd.args([
-        "new-session",
-        "-d",
-        "-s",
-        session,
-        "-x",
-        &cols.to_string(),
-        "-y",
-        &rows.to_string(),
-        &shell_cmd,
-    ]);
+    cmd.args(new_session_args(session, cols, rows, environment, None));
     cmd.envs(environment.iter().copied());
     run_new_session(&mut cmd)
+}
+
+/// Builds the `tmux new-session` argument vector for a detached harness pane.
+///
+/// ## Why `-e` rather than [`Command::env`]
+///
+/// A variable set on the `tmux` *client* process reaches the pane only when
+/// that client also starts the server; against an already-running server the
+/// session inherits the server's environment instead and the variable is
+/// silently dropped. `-e` sets it on the session tmux is creating, so it
+/// arrives either way.
+///
+/// The shell words are passed as separate arguments, which tmux `exec`s
+/// directly. A single string would be re-parsed by tmux's own command-string
+/// splitter before reaching the shell.
+fn new_session_args(
+    session: &str,
+    cols: u32,
+    rows: u32,
+    session_env: &[(&str, &str)],
+    bin_dir: Option<&Path>,
+) -> Vec<String> {
+    let mut args = vec![
+        "new-session".to_string(),
+        "-d".to_string(),
+        "-s".to_string(),
+        session.to_string(),
+        "-x".to_string(),
+        cols.to_string(),
+        "-y".to_string(),
+        rows.to_string(),
+    ];
+    if let Some(bin_dir) = bin_dir {
+        args.push("-e".to_string());
+        args.push(format!("BISCUIT_TEST_BIN_DIR={}", bin_dir.display()));
+    }
+    for (key, value) in session_env {
+        args.push("-e".to_string());
+        args.push(format!("{key}={value}"));
+    }
+    args.extend(super::login_shell_argv(
+        &super::detect_shell(),
+        bin_dir.is_some(),
+    ));
+    args
 }
 
 fn run_new_session(cmd: &mut Command) -> io::Result<()> {
@@ -330,38 +364,19 @@ impl TerminalHarness for TmuxHarness {
     /// The cargo target directory containing `bt` and `question` is
     /// prepended to `PATH` so CLI binaries resolve without an absolute
     /// path. Color-forcing env vars are applied so SGR output is
-    /// deterministic.
+    /// deterministic. The interactive shell the harness drives runs with
+    /// its rc files suppressed — see
+    /// [`configure_login_shell`](super::configure_login_shell).
     fn spawn_shell(&mut self) -> io::Result<()> {
         if !Self::available() {
             return Err(io::Error::other("tmux not available"));
         }
         CLEANUP_ONCE.call_once(cleanup_stale_tmux_sessions);
         let session = unique_session_name();
-        let shell = super::detect_shell();
-        let shell_cmd = format!("{} -l", shell);
+        let bin_dir = super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"));
 
         let mut cmd = Command::new("tmux");
-        cmd.args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "120",
-            "-y",
-            "40",
-            &shell_cmd,
-        ]);
-
-        if let Some(bin_dir) =
-            super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"))
-        {
-            let current_path = std::env::var_os("PATH").unwrap_or_default();
-            let mut new_path = OsString::from(bin_dir);
-            new_path.push(":");
-            new_path.push(current_path);
-            cmd.env("PATH", new_path);
-        }
+        cmd.args(new_session_args(&session, 120, 40, &[], bin_dir.as_deref()));
 
         // Force color on the spawned shell so `bt`'s color detection is
         // deterministic regardless of how the test runner inherits TTY
@@ -484,6 +499,42 @@ mod tests {
         assert!(should_retry_server_exit(0, "server exited unexpectedly"));
         assert!(!should_retry_server_exit(1, "server exited unexpectedly"));
         assert!(!should_retry_server_exit(0, "duplicate session: fixture"));
+    }
+
+    /// The Atuin regression for the CI backend: the shell tmux starts must be
+    /// the harness's two-stage invocation, never a bare `<shell> -l` whose
+    /// single interactive shell reads the host's rc file.
+    #[test]
+    fn new_session_args_end_with_the_two_stage_login_shell() {
+        let args = new_session_args("s", 120, 40, &[], None);
+        let expected = crate::login_shell_argv(&crate::detect_shell(), false);
+        assert_eq!(args[args.len() - expected.len()..], expected[..]);
+        assert!(
+            !args.iter().any(|a| a.ends_with(" -l")),
+            "no argument may be a pre-joined `<shell> -l` command string: {args:?}"
+        );
+    }
+
+    #[test]
+    fn new_session_args_pass_the_bin_dir_and_caller_env_through_tmux_e() {
+        let args = new_session_args("s", 120, 40, &[("FORCE_COLOR", "1")], Some(Path::new("/b")));
+        assert!(
+            args.contains(&"BISCUIT_TEST_BIN_DIR=/b".to_string()),
+            "{args:?}"
+        );
+        assert!(args.contains(&"FORCE_COLOR=1".to_string()), "{args:?}");
+        assert_eq!(args.iter().filter(|a| *a == "-e").count(), 2, "{args:?}");
+        assert!(
+            args.iter()
+                .any(|a| a.contains("$BISCUIT_TEST_BIN_DIR:$PATH")),
+            "a bin dir must also switch on the script's PATH prepend: {args:?}"
+        );
+    }
+
+    #[test]
+    fn new_session_args_omit_e_when_there_is_nothing_to_set() {
+        let args = new_session_args("s", 120, 40, &[], None);
+        assert!(!args.contains(&"-e".to_string()), "{args:?}");
     }
 
     #[test]

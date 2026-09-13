@@ -95,12 +95,7 @@ pub fn render_one(
 
 /// Markup for one entry: the bold version, plus a parenthetical with the
 /// source information (verbose) and/or attributing package (multi-entry).
-fn entry_markup(
-    entry: &VersionAttribution,
-    verbose: u8,
-    multi: bool,
-    repo_root: &Path,
-) -> String {
+fn entry_markup(entry: &VersionAttribution, verbose: u8, multi: bool, repo_root: &Path) -> String {
     let mut detail: Vec<String> = Vec::new();
     if verbose > 0 {
         detail.push(source_detail_markup(entry, repo_root));
@@ -116,7 +111,11 @@ fn entry_markup(
     if detail.is_empty() {
         format!("<b>{}</b>", entry.version)
     } else {
-        format!("<b>{}</b> (<dim>{}</dim>)", entry.version, detail.join(", "))
+        format!(
+            "<b>{}</b> (<dim>{}</dim>)",
+            entry.version,
+            detail.join(", ")
+        )
     }
 }
 

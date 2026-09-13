@@ -21,14 +21,14 @@
 use biscuit_browser_harness::{
     BrowserHarness, ChromeHarness, InputStep, KeyStroke, require_browser, wrap_fragment,
 };
-use darkmatter::mermaid::{
-    MERMAID_CDN_FALLBACK_ORIGIN, MERMAID_CDN_PRIMARY_ORIGIN, MERMAID_VERSION,
-};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::highlighting::{CodeBlockMode, ColorMode, ThemePair};
 use darkmatter::markdown::output::HtmlOptions;
-use darkmatter::markdown::render_tree::{TerminalCodeRenderer, fold_markdown_to_document};
 use darkmatter::markdown::render_tree::svg_sanitizer::sanitize_svg;
+use darkmatter::markdown::render_tree::{TerminalCodeRenderer, fold_markdown_to_document};
+use darkmatter::mermaid::{
+    MERMAID_CDN_FALLBACK_ORIGIN, MERMAID_CDN_PRIMARY_ORIGIN, MERMAID_VERSION,
+};
 use renderable::tree::{
     BrowserMermaidMode, BrowserRenderOptions, GraphicsMode, HrAlignment, HrKind, HrWeight,
     RawHtmlPolicy, RenderNode, RenderStrictness, SourceDescriptor, ThematicBreakAttrs,
@@ -36,6 +36,7 @@ use renderable::tree::{
 };
 use serial_test::serial;
 use std::rc::Rc;
+use test_toolkit::{Level, require_level};
 
 /// The `.code-block` background darkmatter emits for a `github` + dark page must
 /// compute, in a real browser, to the github-*light* panel color (`#ffffff`).
@@ -181,7 +182,10 @@ async fn hr_geometry(harness: &mut ChromeHarness, alignment: HrAlignment) -> (f6
         .computed_style("body", "width")
         .await
         .expect("body width"));
-    assert!(block_width > 0.0, "containing block must have a positive used width");
+    assert!(
+        block_width > 0.0,
+        "containing block must have a positive used width"
+    );
     (left, right, rule_width / block_width)
 }
 
@@ -210,7 +214,10 @@ async fn browser_hr_alignment_positions_narrow_rule() {
         l < 1.0 && r > 1.0,
         "left alignment must anchor left (ml≈0, mr>0); got ml={l}, mr={r}",
     );
-    assert!((w - 0.5).abs() < 0.02, "left rule must stay narrow (~50%); got width ratio {w}");
+    assert!(
+        (w - 0.5).abs() < 0.02,
+        "left rule must stay narrow (~50%); got width ratio {w}"
+    );
 
     // Right-anchored: the mirror image.
     let (l, r, w) = hr_geometry(&mut harness, HrAlignment::Right).await;
@@ -218,7 +225,10 @@ async fn browser_hr_alignment_positions_narrow_rule() {
         r < 1.0 && l > 1.0,
         "right alignment must anchor right (mr≈0, ml>0); got ml={l}, mr={r}",
     );
-    assert!((w - 0.5).abs() < 0.02, "right rule must stay narrow (~50%); got width ratio {w}");
+    assert!(
+        (w - 0.5).abs() < 0.02,
+        "right rule must stay narrow (~50%); got width ratio {w}"
+    );
 
     // Centered: equal slack on both sides.
     let (l, r, w) = hr_geometry(&mut harness, HrAlignment::Center).await;
@@ -226,7 +236,10 @@ async fn browser_hr_alignment_positions_narrow_rule() {
         l > 1.0 && r > 1.0 && (l - r).abs() < 1.0,
         "center alignment must split the slack evenly; got ml={l}, mr={r}",
     );
-    assert!((w - 0.5).abs() < 0.02, "center rule must stay narrow (~50%); got width ratio {w}");
+    assert!(
+        (w - 0.5).abs() < 0.02,
+        "center rule must stay narrow (~50%); got width ratio {w}"
+    );
 
     // Full: zero horizontal margin and stretched to the whole containing block,
     // overriding the authored 50% width (review-2 finding 1).
@@ -283,7 +296,9 @@ async fn browser_hr_hostile_attrs_inject_no_nodes() {
     // Source-level guard: the sanitized fragment must carry neither the injected
     // markup nor the attacker payload.
     assert!(
-        !fragment.contains("<img") && !fragment.contains("<script") && !fragment.contains("__pwned"),
+        !fragment.contains("<img")
+            && !fragment.contains("<script")
+            && !fragment.contains("__pwned"),
         "hostile HR hints must be dropped before raw-HTML emission; got:\n{fragment}",
     );
 
@@ -337,7 +352,9 @@ async fn browser_mermaid_static_svg_computes_in_browser() {
     let fragment = md.as_html(options).expect("as_html");
 
     if !fragment.contains("<svg") {
-        eprintln!("skipping: Mermaid toolchain unavailable (no SVG produced; degraded to code block)");
+        eprintln!(
+            "skipping: Mermaid toolchain unavailable (no SVG produced; degraded to code block)"
+        );
         return;
     }
 
@@ -574,14 +591,19 @@ async fn browser_sanitized_mermaid_svg_strips_external_css_references() {
 /// `render_browser_mermaid` hook now runs the sanitizer) and asserts the
 /// surviving `<svg>` still carries drawable geometry.
 ///
-/// Skips cleanly when the Mermaid toolchain is unavailable (no `<svg>` produced).
+/// Records an explicit Level-2 skip when the Mermaid CLI is unavailable.
 #[test]
-fn sanitized_real_mermaid_retains_diagram_geometry() {
+fn browser_sanitized_real_mermaid_retains_diagram_geometry() {
+    require_level!(
+        Level::L2,
+        which::which("mmdc").is_ok(),
+        "Mermaid CLI (mmdc)",
+    );
     let html = render_tree_path_mermaid_html();
-    if !html.contains("<svg") {
-        eprintln!("skipping: Mermaid toolchain unavailable (no SVG produced; degraded to code block)");
-        return;
-    }
+    assert!(
+        html.contains("<svg"),
+        "available Mermaid CLI failed to produce SVG:\n{html}",
+    );
     assert!(
         html.contains("<path") || html.contains("<rect") || html.contains("<polygon"),
         "sanitized real Mermaid SVG kept no drawable geometry:\n{html}",
@@ -733,11 +755,16 @@ async fn browser_page_max_width_percent_computes_against_viewport() {
         .await
         .expect("computed style query");
     assert!(
-        max_width != "none" && max_width != "<no-match>" && (max_width.ends_with("px") || max_width.ends_with('%')),
+        max_width != "none"
+            && max_width != "<no-match>"
+            && (max_width.ends_with("px") || max_width.ends_with('%')),
         "browser must accept and compute percentage max-width; got {max_width}",
     );
     if max_width.ends_with("px") {
-        assert!(px(&max_width) > 0.0, "resolved max-width must be positive; got {max_width}");
+        assert!(
+            px(&max_width) > 0.0,
+            "resolved max-width must be positive; got {max_width}"
+        );
     }
     harness.shutdown().await;
 }
@@ -796,7 +823,11 @@ async fn browser_table_center_alignment_computes_equal_margins() {
     if !require_browser() {
         return;
     }
-    let doc = style_page_doc(120, "table:\n  alignment: center\n  max-width: 20ch", TABLE_MD);
+    let doc = style_page_doc(
+        120,
+        "table:\n  alignment: center\n  max-width: 20ch",
+        TABLE_MD,
+    );
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
@@ -810,8 +841,14 @@ async fn browser_table_center_alignment_computes_equal_margins() {
         .computed_style("table", "margin-right")
         .await
         .expect("computed style query");
-    assert_eq!(left, right, "centered table must have equal auto margins; got {left} / {right}");
-    assert!(px(&left) > 0.0, "centered table margins must be non-zero; got {left}");
+    assert_eq!(
+        left, right,
+        "centered table must have equal auto margins; got {left} / {right}"
+    );
+    assert!(
+        px(&left) > 0.0,
+        "centered table margins must be non-zero; got {left}"
+    );
     harness.shutdown().await;
 }
 
@@ -846,7 +883,10 @@ async fn browser_page_max_width_centers_frame() {
         left, right,
         "max-width page frame must center via equal auto side offsets; got {left} / {right}",
     );
-    assert!(px(&left) > 0.0, "centered page frame side offsets must be non-zero; got {left}");
+    assert!(
+        px(&left) > 0.0,
+        "centered page frame side offsets must be non-zero; got {left}"
+    );
 
     let max_width = harness
         .computed_style(".darkmatter-page", "max-width")
@@ -909,7 +949,11 @@ async fn browser_page_color_inherits_to_descendants() {
     if !require_browser() {
         return;
     }
-    let doc = style_page_doc(120, "page:\n  color: red-500", "A paragraph of text.\n\n# Heading\n");
+    let doc = style_page_doc(
+        120,
+        "page:\n  color: red-500",
+        "A paragraph of text.\n\n# Heading\n",
+    );
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
@@ -1151,9 +1195,12 @@ async fn browser_page_code_block_mode_same_vs_inverse_computes() {
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
 
-    let (inverse_bg, _) =
-        page_code_block_computed_styles(&mut harness, ColorMode::Dark, Some(CodeBlockMode::Inverse))
-            .await;
+    let (inverse_bg, _) = page_code_block_computed_styles(
+        &mut harness,
+        ColorMode::Dark,
+        Some(CodeBlockMode::Inverse),
+    )
+    .await;
     let (same_bg, _) =
         page_code_block_computed_styles(&mut harness, ColorMode::Dark, Some(CodeBlockMode::Same))
             .await;
@@ -1215,10 +1262,16 @@ async fn browser_feature_free_fragment_has_no_nested_document_scaffold() {
         const h1 = document.querySelector('h1');\
         return `htmls=${htmls};heads=${heads};bodies=${bodies};styles=${styles};heading=${h1 ? h1.textContent : ''}`;\
     })()";
-    let result = harness.evaluate(probe).await.expect("evaluate scaffold probe");
+    let result = harness
+        .evaluate(probe)
+        .await
+        .expect("evaluate scaffold probe");
     harness.shutdown().await;
 
-    assert!(!result.starts_with("err="), "scaffold probe failed: {result}");
+    assert!(
+        !result.starts_with("err="),
+        "scaffold probe failed: {result}"
+    );
     let kv = parse_kv(&result);
     assert_eq!(
         kv.get("htmls").map(String::as_str),
@@ -1304,10 +1357,16 @@ async fn browser_decorated_standalone_document_head_body_placement() {
         const popoverInBody = dp.querySelector('.dm-popover-wrapper') ? 1 : 0;\
         return `dpParent=${dpParent};headModuleScripts=${headModuleScripts};bodyScripts=${bodyScripts};headMeta=${headMeta};bodyMeta=${bodyMeta};headPopover=${headPopover};bodyStyles=${bodyStyles};mermaidInBody=${mermaidInBody};popoverInBody=${popoverInBody}`;\
     })()";
-    let result = harness.evaluate(probe).await.expect("evaluate placement probe");
+    let result = harness
+        .evaluate(probe)
+        .await
+        .expect("evaluate placement probe");
     harness.shutdown().await;
 
-    assert!(!result.starts_with("err="), "placement probe failed: {result}");
+    assert!(
+        !result.starts_with("err="),
+        "placement probe failed: {result}"
+    );
     let kv = parse_kv(&result);
     assert_eq!(
         kv.get("dpParent").map(String::as_str),
@@ -1418,7 +1477,10 @@ async fn browser_disclosure_click_reveals_body() {
         const openedVis = body.checkVisibility();\
         return `scripts=${scripts};closedOpen=${closedOpen};closedVis=${closedVis};openedOpen=${openedOpen};openedVis=${openedVis}`;\
     })()";
-    let result = harness.evaluate(probe).await.expect("evaluate disclosure probe");
+    let result = harness
+        .evaluate(probe)
+        .await
+        .expect("evaluate disclosure probe");
     assert!(
         !result.starts_with("err="),
         "disclosure DOM probe failed: {result}",
@@ -1482,8 +1544,14 @@ async fn browser_nested_disclosure_toggles_independently() {
         inner.querySelector('summary').click();\
         return `count=${all.length};innerVisClosed=${innerVisClosed};innerVisOuterOpen=${innerVisOuterOpen};innerOpen=${inner.open}`;\
     })()";
-    let result = harness.evaluate(probe).await.expect("evaluate nested probe");
-    assert!(!result.starts_with("err="), "nested DOM probe failed: {result}");
+    let result = harness
+        .evaluate(probe)
+        .await
+        .expect("evaluate nested probe");
+    assert!(
+        !result.starts_with("err="),
+        "nested DOM probe failed: {result}"
+    );
     let kv = parse_kv(&result);
 
     assert_eq!(
@@ -1528,8 +1596,7 @@ async fn browser_prompted_link_popover_reveals_on_focus() {
         return;
     }
 
-    let md: Markdown =
-        "[Click](https://example.com \"prompt='Extra detail'\")\n".into();
+    let md: Markdown = "[Click](https://example.com \"prompt='Extra detail'\")\n".into();
     let doc = md.as_html(HtmlOptions::default()).expect("as_html");
 
     let mut harness = ChromeHarness::new();
@@ -1550,8 +1617,14 @@ async fn browser_prompted_link_popover_reveals_on_focus() {
         return `display=${display};visDefault=${visDefault};visFocus=${visFocus};` +\
             `href=${a.getAttribute('href')};describedby=${a.getAttribute('aria-describedby')};promptId=${p.id}`;\
     })()";
-    let result = harness.evaluate(probe).await.expect("evaluate popover probe");
-    assert!(!result.starts_with("err="), "popover DOM probe failed: {result}");
+    let result = harness
+        .evaluate(probe)
+        .await
+        .expect("evaluate popover probe");
+    assert!(
+        !result.starts_with("err="),
+        "popover DOM probe failed: {result}"
+    );
     let kv = parse_kv(&result);
 
     assert_eq!(
@@ -1628,7 +1701,9 @@ async fn browser_popover_stays_within_viewport_right_edge() {
     if !require_browser() {
         return;
     }
-    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+    let doc = popover_doc("Extra detail")
+        .as_html(HtmlOptions::default())
+        .expect("as_html");
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
@@ -1638,11 +1713,18 @@ async fn browser_popover_stays_within_viewport_right_edge() {
         .evaluate(&edge_geometry_probe("right"))
         .await
         .expect("evaluate right-edge probe");
-    assert!(!result.starts_with("err="), "right-edge probe failed: {result}");
+    assert!(
+        !result.starts_with("err="),
+        "right-edge probe failed: {result}"
+    );
     let kv = parse_kv(&result);
     let right: f64 = kv["right"].parse().expect("right is a number");
     let iw: f64 = kv["iw"].parse().expect("iw is a number");
-    assert_eq!(kv.get("supports").map(String::as_str), Some("true"), "anchor positioning must be active: {result}");
+    assert_eq!(
+        kv.get("supports").map(String::as_str),
+        Some("true"),
+        "anchor positioning must be active: {result}"
+    );
     assert!(
         right <= iw + 0.5,
         "popover near the right edge must stay on-screen: right={right} > innerWidth={iw} ({result})",
@@ -1660,7 +1742,9 @@ async fn browser_popover_stays_within_viewport_left_edge() {
     if !require_browser() {
         return;
     }
-    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+    let doc = popover_doc("Extra detail")
+        .as_html(HtmlOptions::default())
+        .expect("as_html");
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
@@ -1670,13 +1754,22 @@ async fn browser_popover_stays_within_viewport_left_edge() {
         .evaluate(&edge_geometry_probe("left"))
         .await
         .expect("evaluate left-edge probe");
-    assert!(!result.starts_with("err="), "left-edge probe failed: {result}");
+    assert!(
+        !result.starts_with("err="),
+        "left-edge probe failed: {result}"
+    );
     let kv = parse_kv(&result);
     let left: f64 = kv["left"].parse().expect("left is a number");
     let right: f64 = kv["right"].parse().expect("right is a number");
     let iw: f64 = kv["iw"].parse().expect("iw is a number");
-    assert!(left >= -0.5, "popover near the left edge must not spill left: left={left} ({result})");
-    assert!(right <= iw + 0.5, "popover near the left edge must stay on-screen: right={right} > iw={iw} ({result})");
+    assert!(
+        left >= -0.5,
+        "popover near the left edge must not spill left: left={left} ({result})"
+    );
+    assert!(
+        right <= iw + 0.5,
+        "popover near the left edge must stay on-screen: right={right} > iw={iw} ({result})"
+    );
 
     harness.shutdown().await;
 }
@@ -1694,7 +1787,9 @@ async fn browser_popover_long_prompt_wraps_within_viewport() {
     let long = "This is a deliberately long prompt that must wrap onto several lines \
                 instead of overflowing the popover panel or spilling past the right edge \
                 of the viewport when rendered in a real browser window.";
-    let doc = popover_doc(long).as_html(HtmlOptions::default()).expect("as_html");
+    let doc = popover_doc(long)
+        .as_html(HtmlOptions::default())
+        .expect("as_html");
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
@@ -1712,8 +1807,14 @@ async fn browser_popover_long_prompt_wraps_within_viewport() {
         return `width=${r.width};right=${r.right};iw=${window.innerWidth};`+\
             `overflow=${p.scrollWidth - p.clientWidth};lines=${lines}`;\
     })()";
-    let result = harness.evaluate(probe).await.expect("evaluate long-prompt probe");
-    assert!(!result.starts_with("err="), "long-prompt probe failed: {result}");
+    let result = harness
+        .evaluate(probe)
+        .await
+        .expect("evaluate long-prompt probe");
+    assert!(
+        !result.starts_with("err="),
+        "long-prompt probe failed: {result}"
+    );
     let kv = parse_kv(&result);
     let width: f64 = kv["width"].parse().expect("width is a number");
     let right: f64 = kv["right"].parse().expect("right is a number");
@@ -1723,10 +1824,22 @@ async fn browser_popover_long_prompt_wraps_within_viewport() {
     // 20rem == 320px content cap; the border-box adds padding (.5rem each side)
     // + 1px border, so ~338px. The point is that the cap engaged — far below the
     // ~1100px an unwrapped single line would need.
-    assert!(width <= 340.5, "panel must not exceed the 20rem cap plus box model: width={width} ({result})");
-    assert!(right <= iw + 0.5, "wrapped panel must stay on-screen: right={right} > iw={iw} ({result})");
-    assert!(overflow <= 1.0, "prompt text must wrap, not overflow horizontally: overflow={overflow} ({result})");
-    assert!(lines >= 2, "a long prompt must wrap onto multiple lines: lines={lines} ({result})");
+    assert!(
+        width <= 340.5,
+        "panel must not exceed the 20rem cap plus box model: width={width} ({result})"
+    );
+    assert!(
+        right <= iw + 0.5,
+        "wrapped panel must stay on-screen: right={right} > iw={iw} ({result})"
+    );
+    assert!(
+        overflow <= 1.0,
+        "prompt text must wrap, not overflow horizontally: overflow={overflow} ({result})"
+    );
+    assert!(
+        lines >= 2,
+        "a long prompt must wrap onto multiple lines: lines={lines} ({result})"
+    );
 
     harness.shutdown().await;
 }
@@ -1742,7 +1855,9 @@ async fn browser_popover_color_modes_differ() {
     if !require_browser() {
         return;
     }
-    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+    let doc = popover_doc("Extra detail")
+        .as_html(HtmlOptions::default())
+        .expect("as_html");
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
@@ -1764,7 +1879,10 @@ async fn browser_popover_color_modes_differ() {
         .expect("evaluate light");
     assert!(!dark.starts_with("err="), "dark probe failed: {dark}");
     assert!(!light.starts_with("err="), "light probe failed: {light}");
-    assert_ne!(dark, light, "dark and light popover colors must differ (dark={dark}, light={light})");
+    assert_ne!(
+        dark, light,
+        "dark and light popover colors must differ (dark={dark}, light={light})"
+    );
 
     harness.shutdown().await;
 }
@@ -1778,7 +1896,9 @@ async fn browser_popover_reduced_motion_suppresses_transition() {
     if !require_browser() {
         return;
     }
-    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+    let doc = popover_doc("Extra detail")
+        .as_html(HtmlOptions::default())
+        .expect("as_html");
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
@@ -1797,8 +1917,14 @@ async fn browser_popover_reduced_motion_suppresses_transition() {
         .evaluate_with_media(&[("prefers-reduced-motion", "no-preference")], probe)
         .await
         .expect("evaluate normal");
-    assert_eq!(reduced, "0s", "reduced motion must suppress the transition, got {reduced}");
-    assert_ne!(normal, "0s", "the default keeps a non-zero transition, got {normal}");
+    assert_eq!(
+        reduced, "0s",
+        "reduced motion must suppress the transition, got {reduced}"
+    );
+    assert_ne!(
+        normal, "0s",
+        "the default keeps a non-zero transition, got {normal}"
+    );
 
     harness.shutdown().await;
 }
@@ -1828,7 +1954,9 @@ async fn browser_popover_tab_reaches_anchor() {
     if !require_browser() {
         return;
     }
-    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+    let doc = popover_doc("Extra detail")
+        .as_html(HtmlOptions::default())
+        .expect("as_html");
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
@@ -1849,8 +1977,16 @@ async fn browser_popover_tab_reaches_anchor() {
         .await
         .expect("drive tab probe");
     let kv = parse_kv(&result);
-    assert_eq!(kv.get("active").map(String::as_str), Some("true"), "Tab must focus the anchor: {result}");
-    assert_eq!(kv.get("vis").map(String::as_str), Some("visible"), "focusing the anchor must reveal the prompt: {result}");
+    assert_eq!(
+        kv.get("active").map(String::as_str),
+        Some("true"),
+        "Tab must focus the anchor: {result}"
+    );
+    assert_eq!(
+        kv.get("vis").map(String::as_str),
+        Some("visible"),
+        "focusing the anchor must reveal the prompt: {result}"
+    );
 
     harness.shutdown().await;
 }
@@ -1863,7 +1999,9 @@ async fn browser_popover_shift_tab_leaves_anchor() {
     if !require_browser() {
         return;
     }
-    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+    let doc = popover_doc("Extra detail")
+        .as_html(HtmlOptions::default())
+        .expect("as_html");
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
@@ -1885,8 +2023,16 @@ async fn browser_popover_shift_tab_leaves_anchor() {
         .await
         .expect("drive shift-tab probe");
     let kv = parse_kv(&result);
-    assert_eq!(kv.get("active").map(String::as_str), Some("false"), "Shift+Tab must move focus off the anchor: {result}");
-    assert_eq!(kv.get("vis").map(String::as_str), Some("hidden"), "losing focus must re-hide the prompt: {result}");
+    assert_eq!(
+        kv.get("active").map(String::as_str),
+        Some("false"),
+        "Shift+Tab must move focus off the anchor: {result}"
+    );
+    assert_eq!(
+        kv.get("vis").map(String::as_str),
+        Some("hidden"),
+        "losing focus must re-hide the prompt: {result}"
+    );
 
     harness.shutdown().await;
 }
@@ -1901,7 +2047,9 @@ async fn browser_popover_enter_activates_link() {
     if !require_browser() {
         return;
     }
-    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+    let doc = popover_doc("Extra detail")
+        .as_html(HtmlOptions::default())
+        .expect("as_html");
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
@@ -1940,7 +2088,9 @@ async fn browser_popover_pointer_hover_reveals_prompt() {
     if !require_browser() {
         return;
     }
-    let doc = popover_doc("Extra detail").as_html(HtmlOptions::default()).expect("as_html");
+    let doc = popover_doc("Extra detail")
+        .as_html(HtmlOptions::default())
+        .expect("as_html");
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
@@ -1961,8 +2111,16 @@ async fn browser_popover_pointer_hover_reveals_prompt() {
         .await
         .expect("drive hover probe");
     let kv = parse_kv(&result);
-    assert_eq!(kv.get("before").map(String::as_str), Some("hidden"), "prompt must start hidden: {result}");
-    assert_eq!(kv.get("after").map(String::as_str), Some("visible"), "pointer hover must reveal the prompt: {result}");
+    assert_eq!(
+        kv.get("before").map(String::as_str),
+        Some("hidden"),
+        "prompt must start hidden: {result}"
+    );
+    assert_eq!(
+        kv.get("after").map(String::as_str),
+        Some("visible"),
+        "pointer hover must reveal the prompt: {result}"
+    );
 
     harness.shutdown().await;
 }
@@ -2115,16 +2273,13 @@ fn mermaid_body_fragment(color_mode: ColorMode, doc: &str) -> String {
 /// jsDelivr and unpkg specifiers the bootstrap imports. A head-level classic
 /// script captures `console.error` into `window.__dmConsoleErrors` before the
 /// deferred module bootstrap can run.
-fn wrap_mermaid_stub_page(
-    fragment: &str,
-    primary_module: &str,
-    fallback_module: &str,
-) -> String {
+fn wrap_mermaid_stub_page(fragment: &str, primary_module: &str, fallback_module: &str) -> String {
     // Must byte-match the specifiers emitted by `mermaid_bootstrap` in
     // `darkmatter/lib/src/mermaid/feature.rs`; an import-map URL key only
     // redirects an exactly-equal `import()` specifier.
-    let primary_url =
-        format!("{MERMAID_CDN_PRIMARY_ORIGIN}/npm/mermaid@{MERMAID_VERSION}/dist/mermaid.esm.min.mjs");
+    let primary_url = format!(
+        "{MERMAID_CDN_PRIMARY_ORIGIN}/npm/mermaid@{MERMAID_VERSION}/dist/mermaid.esm.min.mjs"
+    );
     let fallback_url =
         format!("{MERMAID_CDN_FALLBACK_ORIGIN}/mermaid@{MERMAID_VERSION}/dist/mermaid.esm.min.mjs");
     let primary_data = data_module(primary_module);
@@ -2163,7 +2318,10 @@ async fn browser_mermaid_interactive_renders_svg_in_live_dom() {
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
     harness.render_html(&doc).await.expect("render html");
-    let result = harness.evaluate(MERMAID_DOM_PROBE).await.expect("mermaid probe");
+    let result = harness
+        .evaluate(MERMAID_DOM_PROBE)
+        .await
+        .expect("mermaid probe");
     harness.shutdown().await;
 
     let kv = parse_kv(&result);
@@ -2207,16 +2365,15 @@ async fn browser_mermaid_primary_failure_falls_back_to_unpkg() {
     }
 
     let fragment = mermaid_body_fragment(ColorMode::Dark, MERMAID_ONE_DOC);
-    let doc = wrap_mermaid_stub_page(
-        &fragment,
-        THROWING_STUB,
-        &working_mermaid_stub("FALLBACK"),
-    );
+    let doc = wrap_mermaid_stub_page(&fragment, THROWING_STUB, &working_mermaid_stub("FALLBACK"));
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
     harness.render_html(&doc).await.expect("render html");
-    let result = harness.evaluate(MERMAID_DOM_PROBE).await.expect("mermaid probe");
+    let result = harness
+        .evaluate(MERMAID_DOM_PROBE)
+        .await
+        .expect("mermaid probe");
     harness.shutdown().await;
 
     let kv = parse_kv(&result);
@@ -2254,7 +2411,10 @@ async fn browser_mermaid_total_failure_keeps_readable_source() {
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
     harness.render_html(&doc).await.expect("render html");
-    let result = harness.evaluate(MERMAID_DOM_PROBE).await.expect("mermaid probe");
+    let result = harness
+        .evaluate(MERMAID_DOM_PROBE)
+        .await
+        .expect("mermaid probe");
     harness.shutdown().await;
 
     let kv = parse_kv(&result);
@@ -2273,10 +2433,7 @@ async fn browser_mermaid_total_failure_keeps_readable_source() {
         Some("true"),
         "the escaped diagram source must remain readable in the <pre>; got {result}",
     );
-    let errs: u32 = kv
-        .get("errs")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+    let errs: u32 = kv.get("errs").and_then(|v| v.parse().ok()).unwrap_or(0);
     assert!(
         errs >= 1,
         "a total load failure must emit a console.error; got {result}",
@@ -2305,7 +2462,10 @@ async fn browser_mermaid_dedup_renders_both_diagrams_once() {
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
     harness.render_html(&doc).await.expect("render html");
-    let result = harness.evaluate(MERMAID_DOM_PROBE).await.expect("mermaid probe");
+    let result = harness
+        .evaluate(MERMAID_DOM_PROBE)
+        .await
+        .expect("mermaid probe");
     harness.shutdown().await;
 
     let kv = parse_kv(&result);
@@ -2399,7 +2559,12 @@ async fn browser_mermaid_theme_variables_differ_by_color_mode() {
         &working_mermaid_stub("PRIMARY"),
     );
     harness.render_html(&dark_doc).await.expect("render dark");
-    let dark = parse_kv(&harness.evaluate(MERMAID_DOM_PROBE).await.expect("dark probe"));
+    let dark = parse_kv(
+        &harness
+            .evaluate(MERMAID_DOM_PROBE)
+            .await
+            .expect("dark probe"),
+    );
 
     let light_doc = wrap_mermaid_stub_page(
         &mermaid_body_fragment(ColorMode::Light, MERMAID_ONE_DOC),
@@ -2407,7 +2572,12 @@ async fn browser_mermaid_theme_variables_differ_by_color_mode() {
         &working_mermaid_stub("PRIMARY"),
     );
     harness.render_html(&light_doc).await.expect("render light");
-    let light = parse_kv(&harness.evaluate(MERMAID_DOM_PROBE).await.expect("light probe"));
+    let light = parse_kv(
+        &harness
+            .evaluate(MERMAID_DOM_PROBE)
+            .await
+            .expect("light probe"),
+    );
 
     harness.shutdown().await;
 
@@ -2656,10 +2826,15 @@ async fn browser_mermaid_real_engine_renders_and_themes() {
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
 
-    let dark_doc =
-        wrap_mermaid_loopback_page(&mermaid_body_fragment(ColorMode::Dark, MERMAID_ONE_DOC), &base);
+    let dark_doc = wrap_mermaid_loopback_page(
+        &mermaid_body_fragment(ColorMode::Dark, MERMAID_ONE_DOC),
+        &base,
+    );
     harness.render_html(&dark_doc).await.expect("render dark");
-    let dark_raw = harness.evaluate(MERMAID_REAL_PROBE).await.expect("dark probe");
+    let dark_raw = harness
+        .evaluate(MERMAID_REAL_PROBE)
+        .await
+        .expect("dark probe");
     let dark = parse_kv(&dark_raw);
 
     let light_doc = wrap_mermaid_loopback_page(
@@ -2667,7 +2842,10 @@ async fn browser_mermaid_real_engine_renders_and_themes() {
         &base,
     );
     harness.render_html(&light_doc).await.expect("render light");
-    let light_raw = harness.evaluate(MERMAID_REAL_PROBE).await.expect("light probe");
+    let light_raw = harness
+        .evaluate(MERMAID_REAL_PROBE)
+        .await
+        .expect("light probe");
     let light = parse_kv(&light_raw);
 
     harness.shutdown().await;
@@ -2688,7 +2866,10 @@ async fn browser_mermaid_real_engine_renders_and_themes() {
     // It is the REAL engine, not a stub: flowchart role present, no stub marker.
     for (mode, kv, raw) in [("dark", &dark, &dark_raw), ("light", &light, &light_raw)] {
         assert!(
-            kv.get("role").map(String::as_str).unwrap_or("").contains("flowchart"),
+            kv.get("role")
+                .map(String::as_str)
+                .unwrap_or("")
+                .contains("flowchart"),
             "the {mode} SVG must carry Mermaid's flowchart aria-roledescription \
              (real engine output); got {raw}",
         );
@@ -2698,7 +2879,10 @@ async fn browser_mermaid_real_engine_renders_and_themes() {
             "the {mode} SVG must NOT be the handwritten stub (data-stub); got {raw}",
         );
         assert!(
-            kv.get("nodes").and_then(|v| v.parse::<u32>().ok()).unwrap_or(0) >= 2,
+            kv.get("nodes")
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(0)
+                >= 2,
             "the {mode} flowchart must render both nodes as real Mermaid <g class=node>; got {raw}",
         );
         assert_eq!(

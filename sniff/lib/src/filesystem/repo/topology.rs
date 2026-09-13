@@ -11,10 +11,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::detection::{ManifestStore, probe_exists};
+use super::seed::PackageSeed;
 use super::standard::{
     DetectedStandard, DetectionConfidence, MonorepoLayer, MonorepoStandard, RootMembership,
 };
-use super::seed::PackageSeed;
 
 /// One detector's contribution to the topology: the standard it matched, the
 /// root its marker lives at, and the boundaries its membership model resolved.

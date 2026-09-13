@@ -19,9 +19,9 @@ mod vocabulary_tests;
 // resolves to this module, so we mirror the items that previously lived
 // directly in `stream/`.
 pub(crate) use super::{
-    ensure_message_newline, parser, protocol, semantic, summary, token_usage, trace_malformed_line,
-    trace_parser_event, trace_parser_finish, trace_session_metadata, trace_summary_update,
-    trace_tool_event,
+    ensure_message_newline, parser, protocol, semantic, summary, task_ledger, token_usage,
+    trace_malformed_line, trace_parser_event, trace_parser_finish, trace_session_metadata,
+    trace_summary_update, trace_tool_event,
 };
 
 use crate::provider::BoxedSemanticEventSink;

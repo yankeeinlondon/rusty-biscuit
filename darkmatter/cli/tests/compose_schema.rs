@@ -4,19 +4,17 @@
 //! styled `BlockError` rendering, stderr routing, and the top-level error
 //! handler are all covered end-to-end.
 
+mod common;
+
+use common::CliProcessFixture;
 use darkmatter::markdown::Markdown;
 use predicates::prelude::*;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use tempfile::TempDir;
 
-fn md_cmd() -> assert_cmd::Command {
-    assert_cmd::Command::cargo_bin("md").unwrap()
-}
-
-fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
-    let path = dir.path().join(name);
+fn write_file(dir: &Path, name: &str, content: &str) -> PathBuf {
+    let path = dir.join(name);
     let mut f = fs::File::create(&path).unwrap();
     f.write_all(content.as_bytes()).unwrap();
     path
@@ -26,20 +24,39 @@ fn read_to_string(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_default()
 }
 
-fn repository_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+fn repository_root(process: &CliProcessFixture) -> PathBuf {
+    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
         .expect("darkmatter CLI crate should live two levels below the repository root")
-        .to_path_buf()
+        .to_path_buf();
+    let root = process.cwd().to_path_buf();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    fs::create_dir_all(root.join("prompts")).unwrap();
+    fs::copy(
+        checkout.join("prompts/plan.md"),
+        root.join("prompts/plan.md"),
+    )
+    .unwrap();
+    let route = "darkmatter/cli/tests/fixtures/shipped_plan_route";
+    fs::create_dir_all(root.join(route)).unwrap();
+    fs::copy(
+        checkout.join(route).join("spec.md"),
+        root.join(route).join("spec.md"),
+    )
+    .unwrap();
+    root
 }
 
 #[test]
 fn shipped_plan_prompt_anchors_caller_file_from_repository_root() {
-    let root = repository_root();
+    let process = CliProcessFixture::new();
+    let root = repository_root(&process);
 
-    md_cmd()
-        .current_dir(&root)
+    process
+        .command_builder()
+        .ambient_context(&root)
+        .build()
         .args([
             "compose",
             "prompts/plan.md",
@@ -56,10 +73,15 @@ fn shipped_plan_prompt_anchors_caller_file_from_repository_root() {
 
 #[test]
 fn shipped_plan_prompt_anchors_caller_file_from_package_area() {
-    let root = repository_root();
+    let process = CliProcessFixture::new();
+    let root = repository_root(&process);
+    let package = root.join("darkmatter");
+    fs::create_dir_all(&package).unwrap();
 
-    md_cmd()
-        .current_dir(root.join("darkmatter"))
+    process
+        .command_builder()
+        .ambient_context(&package)
+        .build()
         .args([
             "compose",
             "../prompts/plan.md",
@@ -85,8 +107,9 @@ fn shipped_plan_prompt_anchors_caller_file_from_package_area() {
 /// appear in the rendered output).
 #[test]
 fn compose_fails_fast_with_schema_block_before_shell_expansion() {
-    let tmp = TempDir::new().unwrap();
-    let sentinel = tmp.path().join("SENTINEL");
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let sentinel = tmp.join("SENTINEL");
     let sentinel_arg = sentinel.to_string_lossy().to_string();
 
     // Use a sentinel command that would create a file if shell expansion ran.
@@ -98,9 +121,14 @@ fn compose_fails_fast_with_schema_block_before_shell_expansion() {
         ---\nBody\n",
         sentinel_arg,
     );
-    let doc = write_file(&tmp, "planner.md", &content);
+    let doc = write_file(tmp, "planner.md", &content);
 
-    let assert = md_cmd().args(["compose"]).arg(&doc).assert().failure();
+    let assert = process
+        .command()
+        .args(["compose"])
+        .arg(&doc)
+        .assert()
+        .failure();
     let output = assert.get_output();
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -134,17 +162,16 @@ fn compose_fails_fast_with_schema_block_before_shell_expansion() {
 
 #[test]
 fn compose_with_required_property_supplied_succeeds() {
-    let tmp = TempDir::new().unwrap();
-    let target = write_file(&tmp, "design.md", "# Design\n");
-    let _ = target;
+    let process = CliProcessFixture::new();
+    process.write_file("design.md", "# Design\n");
     let content = "---\n\
         $schema:\n  spec: 'string(min(1); required)'\n\
         spec: design.md\n\
         ---\nBody\n";
-    let doc = write_file(&tmp, "planner-ok.md", content);
+    let doc = process.write_file("planner-ok.md", content);
 
-    md_cmd()
-        .current_dir(tmp.path())
+    process
+        .command()
         .args(["compose"])
         .arg(&doc)
         .assert()
@@ -162,27 +189,34 @@ fn compose_with_required_property_supplied_succeeds() {
 ///   `key=value` setter.
 #[test]
 fn compose_and_schema_validate_agree_on_same_document() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let content = "---\n\
         $schema:\n  title: 'string(min(1); required)'\n\
         ---\nBody\n";
-    let doc = write_file(&tmp, "post.md", content);
+    let doc = write_file(tmp, "post.md", content);
 
     // Both fail without the required property.
-    let validate_failure = md_cmd()
+    let validate_failure = process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
         .failure();
-    let validate_stdout = String::from_utf8_lossy(&validate_failure.get_output().stdout).to_string();
+    let validate_stdout =
+        String::from_utf8_lossy(&validate_failure.get_output().stdout).to_string();
     assert!(
         validate_stdout.contains("title"),
         "schema validate should mention failing property `title`, got:\n{validate_stdout}",
     );
 
-    let compose_failure = md_cmd().args(["compose"]).arg(&doc).assert().failure();
-    let compose_stderr =
-        String::from_utf8_lossy(&compose_failure.get_output().stderr).to_string();
+    let compose_failure = process
+        .command()
+        .args(["compose"])
+        .arg(&doc)
+        .assert()
+        .failure();
+    let compose_stderr = String::from_utf8_lossy(&compose_failure.get_output().stderr).to_string();
     assert!(
         compose_stderr.contains("title"),
         "compose should mention failing property `title`, got:\n{compose_stderr}",
@@ -192,14 +226,16 @@ fn compose_and_schema_validate_agree_on_same_document() {
     // `title=...` setter (compose uses the same shorthand-set machinery via
     // its positional ARGS; schema validate has parity via its assignment
     // positional support).
-    md_cmd()
+    process
+        .command()
         .args(["schema", "validate"])
         .arg(&doc)
         .arg("title=Hello")
         .assert()
         .success();
 
-    md_cmd()
+    process
+        .command()
         .args(["compose"])
         .arg(&doc)
         .arg("title=Hello")
@@ -215,14 +251,20 @@ fn compose_and_schema_validate_agree_on_same_document() {
 /// the root cause instead of just the path.
 #[test]
 fn compose_renders_summary_for_schema_preparation_failure() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "bad-schema.md",
         "---\n$schema: ./does-not-exist.yaml\ntitle: hi\n---\nBody\n",
     );
 
-    let assert = md_cmd().args(["compose"]).arg(&doc).assert().failure();
+    let assert = process
+        .command()
+        .args(["compose"])
+        .arg(&doc)
+        .assert()
+        .failure();
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
 
     assert!(
@@ -231,7 +273,9 @@ fn compose_renders_summary_for_schema_preparation_failure() {
     );
     // The underlying diagnostic must be visible — not just the path.
     assert!(
-        stderr.to_lowercase().contains("schema could not be prepared")
+        stderr
+            .to_lowercase()
+            .contains("schema could not be prepared")
             || stderr.to_lowercase().contains("could not")
             || stderr.to_lowercase().contains("resolve")
             || stderr.to_lowercase().contains("not found"),
@@ -245,14 +289,20 @@ fn compose_renders_summary_for_schema_preparation_failure() {
 /// renderer wraps it in OSC8, but the literal path text is still emitted).
 #[test]
 fn compose_block_includes_source_path() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "needs-title.md",
         "---\n$schema:\n  title: 'string(required)'\n---\nBody\n",
     );
 
-    let assert = md_cmd().args(["compose"]).arg(&doc).assert().failure();
+    let assert = process
+        .command()
+        .args(["compose"])
+        .arg(&doc)
+        .assert()
+        .failure();
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let _ = read_to_string(&doc);
 
@@ -275,15 +325,20 @@ fn compose_block_includes_source_path() {
 
 /// Composes `doc` with `--frontmatter` and re-parses the emitted document so
 /// callers can inspect the *serialized* frontmatter's real JSON types.
-fn composed_frontmatter(doc: &Path) -> serde_json::Map<String, serde_json::Value> {
-    composed_document(doc, &[]).1
+fn composed_frontmatter(
+    process: &CliProcessFixture,
+    doc: &Path,
+) -> serde_json::Map<String, serde_json::Value> {
+    composed_document(process, doc, &[]).1
 }
 
 fn composed_document(
+    process: &CliProcessFixture,
     doc: &Path,
     extra_args: &[&str],
 ) -> (String, serde_json::Map<String, serde_json::Value>) {
-    let assert = md_cmd()
+    let assert = process
+        .command()
         .args(["compose", "--frontmatter"])
         .arg(doc)
         .args(extra_args)
@@ -302,88 +357,95 @@ fn composed_document(
 
 #[test]
 fn compose_frontmatter_serializes_real_boolean() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "boolean.md",
         "---\n$schema:\n  has_spec: boolean\nhas_spec: \"true\"\n---\nBody\n",
     );
-    let fm = composed_frontmatter(&doc);
+    let fm = composed_frontmatter(&process, &doc);
     assert_eq!(fm.get("has_spec"), Some(&serde_json::json!(true)));
 }
 
 #[test]
 fn compose_frontmatter_serializes_real_number() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "number.md",
         "---\n$schema:\n  n: number\nn: \"42\"\n---\nBody\n",
     );
-    let fm = composed_frontmatter(&doc);
+    let fm = composed_frontmatter(&process, &doc);
     assert_eq!(fm.get("n"), Some(&serde_json::json!(42)));
 }
 
 #[test]
 fn compose_frontmatter_serializes_string_reverse_coercion() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     // A real number `42` against a `string` field is reverse-coerced to "42";
     // the composed output must store (and serialize) it as a real string.
     let doc = write_file(
-        &tmp,
+        tmp,
         "string.md",
         "---\n$schema:\n  spec: 'string(required)'\nspec: 42\n---\nBody\n",
     );
-    let fm = composed_frontmatter(&doc);
+    let fm = composed_frontmatter(&process, &doc);
     assert_eq!(fm.get("spec"), Some(&serde_json::json!("42")));
 }
 
 #[test]
 fn compose_frontmatter_serializes_boolish_normalization() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     // `boolish` accepts the `True` spelling and normalizes it to a real bool.
     let doc = write_file(
-        &tmp,
+        tmp,
         "boolish.md",
         "---\n$schema:\n  flag: boolish\nflag: \"True\"\n---\nBody\n",
     );
-    let fm = composed_frontmatter(&doc);
+    let fm = composed_frontmatter(&process, &doc);
     assert_eq!(fm.get("flag"), Some(&serde_json::json!(true)));
 }
 
 #[test]
 fn compose_frontmatter_serializes_numberlike_normalization() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "numberlike.md",
         "---\n$schema:\n  n: numberlike\nn: \"42\"\n---\nBody\n",
     );
-    let fm = composed_frontmatter(&doc);
+    let fm = composed_frontmatter(&process, &doc);
     assert_eq!(fm.get("n"), Some(&serde_json::json!(42)));
 }
 
 #[test]
 fn compose_frontmatter_serializes_typed_array() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "array.md",
         "---\n$schema:\n  flags: 'boolean[]'\nflags:\n  - \"true\"\n  - \"false\"\n---\nBody\n",
     );
-    let fm = composed_frontmatter(&doc);
+    let fm = composed_frontmatter(&process, &doc);
     assert_eq!(fm.get("flags"), Some(&serde_json::json!([true, false])));
 }
 
 #[test]
 fn compose_frontmatter_serializes_root_union_write_back() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     // A 3-arm root union (mirrors prompts/implement.md) where every arm types
     // the `has_*` trio as boolean. The frontmatter holds them as strings; the
     // composed output must serialize them as real booleans via the
     // first-validating-arm coercion path.
     let doc = write_file(
-        &tmp,
+        tmp,
         "union.md",
         "---\n\
          $schema:\n\
@@ -405,7 +467,7 @@ fn compose_frontmatter_serializes_root_union_write_back() {
          has_review: \"false\"\n\
          ---\nBody\n",
     );
-    let fm = composed_frontmatter(&doc);
+    let fm = composed_frontmatter(&process, &doc);
     assert_eq!(fm.get("has_spec"), Some(&serde_json::json!(true)));
     assert_eq!(fm.get("has_plan"), Some(&serde_json::json!(false)));
     assert_eq!(fm.get("has_review"), Some(&serde_json::json!(false)));
@@ -413,9 +475,10 @@ fn compose_frontmatter_serializes_root_union_write_back() {
 
 #[test]
 fn compose_frontmatter_materializes_optional_parameters_as_ordered_nulls() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "optional-parameters.md",
         "---\n\
          $schema:\n\
@@ -426,7 +489,7 @@ fn compose_frontmatter_materializes_optional_parameters_as_ordered_nulls() {
          ---\nBody\n",
     );
 
-    let (stdout, fm) = composed_document(&doc, &[]);
+    let (stdout, fm) = composed_document(&process, &doc, &[]);
     assert_eq!(fm.get("first_optional"), Some(&serde_json::Value::Null));
     assert_eq!(fm.get("second_optional"), Some(&serde_json::Value::Null));
 
@@ -444,9 +507,10 @@ fn compose_frontmatter_materializes_optional_parameters_as_ordered_nulls() {
 
 #[test]
 fn compose_frontmatter_materialized_null_is_stable_after_write_and_recompose() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let source = write_file(
-        &tmp,
+        tmp,
         "source.md",
         "---\n\
          $schema:\n\
@@ -457,39 +521,47 @@ fn compose_frontmatter_materialized_null_is_stable_after_write_and_recompose() {
          ---\nBody\n",
     );
 
-    let (first_output, first_frontmatter) = composed_document(&source, &[]);
-    let persisted = write_file(&tmp, "persisted.md", &first_output);
-    let (second_output, second_frontmatter) = composed_document(&persisted, &[]);
+    let (first_output, first_frontmatter) = composed_document(&process, &source, &[]);
+    let persisted = write_file(tmp, "persisted.md", &first_output);
+    let (second_output, second_frontmatter) = composed_document(&process, &persisted, &[]);
 
     assert_eq!(second_frontmatter, first_frontmatter);
     assert_eq!(second_output, first_output);
-    assert_eq!(second_frontmatter.get("first_optional"), Some(&serde_json::Value::Null));
-    assert_eq!(second_frontmatter.get("second_optional"), Some(&serde_json::Value::Null));
+    assert_eq!(
+        second_frontmatter.get("first_optional"),
+        Some(&serde_json::Value::Null)
+    );
+    assert_eq!(
+        second_frontmatter.get("second_optional"),
+        Some(&serde_json::Value::Null)
+    );
 }
 
 #[test]
 fn compose_frontmatter_caller_value_wins_over_optional_materialization() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "supplied-parameter.md",
         "---\n$schema:\n  commit_message: string\n---\nBody\n",
     );
 
-    let (_, fm) = composed_document(&doc, &["commit_message=chore: x"]);
-    assert_eq!(fm.get("commit_message"), Some(&serde_json::json!("chore: x")));
+    let (_, fm) = composed_document(&process, &doc, &["commit_message=chore: x"]);
+    assert_eq!(
+        fm.get("commit_message"),
+        Some(&serde_json::json!("chore: x"))
+    );
 }
 
 #[test]
 fn compose_without_an_effective_schema_does_not_synthesize_frontmatter() {
-    let tmp = TempDir::new().unwrap();
-    let doc = write_file(
-        &tmp,
-        "no-schema.md",
-        "---\nexisting: value\n---\nBody\n",
-    );
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let doc = write_file(tmp, "no-schema.md", "---\nexisting: value\n---\nBody\n");
 
     let (_, fm) = composed_document(
+        &process,
         &doc,
         &["--no-baseline-schema", "--no-trigger-schemas"],
     );
@@ -499,28 +571,26 @@ fn compose_without_an_effective_schema_does_not_synthesize_frontmatter() {
 
 #[test]
 fn materialized_optional_parameter_is_known_to_strict_subtree_compose() {
+    let process = CliProcessFixture::new();
     use darkmatter::markdown::compose::EffectiveStateBuilder;
     use darkmatter::markdown::compose::subtree::SubtreeCompose;
 
-    let tmp = TempDir::new().unwrap();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "strict-root.md",
         "---\n$schema:\n  commit_message: string\n---\nBody\n",
     );
-    let fm = composed_frontmatter(&doc);
+    let fm = composed_frontmatter(&process, &doc);
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(fm.into_iter().collect())
         .build()
         .unwrap();
 
-    let rendered = SubtreeCompose::new(
-        &serde_json::json!("message={{ commit_message }}"),
-        &state,
-    )
-    .strict()
-    .compose()
-    .unwrap();
+    let rendered = SubtreeCompose::new(&serde_json::json!("message={{ commit_message }}"), &state)
+        .strict()
+        .compose()
+        .unwrap();
     assert_eq!(rendered, serde_json::json!("message="));
 
     let error = SubtreeCompose::new(&serde_json::json!("{{ commit_mesage }}"), &state)
@@ -534,9 +604,10 @@ fn materialized_optional_parameter_is_known_to_strict_subtree_compose() {
 
 #[test]
 fn optional_null_and_supplied_empty_string_remain_distinct_in_body_expressions() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "optional-expressions.md",
         "---\n\
          $schema:\n\
@@ -547,7 +618,8 @@ fn optional_null_and_supplied_empty_string_remain_distinct_in_body_expressions()
          is-string={{ is_string(optional) ? 'yes' : 'no' }}\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["compose"])
         .arg(&doc)
         .assert()
@@ -556,7 +628,8 @@ fn optional_null_and_supplied_empty_string_remain_distinct_in_body_expressions()
         .stdout(predicate::str::contains("truthy=no"))
         .stdout(predicate::str::contains("is-string=no"));
 
-    md_cmd()
+    process
+        .command()
         .args(["compose"])
         .arg(&doc)
         .arg("optional=")
@@ -569,9 +642,10 @@ fn optional_null_and_supplied_empty_string_remain_distinct_in_body_expressions()
 
 #[test]
 fn first_frontmatter_interpolation_precedes_optional_materialization() {
-    let tmp = TempDir::new().unwrap();
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
     let doc = write_file(
-        &tmp,
+        tmp,
         "pre-schema-interpolation.md",
         "---\n\
          $schema:\n\
@@ -582,7 +656,8 @@ fn first_frontmatter_interpolation_precedes_optional_materialization() {
          after-schema={{ has_key(doc, 'optional') }}\n",
     );
 
-    md_cmd()
+    process
+        .command()
         .args(["compose"])
         .arg(&doc)
         .assert()

@@ -25,6 +25,22 @@
 //! Exceptions live in [`ALLOWLIST_FILE`], keyed to an enclosing symbol and
 //! carrying a written reason. See
 //! `claudine/features/2026-07-13-error-propogation/spec.md` §D2, §D7, §D8.
+//!
+//! ## Why the source-backed guards share one test
+//!
+//! Twelve of these guards read the same `syn` parse of `lib/src`, `cli/src` and
+//! `contract/src`. `scan_production_sources`'s `OnceLock` is process-local and
+//! nextest runs every test in its own process, so under nextest each of the
+//! twelve paid the whole ~1.7 s parse: 20.2 s of summed duration for one scan's
+//! worth of work. They are therefore evaluated as named arms of the single
+//! passive corpus test [`production_sources_pass_every_scan_backed_guard`],
+//! which scans once and reports *every* failing arm by the name it used to
+//! carry. New source-backed regressions extend [`SCAN_GUARDS`] rather than
+//! adding a thirteenth rescanning process.
+//!
+//! The six guards that need no production scan stay independently selectable —
+//! four of them are the arms that prove the scanner is not blind, and merging
+//! those into the corpus test would make the corpus test its own witness.
 
 // A test target's crate root is this file, so a plain `mod` would resolve
 // against `tests/` — where every `.rs` is its own test binary.
@@ -40,7 +56,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use source_scan::{
-    BoxedError, Finding, Shape, area_root, discovery_registry, scan_production_sources,
+    BoxedError, Finding, ScanResult, Shape, area_root, discovery_registry, scan_production_sources,
 };
 
 /// Area-relative path of the D8 exception list.
@@ -107,12 +123,174 @@ fn describe(findings: &[&Finding]) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// The shared production-source scan
+// ---------------------------------------------------------------------------
+
+/// A guard that answers a question about the production sources.
+///
+/// The name is the identity a failure is reported under; it is the test name
+/// each arm carried before they were merged onto one scan, so a failure message
+/// still points at a single contract.
+type ScanGuard = (&'static str, fn(&ScanResult) -> Result<(), String>);
+
+/// Every guard that reads the production-source scan, in the order the failure
+/// report lists them.
+const SCAN_GUARDS: &[ScanGuard] = &[
+    // D8 — lossy boundaries
+    (
+        "no_unallowlisted_typed_error_collapses",
+        no_unallowlisted_typed_error_collapses,
+    ),
+    (
+        "every_allowlist_entry_still_matches_a_live_site",
+        every_allowlist_entry_still_matches_a_live_site,
+    ),
+    // D2 — source parity with the discovery registry
+    (
+        "registry_lists_every_diagnostic_impl",
+        registry_lists_every_diagnostic_impl,
+    ),
+    (
+        "every_diagnostic_impl_also_implements_block_error",
+        every_diagnostic_impl_also_implements_block_error,
+    ),
+    (
+        "the_scan_finds_the_diagnostic_impls_known_to_exist",
+        the_scan_finds_the_diagnostic_impls_known_to_exist,
+    ),
+    // D-13 — reachability through a `Box`
+    (
+        "no_registered_diagnostic_is_reachable_only_through_a_box",
+        no_registered_diagnostic_is_reachable_only_through_a_box,
+    ),
+    (
+        "every_boxed_allowlist_entry_still_matches_a_live_site",
+        every_boxed_allowlist_entry_still_matches_a_live_site,
+    ),
+    (
+        "the_boxed_scan_finds_the_sites_known_to_exist",
+        the_boxed_scan_finds_the_sites_known_to_exist,
+    ),
+    // D7 — catalog parity
+    (
+        "every_code_a_diagnostic_claims_is_a_registered_code",
+        every_code_a_diagnostic_claims_is_a_registered_code,
+    ),
+    (
+        "detail_projections_write_only_declared_keys",
+        detail_projections_write_only_declared_keys,
+    ),
+    (
+        "a_diagnostic_claiming_a_registered_code_projects_a_detail",
+        a_diagnostic_claiming_a_registered_code_projects_a_detail,
+    ),
+    (
+        "the_corpus_covers_every_code_a_diagnostic_can_return",
+        the_corpus_covers_every_code_a_diagnostic_can_return,
+    ),
+];
+
+/// Run every arm of [`SCAN_GUARDS`] against `scan`, collecting all failures
+/// rather than stopping at the first — a run that repairs one collapse should
+/// see the other eleven answers in the same report.
+fn evaluate_scan_guards(scan: &ScanResult) -> Vec<(&'static str, String)> {
+    SCAN_GUARDS
+        .iter()
+        .filter_map(|(name, guard)| guard(scan).err().map(|failure| (*name, failure)))
+        .collect()
+}
+
+#[test]
+fn production_sources_pass_every_scan_backed_guard() {
+    let failures = evaluate_scan_guards(scan_production_sources());
+
+    let rendered: Vec<String> = failures
+        .iter()
+        .map(|(name, failure)| format!("── {name}\n{failure}"))
+        .collect();
+
+    assert!(
+        failures.is_empty(),
+        "{} of {} source-backed diagnostic guard(s) failed:\n\n{}",
+        failures.len(),
+        SCAN_GUARDS.len(),
+        rendered.join("\n\n")
+    );
+}
+
+#[test]
+fn a_failing_scan_backed_guard_is_reported_under_its_own_name() {
+    // Non-vacuity for the merge itself. `production_sources_pass_every_scan_backed_guard`
+    // is one test standing in for twelve, so an aggregator that swallowed a
+    // failure — or reported it without saying which contract broke — would make
+    // all twelve pass by being silent.
+    //
+    // The fixture is a synthetic scan, so it is a plausible *wrong* answer: it
+    // holds one unallowlisted collapse and no trait impls or boxed errors at
+    // all. Every arm whose subject is absent from it must name itself, and the
+    // arms that are vacuously satisfied by an empty scan must stay quiet.
+    let planted = source_scan::scan_text(
+        "lib/src/fixture.rs",
+        r#"
+        fn report_macro(snapshot: &DiagnosticSnapshot) -> Report {
+            eyre!("launch detection failed: {}", snapshot.message)
+        }
+        "#,
+    );
+    assert_eq!(
+        planted.findings.len(),
+        1,
+        "the fixture must plant exactly one collapse, or this test proves nothing about \
+         which arm reported it; found {:?}",
+        planted.findings
+    );
+
+    let failed: BTreeSet<&str> = evaluate_scan_guards(&planted)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+
+    for expected in [
+        // the planted collapse itself
+        "no_unallowlisted_typed_error_collapses",
+        // both allowlists describe real sites this scan does not contain
+        "every_allowlist_entry_still_matches_a_live_site",
+        "every_boxed_allowlist_entry_still_matches_a_live_site",
+        // the registry downcasts to types this scan never saw implemented
+        "registry_lists_every_diagnostic_impl",
+        // the blindness anchors, which is exactly what a blind scan trips
+        "the_scan_finds_the_diagnostic_impls_known_to_exist",
+        "the_boxed_scan_finds_the_sites_known_to_exist",
+    ] {
+        assert!(
+            failed.contains(expected),
+            "`{expected}` did not report itself against a scan that violates it; \
+             reported {failed:?}"
+        );
+    }
+
+    for quiet in [
+        // no trait impl in the fixture, so nothing claims a code, writes a
+        // detail key, or inherits the default `detail()`
+        "every_diagnostic_impl_also_implements_block_error",
+        "every_code_a_diagnostic_claims_is_a_registered_code",
+        "detail_projections_write_only_declared_keys",
+        "a_diagnostic_claiming_a_registered_code_projects_a_detail",
+        "the_corpus_covers_every_code_a_diagnostic_can_return",
+    ] {
+        assert!(
+            !failed.contains(quiet),
+            "`{quiet}` reported a failure against a scan it has no subject in, so a real \
+             failure of another arm would be buried in noise"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // D8 — lossy-boundary guard
 // ---------------------------------------------------------------------------
 
-#[test]
-fn no_unallowlisted_typed_error_collapses() {
-    let scan = scan_production_sources();
+fn no_unallowlisted_typed_error_collapses(scan: &ScanResult) -> Result<(), String> {
     let allowlist = load_allowlist();
 
     let unexpected: Vec<&Finding> = scan
@@ -121,23 +299,23 @@ fn no_unallowlisted_typed_error_collapses() {
         .filter(|finding| !allowlist.iter().any(|entry| entry.covers(finding)))
         .collect();
 
-    assert!(
-        unexpected.is_empty(),
+    if unexpected.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
         "{} typed-error collapse(s) with no allowlist entry:\n{}\n\
          Preserve the typed cause as a `#[source]` field or a `#[from]` variant. \
          If the value genuinely has no typed source, add an entry to {ALLOWLIST_FILE} \
          naming the shape, file, and enclosing symbol, with a reason.",
         unexpected.len(),
         describe(&unexpected)
-    );
+    ))
 }
 
-#[test]
-fn every_allowlist_entry_still_matches_a_live_site() {
+fn every_allowlist_entry_still_matches_a_live_site(scan: &ScanResult) -> Result<(), String> {
     // A stale entry is worse than no entry: it is a standing exception for code
     // that no longer exists, ready to suppress an unrelated future defect that
     // happens to land in the same symbol.
-    let scan = scan_production_sources();
     let allowlist = load_allowlist();
 
     let stale: Vec<&AllowEntry> = allowlist
@@ -145,17 +323,18 @@ fn every_allowlist_entry_still_matches_a_live_site() {
         .filter(|entry| !scan.findings.iter().any(|finding| entry.covers(finding)))
         .collect();
 
+    if stale.is_empty() {
+        return Ok(());
+    }
     let rendered: Vec<String> = stale
         .iter()
         .map(|entry| format!("  [{}] {} in `{}`", entry.shape, entry.file, entry.symbol))
         .collect();
-
-    assert!(
-        stale.is_empty(),
+    Err(format!(
         "{} allowlist entr(y/ies) match no live site — delete them:\n{}",
         stale.len(),
         rendered.join("\n")
-    );
+    ))
 }
 
 /// Burn-down buckets an entry may claim. A tag outside this set is a typo, and
@@ -257,9 +436,7 @@ fn the_scan_still_sees_a_snapshot_facet_re_erasure() {
 // D2 — source parity between the sources and the discovery registry
 // ---------------------------------------------------------------------------
 
-#[test]
-fn registry_lists_every_diagnostic_impl() {
-    let scan = scan_production_sources();
+fn registry_lists_every_diagnostic_impl(scan: &ScanResult) -> Result<(), String> {
     let registered = discovery_registry();
 
     let implemented: BTreeSet<String> = scan
@@ -270,30 +447,29 @@ fn registry_lists_every_diagnostic_impl() {
         .collect();
 
     let missing: Vec<&String> = implemented.difference(&registered).collect();
-    assert!(
-        missing.is_empty(),
-        "{:?} implement `Diagnostic` but `as_diagnostic` cannot see them, so the CLI walker \
-         renders them as a generic `Error:` line. Add a `downcast_ref::<T>()` arm in \
-         lib/src/diagnostics/discovery.rs.",
-        missing
-    );
+    if !missing.is_empty() {
+        return Err(format!(
+            "{missing:?} implement `Diagnostic` but `as_diagnostic` cannot see them, so the CLI \
+             walker renders them as a generic `Error:` line. Add a `downcast_ref::<T>()` arm in \
+             lib/src/diagnostics/discovery.rs."
+        ));
+    }
 
     let phantom: Vec<&String> = registered.difference(&implemented).collect();
-    assert!(
-        phantom.is_empty(),
-        "`as_diagnostic` downcasts to {:?}, which no production `impl Diagnostic for …` \
-         defines. The registry has drifted from the sources.",
-        phantom
-    );
+    if !phantom.is_empty() {
+        return Err(format!(
+            "`as_diagnostic` downcasts to {phantom:?}, which no production \
+             `impl Diagnostic for …` defines. The registry has drifted from the sources."
+        ));
+    }
+    Ok(())
 }
 
-#[test]
-fn every_diagnostic_impl_also_implements_block_error() {
+fn every_diagnostic_impl_also_implements_block_error(scan: &ScanResult) -> Result<(), String> {
     // `Diagnostic: BlockError`, so this cannot fail while both impls are in
     // scope — but it can fail *the scan*, which is the point: a `Diagnostic`
     // impl the scan pairs with no `BlockError` impl means the scan lost a file,
     // and a blind guard is a guard that passes.
-    let scan = scan_production_sources();
     let blocks: BTreeSet<&str> = scan
         .trait_impls
         .iter()
@@ -302,20 +478,19 @@ fn every_diagnostic_impl_also_implements_block_error() {
         .collect();
 
     for item in scan.trait_impls.iter().filter(|i| i.trait_name == "Diagnostic") {
-        assert!(
-            blocks.contains(item.type_name.as_str()),
-            "`{}` implements Diagnostic but the scan found no `impl BlockError for {}` — \
-             the scan's file set is wrong",
-            item.type_name,
-            item.type_name
-        );
+        if !blocks.contains(item.type_name.as_str()) {
+            return Err(format!(
+                "`{}` implements Diagnostic but the scan found no `impl BlockError for {}` — \
+                 the scan's file set is wrong",
+                item.type_name, item.type_name
+            ));
+        }
     }
+    Ok(())
 }
 
-#[test]
-fn the_scan_finds_the_diagnostic_impls_known_to_exist() {
-    // Anchors the parity test against a scan that silently matches nothing.
-    let scan = scan_production_sources();
+fn the_scan_finds_the_diagnostic_impls_known_to_exist(scan: &ScanResult) -> Result<(), String> {
+    // Anchors the parity arm against a scan that silently matches nothing.
     let implemented: BTreeSet<&str> = scan
         .trait_impls
         .iter()
@@ -329,11 +504,13 @@ fn the_scan_finds_the_diagnostic_impls_known_to_exist() {
         "HarnessError",
         "RestoredDiagnostic",
     ] {
-        assert!(
-            implemented.contains(expected),
-            "scan did not find `impl Diagnostic for {expected}`; found {implemented:?}"
-        );
+        if !implemented.contains(expected) {
+            return Err(format!(
+                "scan did not find `impl Diagnostic for {expected}`; found {implemented:?}"
+            ));
+        }
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -379,18 +556,18 @@ fn load_boxed_allowlist() -> Vec<BoxedAllowEntry> {
     parsed.allow
 }
 
-/// Every `Box<T>` on a cause chain where `T` is a registered diagnostic.
-fn boxed_registered_diagnostics() -> Vec<&'static BoxedError> {
+/// Every `Box<T>` in `scan` where `T` is a registered diagnostic.
+fn boxed_registered_diagnostics(scan: &ScanResult) -> Vec<&BoxedError> {
     let registered = discovery_registry();
-    scan_production_sources()
-        .boxed_errors
+    scan.boxed_errors
         .iter()
         .filter(|boxed| registered.contains(&boxed.type_name))
         .collect()
 }
 
-#[test]
-fn no_registered_diagnostic_is_reachable_only_through_a_box() {
+fn no_registered_diagnostic_is_reachable_only_through_a_box(
+    scan: &ScanResult,
+) -> Result<(), String> {
     // D-7 proved that a `Box<E>` publishes `Box<E>` to the cause chain, not `E`:
     // `downcast_ref::<E>()` returns `None`, and `Box`'s own `source()` delegates
     // to `E::source()`, so the walk skips `E` at every depth. `as_diagnostic` is
@@ -402,7 +579,7 @@ fn no_registered_diagnostic_is_reachable_only_through_a_box() {
     // error went `.into()` a `Report` — making the *report's root* a `Box`. The
     // source-parity, transport, and headless-render guards all passed on it; a
     // real terminal found it. Hence both sites are scanned.
-    let unexpected: Vec<&BoxedError> = boxed_registered_diagnostics()
+    let unexpected: Vec<&BoxedError> = boxed_registered_diagnostics(scan)
         .into_iter()
         .filter(|boxed| {
             !load_boxed_allowlist()
@@ -411,6 +588,9 @@ fn no_registered_diagnostic_is_reachable_only_through_a_box() {
         })
         .collect();
 
+    if unexpected.is_empty() {
+        return Ok(());
+    }
     let rendered: Vec<String> = unexpected
         .iter()
         .map(|boxed| {
@@ -425,8 +605,7 @@ fn no_registered_diagnostic_is_reachable_only_through_a_box() {
         })
         .collect();
 
-    assert!(
-        unexpected.is_empty(),
+    Err(format!(
         "{} boxed registered diagnostic(s) with no allowlist entry:\n{}\n\
          `as_diagnostic` cannot downcast through a `Box`, so these render as a generic \
          `Error:` line. Carry the diagnostic unboxed (box a context struct instead, as \
@@ -436,12 +615,11 @@ fn no_registered_diagnostic_is_reachable_only_through_a_box() {
          reason and the test that proves the value still resolves.",
         unexpected.len(),
         rendered.join("\n")
-    );
+    ))
 }
 
-#[test]
-fn every_boxed_allowlist_entry_still_matches_a_live_site() {
-    let live = boxed_registered_diagnostics();
+fn every_boxed_allowlist_entry_still_matches_a_live_site(scan: &ScanResult) -> Result<(), String> {
+    let live = boxed_registered_diagnostics(scan);
     let stale: Vec<String> = load_boxed_allowlist()
         .iter()
         .filter(|entry| !live.iter().any(|boxed| entry.covers(boxed)))
@@ -453,12 +631,14 @@ fn every_boxed_allowlist_entry_still_matches_a_live_site() {
         })
         .collect();
 
-    assert!(
-        stale.is_empty(),
+    if stale.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
         "{} boxed-diagnostic allowlist entr(y/ies) match no live site — delete them:\n{}",
         stale.len(),
         stale.join("\n")
-    );
+    ))
 }
 
 #[test]
@@ -490,18 +670,20 @@ fn every_boxed_allowlist_entry_names_a_known_site_tag_and_reason() {
     }
 }
 
-#[test]
-fn the_boxed_scan_finds_the_sites_known_to_exist() {
+fn the_boxed_scan_finds_the_sites_known_to_exist(scan: &ScanResult) -> Result<(), String> {
     // Anchors the guard against a scan that silently matches nothing — the
     // failure mode that would make every assertion above vacuously true.
-    let boxed = boxed_registered_diagnostics();
-    assert!(
-        boxed
-            .iter()
-            .any(|b| b.site == source_scan::BoxSite::ResultError),
+    let boxed = boxed_registered_diagnostics(scan);
+    if boxed
+        .iter()
+        .any(|b| b.site == source_scan::BoxSite::ResultError)
+    {
+        return Ok(());
+    }
+    Err(format!(
         "scan found no `Result<_, Box<RegisteredDiagnostic>>`, but D-13's \
          `preflight_harness_document` is one; found {boxed:?}"
-    );
+    ))
 }
 
 #[test]
@@ -542,9 +724,7 @@ fn the_boxed_scan_still_sees_a_source_field_box() {
 // D7 — catalog parity
 // ---------------------------------------------------------------------------
 
-#[test]
-fn every_code_a_diagnostic_claims_is_a_registered_code() {
-    let scan = scan_production_sources();
+fn every_code_a_diagnostic_claims_is_a_registered_code(scan: &ScanResult) -> Result<(), String> {
     let mut unregistered: Vec<String> = Vec::new();
 
     for item in scan.trait_impls.iter().filter(|i| i.trait_name == "Diagnostic") {
@@ -561,18 +741,18 @@ fn every_code_a_diagnostic_claims_is_a_registered_code() {
         }
     }
 
-    assert!(
-        unregistered.is_empty(),
-        "diagnostics claim codes absent from the locked catalog: {unregistered:?}"
-    );
+    if !unregistered.is_empty() {
+        return Err(format!(
+            "diagnostics claim codes absent from the locked catalog: {unregistered:?}"
+        ));
+    }
+    Ok(())
 }
 
-#[test]
-fn detail_projections_write_only_declared_keys() {
+fn detail_projections_write_only_declared_keys(scan: &ScanResult) -> Result<(), String> {
     // The ad hoc key check. `base["retry_after"] = …` on a code that declares
     // `retry_after_ms` compiles, projects, and reads as `null` forever at
     // `err.detail.retry_after_ms`. Nothing but this catches the typo.
-    let scan = scan_production_sources();
     let mut violations: Vec<String> = Vec::new();
 
     for item in scan.trait_impls.iter().filter(|i| i.trait_name == "Diagnostic") {
@@ -595,32 +775,33 @@ fn detail_projections_write_only_declared_keys() {
         }
     }
 
-    assert!(
-        violations.is_empty(),
-        "undeclared `detail` keys:\n  {}",
-        violations.join("\n  ")
-    );
+    if !violations.is_empty() {
+        return Err(format!(
+            "undeclared `detail` keys:\n  {}",
+            violations.join("\n  ")
+        ));
+    }
+    Ok(())
 }
 
-#[test]
-fn a_diagnostic_claiming_a_registered_code_projects_a_detail() {
+fn a_diagnostic_claiming_a_registered_code_projects_a_detail(
+    scan: &ScanResult,
+) -> Result<(), String> {
     // The default `Diagnostic::detail` returns `Value::Null`. Inheriting it
     // while claiming a registered code is precisely the D7 top-level-null
     // defect, in its static form.
-    let scan = scan_production_sources();
-
     for item in scan.trait_impls.iter().filter(|i| i.trait_name == "Diagnostic") {
         let claims_registered = item.codes.iter().any(|code| code_spec(code).is_some());
-        if !claims_registered {
+        if !claims_registered || item.overrides_detail {
             continue;
         }
-        assert!(
-            item.overrides_detail,
+        return Err(format!(
             "`{}` ({}) claims registered codes but inherits the default `detail()`, which \
              returns a top-level `Value::Null` — `err.detail.<field>` would fail against a scalar",
             item.type_name, item.file
-        );
+        ));
     }
+    Ok(())
 }
 
 #[test]
@@ -681,11 +862,9 @@ fn every_diagnostic_in_the_corpus_projects_its_catalog_key_set() {
     }
 }
 
-#[test]
-fn the_corpus_covers_every_code_a_diagnostic_can_return() {
+fn the_corpus_covers_every_code_a_diagnostic_can_return(scan: &ScanResult) -> Result<(), String> {
     // Completeness. Without this the corpus is a spot-check that quietly stops
     // covering a code the moment a new variant maps to one.
-    let scan = scan_production_sources();
     let mut claimed: BTreeSet<String> = BTreeSet::new();
     for item in scan.trait_impls.iter().filter(|i| i.trait_name == "Diagnostic") {
         for code in &item.codes {
@@ -705,11 +884,13 @@ fn the_corpus_covers_every_code_a_diagnostic_can_return() {
         .filter(|code| !covered.contains_key(*code))
         .collect();
 
-    assert!(
-        uncovered.is_empty(),
-        "a production diagnostic can return {uncovered:?}, but no corpus entry does — add one to \
-         `corpus::all()` so its detail projection is checked against the catalog"
-    );
+    if !uncovered.is_empty() {
+        return Err(format!(
+            "a production diagnostic can return {uncovered:?}, but no corpus entry does — add one \
+             to `corpus::all()` so its detail projection is checked against the catalog"
+        ));
+    }
+    Ok(())
 }
 
 /// Constructed diagnostics covering every registered code a production

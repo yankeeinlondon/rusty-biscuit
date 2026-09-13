@@ -27,7 +27,6 @@ use super::seed::PackageSeed;
 use super::standard::{MonorepoStandard, PackageProvenance};
 use super::topology::DetectorOutcome;
 
-
 /// Bazel project-root markers. Any one of these promotes a directory to a
 /// (parent or nested) workspace root.
 const BAZEL_ROOT_MARKERS: [&str; 3] = ["WORKSPACE", "WORKSPACE.bazel", "MODULE.bazel"];
@@ -149,9 +148,7 @@ fn walk_leaf_workspaces(
         .map(|(ws_root, leaf_dirs)| {
             let seeds = leaf_dirs
                 .into_iter()
-                .map(|dir| {
-                    PackageSeed::new(&dir, root, standard, PackageProvenance::LeafMarkers)
-                })
+                .map(|dir| PackageSeed::new(&dir, root, standard, PackageProvenance::LeafMarkers))
                 .collect();
             LeafWorkspace {
                 root: ws_root,

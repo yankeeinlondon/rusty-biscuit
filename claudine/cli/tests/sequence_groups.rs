@@ -11,27 +11,20 @@
 
 use std::fs;
 use std::path::Path;
-use tempfile::tempdir;
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 /// Install a fake `goose` that succeeds and echoes a fixed line.
-fn fake_goose(workspace: &Path) -> std::path::PathBuf {
-    let path_dir = workspace.join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+fn fake_goose(fixture: &CliProcessFixture) {
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\nprintf 'agent-said\\n'\nexit 0\n",
     );
-    path_dir
 }
 
-fn run(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, String, i32) {
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace)
-        .env("PATH", augmented_path(path_dir))
-        .current_dir(workspace)
+fn run(fixture: &CliProcessFixture, args: &[&str]) -> (String, String, i32) {
+    let output = fixture
+        .command()
         .args(args)
         .assert()
         .get_output()
@@ -48,8 +41,9 @@ fn run(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, String, i32
 /// `FORCE_COLOR=1` is what routes claudine through an optimistic color terminal
 /// when neither stream is a TTY; without it the palette collapses and a body
 /// line cannot be matched to its header by color.
-fn run_in_color(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, String, i32) {
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
+fn run_in_color(fixture: &CliProcessFixture, args: &[&str]) -> (String, String, i32) {
+    let output = fixture
+        .command()
         .env("FORCE_COLOR", "1")
         // `NO_COLOR` is absolute for this CLI (`log::colors_disabled`), so
         // `FORCE_COLOR` cannot out-vote an inherited one the way it does in
@@ -57,9 +51,6 @@ fn run_in_color(workspace: &Path, path_dir: &Path, args: &[&str]) -> (String, St
         // colorless on a `NO_COLOR` host and every bar compares equal.
         .env_remove("NO_COLOR")
         .env("COLUMNS", "100")
-        .env("HOME", workspace)
-        .env("PATH", augmented_path(path_dir))
-        .current_dir(workspace)
         .args(args)
         .assert()
         .get_output()
@@ -90,9 +81,9 @@ fn trace(workspace: &Path) -> Vec<String> {
 /// one by name in the step breakdown.
 #[test]
 fn an_inline_serial_group_runs_its_tasks_in_declaration_order() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         r#"---
@@ -113,13 +104,12 @@ Body.
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
 
     assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert_eq!(trace(workspace.path()), vec!["one", "two"]);
+    assert_eq!(trace(fixture.cwd()), vec!["one", "two"]);
     assert!(
         stderr.contains("first") && stderr.contains("second"),
         "the step breakdown names every member task; stderr:\n{stderr}"
@@ -130,16 +120,16 @@ Body.
 /// group written inline.
 #[test]
 fn a_group_file_reference_executes_the_same_bundle() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
-    let bundle = workspace.path().join("bundle");
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
+    let bundle = fixture.cwd().join("bundle");
     fs::create_dir(&bundle).unwrap();
     fs::write(
         bundle.join("group.yaml"),
         "kind: group\nname: bundle\ntasks:\n  - name: first\n    shell: \"printf 'one\\n' >> trace.txt\"\n  - name: second\n    shell: \"printf 'two\\n' >> trace.txt\"\n",
     )
     .unwrap();
-    let md = workspace.path().join("seq.md");
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         "---\nsequence:\n  - name: alpha\n    group: bundle/group.yaml\n---\n\nBody.\n",
@@ -147,27 +137,26 @@ fn a_group_file_reference_executes_the_same_bundle() {
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
 
     assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert_eq!(trace(workspace.path()), vec!["one", "two"]);
+    assert_eq!(trace(fixture.cwd()), vec!["one", "two"]);
 }
 
 /// A named entry in a `kind: group-catalog` file is a third spelling of the
 /// same bundle.
 #[test]
 fn a_named_catalog_entry_executes_the_same_bundle() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
     fs::write(
-        workspace.path().join("catalog.yaml"),
+        fixture.cwd().join("catalog.yaml"),
         "kind: group-catalog\ngroups:\n  - name: other\n    tasks:\n      - shell: \"printf 'wrong\\n' >> trace.txt\"\n  - name: bundle\n    tasks:\n      - name: first\n        shell: \"printf 'one\\n' >> trace.txt\"\n      - name: second\n        shell: \"printf 'two\\n' >> trace.txt\"\n",
     )
     .unwrap();
-    let md = workspace.path().join("seq.md");
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         "---\nsequence:\n  - name: alpha\n    group: bundle@catalog.yaml\n---\n\nBody.\n",
@@ -175,22 +164,21 @@ fn a_named_catalog_entry_executes_the_same_bundle() {
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
 
     assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert_eq!(trace(workspace.path()), vec!["one", "two"]);
+    assert_eq!(trace(fixture.cwd()), vec!["one", "two"]);
 }
 
 /// The first failed task stops the group and the remaining members do not run;
 /// with sequence `fail_fast: false` the *sequence* still continues.
 #[test]
 fn a_failed_task_stops_the_group_but_fail_fast_false_continues_the_sequence() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         r#"---
@@ -216,14 +204,13 @@ Body.
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
 
     assert_eq!(code, 1, "a failed group fails the run; stderr:\n{stderr}");
     assert_eq!(
-        trace(workspace.path()),
+        trace(fixture.cwd()),
         vec!["one", "two", "later"],
         "`never` must not run, but the next sequence step must; stderr:\n{stderr}"
     );
@@ -237,9 +224,9 @@ Body.
 /// failed group stops the sequence immediately.
 #[test]
 fn fail_fast_true_stops_the_sequence_after_a_failed_group() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         r#"---
@@ -261,13 +248,12 @@ Body.
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
 
     assert_eq!(code, 1, "stderr:\n{stderr}");
-    assert_eq!(trace(workspace.path()), vec!["one"], "stderr:\n{stderr}");
+    assert_eq!(trace(fixture.cwd()), vec!["one"], "stderr:\n{stderr}");
 }
 
 /// Group variables reach a member task's prompt document, and the scope ends
@@ -275,14 +261,14 @@ Body.
 /// reading a stale value.
 #[test]
 fn group_variables_reach_members_and_do_not_leak_to_the_next_step() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
     fs::write(
-        workspace.path().join("member.md"),
+        fixture.cwd().join("member.md"),
         "---\nstart:\n  info: 'label is {{ doc.label }}'\n---\n\nMember body.\n",
     )
     .unwrap();
-    let md = workspace.path().join("seq.md");
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         r#"---
@@ -310,8 +296,7 @@ Body.
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
 
@@ -334,14 +319,14 @@ Body.
 /// task was a sibling in this group or an earlier sequence step.
 #[test]
 fn outputs_chain_through_a_serial_group() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
     fs::write(
-        workspace.path().join("member.md"),
+        fixture.cwd().join("member.md"),
         "---\nstart:\n  info: 'prior is {{ doc.prior }}'\n---\n\nMember body.\n",
     )
     .unwrap();
-    let md = workspace.path().join("seq.md");
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         r#"---
@@ -364,8 +349,7 @@ Body.
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
 
@@ -380,9 +364,9 @@ Body.
 /// runs — because iteration commit semantics are not ratified.
 #[test]
 fn a_group_loop_is_rejected_before_anything_runs() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         r#"---
@@ -402,8 +386,7 @@ Body.
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
 
@@ -413,7 +396,7 @@ Body.
         "the rejection must name the construct; stderr:\n{stderr}"
     );
     assert!(
-        trace(workspace.path()).is_empty(),
+        trace(fixture.cwd()).is_empty(),
         "preflight rejection means nothing ran; stderr:\n{stderr}"
     );
 }
@@ -423,9 +406,9 @@ Body.
 /// satisfy that barrier.
 #[test]
 fn a_parallel_group_overlaps_its_members() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         r#"---
@@ -449,12 +432,11 @@ Body.
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
     assert_eq!(code, 0, "stderr:\n{stderr}");
-    let mut lines = trace(workspace.path());
+    let mut lines = trace(fixture.cwd());
     lines.sort();
     assert_eq!(lines, vec!["one", "three", "two"], "every member must run");
 }
@@ -464,10 +446,10 @@ Body.
 /// the counter before exiting.
 #[test]
 fn max_parallel_bounds_the_overlap() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
     fs::write(
-        workspace.path().join("count-active.sh"),
+        fixture.cwd().join("count-active.sh"),
         r#"set -eu
 name="$1"
 lock() {
@@ -494,7 +476,7 @@ printf '%s\n' "$name" >> trace.txt
 "#,
     )
     .unwrap();
-    let md = workspace.path().join("seq.md");
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         r#"---
@@ -521,14 +503,13 @@ Body.
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
     assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert_eq!(trace(workspace.path()).len(), 4);
+    assert_eq!(trace(fixture.cwd()).len(), 4);
     assert!(
-        !workspace.path().join("cap-exceeded").exists(),
+        !fixture.cwd().join("cap-exceeded").exists(),
         "max_parallel allowed more than two tasks to overlap",
     );
 }
@@ -537,14 +518,14 @@ Body.
 /// even when the members finish in the opposite order.
 #[test]
 fn a_parallel_group_commits_a_declaration_ordered_nested_entry() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
     fs::write(
-        workspace.path().join("reader.md"),
+        fixture.cwd().join("reader.md"),
         "---\nstart:\n  info: 'entry is {{ doc.entry }}'\n---\n\nReader body.\n",
     )
     .unwrap();
-    let md = workspace.path().join("seq.md");
+    let md = fixture.cwd().join("seq.md");
     // `first` sleeps the longest, so completion order is the reverse of
     // declaration order. Indexing the nested entry positionally is what proves
     // the slots follow declaration order rather than arrival order.
@@ -573,8 +554,7 @@ Body.
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
 
@@ -590,9 +570,9 @@ Body.
 /// governed by sequence-level `fail_fast` exactly as a serial group's is.
 #[test]
 fn a_failed_parallel_member_lets_its_siblings_finish() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         r#"---
@@ -617,13 +597,12 @@ Body.
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
 
     assert_ne!(code, 0, "a failed member fails the group; stderr:\n{stderr}");
-    let lines = trace(workspace.path());
+    let lines = trace(fixture.cwd());
     assert!(
         lines.contains(&"survivor".to_string()),
         "the sibling must run to completion after the failure; trace: {lines:?}",
@@ -638,14 +617,14 @@ Body.
 /// and warn on stderr naming the key and both tasks.
 #[test]
 fn a_contested_key_in_a_parallel_group_warns_and_resolves_by_declaration_order() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
     fs::write(
-        workspace.path().join("reader.md"),
+        fixture.cwd().join("reader.md"),
         "---\nstart:\n  info: 'shared is {{ shared }}'\n---\n\nReader body.\n",
     )
     .unwrap();
-    let md = workspace.path().join("seq.md");
+    let md = fixture.cwd().join("seq.md");
     // The later-declared task finishes first, so a completion-order merge would
     // leave `from-early` behind.
     fs::write(
@@ -678,8 +657,7 @@ Body.
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
 
@@ -699,9 +677,9 @@ Body.
 /// output lands framed on stdout in between.
 #[test]
 fn parallel_group_members_are_attributed_across_both_channels() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         r#"---
@@ -723,8 +701,7 @@ Body.
     .unwrap();
 
     let (stdout, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", "seq.md"],
     );
 
@@ -772,9 +749,9 @@ Body.
 /// channels because that is exactly how a reader resolves them on a terminal.
 #[test]
 fn parallel_body_lines_carry_their_own_tasks_bar_color() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         r#"---
@@ -796,8 +773,7 @@ Body.
     .unwrap();
 
     let (stdout, stderr, code) = run_in_color(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", "seq.md"],
     );
     assert_eq!(code, 0, "stderr:\n{stderr}");
@@ -835,9 +811,9 @@ Body.
 #[test]
 fn serial_and_parallel_group_frames_share_one_left_edge() {
     let column_of_header = |execution: &str| -> usize {
-        let workspace = tempdir().unwrap();
-        let path_dir = fake_goose(workspace.path());
-        let md = workspace.path().join("seq.md");
+        let fixture = CliProcessFixture::named("sequence-groups");
+        fake_goose(&fixture);
+        let md = fixture.cwd().join("seq.md");
         fs::write(
             &md,
             format!(
@@ -858,8 +834,7 @@ Body.
         )
         .unwrap();
         let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", "seq.md"],
     );
         assert_eq!(code, 0, "stderr: {stderr}");
@@ -881,9 +856,9 @@ Body.
 /// `--silent` suppresses the framing without changing what runs.
 #[test]
 fn a_silent_group_run_emits_no_task_frames() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         r#"---
@@ -905,14 +880,13 @@ Body.
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", "seq.md", "--silent"],
     );
 
     assert_eq!(code, 0, "stderr: {stderr}");
     assert!(!stderr.contains("▶ first"), "frames survived --silent: {stderr}");
-    let mut ran = trace(workspace.path());
+    let mut ran = trace(fixture.cwd());
     ran.sort();
     assert_eq!(ran, vec!["one", "two"], "silencing changed what ran");
 }
@@ -920,9 +894,9 @@ Body.
 /// `--perf` attributes a group's wall-clock to its member tasks by name.
 #[test]
 fn perf_reports_the_group_task_hierarchy() {
-    let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path());
-    let md = workspace.path().join("seq.md");
+    let fixture = CliProcessFixture::named("sequence-groups");
+    fake_goose(&fixture);
+    let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
         r#"---
@@ -944,8 +918,7 @@ Body.
     .unwrap();
 
     let (_, stderr, code) = run(
-        workspace.path(),
-        &path_dir,
+        &fixture,
         &["sequence", "--goose", "--yolo", "seq.md", "--perf"],
     );
 
@@ -970,13 +943,11 @@ Body.
 /// (stderr), and each carries its task's textual label under `NO_COLOR`.
 #[test]
 fn parallel_prompt_task_splits_data_and_status_across_channels() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("sequence-groups");
     // `claude`, not `goose`: only a provider with a `stream_protocol` reaches
     // the semantic spawn where the task decorator is installed.
     write_executable(
-        &path_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         &format!(
             r#"#!/bin/sh
 {find_doc}printf '%s\n' '{{"type":"system","subtype":"init","session_id":"stub-1","model":"stub-model"}}'
@@ -994,10 +965,10 @@ exit 0
         ),
     );
 
-    fs::write(workspace.path().join("one.md"), "---\nprompt: hi\n---\n\nOne.\n").unwrap();
-    fs::write(workspace.path().join("two.md"), "---\nprompt: hi\n---\n\nTwo.\n").unwrap();
+    fs::write(fixture.cwd().join("one.md"), "---\nprompt: hi\n---\n\nOne.\n").unwrap();
+    fs::write(fixture.cwd().join("two.md"), "---\nprompt: hi\n---\n\nTwo.\n").unwrap();
     fs::write(
-        workspace.path().join("seq.md"),
+        fixture.cwd().join("seq.md"),
         r#"---
 sequence:
   - name: alpha
@@ -1016,11 +987,8 @@ Body.
     )
     .unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let output = fixture
+        .command()
         .args(["sequence", "--claude", "--yolo", "seq.md"])
         .assert()
         .get_output()
@@ -1070,31 +1038,29 @@ Body.
 /// record stream. Each member's run keeps its own session identity.
 #[test]
 fn parallel_group_members_keep_separate_provider_sessions() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("sequence-groups");
     // Each launch records the session id it was handed, then waits for its
     // sibling. Reaching the barrier requires both production task preparations
     // to remain live at once; serial scheduling cannot satisfy it.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\nprintf '%s\\n' \"${CLAUDINE_SESSION_ID:-none}\" >> \"$CLAUDINE_TEST_SESSIONS\"\nattempts=0\nwhile [ \"$(wc -l < \"$CLAUDINE_TEST_SESSIONS\")\" -lt 2 ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done\nprintf 'agent-said\\n'\nexit 0\n",
     );
-    let sessions = workspace.path().join("sessions.txt");
+    let sessions = fixture.cwd().join("sessions.txt");
     fs::write(&sessions, "").unwrap();
 
     fs::write(
-        workspace.path().join("one.md"),
+        fixture.cwd().join("one.md"),
         "---\nstart:\n  stderr: '{{ ctx.os }}'\n---\n\nOne {{ ctx.os }}.\n",
     )
     .unwrap();
     fs::write(
-        workspace.path().join("two.md"),
+        fixture.cwd().join("two.md"),
         "---\nstart:\n  stderr: '{{ ctx.os }}'\n---\n\nTwo {{ ctx.os }}.\n",
     )
     .unwrap();
     fs::write(
-        workspace.path().join("seq.md"),
+        fixture.cwd().join("seq.md"),
         r#"---
 sequence:
   - name: alpha
@@ -1113,12 +1079,9 @@ Body.
     )
     .unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let output = fixture
+        .command()
         .env("CLAUDINE_TEST_SESSIONS", &sessions)
-        .current_dir(workspace.path())
         .args(["sequence", "--goose", "--yolo", "seq.md", "--perf"])
         .assert()
         .get_output()

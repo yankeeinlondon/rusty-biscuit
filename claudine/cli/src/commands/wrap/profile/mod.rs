@@ -29,10 +29,6 @@ mod pi;
 mod qwen;
 mod resolve;
 
-pub(crate) use self::resolve::{
-    NoModelProvided, OpenCodeEnvSnapshot, OpenCodeModelSource, apply_opencode_model_resolution,
-    extract_prompt_source_from_passthrough, require_prompt_present, resolve_opencode_model,
-};
 pub(crate) use self::antigravity::AntigravityWrapper;
 pub(crate) use self::claude::ClaudeWrapper;
 pub(crate) use self::codex::CodexWrapper;
@@ -43,6 +39,10 @@ pub(crate) use self::kimi::KimiWrapper;
 pub(crate) use self::opencode::OpencodeWrapper;
 pub(crate) use self::pi::PiWrapper;
 pub(crate) use self::qwen::QwenWrapper;
+pub(crate) use self::resolve::{
+    ConfiguredModel, ModelSource, extract_prompt_source_from_passthrough, no_model_error,
+    require_prompt_present, resolve_model_source,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OutputFormat {
@@ -365,6 +365,17 @@ pub(crate) trait WrapperProfile: Send + Sync {
         Ok(())
     }
 
+    /// The model the provider would run on its own when no explicit model is
+    /// given, read from the provider's configuration.
+    ///
+    /// Consulted by the shared model stage only for providers whose catalog
+    /// sets `model_required_in_non_tty`, so the launch can be reported and
+    /// `MODEL` exported without pushing a flag the provider does not need.
+    /// Default: `None` (no discoverable default).
+    fn configured_default_model(&self) -> Option<ConfiguredModel> {
+        None
+    }
+
     // -- Universal --model flag ----------------------------------------------
 
     /// Map the universal `--model <value>` to provider-specific flags/env.
@@ -443,7 +454,9 @@ pub(crate) trait WrapperProfile: Send + Sync {
     ///
     /// Default: the central catalog's curated suppression list.
     fn stdout_noise_prefixes(&self) -> &'static [&'static str] {
-        provider_info(self.provider()).display_policy.stdout_noise_prefixes
+        provider_info(self.provider())
+            .display_policy
+            .stdout_noise_prefixes
     }
 
     // -- Captured output (compose mode) ----------------------------------------
@@ -480,7 +493,9 @@ pub(crate) trait WrapperProfile: Send + Sync {
     ///
     /// Default: the central catalog's curated suppression list.
     fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
-        provider_info(self.provider()).display_policy.stderr_noise_prefixes
+        provider_info(self.provider())
+            .display_policy
+            .stderr_noise_prefixes
     }
 
     /// When true, structured non-interactive runs buffer filtered stderr and
@@ -647,10 +662,6 @@ static WRAPPER_REGISTRY: [Option<&'static dyn WrapperProfile>; PROVIDER_COUNT] =
 /// [`WRAPPER_REGISTRY`].
 pub(crate) fn profile_for_provider(provider: Provider) -> Option<&'static dyn WrapperProfile> {
     WRAPPER_REGISTRY[provider as usize]
-}
-
-fn non_empty_env_var(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|value| !value.is_empty())
 }
 
 fn has_any_flag(args: &[String], primary: &str, aliases: &[&str]) -> bool {

@@ -15,3 +15,13 @@ strum = { version = "0.28", features = ["derive"] }
 
 [dev-dependencies]
 serde_json = "1.0"
+
+# Declared rather than defaulted (2026-09-07-faster-claudine-tests, Phase 6).
+# This is a leaf type crate: 21 pure serde/strum unit tests, no features, no
+# tier above L1, nothing to provision. The values below are the defaults
+# `scripts/ci/affected_scope.py` would apply anyway — written out so the route
+# is a decision on record instead of an omission.
+[package.metadata.ci.tests]
+tiers = ["L1"]
+features = []
+local-features = []

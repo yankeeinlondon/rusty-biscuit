@@ -11,9 +11,11 @@
 //! bytes — wording, ordering, indentation, arm prefixes, line annotations, and
 //! the additive `description` sub-line — are compared exactly.
 
+mod common;
+
+use common::CliProcessFixture;
 use std::fs;
-use std::path::Path;
-use tempfile::TempDir;
+use std::path::{Path, PathBuf};
 
 const FIXTURES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -35,9 +37,10 @@ const CASES: &[&str] = &[
 /// Copy every input file for a case (everything but the `expected.*` snapshots)
 /// into a fresh working directory so the CLI resolves a deterministic,
 /// relative `doc.md` argument.
-fn stage_inputs(case: &str) -> TempDir {
+fn stage_inputs(process: &CliProcessFixture, case: &str) -> PathBuf {
     let src = Path::new(FIXTURES).join(case);
-    let work = TempDir::new().unwrap();
+    let work = process.cwd().join(case);
+    fs::create_dir_all(&work).unwrap();
     for entry in fs::read_dir(&src).unwrap() {
         let entry = entry.unwrap();
         let name = entry.file_name();
@@ -45,7 +48,7 @@ fn stage_inputs(case: &str) -> TempDir {
         if name == "expected.json" || name == "expected.pretty" {
             continue;
         }
-        fs::copy(entry.path(), work.path().join(name)).unwrap();
+        fs::copy(entry.path(), work.join(name)).unwrap();
     }
     work
 }
@@ -66,13 +69,16 @@ fn normalize_document_url(mut output: String) -> String {
 
 #[test]
 fn schema_validate_legacy_json_output_is_byte_identical() {
+    let process = CliProcessFixture::new();
     for case in CASES {
-        let work = stage_inputs(case);
+        let work = stage_inputs(&process, case);
         let expected = read_snapshot(case, "expected.json");
         let expects_success = expected.contains("\"valid\":true");
 
-        let output = assert_cmd::Command::cargo_bin("md").unwrap()
-            .current_dir(work.path())
+        let output = process
+            .command_builder()
+            .ambient_context(&work)
+            .build()
             .args(["schema", "validate", "--format", "json", "doc.md"])
             .output()
             .unwrap();
@@ -92,15 +98,17 @@ fn schema_validate_legacy_json_output_is_byte_identical() {
 
 #[test]
 fn schema_validate_legacy_pretty_output_is_byte_identical() {
+    let process = CliProcessFixture::new();
     for case in CASES {
-        let work = stage_inputs(case);
+        let work = stage_inputs(&process, case);
         let template = read_snapshot(case, "expected.pretty");
-        let expects_success =
-            read_snapshot(case, "expected.json").contains("\"valid\":true");
+        let expects_success = read_snapshot(case, "expected.json").contains("\"valid\":true");
 
-        let output = assert_cmd::Command::cargo_bin("md").unwrap()
-            .current_dir(work.path())
-            .env("NO_COLOR", "1")
+        let output = process
+            .command_builder()
+            .ambient_context(&work)
+            .rendering_input("NO_COLOR", "1")
+            .build()
             .args(["schema", "validate", "doc.md"])
             .output()
             .unwrap();

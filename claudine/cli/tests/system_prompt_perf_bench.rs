@@ -8,6 +8,11 @@
 //!
 //! The test is `#[ignore]`d by default — it's diagnostic, not a gate.
 
+// The helper-tool policy alone, not the fixture surface: this binary shells
+// out to `git` and never spawns `claudine`.
+#[path = "common/host_tools.rs"]
+mod host_tools;
+
 use claudine::system_prompt::{
     LaunchContext, ResolvedSystemPrompt, SystemPromptArgs,
     resolve_and_prepare_for_session_with_context,
@@ -174,7 +179,7 @@ fn bench_resolve_and_prepare_step_by_step() {
 #[ignore = "diagnostic perf bench; run with --ignored --nocapture"]
 fn bench_request_topology_probe_and_reuse() {
     fn init_repo(path: &std::path::Path) {
-        let status = std::process::Command::new("git")
+        let status = host_tools::helper_command("git")
             .args(["init", "--initial-branch=main", "--quiet"])
             .current_dir(path)
             .status()

@@ -136,6 +136,7 @@ pub(crate) fn execute_harness_attempt(
 
     let (
         exit_code,
+        is_error,
         termination,
         session_id,
         final_response,
@@ -274,6 +275,7 @@ pub(crate) fn execute_harness_attempt(
 
         super::super::policy::emit_stream_summary(
             &summary,
+            termination,
             profile,
             env_context,
             stream_verbosity,
@@ -327,6 +329,9 @@ pub(crate) fn execute_harness_attempt(
 
         (
             summary.exit_code,
+            // The stream parser's semantic verdict rides alongside the native
+            // exit code; the classifier needs both.
+            summary.is_error,
             termination,
             summary.session_id.clone(),
             effective_response,
@@ -389,6 +394,9 @@ pub(crate) fn execute_harness_attempt(
 
         (
             capture.data.exit_code,
+            // No stream parser on the capture path, so there is no semantic
+            // verdict to carry; classification stays exit-code-driven here.
+            false,
             termination,
             None,
             response,
@@ -437,6 +445,8 @@ pub(crate) fn execute_harness_attempt(
 
         (
             result.data,
+            // Interactive/passthrough has no stream parser either.
+            false,
             termination,
             None,
             response,
@@ -469,6 +479,7 @@ pub(crate) fn execute_harness_attempt(
             session_id,
             final_response,
             exit_code,
+            is_error,
             termination,
             stderr_text,
             error_kind,

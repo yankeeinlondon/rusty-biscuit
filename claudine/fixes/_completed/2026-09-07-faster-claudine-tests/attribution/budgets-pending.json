@@ -1,0 +1,29 @@
+{
+  "_comment": [
+    "Budget input for `attribution.ts --budgets`. It declares the four legs the",
+    "spec requires and the number of consecutive green CI runs collected for",
+    "each. Phase 9 (2026-09-08) collected the first post-merge `main` run",
+    "(`baseline/34173378609/`), so every leg stands at one; the gate still",
+    "refuses to derive a budget until each leg has three.",
+    "This file is hand-written and is kept at one run with no measurements on",
+    "purpose: it reproduces the original `missing-leg` refusal verbatim. The",
+    "JUnit -> family join now exists (`attribution.ts aggregate`, 2026-09-09)",
+    "and generates this same shape from the stored staging trees, so its",
+    "output — not a hand edit — is what replaces this file once three green",
+    "runs per leg exist. Local timing lives in `attribution.md` and is never a",
+    "budget input — a `kind` of `local` is refused before any leg is read."
+  ],
+  "provenance": {
+    "kind": "ci",
+    "legs": ["ubuntu-latest", "macos-latest", "windows-latest", "wsl2-ubuntu"],
+    "runsPerLeg": {
+      "ubuntu-latest": 1,
+      "macos-latest": 1,
+      "windows-latest": 1,
+      "wsl2-ubuntu": 1
+    },
+    "runs": ["34173378609"]
+  },
+  "perLegFamilySummed": {},
+  "headroom": 0.25
+}

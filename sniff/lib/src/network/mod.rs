@@ -985,11 +985,7 @@ fn windows_default_route_command() -> (&'static str, [&'static str; 2]) {
 
 #[cfg(any(target_os = "windows", test))]
 #[allow(dead_code)]
-fn command_output(
-    program: &str,
-    args: &[&str],
-    timeout: std::time::Duration,
-) -> Option<String> {
+fn command_output(program: &str, args: &[&str], timeout: std::time::Duration) -> Option<String> {
     process::run_for_stdout(program, args, timeout)
 }
 
@@ -1367,8 +1363,10 @@ mod tests {
             .mount(&server)
             .await;
 
-        let detector = WanIpDetector::new()
-            .with_endpoints(vec![format!("{}/a", server.uri()), format!("{}/b", server.uri())]);
+        let detector = WanIpDetector::new().with_endpoints(vec![
+            format!("{}/a", server.uri()),
+            format!("{}/b", server.uri()),
+        ]);
         assert_eq!(detector.detect(), None);
     }
 
@@ -1396,7 +1394,10 @@ mod tests {
         // went through `IpAddr` rather than being trusted as a string.
         Mock::given(method("GET"))
             .and(path("/verbose-v6"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("2001:0db8:0000:0000:0000:0000:0000:0001\n"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("2001:0db8:0000:0000:0000:0000:0000:0001\n"),
+            )
             .mount(&server)
             .await;
 
@@ -2036,10 +2037,7 @@ eth0\t00000000\t0100A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0";
         // which `read_to_string(...).ok()` maps to `None` in the caller.
         let header_only =
             "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT";
-        assert_eq!(
-            parse_linux_proc_default_route_interface(header_only),
-            None
-        );
+        assert_eq!(parse_linux_proc_default_route_interface(header_only), None);
         assert_eq!(parse_linux_proc_default_route_interface(""), None);
     }
 

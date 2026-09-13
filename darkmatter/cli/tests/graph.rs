@@ -1,21 +1,20 @@
 mod common;
 
-use common::{md_cmd, md_file};
+use common::CliProcessFixture;
 use predicates::prelude::*;
-use std::io::Write;
 
 #[test]
 fn test_graph_basic() {
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(
-        tmp,
-        "# Test\n\n[link](https://example.com)\n\n![img](./logo.png)"
-    )
-    .unwrap();
+    let fixture = CliProcessFixture::named("test_graph_basic");
+    let input = fixture.write_file(
+        "cwd/test.md",
+        "# Test\n\n[link](https://example.com)\n\n![img](./logo.png)",
+    );
 
-    md_cmd()
+    fixture
+        .command()
         .arg("graph")
-        .arg(tmp.path())
+        .arg(input)
         .assert()
         .success()
         .stdout(predicate::str::contains("example.com"))
@@ -24,13 +23,16 @@ fn test_graph_basic() {
 
 #[test]
 fn test_graph_follow() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let parent = dir.path().join("parent.md");
-    let child = dir.path().join("child.md");
-    std::fs::write(&parent, "# Parent\n\n::file child.md").unwrap();
-    std::fs::write(&child, "# Child\n\n[link](https://child.example.com)").unwrap();
+    let fixture = CliProcessFixture::named("test_graph_follow");
+    assert!(fixture.initialize_repository());
+    let parent = fixture.write_file("cwd/parent.md", "# Parent\n\n::file child.md");
+    fixture.write_file(
+        "cwd/child.md",
+        "# Child\n\n[link](https://child.example.com)",
+    );
 
-    md_cmd()
+    fixture
+        .command()
         .arg("graph")
         .arg(&parent)
         .arg("--follow")
@@ -42,13 +44,13 @@ fn test_graph_follow() {
 
 #[test]
 fn test_graph_validate_valid() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let md_path = dir.path().join("valid.md");
-    let linked = dir.path().join("linked.md");
-    std::fs::write(&md_path, "# Valid\n\n[link](./linked.md)").unwrap();
-    std::fs::write(&linked, "# Linked").unwrap();
+    let fixture = CliProcessFixture::named("test_graph_validate_valid");
+    assert!(fixture.initialize_repository());
+    let md_path = fixture.write_file("cwd/valid.md", "# Valid\n\n[link](./linked.md)");
+    fixture.write_file("cwd/linked.md", "# Linked");
 
-    md_cmd()
+    fixture
+        .command()
         .arg("graph")
         .arg(&md_path)
         .arg("--validate")
@@ -60,11 +62,14 @@ fn test_graph_validate_valid() {
 
 #[test]
 fn test_graph_validate_invalid() {
-    let tmp = md_file("# Test\n\n[broken](./nonexistent.md)\n");
+    let fixture = CliProcessFixture::named("test_graph_validate_invalid");
+    assert!(fixture.initialize_repository());
+    let input = fixture.write_file("cwd/test.md", "# Test\n\n[broken](./nonexistent.md)\n");
 
-    let output = md_cmd()
+    let output = fixture
+        .command()
         .arg("graph")
-        .arg(tmp.path())
+        .arg(input)
         .arg("--validate")
         .output()
         .unwrap();
@@ -87,17 +92,16 @@ fn test_graph_validate_invalid() {
 
 #[test]
 fn test_graph_follow_toc_linking() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let parent = dir.path().join("root.md");
-    let child = dir.path().join("child.md");
-    std::fs::write(&parent, "# Root\n\n::toc-linking child.md").unwrap();
-    std::fs::write(
-        &child,
+    let fixture = CliProcessFixture::named("test_graph_follow_toc_linking");
+    assert!(fixture.initialize_repository());
+    let parent = fixture.write_file("cwd/root.md", "# Root\n\n::toc-linking child.md");
+    fixture.write_file(
+        "cwd/child.md",
         "# Child\n\n## Section A\n\n## Section B\n\n[link](https://child.example.com)",
-    )
-    .unwrap();
+    );
 
-    md_cmd()
+    fixture
+        .command()
         .arg("graph")
         .arg(&parent)
         .arg("--follow")
@@ -110,13 +114,13 @@ fn test_graph_follow_toc_linking() {
 
 #[test]
 fn test_graph_follow_validate_child_broken_link() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let parent = dir.path().join("root.md");
-    let child = dir.path().join("child.md");
-    std::fs::write(&parent, "# Root\n\n::toc-linking child.md").unwrap();
-    std::fs::write(&child, "# Child\n\n[broken](./missing.md)").unwrap();
+    let fixture = CliProcessFixture::named("test_graph_follow_validate_child_broken_link");
+    assert!(fixture.initialize_repository());
+    let parent = fixture.write_file("cwd/root.md", "# Root\n\n::toc-linking child.md");
+    fixture.write_file("cwd/child.md", "# Child\n\n[broken](./missing.md)");
 
-    let output = md_cmd()
+    let output = fixture
+        .command()
         .arg("graph")
         .arg(&parent)
         .arg("--follow")
@@ -138,15 +142,17 @@ fn test_graph_follow_validate_child_broken_link() {
 
 #[test]
 fn test_graph_follow_multiple_prologues() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path().join("root.md");
-    let a = dir.path().join("a.md");
-    let b = dir.path().join("b.md");
-    std::fs::write(&root, "---\nprologue:\n  - a.md\n  - b.md\n---\n\n# Root").unwrap();
-    std::fs::write(&a, "# A\n\n[a-link](https://a.example.com)").unwrap();
-    std::fs::write(&b, "# B\n\n[b-link](https://b.example.com)").unwrap();
+    let fixture = CliProcessFixture::named("test_graph_follow_multiple_prologues");
+    assert!(fixture.initialize_repository());
+    let root = fixture.write_file(
+        "cwd/root.md",
+        "---\nprologue:\n  - a.md\n  - b.md\n---\n\n# Root",
+    );
+    fixture.write_file("cwd/a.md", "# A\n\n[a-link](https://a.example.com)");
+    fixture.write_file("cwd/b.md", "# B\n\n[b-link](https://b.example.com)");
 
-    md_cmd()
+    fixture
+        .command()
         .arg("graph")
         .arg(&root)
         .arg("--follow")
@@ -160,21 +166,19 @@ fn test_graph_follow_multiple_prologues() {
 
 #[test]
 fn test_graph_follow_epilogue() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path().join("root.md");
-    let epilogue = dir.path().join("epilogue.md");
-    std::fs::write(
-        &root,
+    let fixture = CliProcessFixture::named("test_graph_follow_epilogue");
+    assert!(fixture.initialize_repository());
+    let root = fixture.write_file(
+        "cwd/root.md",
         "---\nepilogue: epilogue.md\n---\n\n# Root\n\n[main](https://main.example.com)",
-    )
-    .unwrap();
-    std::fs::write(
-        &epilogue,
+    );
+    fixture.write_file(
+        "cwd/epilogue.md",
         "# Epilogue\n\n[epi-link](https://epilogue.example.com)",
-    )
-    .unwrap();
+    );
 
-    md_cmd()
+    fixture
+        .command()
         .arg("graph")
         .arg(&root)
         .arg("--follow")
@@ -187,7 +191,9 @@ fn test_graph_follow_epilogue() {
 
 #[test]
 fn test_graph_file_not_found() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_graph_file_not_found");
+    fixture
+        .command()
         .arg("graph")
         .arg("/nonexistent/file.md")
         .assert()
@@ -196,7 +202,9 @@ fn test_graph_file_not_found() {
 
 #[test]
 fn test_graph_help() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_graph_help");
+    fixture
+        .command()
         .arg("graph")
         .arg("--help")
         .assert()
@@ -205,14 +213,13 @@ fn test_graph_help() {
         .stdout(predicate::str::contains("--validate"));
 }
 
-
 #[test]
 fn test_graph_json_output() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let file = dir.path().join("test.md");
-    std::fs::write(&file, "# Test\n\n[link](https://example.com)").unwrap();
+    let fixture = CliProcessFixture::named("test_graph_json_output");
+    let file = fixture.write_file("cwd/test.md", "# Test\n\n[link](https://example.com)");
 
-    md_cmd()
+    fixture
+        .command()
         .args(["graph", "--json"])
         .arg(&file)
         .assert()
@@ -236,11 +243,13 @@ use common::baseline;
 /// normalizes temp paths / hash prefixes, and compares the full value
 /// against the named baseline fixture.
 fn assert_graph_json_matches_baseline(
+    fixture: &CliProcessFixture,
     args: &[&str],
     temp_dir: &std::path::Path,
     baseline_name: &str,
 ) {
-    let output = md_cmd()
+    let output = fixture
+        .command()
         .args(args)
         .output()
         .expect("md command failed to spawn");
@@ -270,12 +279,18 @@ fn assert_graph_json_matches_baseline(
 
 #[test]
 fn graph_json_local_baseline() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path();
-    std::fs::write(root.join("local.md"), "# Local Test\n\n[local link](./other.md)\n![local image](./img.png)\n::file other.md\n").unwrap();
+    let fixture = CliProcessFixture::named("graph_json_local_baseline");
+    assert!(fixture.initialize_repository());
+    let root = fixture.cwd();
+    std::fs::write(
+        root.join("local.md"),
+        "# Local Test\n\n[local link](./other.md)\n![local image](./img.png)\n::file other.md\n",
+    )
+    .unwrap();
     std::fs::write(root.join("other.md"), "# Other\n").unwrap();
     let local = root.join("local.md");
     assert_graph_json_matches_baseline(
+        &fixture,
         &["graph", "--json", local.to_str().unwrap()],
         root,
         "graph_local.json",
@@ -284,8 +299,9 @@ fn graph_json_local_baseline() {
 
 #[test]
 fn graph_json_follow_baseline() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path();
+    let fixture = CliProcessFixture::named("graph_json_follow_baseline");
+    assert!(fixture.initialize_repository());
+    let root = fixture.cwd();
     std::fs::write(
         root.join("prologue.md"),
         "---\nprologue: other.md\n---\n\n# Prologue\n",
@@ -294,12 +310,8 @@ fn graph_json_follow_baseline() {
     std::fs::write(root.join("other.md"), "# Other\n").unwrap();
     let prologue = root.join("prologue.md");
     assert_graph_json_matches_baseline(
-        &[
-            "graph",
-            "--json",
-            "--follow",
-            prologue.to_str().unwrap(),
-        ],
+        &fixture,
+        &["graph", "--json", "--follow", prologue.to_str().unwrap()],
         root,
         "graph_follow.json",
     );
@@ -307,19 +319,19 @@ fn graph_json_follow_baseline() {
 
 #[test]
 fn graph_json_validate_baseline() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let root = dir.path();
-    std::fs::write(root.join("errors.md"), "# Errors\n\n[missing](./missing.md)\n").unwrap();
+    let fixture = CliProcessFixture::named("graph_json_validate_baseline");
+    assert!(fixture.initialize_repository());
+    let root = fixture.cwd();
+    std::fs::write(
+        root.join("errors.md"),
+        "# Errors\n\n[missing](./missing.md)\n",
+    )
+    .unwrap();
     let errors = root.join("errors.md");
     assert_graph_json_matches_baseline(
-        &[
-            "graph",
-            "--json",
-            "--validate",
-            errors.to_str().unwrap(),
-        ],
+        &fixture,
+        &["graph", "--json", "--validate", errors.to_str().unwrap()],
         root,
         "graph_validate.json",
     );
 }
-

@@ -490,9 +490,10 @@ mod completeness_serialization {
     /// serialized before this phase keep round-tripping.
     #[test]
     fn legacy_json_without_the_fields_deserializes_as_complete() {
-        let inventory: FileInventory =
-            serde_json::from_value(serde_json::json!({ "scope": { "root": "/repo" }, "total_files_scanned": 3 }))
-                .expect("legacy inventory JSON must still deserialize");
+        let inventory: FileInventory = serde_json::from_value(
+            serde_json::json!({ "scope": { "root": "/repo" }, "total_files_scanned": 3 }),
+        )
+        .expect("legacy inventory JSON must still deserialize");
         assert!(!inventory.truncated);
         assert_eq!(inventory.limit, None);
     }

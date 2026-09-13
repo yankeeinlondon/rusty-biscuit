@@ -695,6 +695,19 @@ an enclosing **symbol** and require a `tag` and a substantive `reason`.
 `retained` is permanent; any other tag is burn-down debt a follow-up spec closes.
 A stale entry fails its own guard.
 
+**Where the guards named above live.** Every guard that reads the production
+sources is an arm of `SCAN_GUARDS` in `cli/tests/error_guards.rs`, evaluated by
+the single passive corpus test `production_sources_pass_every_scan_backed_guard`
+— they keep the names used here, and a failure reports them by name, but they
+are no longer separate `#[test]` functions. The `syn` parse of `lib/src` +
+`cli/src` + `contract/src` costs ~1.7 s and `scan_production_sources`'s
+`OnceLock` is process-local, so under nextest's process-per-test model twelve
+`#[test]`s meant twelve parses (20.2 s summed against 1.7 s of work). Add a new
+source-backed regression by **extending `SCAN_GUARDS`**, not by adding a
+thirteenth rescanning test. The six guards that need no production scan — the
+allowlist-shape checks, the `scan_text` scanner unit tests, and the runtime
+catalog checks — stay independently selectable.
+
 **Changing an error's behavior** means a pass over its rustdoc in the same
 change, per the repo's authoring discipline — the rendering and propagation
 claims in these doc comments are exactly the kind that drift.

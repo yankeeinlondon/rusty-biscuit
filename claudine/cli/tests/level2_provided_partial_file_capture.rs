@@ -3,7 +3,7 @@
 //!
 //! `fixes/2026-09-10-no-interactive-completion` asked for its interactive
 //! coverage to run through the shared terminal harness. The PTY suite in
-//! `level2_provided_partial_file_pty.rs` proves the ordering and the data flow
+//! `level1_review_router_partial_pty.rs` proves the ordering and the data flow
 //! of that flow with bytes the test process manufactures; this binary is its
 //! rendering complement. It runs the shipped `prompts/review.md` router with
 //! the reported `spec=` partial inside a real terminal emulator (tmux and

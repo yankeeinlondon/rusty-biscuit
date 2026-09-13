@@ -8,7 +8,7 @@
 
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness, capture_settled};
 use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
 use serial_test::serial;
 use std::process::Command;
@@ -59,10 +59,7 @@ fn run_with_sentinel(harness: &mut TmuxHarness, cmd: &str, colorfgbg: &str) -> C
         )
         .expect("send_command_with_env failed");
     match wait_for_sentinel(harness, &sentinel) {
-        Ok(frame) => {
-            std::thread::sleep(Duration::from_millis(250));
-            harness.capture().unwrap_or(frame)
-        }
+        Ok(frame) => capture_settled(harness).unwrap_or(frame),
         Err(last) => panic!(
             "timed out waiting for sentinel {sentinel} after {SENTINEL_TIMEOUT:?}. \
              last plain capture:\n{}",
@@ -84,7 +81,10 @@ fn capture_schema_about(harness: &mut TmuxHarness, colorfgbg: &str) -> CapturedF
     // The broker pane can outlive a prior fixture CWD, so every invocation
     // reestablishes a stable package directory before terminal discovery.
     let working_dir = shell_quote(env!("CARGO_MANIFEST_DIR"));
-    let command = format!("cd {working_dir} && {} schema about", shell_quote(&md_bin()));
+    let command = format!(
+        "cd {working_dir} && {} schema about",
+        shell_quote(&md_bin())
+    );
     let _visible = run_with_sentinel(harness, &command, colorfgbg);
     capture_scrollback(harness, 300).unwrap_or(_visible)
 }
@@ -181,8 +181,8 @@ fn raw_line_anywhere(frame: &CapturedFrame, needle: &str) -> Option<String> {
 fn level2_schema_about_constraint_table_renders_striped_row() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let mut guard = SHARED_TMUX
-        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard =
+        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     let frame = capture_schema_about(harness, "15;0");
 
@@ -273,8 +273,8 @@ fn assert_schema_about_yaml_uses_theme(frame: &CapturedFrame, expected_mode: Col
 fn level2_schema_about_dark_terminal_uses_light_code_theme() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let mut guard = SHARED_TMUX
-        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard =
+        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     let frame = capture_schema_about(harness, "15;0");
 
@@ -286,8 +286,8 @@ fn level2_schema_about_dark_terminal_uses_light_code_theme() {
 fn level2_schema_about_light_terminal_uses_dark_code_theme() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let mut guard = SHARED_TMUX
-        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard =
+        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     let frame = capture_schema_about(harness, "0;15");
 

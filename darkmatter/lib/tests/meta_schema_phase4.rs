@@ -124,7 +124,11 @@ fn semantic_keyword_failures_are_structured_and_distinguishable() {
             "string(min(nope))",
             "x-darkmatter-type-definition",
         ),
-        ("schema", "https://example.com/schema.yaml", "x-darkmatter-schema"),
+        (
+            "schema",
+            "https://example.com/schema.yaml",
+            "x-darkmatter-schema",
+        ),
     ] {
         let source = format!(
             "---\n$schema:\n  candidate: {semantic_type}(required)\ncandidate: {candidate}\n---\nBody\n"
@@ -138,7 +142,10 @@ fn semantic_keyword_failures_are_structured_and_distinguishable() {
         assert_eq!(problem.line, Some(4));
         assert_eq!(problem.column, Some(1));
         let schema_path = problem.schema_path.as_ref().expect("keyword schema path");
-        assert_eq!(schema_path.segments().last().map(String::as_str), Some(keyword));
+        assert_eq!(
+            schema_path.segments().last().map(String::as_str),
+            Some(keyword)
+        );
     }
 }
 
@@ -159,8 +166,16 @@ fn semantic_carriers_are_validation_and_compose_no_ops() {
     let report = DarkmatterSchemas::new()
         .validate(&original)
         .expect("validation must run");
-    assert!(report.valid, "semantic carriers must validate: {:?}", report.problems);
-    assert_eq!(original.frontmatter().as_map(), &before, "validation is read-only");
+    assert!(
+        report.valid,
+        "semantic carriers must validate: {:?}",
+        report.problems
+    );
+    assert_eq!(
+        original.frontmatter().as_map(),
+        &before,
+        "validation is read-only"
+    );
 
     let (composed, _) = original.compose().expect("normal compose path");
     assert_eq!(composed.frontmatter().as_map(), &before);
@@ -168,15 +183,31 @@ fn semantic_carriers_are_validation_and_compose_no_ops() {
 
 #[test]
 fn semantic_types_match_triggers_by_passive_parse() {
+    #[cfg(feature = "effects-instrumentation")]
+    let before = (
+        darkmatter::effects::engine_build_count(),
+        darkmatter::effects::network_attempt_count(),
+    );
+
     for value in [
         json!("string(required)"),
         json!({ "title": "string(required)" }),
         json!(["literal(auto)", { "width": "number(required)" }]),
     ] {
-        assert!(semantic_match("definition", SimplifiedType::TypeDefinition, false, value));
+        assert!(semantic_match(
+            "definition",
+            SimplifiedType::TypeDefinition,
+            false,
+            value
+        ));
     }
     for value in [json!(true), json!("string(min(nope))"), json!([])] {
-        assert!(!semantic_match("definition", SimplifiedType::TypeDefinition, false, value));
+        assert!(!semantic_match(
+            "definition",
+            SimplifiedType::TypeDefinition,
+            false,
+            value
+        ));
     }
 
     for value in [
@@ -184,10 +215,24 @@ fn semantic_types_match_triggers_by_passive_parse() {
         json!({ "title": "string(required)" }),
         json!(["./missing.yaml", { "kind": "literal(review)" }]),
     ] {
-        assert!(semantic_match("declaration", SimplifiedType::Schema, false, value));
+        assert!(semantic_match(
+            "declaration",
+            SimplifiedType::Schema,
+            false,
+            value
+        ));
     }
-    for value in [json!(true), json!("https://example.com/schema.yaml"), json!([])] {
-        assert!(!semantic_match("declaration", SimplifiedType::Schema, false, value));
+    for value in [
+        json!(true),
+        json!("https://example.com/schema.yaml"),
+        json!([]),
+    ] {
+        assert!(!semantic_match(
+            "declaration",
+            SimplifiedType::Schema,
+            false,
+            value
+        ));
     }
 
     assert!(semantic_match(
@@ -202,6 +247,16 @@ fn semantic_types_match_triggers_by_passive_parse() {
         true,
         json!(["string", true]),
     ));
+
+    #[cfg(feature = "effects-instrumentation")]
+    assert_eq!(
+        (
+            darkmatter::effects::engine_build_count(),
+            darkmatter::effects::network_attempt_count(),
+        ),
+        before,
+        "passive trigger matching must build no effect engine and attempt no network access",
+    );
 }
 
 #[test]
@@ -218,7 +273,9 @@ fn shipped_schema_artifacts_validate_through_semantic_keywords() {
     for path in paths {
         let source = fs::read_to_string(&path).expect("shipped schema artifact");
         let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).expect("shipped YAML");
-        let Some(map) = value.as_mapping() else { continue };
+        let Some(map) = value.as_mapping() else {
+            continue;
+        };
         if let Some(declaration) = map.get(serde_yaml_ng::Value::String("$schema".into())) {
             declarations.push(declaration.clone());
         }
@@ -237,9 +294,19 @@ fn shipped_schema_artifacts_validate_through_semantic_keywords() {
     let definitions = serde_yaml_ng::to_string(&definitions).expect("serialize definitions");
     let source = format!(
         "---\n$schema:\n  declarations: schema[](required)\n  definitions: type-definition[](required)\ndeclarations:\n{}definitions:\n{}---\nBody\n",
-        declarations.lines().map(|line| format!("  {line}\n")).collect::<String>(),
-        definitions.lines().map(|line| format!("  {line}\n")).collect::<String>(),
+        declarations
+            .lines()
+            .map(|line| format!("  {line}\n"))
+            .collect::<String>(),
+        definitions
+            .lines()
+            .map(|line| format!("  {line}\n"))
+            .collect::<String>(),
     );
     let report = validate_document(&source);
-    assert!(report.valid, "shipped artifacts must validate: {:?}", report.problems);
+    assert!(
+        report.valid,
+        "shipped artifacts must validate: {:?}",
+        report.problems
+    );
 }

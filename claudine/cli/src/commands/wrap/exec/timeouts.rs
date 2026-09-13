@@ -3,18 +3,25 @@ use std::time::{Duration, Instant};
 use claudine::stream::logs::EarlyTermination;
 use claudine::stream::progress::LiveMetrics;
 
-/// Detect a step-silence timeout for the harness `step_timeout` field.
+/// Legacy step-silence detector, retained only for its own tests.
+///
+/// **Not the authoritative silence rule.** The wrapper evaluates
+/// `step_timeout` in
+/// [`evaluate_timeout_tick`](super::watchdog::evaluate_timeout_tick), which
+/// anchors the silence clock on the child's spawn instant until real output
+/// exists — a child that emits nothing is killed on budget. This helper
+/// predates that anchoring and returns `None` while `last_event_at` is
+/// unpopulated, so it cannot bound a startup stall. No production path calls
+/// it.
 ///
 /// Returns `Some(EarlyTermination::StepTimeout)` when the time since the last
 /// stream event exceeds `step_timeout`. Returns `None` when `last_event_at`
-/// is not yet populated (first-event grace so provider startup does not
-/// trip a kill), when silence is still under budget, or when in-flight tools
-/// or subagents are still active.
+/// is not yet populated, when silence is still under budget, or when
+/// in-flight tools or subagents are still active.
 ///
 /// This helper gates on `in_flight` and `in_flight_subagents`: a long-running
 /// Task/subagent call produces parent-stream silence by design while the
-/// child works. The wall-clock `timeout` rule serves as the backstop for
-/// truly stuck tool calls. The caller is responsible for SIGTERM escalation.
+/// child works. The caller is responsible for SIGTERM escalation.
 #[allow(dead_code)]
 pub(crate) fn detect_step_timeout(
     metrics: &LiveMetrics,
@@ -100,8 +107,9 @@ pub(crate) fn format_internal_duration(secs: u64) -> String {
 ///
 /// - `timeout` — wall-clock budget from child spawn. `None` disables the
 ///   wall-clock kill (no built-in default).
-/// - `step_timeout` — silence-since-last-parent-stream-event budget. `None`
-///   disables the silence kill.
+/// - `step_timeout` — silence budget, measured from the newest of the child's
+///   spawn instant, the last parent-stream event, and the last non-whitespace
+///   byte. `None` disables the silence kill.
 ///
 /// Plus two supporting knobs that govern the termination path itself:
 ///
@@ -127,10 +135,10 @@ pub(crate) struct TimeoutConfig {
     pub(crate) interval: Duration,
     /// Wrapped provider, when known. Threaded through so the silence-rule
     /// evaluator can apply provider-specific guards (notably the OpenCode
-    /// `provider_status` grace that suppresses `step_timeout` until at
-    /// least one `step_finish` boundary has been observed). `None`
-    /// disables all provider-specific guards; the wall-clock `timeout`
-    /// rule is unaffected.
+    /// per-step grace that suppresses `step_timeout` while a step is open
+    /// and at least one activity clock is fresh) and enrich the breach
+    /// diagnostic. `None` disables all provider-specific guards; the
+    /// wall-clock `timeout` rule is unaffected.
     pub(crate) provider: Option<claudine::provider::Provider>,
 }
 

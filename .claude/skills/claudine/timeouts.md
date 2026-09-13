@@ -35,7 +35,7 @@ timeout ticker in the wrapper process:
 | Name | What it measures | Built-in default |
 |---|---|---|
 | `timeout` | Wall-clock budget from child spawn | none (opt-in) |
-| `step_timeout` | Stream-silence budget since the last parent-stream event | `30m` |
+| `step_timeout` | Stream-silence budget since the last activity — or since child spawn, while there has been none | `30m` |
 
 Both rules feed the same termination path: the ticker sends a
 termination request into the wait loop, which sends `SIGTERM` to the child
@@ -80,21 +80,24 @@ from the moment Claudine spawns it.
 as the child keeps emitting structured events at a healthy cadence, the
 silence clock keeps resetting and the ticker stays asleep.
 
-- **Formula.** The ticker fires when `now - last_activity_at >= step_timeout`,
-  the in-flight gate does not suppress, and one full activity signal has
-  been observed (first-event grace). `last_activity_at` is the more
-  recent of two clocks — the structured-event clock `last_event_at` and
-  the raw-byte clock `last_byte_at` — so even a provider whose
-  structured events lag behind real progress refreshes silence whenever
-  bytes flow.
+- **Formula.** The ticker fires when `now - silence_reference >= step_timeout`
+  and the in-flight gate does not suppress. The **silence reference** is
+  the most recent of three instants: the child's monotonic `started_at`
+  (the spawn instant), the structured-event clock `last_event_at`, and
+  the raw-byte clock `last_byte_at`. A provider whose structured events
+  lag behind real progress therefore refreshes silence whenever bytes
+  flow.
 - **Resets.** Every parent-stream **activity event** advances
   `last_event_at`; every non-empty chunk of stdout/stderr bytes from the
   wrapped child advances `last_byte_at`. See
   [Activity vocabulary](#activity-vocabulary) below for the exact
   taxonomy.
-- **First-event grace.** Until at least one activity signal has been
-  observed on either clock, the rule cannot fire. Slow provider startup
-  or a long first model response will not be killed.
+- **Bounded from spawn.** There is no startup grace. Until real output
+  exists the reference *is* the spawn instant, so a child that starts
+  successfully and then emits nothing is killed on budget like any other
+  silence. Non-whitespace bytes arriving before the first semantic event
+  do move the deadline; whitespace-only output does not. See
+  [Startup stalls](#startup-stalls).
 - **In-flight gate.** When the structured stream reports in-flight tool
   calls (`in_flight`) or active subagents (`in_flight_subagents`), the
   rule is suppressed *unless* the in-flight item itself is stuck. See
@@ -107,8 +110,9 @@ silence clock keeps resetting and the ticker stays asleep.
 
 ### Activity vocabulary
 
-Two independent clocks feed the silence reference. The ticker uses the
-more recent of the two on every evaluation.
+Two independent activity clocks feed the silence reference, and the
+child's spawn instant backs them both. The ticker uses the most recent of
+the three on every evaluation.
 
 #### Structured-event clock (`last_event_at`)
 
@@ -195,6 +199,49 @@ gate is effectively bypassed.
 If the subagent had emitted any progress event during that window
 (e.g., a `task_progress` Info line), `B.last_progress_at` would have
 advanced and the gate would have continued to suppress.
+
+### Startup stalls
+
+Because the reference falls back to the spawn instant, the window between
+a successful spawn and the child's first real output is **inside**
+`step_timeout`, not outside it. This is the same rule, not a third one:
+there is no startup duration, no additional configuration key, and no new
+termination reason. A startup breach is `ProcessTermination::TimedOut`
+with `error_kind: "step_timeout"` and follows the same
+[termination path](#termination-path) as any other silence kill.
+
+The in-flight gate cannot mask it either. That gate suppresses only while
+a tool or subagent is in flight, and before the first tool or task start
+nothing is — so it has nothing to suppress against while the child is
+still silent.
+
+The diagnostic distinguishes the two silences the one rule now covers:
+a child that has produced nothing at all since it launched, versus a
+child that produced output and then went quiet. `step_timeout_warn` reads
+the same reference and draws the same distinction, so the warning can
+never promise a deadline the kill rule would not enforce.
+
+#### OpenCode plugin resolution and `@latest`
+
+The reference incident (2026-08-30/31) is the operational shape this
+bounds. OpenCode resolves its configured plugins and fetches the
+models.dev catalog *before* it creates a session or emits any stream
+event. A plugin declared as `<name>@latest` puts an npm registry lookup
+on that startup path, so an unreachable or slow registry leaves the
+process alive and completely silent. Three runs stalled for 30 minutes
+each with nothing but OpenCode's own configuration-file loads recorded;
+only the document's opt-in wall-clock `timeout` ended them.
+
+Two things are different now. `step_timeout` bounds this class of stall
+on its own, so a wall-clock `timeout` is no longer the only backstop. And
+the durable operator fix is to **pin exact plugin versions** in the
+OpenCode configuration rather than tracking `@latest`, which takes the
+registry lookup off the startup path entirely.
+
+Claudine does **not** mutate a user's OpenCode configuration. Bounding a
+run is Claudine's job; rewriting the provider's own configuration file is
+an operator action, and doing it silently on the user's behalf would be a
+side effect they never asked for.
 
 ## Configuration sources and precedence
 
@@ -333,7 +380,13 @@ the corresponding hard threshold fires:
 - **`timeout_warn`** — wall-clock warning. Fires once when
   `now - started_at >= timeout_warn`.
 - **`step_timeout_warn`** — stream-silence warning. Fires once per stall
-  episode when `now - last_event_at >= step_timeout_warn`.
+  episode when the age of the
+  [silence reference](#step_timeout-stream-silence) reaches
+  `step_timeout_warn`. It reads the same reference as the kill rule, so
+  it also warns during a startup stall and words that case as *no output
+  at all since launch* rather than as an interruption of output that was
+  already flowing. Activity ends the episode: once the reference advances
+  past the recorded warning, the next stall is eligible to warn again.
 
 Each `*_warn` value must be strictly less than its corresponding hard
 threshold when both are present; `timeout_warn >= timeout` and
@@ -666,13 +719,19 @@ second source:
    covers OpenCode-style sparse streams.
 2. **Per-step `provider_status` grace.** The silence rule is
    suppressed **while an OpenCode step is in flight** — from
-   `step_start` until the matching `step_finish` — because mid-step
-   silence is expected on this provider. The grace resets for every
+   `step_start` until the matching `step_finish` — *and* at least one
+   of the two activity clocks is still inside the budget, because
+   mid-step silence is expected on this provider but a mid-step
+   *blackout* is not. When both clocks are stale for the full budget
+   the breach fires even with a step open. The grace resets for every
    new step, so multi-step flows that dispatch subagents mid-stream
    are protected throughout the entire session, not just during the
-   first step. The wall-clock `timeout` rule is **not** suppressed; it
-   remains the unconditional backstop. The guard fires only for
-   OpenCode; richer-stream providers do not need it.
+   first step. There is **no companion cold-start grace**: OpenCode's
+   startup is bounded by the shared silence reference like every other
+   provider's (see [Startup stalls](#startup-stalls)). The wall-clock
+   `timeout` rule is **not** suppressed; it remains the unconditional
+   backstop. The guard fires only for OpenCode; richer-stream providers
+   do not need it.
 3. **Synthesized subagent lifecycle (legacy path, removed).** Earlier
    releases synthesized `SubagentStart` → `SubagentStop` from the
    `task` `tool_use` payload at completion time. That path was removed
@@ -754,7 +813,7 @@ byte heartbeat, and the per-step `provider_status` grace:
 12:14:35  ...closing synthesis streams reasoning bytes (no parsed event)...
                                                      last_byte_at  advances on each chunk
                                                      last_event_at remains stale
-                                                     silence = now - last_activity_at < 30m
+                                                     silence = now - silence_reference < 30m
                                                      → no kill
 
 # A genuinely stuck child (zero bytes for 30m) would fire normally:

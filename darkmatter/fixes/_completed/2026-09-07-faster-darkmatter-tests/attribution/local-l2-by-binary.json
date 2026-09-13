@@ -1,0 +1,175 @@
+{
+  "families": [
+    {
+      "id": "cli-l2-render-capture",
+      "package": "darkmatter-cli",
+      "count": 66,
+      "summed": 94.31199999999997,
+      "mean": 1.4289696969696966,
+      "max": 2.809,
+      "min": 0.654,
+      "slowest": {
+        "name": "darkmatter-cli::level2_frontmatter_images level2_style_frontmatter_images_alignment_indents_fallback_text",
+        "seconds": 2.809
+      },
+      "share": 0.8054865185716605
+    },
+    {
+      "id": "lib-l2-terminal",
+      "package": "darkmatter",
+      "count": 18,
+      "summed": 16.218999999999998,
+      "mean": 0.9010555555555554,
+      "max": 2.646,
+      "min": 0.019,
+      "slowest": {
+        "name": "darkmatter::level2_render_tree_terminal layout_policy::level2_matched_layout_policy_matches_no_policy_capabilities_in_real_terminal",
+        "seconds": 2.646
+      },
+      "share": 0.13852092888194253
+    },
+    {
+      "id": "cli-l2-tmux-schema-about",
+      "package": "darkmatter-cli",
+      "count": 3,
+      "summed": 4.041,
+      "mean": 1.3470000000000002,
+      "max": 1.375,
+      "min": 1.32,
+      "slowest": {
+        "name": "darkmatter-cli::level2_schema_about level2_schema_about_dark_terminal_uses_light_code_theme",
+        "seconds": 1.375
+      },
+      "share": 0.034512798175715516
+    },
+    {
+      "id": "dmls-l2-neovim",
+      "package": "dmls",
+      "count": 3,
+      "summed": 2.5149999999999997,
+      "mean": 0.8383333333333333,
+      "max": 1.63,
+      "min": 0.163,
+      "slowest": {
+        "name": "dmls::level2_editor_neovim level2_neovim_tmux_renders_recipe_colors_and_repaints",
+        "seconds": 1.63
+      },
+      "share": 0.02147975437068164
+    }
+  ],
+  "binaries": [
+    {
+      "binaryId": "darkmatter-cli::level2_ordered_lists",
+      "package": "darkmatter-cli",
+      "count": 10,
+      "summed": 16.491,
+      "mean": 1.6491,
+      "max": 2.498,
+      "min": 1.018
+    },
+    {
+      "binaryId": "darkmatter::level2_render_tree_terminal",
+      "package": "darkmatter",
+      "count": 18,
+      "summed": 16.218999999999998,
+      "mean": 0.9010555555555554,
+      "max": 2.646,
+      "min": 0.019
+    },
+    {
+      "binaryId": "darkmatter-cli::level2_frontmatter_images",
+      "package": "darkmatter-cli",
+      "count": 11,
+      "summed": 15.309,
+      "mean": 1.3917272727272727,
+      "max": 2.809,
+      "min": 1.023
+    },
+    {
+      "binaryId": "darkmatter-cli::level2_frontmatter_tables",
+      "package": "darkmatter-cli",
+      "count": 8,
+      "summed": 13.097999999999999,
+      "mean": 1.6372499999999999,
+      "max": 2.793,
+      "min": 1.072
+    },
+    {
+      "binaryId": "darkmatter-cli::level2_errors",
+      "package": "darkmatter-cli",
+      "count": 8,
+      "summed": 12.068,
+      "mean": 1.5085,
+      "max": 1.774,
+      "min": 1.394
+    },
+    {
+      "binaryId": "darkmatter-cli::level2_code_block_styling",
+      "package": "darkmatter-cli",
+      "count": 10,
+      "summed": 11.764,
+      "mean": 1.1764,
+      "max": 2.393,
+      "min": 0.654
+    },
+    {
+      "binaryId": "darkmatter-cli::level2_layout_dimensions",
+      "package": "darkmatter-cli",
+      "count": 8,
+      "summed": 9.737000000000002,
+      "mean": 1.2171250000000002,
+      "max": 1.595,
+      "min": 1.02
+    },
+    {
+      "binaryId": "darkmatter-cli::level2_horizontal_rules",
+      "package": "darkmatter-cli",
+      "count": 6,
+      "summed": 9.23,
+      "mean": 1.5383333333333333,
+      "max": 2.628,
+      "min": 1.026
+    },
+    {
+      "binaryId": "darkmatter-cli::level2_disclosure_blocks",
+      "package": "darkmatter-cli",
+      "count": 4,
+      "summed": 5.018,
+      "mean": 1.2545,
+      "max": 1.427,
+      "min": 1.069
+    },
+    {
+      "binaryId": "darkmatter-cli::level2_schema_about",
+      "package": "darkmatter-cli",
+      "count": 3,
+      "summed": 4.041,
+      "mean": 1.3470000000000002,
+      "max": 1.375,
+      "min": 1.32
+    },
+    {
+      "binaryId": "dmls::level2_editor_neovim",
+      "package": "dmls",
+      "count": 3,
+      "summed": 2.5149999999999997,
+      "mean": 0.8383333333333333,
+      "max": 1.63,
+      "min": 0.163
+    },
+    {
+      "binaryId": "darkmatter-cli::level2_schema_validate",
+      "package": "darkmatter-cli",
+      "count": 1,
+      "summed": 1.597,
+      "mean": 1.597,
+      "max": 1.597,
+      "min": 1.597
+    }
+  ],
+  "summed": 117.08699999999995,
+  "elapsed": 117.10700000000001,
+  "count": 90,
+  "violations": []
+}
+GATE EXIT=0

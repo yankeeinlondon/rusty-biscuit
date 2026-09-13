@@ -14,8 +14,8 @@ use super::discovery::{
     DeltaKind, PathHistoryOptions, PathHistoryResult, get_commit_by_sha_fallible,
     get_commit_files_fallible, get_commits_for_branch_fallible, get_commits_for_path_fallible,
 };
-use super::open;
 use super::merge_conflicts::merge_conflicts_between;
+use super::open;
 use super::status::detect_merge_conflicts_fallible;
 use super::types::{BranchInfo, CommitInfo, GitHostingProvider};
 use crate::Result;
@@ -170,14 +170,13 @@ pub fn merge_conflicts_at(path: &Path) -> Result<Vec<PathBuf>> {
 /// invalid or missing local branch, for unrelated or corrupt histories, or
 /// when an applicable external merge driver/filter or renormalization setting
 /// prevents command-free prediction.
-pub fn merge_conflicts_with_branch_at(
-    path: &Path,
-    incoming_branch: &str,
-) -> Result<Vec<PathBuf>> {
+pub fn merge_conflicts_with_branch_at(path: &Path, incoming_branch: &str) -> Result<Vec<PathBuf>> {
     let Some(repo) = open_gix(path)? else {
         return Err(crate::SniffError::NotARepository(path.to_path_buf()));
     };
-    let mut head = repo.head().map_err(|error| crate::SniffError::git("head", error))?;
+    let mut head = repo
+        .head()
+        .map_err(|error| crate::SniffError::git("head", error))?;
     if head.is_detached() {
         return Err(crate::SniffError::git(
             "merge_current_branch",
@@ -245,8 +244,7 @@ pub fn branches_at(path: &Path, refresh_remotes: bool) -> Result<Option<Vec<Bran
 /// Trust/ownership, permission, I/O, and corruption failures surface as
 /// [`SniffError::Git`].
 pub fn preferred_remote_url(path: &Path) -> Result<Option<String>> {
-    Ok(super::remote_resolver::resolve_remote_at(path, None)?
-        .map(|remote| remote.fetch_url))
+    Ok(super::remote_resolver::resolve_remote_at(path, None)?.map(|remote| remote.fetch_url))
 }
 
 /// [`preferred_remote_url`] against an already-discovered repository.

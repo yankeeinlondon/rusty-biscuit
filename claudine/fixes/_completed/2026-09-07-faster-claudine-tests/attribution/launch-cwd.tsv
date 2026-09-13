@@ -1,0 +1,9 @@
+cwd	concurrency	elapsed_ms	per_process_mean_ms	per_process_max_ms
+repo-root	1	672	672	672
+repo-root	8	1953	1940	1951
+repo-root	16	3812	3773	3807
+repo-root	27	6040	5895	6036
+outside-repo	1	20	20	20
+outside-repo	8	24	21	24
+outside-repo	16	36	26	30
+outside-repo	27	52	33	44

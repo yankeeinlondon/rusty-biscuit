@@ -14,20 +14,18 @@ use color_eyre::eyre::Result;
 
 use super::wrap::env::EnvPlan;
 use super::wrap::policy::StructuredCodexOutput;
-use super::wrap::profile::{
-    OpenCodeEnvSnapshot, OpenCodeModelSource, WrapperProfile, apply_opencode_model_resolution,
-};
+use super::wrap::profile::{ModelSource, WrapperProfile, no_model_error, resolve_model_source};
 use super::wrap::repo_home;
 
 /// Failure from [`resolve_model_and_validate`], split so each pipeline
 /// keeps its own presentation.
 #[derive(Debug)]
 pub(crate) enum ModelStageError {
-    /// Non-interactive OpenCode launch with no model from any source
-    /// (CLI switch, `OPENCODE_MODEL`, config default). The direct
-    /// wrapper renders `AgentErrorReport::no_model_provided` and exits;
-    /// composition propagates the message.
-    NoOpenCodeModel(color_eyre::eyre::Error),
+    /// Non-interactive launch of a provider whose catalog requires a model
+    /// (`model_required_in_non_tty`) with no model from any source. The
+    /// direct wrapper renders `AgentErrorReport::no_model_provided` and
+    /// exits; composition propagates the message.
+    NoModel(color_eyre::eyre::Error),
     /// Provider-trait non-interactive validation failure; both
     /// pipelines propagate it unchanged.
     Validation(color_eyre::eyre::Error),
@@ -36,31 +34,35 @@ pub(crate) enum ModelStageError {
 impl ModelStageError {
     pub(crate) fn into_report(self) -> color_eyre::eyre::Error {
         match self {
-            Self::NoOpenCodeModel(report) | Self::Validation(report) => report,
+            Self::NoModel(report) | Self::Validation(report) => report,
         }
     }
 }
 
 /// Resolve the session model onto the child argv/env and run the
-/// provider's non-interactive validation.
+/// provider's non-interactive validation. One path for every provider:
 ///
-/// Covers three formerly duplicated steps, in order:
-///
-/// 1. OpenCode model resolution via
-///    [`apply_opencode_model_resolution`] (acts only when
-///    non-interactive; the resolved source feeds the wrapper's
-///    preflight preamble).
-/// 2. The universal `--model` flag through `profile.apply_model` — for
-///    non-OpenCode providers always, and for OpenCode only when
-///    interactive (non-interactive OpenCode was handled by step 1).
-/// 3. `profile.validate_non_interactive_requirements` for non-OpenCode
-///    providers in non-interactive mode.
+/// 1. An explicit `model` (the composition's resolved model, or the direct
+///    wrapper's `--model`) goes through `profile.apply_model` — the universal
+///    `--model` mapping plus the `MODEL` env export.
+/// 2. With no explicit model, in non-interactive mode, and only when the
+///    catalog says `model_required_in_non_tty`, Claudine finds one on the
+///    provider's behalf: the catalog's `model_env_vars` in order (applied
+///    exactly like step 1), then `profile.configured_default_model()` (which
+///    sets only `MODEL`; the provider reads its own default). Nothing found
+///    is [`ModelStageError::NoModel`], unless the caller's env plan or the
+///    passthrough argv already carries a model.
+/// 3. `profile.validate_non_interactive_requirements` in non-interactive
+///    mode.
 ///
 /// `has_model_env` is whether the caller's env plan already carries a
 /// `MODEL` entry; env writes go through `env_sink` (the wrapper pushes
 /// onto `env_overrides`, composition inserts into `env_plan.env`) and
 /// unsupported-model warnings through `warn_sink` (deferred vs. logged
-/// immediately).
+/// immediately). The returned [`ModelSource`] feeds the wrapper's preflight
+/// preamble and error attribution, and is reported only for a provider
+/// that had to have a model (`must_find_model`): where the model is
+/// optional, the launch says nothing about it, as before.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_model_and_validate(
     provider: Provider,
@@ -71,46 +73,50 @@ pub(crate) fn resolve_model_and_validate(
     has_model_env: bool,
     env_sink: &mut dyn FnMut(String, String),
     warn_sink: &mut dyn FnMut(String),
-) -> Result<Option<OpenCodeModelSource>, ModelStageError> {
-    // Gated on the catalog's `model_required_in_non_tty` (OpenCode is the
-    // only provider setting it today, so semantics are identical). The
-    // resolution helper itself is still OpenCode-flavored (OPENCODE_MODEL
-    // env, `OpenCodeEnvSnapshot`) — a future provider setting this bool
-    // needs the helper generalized first.
-    let model_required_in_non_tty = provider_info(provider).model_required_in_non_tty;
-    let opencode_model_source = if model_required_in_non_tty {
-        apply_opencode_model_resolution(
-            child_args,
-            env_sink,
-            has_model_env,
-            model,
-            non_interactive,
-            &OpenCodeEnvSnapshot::from_system(),
-        )
-        .map_err(ModelStageError::NoOpenCodeModel)?
-    } else {
-        None
+) -> Result<Option<ModelSource>, ModelStageError> {
+    let info = provider_info(provider);
+    let must_find_model = non_interactive && info.model_required_in_non_tty;
+
+    let source = match model {
+        Some(model) => Some(ModelSource::CliSwitch(model.to_string())),
+        None if must_find_model => resolve_model_source(
+            info.model_env_vars,
+            |var| std::env::var(var).ok(),
+            || profile.configured_default_model(),
+        ),
+        None => None,
     };
 
-    if (!model_required_in_non_tty || !non_interactive)
-        && let Some(model) = model
-    {
-        let mut env_overrides = Vec::new();
-        if let Some(warn) = profile.apply_model(child_args, &mut env_overrides, model) {
-            warn_sink(warn);
+    match &source {
+        Some(ModelSource::CliSwitch(model) | ModelSource::ProviderEnv { model, .. }) => {
+            let mut env_overrides = Vec::new();
+            if let Some(warn) = profile.apply_model(child_args, &mut env_overrides, model) {
+                warn_sink(warn);
+            }
+            for (key, value) in env_overrides {
+                env_sink(key, value);
+            }
         }
-        for (key, value) in env_overrides {
-            env_sink(key, value);
+        Some(ModelSource::ConfigDefault(configured)) => {
+            env_sink("MODEL".to_string(), configured.model.clone());
+        }
+        None => {
+            let has_model_arg = child_args
+                .iter()
+                .any(|arg| arg == "--model" || arg == "-m" || arg.starts_with("--model="));
+            if must_find_model && !has_model_arg && !has_model_env {
+                return Err(ModelStageError::NoModel(no_model_error(provider)));
+            }
         }
     }
 
-    if !model_required_in_non_tty && non_interactive {
+    if non_interactive {
         profile
             .validate_non_interactive_requirements(child_args)
             .map_err(ModelStageError::Validation)?;
     }
 
-    Ok(opencode_model_source)
+    Ok(source.filter(|_| must_find_model))
 }
 
 /// Guarantee `env_plan.shadow_home_path` before provider-config
@@ -174,6 +180,23 @@ mod tests {
         profile::profile_for_provider(Provider::OpenCode).unwrap()
     }
 
+    /// Pin the process-level sources the stage reads on the provider's behalf
+    /// — `OPENCODE_MODEL` and the OpenCode config directory — so a test never
+    /// observes the developer's own configuration.
+    fn isolated_opencode_sources(
+        config: Option<&str>,
+    ) -> (test_toolkit::EnvGuard, test_toolkit::EnvGuard, tempfile::TempDir) {
+        let xdg = tempfile::tempdir().unwrap();
+        if let Some(config) = config {
+            let dir = xdg.path().join("opencode");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("opencode.jsonc"), config).unwrap();
+        }
+        let xdg_guard = test_toolkit::EnvGuard::set_safe("XDG_CONFIG_HOME", xdg.path());
+        let env_guard = test_toolkit::EnvGuard::remove_safe("OPENCODE_MODEL");
+        (xdg_guard, env_guard, xdg)
+    }
+
     #[test]
     fn codex_structured_output_prepares_for_structured_runs() {
         let mut args = vec!["exec".to_string()];
@@ -217,34 +240,40 @@ mod tests {
             &mut |w| warnings.push(w),
         )
         .unwrap();
+        // The model is optional for Claude, so the launch reports no source.
         assert!(source.is_none());
         assert!(args.windows(2).any(|w| w == ["--model", "opus"]));
         assert!(env.iter().any(|(k, v)| k == "MODEL" && v == "opus"));
         assert!(warnings.is_empty());
     }
 
+    /// The 2026-09-08 regression shape: a composition-resolved model that is
+    /// outside the compiled baseline must still reach argv and `MODEL`.
     #[test]
-    fn resolve_model_uses_opencode_resolution_when_non_interactive() {
+    fn explicit_model_is_applied_for_non_interactive_opencode() {
         let mut args = vec!["run".to_string()];
         let mut env: Vec<(String, String)> = Vec::new();
         let source = resolve_model_and_validate(
             Provider::OpenCode,
             opencode_profile(),
             &mut args,
-            Some("anthropic/claude-sonnet-4"),
+            Some("minimax/MiniMax-M3"),
             true,
             false,
             &mut |k, v| env.push((k, v)),
             &mut |_| {},
         )
         .unwrap();
-        assert!(matches!(source, Some(OpenCodeModelSource::CliSwitch(_))));
-        assert!(args.iter().any(|a| a == "--model"));
-        assert!(env.iter().any(|(k, _)| k == "MODEL"));
+        assert_eq!(
+            source,
+            Some(ModelSource::CliSwitch("minimax/MiniMax-M3".to_string()))
+        );
+        assert!(args.windows(2).any(|w| w == ["--model", "minimax/MiniMax-M3"]));
+        assert!(env.contains(&("MODEL".to_string(), "minimax/MiniMax-M3".to_string())));
     }
 
     #[test]
-    fn resolve_model_keeps_interactive_opencode_on_apply_model_path() {
+    fn explicit_model_is_applied_for_interactive_opencode() {
         let mut args = Vec::new();
         let mut env: Vec<(String, String)> = Vec::new();
         let source = resolve_model_and_validate(
@@ -258,10 +287,151 @@ mod tests {
             &mut |_| {},
         )
         .unwrap();
-        // Interactive OpenCode skips resolution (no source) but still
-        // receives the universal --model flag.
+        // Interactive OpenCode does not require a model, so no source is
+        // reported — but the explicit model still reaches argv.
         assert!(source.is_none());
-        assert!(args.iter().any(|a| a == "--model"));
+        assert!(args.windows(2).any(|w| w == ["--model", "anthropic/claude-sonnet-4"]));
+    }
+
+    #[test]
+    fn interactive_opencode_without_a_model_is_left_to_the_provider() {
+        let _sources = isolated_opencode_sources(Some(r#"{"model": "cfg/model"}"#));
+        let mut args = Vec::new();
+        let mut env: Vec<(String, String)> = Vec::new();
+        let source = resolve_model_and_validate(
+            Provider::OpenCode,
+            opencode_profile(),
+            &mut args,
+            None,
+            false,
+            false,
+            &mut |k, v| env.push((k, v)),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(source.is_none());
+        assert!(args.is_empty());
+        assert!(env.is_empty());
+    }
+
+    #[test]
+    fn missing_model_is_tolerated_when_the_env_plan_already_carries_one() {
+        // `has_model_env` covers a caller whose env plan already exports
+        // `MODEL`; the stage must neither error nor invent a source.
+        let _sources = isolated_opencode_sources(None);
+        let mut args = vec!["run".to_string()];
+        let mut env: Vec<(String, String)> = Vec::new();
+        let source = resolve_model_and_validate(
+            Provider::OpenCode,
+            opencode_profile(),
+            &mut args,
+            None,
+            true,
+            true,
+            &mut |k, v| env.push((k, v)),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(source.is_none());
+        assert!(env.is_empty());
+    }
+
+    #[test]
+    fn required_model_comes_from_the_catalog_env_var_when_nothing_is_explicit() {
+        let _sources = isolated_opencode_sources(Some(r#"{"model": "cfg/model"}"#));
+        let _env = test_toolkit::EnvGuard::set_safe("OPENCODE_MODEL", "env/model");
+        let mut args = vec!["run".to_string()];
+        let mut env: Vec<(String, String)> = Vec::new();
+        let source = resolve_model_and_validate(
+            Provider::OpenCode,
+            opencode_profile(),
+            &mut args,
+            None,
+            true,
+            false,
+            &mut |k, v| env.push((k, v)),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(
+            source,
+            Some(ModelSource::ProviderEnv {
+                var: "OPENCODE_MODEL",
+                model: "env/model".to_string()
+            })
+        );
+        assert!(args.windows(2).any(|w| w == ["--model", "env/model"]));
+        assert!(env.contains(&("MODEL".to_string(), "env/model".to_string())));
+    }
+
+    #[test]
+    fn required_model_falls_back_to_the_configured_default_without_a_flag() {
+        let (_xdg, _env_guard, xdg) =
+            isolated_opencode_sources(Some("{\n  // default\n  \"model\": \"cfg/model\",\n}\n"));
+        let mut args = vec!["run".to_string()];
+        let mut env: Vec<(String, String)> = Vec::new();
+        let source = resolve_model_and_validate(
+            Provider::OpenCode,
+            opencode_profile(),
+            &mut args,
+            None,
+            true,
+            false,
+            &mut |k, v| env.push((k, v)),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(
+            source,
+            Some(ModelSource::ConfigDefault(profile::ConfiguredModel {
+                model: "cfg/model".to_string(),
+                path: xdg.path().join("opencode").join("opencode.jsonc"),
+            }))
+        );
+        assert!(!args.iter().any(|a| a == "--model"));
+        assert_eq!(env, vec![("MODEL".to_string(), "cfg/model".to_string())]);
+    }
+
+    #[test]
+    fn required_model_missing_everywhere_fails_before_launch() {
+        let _sources = isolated_opencode_sources(None);
+        let mut args = vec!["run".to_string()];
+        let mut env: Vec<(String, String)> = Vec::new();
+        let result = resolve_model_and_validate(
+            Provider::OpenCode,
+            opencode_profile(),
+            &mut args,
+            None,
+            true,
+            false,
+            &mut |k, v| env.push((k, v)),
+            &mut |_| {},
+        );
+        let Err(ModelStageError::NoModel(report)) = result else {
+            panic!("expected the no-model error, got {result:?}");
+        };
+        assert!(report.to_string().contains("No model specified!"));
+        assert!(env.is_empty());
+    }
+
+    #[test]
+    fn model_free_provider_never_searches_for_a_model() {
+        let mut args = Vec::new();
+        let mut env: Vec<(String, String)> = Vec::new();
+        let source = resolve_model_and_validate(
+            Provider::Claude,
+            profile::profile_for_provider(Provider::Claude).unwrap(),
+            &mut args,
+            None,
+            true,
+            false,
+            &mut |k, v| env.push((k, v)),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(source.is_none());
+        assert!(args.is_empty());
+        assert!(env.is_empty());
     }
 
     #[test]

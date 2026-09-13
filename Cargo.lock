@@ -3395,6 +3395,7 @@ dependencies = [
  "tracing-subscriber",
  "unicode-normalization",
  "url",
+ "wait-timeout",
 ]
 
 [[package]]

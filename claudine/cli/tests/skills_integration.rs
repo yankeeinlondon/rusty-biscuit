@@ -3,7 +3,7 @@ use std::path::Path;
 
 use predicates::str::contains;
 mod common;
-use common::{TestWorkspace, init_git_repo, write};
+use common::{CliProcessFixture, init_git_repo, write};
 
 fn setup_skill(base: &Path, name: &str, description: &str) {
     write(
@@ -16,16 +16,14 @@ fn setup_skill(base: &Path, name: &str, description: &str) {
 
 #[test]
 fn skills_subcommand_runs_without_panic() {
-    let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let home_dir = fixture.home().to_path_buf();
+    let cwd = fixture.cwd().to_path_buf();
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&cwd).unwrap();
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .arg("skills")
         .assert()
         .success();
@@ -33,16 +31,14 @@ fn skills_subcommand_runs_without_panic() {
 
 #[test]
 fn skills_with_verbose_flag_runs_without_panic() {
-    let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let home_dir = fixture.home().to_path_buf();
+    let cwd = fixture.cwd().to_path_buf();
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&cwd).unwrap();
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .args(["skills", "-v"])
         .assert()
         .success();
@@ -50,17 +46,15 @@ fn skills_with_verbose_flag_runs_without_panic() {
 
 #[test]
 fn skills_with_global_verbose_flag_runs_without_panic() {
-    let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let home_dir = fixture.home().to_path_buf();
+    let cwd = fixture.cwd().to_path_buf();
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&cwd).unwrap();
 
     // Global -v before the subcommand
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .args(["-v", "skills"])
         .assert()
         .success();
@@ -70,16 +64,14 @@ fn skills_with_global_verbose_flag_runs_without_panic() {
 
 #[test]
 fn skills_shows_no_skills_message_when_empty() {
-    let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("empty-project");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let home_dir = fixture.home().to_path_buf();
+    let cwd = fixture.cwd().to_path_buf();
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&cwd).unwrap();
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .arg("skills")
         .assert()
         .success()
@@ -90,8 +82,8 @@ fn skills_shows_no_skills_message_when_empty() {
 
 #[test]
 fn skills_lists_repo_scoped_skill_from_nested_directory() {
-    let workspace = TestWorkspace::new();
-    let repo_root = workspace.path().join("repo");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let repo_root = fixture.cwd().join("repo");
     let cwd = repo_root.join("nested");
     let skills_dir = repo_root.join(".claude/skills");
     fs::create_dir_all(&repo_root).unwrap();
@@ -99,9 +91,12 @@ fn skills_lists_repo_scoped_skill_from_nested_directory() {
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A useful tool");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("NO_COLOR", "1")
+    fixture
+        .command_builder()
+        // Skill discovery walks out of the launch directory, so the
+        // launch directory is the nested path this test built.
+        .ambient_context(&cwd)
+        .build()
         .arg("skills")
         .assert()
         .success()
@@ -110,17 +105,19 @@ fn skills_lists_repo_scoped_skill_from_nested_directory() {
 
 #[test]
 fn skills_lists_repo_scoped_skill() {
-    let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let repo_root = workspace.path().join("repo");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let home_dir = fixture.home().to_path_buf();
+    let repo_root = fixture.cwd().join("repo");
     let skills_dir = repo_root.join(".claude/skills");
     fs::create_dir_all(&home_dir).unwrap();
     setup_skill(&skills_dir, "repo-skill", "Repo-scoped skill");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&repo_root)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    fixture
+        .command_builder()
+        // Skill discovery walks out of the launch directory, so the
+        // launch directory is the nested path this test built.
+        .ambient_context(&repo_root)
+        .build()
         .arg("skills")
         .assert()
         .success()
@@ -131,19 +128,17 @@ fn skills_lists_repo_scoped_skill() {
 
 #[test]
 fn skills_filters_by_name() {
-    let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let home_dir = fixture.home().to_path_buf();
+    let cwd = fixture.cwd().to_path_buf();
     let skills_dir = home_dir.join(".claude/skills");
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "alpha", "Alpha skill");
     setup_skill(&skills_dir, "beta", "Beta skill");
     setup_skill(&skills_dir, "gamma", "Gamma skill");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .args(["skills", "beta"])
         .assert()
         .success()
@@ -152,17 +147,15 @@ fn skills_filters_by_name() {
 
 #[test]
 fn skills_filter_no_match_shows_message() {
-    let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let home_dir = fixture.home().to_path_buf();
+    let cwd = fixture.cwd().to_path_buf();
     let skills_dir = home_dir.join(".claude/skills");
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "alpha", "Alpha skill");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .args(["skills", "zzzznotfound"])
         .assert()
         .success()
@@ -173,8 +166,8 @@ fn skills_filter_no_match_shows_message() {
 
 #[test]
 fn skills_verbose_shows_descriptions() {
-    let workspace = TestWorkspace::new();
-    let repo_root = workspace.path().join("repo");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let repo_root = fixture.cwd().join("repo");
     let cwd = repo_root.join("nested");
     let skills_dir = repo_root.join(".claude/skills");
     fs::create_dir_all(&repo_root).unwrap();
@@ -182,9 +175,12 @@ fn skills_verbose_shows_descriptions() {
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A useful testing tool");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("NO_COLOR", "1")
+    fixture
+        .command_builder()
+        // Skill discovery walks out of the launch directory, so the
+        // launch directory is the nested path this test built.
+        .ambient_context(&cwd)
+        .build()
         .args(["-v", "skills"])
         .assert()
         .success()
@@ -196,16 +192,14 @@ fn skills_verbose_shows_descriptions() {
 
 #[test]
 fn skills_fix_flag_accepted() {
-    let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let home_dir = fixture.home().to_path_buf();
+    let cwd = fixture.cwd().to_path_buf();
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&cwd).unwrap();
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .args(["skills", "--fix"])
         .assert()
         .success();
@@ -213,16 +207,14 @@ fn skills_fix_flag_accepted() {
 
 #[test]
 fn skills_apply_flag_accepted() {
-    let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let home_dir = fixture.home().to_path_buf();
+    let cwd = fixture.cwd().to_path_buf();
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&cwd).unwrap();
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .args(["skills", "--apply"])
         .assert()
         .success();
@@ -230,8 +222,8 @@ fn skills_apply_flag_accepted() {
 
 #[test]
 fn skills_fix_shows_summary() {
-    let workspace = TestWorkspace::new();
-    let repo_root = workspace.path().join("repo");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let repo_root = fixture.cwd().join("repo");
     let cwd = repo_root.join("nested");
     let skills_dir = repo_root.join(".claude/skills");
     fs::create_dir_all(&repo_root).unwrap();
@@ -243,9 +235,12 @@ fn skills_fix_shows_summary() {
     );
     setup_skill(&skills_dir, "fixable", "A fixable skill");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("NO_COLOR", "1")
+    fixture
+        .command_builder()
+        // Skill discovery walks out of the launch directory, so the
+        // launch directory is the nested path this test built.
+        .ambient_context(&cwd)
+        .build()
         .args(["skills", "--fix"])
         .assert()
         .success()
@@ -254,17 +249,15 @@ fn skills_fix_shows_summary() {
 
 #[test]
 fn skills_fix_does_not_show_fix_hint() {
-    let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let home_dir = fixture.home().to_path_buf();
+    let cwd = fixture.cwd().to_path_buf();
     let skills_dir = home_dir.join(".claude/skills");
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-skill", "A skill");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command()
         .args(["skills", "--fix"])
         .output()
         .unwrap();
@@ -281,8 +274,8 @@ fn skills_fix_does_not_show_fix_hint() {
 
 #[test]
 fn skills_detail_view_shows_filesystem() {
-    let workspace = TestWorkspace::new();
-    let repo_root = workspace.path().join("repo");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let repo_root = fixture.cwd().join("repo");
     let cwd = repo_root.join("nested");
     let skills_dir = repo_root.join(".claude/skills");
     fs::create_dir_all(&repo_root).unwrap();
@@ -296,9 +289,12 @@ fn skills_detail_view_shows_filesystem() {
     )
     .unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command_builder()
+        // Skill discovery walks out of the launch directory, so the
+        // launch directory is the nested path this test built.
+        .ambient_context(&cwd)
+        .build()
         .args(["skills", "my-tool"])
         .output()
         .unwrap();
@@ -315,9 +311,9 @@ fn skills_detail_view_shows_filesystem() {
 
 #[test]
 fn skills_filter_suppresses_unrelated_exceptions() {
-    let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let home_dir = fixture.home().to_path_buf();
+    let cwd = fixture.cwd().to_path_buf();
     let skills_dir = home_dir.join(".claude/skills");
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "alpha", "Alpha skill");
@@ -327,10 +323,8 @@ fn skills_filter_suppresses_unrelated_exceptions() {
         "---\ndescription: Broken tool\n---\nSee [missing](./gone.md) for more.\n",
     );
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command()
         .args(["skills", "alpha"])
         .output()
         .unwrap();
@@ -347,8 +341,8 @@ fn skills_filter_suppresses_unrelated_exceptions() {
 
 #[test]
 fn skills_footer_shows_filter_hint() {
-    let workspace = TestWorkspace::new();
-    let repo_root = workspace.path().join("repo");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let repo_root = fixture.cwd().join("repo");
     let cwd = repo_root.join("nested");
     let skills_dir = repo_root.join(".claude/skills");
     fs::create_dir_all(&repo_root).unwrap();
@@ -356,9 +350,12 @@ fn skills_footer_shows_filter_hint() {
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A tool");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command_builder()
+        // Skill discovery walks out of the launch directory, so the
+        // launch directory is the nested path this test built.
+        .ambient_context(&cwd)
+        .build()
         .arg("skills")
         .output()
         .unwrap();
@@ -372,17 +369,15 @@ fn skills_footer_shows_filter_hint() {
 
 #[test]
 fn skills_footer_hides_filter_hint_with_filter() {
-    let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let home_dir = fixture.home().to_path_buf();
+    let cwd = fixture.cwd().to_path_buf();
     let skills_dir = home_dir.join(".claude/skills");
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A tool");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command()
         .args(["skills", "my-tool"])
         .output()
         .unwrap();
@@ -396,8 +391,8 @@ fn skills_footer_hides_filter_hint_with_filter() {
 
 #[test]
 fn skills_in_git_repo_does_not_show_user_only_hint() {
-    let workspace = TestWorkspace::new();
-    let repo_root = workspace.path().join("repo");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let repo_root = fixture.cwd().join("repo");
     let cwd = repo_root.join("nested");
     let skills_dir = repo_root.join(".claude/skills");
     fs::create_dir_all(&repo_root).unwrap();
@@ -405,9 +400,12 @@ fn skills_in_git_repo_does_not_show_user_only_hint() {
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "my-tool", "A tool");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command_builder()
+        // Skill discovery walks out of the launch directory, so the
+        // launch directory is the nested path this test built.
+        .ambient_context(&cwd)
+        .build()
         .arg("skills")
         .output()
         .unwrap();
@@ -423,8 +421,8 @@ fn skills_in_git_repo_does_not_show_user_only_hint() {
 
 #[test]
 fn skills_negation_with_dash_prefix_excludes_match() {
-    let workspace = TestWorkspace::new();
-    let repo_root = workspace.path().join("repo");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let repo_root = fixture.cwd().join("repo");
     let cwd = repo_root.join("nested");
     let skills_dir = repo_root.join(".claude/skills");
     fs::create_dir_all(&repo_root).unwrap();
@@ -434,9 +432,12 @@ fn skills_negation_with_dash_prefix_excludes_match() {
     setup_skill(&skills_dir, "beta", "Beta skill");
     setup_skill(&skills_dir, "gamma", "Gamma skill");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command_builder()
+        // Skill discovery walks out of the launch directory, so the
+        // launch directory is the nested path this test built.
+        .ambient_context(&cwd)
+        .build()
         .args(["skills", "--", "-beta"])
         .output()
         .unwrap();
@@ -458,8 +459,8 @@ fn skills_negation_with_dash_prefix_excludes_match() {
 
 #[test]
 fn skills_negation_with_bang_prefix_excludes_match() {
-    let workspace = TestWorkspace::new();
-    let repo_root = workspace.path().join("repo");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let repo_root = fixture.cwd().join("repo");
     let cwd = repo_root.join("nested");
     let skills_dir = repo_root.join(".claude/skills");
     fs::create_dir_all(&repo_root).unwrap();
@@ -469,9 +470,12 @@ fn skills_negation_with_bang_prefix_excludes_match() {
     setup_skill(&skills_dir, "beta", "Beta skill");
     setup_skill(&skills_dir, "gamma", "Gamma skill");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command_builder()
+        // Skill discovery walks out of the launch directory, so the
+        // launch directory is the nested path this test built.
+        .ambient_context(&cwd)
+        .build()
         .args(["skills", "!beta"])
         .output()
         .unwrap();
@@ -495,18 +499,16 @@ fn skills_negation_with_bang_prefix_excludes_match() {
 
 #[test]
 fn skills_exact_filter_matches_only_full_name() {
-    let workspace = TestWorkspace::new();
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("project");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let home_dir = fixture.home().to_path_buf();
+    let cwd = fixture.cwd().to_path_buf();
     let skills_dir = home_dir.join(".claude/skills");
     fs::create_dir_all(&cwd).unwrap();
     setup_skill(&skills_dir, "alpha", "Alpha skill");
     setup_skill(&skills_dir, "alpha-extended", "Alpha extended skill");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command()
         .args(["skills", "alpha!"])
         .output()
         .unwrap();
@@ -526,8 +528,8 @@ fn skills_exact_filter_matches_only_full_name() {
 
 #[test]
 fn skills_combined_positive_and_negation() {
-    let workspace = TestWorkspace::new();
-    let repo_root = workspace.path().join("repo");
+    let fixture = CliProcessFixture::named("skills-integration");
+    let repo_root = fixture.cwd().join("repo");
     let cwd = repo_root.join("nested");
     let skills_dir = repo_root.join(".claude/skills");
     fs::create_dir_all(&repo_root).unwrap();
@@ -538,9 +540,12 @@ fn skills_combined_positive_and_negation() {
     setup_skill(&skills_dir, "gamma", "Gamma skill");
 
     // "a" matches alpha, beta, and gamma; "-alpha" excludes alpha
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command_builder()
+        // Skill discovery walks out of the launch directory, so the
+        // launch directory is the nested path this test built.
+        .ambient_context(&cwd)
+        .build()
         .args(["skills", "--", "a", "-alpha"])
         .output()
         .unwrap();

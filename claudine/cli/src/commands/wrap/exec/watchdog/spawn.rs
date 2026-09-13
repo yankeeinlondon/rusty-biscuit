@@ -472,35 +472,44 @@ fn maybe_emit_step_timeout_warn(
     term: &Terminal,
     stream_output: &StreamOutput,
 ) {
-    let (silence, last_event_at) = {
+    // The warning shares `started_at` — the child's spawn instant — with the
+    // kill rule, so a run that never produces output warns before it is
+    // killed instead of going straight from silence to termination.
+    let (silence, silence_reference, origin) = {
         let mut state = match live_metrics.lock() {
             Ok(state) => state,
             Err(_) => return,
         };
-        if !claudine::stream::progress::should_warn_stall(&state, now, threshold) {
+        if !claudine::stream::progress::should_warn_stall(&state, now, threshold, started_at) {
             return;
         }
         state.last_stall_warning_at = Some(now);
-        let Some(last_event) = state.last_event_at else {
-            return;
-        };
-        (now.saturating_duration_since(last_event), last_event)
+        let reference = state.silence_reference(started_at);
+        (
+            now.saturating_duration_since(reference),
+            reference,
+            state.silence_origin(),
+        )
     };
 
     let hard_remaining = hard_step_timeout.and_then(|hard| {
-        let deadline_instant = last_event_at + hard;
+        let deadline_instant = silence_reference + hard;
         let remaining = deadline_instant.saturating_duration_since(now);
         if remaining.is_zero() {
             None
         } else {
-            let last_event_wall = instant_to_local(started_at_wall, started_at, last_event_at);
-            let deadline_wall = last_event_wall + chrono::Duration::from_std(hard).ok()?;
+            let reference_wall = instant_to_local(started_at_wall, started_at, silence_reference);
+            let deadline_wall = reference_wall + chrono::Duration::from_std(hard).ok()?;
             Some((remaining, deadline_wall))
         }
     });
 
-    let body =
-        prompt_timing_mod::render_step_timeout_warn_prose(silence, hard_remaining, prompt_timing);
+    let body = prompt_timing_mod::render_step_timeout_warn_prose(
+        silence,
+        origin,
+        hard_remaining,
+        prompt_timing,
+    );
     let rendered = Status::from_prose(body)
         .state(StatusState::Warning)
         .render(term);

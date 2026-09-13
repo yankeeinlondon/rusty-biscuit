@@ -271,7 +271,11 @@ impl TerminalCodeRenderer {
         // (review-2 finding 1).
         let code_theme = self
             .theme_override
-            .or_else(|| context.code_theme_name().map(ThemePair::from_str_or_default))
+            .or_else(|| {
+                context
+                    .code_theme_name()
+                    .map(ThemePair::from_str_or_default)
+            })
             .or(self.env_code_theme)
             .unwrap_or(ThemePair::OneHalf);
         let surface = self
@@ -279,11 +283,8 @@ impl TerminalCodeRenderer {
             .as_ref()
             .map(crate::markdown::highlighting::Surface::Terminal)
             .unwrap_or(crate::markdown::highlighting::Surface::Mode(page_mode));
-        let resolved = code_theme.resolve_for_surface(
-            surface,
-            Some(code_theme),
-            self.code_block_mode,
-        );
+        let resolved =
+            code_theme.resolve_for_surface(surface, Some(code_theme), self.code_block_mode);
         let header_mode = mode_for_background(
             CodeHighlighter::from_theme(resolved.theme, resolved.color_mode)
                 .theme()
@@ -725,7 +726,11 @@ last: 4
         for event in Parser::new_ext(&text, Options::all()) {
             match event {
                 Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => {
-                    let language = info.split_whitespace().next().unwrap_or_default().to_string();
+                    let language = info
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or_default()
+                        .to_string();
                     current = Some((language, String::new()));
                 }
                 Event::Text(text) => {
@@ -1007,7 +1012,7 @@ last: 4
     /// `HtmlOptions` + theme variant once and every fence borrows it.
     #[test]
     #[serial]
-    fn browser_render_resolves_code_surface_once_per_render() {
+    fn render_browser_resolves_code_surface_once_per_render() {
         let _theme = EnvVarGuard::capture("THEME");
         let _code_theme = EnvVarGuard::capture("CODE_THEME");
         unsafe {
@@ -1378,7 +1383,7 @@ last: 4
     }
 
     #[test]
-    fn browser_code_emits_language_class() {
+    fn render_browser_code_emits_language_class() {
         let renderer = TerminalCodeRenderer::new();
         let fragment = renderer
             .render_browser_code(Some("yaml"), "foo: 1", None, &NodeAttrs::default())
@@ -1395,7 +1400,7 @@ last: 4
     /// non-inverted (buggy) highlighters and assert the hook reproduces the
     /// inverted one — independent of concrete hex values.
     #[test]
-    fn browser_code_inverts_theme_for_page_contrast() {
+    fn render_browser_code_inverts_theme_for_page_contrast() {
         let opts = HtmlOptions::default();
         let code = "fn main() {}";
         let meta = build_code_meta("rust", None);
@@ -1446,7 +1451,7 @@ last: 4
     /// reproduce the legacy renderer's title block, line-number table, and
     /// highlighted-line markup on the browser path.
     #[test]
-    fn browser_code_emits_title_and_line_numbers_from_meta() {
+    fn render_browser_code_emits_title_and_line_numbers_from_meta() {
         let renderer = TerminalCodeRenderer::new();
         let fragment = renderer
             .render_browser_code(
@@ -1477,7 +1482,7 @@ last: 4
     /// case mermaid; doing so would hide an SVG failure behind a code-block
     /// fallback and bypass strictness (review-2 finding 2).
     #[test]
-    fn browser_mermaid_returns_svg_or_none_never_silent_code_block() {
+    fn render_browser_mermaid_returns_svg_or_none_never_silent_code_block() {
         let renderer = TerminalCodeRenderer::new();
 
         match renderer.render_browser_mermaid(
@@ -1503,7 +1508,7 @@ last: 4
     /// block (no SVG promotion), so the only promotion path is the fallible
     /// `render_browser_mermaid` hook.
     #[test]
-    fn browser_code_does_not_promote_mermaid() {
+    fn render_browser_code_does_not_promote_mermaid() {
         let renderer = TerminalCodeRenderer::new();
         let html = renderer
             .render_browser_code(

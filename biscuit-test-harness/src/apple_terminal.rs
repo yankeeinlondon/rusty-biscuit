@@ -818,8 +818,8 @@ fn existing_window_ids() -> Option<Vec<i64>> {
 ///
 /// ## Why a shell allowlist, not [`super::detect_shell`]
 ///
-/// The harness spawns `exec <detect_shell()> -l`, but a Terminal.app window
-/// reports the *login* shell macOS started it with — which is the user's
+/// The harness execs the shell [`super::detect_shell`] picked, but a
+/// Terminal.app window reports the *login* shell macOS started it with — the user's
 /// `UserShell` (commonly `zsh`, shown as `-zsh`), not whatever
 /// `detect_shell()` (which prefers `bash`) selected. Matching only the
 /// detected shell therefore never recognized a real leaked window, so they
@@ -941,6 +941,12 @@ impl TerminalHarness for AppleTerminalHarness {
     /// window cannot accidentally receive keystrokes meant for the
     /// developer's foreground app.
     ///
+    /// The `do script` line `exec`s away the shell Terminal.app started
+    /// for its own reasons and replaces it with the harness's two-stage
+    /// login shell, whose interactive stage runs with rc files
+    /// suppressed — see
+    /// [`configure_login_shell`](super::configure_login_shell).
+    ///
     /// Cargo's target binary directory is prepended to `PATH` so CLI
     /// binaries (`bt`, `question`) resolve without an absolute path.
     /// Color-forcing env vars (`FORCE_COLOR`, `CLICOLOR_FORCE`) are set
@@ -970,12 +976,11 @@ impl TerminalHarness for AppleTerminalHarness {
         let window_tag = unique_window_tag();
         let mut shell_cmd = String::new();
 
-        if let Some(bin_dir) =
-            super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"))
-        {
-            shell_cmd.push_str("PATH=");
+        let bin_dir = super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"));
+        if let Some(bin_dir) = &bin_dir {
+            shell_cmd.push_str("BISCUIT_TEST_BIN_DIR=");
             shell_cmd.push_str(&shell_quote(&bin_dir.to_string_lossy()));
-            shell_cmd.push_str(":$PATH ");
+            shell_cmd.push(' ');
         }
         if !self.preserve_capabilities {
             // Force-color env vars are gated because they flip `bt`'s
@@ -999,9 +1004,7 @@ impl TerminalHarness for AppleTerminalHarness {
         if env::var_os("COLORTERM").is_none() {
             shell_cmd.push_str("COLORTERM=truecolor ");
         }
-        shell_cmd.push_str("exec ");
-        shell_cmd.push_str(&shell);
-        shell_cmd.push_str(" -l");
+        shell_cmd.push_str(&super::login_shell_command_line(&shell, bin_dir.is_some()));
 
         // Snapshot the frontmost process *before* `do script` so we can
         // restore focus afterwards. The outer `try` blocks let the script
@@ -1320,6 +1323,20 @@ mod tests {
         let got = applescript_escape(s);
         assert!(got.contains(r#"\""#));
         assert!(!got.contains('\n'));
+    }
+
+    /// The `do script` payload crosses two quoting layers — POSIX single
+    /// quotes around the `-c` script, then AppleScript's own escaping — and
+    /// has to survive both intact.
+    #[test]
+    fn login_shell_command_line_survives_the_applescript_escape() {
+        let line = super::super::login_shell_command_line("bash", true);
+        let escaped = applescript_escape(&format!("BISCUIT_TEST_BIN_DIR='/b' {line}"));
+        assert!(
+            escaped.contains(r#"-c 'unset ENV BASH_ENV; export PATH=\"$BISCUIT_TEST_BIN_DIR:$PATH\"; unset BISCUIT_TEST_BIN_DIR; exec \"$0\" --norc -i' bash"#),
+            "{escaped}"
+        );
+        assert!(!escaped.contains('\n'), "a newline would break the literal");
     }
 
     #[test]

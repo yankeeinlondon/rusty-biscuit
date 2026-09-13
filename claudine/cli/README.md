@@ -245,7 +245,7 @@ Shared composition flags include provider selectors (`--claude`, `--codex`, `--g
 
 Provider selection follows a TTY/non-TTY split. In **TTY mode** with no explicit flag, an interactive `biscuit-tui` picker is always shown. In **non-TTY mode**, resolution follows a strict chain: explicit flag → singular frontmatter `agent` → list-valued frontmatter `agent` (first installed match) → configured `favorite_agent` → structured hard error. The old "single installed" auto-selection shortcut has been removed.
 
-Model resolution is independent of TTY mode: CLI `--model` → provider-specific env var (`CODEX_MODEL`, `CLAUDE_MODEL`, etc.) → generic `MODEL` env → frontmatter `model` → provider default. OpenCode requires a model in non-interactive mode and fails hard if none is resolved.
+Model resolution is independent of TTY mode: CLI `--model` → provider-specific env var (`CODEX_MODEL`, `CLAUDE_MODEL`, etc.) → generic `MODEL` env → frontmatter `model` (always forwarded; a value outside Claudine's expected offerings for the provider prints a `[model]` warning) → provider default. A provider that requires a model in non-interactive mode (OpenCode) falls back to its own env var and then its configured default (`opencode.jsonc` / `opencode.json`), and fails before launch only when neither names one.
 
 Set or clear the favorite agent with:
 

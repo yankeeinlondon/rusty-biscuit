@@ -139,9 +139,11 @@ pub(crate) fn collect_ref_decorations(
 pub(crate) fn collect_ref_decorations_fallible(
     repo: &gix::Repository,
 ) -> Result<HashMap<gix::ObjectId, Vec<RefDecoration>>> {
-    Ok(super::remote_refresh::RefSnapshot::observe(repo, true, true, true)?
-        .decorations()
-        .clone())
+    Ok(
+        super::remote_refresh::RefSnapshot::observe(repo, true, true, true)?
+            .decorations()
+            .clone(),
+    )
 }
 
 /// Gets the last N commits from HEAD using a gix revwalk, attaching
@@ -987,7 +989,10 @@ mod path_history_tests {
         .unwrap();
 
         assert_eq!(result.commits_scanned, 3, "must stop at the bound");
-        assert!(result.limit_reached, "stopping at the bound must be visible");
+        assert!(
+            result.limit_reached,
+            "stopping at the bound must be visible"
+        );
         assert!(
             !result.history_exhausted,
             "a bounded stop is not an exhausted history"

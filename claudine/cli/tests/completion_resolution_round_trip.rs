@@ -7,10 +7,8 @@
 
 
 mod common;
-use common::completion::{
-    fake_home, run_complete_with_home, seed_cargo_workspace_members, write_file,
-};
-use common::{TestWorkspace, init_git_repo};
+use common::completion::{run_complete_with_home, seed_cargo_workspace_members, write_file};
+use common::CliProcessFixture;
 
 fn emitted_magic_token(cwd: &std::path::Path, home: &std::path::Path, partial: &str) -> String {
     let candidates = run_complete_with_home(cwd, home, &["compose", partial]);
@@ -22,11 +20,13 @@ fn emitted_magic_token(cwd: &std::path::Path, home: &std::path::Path, partial: &
     candidates.into_iter().next().unwrap()
 }
 
-fn compose_dry_run(cwd: &std::path::Path, home: &std::path::Path, token: &str) -> String {
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", home)
-        .env("NO_COLOR", "1")
-        .current_dir(cwd)
+fn compose_dry_run(fixture: &CliProcessFixture, launch: &std::path::Path, token: &str) -> String {
+    let output = fixture
+        .command_builder()
+        // The launch directory decides which magic root wins, which is the
+        // round trip's whole subject.
+        .ambient_context(launch)
+        .build()
         .args(["compose", "--dry-run", token])
         .assert()
         .success()
@@ -38,24 +38,24 @@ fn compose_dry_run(cwd: &std::path::Path, home: &std::path::Path, token: &str) -
 
 #[test]
 fn package_area_collision_round_trips_the_completion_value_unchanged() {
-    let workspace = TestWorkspace::named("completion-resolution-area-collision");
-    seed_cargo_workspace_members(workspace.path(), &["area/lib", "area/cli"]);
-    assert!(init_git_repo(workspace.path()), "fixture requires a real git repository");
-    let launch = workspace.path().join("area/lib");
-    let home = fake_home(workspace.path());
+    let fixture = CliProcessFixture::named("completion-resolution-area-collision");
+    seed_cargo_workspace_members(fixture.cwd(), &["area/lib", "area/cli"]);
+    fixture.initialize_repository();
+    let launch = fixture.cwd().join("area/lib");
+    let home = fixture.home().to_path_buf();
 
     write_file(
-        &workspace.path().join("area/prompts/plan.md"),
+        &fixture.cwd().join("area/prompts/plan.md"),
         "PACKAGE_AREA_MAGIC_ROOT\n",
     );
     write_file(
-        &workspace.path().join("prompts/plan.md"),
+        &fixture.cwd().join("prompts/plan.md"),
         "REPOSITORY_MAGIC_ROOT\n",
     );
 
     let token = emitted_magic_token(&launch, &home, "@plan");
     assert_eq!(token, "@plan.md");
-    let composed = compose_dry_run(&launch, &home, &token);
+    let composed = compose_dry_run(&fixture, &launch, &token);
     assert!(
         composed.contains("PACKAGE_AREA_MAGIC_ROOT"),
         "runtime must select the package-area file completion inspected; stdout:\n{composed}",
@@ -68,11 +68,11 @@ fn package_area_collision_round_trips_the_completion_value_unchanged() {
 
 #[test]
 fn discrete_package_only_prompt_round_trips_the_completion_value_unchanged() {
-    let workspace = TestWorkspace::named("completion-resolution-discrete-package");
-    seed_cargo_workspace_members(workspace.path(), &["tools/leaf", "area/lib"]);
-    assert!(init_git_repo(workspace.path()), "fixture requires a real git repository");
-    let launch = workspace.path().join("tools/leaf");
-    let home = fake_home(workspace.path());
+    let fixture = CliProcessFixture::named("completion-resolution-discrete-package");
+    seed_cargo_workspace_members(fixture.cwd(), &["tools/leaf", "area/lib"]);
+    fixture.initialize_repository();
+    let launch = fixture.cwd().join("tools/leaf");
+    let home = fixture.home().to_path_buf();
 
     write_file(
         &launch.join("prompts/package-only.md"),
@@ -81,7 +81,7 @@ fn discrete_package_only_prompt_round_trips_the_completion_value_unchanged() {
 
     let token = emitted_magic_token(&launch, &home, "@package-only");
     assert_eq!(token, "@package-only.md");
-    let composed = compose_dry_run(&launch, &home, &token);
+    let composed = compose_dry_run(&fixture, &launch, &token);
     assert!(
         composed.contains("DISCRETE_PACKAGE_MAGIC_ROOT"),
         "runtime must consume the discrete-package root completion used; stdout:\n{composed}",

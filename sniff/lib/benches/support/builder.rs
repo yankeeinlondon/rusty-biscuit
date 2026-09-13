@@ -460,7 +460,10 @@ pub fn build_git_repo_with_dirty_files_of_size(
 
 /// Build a deep, wide tree whose only formatting evidence is at its root.
 pub fn build_deep_wide_formatting_tree(root: &Path, depth: usize, width: usize) {
-    write_file(&root.join(".editorconfig"), "root = true\n[*]\nindent_size = 4\n");
+    write_file(
+        &root.join(".editorconfig"),
+        "root = true\n[*]\nindent_size = 4\n",
+    );
     for branch in 0..width {
         let mut dir = root.join(format!("branch-{branch:03}"));
         for level in 0..depth {
@@ -527,7 +530,10 @@ pub fn build_mixed_monorepo(root: &Path, package_count: usize) -> Repository {
             &package.join("package.json"),
             &format!("{{\"name\":\"js-{i:04}\",\"version\":\"0.1.0\"}}\n"),
         );
-        write_file(&package.join("src/index.ts"), "export const fixture = true;\n");
+        write_file(
+            &package.join("src/index.ts"),
+            "export const fixture = true;\n",
+        );
     }
     for i in 0..python_count {
         let package = root.join(format!("python/py-{i:04}"));
@@ -582,10 +588,7 @@ pub fn add_nested_workspace(root: &Path) {
         &root.join("nested/pnpm-workspace.yaml"),
         "packages:\n  - 'packages/*'\n",
     );
-    write_file(
-        &root.join("nested/package.json"),
-        "{\"private\":true}\n",
-    );
+    write_file(&root.join("nested/package.json"), "{\"private\":true}\n");
     write_file(
         &root.join("nested/packages/member/package.json"),
         "{\"name\":\"nested-member\",\"version\":\"0.1.0\"}\n",

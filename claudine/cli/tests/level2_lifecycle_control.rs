@@ -4928,6 +4928,15 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
         root.join("_implement/implement-plan.md"),
     )
     .expect("copy the drift-guarded implement-plan fixture");
+    // The target transcludes these two shipped snippets from its parent
+    // directory; they are prose only, so the shipped bytes serve as-is.
+    for snippet in ["_no_formatting.md", "_os.md"] {
+        fs::copy(
+            repo_root.join("prompts").join(snippet),
+            root.join(snippet),
+        )
+        .expect("copy a snippet the implement-plan fixture transcludes");
+    }
 
     // The router branches on `frontmatter(spec, 'implemented')`; an unimplemented
     // spec is the branch that reaches `implement-plan.md`.
@@ -4954,6 +4963,8 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
 /// Stage the repository's real `implement-plan.md` with every external effect
 /// replaced by a PATH-local recorder. The prompt itself is copied byte-for-byte;
 /// only the provider, TTS executable, and lifecycle shell commands are doubled.
+/// Recorders assemble each line before appending so concurrent TTS output cannot
+/// split a command's argument record.
 fn stage_shipped_optional_commit_message() -> Staged {
     let workspace = tempdir().unwrap();
     let root = workspace.path().to_path_buf();
@@ -4994,17 +5005,11 @@ fn stage_shipped_optional_commit_message() -> Staged {
         &format!(
             r#"#!/bin/sh
 case "$1" in
-  add)
-    printf 'git-add' >> {log}
+  add|commit)
+    record="git-$1"
     shift
-    for arg in "$@"; do printf '|%s' "$arg" >> {log}; done
-    printf '\n' >> {log}
-    ;;
-  commit)
-    printf 'git-commit' >> {log}
-    shift
-    for arg in "$@"; do printf '|%s' "$arg" >> {log}; done
-    printf '\n' >> {log}
+    for arg in "$@"; do record="$record|$arg"; done
+    printf '%s\n' "$record" >> {log}
     ;;
   *)
     exec '{real_git}' "$@"
@@ -5019,14 +5024,14 @@ exit 0
     write_executable(
         &bin_dir.join("just"),
         &format!(
-            "#!/bin/sh\nprintf 'just' >> {log}\nfor arg in \"$@\"; do printf '|%s' \"$arg\" >> {log}; done\nprintf '\\n' >> {log}\nexit 0\n",
+            "#!/bin/sh\nrecord=just\nfor arg in \"$@\"; do record=\"$record|$arg\"; done\nprintf '%s\\n' \"$record\" >> {log}\nexit 0\n",
             log = events_log.display(),
         ),
     );
     write_executable(
         &bin_dir.join("gitnexus"),
         &format!(
-            "#!/bin/sh\nprintf 'gitnexus' >> {log}\nfor arg in \"$@\"; do printf '|%s' \"$arg\" >> {log}; done\nprintf '\\n' >> {log}\nexit 0\n",
+            "#!/bin/sh\nrecord=gitnexus\nfor arg in \"$@\"; do record=\"$record|$arg\"; done\nprintf '%s\\n' \"$record\" >> {log}\nexit 0\n",
             log = events_log.display(),
         ),
     );
@@ -5036,12 +5041,23 @@ exit 0
         .ancestors()
         .nth(2)
         .expect("repository root is two levels above claudine/cli");
-    let md_file = root.join("implement-plan.md");
+    // Staged in the shipped layout: the prompt transcludes `../_no_formatting.md`
+    // and `../_os.md`, so it lives one directory down and the two snippets sit
+    // beside that directory, inside the workspace.
+    fs::create_dir_all(root.join("_implement")).unwrap();
+    let md_file = root.join("_implement/implement-plan.md");
     fs::copy(
         repo_root.join("prompts/_implement/implement-plan.md"),
         &md_file,
     )
     .expect("copy the shipped implement-plan prompt");
+    for snippet in ["_no_formatting.md", "_os.md"] {
+        fs::copy(
+            repo_root.join("prompts").join(snippet),
+            root.join(snippet),
+        )
+        .expect("copy a snippet the shipped implement-plan prompt transcludes");
+    }
     fs::write(
         root.join("feature/plan.md"),
         "---\ntotal_phases: 1\nstart_phase: 1\n---\n\n# Plan\n",
@@ -5056,7 +5072,7 @@ exit 0
     // baseline inside this isolated fixture, then make the tracked plan dirty
     // before Claudine captures its invocation snapshot.
     let git = |args: &[&str]| {
-        std::process::Command::new("git")
+        common::helper_command("git")
             .arg("-C")
             .arg(&root)
             .args(args)

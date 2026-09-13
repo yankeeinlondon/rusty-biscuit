@@ -30,7 +30,8 @@ pub use aggregate::{
     resolve_directory_version, resolve_scope, resolve_scope_with_overrides,
 };
 pub use aggregate_view::{
-    AggregateCwdContext, RepoAggregate, RepoAggregateObservation, detect_repo_aggregate, scope_paths,
+    AggregateCwdContext, RepoAggregate, RepoAggregateObservation, detect_repo_aggregate,
+    scope_paths,
 };
 pub use area::{AreaError, detect_area};
 pub use identity::{RepoIdentity, detect_repo_identity, detect_repo_identity_with_repo};

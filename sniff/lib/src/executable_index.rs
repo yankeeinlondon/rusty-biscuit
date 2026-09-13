@@ -668,8 +668,8 @@ mod tests {
         }
 
         let mut env = ScopedEnv::new();
-        let new_path = std::env::join_paths([dir_first.path(), dir_second.path()])
-            .expect("join PATH dirs");
+        let new_path =
+            std::env::join_paths([dir_first.path(), dir_second.path()]).expect("join PATH dirs");
         env.set_os("PATH", &new_path);
 
         let eager_path = scan_path_executables();

@@ -54,8 +54,14 @@ pub(crate) fn merge_conflicts_between(
     // Rejection precedes the merge: the built-in approximation is only a valid
     // prediction once no external driver or filter could have changed its
     // outcome, and running it first would already have executed them.
-    let participating =
-        participating_paths(&probe, ours, theirs, ours_tree, theirs_tree, &mut diff_cache)?;
+    let participating = participating_paths(
+        &probe,
+        ours,
+        theirs,
+        ours_tree,
+        theirs_tree,
+        &mut diff_cache,
+    )?;
     reject_unsafe_configuration(&probe, &ours_index, &participating)?;
 
     let attribute_stack = committed_attribute_stack(&probe, &ours_index);
@@ -143,12 +149,8 @@ fn committed_diff_cache(
             .map_err(|error| SniffError::git("merge_command_context", error))?,
         options,
     );
-    let pipeline = gix::diff::blob::Pipeline::new(
-        Default::default(),
-        filter,
-        Vec::new(),
-        Default::default(),
-    );
+    let pipeline =
+        gix::diff::blob::Pipeline::new(Default::default(), filter, Vec::new(), Default::default());
     let options = gix::diff::blob::platform::Options {
         algorithm: Some(
             repo.diff_algorithm()
@@ -175,7 +177,10 @@ fn committed_attribute_stack(
         Default::default(),
     );
     let state = gix::worktree::stack::State::AttributesStack(attributes);
-    let ignore_case = repo.config_snapshot().boolean("core.ignoreCase").unwrap_or(false);
+    let ignore_case = repo
+        .config_snapshot()
+        .boolean("core.ignoreCase")
+        .unwrap_or(false);
     gix::worktree::Stack::from_state_and_ignore_case(
         repo.workdir().unwrap_or(repo.git_dir()),
         ignore_case,
@@ -209,7 +214,12 @@ fn participating_paths(
 ) -> Result<BTreeSet<BString>> {
     let bases = repo
         .merge_bases_many(ours, &[theirs])
-        .map(|bases| bases.into_iter().map(|base| base.detach()).collect::<Vec<_>>())
+        .map(|bases| {
+            bases
+                .into_iter()
+                .map(|base| base.detach())
+                .collect::<Vec<_>>()
+        })
         .unwrap_or_default();
 
     // A single merge base that is one of the sides means one tip already

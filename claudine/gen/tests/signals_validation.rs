@@ -62,8 +62,16 @@ impl Fixture {
 
 /// Untampered corpus compiles, twice, byte-identically (the determinism
 /// contract behind the drift test).
+///
+/// Was `real_corpus_builds_deterministically`. `real_` is a tier marker for a
+/// test needing an external device or API, and every canonical recipe filters
+/// on it — so this one compiled on every run and executed on none, while
+/// `just test-real` covers only `claudine-contract` and `claudine-cli`. The
+/// "real" it meant was the *shipped* corpus as opposed to this file's tampered
+/// fixtures, which is an ordinary L1 subject: it reads files in the checkout
+/// and finishes in 0.09 s.
 #[test]
-fn real_corpus_builds_deterministically() {
+fn shipped_corpus_builds_deterministically() {
     let fixture = Fixture::new();
     let first = fixture.build().expect("real corpus must compile");
     let second = fixture.build().expect("real corpus must compile twice");

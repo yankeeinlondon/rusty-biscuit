@@ -2,6 +2,13 @@
 
 ## Recent Dependency Notes
 
+- `tools/test-audit` is a TypeScript pnpm-workspace member (registered in the
+  root `pnpm-workspace.yaml`, pinned through the root `pnpm-lock.yaml`), not a
+  Cargo package. It depends on `fast-xml-parser` (JUnit reports),
+  `web-tree-sitter` + `tree-sitter-rust` (prebuilt wasm; source-side test
+  attribute scans), and `zod` (area configuration validation), with
+  `typescript`, `tsx`, and `vitest` as dev dependencies. Only the
+  `ci-tooling` CI leg provisions Node for it; Rust test legs never do.
 - `biscuit-test-harness` uses `tempfile` as a regular dependency to retain private
   WezTerm client configuration files through subprocess completion and remove
   them afterward.

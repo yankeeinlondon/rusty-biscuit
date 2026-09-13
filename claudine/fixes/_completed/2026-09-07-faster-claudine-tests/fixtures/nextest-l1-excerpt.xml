@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="31" failures="0" errors="0" uuid="4411197c-1f1f-4353-bfcf-cd646788e987" timestamp="2026-09-06T16:18:38.154-07:00" time="9.750">
+<testsuite name="claudine-cli::argv_normalization" tests="14" disabled="0" errors="0" failures="0">
+        <testcase name="complete_env_short_circuits_before_argv_normalization" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.159-07:00" time="0.053">
+        </testcase>
+        <testcase name="complete_env_short_circuits_wrapper_argv_without_launching_provider" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.211-07:00" time="0.018">
+        </testcase>
+        <testcase name="headline_compose_with_fuzzy_provider_resolves_to_claude" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.230-07:00" time="0.159">
+        </testcase>
+        <testcase name="headline_compose_with_interleaved_flag_renders_help" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.389-07:00" time="0.020">
+        </testcase>
+        <testcase name="headline_compose_with_plain_setter_behaves_as_before" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.409-07:00" time="0.066">
+        </testcase>
+        <testcase name="headline_compose_with_setter_before_late_flags_preserves_flag_semantics" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.475-07:00" time="0.062">
+        </testcase>
+        <testcase name="headline_compose_with_setter_then_late_flags_preserves_flag_semantics" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.537-07:00" time="0.063">
+        </testcase>
+        <testcase name="headline_compose_with_trailing_help_renders_help" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.601-07:00" time="0.019">
+        </testcase>
+        <testcase name="non_composition_subcommands_accept_help_flag" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.620-07:00" time="0.059">
+        </testcase>
+        <testcase name="non_owned_flag_after_file_is_forwarded_to_agent" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.678-07:00" time="0.067">
+        </testcase>
+        <testcase name="non_owned_flag_before_file_errors_with_ordering_guidance" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.745-07:00" time="0.018">
+        </testcase>
+        <testcase name="passthrough_hooks_describe_still_runs" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.763-07:00" time="0.028">
+        </testcase>
+        <testcase name="passthrough_root_help_renders_custom_help_screen" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.791-07:00" time="0.018">
+        </testcase>
+        <testcase name="passthrough_version_flag_still_prints_version_string" classname="claudine-cli::argv_normalization" timestamp="2026-09-06T16:18:38.809-07:00" time="0.017">
+        </testcase>
+    </testsuite>
+<testsuite name="claudine-cli::characterization_error_routes" tests="8" disabled="0" errors="0" failures="0">
+        <testcase name="characterize_all_failure_routes_exit_one_and_emit_once" classname="claudine-cli::characterization_error_routes" timestamp="2026-09-06T16:18:38.826-07:00" time="0.259">
+        </testcase>
+        <testcase name="characterize_initialize_proxy_resolution_failure" classname="claudine-cli::characterization_error_routes" timestamp="2026-09-06T16:18:39.085-07:00" time="0.035">
+        </testcase>
+        <testcase name="characterize_loop_iteration_failure" classname="claudine-cli::characterization_error_routes" timestamp="2026-09-06T16:18:39.121-07:00" time="0.206">
+        </testcase>
+        <testcase name="characterize_post_start_setup_failure" classname="claudine-cli::characterization_error_routes" timestamp="2026-09-06T16:18:39.327-07:00" time="0.081">
+        </testcase>
+        <testcase name="characterize_pre_document_argument_failure" classname="claudine-cli::characterization_error_routes" timestamp="2026-09-06T16:18:39.407-07:00" time="0.022">
+        </testcase>
+        <testcase name="characterize_preflight_shell_denial" classname="claudine-cli::characterization_error_routes" timestamp="2026-09-06T16:18:39.430-07:00" time="0.026">
+        </testcase>
+        <testcase name="characterize_terminal_proxy_fails_at_resolution_with_invalid_file_reference" classname="claudine-cli::characterization_error_routes" timestamp="2026-09-06T16:18:39.455-07:00" time="0.207">
+        </testcase>
+        <testcase name="characterize_terminal_proxy_resolution_failure" classname="claudine-cli::characterization_error_routes" timestamp="2026-09-06T16:18:39.662-07:00" time="0.210">
+        </testcase>
+    </testsuite>
+<testsuite name="claudine-cli::cli_process_fixture" tests="9" disabled="0" errors="0" failures="0">
+        <testcase name="ambient_context_escape_pins_the_cwd_to_a_test_built_repository" classname="claudine-cli::cli_process_fixture" timestamp="2026-09-06T16:18:39.872-07:00" time="0.202">
+        </testcase>
+        <testcase name="ambient_context_escape_rejects_a_directory_outside_the_workspace" classname="claudine-cli::cli_process_fixture" timestamp="2026-09-06T16:18:40.074-07:00" time="0.011">
+        </testcase>
+        <testcase name="ambient_context_escape_rejects_a_directory_that_does_not_exist" classname="claudine-cli::cli_process_fixture" timestamp="2026-09-06T16:18:40.085-07:00" time="0.009">
+        </testcase>
+        <testcase name="default_command_drops_inherited_home_and_config_overrides" classname="claudine-cli::cli_process_fixture" timestamp="2026-09-06T16:18:40.095-07:00" time="0.176">
+        </testcase>
+        <testcase name="default_command_pins_cwd_home_and_the_minimal_system_path" classname="claudine-cli::cli_process_fixture" timestamp="2026-09-06T16:18:40.270-07:00" time="0.181">
+        </testcase>
+        <testcase name="default_path_hides_host_tool_prefixes_and_resolves_the_fixture_stub" classname="claudine-cli::cli_process_fixture" timestamp="2026-09-06T16:18:40.452-07:00" time="0.183">
+        </testcase>
+        <testcase name="fake_only_path_escape_carries_the_fixture_bin_alone" classname="claudine-cli::cli_process_fixture" timestamp="2026-09-06T16:18:40.634-07:00" time="0.173">
+        </testcase>
+        <testcase name="host_path_escape_prepends_the_fixture_bin_to_the_host_path" classname="claudine-cli::cli_process_fixture" timestamp="2026-09-06T16:18:40.807-07:00" time="0.183">
+        </testcase>
+        <testcase name="inherit_no_env_keeps_the_defaults_and_drops_everything_else" classname="claudine-cli::cli_process_fixture" timestamp="2026-09-06T16:18:40.991-07:00" time="0.182">
+        </testcase>
+    </testsuite>
+</testsuites>

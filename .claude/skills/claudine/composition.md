@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-dca548733b4c3279
-last_updated: 2026-09-10
+hash: ef46db3751d8e999-db40061a84f03193
+last_updated: 2026-09-12
 ---
 # Claudine Composition
 
@@ -91,6 +91,30 @@ required runtime groups, and supplies the resulting evidence to
 Missing supplied evidence remains a partial-capture diagnostic; canonical
 paths do not recover it from ambient CWD, HOME, environment, Git, or host
 discovery.
+
+### Binding time: eager `ctx`, lazy `current`, lazy functions
+
+`ctx` and `current` are the same data structure, and so are `env` and
+`current_env`; they differ only in *when* each key is evaluated.
+
+| Surface | Binding |
+|---------|---------|
+| `ctx.<key>` | Eager — captured once at the start of the run, shared by the whole run |
+| `current.<key>` | Lazy — the same keys as `ctx`, each evaluated when referenced |
+| `env.<key>` | Eager — the frozen invocation snapshot |
+| `current_env.<key>` | Lazy — the same keys as `env`, re-read when referenced |
+
+Expression functions are evaluated lazily, at call time. When a context
+variable and a function share a name — `ctx.recent_commits` and
+`recent_commits(count)` are the first pair — they share one definition and
+output format: the variable is the eager snapshot, the function is the lazy,
+parameterized form, and both are projected from one descriptor entry so
+`claudine context` and `claudine context --expressions` cannot drift. This is
+a clean break: `current.ctx.*` and `current.env.*` are removed, not aliased
+(ratified 2026-09-11 in the more-context spec, rulings R29–R33; implementation
+pending — until it lands, lifecycle handlers still see the old `current.ctx.*`
+/ `current.env.*` shape). See
+[lifecycle.md — Binding Time: Early vs Late](lifecycle.md#binding-time-early-vs-late).
 
 File provenance does not choose the provider child's working directory.
 Canonical `::shell` composition remains pinned to
@@ -222,7 +246,7 @@ Steps:
 
 The composed prompt is sent to the provider. Output streams to the terminal with Markdown-to-terminal rendering in non-interactive mode.
 
-> **Deferred lifecycle keys.** The Prepare stage composes every frontmatter key *except* the seven lifecycle event keys (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`). Those keep their authored `{{ … }}` spans raw in `effective_frontmatter`; Claudine interpolates them through Darkmatter a **second time, at event-time**, so they can read the runtime globals (`err`, `timing`, `current`) and the live document state. See [lifecycle.md — When Lifecycle Properties Interpolate](lifecycle.md#when-lifecycle-properties-interpolate). The single exception is `shell` commands (positional `shell: "…"` or key/value `command:`), resolved against early-binding surfaces at pre-flight so the approved command is byte-identical to the executed one.
+> **Deferred lifecycle keys.** The Prepare stage composes every frontmatter key *except* the seven lifecycle event keys (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`). Those keep their authored `{{ … }}` spans raw in `effective_frontmatter`; Claudine interpolates them through Darkmatter a **second time, at event-time**, so they can read the runtime globals (`err`, `timing`, `current`, `current_env`) and the live document state. See [lifecycle.md — When Lifecycle Properties Interpolate](lifecycle.md#when-lifecycle-properties-interpolate). The single exception is `shell` commands (positional `shell: "…"` or key/value `command:`), resolved against early-binding surfaces at pre-flight so the approved command is byte-identical to the executed one.
 
 ## Inline Composition
 
@@ -577,7 +601,7 @@ model: gpt-4o
 model: [gpt-4o, o3-mini]
 ```
 
-List-valued `agent` is treated as author preference order: the first installed provider wins. List-valued `model` is validated against the provider's model catalog; the first valid entry wins. When a catalog is unavailable (e.g., Gemini, Kimi, Goose in v1), frontmatter `model` is gracefully skipped rather than treated as an error.
+List-valued `agent` is treated as author preference order: the first installed provider wins. A frontmatter `model` is always forwarded to the provider: the provider is the authority on which ids it accepts, and Claudine's compiled model catalog is a drift signal, not a gate. A list-valued `model` resolves to the first entry the catalog recognizes, else to its first entry. When the resolved frontmatter model is outside the provider's expected offerings (for OpenCode that baseline is the `opencode/*` aggregator ids, so any provider configured in `opencode.jsonc`, such as `minimax/…` or `zai-coding-plan/…`, qualifies), composition prints one `warning: [model] …` naming the value and the provider, suppressed by `--silent`, and launches with the value unchanged. `--dry-run` resolves the same way and prints the same warning.
 
 ### Model Resolution
 
@@ -586,15 +610,15 @@ Model selection follows a single chain independent of TTY mode:
 1. **CLI `--model`**
 2. **Provider-specific env var** (`CODEX_MODEL`, `CLAUDE_MODEL`, `OPENCODE_MODEL`, etc.)
 3. **Generic `MODEL` env var**
-4. **Frontmatter `model`** (validated against catalog when available)
+4. **Frontmatter `model`** (always forwarded; the catalog orders list hints and warns on an unrecognized value)
 5. **Provider default** (`None` — let the provider choose)
 
-### OpenCode Non-TTY Requirement
+### Providers That Require a Model in Non-Interactive Mode
 
-OpenCode requires a model in non-interactive mode. If no model survives the resolution chain when running OpenCode in non-TTY mode, Claudine emits a hard error before launching the provider:
+A provider whose catalog sets `model_required_in_non_tty` (OpenCode today) cannot launch non-interactively without a model. When nothing in the chain above resolves one, the shared prep stage (`exec_prep::resolve_model_and_validate`, the same function for every provider and for the direct wrapper) looks for one on the provider's behalf through two data sources: the catalog's `model_env_vars` (`OPENCODE_MODEL`), applied exactly like an explicit `--model`, then the provider's own configured default through the `WrapperProfile::configured_default_model` hook. For OpenCode that is the `model` key of `opencode.jsonc` / `opencode.json` (then the legacy `config.json`) under `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`, parsed JSONC-tolerant; a configured default is exported as `MODEL` and reported in the preflight preamble without pushing a flag, because OpenCode reads it itself. Only when neither names a model does Claudine fail before launch:
 
 ```
-OpenCode requires a model in non-interactive mode; set --model, OPENCODE_MODEL, or MODEL
+No model specified! OpenCode requires a model in non-interactive mode.
 ```
 
 ### Shorthand Flags
@@ -720,7 +744,7 @@ initialize → start → (success | blocked | failure) → finalize → loop
 - **`finalize`** fires once per iteration, immediately after the terminal event.
 - **`loop`** is the post-`finalize` gate. Lifecycle concerns authored inside the `loop:` block run first, then the `while`/`until` condition is evaluated, then per-iteration mutations are applied only when continuing.
 
-Legacy prompts that only declare `start`, `success`, `blocked`, and `failure` continue to behave the same way. See [lifecycle.md](lifecycle.md) for the full lifecycle reference, including stacks, control actions, the `err`/`timing`/`current` globals, and examples.
+Legacy prompts that only declare `start`, `success`, `blocked`, and `failure` continue to behave the same way. See [lifecycle.md](lifecycle.md) for the full lifecycle reference, including stacks, control actions, the `err`/`timing`/`current`/`current_env` globals, and examples.
 
 Each lifecycle property interpolates **when its event fires**, not during the initial compose — Darkmatter defers the seven lifecycle keys from compose-time resolution (so their `{{ … }}` spans survive raw in `effective_frontmatter`) and Claudine re-interpolates each property/action string through Darkmatter just-in-time, against the live document state plus the in-scope late-binding globals. Resolution fails closed before any side effect dispatches. See [lifecycle.md — Binding Time: Early vs Late](lifecycle.md#binding-time-early-vs-late).
 
@@ -883,7 +907,7 @@ Plain `ctx.*` in a composed document describes the caller's **launch context** �
 - **Reuse is observable and attributable.** Every canonical preparation carries a Claudine-local document-epoch token whose recorder owns that epoch's launch construction, same-epoch extensions, ambient fallbacks, and populated-context observations under the stable consumer names `preflight`, `body`, `effective-frontmatter`, `loop-condition`, and `lifecycle`. The recorder is separate from Darkmatter's `ComposeContext`; overlapping parallel sequence workers therefore cannot contribute to one another's exact maps. Performance reports project both invocation totals and each sorted epoch map. Canonical preparation records a fallback on the owning epoch if its prepared context is absent, so dropping the snapshot cannot pass a zero-fallback assertion invisibly.
 - **Target identity is layered, not captured.** `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` reflect the resolved target's environment overrides applied on top of the launch snapshot, preserving target-identity precedence on every route.
 - **The source context stays source-relative.** The active document's `SourceContext` (its authoring base, repository identity, and `FileResolutionContext`) remains authoritative for document-authored file references, transclusion, `$schema` discovery, and provenance. Source-relative resolution is unchanged by this contract.
-- **`current.ctx.*` is unchanged.** It remains live event-time state, captured when the event fires, and is explicitly *not* a fallback for a missing prepared `ctx.*`.
+- **`current.<key>` is unchanged.** It remains live event-time state, evaluated when referenced, and is explicitly *not* a fallback for a missing prepared `ctx.*` (spelling per the ratified mirror — ratified 2026-09-11 in the more-context spec, rulings R29–R33; implementation pending — until it lands, lifecycle handlers still see the old `current.ctx.*` / `current.env.*` shape).
 
 In sequences, the graph phase runs before per-task target selection, so graph-resolved shell bytes cannot legally reference target identity: a command referencing `ctx.agent`, `ctx.model`, `env.AGENT`, or `env.MODEL` fails graph preflight with a typed target-identity rejection directing the author to the task that owns the target. Static bracket access such as `ctx["agent"]` is canonicalized to the same identity path. A computed index rooted at `ctx` or `env` also fails closed because its dynamic key could select a target-dependent leaf; computed indexes under other namespaces are unaffected. Per-task and just-in-time audits — where the selected target's environment is available — continue to expand those roots. The capture-owner drift guard in `cli/tests/composition_seams.rs` rejects any new direct prepared-context capture outside the invocation owner and its allowlisted compatibility sites.
 
@@ -954,7 +978,7 @@ Retry and resume want opposite things from that rebuild. A **retry** opens a fre
 
 The target's stabilized frontmatter is the basis for the target's decisions. What is rebuilt per target today:
 
-- **Context** — the prepared document stores the exact `ComposeContext` it composed against, captured once per document epoch from the invocation's launch context (see [Launch-Anchored Prepared Context](#launch-anchored-prepared-context)) with the resolved target's identity overrides applied. Body interpolation, effective frontmatter, lifecycle DM2 lookup, schema and file evaluation, and shell preflight all read that one stored snapshot; nothing recaptures ambient context at runtime, which matters because the wrapper deliberately moves the process CWD to the repo root. `current.ctx.*` remains live as a late-binding surface, and is explicitly *not* a fallback for a missing prepared `ctx.*`.
+- **Context** — the prepared document stores the exact `ComposeContext` it composed against, captured once per document epoch from the invocation's launch context (see [Launch-Anchored Prepared Context](#launch-anchored-prepared-context)) with the resolved target's identity overrides applied. Body interpolation, effective frontmatter, lifecycle DM2 lookup, schema and file evaluation, and shell preflight all read that one stored snapshot; nothing recaptures ambient context at runtime, which matters because the wrapper deliberately moves the process CWD to the repo root. `current.<key>` remains live as a late-binding surface, and is explicitly *not* a fallback for a missing prepared `ctx.*` (spelling per the ratified mirror — ratified 2026-09-11 in the more-context spec, rulings R29–R33; implementation pending — until it lands, lifecycle handlers still see the old `current.ctx.*` / `current.env.*` shape).
 - **`initialize` and shell** — the target runs its own `initialize` behind a narrow safety gate that approves every potentially-selected `initialize` shell command first ("initialize before full pre-flight" never means "execute unapproved shell"), then rereads the stabilized target so initialize-time mutations are visible, then runs the full audit over every remaining lifecycle and template shell surface, reusing approvals the narrow gate already granted rather than re-prompting. An `initialize` proxy may chain another proxy; the chain stabilizes before any launch.
 - **Schema and diagnostics** — the target's `$schema` validates the target's effective frontmatter (including any `with:` overlay), and a given failure has one typed identity whichever route reached it.
 - **Launch identity** — when the handoff surfaces to the command-owned coordinator, `compose/prep.rs::prepare_and_run_active_document` re-prepares the target as a fresh document and re-enters the production selection/MCP/argv pipeline, rebuilding from the target's own frontmatter under explicit-CLI precedence: provider selection, profile/binary sub-selection, the argv entrypoint and flags, MCP runtime injection, the effective child environment, interactivity and structured-output mode, dispatch/correlation configuration, model selection, document-loop ownership/recognition, child CWD, and system-prompt delivery. A proxied target therefore selects its authored `agent:`/`model:`, gets its own provider binary and MCP server set, and acquires its own `loop:`, matching a direct invocation. Verified by L2 equivalence rows including a provider *switch* (`level2_lifecycle_equivalence_target_launch_bundle_matches_direct_run`, router `goose` → target `codex`; `level2_lifecycle_equivalence_target_mcp_injection_matches_direct_run`, router `codex` → target `gemini`).

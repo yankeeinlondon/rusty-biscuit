@@ -9,7 +9,7 @@
 
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 use predicates::prelude::*;
 use std::fs;
 
@@ -49,8 +49,8 @@ fn baseline(name: &str) -> String {
 }
 
 /// Runs `md clean` on `path` and returns STDOUT.
-fn clean_to_string(path: &std::path::Path) -> String {
-    let assert = md_cmd().arg("clean").arg(path).assert().success();
+fn clean_to_string(fixture: &CliProcessFixture, path: &std::path::Path) -> String {
+    let assert = fixture.command().arg("clean").arg(path).assert().success();
     String::from_utf8(assert.get_output().stdout.clone()).unwrap()
 }
 
@@ -79,9 +79,7 @@ fn assert_repaired_reserved_indicator_document(output: &str, delimiter_ending: &
         output.starts_with(&format!("---{delimiter_ending}")),
         "expected preserved opening delimiter terminator: {output:?}"
     );
-    assert!(output.contains(&format!(
-        "title: \"@daily-report\"\n---{delimiter_ending}"
-    )));
+    assert!(output.contains(&format!("title: \"@daily-report\"\n---{delimiter_ending}")));
     assert!(!output.contains('\u{feff}'), "UTF-8 BOM must be removed");
 }
 
@@ -89,9 +87,12 @@ fn assert_repaired_reserved_indicator_document(output: &str, delimiter_ending: &
 /// indicator makes the document unparseable, and `md clean` repairs it.
 #[test]
 fn test_clean_repairs_reserved_indicator_scalar() {
+    let fixture =
+        CliProcessFixture::named("clean-frontmatter-test-clean-repairs-reserved-indicator-scalar");
     let (_dir, path) = doc("---\ntitle: @daily-report\n---\n\n# Daily Report\n\nBody.\n");
 
-    md_cmd()
+    fixture
+        .command()
         .arg("clean")
         .arg(&path)
         .assert()
@@ -103,9 +104,18 @@ fn test_clean_repairs_reserved_indicator_scalar() {
 /// D-3: the same repair through `--save`, written back to the file.
 #[test]
 fn test_clean_save_repairs_reserved_indicator_scalar() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-save-repairs-reserved-indicator-scalar",
+    );
     let (_dir, path) = doc("---\ntitle: @daily-report\n---\n\n# Daily Report\n\nBody.\n");
 
-    md_cmd().arg("clean").arg(&path).arg("--save").assert().success();
+    fixture
+        .command()
+        .arg("clean")
+        .arg(&path)
+        .arg("--save")
+        .assert()
+        .success();
 
     let saved = fs::read_to_string(&path).unwrap();
     assert!(
@@ -117,7 +127,11 @@ fn test_clean_save_repairs_reserved_indicator_scalar() {
 /// D-2: stdin gets the same repair as file input.
 #[test]
 fn test_clean_stdin_repairs_reserved_indicator_scalar() {
-    md_cmd()
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-stdin-repairs-reserved-indicator-scalar",
+    );
+    fixture
+        .command()
         .args(["clean", "-"])
         .write_stdin("---\ntitle: @daily-report\n---\n\n# Daily Report\n")
         .assert()
@@ -127,16 +141,27 @@ fn test_clean_stdin_repairs_reserved_indicator_scalar() {
 
 #[test]
 fn test_clean_file_preserves_trimmed_delimiters_and_their_line_endings() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-file-preserves-trimmed-delimiters-and-their-line-endings",
+    );
     for (name, source, expected) in delimiter_cases() {
         let (_dir, path) = doc(source);
-        assert_eq!(clean_to_string(&path), expected, "failed {name} case");
+        assert_eq!(
+            clean_to_string(&fixture, &path),
+            expected,
+            "failed {name} case"
+        );
     }
 }
 
 #[test]
 fn test_clean_stdin_preserves_trimmed_delimiters_and_their_line_endings() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-stdin-preserves-trimmed-delimiters-and-their-line-endings",
+    );
     for (name, source, expected) in delimiter_cases() {
-        let assert = md_cmd()
+        let assert = fixture
+            .command()
             .args(["clean", "-"])
             .write_stdin(source)
             .assert()
@@ -151,28 +176,41 @@ fn test_clean_stdin_preserves_trimmed_delimiters_and_their_line_endings() {
 
 #[test]
 fn test_clean_save_preserves_trimmed_delimiters_and_their_line_endings() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-save-preserves-trimmed-delimiters-and-their-line-endings",
+    );
     for (name, source, expected) in delimiter_cases() {
         let (_dir, path) = doc(source);
-        md_cmd()
+        fixture
+            .command()
             .arg("clean")
             .arg(&path)
             .arg("--save")
             .assert()
             .success();
-        assert_eq!(fs::read_to_string(path).unwrap(), expected, "failed {name} case");
+        assert_eq!(
+            fs::read_to_string(path).unwrap(),
+            expected,
+            "failed {name} case"
+        );
     }
 }
 
 #[test]
 fn test_clean_file_repairs_bom_frontmatter() {
+    let fixture =
+        CliProcessFixture::named("clean-frontmatter-test-clean-file-repairs-bom-frontmatter");
     let (_dir, path) = doc("\u{feff}---\ntitle: @daily-report\n---\n\n# Daily Report\n");
 
-    assert_repaired_reserved_indicator_document(&clean_to_string(&path), "\n");
+    assert_repaired_reserved_indicator_document(&clean_to_string(&fixture, &path), "\n");
 }
 
 #[test]
 fn test_clean_stdin_repairs_bom_frontmatter() {
-    let assert = md_cmd()
+    let fixture =
+        CliProcessFixture::named("clean-frontmatter-test-clean-stdin-repairs-bom-frontmatter");
+    let assert = fixture
+        .command()
         .args(["clean", "-"])
         .write_stdin("\u{feff}---\ntitle: @daily-report\n---\n\n# Daily Report\n")
         .assert()
@@ -184,9 +222,12 @@ fn test_clean_stdin_repairs_bom_frontmatter() {
 
 #[test]
 fn test_clean_save_repairs_bom_frontmatter() {
+    let fixture =
+        CliProcessFixture::named("clean-frontmatter-test-clean-save-repairs-bom-frontmatter");
     let (_dir, path) = doc("\u{feff}---\ntitle: @daily-report\n---\n\n# Daily Report\n");
 
-    md_cmd()
+    fixture
+        .command()
         .arg("clean")
         .arg(&path)
         .arg("--save")
@@ -198,14 +239,19 @@ fn test_clean_save_repairs_bom_frontmatter() {
 
 #[test]
 fn test_clean_file_repairs_lone_cr_frontmatter() {
+    let fixture =
+        CliProcessFixture::named("clean-frontmatter-test-clean-file-repairs-lone-cr-frontmatter");
     let (_dir, path) = doc("---\rtitle: @daily-report\r---\r\r# Daily Report\r");
 
-    assert_repaired_reserved_indicator_document(&clean_to_string(&path), "\r");
+    assert_repaired_reserved_indicator_document(&clean_to_string(&fixture, &path), "\r");
 }
 
 #[test]
 fn test_clean_stdin_repairs_lone_cr_frontmatter() {
-    let assert = md_cmd()
+    let fixture =
+        CliProcessFixture::named("clean-frontmatter-test-clean-stdin-repairs-lone-cr-frontmatter");
+    let assert = fixture
+        .command()
         .args(["clean", "-"])
         .write_stdin("---\rtitle: @daily-report\r---\r\r# Daily Report\r")
         .assert()
@@ -217,9 +263,12 @@ fn test_clean_stdin_repairs_lone_cr_frontmatter() {
 
 #[test]
 fn test_clean_save_repairs_lone_cr_frontmatter() {
+    let fixture =
+        CliProcessFixture::named("clean-frontmatter-test-clean-save-repairs-lone-cr-frontmatter");
     let (_dir, path) = doc("---\rtitle: @daily-report\r---\r\r# Daily Report\r");
 
-    md_cmd()
+    fixture
+        .command()
         .arg("clean")
         .arg(&path)
         .arg("--save")
@@ -233,13 +282,19 @@ fn test_clean_save_repairs_lone_cr_frontmatter() {
 /// for byte, including the repaired frontmatter.
 #[test]
 fn test_clean_output_is_idempotent() {
+    let fixture = CliProcessFixture::named("clean-frontmatter-test-clean-output-is-idempotent");
     let (_dir, path) = doc("---\ntitle: @daily-report\ntags:  [a,  b]\n---\n\n# Title\n\nBody.\n");
 
-    let first = md_cmd().arg("clean").arg(&path).assert().success();
+    let first = fixture.command().arg("clean").arg(&path).assert().success();
     let once = String::from_utf8(first.get_output().stdout.clone()).unwrap();
 
     let (_dir2, path2) = doc(&once);
-    let second = md_cmd().arg("clean").arg(&path2).assert().success();
+    let second = fixture
+        .command()
+        .arg("clean")
+        .arg(&path2)
+        .assert()
+        .success();
     let twice = String::from_utf8(second.get_output().stdout.clone()).unwrap();
 
     assert_eq!(once, twice, "md clean must be a fixed point");
@@ -249,11 +304,15 @@ fn test_clean_output_is_idempotent() {
 /// patches source spans instead of reserializing the parsed value.
 #[test]
 fn test_clean_preserves_untouched_frontmatter_ranges() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-preserves-untouched-frontmatter-ranges",
+    );
     let (_dir, path) = doc(
         "---\n# a leading comment\nzebra: last-alphabetically\ntitle: @daily-report\n---\n\n# Body\n",
     );
 
-    md_cmd()
+    fixture
+        .command()
         .arg("clean")
         .arg(&path)
         .assert()
@@ -271,9 +330,12 @@ fn test_clean_preserves_untouched_frontmatter_ranges() {
 /// trigger-schema git-root walk can run.
 #[test]
 fn test_clean_no_frontmatter_is_unchanged() {
+    let fixture =
+        CliProcessFixture::named("clean-frontmatter-test-clean-no-frontmatter-is-unchanged");
     let (_dir, path) = doc("# Just A Body\n\nNo frontmatter here.\n");
 
-    md_cmd()
+    fixture
+        .command()
         .arg("clean")
         .arg(&path)
         .assert()
@@ -285,21 +347,27 @@ fn test_clean_no_frontmatter_is_unchanged() {
 /// D-8: an empty frontmatter block also bypasses the pipeline.
 #[test]
 fn test_clean_empty_frontmatter_succeeds() {
+    let fixture =
+        CliProcessFixture::named("clean-frontmatter-test-clean-empty-frontmatter-succeeds");
     let (_dir, path) = doc("---\n---\n\n# Body\n");
 
-    md_cmd().arg("clean").arg(&path).assert().success();
+    fixture.command().arg("clean").arg(&path).assert().success();
 }
 
 /// D-7: YAML no repair can prove stays an error — exit 1, and `--save` must
 /// leave the file byte-identical.
 #[test]
 fn test_clean_unrepairable_yaml_exits_one_and_leaves_file_untouched() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-unrepairable-yaml-exits-one-and-leaves-file-untouched",
+    );
     let source = "---\ntitle: [unclosed\n  nested: {also broken\n---\n\n# Body\n";
     let (_dir, path) = doc(source);
 
-    md_cmd().arg("clean").arg(&path).assert().failure();
+    fixture.command().arg("clean").arg(&path).assert().failure();
 
-    md_cmd()
+    fixture
+        .command()
         .arg("clean")
         .arg(&path)
         .arg("--save")
@@ -316,11 +384,14 @@ fn test_clean_unrepairable_yaml_exits_one_and_leaves_file_untouched() {
 /// D-11: broken YAML inside a fenced body block is never analyzed or mutated.
 #[test]
 fn test_clean_ignores_yaml_in_fenced_body_blocks() {
+    let fixture =
+        CliProcessFixture::named("clean-frontmatter-test-clean-ignores-yaml-in-fenced-body-blocks");
     let (_dir, path) = doc(
         "---\ntitle: Fine\n---\n\n# Examples\n\n```yaml\ntitle: @daily-report\nbroken: [unclosed\n```\n",
     );
 
-    md_cmd()
+    fixture
+        .command()
         .arg("clean")
         .arg(&path)
         .assert()
@@ -335,26 +406,39 @@ fn test_clean_ignores_yaml_in_fenced_body_blocks() {
 /// proof; coercing it to the number `1.2` would silently drop a digit.
 #[test]
 fn test_clean_leaves_unconstrained_ambiguous_scalar_byte_identical() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-leaves-unconstrained-ambiguous-scalar-byte-identical",
+    );
     let source = baseline("coercible.md");
     let (_dir, path) = doc(&source);
 
-    let assert = md_cmd().arg("clean").arg(&path).assert().success();
+    let assert = fixture.command().arg("clean").arg(&path).assert().success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
     assert!(
         stdout.contains("release: 1.20"),
         "unconstrained scalar must survive verbatim, got:\n{stdout}"
     );
-    assert!(!stdout.contains("1.2\n"), "must not coerce to 1.2:\n{stdout}");
-    assert!(!stdout.contains("\"1.20\""), "must not quote without schema proof");
+    assert!(
+        !stdout.contains("1.2\n"),
+        "must not coerce to 1.2:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("\"1.20\""),
+        "must not quote without schema proof"
+    );
 }
 
 /// D-1: frontmatter repair and ordinary body cleanup happen in the same run.
 #[test]
 fn test_clean_applies_body_cleanup_alongside_frontmatter_repair() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-applies-body-cleanup-alongside-frontmatter-repair",
+    );
     let (_dir, path) = doc("---\ntitle: @daily-report\n---\n\n# Body   \n\n-  Alpha\n-  Beta\n");
 
-    md_cmd()
+    fixture
+        .command()
         .arg("clean")
         .arg(&path)
         .assert()
@@ -368,7 +452,11 @@ fn test_clean_applies_body_cleanup_alongside_frontmatter_repair() {
 /// D-2: stdin with no `-` marker at all takes the same repair path.
 #[test]
 fn test_clean_implicit_stdin_repairs_reserved_indicator_scalar() {
-    md_cmd()
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-implicit-stdin-repairs-reserved-indicator-scalar",
+    );
+    fixture
+        .command()
         .arg("clean")
         .write_stdin(baseline("invalid-reserved.md"))
         .assert()
@@ -382,9 +470,13 @@ fn test_clean_implicit_stdin_repairs_reserved_indicator_scalar() {
 /// that repair at the text level instead.
 #[test]
 fn test_clean_save_reports_frontmatter_repair_rather_than_no_changes() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-save-reports-frontmatter-repair-rather-than-no-changes",
+    );
     let (_dir, path) = doc(&baseline("invalid-reserved.md"));
 
-    let assert = md_cmd()
+    let assert = fixture
+        .command()
         .arg("clean")
         .arg(&path)
         .arg("--save")
@@ -401,7 +493,9 @@ fn test_clean_save_reports_frontmatter_repair_rather_than_no_changes() {
         "the run must not claim nothing changed, got:\n{stdout}"
     );
     assert!(
-        fs::read_to_string(&path).unwrap().contains("\"@daily-report\""),
+        fs::read_to_string(&path)
+            .unwrap()
+            .contains("\"@daily-report\""),
         "the file really was rewritten"
     );
 }
@@ -409,9 +503,13 @@ fn test_clean_save_reports_frontmatter_repair_rather_than_no_changes() {
 /// D-4: a document whose frontmatter needed no repair gets no such notice.
 #[test]
 fn test_clean_save_omits_repair_notice_for_valid_frontmatter() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-save-omits-repair-notice-for-valid-frontmatter",
+    );
     let (_dir, path) = doc(&baseline("clean-fm.md"));
 
-    let assert = md_cmd()
+    let assert = fixture
+        .command()
         .arg("clean")
         .arg(&path)
         .arg("--save")
@@ -430,14 +528,21 @@ fn test_clean_save_omits_repair_notice_for_valid_frontmatter() {
 /// because `md clean` is piped into files and pre-commit hooks.
 #[test]
 fn test_clean_suggestions_go_to_stderr_with_exit_zero() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-suggestions-go-to-stderr-with-exit-zero",
+    );
     let (_dir, path) = doc("---\ntitle:\n---\n\n# Body\n");
 
-    let assert = md_cmd().arg("clean").arg(&path).assert().success();
+    let assert = fixture.command().arg("clean").arg(&path).assert().success();
     let output = assert.get_output();
     let stdout = String::from_utf8(output.stdout.clone()).unwrap();
     let stderr = String::from_utf8(output.stderr.clone()).unwrap();
 
-    assert_eq!(output.status.code(), Some(0), "suggestions must not fail the run");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "suggestions must not fail the run"
+    );
     assert!(
         stderr.contains("suspicious-empty-value"),
         "expected the suggestion on stderr, got:\n{stderr}"
@@ -460,7 +565,10 @@ fn test_clean_suggestions_go_to_stderr_with_exit_zero() {
         !stdout.contains("frontmatter suggestions"),
         "suggestion header must never reach stdout, got:\n{stdout}"
     );
-    assert!(stdout.contains("# Body"), "stdout still carries the document");
+    assert!(
+        stdout.contains("# Body"),
+        "stdout still carries the document"
+    );
 }
 
 /// D-6: a finding is reported exactly once. The syntax tier can run a second
@@ -468,11 +576,14 @@ fn test_clean_suggestions_go_to_stderr_with_exit_zero() {
 /// pass's restatements would print every suggestion twice.
 #[test]
 fn test_clean_reports_each_suggestion_once_across_both_syntax_passes() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-reports-each-suggestion-once-across-both-syntax-passes",
+    );
     // The reserved indicator forces a repair, which unlocks the second pass;
     // the empty value is visible to both.
     let (_dir, path) = doc("---\ntitle: @daily-report\nempty:\n---\n\n# Body\n");
 
-    let assert = md_cmd().arg("clean").arg(&path).assert().success();
+    let assert = fixture.command().arg("clean").arg(&path).assert().success();
     let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
 
     assert_eq!(
@@ -485,9 +596,12 @@ fn test_clean_reports_each_suggestion_once_across_both_syntax_passes() {
 /// D-6: deterministic repairs are applied silently — they are not suggestions.
 #[test]
 fn test_clean_does_not_suggest_repairs_it_applied() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-does-not-suggest-repairs-it-applied",
+    );
     let (_dir, path) = doc(&baseline("invalid-reserved.md"));
 
-    let assert = md_cmd().arg("clean").arg(&path).assert().success();
+    let assert = fixture.command().arg("clean").arg(&path).assert().success();
     let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
 
     assert!(
@@ -499,9 +613,12 @@ fn test_clean_does_not_suggest_repairs_it_applied() {
 /// D-6: a document with nothing to report writes nothing to STDERR.
 #[test]
 fn test_clean_clean_document_writes_nothing_to_stderr() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-clean-document-writes-nothing-to-stderr",
+    );
     let (_dir, path) = doc(&baseline("clean-fm.md"));
 
-    let assert = md_cmd().arg("clean").arg(&path).assert().success();
+    let assert = fixture.command().arg("clean").arg(&path).assert().success();
     let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
 
     assert!(stderr.is_empty(), "expected silent stderr, got:\n{stderr}");
@@ -511,7 +628,11 @@ fn test_clean_clean_document_writes_nothing_to_stderr() {
 /// on stderr and nothing on stdout.
 #[test]
 fn test_clean_unrepairable_stdin_exits_one_with_error_on_stderr() {
-    let assert = md_cmd()
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-unrepairable-stdin-exits-one-with-error-on-stderr",
+    );
+    let assert = fixture
+        .command()
         .args(["clean", "-"])
         .write_stdin("---\ntitle: [unclosed\n---\n\n# Body\n")
         .assert()
@@ -531,6 +652,9 @@ fn test_clean_unrepairable_stdin_exits_one_with_error_on_stderr() {
 /// D-9: every fixture class is a fixed point under `md clean`.
 #[test]
 fn test_clean_is_idempotent_across_fixture_classes() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-is-idempotent-across-fixture-classes",
+    );
     let cases = [
         ("no-frontmatter", baseline("no-fm.md")),
         ("clean-frontmatter", baseline("clean-fm.md")),
@@ -548,10 +672,10 @@ fn test_clean_is_idempotent_across_fixture_classes() {
 
     for (label, source) in cases {
         let (_dir, path) = doc(&source);
-        let once = clean_to_string(&path);
+        let once = clean_to_string(&fixture, &path);
 
         let (_dir2, path2) = doc(&once);
-        let twice = clean_to_string(&path2);
+        let twice = clean_to_string(&fixture, &path2);
 
         assert_eq!(once, twice, "`{label}` is not a fixed point");
     }
@@ -561,10 +685,13 @@ fn test_clean_is_idempotent_across_fixture_classes() {
 /// unquoted. `contains` alone would pass even if the engine reflowed the fence.
 #[test]
 fn test_clean_leaves_fenced_yaml_body_block_byte_identical() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-leaves-fenced-yaml-body-block-byte-identical",
+    );
     let fence = "```yaml\ntitle: @daily-report\nbroken: [unclosed\nempty:\n```\n";
     let (_dir, path) = doc(&format!("---\ntitle: Fine\n---\n\n# Examples\n\n{fence}"));
 
-    let assert = md_cmd().arg("clean").arg(&path).assert().success();
+    let assert = fixture.command().arg("clean").arg(&path).assert().success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
     assert!(
@@ -578,11 +705,14 @@ fn test_clean_leaves_fenced_yaml_body_block_byte_identical() {
 /// all would mean the fence had been analyzed.
 #[test]
 fn test_clean_fenced_yaml_body_block_produces_no_diagnostics() {
+    let fixture = CliProcessFixture::named(
+        "clean-frontmatter-test-clean-fenced-yaml-body-block-produces-no-diagnostics",
+    );
     let (_dir, path) = doc(
         "---\ntitle: Fine\n---\n\n# Examples\n\n```yaml\ntitle: @daily-report\nempty:\ndup: 1\ndup: 2\n```\n",
     );
 
-    let assert = md_cmd().arg("clean").arg(&path).assert().success();
+    let assert = fixture.command().arg("clean").arg(&path).assert().success();
     let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
 
     assert!(

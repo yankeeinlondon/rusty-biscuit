@@ -1,7 +1,7 @@
-use crate::{Result, SniffError};
 use crate::performance;
 use crate::performance::counters;
 use crate::request::RepoRequest;
+use crate::{Result, SniffError};
 use biscuit_file::serde_yaml_ng;
 use biscuit_file::toml_crate;
 use std::cell::RefCell;
@@ -30,20 +30,20 @@ use super::manifest_index::{
 };
 use super::maven::detect_maven_workspace;
 use super::nested::discover_nested_workspace_outcomes;
-use super::seed::{PackageSeed, merge_seeds, normalized_key};
 use super::npm::{
     detect_bun_workspace, detect_npm_workspace, detect_pnpm_workspace, detect_rush_workspace,
     detect_yarn_workspace, npm_package_name, npm_package_version,
     package_json_dependencies_from_value, package_json_workspace_patterns_from_value,
     pnpm_workspace_patterns_from_value, resolve_js_package_manager,
 };
-use super::ownership::PackageOwnershipIndex;
 use super::nx_turbo::{detect_lerna, detect_nx, detect_turborepo, parse_lerna_workspace_patterns};
+use super::ownership::PackageOwnershipIndex;
 use super::polyglot::{detect_bazel_workspace, detect_buck2_workspace, detect_pants_workspace};
 use super::python::{
     parse_requirements_txt_dependencies, pyproject_dependencies_from_value, pyproject_package_name,
     pyproject_package_version,
 };
+use super::seed::{PackageSeed, merge_seeds, normalized_key};
 use super::standard::{MonorepoLayer, MonorepoStandard, PackageProvenance, resolve_acting_binary};
 pub(crate) use super::topology::DetectorOutcome;
 use super::topology::{build_detected_standards, build_monorepo_layers, layers_imply_monorepo};
@@ -75,7 +75,9 @@ impl<'a> RepoEvidence<'a> {
     ///
     /// The only constructor from a walk, so evidence and the root it was
     /// observed from cannot drift apart at a call site.
-    pub(crate) fn from_view(view: &'a crate::filesystem::system_view::FilesystemSystemView) -> Self {
+    pub(crate) fn from_view(
+        view: &'a crate::filesystem::system_view::FilesystemSystemView,
+    ) -> Self {
         Self {
             manifest_index: view.manifest_index.as_ref(),
             manifest_dirs: view.manifest_dirs.as_deref(),
@@ -354,10 +356,7 @@ impl ManifestStore {
     /// Parse a required `pnpm-workspace.yaml` while preserving detector error
     /// propagation. Both parsed values and failures populate the same cache
     /// used by every consumer of the declaration in the same detection.
-    pub(crate) fn required_pnpm_workspace(
-        &self,
-        path: &Path,
-    ) -> Result<Rc<serde_yaml_ng::Value>> {
+    pub(crate) fn required_pnpm_workspace(&self, path: &Path) -> Result<Rc<serde_yaml_ng::Value>> {
         let key = normalized_key(path);
         if let Some(cached) = self.pnpm_workspace.borrow().get(&key) {
             return cached.clone().map_err(|error| error.to_sniff_error());
@@ -366,9 +365,7 @@ impl ManifestStore {
         let parsed = read_counted_parsed_manifest(path, |content| {
             serde_yaml_ng::from_str::<serde_yaml_ng::Value>(content)
         });
-        self.pnpm_workspace
-            .borrow_mut()
-            .insert(key, parsed.clone());
+        self.pnpm_workspace.borrow_mut().insert(key, parsed.clone());
         parsed.map_err(|error| error.to_sniff_error())
     }
 
@@ -794,9 +791,7 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
         packages_and_keys
             .iter()
             .enumerate()
-            .map(|(index, (package, key))| {
-                (key.as_path(), Path::new(&package.relative), index)
-            }),
+            .map(|(index, (package, key))| (key.as_path(), Path::new(&package.relative), index)),
     );
     let mut packages: Vec<Package> = packages_and_keys
         .into_iter()
@@ -1049,15 +1044,13 @@ fn cargo_lockfile_matches(
         let key = normalize_layer_package_relative(relative);
         let seed = seeds.iter().find(|s| s.relative == key)?;
         let cargo_toml = seed.path.join("Cargo.toml");
-        let name = manifests
-            .cargo(&cargo_toml)
-            .and_then(|parsed| {
-                parsed
-                    .get("package")?
-                    .get("name")?
-                    .as_str()
-                    .map(String::from)
-            });
+        let name = manifests.cargo(&cargo_toml).and_then(|parsed| {
+            parsed
+                .get("package")?
+                .get("name")?
+                .as_str()
+                .map(String::from)
+        });
 
         let Some(name) = name else {
             return Some(false);
@@ -1768,24 +1761,19 @@ fn create_package_with_request(
     let relative = make_relative_path(path, root);
     let package_area = make_package_area(&relative);
     let ecosystem = detect_package_ecosystem(path);
-    let detected_package_managers = if request.wants_package_managers()
-        || request.wants_dependencies()
-    {
-        detect_package_managers(path)
-    } else {
-        Vec::new()
-    };
+    let detected_package_managers =
+        if request.wants_package_managers() || request.wants_dependencies() {
+            detect_package_managers(path)
+        } else {
+            Vec::new()
+        };
     let package_managers = if request.wants_package_managers() {
         detected_package_managers.clone()
     } else {
         Vec::new()
     };
     let test_runners = if request.wants_test_runners() {
-        crate::filesystem::repo::test_runner_usage::detect_test_runners(
-            path,
-            root,
-            ctx.manifests,
-        )
+        crate::filesystem::repo::test_runner_usage::detect_test_runners(path, root, ctx.manifests)
     } else {
         Vec::new()
     };
@@ -1812,8 +1800,7 @@ fn create_package_with_request(
         && probe_exists(&cargo_toml)
         && let Some(parsed) = ctx.manifests.cargo(&cargo_toml)
     {
-        let (normal, dev, build) =
-            cargo_dependencies_from_value(&parsed, ctx.lock_versions);
+        let (normal, dev, build) = cargo_dependencies_from_value(&parsed, ctx.lock_versions);
         let mut all_deps = normal;
         all_deps.extend(build);
 
@@ -2271,10 +2258,16 @@ mod tests {
         let manifests = ManifestStore::default();
 
         let (_, counts) = testing::measure(|| {
-            let npm_error = manifests.required_npm(&package_json).unwrap_err().to_string();
+            let npm_error = manifests
+                .required_npm(&package_json)
+                .unwrap_err()
+                .to_string();
             assert!(manifests.npm(&package_json).is_none());
             assert_eq!(
-                manifests.required_npm(&package_json).unwrap_err().to_string(),
+                manifests
+                    .required_npm(&package_json)
+                    .unwrap_err()
+                    .to_string(),
                 npm_error
             );
 
@@ -2373,8 +2366,7 @@ mod tests {
         assert!(features.contains(&"std".to_string()));
 
         if let Some(parsed) = ctx.manifests.cargo(&cargo_toml) {
-            let (normal, _dev, _build) =
-                cargo_dependencies_from_value(&parsed, ctx.lock_versions);
+            let (normal, _dev, _build) = cargo_dependencies_from_value(&parsed, ctx.lock_versions);
             assert_eq!(normal.len(), 1);
             assert_eq!(normal[0].name, "serde");
         }
@@ -2741,8 +2733,7 @@ mod observation_index {
 
     fn nested_cargo_workspaces() -> TempDir {
         let dir = TempDir::new().expect("tempdir");
-        for (workspace, member, version) in
-            [("rust", "core", "1.2.3"), ("tools", "xtask", "7.8.9")]
+        for (workspace, member, version) in [("rust", "core", "1.2.3"), ("tools", "xtask", "7.8.9")]
         {
             let root = dir.path().join(workspace);
             let package = root.join(member);
@@ -2757,9 +2748,7 @@ mod observation_index {
             .expect("write nested root manifest");
             fs::write(
                 package.join("Cargo.toml"),
-                format!(
-                    "[package]\nname = \"{member}\"\nversion.workspace = true\n"
-                ),
+                format!("[package]\nname = \"{member}\"\nversion.workspace = true\n"),
             )
             .expect("write nested member manifest");
         }
@@ -2778,9 +2767,7 @@ mod observation_index {
         names
     }
 
-    fn full_repo_evidence(
-        root: &Path,
-    ) -> crate::filesystem::system_view::FilesystemSystemView {
+    fn full_repo_evidence(root: &Path) -> crate::filesystem::system_view::FilesystemSystemView {
         crate::filesystem::system_view::build_filesystem_system_view(
             root,
             crate::filesystem::system_view::SharedWalkOptions::full_repo(),
@@ -2819,9 +2806,16 @@ mod observation_index {
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].name, "app");
         assert_eq!(packages[0].version.as_deref(), Some("4.2.0"));
-        assert!(packages[0].dependencies.as_deref().is_some_and(|dependencies| {
-            dependencies.iter().any(|dependency| dependency.name == "react")
-        }));
+        assert!(
+            packages[0]
+                .dependencies
+                .as_deref()
+                .is_some_and(|dependencies| {
+                    dependencies
+                        .iter()
+                        .any(|dependency| dependency.name == "react")
+                })
+        );
         assert_eq!(counts.get(counters::REPO_PACKAGE_ENRICHMENTS), 1);
         assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 2);
         assert_eq!(counts.get(counters::FS_FILE_OPENS), 2);
@@ -2867,7 +2861,9 @@ mod observation_index {
         assert!(packages.iter().all(|package| {
             package.version.as_deref() == Some("3.1.0")
                 && package.dependencies.as_deref().is_some_and(|dependencies| {
-                    dependencies.iter().any(|dependency| dependency.name == "zod")
+                    dependencies
+                        .iter()
+                        .any(|dependency| dependency.name == "zod")
                 })
         }));
         assert_eq!(counts.get(counters::REPO_PACKAGE_ENRICHMENTS), 2);
@@ -2962,11 +2958,8 @@ mod observation_index {
         let root = dir.path();
         fs::write(root.join("turbo.json"), "{}").expect("write Turborepo marker");
         fs::write(root.join("package.json"), "{}").expect("write package.json");
-        fs::write(
-            root.join("pnpm-workspace.yaml"),
-            "packages: [unterminated",
-        )
-        .expect("write malformed pnpm workspace");
+        fs::write(root.join("pnpm-workspace.yaml"), "packages: [unterminated")
+            .expect("write malformed pnpm workspace");
         let view = full_repo_evidence(root);
 
         let (result, counts) = testing::measure(|| {
@@ -3127,14 +3120,20 @@ mod observation_index {
         let repo = repo.expect("fixture is a Cargo workspace");
 
         assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 1);
-        assert!(repo.packages.as_deref().expect("packages").iter().all(
-            |package| package.dependencies.as_deref().is_some_and(|dependencies| {
-                dependencies.iter().any(|dependency| {
-                    dependency.name == "serde"
-                        && dependency.actual_version.as_deref() == Some("1.0.0")
-                })
-            })
-        ));
+        assert!(
+            repo.packages
+                .as_deref()
+                .expect("packages")
+                .iter()
+                .all(
+                    |package| package.dependencies.as_deref().is_some_and(|dependencies| {
+                        dependencies.iter().any(|dependency| {
+                            dependency.name == "serde"
+                                && dependency.actual_version.as_deref() == Some("1.0.0")
+                        })
+                    })
+                )
+        );
     }
 
     #[test]
@@ -3150,18 +3149,22 @@ mod observation_index {
         let repo = repo.expect("fixture is a Cargo workspace");
 
         assert_eq!(counts.get(counters::REPO_ROOT_CONFIG_PROBES), 1);
-        assert!(repo.packages.as_deref().expect("packages").iter().all(
-            |package| package.test_runners.iter().any(|usage| {
-                usage.runner == TestRunner::Nextest
-                    && matches!(
-                        &usage.source,
-                        crate::filesystem::repo::test_runner_usage::TestRunnerSource::Config {
-                            path,
-                            ..
-                        } if path == ".config/nextest.toml"
-                    )
-            })
-        ));
+        assert!(
+            repo.packages
+                .as_deref()
+                .expect("packages")
+                .iter()
+                .all(|package| package.test_runners.iter().any(|usage| {
+                    usage.runner == TestRunner::Nextest
+                        && matches!(
+                            &usage.source,
+                            crate::filesystem::repo::test_runner_usage::TestRunnerSource::Config {
+                                path,
+                                ..
+                            } if path == ".config/nextest.toml"
+                        )
+                }))
+        );
     }
 
     #[test]
@@ -3264,10 +3267,7 @@ mod observation_index {
 
         let dir = workspace_fixture();
         let cases = [
-            (
-                RepoDetailRequest::package_managers(),
-                (true, false, false),
-            ),
+            (RepoDetailRequest::package_managers(), (true, false, false)),
             (RepoDetailRequest::dependencies(), (false, true, false)),
             (RepoDetailRequest::test_runners(), (false, false, true)),
         ];
@@ -3289,7 +3289,10 @@ mod observation_index {
             assert_eq!(
                 (
                     !alpha.package_managers.is_empty(),
-                    alpha.dependencies.as_ref().is_some_and(|deps| !deps.is_empty()),
+                    alpha
+                        .dependencies
+                        .as_ref()
+                        .is_some_and(|deps| !deps.is_empty()),
                     !alpha.test_runners.is_empty(),
                 ),
                 expected
@@ -3601,7 +3604,10 @@ mod observation_index {
             !markers.iter().any(|path| path.starts_with(&pruned)),
             "a marker inside a pruned directory must not be observed; markers were {markers:?}"
         );
-        let dirs = view.manifest_dirs.as_ref().expect("manifest dirs requested");
+        let dirs = view
+            .manifest_dirs
+            .as_ref()
+            .expect("manifest dirs requested");
         assert!(
             !dirs.iter().any(|path| path.starts_with(&pruned)),
             "a pruned directory must not contribute manifest evidence; dirs were {dirs:?}"
@@ -3634,7 +3640,10 @@ mod observation_index {
             "marker evidence must stay native absolute paths"
         );
 
-        let dirs = view.manifest_dirs.as_ref().expect("manifest dirs requested");
+        let dirs = view
+            .manifest_dirs
+            .as_ref()
+            .expect("manifest dirs requested");
         assert!(
             dirs.windows(2).all(|w| w[0] < w[1]),
             "manifest dirs must be sorted and deduped for prefix queries"

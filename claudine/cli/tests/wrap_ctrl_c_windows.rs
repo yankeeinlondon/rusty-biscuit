@@ -42,6 +42,10 @@
 /// `CREATE_NEW_PROCESS_GROUP` isolates it so the event hits only the wrapper
 /// subtree. (This is also what production does — `spawn.rs` sets the same flag.)
 ///
+mod common;
+#[cfg(windows)]
+use common::CliProcessFixture;
+
 #[cfg(windows)]
 fn write_opencode_provider(path_dir: &std::path::Path) {
     let source = path_dir.join("opencode-fixture.rs");
@@ -91,56 +95,43 @@ fn main() {
 fn ctrl_c_terminates_wrapped_child_on_windows() {
     use std::fs;
     use std::os::windows::process::CommandExt;
-    use std::process::Command;
     use std::time::{Duration, Instant};
 
-    use tempfile::tempdir;
     use windows::Win32::System::Console::{
         CTRL_BREAK_EVENT, GenerateConsoleCtrlEvent,
     };
     use windows::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP;
 
-    let workspace = tempdir().expect("tempdir");
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).expect("create bin dir");
+    let fixture = CliProcessFixture::named("wrap-ctrl-c-windows");
 
-    // Minimal config so the wrapper's startup config load succeeds — the
-    // Windows arm cannot use the `#[cfg(target_os = "macos")]` `common`
-    // helpers, so seed the same `{}` config inline.
-    let claudine_dir = workspace.path().join(".claudine");
+    // Minimal config so the wrapper's startup config load succeeds.
+    let claudine_dir = fixture.home().join(".claudine");
     fs::create_dir_all(&claudine_dir).expect("create .claudine");
     fs::write(claudine_dir.join("config.json"), "{}").expect("seed config");
 
-    let md_file = workspace.path().join("run.md");
+    let md_file = fixture.cwd().join("run.md");
     fs::write(&md_file, "---\ntitle: win\nmodel: test-model\n---\nBody\n").expect("write md");
 
-    let ready_marker = workspace.path().join("opencode-started");
+    let ready_marker = fixture.cwd().join("opencode-started");
 
     // A real executable keeps this test on the process-termination seam. Batch
     // syntax would add unrelated `cmd.exe` argument and PATH-resolution rules.
-    write_opencode_provider(&path_dir);
+    write_opencode_provider(fixture.bin_dir());
 
-    // PATH with the fake-provider dir first so `opencode` resolves to the
-    // native fixture.
-    let system_path = std::env::var_os("PATH").unwrap_or_default();
-    let mut path_entries = vec![path_dir.clone()];
-    path_entries.extend(std::env::split_paths(&system_path));
-    let augmented = std::env::join_paths(path_entries).expect("join_paths");
-
-    let claudine = biscuit_test_harness::bin_exe!("claudine");
-
+    // The wrapper has to stay alive to receive the console event, so this is
+    // the builder's raw-command surface. The call site keeps only its subject:
+    // `CREATE_NEW_PROCESS_GROUP`, the targeted console signal, and the reaping.
+    // The fixture supplies the rest — including the `CLAUDINE_*` scrub that an
+    // inherited `CLAUDINE_TIMEOUT` would otherwise use to end this run early,
+    // turning the termination assertion into a silent false pass.
+    //
     // Spawn the wrapper in its OWN process group so the console event we send
-    // targets only the wrapper subtree, never this test runner. Anchor CWD to
-    // the small temp workspace so the wrapper's repo detection stays bounded.
-    let mut child = Command::new(claudine)
+    // targets only the wrapper subtree, never this test runner.
+    let mut child = fixture
+        .command_std()
         .arg("compose")
         .arg("--opencode")
         .arg(&md_file)
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("USERPROFILE", workspace.path())
-        .env("PATH", &augmented)
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_READY_MARKER", &ready_marker)
         .creation_flags(CREATE_NEW_PROCESS_GROUP.0)

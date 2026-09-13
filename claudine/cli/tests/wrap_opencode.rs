@@ -601,10 +601,17 @@ exit 0
 
     let row = read_summary_row(fixture.home());
     assert_eq!(row["extra"]["exit_code"], serde_json::json!(1));
-    assert_eq!(
-        row["error"].as_str().unwrap_or(""),
-        row["error"].as_str().unwrap_or(""),
-        "error field should carry the rate-limit message",
+    // Was `assert_eq!(row["error"], row["error"], "error field should carry the
+    // rate-limit message")` — a value compared with itself, which held for a
+    // missing `error`, a `null` one, and a generic "provider exited non-zero"
+    // just as happily as for the message it named.
+    let error_field = row["error"].as_str().unwrap_or_else(|| {
+        panic!("summary row must carry a prose `error` string; row={row}")
+    });
+    assert!(
+        error_field.contains("Usage limit reached"),
+        "error field must carry the provider's rate-limit message, not a generic \
+         failure; got {error_field:?}",
     );
     let diagnostics = &row["extra"]["provider_summary"]["stderr_diagnostics"];
     assert_eq!(

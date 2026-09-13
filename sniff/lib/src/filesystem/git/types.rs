@@ -581,7 +581,6 @@ impl GitRepo {
         }
         std::cell::Ref::map(self.ref_decorations.borrow(), |opt| opt.as_ref().unwrap())
     }
-
 }
 
 impl GitRepo {
@@ -821,7 +820,11 @@ impl GitRepo {
     pub fn try_branches(&self) -> Result<Vec<LocalBranchInfo>> {
         self.ensure_cache();
         let current = self.try_current_branch()?;
-        super::remote_refresh::get_local_branches_fallible(&self.gix.borrow(), current.as_deref(), true)
+        super::remote_refresh::get_local_branches_fallible(
+            &self.gix.borrow(),
+            current.as_deref(),
+            true,
+        )
     }
 
     /// Branch projection for `sniff repo branches`.
@@ -1056,7 +1059,9 @@ impl GitRepo {
                 super::remote_refresh::get_tracking_status_from_snapshot(
                     &self.gix.borrow(),
                     Some(current_branch),
-                    ref_snapshot.as_ref().expect("tracking request observes refs"),
+                    ref_snapshot
+                        .as_ref()
+                        .expect("tracking request observes refs"),
                 )?
             } else {
                 Vec::new()
@@ -1116,12 +1121,8 @@ impl GitRepo {
     pub(crate) fn observe_aggregate_evidence(&self) -> Result<GitAggregateEvidence> {
         self.ensure_cache();
         let current_branch = self.try_current_branch()?;
-        let refs = super::remote_refresh::RefSnapshot::observe(
-            &self.gix.borrow(),
-            true,
-            true,
-            false,
-        )?;
+        let refs =
+            super::remote_refresh::RefSnapshot::observe(&self.gix.borrow(), true, true, false)?;
         let branches = self.with_cached_gix(|repo| {
             super::remote_refresh::get_branch_info_from_snapshot(
                 repo,
@@ -1546,7 +1547,12 @@ fn parse_org_repo(url: &str) -> (Option<String>, Option<String>) {
 fn preferred_remote(remotes: &[RemoteInfo]) -> Option<&RemoteInfo> {
     let usable = remotes
         .iter()
-        .filter(|remote| remote.url.as_deref().is_some_and(|url| !url.trim().is_empty()))
+        .filter(|remote| {
+            remote
+                .url
+                .as_deref()
+                .is_some_and(|url| !url.trim().is_empty())
+        })
         .collect::<Vec<_>>();
     let selected =
         super::remote_resolver::select_preferred_remote(usable.iter().map(|r| r.name.as_str()))?;
@@ -1904,9 +1910,7 @@ mod tests {
         let info = crate::performance::with_current_collector(Some(collector.clone()), || {
             git_repo.detect_with_request(&request).unwrap()
         });
-        let counters = collector
-            .snapshot(std::time::Duration::ZERO)
-            .counters;
+        let counters = collector.snapshot(std::time::Duration::ZERO).counters;
 
         assert_eq!(
             counters
@@ -1917,7 +1921,11 @@ mod tests {
             "branches, tracking, remote tips, and decorations share one pass: {counters:?}"
         );
         assert!(info.recent.iter().any(|commit| !commit.refs.is_empty()));
-        assert!(info.branches.iter().any(|candidate| candidate.name == branch));
+        assert!(
+            info.branches
+                .iter()
+                .any(|candidate| candidate.name == branch)
+        );
         assert!(info.tracking.iter().any(|status| status.remote == "origin"));
         let origin = info
             .remotes
@@ -1934,17 +1942,14 @@ mod tests {
         let linked_path = dir.path().join("linked-native-path");
         repo.worktree("linked", &linked_path, None).unwrap();
 
-        let request = GitRequest::full().metadata(
-            crate::request::GitMetadataRequest::none().worktrees(true),
-        );
+        let request =
+            GitRequest::full().metadata(crate::request::GitMetadataRequest::none().worktrees(true));
         let git_repo = GitRepo::discover(dir.path()).unwrap().unwrap();
         let collector = crate::performance::PerformanceCollector::new_shared();
         let info = crate::performance::with_current_collector(Some(collector.clone()), || {
             git_repo.detect_with_request(&request).unwrap()
         });
-        let counters = collector
-            .snapshot(std::time::Duration::ZERO)
-            .counters;
+        let counters = collector.snapshot(std::time::Duration::ZERO).counters;
 
         assert_eq!(
             counters
@@ -1957,15 +1962,10 @@ mod tests {
         let linked = info.worktrees.get("master").or_else(|| {
             info.worktrees
                 .values()
-                .find(|worktree| {
-                    worktree.filepath == std::fs::canonicalize(&linked_path).unwrap()
-                })
+                .find(|worktree| worktree.filepath == std::fs::canonicalize(&linked_path).unwrap())
         });
         let linked = linked.expect("linked worktree is projected from metadata");
-        assert_eq!(
-            linked.filepath,
-            std::fs::canonicalize(linked_path).unwrap()
-        );
+        assert_eq!(linked.filepath, std::fs::canonicalize(linked_path).unwrap());
         assert!(!linked.sha.is_empty());
         assert!(!linked.is_current);
     }
@@ -1976,17 +1976,14 @@ mod tests {
         let linked_path = dir.path().join("current-linked");
         repo.worktree("current-linked", &linked_path, None).unwrap();
 
-        let request = GitRequest::full().metadata(
-            crate::request::GitMetadataRequest::none().worktrees(true),
-        );
+        let request =
+            GitRequest::full().metadata(crate::request::GitMetadataRequest::none().worktrees(true));
         let git_repo = GitRepo::discover(&linked_path).unwrap().unwrap();
         let collector = crate::performance::PerformanceCollector::new_shared();
         let info = crate::performance::with_current_collector(Some(collector.clone()), || {
             git_repo.detect_with_request(&request).unwrap()
         });
-        let counters = collector
-            .snapshot(std::time::Duration::ZERO)
-            .counters;
+        let counters = collector.snapshot(std::time::Duration::ZERO).counters;
 
         assert_eq!(
             counters
@@ -1999,9 +1996,7 @@ mod tests {
         let current = info
             .worktrees
             .values()
-            .find(|worktree| {
-                worktree.filepath == std::fs::canonicalize(&linked_path).unwrap()
-            })
+            .find(|worktree| worktree.filepath == std::fs::canonicalize(&linked_path).unwrap())
             .expect("current linked worktree is present");
         assert!(current.is_current);
         assert!(!current.sha.is_empty());

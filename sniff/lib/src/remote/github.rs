@@ -10,11 +10,12 @@ use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 use super::{
     count_api_request,
     provider::RemoteRepoProvider,
-    snapshot::{documents_from_tree, RemoteRepoSnapshot, RemoteTree, RemoteTreeFile, CONTINUATION_PREFIXES},
+    snapshot::{
+        CONTINUATION_PREFIXES, RemoteRepoSnapshot, RemoteTree, RemoteTreeFile, documents_from_tree,
+    },
     types::{
-        CiCdInfo, DocumentRef, GitProvider, IssueInfo, KeyUrls, LicenseRef,
-        OrgInfo, OrgRepoRef, PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo,
-        TagsAndReleases,
+        CiCdInfo, DocumentRef, GitProvider, IssueInfo, KeyUrls, LicenseRef, OrgInfo, OrgRepoRef,
+        PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo, TagsAndReleases,
     },
 };
 use crate::error::SniffError;
@@ -143,11 +144,8 @@ impl GitHubRemote {
         for prefix in CONTINUATION_PREFIXES {
             // `branch:path` addresses a subtree directly, so each continuation is
             // one bounded request rather than a walk.
-            let request = GetGitTreeRecursiveRequest::new(
-                owner,
-                repo,
-                format!("{default_branch}:{prefix}"),
-            );
+            let request =
+                GetGitTreeRecursiveRequest::new(owner, repo, format!("{default_branch}:{prefix}"));
             // Counted under its own slug: a continuation preserves correctness and
             // must stay distinguishable from the duplicate root-tree requests this
             // phase removed.
@@ -159,10 +157,14 @@ impl GitHubRemote {
 
             // Subtree paths are relative to the subtree root; re-prefix them so the
             // projections see repository-root-relative paths like every other entry.
-            recovered.extend(blobs_of(response.tree).into_iter().map(|file| RemoteTreeFile {
-                path: format!("{prefix}/{}", file.path),
-                size: file.size,
-            }));
+            recovered.extend(
+                blobs_of(response.tree)
+                    .into_iter()
+                    .map(|file| RemoteTreeFile {
+                        path: format!("{prefix}/{}", file.path),
+                        size: file.size,
+                    }),
+            );
         }
 
         tree.extend_from_continuation(recovered);
@@ -180,7 +182,6 @@ fn blobs_of(entries: Vec<GitTreeEntry>) -> Vec<RemoteTreeFile> {
         })
         .collect()
 }
-
 
 /// Map a [`SchematicError`] to a [`SniffError`].
 ///
@@ -630,7 +631,6 @@ impl RemoteRepoProvider for GitHubRemote {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn test_build_key_urls() {

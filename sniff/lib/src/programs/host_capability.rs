@@ -683,7 +683,10 @@ mod tests {
             "Linux version 5.15.0-microsoft-standard-WSL2 (oe-user@oe-host)",
             ""
         ));
-        assert!(proc_markers_indicate_wsl("", "5.15.90.1-microsoft-standard-WSL2"));
+        assert!(proc_markers_indicate_wsl(
+            "",
+            "5.15.90.1-microsoft-standard-WSL2"
+        ));
         // Marker can live in either file; matching is case-insensitive.
         assert!(proc_markers_indicate_wsl("WSL", ""));
     }

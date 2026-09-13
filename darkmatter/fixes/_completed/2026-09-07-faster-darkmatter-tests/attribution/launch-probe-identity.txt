@@ -1,0 +1,7 @@
+revision 973d1d9184601ab3409654955ffacc249f4870a5
+md md 0.1.0
+hyperfine hyperfine 1.20.0
+host Darwin 27.0.0 arm64
+load-before 10.00 8.27 8.28
+runs 15
+load-after 21.95 11.58 9.50

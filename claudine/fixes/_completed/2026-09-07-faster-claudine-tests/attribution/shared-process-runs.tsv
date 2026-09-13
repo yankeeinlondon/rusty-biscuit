@@ -1,0 +1,16 @@
+binary	rep	wall_s	in_process_s	tests
+error_guards	1	2.05	1.61	18
+error_guards	2	2.05	1.62	18
+error_guards	3	2.10	1.61	18
+spawn_inventory	1	2.13	1.64	2
+spawn_inventory	2	2.09	1.64	2
+spawn_inventory	3	2.06	1.64	2
+dispatch_inventory	1	0.65	0.21	12
+dispatch_inventory	2	0.63	0.21	12
+dispatch_inventory	3	0.63	0.20	12
+composition_seams	1	0.79	0.37	19
+composition_seams	2	0.75	0.35	19
+composition_seams	3	0.84	0.36	19
+test_placement	1	0.69	0.24	9
+test_placement	2	0.72	0.24	9
+test_placement	3	0.65	0.23	9

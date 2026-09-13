@@ -98,6 +98,8 @@ protocol-focused:
   file-reference resolution conventions.
 - `biscuit-hash` — xxHash content-hash identity for the Phase 3 invalidation
   engine (`WorkspaceIndex`).
+- `wait-timeout` (test-only) — bounded, cross-platform reaping for the real
+  `dmls` stdio subprocess lifecycle test.
 
 ## DMLS Zed CLI (`darkmatter/dmls/zed-dmls-cli`)
 

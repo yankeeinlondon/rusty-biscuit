@@ -1,6 +1,6 @@
 mod common;
 
-use common::{md_cmd, md_file};
+use common::{CliProcessFixture, md_file};
 use predicates::prelude::*;
 use std::io::Write;
 
@@ -21,7 +21,9 @@ const FM_DOC_TAB_INDENT: &str = "---\n\
 
 #[test]
 fn test_get_single_property_string() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-single-property-string");
+    fixture
+        .command()
         .args(["get", "-", "title"])
         .write_stdin(FM_DOC)
         .assert()
@@ -31,7 +33,9 @@ fn test_get_single_property_string() {
 
 #[test]
 fn test_get_single_property_number() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-single-property-number");
+    fixture
+        .command()
         .args(["get", "-", "count"])
         .write_stdin(FM_DOC)
         .assert()
@@ -41,7 +45,9 @@ fn test_get_single_property_number() {
 
 #[test]
 fn test_get_single_property_array() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-single-property-array");
+    fixture
+        .command()
         .args(["get", "-", "tags"])
         .write_stdin(FM_DOC)
         .assert()
@@ -52,7 +58,10 @@ fn test_get_single_property_array() {
 
 #[test]
 fn test_get_missing_property_returns_empty_string() {
-    md_cmd()
+    let fixture =
+        CliProcessFixture::named("get-set-rm-test-get-missing-property-returns-empty-string");
+    fixture
+        .command()
         .args(["get", "-", "nonexistent"])
         .write_stdin(FM_DOC)
         .assert()
@@ -62,7 +71,10 @@ fn test_get_missing_property_returns_empty_string() {
 
 #[test]
 fn test_get_multiple_properties_returns_object() {
-    md_cmd()
+    let fixture =
+        CliProcessFixture::named("get-set-rm-test-get-multiple-properties-returns-object");
+    fixture
+        .command()
         .args(["get", "-", "title", "author"])
         .write_stdin(FM_DOC)
         .assert()
@@ -75,7 +87,10 @@ fn test_get_multiple_properties_returns_object() {
 
 #[test]
 fn test_get_multiple_with_missing_includes_empty_string() {
-    md_cmd()
+    let fixture =
+        CliProcessFixture::named("get-set-rm-test-get-multiple-with-missing-includes-empty-string");
+    fixture
+        .command()
         .args(["get", "-", "title", "missing"])
         .write_stdin(FM_DOC)
         .assert()
@@ -88,7 +103,9 @@ fn test_get_multiple_with_missing_includes_empty_string() {
 
 #[test]
 fn test_get_json5_output() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-json5-output");
+    fixture
+        .command()
         .args(["get", "--json5", "-", "title", "count"])
         .write_stdin(FM_DOC)
         .assert()
@@ -100,7 +117,9 @@ fn test_get_json5_output() {
 
 #[test]
 fn test_get_yaml_output() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-yaml-output");
+    fixture
+        .command()
         .args(["get", "--yaml", "-", "title"])
         .write_stdin(FM_DOC)
         .assert()
@@ -110,7 +129,9 @@ fn test_get_yaml_output() {
 
 #[test]
 fn test_get_toml_output() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-toml-output");
+    fixture
+        .command()
         .args(["get", "--toml", "-", "title", "count"])
         .write_stdin(FM_DOC)
         .assert()
@@ -123,9 +144,11 @@ fn test_get_toml_output() {
 
 #[test]
 fn test_get_from_file() {
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-from-file");
     let tmp = md_file("---\nversion: 2\n---\n# Doc\n");
 
-    md_cmd()
+    fixture
+        .command()
         .args(["get"])
         .arg(tmp.path())
         .arg("version")
@@ -136,7 +159,10 @@ fn test_get_from_file() {
 
 #[test]
 fn test_get_no_frontmatter_returns_empty_string() {
-    md_cmd()
+    let fixture =
+        CliProcessFixture::named("get-set-rm-test-get-no-frontmatter-returns-empty-string");
+    fixture
+        .command()
         .args(["get", "-", "title"])
         .write_stdin("# No frontmatter")
         .assert()
@@ -151,11 +177,15 @@ fn test_get_no_frontmatter_returns_empty_string() {
 /// YAML line in the rendered StatusBlock.
 #[test]
 fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
+    let fixture = CliProcessFixture::named(
+        "get-set-rm-test-get-malformed-frontmatter-renders-status-block-with-offending-line",
+    );
     use darkmatter::testing::strip_ansi_codes;
 
     let yaml = "---\nphases: 5\nfindings:\n  - id: '@' magic lookup emits results\n---\n# Doc\n";
 
-    let output = md_cmd()
+    let output = fixture
+        .command()
         .args(["get", "-", "phases"])
         .write_stdin(yaml)
         .output()
@@ -168,7 +198,10 @@ fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
     // asserting on the visible text.
     let stderr = strip_ansi_codes(&String::from_utf8_lossy(&output.stderr));
     assert!(stderr.contains("MarkdownError"), "stderr: {stderr}");
-    assert!(stderr.contains("frontmatter parse failed"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("frontmatter parse failed"),
+        "stderr: {stderr}"
+    );
     assert!(
         stderr.contains("'@' magic lookup emits results"),
         "offending line must be shown. stderr: {stderr}"
@@ -177,7 +210,11 @@ fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
 
 #[test]
 fn test_get_tab_indented_frontmatter_property_is_populated() {
-    md_cmd()
+    let fixture = CliProcessFixture::named(
+        "get-set-rm-test-get-tab-indented-frontmatter-property-is-populated",
+    );
+    fixture
+        .command()
         .args(["get", "-", "last_updated"])
         .write_stdin(FM_DOC_TAB_INDENT)
         .assert()
@@ -189,7 +226,9 @@ fn test_get_tab_indented_frontmatter_property_is_populated() {
 
 #[test]
 fn test_get_raw_string_unquoted() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-string-unquoted");
+    fixture
+        .command()
         .args(["get", "--raw", "-", "title"])
         .write_stdin(FM_DOC)
         .assert()
@@ -199,7 +238,9 @@ fn test_get_raw_string_unquoted() {
 
 #[test]
 fn test_get_raw_number() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-number");
+    fixture
+        .command()
         .args(["get", "--raw", "-", "count"])
         .write_stdin(FM_DOC)
         .assert()
@@ -209,7 +250,9 @@ fn test_get_raw_number() {
 
 #[test]
 fn test_get_raw_null_returns_empty() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-null-returns-empty");
+    fixture
+        .command()
         .args(["get", "--raw", "-", "nonexistent"])
         .write_stdin("---\nnonexistent: null\n---\n# Doc")
         .assert()
@@ -219,7 +262,9 @@ fn test_get_raw_null_returns_empty() {
 
 #[test]
 fn test_get_raw_array_one_per_line() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-array-one-per-line");
+    fixture
+        .command()
         .args(["get", "--raw", "-", "tags"])
         .write_stdin(FM_DOC)
         .assert()
@@ -229,7 +274,9 @@ fn test_get_raw_array_one_per_line() {
 
 #[test]
 fn test_get_raw_object_key_value_lines() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-object-key-value-lines");
+    fixture
+        .command()
         .args(["get", "--raw", "-", "title", "count"])
         .write_stdin(FM_DOC)
         .assert()
@@ -242,7 +289,9 @@ fn test_get_raw_object_key_value_lines() {
 
 #[test]
 fn test_get_compact_array() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-compact-array");
+    fixture
+        .command()
         .args(["get", "--compact", "-", "tags"])
         .write_stdin(FM_DOC)
         .assert()
@@ -252,7 +301,9 @@ fn test_get_compact_array() {
 
 #[test]
 fn test_get_compact_object() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-compact-object");
+    fixture
+        .command()
         .args(["get", "--compact", "-", "title", "count"])
         .write_stdin(FM_DOC)
         .assert()
@@ -263,7 +314,9 @@ fn test_get_compact_object() {
 
 #[test]
 fn test_get_compact_scalar_unchanged() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-compact-scalar-unchanged");
+    fixture
+        .command()
         .args(["get", "--compact", "-", "title"])
         .write_stdin(FM_DOC)
         .assert()
@@ -277,7 +330,9 @@ fn test_get_compact_scalar_unchanged() {
 
 #[test]
 fn test_set_string_value_via_stdin() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-set-string-value-via-stdin");
+    fixture
+        .command()
         .args(["set", "-", "title", "New Title"])
         .write_stdin("---\ntitle: Old Title\n---\n# Content\n")
         .assert()
@@ -288,7 +343,9 @@ fn test_set_string_value_via_stdin() {
 
 #[test]
 fn test_set_adds_new_property_via_stdin() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-set-adds-new-property-via-stdin");
+    fixture
+        .command()
         .args(["set", "-", "author", "Alice"])
         .write_stdin("---\ntitle: Hello\n---\n# Content\n")
         .assert()
@@ -299,7 +356,9 @@ fn test_set_adds_new_property_via_stdin() {
 
 #[test]
 fn test_set_numeric_value() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-set-numeric-value");
+    fixture
+        .command()
         .args(["set", "-", "count", "42"])
         .write_stdin("---\ntitle: Test\n---\n# Content\n")
         .assert()
@@ -309,7 +368,9 @@ fn test_set_numeric_value() {
 
 #[test]
 fn test_set_boolean_value() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-set-boolean-value");
+    fixture
+        .command()
         .args(["set", "-", "draft", "true"])
         .write_stdin("---\ntitle: Test\n---\n# Content\n")
         .assert()
@@ -319,7 +380,9 @@ fn test_set_boolean_value() {
 
 #[test]
 fn test_set_json_array_value() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-set-json-array-value");
+    fixture
+        .command()
         .args(["set", "-", "tags", r#"["rust","cli"]"#])
         .write_stdin("---\ntitle: Test\n---\n# Content\n")
         .assert()
@@ -330,7 +393,10 @@ fn test_set_json_array_value() {
 
 #[test]
 fn test_set_creates_frontmatter_when_none_exists() {
-    md_cmd()
+    let fixture =
+        CliProcessFixture::named("get-set-rm-test-set-creates-frontmatter-when-none-exists");
+    fixture
+        .command()
         .args(["set", "-", "title", "Brand New"])
         .write_stdin("# No Frontmatter\n\nJust content.\n")
         .assert()
@@ -341,10 +407,12 @@ fn test_set_creates_frontmatter_when_none_exists() {
 
 #[test]
 fn test_set_updates_file_in_place() {
+    let fixture = CliProcessFixture::named("get-set-rm-test-set-updates-file-in-place");
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
     write!(tmp, "---\ntitle: Original\n---\n# Content\n").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .arg("set")
         .arg(tmp.path())
         .args(["title", "Updated", "--save"])
@@ -360,10 +428,12 @@ fn test_set_updates_file_in_place() {
 
 #[test]
 fn test_set_without_save_does_not_mutate_file() {
+    let fixture = CliProcessFixture::named("get-set-rm-test-set-without-save-does-not-mutate-file");
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
     write!(tmp, "---\ntitle: Original\n---\n# Content\n").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .arg("set")
         .arg(tmp.path())
         .args(["title", "Updated"])
@@ -379,9 +449,11 @@ fn test_set_without_save_does_not_mutate_file() {
 
 #[test]
 fn test_set_preserves_body_content() {
+    let fixture = CliProcessFixture::named("get-set-rm-test-set-preserves-body-content");
     let input =
         "---\ntitle: Test\n---\n# Heading\n\nParagraph with **bold** text.\n\n- list item\n";
-    md_cmd()
+    fixture
+        .command()
         .args(["set", "-", "version", "2"])
         .write_stdin(input)
         .assert()
@@ -393,10 +465,11 @@ fn test_set_preserves_body_content() {
 
 #[test]
 fn test_get_requires_at_least_one_prop() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-requires-at-least-one-prop");
+    fixture
+        .command()
         .args(["get", "-"])
         .write_stdin(FM_DOC)
         .assert()
         .failure();
 }
-

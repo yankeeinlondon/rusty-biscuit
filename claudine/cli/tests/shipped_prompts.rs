@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 mod common;
 #[cfg(unix)]
-use common::{augmented_path, init_git_repo, write, write_executable};
+use common::{CliProcessFixture, write, write_executable};
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -53,17 +53,17 @@ fn shipped_prompt_corpus_parses_frontmatter() {
 #[cfg(unix)]
 #[test]
 fn shipped_implement_router_runs_real_proxy_handoff() {
-    let fixture = tempfile::tempdir().expect("fixture directory");
-    let prompt_fixture = tempfile::tempdir().expect("prompt fixture directory");
-    let feature = fixture.path().join("features/2026-07-20-router-fixture");
+    let fixture = CliProcessFixture::named("shipped-prompts-router");
+    // The router prompt is resolved from its own repository, so the launch
+    // directory is a second, separate repository inside the same workspace.
+    let prompt_fixture = fixture.cwd().join("prompt-repo");
+    let feature = fixture.cwd().join("features/2026-07-20-router-fixture");
     let review = feature.join("review.md");
     write(&review, "---\nimplemented: false\n---\n# Router fixture\n");
 
-    let bin_dir = fixture.path().join("bin");
-    std::fs::create_dir_all(&bin_dir).expect("provider bin directory");
-    let capture = fixture.path().join("delivered-prompt.txt");
+    let capture = fixture.cwd().join("delivered-prompt.txt");
     write_executable(
-        &bin_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         r#"#!/bin/sh
 {
   for arg in "$@"; do
@@ -76,26 +76,28 @@ exit 0
     );
 
     let root = workspace_root();
-    let prompt_dir = prompt_fixture.path().join("prompts");
+    let prompt_dir = prompt_fixture.join("prompts");
     let target_dir = prompt_dir.join("_implement");
     std::fs::create_dir_all(&target_dir).expect("prompt fixture directory");
+    // The *shipped* router is the artifact under test; only its repository is
+    // isolated, so its relative references still resolve as authored.
     std::fs::copy(root.join("prompts/implement.md"), prompt_dir.join("implement.md"))
         .expect("copy shipped router prompt");
     write(
         &target_dir.join("implement-review.md"),
         "---\ntitle: Router target fixture\n---\n# Implementation of Review Findings\n",
     );
-    assert!(init_git_repo(prompt_fixture.path()));
+    assert!(common::init_git_repo(&prompt_fixture));
 
     let router = prompt_dir.join("implement.md");
     let review_arg = format!("review={}", review.display());
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", fixture.path())
-        .env("PATH", augmented_path(&bin_dir))
+    fixture
+        .command_builder()
+        // The router resolves its target relative to the repository it is
+        // launched from, which is the prompt repository staged above.
+        .ambient_context(&prompt_fixture)
+        .build()
         .env("CLAUDINE_PROMPT_CAPTURE", &capture)
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .current_dir(prompt_fixture.path())
         .args([
             "compose",
             "--claude",

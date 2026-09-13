@@ -233,6 +233,38 @@ fn action_failure_error_kind_projects_provider_facets() {
 }
 
 #[test]
+fn action_failure_error_kind_projects_incomplete_subagent_facets() {
+    // The ratified lifecycle-stack identity for the silent-success shape. The
+    // machine label stays `incomplete_subagents` on the summary; here it must
+    // resolve to a real catalog row rather than falling back to the facet-less
+    // `LifecycleAction` label a `when:` clause cannot usefully match.
+    let info = LifecycleErrorInfo::from_action_failure(
+        "incomplete_subagents",
+        "2 sub-agent tasks did not complete: commit-alpha (stopped), commit-beta (stopped)",
+    );
+    let value = info.to_value();
+    assert_eq!(
+        value.get("code"),
+        Some(&json!("provider.incomplete_subagents"))
+    );
+    assert_eq!(value.get("category"), Some(&json!("provider")));
+    assert_eq!(value.get("disposition"), Some(&json!("unrecoverable")));
+    assert_eq!(value.get("origin"), Some(&json!("provider")));
+    assert_eq!(value.get("severity"), Some(&json!("error")));
+    // `kind`/`variant` are the deprecated spellings of `category`/`code`; the
+    // old facet-less `LifecycleAction` fallback must be gone.
+    assert_eq!(value.get("kind"), Some(&json!("provider")));
+    assert_eq!(
+        value.get("variant"),
+        Some(&json!("provider.incomplete_subagents"))
+    );
+    // Fail-fast: no generic retry handler may pick this up.
+    assert_eq!(value.get("is_transient"), Some(&json!(false)));
+    assert_eq!(value.get("is_throttled"), Some(&json!(false)));
+    assert_eq!(value.get("is_correctable"), Some(&json!(false)));
+}
+
+#[test]
 fn severity_projects_for_classifiable_errors() {
     // Typed-Diagnostic path: a correctable composition error defaults to
     // `error` severity (catalog §1).
@@ -664,6 +696,7 @@ fn provider_failure_message_precedence_survives_the_constructor() {
         session_id: None,
         final_response: String::new(),
         exit_code: 1,
+        is_error: false,
         termination: crate::harness::ProcessTermination::Completed,
         stderr_text: Some("noise\nlast stderr line".to_string()),
         error_kind: Some("agent_failure".to_string()),
