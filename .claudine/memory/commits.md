@@ -330,6 +330,36 @@ belong here.
   commits of the same fix even when they share a package area with the
   fix's scope — the implementer's "unrelated" is a stronger signal than
   the orchestrator's "lives in the same directory tree".
+- A cycle close that moves a fix/feature directory into `_completed/`
+  often unblocks one or more downstream plans whose `depends_on` lists
+  the closing cycle's `spec.md` (those plans typically carry
+  `status: blocked` in their frontmatter and a matching `blocked_on`
+  entry). The unblock is its own `planning(<area>):` sibling commit:
+  drop `status: blocked` from the downstream plan's frontmatter in a
+  separate `--only -- <downstream-plan-path>` invocation. Do not bundle
+  the unblock into the cycle-close commit — the downstream plan lives
+  in a different fix directory with its own lifecycle, and reviewers
+  need the unblock visible as a deliberate scheduling decision. The
+  unblock body should name the satisfied `depends_on` prerequisite and
+  reference the cycle-close commit's hash (e.g. "the cicd-cleanup
+  cycle is moved to _completed/ in <hash>") so the relationship is
+  auditable without `git log --graph`. A wholesale same-file
+  whitespace reformat that rides along with the `status: blocked`
+  removal (typical of an editor that auto-indents nested list items)
+  is part of the same cohesive edit, not a second semantic group —
+  do not split it into a separate commit just because the diff is
+  ~290+/290- of pure indentation.
+- A cycle close into `_completed/` is valid even when the moved spec
+  still shows `implemented: false`, e.g. when the only remaining
+  work is a branch-protection migration that requires separate human
+  approval (the `ci-verdict` → `ci-gate` switch in
+  `fixes/2026-09-11-cicd-cleanup/closure.md` C10 is the canonical
+  example). The `_completed/` move closes the planning surface; the
+  `implemented: false` flag is the implementation sign-off gate and
+  is independent. Call this out in the cycle-close body so reviewers
+  don't mistake the move for a full implementation sign-off, and so
+  the closure-checklist items still "Waiting for proof / approval"
+  are visible rather than buried.
 - A `RESOLVED_PLAN_SCHEMA_VERSION` bump is one inseparable change with the
   new required fields in `scripts/ci/schema.py`, the regenerated
   `.github/ci/schemas/contract.json`, the version constant in any Rust
