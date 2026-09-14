@@ -3,6 +3,9 @@ created: 2026-09-13
 status: draft
 reviewed: false
 implemented: false
+clarified: true
+needs_rulings: false
+clarified_by: claude/opus
 area: claudine
 packages:
     - darkmatter
@@ -10,21 +13,88 @@ packages:
     - claudine
     - claudine-cli
 related:
+    - darkmatter/fixes/2026-09-13-unify-array-rendering/spec.md
     - claudine/fixes/_completed/2026-09-05-inline-flow-and-validations/spec.md
     - claudine/docs/topics/lifecycle.md
     - darkmatter/docs/inline/interpolation.md
     - darkmatter/docs/lsp/features.md
+references:
+    claudine/fixes/2026-09-13-better-static-analysis/spikes/entry-arena-cost.md: >-
+        Measured entry counts, lookup timings, and schema-shape clone counts
+        for D6's sequence descent across 2,441 documents. Read it before
+        touching the entry arena: it is the evidence that the descent needs
+        no pointer index, the reason the `nested_shape_for_completion` memo
+        is mandatory, and the source of the item-entries-vs-keys-only
+        decision.
+    claudine/fixes/2026-09-13-better-static-analysis/spikes/parser-agreement.md: >-
+        Establishes that DMLS reuses Darkmatter's parser verbatim and that
+        the two dialects accept identical strings, so D7's `ERROR` raise
+        cannot outrank the composer. Also the source of the widened decode
+        guard, the wrong-range-on-a-true-positive correction, and the
+        `union_rejected` invariant.
+    darkmatter/fixes/2026-09-13-unify-array-rendering/spec.md: >-
+        The companion fix. Unifies Darkmatter's two array renderings on JSON
+        and lifts D1's suggestion suppression. Read it to understand why the
+        suppression exists and when it goes away.
+    darkmatter/fixes/2026-08-27-preserve-backslash-escapes/spec.md: >-
+        Merged as bdf471489. Establishes that compose must not consume
+        backslash escapes in body text, which is the invariant D8's escape
+        mechanism is built to respect rather than violate.
+    darkmatter/features/_completed/2026-07-08-single-sourcing-schema/spec.md: >-
+        Its D4 introduced the list-rendering function family and chose
+        newline-joining as the bare-array default. The companion fix reverses
+        that choice; this one depends on the family existing.
+    darkmatter/docs/schemas/darkmatter.yaml: >-
+        The authored base schema. Declares the type of every `ctx.*`
+        variable, which is what makes D1's suggestion suppression
+        type-directed rather than guesswork.
+    darkmatter/lib/src/markdown/compose/context/catalog.rs: >-
+        Projects the base schema's `ctx` block into descriptors carrying
+        `ContextValueType { base, is_array, integer }`. The lookup D1's
+        suppression rule consults.
 ---
 
-# Reject Nested `{{ … }}` Inside Expression String Literals Before Anything Runs
+# Make Expression Defects Visible Before Anything Runs
 
 ## Outcome
 
+This began as one defect — a `{{ … }}` span written inside a quoted string
+literal, which ran an agent to completion and then crashed. Investigating it
+turned up three more ways the expression layer fails the author: it does not
+look where authors write, it does not complain at a volume that matches how
+wrong a thing is, and it gives an author no way to say "this text is not for
+you". All four ship together, because the rule is not worth much if it
+cannot reach the surfaces people use, is easy to ignore, or cannot be
+switched off where it does not belong:
+
+- **The nested-span rule** (D1–D5). The original defect: a nested span is
+  rejected in the editor, at prepare time, and — for what static analysis
+  cannot see — at event time.
+- **Full frontmatter coverage** (D6). The editor's frontmatter model never
+  descends into list items, so roughly a third of real authoring surface is
+  dark to it. The descent is what makes the rule — and every other
+  frontmatter diagnostic — reach the surfaces authors actually use.
+- **A severity ladder** (D7). Warnings mean "might be wrong"; errors mean
+  "will never work". Applied consistently, which moves two existing
+  diagnostics as well as placing the new one, and which separates a
+  schema-declared expression from a brace pattern merely inferred to be one.
+- **A backslash escape** (D8). `\{{` opts a span out of being scanned at
+  all, so a document that discusses another template language stops being
+  diagnosed as though it were written in this one.
+
+A fourth change found during this work — unifying Darkmatter's two array
+renderings on JSON — is specified separately in
+[`darkmatter/fixes/2026-09-13-unify-array-rendering/spec.md`](../../../darkmatter/fixes/2026-09-13-unify-array-rendering/spec.md).
+It changes rendered output rather than diagnostics, and it reverses a
+shipped decision, so it gets its own revert boundary. D1 below records the
+one place the two fixes touch.
+
+The original defect's outcome is unchanged and remains the motivating case.
 An author who writes a `{{ … }}` span inside a quoted string literal of a
 Darkmatter expression, on a surface that is evaluated once, finds out in
 three places, in this order, and never after an agent has already run:
 
-1. **In the editor.** DMLS underlines the inner braces with a warning that
+1. **In the editor.** DMLS underlines the inner braces with an error that
    says the braces are literal text, and offers a quick fix that rewrites
    the literal as `+` concatenation.
 2. **At prepare time.** Claudine refuses to compose the document. The error
@@ -157,7 +227,8 @@ tests in `lifecycle/tests/diagnostics.rs` and `lifecycle/tests/validation.rs`.
 No production call site exists for it in `composition/prepare/` or in the
 CLI, yet `claudine/docs/topics/lifecycle.md` states that it "still runs" for
 non-lifecycle surfaces. Green tests over an uncalled function read as
-coverage and are why this surface looked guarded. See Open Questions.
+coverage and are why this surface looked guarded. Its disposition is a
+Required Planning Determination.
 
 ### Why DMLS missed it
 
@@ -337,18 +408,23 @@ version of the rewrite is wrong, and the failure modes are silent.
    empty pieces of a literal is therefore wrong: `"{{a}}{{b}}"` becomes
    `a + b`, which is `3` rather than `"12"` for `a = 1`, `b = 2`, and
    `"{{x}}"` alone becomes `x`, which is no longer a string at all. The
-   requirement is that no `+` the generator emits can reach the arithmetic
-   branch.
+   requirement is that **no `+` the generator emits can reach the arithmetic
+   branch**.
 
-   A single leading `""` anchor is necessary but **not** sufficient, because
-   the accumulator itself can become a numeric string: `"" + a + b`
-   evaluates as `("" + a) + b` = `"1" + 2`, and `"1"` is a numeric string
-   meeting a `Number`, so the second `+` is arithmetic and the result is `3`
-   again. The generator therefore anchors each lifted span individually, as
-   `("" + <span>)`, except where a literal piece already to its left in the
-   chain is non-empty and cannot itself parse as a number — in which case
-   the accumulator is provably a non-numeric string and the bare span is
-   safe. The incident's else branch takes the cheap path and reads
+   A single leading `""` anchor is necessary but not sufficient, because the
+   accumulator itself becomes a numeric string: `"" + a + b` associates as
+   `("" + a) + b` = `"1" + 2`, and a numeric `String` meeting a `Number` is
+   exactly the arithmetic case, so the result is `3` again. Both halves are
+   pinned by existing tests —
+   `mixed_numeric_string_and_number_addition_is_arithmetic` and
+   `two_numeric_strings_still_concatenate`
+   (`darkmatter/lib/src/markdown/compose/expression/mod.rs`).
+
+   The rule is therefore a **per-span anchor**: each lifted span is emitted
+   as `("" + <span>)`, relaxed to a bare span where a non-empty literal
+   piece already sits to its left in the chain and that piece cannot itself
+   parse as a number, which makes the accumulator provably a non-numeric
+   string. The incident's else branch takes the relaxed path and reads
    naturally; `"{{a}}{{b}}"` and `"{{a}}5"` take the anchored path and are
    correct.
 5. **A lifted span is decoded; the literal pieces are not.** The two halves
@@ -371,17 +447,44 @@ the literal's span, so the suggestion is the complete corrected expression.
 When any nested span fails to parse, `suggestion` is `None`; the diagnostic
 still fires.
 
-**Accepted limitation: array-valued spans are not equivalent.** A rewrite is
-judged against what the author meant — what the same span would have
-produced on a rescanning surface. For an array-valued span the two cannot be
-made to agree. `+` stringifies through `scalar_string`, which renders
-`["a","b"]` as the JSON text `["a","b"]`; interpolation renders through
-`interpolation_output_string`, which produces `a\nb`. No amount of
-parenthesization or anchoring changes this, because the divergence is in the
-two rendering functions, not in the rewrite. `prompts/commit.md`'s
-`ctx.dirty_package_areas` is exactly this case. The lint still fires and
-still offers the rewrite; the non-equivalence is documented (D5) and
-asserted as a known divergence in Testing rather than treated as a bug.
+**Array-valued spans: the suggestion is suppressed, by declared type.** A
+rewrite is judged against what the author meant — what the same span would
+have produced on a rescanning surface. For an array-valued span the two
+paths render differently today: `+` stringifies through `scalar_string`
+(JSON), interpolation through `interpolation_output_string`
+(newline-joined). The divergence is in the two rendering functions, not in
+the rewrite, so no anchoring or parenthesization touches it.
+
+The suppression is **type-directed**, not guesswork. Darkmatter declares a
+type for every context variable in `darkmatter/docs/schemas/darkmatter.yaml`,
+and `darkmatter/lib/src/markdown/compose/context/catalog.rs` projects that
+YAML into a descriptor carrying `ContextValueType { base, is_array,
+integer }` — the catalog is generated from the schema rather than
+hand-declared, so the two cannot drift. Frontmatter variables carry their
+type the same way, through the document's own `$schema`. The rule:
+
+- **Declared array or object** — suppress. `is_array`, or a `base` of
+  `object`, is the whole test.
+- **Declared scalar** — offer the suggestion.
+- **Untyped** — offer the suggestion. A user-defined variable *can* be typed
+  if the author wants it checked; anything untyped is effectively `any`, and
+  the right default there is to trust the author.
+
+This makes suggestion quality a function of how well a document is typed,
+which is the same direction the architectural note at the end of D3 points:
+the more the schema knows, the less the tooling has to guess. It also
+catches the case that actually bit — `ctx.dirty_package_areas` is declared
+`string[](generated; required)`, so `prompts/commit.md`'s literal is
+suppressed rather than given an unfaithful rewrite.
+
+The interim risk is bounded and worth stating rather than leaving to be
+discovered: an **untyped** variable that happens to hold an array can
+receive an imperfect suggestion until the array-rendering fix lands. A typed
+one cannot. The window closes entirely when
+[`darkmatter/fixes/2026-09-13-unify-array-rendering/spec.md`](../../../darkmatter/fixes/2026-09-13-unify-array-rendering/spec.md)
+makes both paths render arrays as JSON and **lifts this suppression as part
+of its own scope**. Neither fix blocks the other, and they may land in
+either order.
 
 **Not flagged.** A `{{{ … }}}` literal escape inside a quoted string is not
 a nested span, because `find_all_plain` does not recognize it as one. A
@@ -494,19 +597,51 @@ helper: every `{{ … }}` span inside a plain string scalar of the
 is the gap that made the editor blind to every lifecycle expression, and it
 is a prerequisite for D3, not an optional extra. Unknown-identifier and
 malformed-expression diagnostics naturally extend to these spans; that
-widening is in scope only insofar as it falls out of the shared walk. Any
-new false positive it introduces on lifecycle keys (for example `err`,
-`timing`, `current`, which are Claudine late-binding globals unknown to
-DMLS) must be suppressed by adding those roots to the known-root authority
-`is_unknown_root`, not by skipping lifecycle keys.
+widening is in scope only insofar as it falls out of the shared walk.
+
+**Late-binding roots are recognized only under lifecycle keys.** `err`,
+`timing`, and `current` are Claudine globals that exist only while a
+lifecycle event is firing. Adding them to the known-root authority
+`is_unknown_root` unconditionally would silence a genuine unknown-identifier
+report everywhere else in the document, so they are scoped: recognized under
+lifecycle keys, unknown elsewhere.
+
+This is a knowing trade. It requires DMLS to hold a static list of which
+keys are lifecycle keys — the Claudine-schema coupling this spec otherwise
+avoids — and that list will drift as lifecycle keys change. The drift is the
+accepted cost of scoping the roots correctly until the mechanism that
+removes the need exists; see the architectural note at the end of D3.
 
 **Where the diagnostic fires.** Only on whole-value frontmatter scalars,
-classified with `is_whole_value_span` (Invariant 2). A document body
-interpolation and a mixed frontmatter string are rescanning surfaces and are
-never flagged, however the inventory reaches them. DMLS has no view of
-Claudine's schema, so brace-less predicate surfaces (`when`, `until`,
-`while`) remain invisible to the editor and are covered by D2 alone; see
-Open Questions.
+classified with `is_whole_value_span` (Invariant 2), and on schema-typed
+predicate values, which are condition text rather than a span and so reach
+the lint by the other route below. A document body interpolation and a mixed
+frontmatter string are rescanning surfaces and are never flagged, however
+the inventory reaches them.
+
+**What the editor could not reach before D6.** The frontmatter AST is built
+by `lower_mapping` (`dmls/src/overlay/frontmatter.rs`), which recurses into
+`Node::Mapping` only. A sequence value produces one entry and the walk
+stops, so nothing inside a `- item` line has an `FmEntry` at all. Every
+scalar nested in a sequence is therefore invisible to the inventory,
+regardless of schema typing — which covers stack action operands,
+`proxy … with` values, and the `when` / `until` / `while` predicates that
+live inside `stack` items — about a third of the expression-bearing lines in
+`prompts/`. **D6 removes this limit** by teaching the overlay to descend
+into sequences, and D3 depends on it.
+
+**Predicates are reached through the schema, not a key list.** `when`,
+`until`, and `while` carry bare condition text with no `{{ … }}` wrapper, so
+the brace-scanning inventory cannot find them however deeply it walks. They
+are instead declared **expression-typed in the schema**, which routes them
+through the editor's existing schema-driven path (`expression_values` →
+`diagnostics/frontmatter.rs::expression_diagnostics`). Two facts make that
+work with no new machinery: the path already parses with the condition
+dialect — it calls `overlay::expressions::parse_condition`, not the
+interpolation parser — so predicates are exactly the dialect it was built
+for; and D6's array-element step in `nested_shape` is what lets a path like
+`initialize.stack[0].when` resolve at all. The schema carries the knowledge;
+the editor learns no Claudine layout.
 
 **Working in raw coordinates.** The editor scans the raw document slice and
 stays in raw coordinates end to end. It never decodes the scalar and never
@@ -567,9 +702,10 @@ newline.** A quoted string literal spanning a line break inside a block
 would otherwise carry raw YAML indentation into the suggestion text.
 
 **Diagnostic.** Add `code::EXPRESSION_NESTED_SPAN_IN_LITERAL =
-"dm.expression.nested_span_in_literal"`. Severity `WARNING`, matching
-`EXPRESSION_MALFORMED`. Source `darkmatter.frontmatter`. Range: the nested
-span's `{{` through `}}`, in raw document coordinates. Message:
+"dm.expression.nested_span_in_literal"`. Severity **`ERROR`** under D7's
+ladder: on the surfaces it fires on the construct can never work, and
+compose refuses the document. Source `darkmatter.frontmatter`. Range: the
+nested span's `{{` through `}}`, in raw document coordinates. Message:
 
 ```text
 `{{ctx.repo_name}}` inside a quoted string is literal text and is never
@@ -606,6 +742,17 @@ the incident's own ternary parses from decoded text that already contains
 newlines and four-space indentation — and is recorded as a check to run, not
 as an unknown.
 
+**Architectural note, explicitly out of scope.** The static lifecycle-key
+list is a stopgap. The direction it is standing in for is a `SimplifiedSchema`
+with schema triggers — a mechanism that brings variables into and out of
+scope as the schema dictates, and gives Claudine a supported way to extend
+the expression grammar it inherits from the Darkmatter baseline. Under that
+mechanism the lifecycle globals would be declared by Claudine's own schema
+extension and DMLS would carry no key list at all. Nothing in this fix
+builds toward it beyond not making it harder; it is recorded so the debt has
+a stated exit and a future reader knows the list was never meant to be
+permanent.
+
 ### D4. The event-time message stops sounding like the crash
 
 The runtime guard stays, because a frontmatter value can still hold raw
@@ -639,27 +786,264 @@ template text that no static pass can see. Its report changes:
   sentence under "Action Forms" stating that braces inside a quoted
   expression literal are inert on a lifecycle surface. The claim that
   `validate_no_interpolation_leaks` "still runs" for non-lifecycle surfaces
-  is corrected to match whatever Open Question 4 decides.
+  is corrected to match the Required Planning Determination on it.
 - `darkmatter/docs/inline/interpolation.md`: a "Braces inside string
   literals" rule next to the `{{{ … }}}` recognition rules, stating which
   surfaces rescan and which do not, that a quoted literal is never
-  re-scanned within a single pass, and showing the `+` form. The
-  array-rendering divergence between `scalar_string` and
-  `interpolation_output_string` is stated here, because it is the reason the
-  rewrite is not a semantic identity.
+  re-scanned within a single pass, and showing the `+` form.
 - `darkmatter/docs/lsp/features.md` section 4.3: a row for the new
-  diagnostic and quick fix, including the folded-scalar limitation; section
-  4.1: a note that frontmatter string scalars are now scanned for
-  interpolation spans.
+  diagnostic and quick fix, including the folded-scalar limitation; the
+  updated severities for the two existing expression diagnostics; and
+  **D7's ladder written down as policy**, where the author of the next
+  diagnostic will find it rather than inferring a severity from a
+  neighbor. Section 4.1: a note that frontmatter string scalars are now
+  scanned for interpolation spans, and that the frontmatter model now
+  descends into list items (D6).
+- `darkmatter/docs/inline/interpolation.md` also gains: a sentence on why a
+  rewrite suggestion is withheld for a span whose declared type is an array
+  or object, pointing at the array-rendering fix as the change that removes
+  the restriction; and **the backslash escape rule (D8) alongside the
+  `{{{ … }}}` rules**, giving both spellings, stating that compose preserves
+  the backslash and the Markdown renderer resolves it, and showing the case
+  it exists for — prose that quotes another template language.
 - `.claude/skills/claudine/` and `.claude/skills/darkmatter/` lifecycle and
   expression authoring guidance: the rule and the rewrite, one paragraph
   each. Hash updates via `md hash`.
 - `claudine/README.md` and `darkmatter/README.md` only if they enumerate
   validation errors or diagnostic codes today.
 
+### D6. The frontmatter overlay descends into sequences
+
+`lower_mapping` (`dmls/src/overlay/frontmatter.rs`) recurses into
+`Node::Mapping` only, so a sequence value yields one entry and the walk
+stops. Nothing authored inside a `- item` line has an `FmEntry`. Across
+`prompts/`, roughly 68 expression-bearing lines are sequence-nested against
+142 mapping-nested: about a third of the real authoring surface is dark to
+the editor, and it is the third where lifecycle stacks, action operands, and
+`proxy … with` values live.
+
+**Design: item-entries.** `lower_mapping` descends into `Node::Sequence`
+and emits **one entry per sequence item**, keyed by its decimal index, in
+addition to the entries for a mapping item's keys. The cheaper alternative —
+descending but emitting no entry for the item itself — was considered and
+rejected: it reaches expressions inside `- item` lines just as well, but it
+cannot range a schema problem at the failing array element, which is a
+user-visible improvement this fix should not leave behind.
+
+Two changes:
+
+- **`lower_mapping` descends into `Node::Sequence`**, emitting an entry per
+  item and per key within it, with correct pointers, spans, parents, and
+  depth.
+- **`nested_shape` gains an array-element step**, so a schema path that
+  crosses a sequence — `initialize.stack[0].when` — resolves to the item
+  shape rather than failing at the sequence key.
+
+**Cost is settled and the arena needs no index.** From
+[`spikes/entry-arena-cost.md`](spikes/entry-arena-cost.md), measured over
+the 2,441 frontmattered documents in the worktree:
+
+- Entry counts go p90 28 → 104 and max 96 → 2,321 under item-entries
+  (keys-only would have been 38 / 1,795). Real prompts are mild: all of
+  `prompts/` goes 381 → 662 entries, and the heaviest authoring document,
+  `prompts/_implement/implement-plan.md`, goes 32 → 70 with max depth 1 → 5.
+  The 2,000-entry outliers are research documents under
+  `claudine/docs/research/`, which nobody authors expressions in but which
+  are openable like any other file.
+- **No pointer-to-index map is needed**, and adding one would be premature.
+  Every production lookup stays in the microseconds even at 2,321 entries.
+  Pointer round-trip was verified clean, including index-bearing pointers
+  and keys containing a literal `/`; no pointer collision is introduced,
+  because a YAML node is either a mapping or a sequence and never both.
+
+**Three obligations come with the descent.** The first is performance and
+the other two are behavioral:
+
+- **A per-pass memo for `nested_shape_for_completion` is mandatory, not an
+  optimization.** It clones the whole schema shape once per ancestor level
+  per scalar entry, and descent takes clone counts per diagnostics pass from
+  p90 1 / max 63 to **p90 83 / max 3,683**. `diagnostics/scheduler.rs`
+  dispatches synchronously and the configured debounce is not yet applied,
+  so this runs per `didChange` on the loop thread. Memoize per ancestor path
+  for the duration of one pass and discard it after; on real documents that
+  is fewer than ten retained shapes. This is the only performance work the
+  descent warrants, and it ships in the same change.
+- **The quadratic shape must not be introduced.** No production path today
+  runs a linear scan inside a per-entry loop: the entry-iterating passes use
+  `key_path_at` (O(depth)), never `key_path` (O(n) via `index_of`). That
+  shape exists only in a unit test, where it measures 1.5 ms at n=2,321.
+  Nothing in this fix may call `key_path(entry)`, `entry_by_pointer`, or
+  `entry_by_dotted` inside a loop over `entries()`, and `index_of` gains a
+  comment saying so.
+- **`test_entry_or_ancestor_falls_back_for_array_index` must be re-cut.**
+  It asserts that `/tags/1` falls back to `/tags` with `kind == Sequence`.
+  Under item-entries `/tags/1` is an exact hit with `kind == Scalar`, so the
+  test fails. It passes unchanged under keys-only, which makes it the
+  de-facto switch between the two designs. Rewriting it is a **deliberate
+  behavior change** recorded as such in the verification record, not an
+  incidental break to be adjusted until green.
+
+**Array schema problems now range the failing item.** `ValidationProblem.path`
+is already an RFC 6901 pointer carrying decimal array indices, so once items
+have entries, a problem inside an array stops ranging the whole sequence and
+starts ranging the element that failed. This is a user-visible improvement
+that falls out of the design rather than being built, and it carries its own
+acceptance criterion so it is verified rather than assumed.
+
+**This is a structural change to the entry arena, not an additive one.**
+Hover, completion, navigation, and every existing frontmatter diagnostic
+iterate that arena. All of them will begin producing output at positions
+where they previously produced none. That is the intent of the change, but
+each is a new behavior surface and none of them was written with list items
+in mind:
+
+- **No regression on what already worked.** Every existing diagnostic
+  produces the same output on mapping-nested surfaces as it does today.
+  This is the primary safety property and is asserted directly, not
+  inferred from a green suite.
+- **Each capability is decided explicitly.** For hover, completion, and
+  navigation inside list items the outcome is either "works correctly, with
+  a test" or "suppressed inside sequence items, with a test proving the
+  suppression". Silence by accident is not an acceptable third option, and
+  which capabilities land in which bucket is a Required Planning
+  Determination.
+- **The incidental widening is tested, not just the new rule.**
+  `EXPRESSION_MALFORMED` and `EXPRESSION_UNKNOWN_IDENTIFIER` will start
+  firing inside list items. Combined with D7's severity moves, that is a
+  materially different editing experience in a lifecycle-heavy document,
+  and it is the change most likely to surprise an author.
+
+### D7. A severity ladder, applied consistently
+
+DMLS has no written severity policy today, and its expression diagnostics do
+not follow one: `EXPRESSION_MALFORMED` is `WARNING` and
+`EXPRESSION_UNKNOWN_IDENTIFIER` is `INFORMATION`, in both producers. The
+policy this fix establishes is one sentence:
+
+> A **warning** means the construct **might** be wrong. An **error** means it
+> **will never work**.
+
+Applied to the whole expression family — which, verified against
+`dmls/src/diagnostics/codes.rs`, is exactly three codes once this fix adds
+its own:
+
+| Code | Today | Under the ladder | Why |
+| --- | --- | --- | --- |
+| `dm.expression.malformed`, schema-typed frontmatter value | `WARNING` | **`ERROR`** | The schema declares the value *is* an expression. A parse failure will never evaluate. |
+| `dm.expression.malformed`, document-body span | `WARNING` | **`WARNING`** | A body `{{ … }}` is *inferred* to be an expression. The inference might be wrong. |
+| `dm.expression.unknown_identifier` | `INFORMATION` | **`WARNING`** | The identifier might be supplied at runtime by a late-binding global, so it might be wrong rather than certainly wrong. |
+| `dm.expression.nested_span_in_literal` | — | **`ERROR`** | On a non-rescanning surface the construct can never work, and compose refuses it. |
+
+No other code in `codes.rs` belongs to the expression family; the schema,
+link, wiki, directive, transclusion, style, and security families are not
+audited here and keep their severities.
+
+**The frontmatter/body split applies the policy; it does not except it.**
+The policy keys on certainty, and the two surfaces differ in exactly that.
+For a schema-typed value the document has declared what the value is, so a
+parse failure is a certainty. For a body span the classification is an
+inference from two braces, and that inference is frequently wrong in this
+very repository: **36 files contain foreign or historical brace syntax in
+their bodies.** The bulk of it is Darkmatter's and Claudine's own
+documentation describing the deprecated single-pipe fallback —
+`{{ name | "default" }}` and `{{env.VAR | "default"}}` across
+`2026-04-24-consistent-use-of-logic-operators/` and
+`claudine/docs/topics/unified-events.md` — alongside placeholder notation
+such as `{{|NAME|}}` in
+`renderable/features/_completed/2026-05-26-inline-span/` and `{{#}}` in
+`research/docs/commands/list.md`. Beyond the repository the same applies to
+any document quoting Handlebars, Liquid, Jinja, or Mustache. Marking that
+prose as a hard error would be the tool asserting a certainty it does not
+have. D8 gives such documents a way to opt out explicitly.
+
+The new nested-span diagnostic is unaffected by the split: it fires only on
+non-rescanning surfaces, and all of those are frontmatter.
+
+**Changing an existing severity is user-visible behavior**, and both moves
+need their own acceptance criteria and tests.
+
+**Preconditions on the `ERROR` raise.** From
+[`spikes/parser-agreement.md`](spikes/parser-agreement.md), which found the
+underlying risk bounded — DMLS has no parser of its own, the two dialects
+accept identical strings, and Claudine extends the namespace rather than the
+grammar — but attached conditions that are now requirements:
+
+- **Widen the decode guard beyond block scalars.** D3's guard as originally
+  written is necessary but not sufficient. `decode_scalar` mis-decodes
+  `|`, `|-`, `|+`, `>`, `>-`, `|2-`, `!!tag`-prefixed scalars, **and
+  `*alias` references** — every style whose first byte is neither `'` nor
+  `"` falls through to `plain_scalar`. Either decode all of them, or have
+  the producer skip any value whose authored first byte is not `'`, `"`, or
+  a plain-scalar start. Skipping is the safe direction, because the schema
+  layer still reports the failure generically.
+- **The damage is a wrong message and range on a *true* positive, not a
+  false positive.** This corrects what D3 originally claimed. The
+  `union_rejected` guard already prevents a spurious report on a valid
+  value. What actually breaks is that `when: |-` holding `1 +` reports
+  ``Unexpected '|'. Use '||' for logical OR.`` pointed at the block
+  indicator rather than at the `1 +`. Cosmetic at `WARNING`; actively
+  misleading at `ERROR`, which is why the guard is a **precondition** for
+  the raise rather than a tidy-up beside it. Regression tests must assert
+  the range and message, not only the diagnostic count.
+- **Preserve the `union_rejected` guard explicitly, and fix its comment.**
+  It is the single reason the frontmatter producer cannot outrank
+  Darkmatter's own validation. It reads as a union-arm special case; the
+  real invariant is "never report malformed for a value the schema
+  validation accepted". The comment is corrected to say so and the
+  invariant gains a test, because the descent adds new callers into this
+  producer.
+
+**D6 and D7 compound.** D6 widens where these diagnostics fire and D7 makes
+them louder. A lifecycle-heavy document that shows nothing today can show
+several errors after this fix. That is the intended outcome — the defect
+this spec exists for ran an agent to completion in silence — but the
+combined effect is larger than either change alone and should be stated in
+the PR description as such.
+
+### D8. A backslash escapes an interpolation span
+
+A document that discusses another template language has no good way to stop
+Darkmatter scanning its examples. `{{{ … }}}` exists, but it is a literal
+*emission* form, not an opt-out: it changes what the author writes and reads
+as Darkmatter syntax in prose that is about something else. That is why 36
+files in this repository carry brace syntax the composer will try to parse,
+and it is the other half of D7's answer to the body-span question.
+
+**Mechanism.** The span scanner declines to treat `{{` as an expression
+start when it is immediately preceded by a backslash, and **preserves the
+backslash in its output**. Compose does not resolve the escape. The
+downstream Markdown renderer does, under CommonMark's rule that a backslash
+before ASCII punctuation is a literal escape, so `\{{` renders as `{{`.
+
+**Spelling: both `\{{` and `\{\{` are recognized.** `\{{` is what an
+author will naturally type and is the form worth optimizing for. `\{\{` is
+the strictly CommonMark-correct spelling, since it escapes both braces.
+Accepting only one would make the feature a trivia question.
+
+#### Reconciliation with the backslash-preservation fix
+
+`darkmatter/fixes/2026-08-27-preserve-backslash-escapes/spec.md` argues that
+compose is a Markdown→Markdown transform and must **not** consume backslash
+escapes in body text. This design is consistent with that position rather
+than in tension with it, and the consistency is the point: the scanner
+*reads* the backslash as a signal and leaves it in place, exactly as that
+fix requires. Nothing is consumed, and the rendering of `\{{` is the
+Markdown renderer's business, not compose's.
+
+That fix is **merged** — commit `bdf471489`, "fix(darkmatter): preserve
+author-written backslash escapes through cleanup" — so there is no
+sequencing dependency to manage. Its spec still reads
+`status: implemented — awaiting review`, which is status drift rather than
+unmerged work. The interaction is nonetheless **verified against that fix's
+behavior rather than assumed**: a document containing `\{{ x }}` must
+round-trip through compose with the backslash intact, which is that fix's
+invariant and this one's mechanism at the same time.
+
 ## Scope
 
 In scope:
+
+**Strand 1 — the nested-span rule (D1–D5).**
 
 - D1 through D5 above.
 - The DMLS frontmatter-string scan and the `ScalarStyle` capture on
@@ -674,11 +1058,35 @@ In scope:
       `… + ctx.area + "" has completed"`, a stray `"` that makes the
       expression malformed, and `failure.say` still contains
       `{{ctx.area}}` inside a literal. Acceptance Criterion 3 fails today.
-    - `prompts/commit.md`'s `resides_in`.
-- Two regression fixtures, captured from the pre-fix state of those two
-  files: the incident document, and the `commit.md` `resides_in` value with
-  its single quotes, `\n` escape, two nested spans in one literal, and
-  array-valued span.
+    - `prompts/commit.md`'s `resides_in`. Ken is separately moving that
+      file to `as_csv(…)` under the array-rendering fix; the two edits are
+      independent and neither blocks the other.
+- Two regression fixtures, both captured from `HEAD`, not from the working
+  tree: the incident document
+  (`git show HEAD:prompts/_reviews/review-spec-inline.md`, where both `say`
+  values carry the defect — the working tree's `failure.say` still carries
+  it too, but its `success.say` is a malformed half-edit), and
+  `git show HEAD:prompts/commit.md`'s `resides_in` value with its single
+  quotes, `\n` escape, two nested spans in one literal, and array-valued
+  span. The working tree of `commit.md` already holds a hand-written `+`
+  rewrite and is not the fixture.
+
+**Strand 2 — full frontmatter coverage (D6).** Sequence descent in
+`lower_mapping`, the array-element step in `nested_shape`, `when` / `until`
+/ `while` declared expression-typed in the schema, and the regression and
+per-capability work the descent obliges.
+
+**Strand 3 — the severity ladder (D7).** The written policy, the new
+diagnostic at `ERROR`, `EXPRESSION_MALFORMED` raised to `ERROR` on
+schema-typed frontmatter values and left at `WARNING` on body spans,
+`EXPRESSION_UNKNOWN_IDENTIFIER` raised to `WARNING`, and the three
+preconditions the parser-agreement spike attached to the raise — the widened
+decode guard, range-and-message regression tests, and the preserved
+`union_rejected` invariant with a corrected comment.
+
+**Strand 4 — the backslash escape (D8).** Both spellings recognized by the
+span scanner, the backslash preserved in compose output, and the
+round-trip verified against the merged backslash-preservation fix.
 
 Out of scope:
 
@@ -691,9 +1099,16 @@ Out of scope:
   an invitation to add one now.
 - Changing the brace-depth behavior of the span finder.
 - A general block-scalar decoder with a decoded-to-raw offset map.
-- An `md lint` or `md validate` CLI surface for expressions. `md validate`
-  is schema validation today; adding expression lints there is a separate
-  decision (see Open Questions).
+- Unifying Darkmatter's two array renderings. That is
+  `darkmatter/fixes/2026-09-13-unify-array-rendering/spec.md`, which also
+  lifts D1's suggestion suppression. Nothing here depends on it landing.
+- An `md lint` or `md validate` CLI surface for expressions (ruled; see
+  Resolved Questions).
+- A schema-driven replacement for the static lifecycle-key list (the
+  architectural note at the end of D3).
+- Severity review of the schema, link, wiki, directive, transclusion, style,
+  and security diagnostic families. D7's ladder is stated as general policy
+  but applied here only to the expression family.
 
 ## Testing
 
@@ -732,10 +1147,27 @@ record must say how that was shown.
       and the lifted span decoded, and the result parses;
     - single-quoted literals keep single quotes, and an embedded `\n` escape
       survives byte-identically (the `commit.md` fixture).
-- **Array divergence is asserted, not fixed.** For an array-valued span the
-  rewritten expression yields `scalar_string` JSON while the rescanning
-  interpolation yields newline-joined text. The test pins both values so the
-  divergence is visible and cannot be "fixed" by accident.
+- **Suppression is type-directed.** A span whose declared type is an array
+  (`ctx.dirty_package_areas`) or an object is diagnosed with
+  `suggestion: None`; a span whose declared type is a scalar
+  (`ctx.repo_name`) is offered a suggestion; an untyped span is offered a
+  suggestion. Each test names the array-rendering fix as the change that
+  will flip the first expectation, so whoever re-cuts it knows it was
+  deliberate rather than a gap.
+
+### Darkmatter L1 — backslash escape (D8)
+
+- `\{{ x }}` and `\{\{ x }}` in a document body are not treated as
+  expression spans, produce no diagnostic of any expression code, and
+  survive compose with the backslash intact.
+- `{{ x }}` with no backslash still interpolates, so the escape did not
+  disable the feature.
+- A backslash elsewhere in body text is untouched, which is the merged
+  backslash-preservation fix's invariant and is asserted here rather than
+  assumed.
+- A document containing the deprecated single-pipe examples from
+  `claudine/docs/topics/unified-events.md`, escaped, produces zero
+  expression diagnostics.
 - A literal whose nested span is malformed yields a lint with no suggestion.
 - Property: for any expression source, the set of literals `lint_spanned`
   flags equals the set of literals on which `find_all_plain` is non-empty.
@@ -778,21 +1210,74 @@ record must say how that was shown.
 ### DMLS L1 (`darkmatter/dmls`)
 
 - Opening the incident file produces two
-  `dm.expression.nested_span_in_literal` warnings, one per `say`, each
-  ranged on the inner `{{ … }}` inside the block scalar, with the source
-  `darkmatter.frontmatter`.
-- A body interpolation with the same defect produces **no** warning of this
-  code, and the document still composes.
+  `dm.expression.nested_span_in_literal` diagnostics at `ERROR`, one per
+  `say`, each ranged on the inner `{{ … }}` inside the block scalar, with
+  the source `darkmatter.frontmatter`.
+- A body interpolation with the same defect produces **no** diagnostic of
+  this code, and the document still composes.
 - The code action rewrites the block scalar's expression text and leaves
   the `|-` indicator and indentation untouched; the resulting document
   produces zero diagnostics of this code.
 - A folded (`>`) scalar carrying the defect is ranged on the whole scalar
   and offers no quick fix.
 - An `Expression`-typed schema property authored as a `|-` block no longer
-  produces a spurious `EXPRESSION_MALFORMED` warning.
-- Frontmatter-string scanning does not introduce `EXPRESSION_UNKNOWN_IDENTIFIER`
-  on `err`, `timing`, or `current` in lifecycle keys.
+  produces a spurious `EXPRESSION_MALFORMED` report. This test must pass
+  before `EXPRESSION_MALFORMED` is raised to `ERROR`.
+- `err`, `timing`, and `current` produce no unknown-identifier report under
+  a lifecycle key, and **do** produce one outside lifecycle keys. Both
+  directions are asserted; the second is what makes the scoping meaningful
+  rather than a blanket allowlist.
 - The `no_side_effects.rs` and `packaging_contract.rs` suites stay green.
+
+### DMLS L1 — sequence descent (D6)
+
+- A scalar inside a `- item` line gets an `FmEntry` with the correct
+  pointer, key path, value span, parent, and depth.
+- `nested_shape` resolves a path that crosses a sequence, such as
+  `initialize.stack[0].when`.
+- A `when` predicate inside a stack item, declared expression-typed in the
+  schema, is reached by `expression_values`, parsed with the condition
+  dialect, and produces the nested-span diagnostic when it carries the
+  defect.
+- A nested span in a stack action operand and in a `proxy … with` value is
+  diagnosed, which is the coverage D2 previously held alone.
+- **No regression on mapping-nested surfaces.** Every existing diagnostic
+  produces byte-identical output on a corpus of mapping-only documents
+  before and after the descent. Asserted directly.
+- For each of hover, completion, and navigation inside a list item, either a
+  test that it behaves correctly or a test that it is suppressed —
+  whichever the Required Planning Determination selects. No capability is
+  left untested there.
+- `test_entry_or_ancestor_falls_back_for_array_index` is re-cut for
+  item-entries: `/tags/1` is an exact hit with `kind == Scalar`. The
+  verification record names it as the deliberate design switch it is.
+- A schema problem inside an array ranges the failing element rather than
+  the whole sequence.
+- The `nested_shape_for_completion` memo holds: a diagnostics pass over
+  `prompts/_implement/implement-plan.md` performs at most one shape clone
+  per distinct ancestor path, not one per ancestor level per scalar entry.
+- No production path calls `key_path(entry)`, `entry_by_pointer`, or
+  `entry_by_dotted` inside a loop over `entries()`. Asserted by review and
+  recorded, since it is a shape rather than a value.
+
+### DMLS L1 — severity ladder (D7)
+
+- `dm.expression.malformed` is reported at `ERROR` on a schema-typed
+  frontmatter value and at `WARNING` on a document-body span;
+  `dm.expression.unknown_identifier` is `WARNING` in both producers.
+- A `|-` block holding `1 +` ranges and describes the `1 +`, not the `|-`
+  indicator. The same for `>-`, `|+`, `|2-`, a `!!str`-tagged scalar, and an
+  `*alias`. These assert range and message, not diagnostic counts.
+- The `union_rejected` invariant has a test: no malformed report is emitted
+  for a value the schema validation accepted, including
+  `when: '{{ ctx.area }}'` and `when: "$(git branch) == 'main'"`.
+- A body containing Handlebars, Liquid, or Jinja syntax produces at most
+  `WARNING`, never `ERROR`.
+- Existing suites that assert on these severities are re-cut, and the
+  verification record names them as intentional assertion changes rather
+  than regressions.
+- The existing `EXPRESSION_MALFORMED` code action still offers itself at
+  the new severity.
 
 ### Evidence
 
@@ -802,6 +1287,8 @@ required for this change. The verification record lists the failing-before
 proof for each new test group.
 
 ## Acceptance Criteria
+
+**Strand 1 — the nested-span rule.**
 
 1. Composing the pre-fix `review-spec-inline.md` fixture with any provider
    exits non-zero at prepare time, names `success.say`, quotes the literal,
@@ -826,55 +1313,160 @@ proof for each new test group.
    frontmatter scalars with the ranges and source in D3, emits nothing for
    body spans or mixed frontmatter strings, and the quick fix produces a
    document with zero such diagnostics.
-7. DMLS scans `{{ … }}` spans in plain frontmatter string scalars, and
-   Claudine's late-binding globals do not produce unknown-identifier noise.
-8. The event-time guard's message names the lifecycle key and the new
+7. The event-time guard's message names the lifecycle key and the new
    reason, selected from a typed reason rather than by message matching;
    the "resolve the missing path or variable" hint no longer appears for a
    surviving span.
-9. Docs listed in D5 are updated in the same change, and skill hashes are
-   refreshed with `md hash`.
-10. L1 green on macOS locally and on Linux, Windows, and WSL2 in CI.
+8. A span whose declared type is an array or object is diagnosed with no
+   rewrite suggestion; a declared scalar and an untyped span are both
+   offered one. Nothing in this fix depends on the array-rendering fix
+   having landed.
 
-## Open Questions
+**Strand 2 — full frontmatter coverage.**
 
-1. **Should `md validate` grow an expression-lint pass?** It would give a
-   CLI surface outside Claudine and outside an editor. Options: (a) add
-   `--expressions` to `md validate` that runs `lint_expression` over body and
-   frontmatter spans; (b) a new `md lint`; (c) leave it to DMLS and Claudine.
-   Recommendation: (c) for this fix. Claudine already rejects at prepare
-   time and DMLS covers authoring. Revisit when a second lint rule exists.
-2. **Severity in DMLS: warning or error?** The construction can never be
-   correct on a non-rescanning surface, which argues for `ERROR`. The
-   consistency argument that was offered for `WARNING` was based on a false
-   premise and does not survive checking: DMLS does **not** render every
-   expression problem as `WARNING`. `EXPRESSION_MALFORMED` is `WARNING`
-   (`providers/dsl.rs`, `diagnostics/frontmatter.rs`), but
-   `EXPRESSION_UNKNOWN_IDENTIFIER` is `DiagnosticSeverity::INFORMATION` in
-   both producers. There is already a severity gradient, so the question is
-   which rung this rule belongs on, not whether the ladder is flat. Still
-   unruled; D3 specifies `WARNING` provisionally.
-3. **Should the `err` / `timing` / `current` roots be known to DMLS in every
-   document, or only under lifecycle keys?** Recommendation: everywhere, via
-   the shared known-root authority. Scoping to lifecycle keys would make
-   DMLS reason about Claudine's schema, which it does not do today.
-4. **What happens to `validate_no_interpolation_leaks`?** It already exists,
-   walks `iter_stack_expression_surfaces` with `visit_string_literals`
-   looking for surviving spans in literals, is exported from
-   `lifecycle/mod.rs`, and has tests — and no production call site was found
-   for it. The new validator overlaps it heavily. The plan must decide
-   whether `validate_no_nested_spans_in_literals` absorbs it, replaces it,
-   or sits beside it, and must not leave a second uncalled validator with
-   green tests behind. Whichever way it goes,
+9. Scalars inside list items carry `FmEntry` nodes, `nested_shape` resolves
+   a path crossing a sequence, and the nested-span rule reaches `when` /
+   `until` / `while` predicates, stack action operands, and `proxy … with`
+   values in the editor.
+10. Every existing diagnostic produces identical output on mapping-nested
+    surfaces before and after the descent, and hover, completion, and
+    navigation inside list items each either work correctly or are
+    suppressed — decided explicitly, and tested either way.
+11. A schema problem inside an array ranges the failing element rather than
+    the whole sequence.
+12. The `nested_shape_for_completion` memo is in place, and no production
+    path runs a linear arena scan inside a loop over `entries()`.
+
+**Strand 3 — the severity ladder.**
+
+13. `dm.expression.malformed` reports at `ERROR` on schema-typed frontmatter
+    values and `WARNING` on body spans,
+    `dm.expression.unknown_identifier` at `WARNING`, and
+    `dm.expression.nested_span_in_literal` at `ERROR`; the ladder is written
+    down where a future diagnostic author will find it.
+14. The decode guard covers every mis-decoded scalar style — `|`, `|-`,
+    `|+`, `>`, `>-`, `|2-`, `!!tag` and `*alias` — and a malformed
+    expression in any of them ranges and describes the expression rather
+    than the scalar indicator. This lands before or with the
+    `EXPRESSION_MALFORMED` raise.
+15. The `union_rejected` invariant is preserved, its comment states the real
+    rule, and a test pins it.
+
+**Strand 4 — the backslash escape.**
+
+16. `\{{` and `\{\{` both opt a span out of scanning, the backslash
+    survives compose unchanged, and unescaped `{{ … }}` still interpolates.
+
+**All strands.**
+
+17. `err`, `timing`, and `current` resolve under lifecycle keys and are
+    reported as unknown elsewhere.
+18. Docs listed in D5 are updated in the same change, and skill hashes are
+    refreshed with `md hash`.
+19. L1 green on macOS locally and on Linux, Windows, and WSL2 in CI.
+
+## Resolved Questions
+
+Every question this fix opened has been ruled. They are recorded with their
+reasoning so a future reader does not reopen them without the context.
+
+1. **Should `md validate` grow an expression-lint pass?** **Ruled: no.** No
+   `--expressions` flag on `md validate` and no new `md lint`. Expression
+   linting stays with DMLS, which covers authoring, and Claudine, which
+   rejects at prepare time. Revisit when a second lint rule exists and a
+   batch surface has a reason to exist.
+2. **Severity for the new diagnostic: warning or error?** **Ruled: `ERROR`,
+   under a general policy** — warnings mean "might be wrong", errors mean
+   "will never work" (D7). The consistency argument originally offered for
+   `WARNING` rested on a false premise: DMLS does not render every
+   expression problem as `WARNING`. `EXPRESSION_MALFORMED` was `WARNING`
+   while `EXPRESSION_UNKNOWN_IDENTIFIER` was `INFORMATION`, in both
+   producers, so the ladder was already uneven rather than flat. D7 makes it
+   deliberate and moves both existing codes.
+3. **Should `err` / `timing` / `current` be known to DMLS everywhere, or
+   only under lifecycle keys?** **Ruled: only under lifecycle keys**, since
+   that is the only place they exist. This reverses the earlier
+   recommendation in this document, which favored recognizing them
+   everywhere to avoid teaching DMLS about Claudine's schema. The coupling
+   is accepted knowingly as a stopgap, with its drift cost stated in D3 and
+   its intended replacement recorded in D3's architectural note.
+4. **Does the editor need to see `when` / `until` / `while` predicates?**
+   **Ruled: yes, and the blocker is removed rather than accepted.** The
+   predicates are declared expression-typed in the schema and reached
+   through the existing schema-driven path; D6's sequence descent and
+   array-element step are what make them reachable at all. Two verified
+   facts support this: `expression_diagnostics` already parses with the
+   condition dialect, so no parser selection is needed; and the original
+   blocker — `lower_mapping` recursing into `Node::Mapping` only, leaving
+   nothing inside a `- item` line with an `FmEntry` — is the thing D6 fixes.
+
+5. **Should DMLS assert a hard error on foreign template syntax in a
+   document body?** **Ruled: no, twice over.** The parser-agreement spike
+   raised this as the largest practical risk of the severity raise, having
+   measured that `{{#each items}}`, `{{ x | default: 1 }}`, `{{ a|upper }}`,
+   `{{> partial}}` and `{{ $json.id }}` all produce malformed reports in any
+   `.md` file in the workspace, with or without frontmatter. Two decisions
+   answer it together: D7 leaves body spans at `WARNING`, because a body
+   brace is an inference rather than a declaration; and D8 gives a document
+   an explicit way to opt out. Neither a per-code severity override in
+   `DmlsConfig` nor restricting the body producer to recognizably Darkmatter
+   documents is needed.
+
+No questions remain open. The items below are determinations the plan must
+make, not decisions still owed by a human.
+
+## Required Planning Determinations
+
+These are not open design questions. Each has a defined procedure and must
+be resolved during planning, with the answer recorded in the plan.
+
+1. **The disposition of `validate_no_interpolation_leaks`.** It exists in
+   `claudine/lib/src/composition/lifecycle/validate.rs`, walks
+   `iter_stack_expression_surfaces` with `visit_string_literals` hunting for
+   surviving spans in literals, is exported from `lifecycle/mod.rs`, and has
+   tests in `lifecycle/tests/diagnostics.rs` and
+   `lifecycle/tests/validation.rs`. No production call site was found in
+   `composition/prepare/` or in `claudine/cli/src/`. The new validator
+   overlaps it heavily.
+
+   Procedure: first confirm whether it is genuinely unreachable from any
+   production path. Then either fold its coverage into
+   `validate_no_nested_spans_in_literals` and delete it together with its
+   tests, or wire it up if it covers something the new validator does not.
+   Leaving a second uncalled validator with green tests behind is not an
+   acceptable outcome — that is the state that made this surface look
+   guarded. Either way,
    `claudine/docs/topics/lifecycle.md`'s claim that it "still runs" for
    non-lifecycle surfaces is corrected in the same change.
-5. **Does the editor need to see `when` / `until` / `while` predicates?**
-   Those surfaces carry bare condition text with no `{{ … }}` wrapper, so
-   the D3 frontmatter inventory cannot find them and only Claudine's schema
-   knows they are expressions. D2 covers them at prepare time, so the defect
-   is always caught — but the editor stays silent on a surface the rule
-   applies to, which makes the "three places" promise in Outcome partial.
-   Options: (a) accept it, and say so in the docs; (b) let DMLS learn the
-   predicate keys, which is exactly the Claudine-schema knowledge Open
-   Question 3 declines to give it; (c) require predicates to be written as
-   `{{ … }}` spans, a language change well outside this fix. Not ruled.
+2. **The raw-source route for stack surfaces.** D2 requires raw YAML text
+   for surfaces that `iter_stack_expression_surfaces` reports as parsed
+   trees. Decide between extending that iterator to carry raw source and
+   adding a parallel raw-text walker, and record which, because the choice
+   determines whether the two walks can drift apart.
+3. **The dotted-path array spelling.** `entry_by_dotted` matches by exact
+   string, and the descent must produce a spelling that agrees with
+   Darkmatter's own dotted-path producers. If the overlay emits
+   `initialize.stack[0].when` and a producer emits
+   `initialize.stack.0.when`, the lookup misses and the caller `continue`s —
+   a silently dropped diagnostic. `style_diagnostics`
+   (`diagnostics/frontmatter.rs`) is the live instance of that pattern.
+   Determine the spelling both sides use and pin it with a test. This is a
+   spelling decision, not a structural one, but getting it wrong fails
+   silently.
+4. **The pending-value deferral.** Darkmatter's `expression` format
+   validator accepts any value containing `$(` or `{{` (`format.rs`),
+   deferring on values that are not yet resolved. DMLS has no equivalent,
+   and the `union_rejected` guard hides the difference **coincidentally**
+   rather than by design. The descent adds new callers into that producer.
+   Determine whether to replicate the deferral in DMLS now or to rely on the
+   guard and pin it with the test required in D7. Relying on the guard is
+   defensible; relying on it without knowing that is what you are doing is
+   not.
+5. **Per-capability behavior inside list items (D6).** The sequence descent
+   makes hover, completion, and navigation fire where they never fired
+   before. For each, decide "works correctly" or "suppressed inside sequence
+   items", and record which, with the test that holds it. The decision is
+   per capability, not one blanket ruling: completion inside a stack item is
+   a plausible feature, while navigation may have no sensible target there.
+   What is not acceptable is discovering the behavior after the fact from a
+   user report.
