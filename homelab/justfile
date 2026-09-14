@@ -184,7 +184,7 @@ install *args="":
     @echo ""
     @echo -e "{{ BOLD }}{{ YELLOW }}Installing Homelab CLI ({{ ITALIC }}homey{{ RESET }}{{ BOLD }}{{ YELLOW }}){{ RESET }}"
     @echo
-    @cargo install --path ./cli {{ args }}  || ( just _play error-2 --background && exit 1 )
+    @cargo install --locked --path ./cli {{ args }}  || ( just _play error-2 --background && exit 1 )
     @echo ""
     @echo -e "{{ BOLD }}{{ BLUE }}Homelab CLI ({{ ITALIC }}homey{{ RESET }}{{ BOLD }}{{ BLUE }}) installed{{ RESET }}"
     @echo ""
@@ -196,7 +196,7 @@ install-server:
     @just build-frontend
     @echo ""
     @echo -e "{{ BOLD }}{{ YELLOW }}Installing Homelab Server{{ RESET }}"
-    @cargo install --path ./server  || ( just _play error-2 --background  && exit 1 )
+    @cargo install --locked --path ./server  || ( just _play error-2 --background  && exit 1 )
     @echo ""
     @echo -e "{{ BOLD }}{{ BLUE }}Homelab Server installed{{ RESET }}"
     @echo ""
@@ -261,7 +261,7 @@ install-integrations args="":
         echo
         echo -e "Installing the {{ BOLD }}{{ BLUE }}${integration}{{ RESET }} integration"
         echo
-        cargo install --path "./${integration}" {{ args }} || (
+        cargo install --locked --path "./${integration}" {{ args }} || (
             just _play error-2 --background &&
             echo -e "{{ RED }}{{ BOLD }}Error: {{ RESET }}problems installing the {{ BOLD }}${integration}{{ RESET }}!" &&
             exit 1
