@@ -12,15 +12,15 @@ success:
     say: |-
         {{
         ctx.area
-            ? "The review of the draft specification file in " + ctx.area + "" has completed"
-            : "The review of the draft specification file in the " + ctx.repo_name + " repo has completed"
+            ? "The review of the draft specification file in " + ctx.area + " has completed"
+            : "The review of the draft specification file in the " + ctx.repo + " repo has completed"
         }}
     message: "✅  review of the draft specification `{{ link(spec) }}` has completed"
 failure:
     say: |-
         {{
         ctx.area
-            ? "The inline review of the draft specification " + title_case(without_date(parent_dir(spec))) + " in the {{ctx.area}} package area failed to complete!"
+            ? "The inline review of the draft specification " + title_case(without_date(parent_dir(spec))) + " in the " + ctx.area + " package area failed to complete!"
             : "The inline review " + title_case(without_date(parent_dir(spec))) + " in the " + ctx.repo + " repo failed to complete!"
         }}
     message: "💥  failed to complete the inline review of `{{parent_dir(spec)}}` spec in **{{ctx.area}}**!"
