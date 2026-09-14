@@ -12,25 +12,47 @@ success:
     say: |-
         {{
         ctx.area
-            ? "The review of the draft specification file in {{ctx.area}} has completed"
-            : "The review of the draft specification file in the {{ctx.repo_name}} repo has completed"
+            ? "The review of the draft specification file in " + ctx.area + "" has completed"
+            : "The review of the draft specification file in the " + ctx.repo_name + " repo has completed"
         }}
     message: "✅  review of the draft specification `{{ link(spec) }}` has completed"
 failure:
     say: |-
         {{
         ctx.area
-            ? "The inline review of the draft specification {{ title_case(without_date(parent_dir(spec))) }} in the {{ctx.area}} package area failed to complete!"
-            : "The inline review {{ title_case(without_date(parent_dir(spec))) }} in the {{ctx.repo_name}} repo failed to complete!"
+            ? "The inline review of the draft specification " + title_case(without_date(parent_dir(spec))) + " in the {{ctx.area}} package area failed to complete!"
+            : "The inline review " + title_case(without_date(parent_dir(spec))) + " in the " + ctx.repo + " repo failed to complete!"
         }}
     message: "💥  failed to complete the inline review of `{{parent_dir(spec)}}` spec in **{{ctx.area}}**!"
 ---
-You are expected to review a draft specification document located at {{spec}}. This will be an "inline review" so instead of just writing a review file, your task is updating the underlying specification file inline with your suggested changes.
+## Context
 
-> Context: 
+You are expected to review a draft specification document located at: 
+
+- {{spec}}
+
+This will be an "inline review" meaning your task is to directly update the specification document with your changes (versus creating a sidecar review document).
+
+::block when='frontmatter(spec, "parent") || frontmatter(spec, "depends-on") || frontmatter(spec, "peers")'
+> **Important:** 
 > 
-> - the spec may include a `sub-spec` frontmatter property, if it does that means that this spec is part of a series of specifications which is trying to achieve a larger goal
-> - the spec may include a `depends-on` frontmatter property which indicates a direct dependency; you can assume that this dependency will be respected and all items in the prior spec file will be complete before any work on this spec is done
+::block when="parent"
+> - the spec you're reviewing includes a `parent` frontmatter property, this indicates that the spec you are reviewing is a sibling to the parent specification
+::end-block
+::block when="peers"
+> - the spec you're reviewing includes a `peers` frontmatter property, this indicates that the spec you are reviewing is part of a group of specs are related and together are designed to address a larger design goal
+::end-block
+::block when="depends-on"
+> - the spec you're reviewing includes a `depends_on` frontmatter property, this indicates that the spec you are reviewing 
+::end-block
+
+It's important to note that Frontmatter references to other specs are likely not a full filepath reference as that is _unstable_ in this repo:
+
+- when a specification is completed it's location is _moved_ to the `_completed` folder
+- that means you might have a full path reference, an old full path reference (e.g., before it was moved to `_completed`), or ideally what you have is the specifications identifier only (e.g., something like `{date}-{description}`)
+- specification files are always located under a package area's "fixes" or "features" directory
+
+::end-block
 
 Look for how this spec file could be improved:
 
@@ -52,7 +74,7 @@ Look for how this spec file could be improved:
 - update with better wording if you think ideas are expressed unclearly
 
 
-Update the spec file at "{{spec}}" and then:
+Update the spec file at "{{spec}}" and set the following frontmatter on the spec file:
 
 - set the spec file's `reviewed` Frontmatter property to 'true'
 - set the spec file's `reviewed_by` Frontmatter property to "{{ctx.agent}}/{{ctx.model}}"
