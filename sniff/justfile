@@ -158,7 +158,7 @@ install *args="":
     @echo ""
     @echo -e "{{ BOLD }}{{ YELLOW }}Installing Sniff CLI{{ RESET }}"
     @cargo build --release -p sniff-cli  || ( playa effect error-2 2>/dev/null && exit 1 )
-    @cargo install --path cli -- {{ args }}  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @cargo install --locked --path cli {{ args }}  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo -e "{{ BOLD }}{{ BLUE }}Sniff CLI Installed{{ RESET }}"
     @echo ""
