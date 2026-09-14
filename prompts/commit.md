@@ -21,8 +21,8 @@ model: |-
 resides_in: |-
     {{
         length(ctx.dirty_package_areas) == 1
-            ? 'are all part of the {{ctx.dirty_package_areas}} package area'
-            : 'are spread across {{length(ctx.dirty_package_areas)}}:\n {{as_unordered_list(ctx.dirty_package_areas)}}'
+            ? 'are all part of the ' + as_csv(ctx.dirty_package_areas) + ' package area'
+            : 'are spread across ' + length(ctx.dirty_package_areas) + ':\n ' + as_unordered_list(ctx.dirty_package_areas)
     }}
 initialize:
     stack:

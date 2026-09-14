@@ -41,7 +41,7 @@ diagnosis.
 4. cypher({statement: "MATCH path..."})                 → Custom traces if needed
 ```
 
-> If "Index is stale" → run `node .gitnexus/run.cjs analyze` in terminal.
+> If "Index is stale" → run `just gitnexus` in terminal.
 
 ## Checklist
 

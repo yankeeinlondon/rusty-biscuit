@@ -44,11 +44,9 @@
 - **The merge gate is `ci-gate`,** a policy-free fold of every blocking job's
   `needs.*.result` (`success` and `skipped` pass; `failure` and `cancelled`
   block). It reads no plan, baseline, or artifact; `MISSING` is each area's
-  coverage audit to catch. Until the `protect-your-bacon` required context is
-  switched from `ci-verdict` to `ci-gate` — Ken's separate approval, after
-  this branch's own run is green — every PR shows `ci-verdict — Expected` and
-  cannot merge. Load the `rust-devops` skill before changing CI scope,
-  evidence reuse, or the gate.
+  coverage audit to catch. It has been the `protect-your-bacon` required
+  context since 2026-09-13, replacing `ci-verdict`. Load the `rust-devops`
+  skill before changing CI scope, evidence reuse, or the gate.
 
 ## Evidence Reuse and Execution Constraints
 
@@ -145,7 +143,7 @@ Update alongside code changes:
 
 This project is indexed by GitNexus as **rusty-biscuit** (158905 symbols, 335372 relationships, 815 execution flows).
 
-> Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
+> Index stale? Run **`just gitnexus`** from anywhere in the repo — always this recipe, never a bare `gitnexus analyze`. It short-circuits when `gitnexus status` already reports up-to-date, and it passes `--skip-agents-md` so refreshing the index cannot rewrite this file or `AGENTS.md` into tracked diff noise. It also passes `--force`, because incremental indexing fails often enough to be unreliable.
 
 ## Always Do
 

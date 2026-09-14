@@ -6,7 +6,12 @@ name: Release-plz
 #
 # Footgun: `workflow_run` workflows execute the definition from the DEFAULT
 # BRANCH, not from the triggering commit. Edits to this trigger take effect only
-# once merged to `main`.
+# once merged to `main`. That is GitHub's rule, not a repository choice: a
+# `workflow_run` job holds `contents: write` and the registry token, so reading
+# its definition from the triggering commit would let that commit rewrite the
+# privileged workflow. `release-dry-run` below is the escape hatch — it is
+# `workflow_dispatch`, which DOES honour the ref you select, so the release
+# calculation can be exercised from a branch before its definition is merged.
 #
 # Lockfile note: lockfiles are TRACKED as of 2026-07-30 (they were gitignored
 # from 2026-04-08). The clean-worktree assertions below inspect tracked files
@@ -18,6 +23,8 @@ name: Release-plz
 # run and has not been exercised since the policy changed. If it fires, decide
 # between committing the regenerated lock as part of the release commit or
 # scoping the assertion to exclude lockfiles; do not simply re-ignore them.
+# Run `release-dry-run` first: it reports exactly which tracked files a real
+# calculation would touch, so that decision is made from evidence.
 # See fixes/2026-07-30-ci-cd-stabilization/plan.md.
 on:
   workflow_run:
@@ -31,6 +38,7 @@ on:
       - main
     types:
       - closed
+  workflow_dispatch:
 
 env:
   # release-plz shells out to `cargo package`/`publish`, which compiles. The
@@ -57,17 +65,46 @@ jobs:
       group: release-plz-${{ github.ref }}
       cancel-in-progress: false
     steps:
+      # The branch, NOT `workflow_run.head_sha`. A bare SHA detaches HEAD, and
+      # release-plz resolves the branch it is releasing through
+      # `git rev-parse --abbrev-ref --symbolic-full-name @{upstream}`, which on
+      # a detached HEAD answers `fatal: HEAD does not point to a branch`. Every
+      # release calculation from 2026-08-31 to 2026-09-13 died there, before a
+      # single version was computed. Checking out a branch ref also restores the
+      # upstream tracking that expression needs. Freshness is asserted below
+      # rather than pinned here.
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          # Check out exactly the main commit that CI validated.
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: main
           fetch-depth: 0
 
+      # `main` can advance between the validated run finishing and this job
+      # starting. That newer commit gets its own `ci` run and its own release
+      # calculation, so this one is stale rather than broken: report and stand
+      # down. Failing here would make an ordinary merge look like a release
+      # fault.
+      - name: Stand down unless main is still the commit CI validated
+        id: freshness
+        shell: bash
+        env:
+          VALIDATED: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "${head}" != "${VALIDATED}" ]; then
+            echo "::notice title=release skipped::main advanced from ${VALIDATED} to ${head}; that commit's own ci run owns its release calculation"
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install Rust
+        if: steps.freshness.outputs.stale != 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Assert clean tracked worktree before release calculation
+        if: steps.freshness.outputs.stale != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -78,6 +115,7 @@ jobs:
           fi
 
       - name: Run release-plz
+        if: steps.freshness.outputs.stale != 'true'
         uses: release-plz/action@v0.5
         with:
           command: release-pr
@@ -87,8 +125,10 @@ jobs:
       # release-pr pushes its changes to a dedicated release branch, so the
       # checked-out commit must stay clean. A dirty tracked worktree here means
       # release-plz mutated a tracked file in place — surface it as a release
-      # failure rather than letting it silently poison a later checkout.
+      # failure rather than letting it silently poison a later checkout. If this
+      # is what fires next, `release-dry-run` names the files first.
       - name: Assert clean tracked worktree after release calculation
+        if: steps.freshness.outputs.stale != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -135,3 +175,76 @@ jobs:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The only way to exercise the release calculation from a branch.
+  #
+  # `release-plz update` is the stage that failed for six weeks: it resolves the
+  # repository and computes each crate's next version, and it writes ONLY to the
+  # local worktree — no branch, no push, no pull request, no registry. It is
+  # what `release-pr` runs before it publishes anything, so a green run here
+  # proves the git state this workflow hands release-plz is one it can work in.
+  #
+  # It also answers the lockfile question in the header: the diff it reports is
+  # exactly the tracked-file set a real calculation would produce, which is what
+  # the post-calculation assertion in `release-plz-pr` would judge.
+  #
+  # `release-plz/action` only accepts `release-pr` and `release`, so the binary
+  # is installed directly — same version and same installer the action uses.
+  # Write permissions are dropped: this job must not be able to release.
+  release-dry-run:
+    name: Release Dry Run
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prove the release calculation has a branch to stand on
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "branch:   $(git rev-parse --abbrev-ref HEAD)"
+          echo "upstream: $(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}')"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
+        env:
+          BINSTALL_VERSION: 1.23.0
+
+      - name: Install release-plz
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo-binstall release-plz@0.3.165 \
+            --force --strategies=crate-meta-data,compile --no-confirm
+
+      - name: Compute next versions
+        shell: bash
+        run: release-plz update
+
+      - name: Report what a real calculation would touch
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed="$(git status --porcelain --untracked-files=no)"
+          if [ -z "${changed}" ]; then
+            echo "No tracked file would change; the post-calculation assertion would pass."
+            exit 0
+          fi
+          {
+            echo "### Tracked files a release calculation would rewrite"
+            echo
+            echo '```'
+            echo "${changed}"
+            echo '```'
+            echo
+            echo "The \`release-plz-pr\` post-calculation assertion judges exactly this set."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "${changed}"
