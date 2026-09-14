@@ -41,6 +41,16 @@ belong here.
   HEAD`. The staged snapshot of any `AM`/`MM` paths you want to commit at their
   pre-supersede content is already in the real index; you only need the temp
   index when sibling staged paths must be excluded from the tree.
+- **Plumbing is for merged multi-agent batches, not sequential commits.** The
+  temp-index fallback only restores the full tree at the merge of all sibling
+  branches; for *sequential* commits on a single branch, the fallback's
+  missing HEAD paths propagate into every subsequent `--only` commit (whose
+  tree is `previous-HEAD + named-change`, with `previous-HEAD` itself sparse)
+  and the cumulative state loses the other files. Prefer `--only` for
+  non-clean-superset `AM` paths in any sequential flow even though it commits
+  working-tree content beyond the staged snapshot — describe those additions
+  in the body so the bullet list matches the diff. Reserve the plumbing
+  fallback for parallel branches that converge in a merge.
 - `--only` on a clean-superset `MM` path still captures working-tree-only
   content (e.g. a manifest `[[test]]` block whose source file is currently
   untracked). The pre-flight `git show :<path>` only sees the staged blob;
