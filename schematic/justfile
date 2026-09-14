@@ -219,7 +219,7 @@ generate-postman:
         --postman-out postman --no-openapi -v
 
 # build, install CLI, generate schemas, and verify
-install:
+install *args="":
     @echo ""
     @echo -e "Installing {{ BOLD }}{{ YELLOW }}Schematic{{ RESET }}"
     @echo "--------------------"
@@ -228,7 +228,7 @@ install:
     @cargo build --release -p schematic-define -p schematic-definitions -p schematic-gen  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo -e "{{ BOLD }}Installing schematic-gen CLI{{ RESET }}"
-    @cargo install --path gen --locked  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @cargo install --locked --path gen {{ args }}  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo -e "{{ BOLD }}Generating all API clients{{ RESET }}"
     @cargo run --release -p schematic-gen -- --api all --output schema/src -v  || ( playa effect error-2 2>/dev/null && exit 1 )

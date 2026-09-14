@@ -122,10 +122,10 @@ lint:
     @just check-zed
 
 # Install the DMLS binary; when Zed is installed, also stage and register its dev extension
-install-dmls:
+install-dmls *args="":
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo install --locked --path ./dmls --force
+    cargo install --locked --path ./dmls --force {{ args }}
     # Staging copies `extension.wasm`; compile it first so a `src/lib.rs` edit
     # cannot reach Zed as a stale bundled module. A machine without the wasm
     # target still gets the binary and the last committed extension.

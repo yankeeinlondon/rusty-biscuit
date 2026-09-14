@@ -192,11 +192,11 @@ install *args="":
     @just _play drop-4
 
 # install server binary
-install-server:
+install-server *args="":
     @just build-frontend
     @echo ""
     @echo -e "{{ BOLD }}{{ YELLOW }}Installing Homelab Server{{ RESET }}"
-    @cargo install --locked --path ./server  || ( just _play error-2 --background  && exit 1 )
+    @cargo install --locked --path ./server {{ args }}  || ( just _play error-2 --background  && exit 1 )
     @echo ""
     @echo -e "{{ BOLD }}{{ BLUE }}Homelab Server installed{{ RESET }}"
     @echo ""
