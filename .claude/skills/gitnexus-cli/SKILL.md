@@ -13,6 +13,20 @@ Commands below use `node .gitnexus/run.cjs <command>` — the project-local runn
 
 ### analyze — Build or refresh the index
 
+**In this repo, always refresh with `just gitnexus`:**
+
+```bash
+just gitnexus
+```
+
+The recipe short-circuits when `gitnexus status` already reports up-to-date, then
+runs `gitnexus analyze --skip-agents-md --force`. `--skip-agents-md` is the point:
+a bare `analyze` regenerates CLAUDE.md and AGENTS.md, which turns an index refresh
+into tracked diff noise. `--force` is there because incremental indexing fails
+often enough to be unreliable.
+
+The underlying command, for reference and for the flags below:
+
 ```bash
 node .gitnexus/run.cjs analyze
 ```
@@ -30,7 +44,7 @@ Run from the project root. This parses all source files, builds the knowledge gr
 | `--spring-actuator <path>` | Import opt-in Spring Boot Actuator mappings, beans, conditions, configprops, and env snapshots. Forces a full rebuild; unsupported with `--watch`. |
 | `--asyncapi-spec <path>` | Read opt-in AsyncAPI 3.x documents (directory or single file) and mint `Destination` nodes from their operations. 2.x is refused, not mapped. Unsupported with `--watch`. |
 
-**When to run:** First time in a project, after major code changes, or when `gitnexus://repo/{name}/context` reports the index is stale. In Claude Code, a PostToolUse hook detects staleness after `git commit` and `git merge` and notifies the agent to run `analyze` — the hook does not run analyze itself, to avoid blocking the agent for up to 120s and risking KuzuDB corruption on timeout.
+**When to run:** First time in a project, after major code changes, or when `gitnexus://repo/{name}/context` reports the index is stale. In Claude Code, a PostToolUse hook detects staleness after `git commit` and `git merge` and notifies the agent to run `just gitnexus` — the hook does not run analyze itself, to avoid blocking the agent for up to 120s and risking KuzuDB corruption on timeout.
 
 For Spring runtime enrichment, pass a JSON bundle, one endpoint JSON file, or a directory containing endpoint files. Route evidence is authoritative only when `runtimeConfirmed === true`; `runtimeSource` records provenance and may also accompany `handler-conflict`. Env/configprops values are never persisted.
 

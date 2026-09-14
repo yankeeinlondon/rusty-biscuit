@@ -606,10 +606,10 @@ jobs:
   #     detailed diagnosis. The failed reusable workflow reaches this fold as
   #     `failure` without relying on the coverage audit to reveal it.
   #
-  # Ruleset `protect-your-bacon` (id 19747338) still names the context
-  # `ci-verdict`. Until Ken switches it to `ci-gate` (Validation and Rollout
-  # step 6, after this change's own run is green) every pull request shows
-  # `ci-verdict — Expected` and cannot merge. Nothing here edits the ruleset.
+  # This job's name IS the required context on ruleset `protect-your-bacon`
+  # (id 19747338), as of 2026-09-13. Renaming it silently un-gates merges:
+  # branch protection would wait on a context nothing reports. Change the
+  # ruleset first.
   ci-gate:
     name: ci-gate
     # Every top-level job whose failure must block. Each package's gates are

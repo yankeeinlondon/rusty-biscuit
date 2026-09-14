@@ -1096,6 +1096,58 @@ fn release_automation_follows_successful_ci() {
     );
 }
 
+/// release-plz resolves the branch it is releasing through
+/// `git rev-parse --abbrev-ref --symbolic-full-name @{upstream}`. A checkout
+/// pinned to a bare SHA detaches HEAD, that expression answers `fatal: HEAD
+/// does not point to a branch`, and the calculation dies before computing a
+/// single version — which is how every release run between 2026-08-31 and
+/// 2026-09-13 failed. The validated SHA must still be honoured, as a freshness
+/// comparison against the branch tip rather than as the checkout ref.
+#[test]
+fn the_release_calculation_runs_on_a_branch_not_a_detached_head() {
+    let release = workflow("release-plz.yml");
+    assert!(
+        !release.contains("ref: ${{ github.event.workflow_run.head_sha }}"),
+        "release-plz must not check out a bare SHA; a detached HEAD has no `@{{upstream}}`"
+    );
+    assert!(
+        release.contains("github.event.workflow_run.head_sha"),
+        "the validated SHA must still be compared against the checked-out branch tip"
+    );
+}
+
+/// The `workflow_run` definition is read from the default branch, so the
+/// release calculation cannot be proven on a pull request. `workflow_dispatch`
+/// honours the selected ref, so it is the one seam that can — and it must stay
+/// unable to publish.
+#[test]
+fn the_release_calculation_is_provable_from_a_branch_without_releasing() {
+    let release = workflow("release-plz.yml");
+    assert!(
+        release.contains("workflow_dispatch:"),
+        "release-plz needs a dispatchable seam; `workflow_run` always runs the default branch's definition"
+    );
+    let dry_run = job_block("release-plz.yml", "  release-dry-run:");
+    assert!(
+        dry_run.contains("github.event_name == 'workflow_dispatch'"),
+        "the dry run must be reachable only by dispatch"
+    );
+    assert!(
+        dry_run.contains("contents: read"),
+        "the dry run must drop write permissions; it may not release"
+    );
+    assert!(
+        dry_run.contains("release-plz update"),
+        "the dry run must exercise the version calculation that fails on a bad git state"
+    );
+    for forbidden in ["command: release-pr", "command: release\n", "GITHUB_TOKEN"] {
+        assert!(
+            !dry_run.contains(forbidden),
+            "the dry run must not reach a publishing path (found {forbidden:?})"
+        );
+    }
+}
+
 #[test]
 fn lockfiles_are_tracked_and_the_release_premise_says_so() {
     let gitignore = read(".gitignore");

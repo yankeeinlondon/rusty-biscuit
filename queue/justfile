@@ -98,7 +98,7 @@ install *args="":
     @cargo build --release -p queue
     @echo ""
     @echo "{{ BOLD }}{{ YELLOW }}Installing Queue CLI{{ RESET }}"
-    @cargo install --path cli {{ args }}
+    @cargo install --locked --path cli {{ args }}
     @echo ""
     @echo "{{ BOLD }}{{ BLUE }}Queue CLI Installed!{{ RESET }}"
     @echo ""

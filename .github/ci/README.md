@@ -583,13 +583,12 @@ authoritative for missing cells, exact skip budgets, and governed gaps when
 producers are green; ordinary failures reach `ci-gate` directly through the
 producer's truthful job result.
 
-**Required-context transition.** Ruleset `protect-your-bacon` (id 19747338)
-still names `ci-verdict`, which was the required check until 2026-09-12.
-Until that context is switched to `ci-gate`, every pull request shows
-`ci-verdict — Expected` and cannot merge. The switch is Ken's separate
-approval (specification Validation and Rollout step 6), taken after this
-change's own run is green; the admin `pull_request` bypass actor on that
-ruleset is untouched by it. `just ci-diff` reads a run's `ci-results-<slug>`
+**Required context.** Ruleset `protect-your-bacon` (id 19747338) requires
+`ci-gate`. It named `ci-verdict` until 2026-09-13, when that job no longer
+existed in `ci.yml` and every pull request sat on a `ci-verdict — Expected`
+check that could never arrive; the swap was taken as specification Validation
+and Rollout step 6. The admin `pull_request` bypass actor on that ruleset was
+left untouched by it. `just ci-diff` reads a run's `ci-results-<slug>`
 slices (there is no whole-run `ci-results` artifact any more) and
 `.claudine/scripts/ci-watchdog.ts` waits for the `ci-gate` job.
 
