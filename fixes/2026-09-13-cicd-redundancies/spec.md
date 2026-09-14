@@ -2,26 +2,48 @@
 created: 2026-09-13
 status: proposed
 implemented: false
-reviewed: false
-review_iterations: 0
+reviewed: true
+reviewed_by: codex/gpt-5.6-sol
+reviewed_on: 2026-09-13
+review_iterations: 1
 area: repository-ci
-relates_to:
+depends-on:
   - fixes/2026-09-11-cicd-cleanup/spec.md
 ---
 
-# CI Redundancies: One Scheduling Model, One Owner Per Suite, One Report
+# CI Redundancies: One Scheduling Model, One Owner Per Suite, One Consolidated Report
 
 ## Objective
 
-Every unit of CI work should be selected by the resolved plan, owned by exactly
-one job, and reported once. Today three legs escape that: two because their
-subjects cannot be expressed as plan cells, and one because it duplicates
-another job's suites outright. A fourth gap is that a change requiring no tests
-produces no account of itself — locally or in CI.
+Every build, lint, test, and companion-suite invocation must be selected by the
+resolved plan, owned by exactly one package cell, and reported once. The
+orchestration jobs that calculate scope, verify runner prerequisites, fold the
+merge gate, and render the advisory report are not cells because they produce
+no package evidence.
 
-This fix folds the escapes back into the cell model, removes the duplication,
-and replaces the advisory summary with a report that states what changed, what
-ran, where it ran, and what it cost.
+Today three test paths escape that rule: `preflight` duplicates eight suites
+from `ci-tooling`; `ci-tooling` itself is selected by a bare flag rather than
+package cells; and the Biscuit TUI Windows console test bypasses the package
+matrix and Nextest. A fourth gap is that a change requiring no package work
+produces no useful account of itself locally or in CI.
+
+This fix assigns every retained suite to a package, removes the duplicate and
+specialized jobs, makes reuse visible with the repository's established origin
+vocabulary, and replaces the current advisory navigation aid with one
+consolidated run report. It does not move policy out of area coverage audits or
+the merge decision out of `ci-gate`.
+
+## Relationship to the CI Cleanup Specification
+
+This specification directly depends on
+`fixes/2026-09-11-cicd-cleanup/spec.md`. It preserves that specification's
+resolved-plan authority, package-keyed evidence, area-only grouping, per-area
+coverage audits, governed-gap behavior, and policy-free `ci-gate` fold.
+
+> **Reader's note (review, 2026-09-13).** The original draft used
+> `relates_to`, but implementation assumes the prior plan schema, area fan-out,
+> local-evidence overlay, and `ci-gate` architecture are already present. This
+> is therefore a direct dependency, not merely related work.
 
 ## Observed Problems
 
@@ -29,265 +51,410 @@ Measured 2026-09-13 against `ci.yml` at `08f536b08`.
 
 ### P1 — `preflight` and `ci-tooling` run the same eight suites
 
-Both jobs run, on the same commit, in the same run:
+Both jobs run, on the same commit, in the same workflow run:
 
-```
+```text
 test_affected_scope.py   test_constraints.py    test_evidence_reuse.py
 test_local_evidence.py   test_publish_gaps.py   test_resolved_plan.py
 test_reuse_validation.py test_schema.py
 ```
 
 `test_runner_loss.py` is preflight's alone. `ci_workflow_contracts`,
-`ci-rollup`, `ci-plan`, `test_ci_local.py` and the test-audit check are
-ci-tooling's alone. Everything else is executed twice.
+`ci-rollup`, `ci-plan`, `test_ci_local.py`, and the test-audit check are
+ci-tooling's alone. The duplicated eight execute twice without producing
+different evidence.
 
 This is also why a change that schedules no packages still runs a
-`preflight (ubuntu-latest)` job: it is not preflighting anything: it is
-re-running CI's self-tests under a name that says otherwise. The plan says so
-in its own words — `preflight_reason: "no build/test packages affected;
-preflight runs on the scope host only"`.
+`preflight (ubuntu-latest)` job. The plan says
+`preflight_reason: "no build/test packages affected; preflight runs on the
+scope host only"`, but the job is primarily re-running CI's self-tests rather
+than establishing a precondition for scheduled package work.
 
-### P2 — `ci-tooling` is a top-level leg because its subjects cannot be cells
+### P2 — CI tooling has owners, but its owners are not schedulable
 
-`ci-tooling` is gated on a bare boolean, `needs.scope.outputs.ci_tooling`. The
-resolved plan carries no cell for it, so it has no
-`{package, environment, gate}` identity, no evidence reuse, and no per-input
-granularity. Any pull request that touches one `ci_tooling` input pays the
-whole leg on **every subsequent push**, including a push that changes only a
-document. Its subjects cannot currently be cells:
+`ci-tooling` is gated on `needs.scope.outputs.ci_tooling`. The resolved plan
+carries no cell for that work, so it has no `{package, environment, gate}`
+identity, no area-owned result, and no cell-granular evidence.
 
-- `scripts/` declares its own `[workspace]` (package `repo-deps`) and is not a
-  member of the root workspace.
-- `tools/test-toolkit` is a member but carries
-  `[package.metadata.ci] gates = false`, `exclusion-class = "promotion-pending"`,
-  expiry `2026-10-31`, whose recorded reason already names this problem: *"63 L1
-  tests that currently run in NO CI job. Promotion is blocked on the canonical
-  just recipe set (check-canonical) for tools/."*
+The existing package model already provides most of the required shape:
 
-The tests themselves are not in question — they are load-bearing, and they
-caught a real defect in `CI_TOOLING_PREFIXES` on 2026-09-13. What is in question
-is the leg.
+- `scripts/Cargo.toml` defines package `repo-deps`, but its nested
+  `[workspace]` keeps it outside the root workspace and gives it a separate
+  lockfile.
+- `tools/test-toolkit` is a root workspace member with a complete canonical
+  recipe set in `tools/justfile`, but its manifest still declares
+  `gates = false` under an obsolete `promotion-pending` record.
+- `[package.metadata.ci.tests].companion-suites` already assigns a non-Cargo
+  suite to a Cargo package and makes a skipped or failed companion downgrade
+  the owning cell. The implementation is currently hard-coded for only
+  `homelab-frontend` and records only one companion outcome.
 
-### P3 — `biscuit-tui-captured-stdout` is a second escape of the same kind
+The suites are load-bearing: they caught a real defect in
+`CI_TOOLING_PREFIXES` on 2026-09-13. The defect is their top-level scheduling
+shape, not their existence.
 
-A top-level job calling a dedicated reusable workflow, for exactly one test:
-`biscuit-tui/cli/tests/windows_captured_stdout.rs`,
-`captured_stdout_receives_only_value_no_tui_bytes`. It is `#[ignore]`d so it
-compiles everywhere and runs only when named, and it is invoked with
-`cargo test … -- --ignored --nocapture` on a Windows host, bypassing nextest and
-the tier filtersets entirely.
+### P3 — `biscuit-tui-captured-stdout` bypasses the normal Windows L1 cell
 
-`biscuit-tui` is an ordinary package with ordinary tests. One test needing a
-Windows host and an attached console is what the **tier system already exists
-for**. D12 already moved this leg once — from self-triggering on paths to
-scope-selected orchestration. This proposes the last step.
+The top-level job calls a dedicated reusable workflow for one test:
+`biscuit-tui/cli/tests/windows_captured_stdout.rs` /
+`captured_stdout_receives_only_value_no_tui_bytes`. The test is `#[ignore]`d
+and invoked with `cargo test ... -- --ignored --nocapture`, bypassing Nextest,
+the canonical recipe, JUnit staging, local evidence, and the area coverage
+audit.
+
+The test does not require an external terminal harness. It self-allocates a
+Windows console, rewires its handles, injects input, and fails when it cannot
+prove that precondition. Under the repository's tier contract, that makes it a
+Windows-only L1 integration test, not L2: operating system is expressed by
+`#![cfg(windows)]`, while L2 is reserved for a real external terminal/PTY
+harness. Classifying it as L2 would strand it behind the governed
+`windows-latest` L2 capability gap.
+
+> **Reader's note (review, 2026-09-13).** The original draft said the tier
+> system should select this test but did not select a tier. This review rules
+> L1 explicitly. That is an intentional correction to the older test docs that
+> treated `#[cfg(windows)] + #[ignore]` as the appropriate automation shape.
 
 ### P4 — a no-test change accounts for itself nowhere
 
-A pure documentation change is correctly scheduled as nothing. Verified at all
-three levels:
+A pure documentation change is correctly scheduled as no package work at all
+three ownership levels:
 
 | change | class | packages | areas | flags |
-|---|---|---|---|---|
-| `docs/…` (monorepo root) | documentation | 0 | 0 | none |
-| `<area>/docs/…` (package area) | documentation | 0 | 0 | none |
-| `<package>/README.md` (package) | documentation | 0 | 0 | none |
+|---|---|---:|---:|---|
+| `docs/...` at repository root | documentation | 0 | 0 | none |
+| `<area>/docs/...` | documentation | 0 | 0 | none |
+| `<package>/README.md` | documentation | 0 | 0 | none |
 
 The scheduling is right. The reporting is absent at both ends: the pre-push
-hook prints no account of which documents changed, and CI produces an
-`infrastructure summary (advisory)` whose three steps are *Reuse successful PR
-validation*, *No package was scheduled*, and *Classify the first actionable
-failure* — a navigation aid for bootstrap jobs, not a report. A reviewer
-learns what happened by noticing an absence.
+hook does not name the documents it evaluated, and the current
+`infrastructure summary (advisory)` is a bootstrap navigation aid rather than a
+change-and-execution report. A reviewer learns what happened by noticing an
+absence.
 
-### P5 — an empty matrix reads as a hung job
+The resolved plan currently carries only the coarse `change_class`; it does
+not carry the changed paths or category counts needed to produce the requested
+report. Raw JUnit manifests and producer statuses also do not currently record
+lint command duration or machine-readable counts for every companion suite.
+The original draft's statement that all report data already exists was
+therefore incomplete.
 
-`area-ci` with zero scheduled areas renders in the Actions graph as
-**"Waiting for pending jobs"** and resolves to `skipped` only at the end. The
-outcome is correct; the presentation says the opposite of what is true for the
-duration of the run.
+### P5 — an empty matrix looks pending longer than necessary
+
+`area-ci` with no scheduled areas renders as **Waiting for pending jobs** while
+its prerequisites run and resolves to `skipped` only afterward. The outcome is
+correct, but the presentation implies undiscovered work. A dynamically scoped
+job cannot resolve before `scope`; the enforceable requirement is that it
+resolve immediately after `scope`, without waiting for an unnecessary
+documentation-only preflight.
 
 ## Required Behavior
 
-### 1. One scheduling model
+### 1. One scheduling model for package work
 
-Every unit of CI work is selected from the resolved plan as a
-`{package, environment, gate}` cell. No top-level job may be gated on a bare
-scope flag as its own unit of work.
+Every build, lint, test, and companion suite is selected from the canonical
+resolved plan as a `{package, environment, gate}` cell. No top-level job may be
+selected by a bare change-classification flag to run package-owned work.
 
-Consequently `ci_tooling` ceases to be a scheduling flag. It may remain as a
-*change-classification* input if the calculator needs it to widen selection, but
-it must not gate a job.
+`ci_tooling` is removed from the plan flags and workflow outputs. Tooling input
+paths select the package that owns the affected suite through an explicit,
+tested path-to-owner rule. This is selection within the existing plan, not a
+second scheduler and not an implicit full-workspace trigger.
 
-### 2. CI's own suites become owned packages
+### 2. CI's own suites become package-owned
 
-`repo-deps` and `test-toolkit` become schedulable like any other package, so
-their suites are selected by scope, reuse local evidence, and skip when their
-inputs did not change. `test-toolkit`'s `promotion-pending` exclusion is retired
-by this fix rather than expiring unattended on 2026-10-31.
+`repo-deps` becomes a root workspace member by removing its nested
+`[workspace]`, adding `scripts` to the root workspace, and retiring
+`scripts/Cargo.lock`. Its package area is `root`, following the existing
+manifest-directory derivation rule.
+
+`test-toolkit` becomes gating now that `tools/justfile` already provides the
+canonical recipe set named by its exclusion record. The
+`promotion-pending` record is removed in the same change.
+
+Suite ownership is:
+
+| owner package | ordinary L1 suite | companion suite |
+|---|---|---|
+| `repo-deps` | the complete Nextest suite, including `ci-rollup` and `ci-plan` tests | every `scripts/ci/test_*.py` suite, including `test_ci_local.py` and `test_runner_loss.py` |
+| `test-toolkit` | the complete Nextest suite, including `ci_workflow_contracts` | `tools/test-audit` typecheck and Vitest suite |
+
+The companion-suite mechanism is generalized from its one hard-coded outcome
+to a closed set of named suites. Each declared suite has one canonical recipe,
+one owning package, one CI environment, and one machine-readable outcome with
+counts and command duration. The producer status carries outcomes per suite;
+one suite's success cannot hide another suite's failure or skip. Unknown suite
+names, missing recipes, absent results, and duplicate owners fail contract
+validation.
+
+The tooling trigger table names each suite's real inputs. At minimum:
+
+- source files under `scripts/**` select `repo-deps` through normal package
+  ownership, while its manifest, canonical runner, and other suite inputs are
+  explicit triggers for the same owner;
+- `.github/ci/**` selects `repo-deps` for the Python CI contracts;
+- `.github/workflows/**` selects `test-toolkit` for workflow contracts;
+- `tools/test-audit/**`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` select
+  `test-toolkit` for its test-audit companion;
+- changes to a suite or its canonical runner select its owner.
+
+The contract tests pin this mapping so an input cannot silently stop selecting
+the suite that verifies it. A shared input may select both owners when both
+suites consume it.
+
+Companion suites remain CI-origin on their declared environment unless the
+local-evidence schema is deliberately extended later. Their presence must not
+make unrelated L1 cells non-reusable. If the current implementation attaches a
+companion to L1, only the environment that must run that companion is
+non-reusable; Rust-only L1 cells in other environments retain normal reuse.
 
 ### 3. One owner per suite
 
-Each suite named in P1 runs in exactly one job per run. `preflight` keeps only
-what is genuinely a precondition for other work — toolchain and tooling
-availability, canonical recipe validation — and stops re-running CI's
-self-tests.
+`preflight` retains only prerequisites for scheduled package work: pinned
+toolchain initialization, required tool availability, Cargo metadata, and
+`just check-canonical`. It runs no Python, Rust, or TypeScript test suite.
 
-A contract test asserts no suite command appears in two top-level job
-definitions.
+When the plan contains no package work, `preflight_os` is empty and preflight
+skips. When package work exists, its current OS-breadth policy remains in
+force. The package fan-out continues to depend on preflight for work that will
+actually execute.
 
-### 4. The Windows console test becomes a cell
+A contract test validates suite identities and owners, rather than comparing
+fragile shell-command strings. Every registered suite must have exactly one
+owner and may be invoked only by that owner's package job.
 
-`captured_stdout_receives_only_value_no_tui_bytes` is selected by tier and
-environment like every other test, on a Windows cell of `biscuit-tui-cli`.
-`biscuit-tui-windows-captured-stdout.yml` and the top-level job that calls it are
-removed. The test's runtime precondition proof — that it fails loudly when the
-console contract does not hold — is preserved exactly; that assertion is the
-evidence, and nothing here weakens it.
+### 4. The Windows console test becomes ordinary L1 evidence
 
-### 5. A change report replaces the advisory summary
+`captured_stdout_receives_only_value_no_tui_bytes` remains
+`#![cfg(windows)]`, loses `#[ignore]`, and runs under the canonical
+`biscuit-tui-cli` L1 recipe with `terminal-tests` enabled. It therefore appears
+in the `biscuit-tui-cli/windows-latest/L1` JUnit and producer-status artifacts,
+can be reused only as Windows evidence, and is audited by the Biscuit TUI area.
 
-`summary` is replaced by `ci-reporting`, which always runs and reports:
+The dedicated `test-windows-captured-stdout` recipe,
+`biscuit-tui-windows-captured-stdout.yml`, and the top-level caller job are
+removed. The test must continue to fail loudly if it cannot establish and
+prove the console precondition. Its fixed readiness sleeps are replaced with a
+bounded readiness observation or bounded retry loop; moving it into the normal
+parallel suite must not add a timing-only race or steal terminal/browser focus.
 
-- **Change summary** — counts of configuration files, documents, and source
-  files changed; packages impacted directly; packages impacted as reverse
-  dependencies.
-- **Test counts** per OS, when any testing ran.
-- **Lint timing**, noting that lint is Linux-only and absent entirely for a
-  change that schedules none.
-- **Test timing** per OS, each carrying a **`local` or `cicd` flag** recording
-  where the cell was actually executed.
+### 5. The resolved plan carries one change inventory
 
-The `local`/`cicd` flag is the point: when the pre-push hook satisfies a cell,
-CI currently just does not run it, and nobody can see that this is what
-happened. Reuse must be visible as a stated outcome, not inferred from an
-absence.
+The scope calculator classifies its already-supplied changed paths once and
+stores a normalized, sorted, repository-relative inventory in the resolved
+plan. The inventory is exhaustive and separates at least `configuration`,
+`documentation`, `source`, and `other`, with per-category and total counts.
+Renames are represented without double-counting one logical changed path. A
+manual full-scope run records that it has no diff inventory rather than
+inventing changed files.
 
-`ci-reporting` is advisory and never gates: `ci-gate` remains the policy-free
-fold, and nothing here changes which job the merge rule names.
+Both the local renderer and hosted report consume this inventory. Neither
+re-runs package selection or independently reclassifies paths. Documentation
+paths are listed by name; full diff bodies are not embedded because they can be
+unbounded and duplicate the review UI.
 
-The data already exists. The resolved plan carries `change_class`, the package
-and reverse-dependency sets, and `preflight_reason`. Per-cell counts, durations
-and outcomes come from `manifest.jsonl` and `status-<package>-<job>[-<environment>]/status.json`.
+Adding this required plan field bumps the resolved-plan schema and generated
+contract. Older scope receipts are rejected with the existing `scope-schema`
+reason and cause one fresh calculation; they are never upgraded in place.
+Validation receipts remain reusable only where their existing cell and
+gate-input checks still qualify.
 
-### 6. A documentation change accounts for itself, locally and in CI
+### 6. `ci-reporting` replaces the advisory summary
 
-When a change schedules no tests, both ends say so affirmatively and name what
-changed:
+The current `summary` job is replaced by `ci-reporting`. It runs with
+`if: always()` and `continue-on-error: true`, after `scope`, `area-ci`, and
+`ci-gate` have resolved. It has three explicit modes:
 
-- The **pre-push hook** reports the documentation changes it evaluated and
-  states that no tests are required, at all three levels — monorepo root,
-  package area, and package.
-- **`ci-reporting`** renders the same change summary and states that the pull
-  request is ready to merge with no tests required.
+1. A reused whole-PR validation links the authoritative prior run and states
+   that this run executed no package cells.
+2. A successful scope calculation reads the resolved plan and existing
+   `ci-results-<area-slug>` slices, using `ci-rollup summarize` (or its shared
+   typed model) for aggregation. It does not parse raw artifacts into a second
+   result model.
+3. A failed or cancelled bootstrap reports the first actionable
+   infrastructure failure, preserving the useful behavior of the old summary
+   without making a run-level policy claim.
 
-Neither end may present this as a warning, a skip, or an error. It is the
-expected outcome for the change class.
+For a normal scoped run the report renders:
 
-### 7. An unscheduled matrix reads as unscheduled
+- the change inventory and direct/reverse-dependency package sets;
+- per-environment test counts, including machine-recorded companion counts;
+- lint command duration, explicitly identified as the Linux-only `ci` result;
+- per-environment test duration and the exact origin vocabulary already used
+  by the plan: `ci`, `local`, or `prior-local`;
+- cells whose measurements are unavailable, as `not recorded` with a reason.
 
-A matrix job with zero entries presents as skipped or neutral from the start of
-the run, not as pending work.
+The literal origin `cicd` is not introduced. `check` and `lint` remain
+CI-origin because local receipts have no JUnit evidence for them. Command
+duration, not runner setup/queue duration, is recorded in producer status;
+existing result-cell `duration_s` remains the report's normalized field.
+
+`ci-reporting` applies no baseline, accepted-gap, missing-cell, or merge policy.
+Per-area coverage audits remain the only policy readers, and `ci-gate` remains
+the only merge authority. The report may state that no package tests were
+required; it must not claim that a pull request is mergeable independently of
+`ci-gate` and other required checks.
+
+### 7. A documentation-only change accounts for itself locally and in CI
+
+When the plan selects no package cells:
+
+- the pre-push hook renders the categorized change inventory, names the
+  changed documents, and states that no package tests are required;
+- `ci-reporting` renders the same inventory and statement;
+- preflight and package matrices skip as soon as scope resolves;
+- `ci-gate` accepts those skipped jobs under its existing fold.
+
+This is an affirmative successful scheduling decision, never a warning,
+failure, accepted gap, or fabricated passing test result. Terminal output is
+rendered through a `TerminalRenderable` component (preferably the existing
+`ci-plan` typed renderer); the GitHub summary renders the same typed data as
+Markdown.
+
+### 8. An unscheduled matrix resolves promptly and honestly
+
+Matrix jobs are guarded by a scalar plan output before matrix expansion. With
+zero entries they resolve to `skipped` immediately after `scope`, and no
+matrix-expression display name is attached to a skippable job. Contract tests
+cover documentation-only, whole-run reuse, and zero-executing-cell plans.
+
+The specification does not require an impossible pre-scope state: GitHub
+cannot know a dynamic matrix is empty before the scope dependency completes.
 
 ## Design Decisions
 
-- **D1 — the tests stay; the legs go.** Nothing in P1–P3 argues that a suite is
-  unnecessary. Each is load-bearing. The defect is the scheduling shape.
-- **D2 — reuse must be visible.** An outcome that says "reused from local
-  evidence, 248 tests, 35.5 s, macOS" is strictly better than a job that did not
-  appear. Silent absence is indistinguishable from a scheduling bug, which is
-  the failure mode this repository has already hit more than once.
-- **D3 — `ci-gate` is untouched.** This fix changes what runs and what is
-  reported, never what blocks. The required context stays `ci-gate` and its fold
-  stays policy-free.
-- **D4 — no new store.** Reporting reads existing artifacts. If a number is not
-  already recorded, it is reported as absent rather than invented.
+- **D1 — the suites stay; duplicate and specialized jobs go.** Each named suite
+  remains load-bearing and receives an explicit owner.
+- **D2 — `repo-deps` joins the root workspace.** Its nested workspace was
+  introduced with the original utility package and has no recorded deliberate
+  lockfile-isolation contract. Membership gives the planner, Nextest profile,
+  target directory, and lockfile one authority. Teaching every consumer about
+  secondary workspaces would add a second package-discovery model; assigning
+  its tests to another package would falsify result identity.
+- **D3 — use the existing companion-suite seam.** Python and TypeScript suites
+  remain non-Cargo companions of the package that owns their contract. This
+  preserves package identity without pretending they are Rust tests or leaving
+  them as top-level exceptions.
+- **D4 — the Windows console test is L1.** The test constructs and proves its
+  own Windows resource and needs no optional external harness. L2 would turn
+  required evidence into an accepted Windows capability gap.
+- **D5 — reuse is visible and uses exact origins.** `local` and `prior-local`
+  remain distinct, and hosted execution remains `ci`. Silent absence and a new
+  alias such as `cicd` are both rejected.
+- **D6 — `ci-gate` policy is unchanged, not byte-identical.** Removing two
+  top-level blocking jobs necessarily removes their names from `needs` and the
+  fold input. Their failures now reach `ci-gate` through `area-ci`. The fold
+  algorithm and accepted conclusions (`success` and `skipped`) do not change.
+- **D7 — reporting aggregates; it does not judge.** Existing per-area result
+  slices are the machine evidence. `ci-reporting` presents them and preserves
+  infrastructure navigation without running another verdict.
+- **D8 — schema evolution is explicit.** The change inventory requires a plan
+  schema bump and a generated-contract update. A temporary scope-receipt miss
+  is safer than accepting a document that cannot support the report.
+- **D9 — no new persistent store.** The plan gains data the calculator already
+  receives, producer status gains measurements it already observes, and the
+  report consumes existing run artifacts. No area-keyed, reporting-only, or
+  long-lived store is introduced.
 
 ## Open Questions
 
-### OQ1 — How does `repo-deps` become schedulable?
-
-`scripts/` declares its own `[workspace]`. Three shapes:
-
-- **Option A — make it a root workspace member.** Most uniform; it then behaves
-  exactly like every other package. Cost: it joins the root lockfile and
-  resolution graph, which was presumably why it was kept separate.
-- **Option B — teach the calculator about secondary workspaces.** Keeps the
-  manifests separate; adds a concept, and every consumer of the plan must
-  understand it.
-- **Option C — leave `repo-deps` out of the cell model and run its suites inside
-  the `test-toolkit` cell.** Cheapest; couples two unrelated subjects and makes
-  one package's results cover another's.
-
-Needs Ken's ruling. Option A is the recommendation unless the separate lockfile
-is deliberate.
-
-### OQ2 — Does promoting `test-toolkit` require `check-canonical` first?
-
-Its exclusion record names the canonical just recipe set for `tools/` as the
-blocker. Is that still true, and is it in scope here or a prerequisite?
-
-### OQ3 — What does the documentation report actually render?
-
-"A visual diff, or at least a summary" spans two different renderers. In a
-terminal hook a rich diff is available. In a GitHub job summary it is Markdown.
-Options: a per-file changed-line summary in both; a rendered diff locally and a
-file list in CI; or a rendered diff in both, accepting the size cost on large
-documentation changes.
-
-### OQ4 — Does `ci-reporting` replace `summary` or sit beside it?
-
-The advisory summary's *Classify the first actionable failure* step is a real
-navigation aid for the bootstrap jobs no area coverage audit covers. Absorb that
-into `ci-reporting`, or keep both jobs with distinct responsibilities?
+None. Review resolved the four draft questions as D2, the already-complete
+`tools/justfile` prerequisite, Required Behavior 5, and Required Behavior 6.
 
 ## Implementation Boundaries
 
-- No change to `ci-gate`, its fold, or the `protect-your-bacon` ruleset.
-- No change to which environments are required for any package.
-- No weakening of the `biscuit-tui` console precondition assertion.
-- No new persisted store; reporting reads existing plan and artifact data.
-- Comment and documentation passes accompany each behavioral change, per repo
-  policy. `.github/ci/README.md` and the `rust-devops` skill are updated in the
-  same change as the workflow edits.
+- No change to required package environments or governed capability gaps.
+- No weakening of the Biscuit TUI console-precondition assertion and no new
+  focus-taking test behavior.
+- No area-keyed result, artifact, baseline, or evidence identity.
+- No second scope calculator, package-discovery mechanism, verdict, or
+  persisted reporting store.
+- No full-workspace selection merely because CI tooling changed; suite inputs
+  select their owner packages only.
+- The `ci-gate` fold semantics and `protect-your-bacon` required context remain
+  unchanged; only retired top-level inputs leave its static dependency list.
+- Comment and documentation passes accompany each behavioral change.
+  `.github/ci/README.md`, `docs/topics/ci-cd.md`, the `rust-devops`,
+  `rust-testing`, and `os` skills, and stale Biscuit TUI test/reproduction docs
+  are updated with the workflow and tier changes.
+- Root workspace membership and lockfile changes are reflected in dependency
+  documentation where required; no dependency version is changed merely to
+  promote `repo-deps`.
 
 ## Acceptance Criteria
 
-1. No suite command appears in two top-level job definitions in `ci.yml`; a
-   contract test enforces this and fails against the current file.
-2. `preflight` runs no CI self-test suite that another job owns; its remaining
-   steps are preconditions for other work.
-3. A change touching only `scripts/` schedules that package's cells and nothing
-   else; a change touching neither `scripts/` nor `tools/` schedules neither.
-4. A second push to a pull request that changed a `ci_tooling` input, where that
-   push changes only a document, re-runs none of those suites and reports them
-   as reused.
-5. `ci-tooling` and `biscuit-tui-captured-stdout` no longer exist as top-level
-   jobs; `biscuit-tui-windows-captured-stdout.yml` is deleted.
-6. The Windows captured-stdout test runs as a `biscuit-tui-cli` cell on a
-   Windows environment, and still fails loudly when its console precondition
-   does not hold.
-7. A documentation-only change at each of the three levels produces: a pre-push
-   report naming the changed documents and stating no tests are required, a CI
-   report saying the same, zero test jobs, and a mergeable pull request.
-8. `ci-reporting` renders change counts, per-OS test counts, lint timing, and
-   per-OS test timing, each timing carrying a `local` or `cicd` flag; a cell
-   satisfied by local evidence appears with its actual counts and duration and
-   is labelled `local`.
-9. A run with zero scheduled areas shows the area matrix as skipped or neutral
-   from the start, never as pending.
-10. `ci-gate` behavior is byte-identical before and after; the required context
-    is unchanged.
+1. No Python, Rust, or TypeScript test suite is invoked by both `preflight` and
+   another job; preflight contains prerequisite checks only.
+2. `repo-deps` is a root workspace member using the root lockfile and canonical
+   Nextest configuration; `scripts/Cargo.lock` and its nested `[workspace]` no
+   longer exist.
+3. `test-toolkit` gates normally and its now-satisfied
+   `promotion-pending` exclusion is removed.
+4. Every suite in the ownership table has exactly one registered owner,
+   canonical recipe, trigger set, selected cell, and machine-readable outcome;
+   missing, skipped, duplicated, or unknown companion suites fail a contract
+   test.
+5. A change touching only `scripts/` selects `repo-deps`; a change touching
+   only `tools/test-audit/` selects `test-toolkit`; a change touching neither
+   tooling owner nor its declared inputs selects neither package.
+6. A subsequent documentation-only push on a pull request whose tooling cells
+   already have qualifying evidence reuses eligible cells, reruns only
+   non-reusable companion work still required by the pull request diff, and
+   reports both outcomes explicitly.
+7. `ci-tooling` and `biscuit-tui-captured-stdout` no longer exist as top-level
+   jobs; `biscuit-tui-windows-captured-stdout.yml` and the dedicated just recipe
+   are removed.
+8. The Windows captured-stdout test is discovered and executed by the normal
+   `biscuit-tui-cli/windows-latest/L1` Nextest cell, appears in that cell's
+   JUnit, and fails if its console precondition cannot be established.
+9. The Windows test uses bounded readiness observation/retry rather than a
+   fixed sleep and never opens or focuses a terminal or browser window.
+10. The plan schema carries the categorized change inventory; plan validation,
+    generated schema contracts, scope-receipt rejection fixtures, and both
+    renderers agree on its shape.
+11. A documentation-only change at each ownership level names the documents
+    locally and in CI, states that no package tests are required, creates zero
+    package/preflight executions, and leaves the merge decision to `ci-gate`.
+12. `ci-reporting` renders direct and reverse dependencies, per-environment
+    counts and test durations, Linux lint duration, companion results, and
+    exact `ci`/`local`/`prior-local` origins without applying policy.
+13. Missing measurements render as unavailable with a reason; they are never
+    emitted as zero, `ci`, or pass.
+14. A zero-entry area matrix resolves as skipped immediately after scope and
+    never displays an unresolved matrix expression.
+15. `ci-gate` still accepts only `success` and `skipped`, blocks `failure` and
+    `cancelled`, reads no plan/artifact/baseline, and remains the required
+    `ci-gate` context. Its dependency list contains no retired top-level job.
+16. All-reused areas still fan out far enough to produce their area result
+    slices, so `ci-reporting` includes reused cells rather than losing them.
 
 ## Validation and Rollout
 
-1. Contract tests for AC1, AC2 and AC9 land first and fail against the current
-   workflow, proving they are not vacuous.
-2. Fixture changes covering AC3, AC4 and AC7 exercise the calculator without a
-   hosted run.
-3. AC5, AC6 and AC8 need a hosted run on this fix's own branch. AC6 needs a
-   native Windows result specifically.
-4. The `test-toolkit` exclusion record is removed in the same change that
-   promotes it, not left to expire.
-5. `docs/cicd/` gains no new document; this fix's outcome is recorded in
-   `.github/ci/README.md`, which already owns the run-shape description.
+1. Add pending contract fixtures for suite ownership, tooling path-to-owner
+   selection, no-test preflight, Windows L1 discovery, plan change inventory,
+   companion result completeness, and prompt empty-matrix resolution. Prove
+   each fixture fails against the current implementation for its intended
+   reason before promotion.
+2. Run the compact Python CI suites, `repo-deps` and `test-toolkit` L1 suites,
+   test-audit check, workflow contracts, schema-generation drift check,
+   `actionlint`, and the root `just ci-local --plan` preview. Do not substitute
+   a full workspace test run for this dependency-derived scope.
+3. Validate the root-workspace migration from both repository root and
+   `scripts/` so Cargo uses one lockfile, target directory, and Nextest config
+   from either working directory.
+4. Exercise documentation-only fixtures at repository, area, and package
+   levels and verify byte-equivalent inventory data reaches the terminal and
+   Markdown renderers.
+5. Use a hosted run on this fix's branch to verify job ownership, artifact
+   collection, report aggregation, advisory failure behavior, and prompt
+   zero-matrix resolution. Verify a failed package-owned tooling suite blocks
+   through `area-ci` and `ci-gate` while a reporting failure does not.
+6. Obtain native `windows-latest` runtime evidence for the captured-stdout L1
+   test. A macOS-to-Windows GNU cross-check is compile evidence only and does
+   not satisfy this criterion.
+7. Follow with a documentation-only commit or equivalent fixture branch to
+   prove eligible prior cells are reported as reused and no suite is silently
+   dropped. Older scope receipts may miss once with `scope-schema`; that is the
+   expected migration behavior.
+8. Update `.github/ci/README.md` and `docs/topics/ci-cd.md` in the same change.
+   No new `docs/cicd/` document or persistent report store is added.
