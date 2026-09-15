@@ -45,7 +45,7 @@ initialize:
               - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
               - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
               - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
-        - when: "frontmatter(log, 'message_to_agent')"
+        - when: "file_exists(log) && frontmatter(log, 'message_to_agent')"
           action:
               - stderr: |-
                     The previous phase's agent has passed a message to this agent:
