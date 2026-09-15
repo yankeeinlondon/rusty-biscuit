@@ -1201,8 +1201,14 @@ _test_workspace *selectors="": _storage_preflight
         fi
     done < "${selected_file}"
 
-    # One scheduler sees every selected test binary. `--no-fail-fast` preserves
-    # the old workspace loop's promise that one failure does not hide the rest.
+    # One scheduler sees every selected test binary. `--no-fail-fast` is baked in
+    # rather than left to nextest's default because this is the repository's
+    # broadest local scope, and re-running it is expensive enough to sit on the CI
+    # side of the fail-fast rule's cost-of-next-run test (`rust-testing` skill).
+    # At the repository root the caller cannot re-specify it — every argument is
+    # consumed as a selector above — so selector-narrowed runs inherit it by
+    # design. Area `test` recipes forward their arguments to nextest and keep the
+    # fail-fast default.
     just _test_local_all "${specs}" --no-fail-fast
 
 # Verify that every package-area `test` recipe preserves Ctrl+C as exit 130.

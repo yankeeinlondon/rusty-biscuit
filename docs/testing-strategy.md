@@ -3,7 +3,7 @@ title: Testing Strategy
 status: living
 audience: technical person but with no knowledge of this monorepo
 created: 2026-05-24
-updated: 2026-09-12
+updated: 2026-09-15
 ---
 
 # Rusty Biscuit Testing Strategy
@@ -299,10 +299,12 @@ just all
 ```
 
 Root `just test` is the one exception to area iteration. It discovers every
-workspace package from `cargo metadata`, resolves each package's declared
-features, and hands all of them to a single nextest invocation with
-`--no-fail-fast`, so one scheduler sees every test binary and one failure
-cannot hide the rest. Ctrl+C stops it immediately with exit code 130, and
+workspace package from `cargo metadata`, narrows that set when selectors are
+given, resolves each selected package's declared features, and hands them to a
+single nextest invocation with `--no-fail-fast`, so one scheduler sees every
+selected test binary and one failure cannot hide the rest. Selector-narrowed
+runs inherit the flag by design; see the `rust-testing` skill for why.
+Ctrl+C stops it immediately with exit code 130, and
 `just check-test-interrupts` verifies that contract for every area.
 
 ### How an area's justfile is built

@@ -5,8 +5,8 @@ description: |-
   test design, fixture isolation, `require_level!` / `expect_level!` gating,
   nextest filtersets, suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 61d07be7e22c9f45-5e3087a71564a05a
-last_updated: 2026-09-12
+hash: 61d07be7e22c9f45-6f2ea54170be340f
+last_updated: 2026-09-15
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -329,6 +329,35 @@ Every curated package area defines these 12 recipes:
 | `all`          | `sanity → lint → doctest → test → test-l2 → test-browser`.                                                                                                                                                                                                                                                                                   |
 
 Delegate to shared recipes in `just/devops.just` (e.g. `@just _test my-crate`).
+
+### Fail-fast is an environment policy, not a flag preference
+
+Locally, fail fast — nextest's default, and the right one. The first failure is
+usually enough to act on, and if more than one test is broken, fixing the first
+surfaces the next. In CI, run to completion instead. The rule keys on **how
+expensive the next run is**, which is what makes it a property of the
+environment rather than a preference between flags: a truncated Windows or WSL2
+report costs a full round-trip measured in hours to learn what the second
+failure was.
+
+**CI already passes `--no-fail-fast`** — in `.github/workflows/_package-ci.yml`,
+`.github/workflows/_wsl-ci.yml`, and `just/ci-local.just`. Do not add it.
+
+Root `just test` keeps the flag by explicit decision (2026-09-15,
+`fixes/2026-09-14-cicd-improvements`). It is the repository's broadest local
+scope and re-running it is expensive enough to sit on the CI side of the
+cost-of-next-run test. **At the repository root** the choice is also not
+reversible from the command line — every argument there is consumed as a
+selector — so selector-narrowed invocations such as `just test claudine` inherit
+the flag by design, not by oversight. Inside a package area the arguments reach
+nextest, so an area `just test` keeps nextest's fail-fast default and you can
+override it per run.
+
+**Consequence for non-vacuous proofs.** Proving a guard fix non-vacuous — neuter
+the guard, confirm the new tests go red, restore — needs the complete failure
+list when the pass runs at CI-shaped or multi-package scope, because a truncated
+list looks exactly like a narrow blast radius, which is the opposite of what the
+proof is for. Against a single package locally, fail-fast is correct and faster.
 
 ## Scope Verification Gates by Blast Radius
 
