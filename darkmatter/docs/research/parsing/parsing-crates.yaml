@@ -1,0 +1,12 @@
+# a 'named-list' is similar to a 'sequence' in that they can define template variables
+# but unlike a 'sequence' it can't directly be executed as a sequence although a
+# sequence can use it very easily with the `iterate_over` directive.
+
+kind: sequence
+template:
+    filepath: "./{{name}}.md"
+list:
+    - nom
+    - logos
+    - rowan
+    - others
