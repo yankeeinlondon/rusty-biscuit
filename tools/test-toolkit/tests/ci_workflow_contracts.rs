@@ -996,15 +996,23 @@ fn ci_summarizes_the_first_actionable_failure_class() {
         ci.contains("## Jobs outside the rollup") && ci.contains("First actionable failure class"),
         "ci.yml must write a failure-class summary for the un-rolled-up jobs (D15)"
     );
+    // The stages `ci-reporting` can see. It waits on `ci-gate` rather than on
+    // `preflight`, so a preflight failure is reported by the gate it blocks
+    // and the summary must say so instead of naming a job it cannot read.
     for stage in [
+        "bootstrap (reuse check)",
         "bootstrap (scope calculation)",
-        "bootstrap (preflight)",
     ] {
         assert!(
             ci.contains(stage),
             "the failure-class summary must be able to report `{stage}`"
         );
     }
+    assert!(
+        ci.contains("it folds every blocking job's result, including \\`preflight\\`"),
+        "the summary must point a reader at the gate that folds the stages it \
+         cannot see itself"
+    );
     for (name, _, _) in ORCHESTRATED {
         let job = name.trim_end_matches(".yml");
         assert!(
@@ -3536,6 +3544,37 @@ fn the_ci_documentation_states_the_implemented_behavior() {
             "Phase 6 measures it against a real run",
             "the package-scoped cache key has not been measured against a real run",
         ),
+        // fixes/2026-09-13-cicd-redundancies, Phase 10.
+        (
+            ".github/ci/README.md",
+            "the advisory summary links",
+            "the reporting job is `ci-reporting`; `summary` no longer exists",
+        ),
+        (
+            ".github/ci/README.md",
+            "the CI-tooling job",
+            "CI's own suites are owned by `repo-deps` and `test-toolkit` and run in their cells",
+        ),
+        (
+            "docs/topics/ci-cd.md",
+            "advisory summary",
+            "the reporting job is `ci-reporting`; `summary` no longer exists",
+        ),
+        (
+            "docs/topics/ci-cd.md",
+            "until Ken switches that context to",
+            "`protect-your-bacon` has required `ci-gate` since 2026-09-13",
+        ),
+        (
+            ".claude/skills/rust-devops/ci-cd.md",
+            "ci.yml:summary",
+            "the advisory job carrying `continue-on-error` is `ci.yml:ci-reporting`",
+        ),
+        (
+            ".claude/skills/rust-devops/ci-cd.md",
+            "still names the retired",
+            "`protect-your-bacon` has required `ci-gate` since 2026-09-13",
+        ),
     ];
     for (file, phrase, why) in RETIRED {
         let source = read(file);
@@ -3559,6 +3598,22 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         (".claude/skills/rust-devops/ci-cd.md", "ACCEPTED GAP"),
         (".claude/skills/os/SKILL.md", "BISCUIT_CI_CONSTRAINTS_DIR"),
         (".claude/skills/os/ci-runners.md", "gate-input identity"),
+        // fixes/2026-09-13-cicd-redundancies, Phase 10.
+        (".github/ci/README.md", "ci-reporting"),
+        (".github/ci/README.md", "change_inventory"),
+        (".github/ci/README.md", "SUITE_REGISTRY"),
+        ("docs/topics/ci-cd.md", "ci-reporting"),
+        ("docs/topics/ci-cd.md", "SUITE_REGISTRY"),
+        ("docs/topics/ci-cd.md", "change inventory"),
+        ("docs/topics/ci-cd.md", "exactly six top-level jobs"),
+        (".claude/skills/rust-devops/ci-cd.md", "ci-reporting"),
+        (".claude/skills/rust-devops/ci-cd.md", "change_inventory"),
+        (".claude/skills/rust-testing/SKILL.md", "repo-deps"),
+        (
+            ".claude/skills/os/windows.md",
+            "Attaching a console inside a nextest process",
+        ),
+        ("docs/dependencies.md", "root Cargo workspace member"),
     ];
     for (file, phrase) in REQUIRED {
         let source = read(file);
@@ -3584,6 +3639,111 @@ fn the_ci_documentation_states_the_implemented_behavior() {
             "{file} must describe `ci-gate` as the required check"
         );
     }
+}
+
+/// Every reader-facing document and recipe, swept for the identities this fix
+/// retired.
+///
+/// ## Notes
+///
+/// `the_ci_documentation_states_the_implemented_behavior` matches named phrases
+/// in a fixed file list, which is the right shape for a claim that became false.
+/// It cannot catch the other failure mode: a *new* document, or one nobody
+/// thought to list, telling a reader to look for a job, flag, recipe, or
+/// workflow that does not exist. So this one globs instead — the same reason
+/// `areas_json_is_gone_and_has_no_readers` globs.
+///
+/// Historical records under `fixes/` and `features/` are deliberately out of
+/// scope: they describe what was true when they were written and are the only
+/// place these names may survive.
+#[test]
+fn no_reader_facing_document_or_recipe_names_a_retired_ci_entity() {
+    /// (retired identity, what owns that work now)
+    const RETIRED: &[(&str, &str)] = &[
+        (
+            "ci-tooling",
+            "CI's own suites are owned by `repo-deps` and `test-toolkit`",
+        ),
+        (
+            "ci_tooling",
+            "the `flags.ci_tooling` boolean is replaced by SUITE_OWNER_PREFIXES/PATHS",
+        ),
+        (
+            "biscuit-tui-captured-stdout",
+            "the test is ordinary L1 in `biscuit-tui-cli`'s own windows-latest cell",
+        ),
+        (
+            "test-windows-captured-stdout",
+            "the canonical `just test` recipe reaches the test",
+        ),
+        (
+            "biscuit-tui-windows-captured-stdout",
+            "the specialized workflow is deleted",
+        ),
+    ];
+
+    let mut swept: Vec<PathBuf> = Vec::new();
+    let mut collect_tree = |dir: &str| {
+        let root = repo_root().join(dir);
+        let mut pending = vec![root];
+        while let Some(dir) = pending.pop() {
+            for entry in
+                fs::read_dir(&dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+            {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else {
+                    swept.push(path);
+                }
+            }
+        }
+    };
+    collect_tree("docs");
+    collect_tree(".github");
+    collect_tree(".claude/skills");
+    collect_tree("just");
+
+    // Every justfile: the root one, each package area's, and each `tools/`
+    // member's. A stale recipe comment is what this sweep found first.
+    swept.push(repo_root().join("justfile"));
+    for parent in [repo_root(), repo_root().join("tools")] {
+        for entry in fs::read_dir(&parent).unwrap_or_else(|e| panic!("read {}: {e}", parent.display()))
+        {
+            let path = entry.expect("entry").path().join("justfile");
+            if path.is_file() {
+                swept.push(path);
+            }
+        }
+    }
+    // The one package README that documented why CI provisions Node here.
+    swept.push(repo_root().join("tools/test-audit/README.md"));
+
+    assert!(
+        swept.len() > 60,
+        "the sweep itself must be non-vacuous (found {} files)",
+        swept.len()
+    );
+
+    let mut violations = Vec::new();
+    for path in &swept {
+        // Binary fixtures (images, archives) live under these trees too.
+        let Ok(source) = fs::read_to_string(path) else {
+            continue;
+        };
+        let source = source.replace("\r\n", "\n");
+        for (retired, owner) in RETIRED {
+            if source.contains(retired) {
+                let relative = path.strip_prefix(repo_root()).unwrap_or(path);
+                violations.push(format!("{} names {retired:?} — {owner}", relative.display()));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "reader-facing documentation names retired CI entities:\n  {}",
+        violations.join("\n  ")
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -3765,6 +3925,85 @@ fn ci_reporting_is_advisory_and_no_blocking_job_is() {
              continue-on-error at job level"
         );
     }
+}
+
+/// Spec §6: the report waits for the whole run, `ci-gate` included, so the
+/// account it writes describes a settled run rather than one in flight.
+#[test]
+fn ci_reporting_needs_exactly_the_four_documents_it_reports_on() {
+    let report = job_block("ci.yml", "  ci-reporting:");
+    let executable: String = report
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let needs: Vec<String> = executable
+        .split_once("    needs:\n")
+        .expect("ci-reporting must declare a needs list")
+        .1
+        .lines()
+        .take_while(|line| line.starts_with("      - "))
+        .map(|line| line.trim_start_matches("      - ").trim().to_owned())
+        .collect();
+    let expected = ["validation", "scope", "area-ci", "ci-gate"];
+    assert_eq!(
+        expected.map(str::to_owned).to_vec(),
+        needs,
+        "ci-reporting must wait on exactly {expected:?}, got {needs:?}"
+    );
+}
+
+/// Spec §6 / D7: the report aggregates through the shared typed model. Parsing
+/// the raw JUnit artifacts here would be a second result model, free to
+/// disagree with the area that produced them.
+#[test]
+fn ci_reporting_aggregates_through_ci_rollup_rather_than_reparsing_artifacts() {
+    let report = job_block("ci.yml", "  ci-reporting:");
+    assert!(
+        report.contains("ci-rollup summarize"),
+        "the successful-scope mode must fold the areas' own slices"
+    );
+    assert!(
+        report.contains("--plan ci-artifacts/ci-resolved-plan/resolved-plan.json"),
+        "the report's change inventory and dependency sets come from the plan"
+    );
+    assert!(
+        report.contains("pattern: 'ci-results-*'"),
+        "the report must read every area's result slice"
+    );
+    for reparse in ["junit-", "manifest.jsonl", "status-"] {
+        assert!(
+            !report.contains(reparse),
+            "the advisory report must not build a second result model from \
+             `{reparse}` artifacts"
+        );
+    }
+}
+
+/// AC16: an area whose cells were all satisfied by evidence still fans out, so
+/// its slice still reaches the report.
+///
+/// This half is the workflow's: with every cell reused, `package-ci` runs no
+/// leg, so the slice exists only because the coverage audit neither waits for a
+/// successful producer nor conditions its upload on one. The planner's half —
+/// that such an area is still in the fan-out at all — is
+/// `test_affected_scope.py::AllReusedAreaFanOutTests`.
+#[test]
+fn an_all_reused_area_still_produces_its_result_slice() {
+    let audit = job_block("_area-ci.yml", "  coverage-audit:");
+    assert!(
+        audit.contains("\n    if: always()\n"),
+        "the coverage audit must run even when no package job executed"
+    );
+    let upload = audit
+        .split_once("name: Upload this area's result slice")
+        .expect("the coverage audit must upload its slice")
+        .1;
+    assert!(
+        upload.trim_start().starts_with("if: always()"),
+        "the slice upload must not be conditional on a package job having run"
+    );
 }
 
 // ---------------------------------------------------------------------------

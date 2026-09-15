@@ -398,6 +398,55 @@ class L1ThreadForwardingTests(unittest.TestCase):
 class PlanSurfaceTests(unittest.TestCase):
     """AC17: the reviewable plan shown before a push or other trigger."""
 
+    @staticmethod
+    def environment_records() -> list[dict]:
+        return [
+            {
+                "name": name,
+                "runner": "windows-latest" if name == "wsl2-ubuntu" else name,
+                "native_key": "ubuntu-latest" if name == "wsl2-ubuntu" else name,
+                "capabilities": {
+                    "tmux": name in ("ubuntu-latest", "macos-latest"),
+                    "headless_browser": name == "ubuntu-latest",
+                    "node_pnpm": name == "ubuntu-latest",
+                    "archive_only": name == "wsl2-ubuntu",
+                },
+            }
+            for name in schema.ENVIRONMENTS
+        ]
+
+    def documentation_plan(self) -> dict:
+        """A documentation-only change's plan: an inventory and no cell at all.
+
+        Spec section 7's local half. The recipe must name the documents and
+        state that no package test is required, as an affirmative scheduling
+        decision rather than a warning.
+        """
+        return {
+            "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            "base": "a" * 40,
+            "head": "b" * 40,
+            "change_class": "documentation",
+            "change_inventory": change_inventory(
+                ["docs/topics/ci-cd.md", "alpha/README.md"], False
+            ),
+            "full_scope": False,
+            "full_scope_gates": [],
+            "areas": [],
+            "packages": [],
+            "source_packages": [],
+            "reverse_dependencies": [],
+            "environments": self.environment_records(),
+            "cells": [],
+            "accepted_evidence": [],
+            "policy_gaps": [],
+            "prohibited_cells": [],
+            "job_estimate": 0,
+            "preflight_os": [],
+            "preflight_reason": "no gating package; preflight establishes nothing",
+            "flags": {},
+        }
+
     def resolved_plan(self, prohibited_is_covered: bool) -> dict:
         cells = [
             {
@@ -506,20 +555,7 @@ class PlanSurfaceTests(unittest.TestCase):
             ],
             "source_packages": ["alpha"],
             "reverse_dependencies": [],
-            "environments": [
-                {
-                    "name": name,
-                    "runner": "windows-latest" if name == "wsl2-ubuntu" else name,
-                    "native_key": "ubuntu-latest" if name == "wsl2-ubuntu" else name,
-                    "capabilities": {
-                        "tmux": name in ("ubuntu-latest", "macos-latest"),
-                        "headless_browser": name == "ubuntu-latest",
-                        "node_pnpm": name == "ubuntu-latest",
-                        "archive_only": name == "wsl2-ubuntu",
-                    },
-                }
-                for name in schema.ENVIRONMENTS
-            ],
+            "environments": self.environment_records(),
             "cells": cells,
             "accepted_evidence": [],
             "policy_gaps": [],
@@ -571,14 +607,16 @@ class PlanSurfaceTests(unittest.TestCase):
         capture: dict | None = None,
         origin: str = "",
         records: Mapping[str, dict] | None = None,
+        document: dict | None = None,
     ) -> subprocess.CompletedProcess:
         """Run `just ci-local --all --plan` in a temp root with a relocated home.
 
         `records` maps a store-relative path to a record written under the
         relocated home's default store; `origin` becomes the root's `origin`
-        remote so the recipe derives the store directory from it.
+        remote so the recipe derives the store directory from it. `document`
+        replaces the default package-change plan.
         """
-        document = self.resolved_plan(prohibited_is_covered)
+        document = document or self.resolved_plan(prohibited_is_covered)
         self.assertEqual(
             [],
             schema.validate_resolved_plan(document),
@@ -711,6 +749,45 @@ class PlanSurfaceTests(unittest.TestCase):
 
         result = self.run_plan(origin="git@github.com:acme/other.git", records=records)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_plan_renders_the_change_inventory_it_was_given(self) -> None:
+        # Spec section 7: the local surface reads the plan's own inventory
+        # field, so it cannot describe a different change than `ci-reporting`.
+        rendered, document = self.run_plan_with_output()
+        self.assertIn("Change inventory: 1 changed path(s)", rendered)
+        self.assertIn("source (1) — alpha/src/lib.rs", rendered)
+        self.assertEqual(
+            ["alpha/src/lib.rs"],
+            document["change_inventory"]["paths"]["source"],
+            "the rendered inventory must be the written plan's, not a second one",
+        )
+
+    def test_a_documentation_only_plan_names_its_documents_and_requires_no_test(
+        self,
+    ) -> None:
+        result = self.run_plan(document=self.documentation_plan())
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Change inventory: 2 changed path(s)", result.stdout)
+        for named in ("alpha/README.md", "docs/topics/ci-cd.md"):
+            self.assertIn(named, result.stdout, f"the plan never names {named}")
+        self.assertIn(
+            "No package test is required: the resolved plan schedules no package cell.",
+            result.stdout,
+        )
+
+    def test_a_documentation_only_plan_is_an_affirmative_decision(self) -> None:
+        # Never a warning, failure, accepted gap, or fabricated passing result.
+        result = self.run_plan(document=self.documentation_plan())
+        combined = result.stdout + result.stderr
+        for forbidden in ("WARN", "warning", "accepted-gap", "prohibited", "✗", "⛔"):
+            self.assertNotIn(forbidden, combined, f"{forbidden!r} in:\n{combined}")
+
+    def test_a_full_scope_plan_reports_that_no_diff_was_consulted(self) -> None:
+        document = self.documentation_plan()
+        document["change_inventory"] = change_inventory([], True)
+        result = self.run_plan(document=document)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Change inventory: no diff was consulted", result.stdout)
 
     def test_plan_writes_the_same_cells_it_rendered(self) -> None:
         # The rendered table is a projection; the canonical JSON is the machine

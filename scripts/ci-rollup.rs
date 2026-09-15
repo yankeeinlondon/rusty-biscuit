@@ -47,6 +47,11 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 
+#[path = "ci-change-inventory.rs"]
+mod change_inventory;
+
+use change_inventory::{ChangeInventory, NO_PACKAGE_TESTS};
+
 /// Version of the emitted result document (`results.json`).
 ///
 /// Version 1 was area-keyed. Version 2 keyed every identity on the package.
@@ -1195,6 +1200,20 @@ struct ResolvedPlan {
     schema_version: u32,
     cells: Vec<PlanCell>,
     packages: Vec<PlanPackage>,
+    /// What changed, classified once by the planner. Read by `summarize` only;
+    /// defaulted so the `rollup` path still accepts a plan written before
+    /// schema 3.
+    #[serde(default)]
+    change_inventory: ChangeInventory,
+    /// Packages whose own source changed, as opposed to packages the plan
+    /// selected.
+    #[serde(default)]
+    source_packages: Vec<String>,
+    /// Direct reverse Cargo dependents of `source_packages` the plan reported
+    /// and did not select. They have no cell, so this is the only place the
+    /// report can name them.
+    #[serde(default)]
+    reverse_dependencies: Vec<String>,
 }
 
 /// A package the plan selected. Only the name is read here: the area travels on
@@ -3664,7 +3683,7 @@ USAGE:
   ci-rollup rollup    --artifacts <dir> [options]
   ci-rollup verdict   --results <file> --baseline <file> [options]
   ci-rollup compare   --base <file>… --head <file>… [options]
-  ci-rollup summarize --results <file> [--results <file>…] [options]
+  ci-rollup summarize [--plan <file>] [--results <file>…] [options]
 
 ROLLUP OPTIONS:
   --artifacts <dir>              root holding the downloaded per-job artifacts
@@ -3697,8 +3716,14 @@ VERDICT OPTIONS:
   --today <YYYY-MM-DD>           override today's date for expiry evaluation
 
 SUMMARIZE OPTIONS:
-  --results <file>               an area's result slice; repeatable
+  --plan <file>                  the scope job's resolved execution plan, for the
+                                 change inventory and the dependency sets
+  --results <file>               an area's result slice; repeatable. Absent for a
+                                 run that scheduled no package, which the report
+                                 states rather than leaving blank
   --summary <file>               append Markdown (default $GITHUB_STEP_SUMMARY)
+
+  One of --plan or --results is required.
 
   Folds area slices into one view and applies NO policy: no baseline, no gap
   acceptance, no missing-cell rule, no merge decision. Each area's own rollup
@@ -4069,18 +4094,234 @@ fn cmd_compare(args: &Args) -> Result<i32> {
 /// being unreadable, not being wrong.
 fn cmd_summarize(args: &Args) -> Result<i32> {
     let paths = args.many("results");
-    if paths.is_empty() {
-        bail!("`--results` is required\n\n{USAGE}");
+    let plan_path = args.one("plan").map(PathBuf::from);
+    if paths.is_empty() && plan_path.is_none() {
+        bail!("`--results` or `--plan` is required\n\n{USAGE}");
     }
     let slices = paths
         .iter()
         .map(|raw| load_rollup(Path::new(raw)))
         .collect::<Result<Vec<Rollup>>>()?;
+    let plan = match &plan_path {
+        Some(path) => {
+            let text = fs::read_to_string(path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            Some(
+                serde_json::from_str::<ResolvedPlan>(&text)
+                    .with_context(|| format!("invalid resolved plan {}", path.display()))?,
+            )
+        }
+        None => None,
+    };
 
-    let markdown = render_combined_summary(&slices);
+    let markdown = render_report(plan.as_ref(), &slices);
     append_summary(args, &markdown)?;
     print!("{markdown}");
     Ok(0)
+}
+
+/// The whole advisory report: what changed, who it reached, and what the run
+/// measured (spec section 6).
+///
+/// ## Notes
+///
+/// Policy-free by construction, like the per-area fold it wraps. It states that
+/// a run required no package test — an affirmative scheduling decision — but
+/// never that a change may merge: `ci-gate` is the only authority on that, and
+/// a second claim here could contradict a red area.
+fn render_report(plan: Option<&ResolvedPlan>, slices: &[Rollup]) -> String {
+    let mut out = String::new();
+    if let Some(plan) = plan {
+        out.push_str(&render_change_report(plan));
+    }
+    if !slices.is_empty() {
+        out.push_str(&render_combined_summary(slices));
+        out.push_str(&render_environment_report(slices));
+        out.push_str(&render_lint_report(slices));
+    }
+    // No slice is two different runs, and conflating them would report a
+    // vanished area as a change that required nothing.
+    if slices.is_empty() {
+        match plan {
+            Some(plan) if plan.cells.is_empty() => {
+                out.push_str(&format!("{NO_PACKAGE_TESTS}\n\n"));
+            }
+            Some(plan) => out.push_str(&format!(
+                "The plan scheduled {} cell(s), and no area result slice reached this \
+                 report: every area's coverage audit uploads one under `always()`, so an \
+                 area that produced none never started. Open the run's `area-ci` \
+                 entries.\n\n",
+                plan.cells.len()
+            )),
+            None => {}
+        }
+    }
+    out.push_str(
+        "The merge decision belongs to `ci-gate` and the other required checks; this report \
+         makes none.\n",
+    );
+    out
+}
+
+/// What changed and whom it reached, from the plan alone.
+fn render_change_report(plan: &ResolvedPlan) -> String {
+    let mut out = String::from("## What changed\n\n");
+    out.push_str(&plan.change_inventory.headline());
+    out.push_str("\n\n");
+    for entry in plan.change_inventory.markdown_entries() {
+        out.push_str(&format!("- {entry}\n"));
+    }
+    out.push('\n');
+
+    let render_set = |packages: &[String]| -> String {
+        if packages.is_empty() {
+            "none".to_owned()
+        } else {
+            packages
+                .iter()
+                .map(|package| format!("`{package}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    };
+    out.push_str("| dependency set | packages |\n| --- | --- |\n");
+    out.push_str(&format!(
+        "| direct (own source changed) | {} |\n",
+        render_set(&plan.source_packages)
+    ));
+    out.push_str(&format!(
+        "| reverse (reported, not selected) | {} |\n\n",
+        render_set(&plan.reverse_dependencies)
+    ));
+    out
+}
+
+/// Per-environment test counts, durations, and origins (spec section 6).
+///
+/// Companion counts are carried separately because a companion suite has no
+/// cell of its own: folding them into the Rust total would overstate what
+/// `cargo nextest` ran on that environment.
+fn render_environment_report(slices: &[Rollup]) -> String {
+    let mut by_environment: BTreeMap<String, Vec<&Cell>> = BTreeMap::new();
+    for slice in slices {
+        for cell in &slice.cells {
+            if is_test_tier(&cell.key.tier) {
+                by_environment
+                    .entry(cell.key.environment.clone())
+                    .or_default()
+                    .push(cell);
+            }
+        }
+    }
+
+    if by_environment.is_empty() {
+        return format!("\n{NO_PACKAGE_TESTS}\n\n");
+    }
+
+    let mut out = String::from("\n## Tests by environment\n\n");
+    out.push_str(
+        "| environment | cells | tests | companion tests | duration | origins |\n\
+         | --- | --- | --- | --- | --- | --- |\n",
+    );
+    for (environment, cells) in &by_environment {
+        let tests: u32 = cells.iter().map(|cell| cell.counts.total).sum();
+        let duration: u64 = cells.iter().map(|cell| cell.duration_s).sum();
+        // `duration_s` is `0` both for "ran in under a second" and for "no
+        // producer recorded one", and only the cells' origins can separate
+        // them: a cell nothing produced has no measurement to report (AC13).
+        let measured = cells
+            .iter()
+            .any(|cell| cell.duration_s > 0 || cell.origin != Origin::Unproduced);
+        let origins = cells
+            .iter()
+            .map(|cell| cell.origin.label())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} |\n",
+            cell_text(environment),
+            cells.len(),
+            tests,
+            cell_text(&companion_tally(cells)),
+            if measured {
+                format!("{duration}s")
+            } else {
+                format!("{UNRECORDED} (no producer reported a result for this environment)")
+            },
+            origins
+        ));
+    }
+    out.push('\n');
+    out
+}
+
+/// One environment's companion-suite test count, or why there is none.
+///
+/// A suite that reported no cardinality — `tsc --noEmit` is pass/fail and has
+/// none — is named rather than counted as `0`, which a reader would take for a
+/// suite that ran and found nothing (AC13).
+fn companion_tally(cells: &[&Cell]) -> String {
+    let companions: Vec<&CompanionResult> =
+        cells.iter().flat_map(|cell| cell.companions.iter()).collect();
+    if companions.is_empty() {
+        return "none declared".to_owned();
+    }
+    let counted: u32 = companions
+        .iter()
+        .filter_map(|companion| companion.counts.map(|counts| counts.total))
+        .sum();
+    let uncounted: Vec<&str> = companions
+        .iter()
+        .filter(|companion| companion.counts.is_none())
+        .map(|companion| companion.suite.as_str())
+        .collect();
+    match (counted, uncounted.as_slice()) {
+        (0, []) => "0".to_owned(),
+        (total, []) => total.to_string(),
+        (0, absent) => format!("{UNRECORDED} ({})", absent.join(", ")),
+        (total, absent) => format!("{total} (+{UNRECORDED}: {})", absent.join(", ")),
+    }
+}
+
+/// The lint gate's command duration, labeled as what it is.
+///
+/// Lint is CI-origin and Linux-only (`_package-ci.yml`): a local receipt
+/// carries no JUnit evidence for it, so nothing else can produce this row. Its
+/// duration is the `just _lint` command's, not the job's elapsed time (R14).
+fn render_lint_report(slices: &[Rollup]) -> String {
+    let lint = Tier::parse("lint");
+    let cells: Vec<&Cell> = slices
+        .iter()
+        .flat_map(|slice| slice.cells.iter())
+        .filter(|cell| cell.key.tier == lint)
+        .collect();
+    if cells.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::from("## Lint command duration\n\n");
+    out.push_str(
+        "The Linux-only `ci` lint result. Duration is the lint COMMAND's, not the job's \
+         elapsed time.\n\n",
+    );
+    out.push_str("| package | environment | origin | command duration |\n| --- | --- | --- | --- |\n");
+    for cell in cells {
+        out.push_str(&format!(
+            "| {} | {} | {} | {} |\n",
+            cell_text(&cell.key.package),
+            cell_text(&cell.key.environment),
+            cell.origin.label(),
+            if cell.duration_s > 0 {
+                format!("{}s", cell.duration_s)
+            } else {
+                format!("{UNRECORDED} (the producer recorded no command duration)")
+            }
+        ));
+    }
+    out.push('\n');
+    out
 }
 
 /// Render the combined view: one row per area, counted from the states its own

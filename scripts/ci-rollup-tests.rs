@@ -3550,6 +3550,254 @@ fn the_combined_summary_aggregates_area_slices_and_applies_no_policy() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The advisory report (spec section 6)
+// ---------------------------------------------------------------------------
+
+/// A plan carrying the shared inventory payload plus the two dependency sets.
+fn reported_plan(inventory: &str, cells: &str) -> ResolvedPlan {
+    let text = format!(
+        r#"{{"schema_version":{PLAN_SCHEMA_VERSION},"change_inventory":{inventory},
+        "source_packages":["claudine"],"reverse_dependencies":["claudine-cli"],
+        "packages":[],"cells":[{cells}]}}"#
+    );
+    serde_json::from_str(&text).expect("the fixture plan parses")
+}
+
+/// One cell per environment, with a companion suite on the Linux L1 cell and a
+/// lint cell beside it — the shape a normal scoped run produces.
+fn reported_slice() -> Rollup {
+    let cells = vec![
+        Cell {
+            area: "claudine".to_owned(),
+            state: CellState::Pass,
+            origin: Origin::Ci,
+            counts: Counts { total: 12, passed: 12, ..Counts::default() },
+            duration_s: 61,
+            companions: vec![
+                CompanionResult::new(
+                    "test_schema.py",
+                    Some(&CompanionOutcome {
+                        outcome: "success".to_owned(),
+                        counts: Some(Counts { total: 31, passed: 31, ..Counts::default() }),
+                        duration_s: Some(2.0),
+                        reason: None,
+                    }),
+                ),
+                CompanionResult::new(
+                    "test-audit typecheck",
+                    Some(&CompanionOutcome {
+                        outcome: "success".to_owned(),
+                        counts: None,
+                        duration_s: Some(9.0),
+                        reason: Some("tsc --noEmit reports no test cardinality".to_owned()),
+                    }),
+                ),
+            ],
+            scheduled: true,
+            ..blank_cell(cell_key("claudine", "ubuntu-latest", Tier::L1))
+        },
+        Cell {
+            area: "claudine".to_owned(),
+            state: CellState::Pass,
+            origin: Origin::PriorLocal,
+            counts: Counts { total: 12, passed: 12, ..Counts::default() },
+            duration_s: 7,
+            scheduled: true,
+            ..blank_cell(cell_key("claudine", "macos-latest", Tier::L1))
+        },
+        Cell {
+            area: "claudine".to_owned(),
+            state: CellState::Pass,
+            origin: Origin::Ci,
+            duration_s: 43,
+            scheduled: true,
+            ..blank_cell(cell_key("claudine", "ubuntu-latest", Tier::parse("lint")))
+        },
+    ];
+    rollup_of(cells, &["claudine"])
+}
+
+#[test]
+fn the_report_names_every_changed_path_the_plan_recorded() {
+    let markdown = render_report(
+        Some(&reported_plan(change_inventory::FIXTURE_INVENTORY, "")),
+        &[],
+    );
+    assert!(markdown.contains("**Change inventory** — 5 changed path(s)."), "{markdown}");
+    for entry in change_inventory::FIXTURE_MARKDOWN_ENTRIES {
+        assert!(markdown.contains(entry), "the report omits {entry:?}:\n{markdown}");
+    }
+    // Every path the plan recorded, spelled as the plan spells it — the same
+    // set `ci-plan-tests.rs` asserts against its own renderer.
+    for path in change_inventory::FIXTURE_PATHS {
+        assert!(markdown.contains(path), "the report omits {path}:\n{markdown}");
+    }
+}
+
+/// Validation step 4: the terminal and Markdown reports consume one payload.
+/// `ci-plan-tests.rs` asserts the same constant against the same projection.
+#[test]
+fn the_markdown_report_projects_the_shared_inventory_payload_unchanged() {
+    let plan = reported_plan(change_inventory::FIXTURE_INVENTORY, "");
+    assert_eq!(
+        change_inventory::FIXTURE_MARKDOWN_ENTRIES.map(str::to_owned).to_vec(),
+        plan.change_inventory.markdown_entries()
+    );
+}
+
+#[test]
+fn the_report_names_the_direct_and_reverse_dependency_sets() {
+    let markdown = render_report(
+        Some(&reported_plan(change_inventory::FIXTURE_INVENTORY, "")),
+        &[],
+    );
+    assert!(
+        markdown.contains("| direct (own source changed) | `claudine` |"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("| reverse (reported, not selected) | `claudine-cli` |"),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn a_run_that_scheduled_no_package_says_so_rather_than_rendering_nothing() {
+    let markdown = render_report(
+        Some(&reported_plan(change_inventory::FIXTURE_INVENTORY, "")),
+        &[],
+    );
+    assert!(markdown.contains(NO_PACKAGE_TESTS), "{markdown}");
+}
+
+#[test]
+fn the_report_makes_no_merge_or_policy_claim() {
+    let markdown = render_report(
+        Some(&reported_plan(change_inventory::FIXTURE_INVENTORY, "")),
+        &[reported_slice()],
+    );
+    assert!(markdown.contains("The merge decision belongs to `ci-gate`"), "{markdown}");
+    for policy_word in [
+        "BLOCKED",
+        "CLEAR —",
+        "must not merge",
+        "may merge",
+        "baseline-",
+        "policy-gap-",
+        "## CI verdict",
+        "cicd",
+    ] {
+        assert!(
+            !markdown.contains(policy_word),
+            "the advisory report applied policy ({policy_word:?}): {markdown}"
+        );
+    }
+}
+
+#[test]
+fn per_environment_rows_carry_counts_duration_and_the_plan_origin_vocabulary() {
+    let markdown = render_report(None, &[reported_slice()]);
+    assert!(markdown.contains("## Tests by environment"), "{markdown}");
+    assert!(
+        markdown.contains("| ubuntu-latest | 1 | 12 | 31 (+not recorded: test-audit typecheck) | 61s | ci |"),
+        "{markdown}"
+    );
+    // The plan's own origin literals, unchanged; `prior-local` is a receipt
+    // from an older head and must not be flattened into `local`.
+    assert!(
+        markdown.contains("| macos-latest | 1 | 12 | none declared | 7s | prior-local |"),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn a_lint_cell_is_reported_as_the_linux_only_ci_command_duration() {
+    let markdown = render_report(None, &[reported_slice()]);
+    assert!(markdown.contains("## Lint command duration"), "{markdown}");
+    assert!(markdown.contains("The Linux-only `ci` lint result"), "{markdown}");
+    assert!(markdown.contains("| claudine | ubuntu-latest | ci | 43s |"), "{markdown}");
+    // Lint is not a test tier: its duration must not be folded into the
+    // environment's test duration.
+    assert!(
+        !markdown.contains("| ubuntu-latest | 2 |"),
+        "the lint cell leaked into the test table: {markdown}"
+    );
+}
+
+#[test]
+fn an_unmeasured_lint_command_renders_not_recorded_rather_than_zero() {
+    let mut slice = reported_slice();
+    for cell in &mut slice.cells {
+        if cell.key.tier == Tier::parse("lint") {
+            cell.duration_s = 0;
+        }
+    }
+    let markdown = render_report(None, &[slice]);
+    assert!(
+        markdown.contains(
+            "| claudine | ubuntu-latest | ci | not recorded (the producer recorded no \
+             command duration) |"
+        ),
+        "{markdown}"
+    );
+    assert!(
+        !markdown.contains("| claudine | ubuntu-latest | ci | 0s |"),
+        "a `0s` duration reads as a measurement: {markdown}"
+    );
+}
+
+#[test]
+fn an_environment_no_producer_reported_renders_not_recorded_rather_than_zero() {
+    let cells = vec![Cell {
+        area: "claudine".to_owned(),
+        state: CellState::Missing,
+        origin: Origin::Unproduced,
+        scheduled: true,
+        ..blank_cell(cell_key("claudine", "windows-latest", Tier::L1))
+    }];
+    let markdown = render_report(None, &[rollup_of(cells, &["claudine"])]);
+    assert!(
+        markdown.contains(
+            "| windows-latest | 1 | 0 | none declared | not recorded (no producer reported \
+             a result for this environment) | none |"
+        ),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn a_companion_with_no_recorded_counts_is_never_reported_as_zero() {
+    let cells = vec![Cell {
+        area: "root".to_owned(),
+        state: CellState::Pass,
+        origin: Origin::Ci,
+        counts: Counts { total: 5, passed: 5, ..Counts::default() },
+        duration_s: 3,
+        companions: vec![CompanionResult::new("test-audit typecheck", None)],
+        scheduled: true,
+        ..blank_cell(cell_key("repo-deps", "ubuntu-latest", Tier::L1))
+    }];
+    let markdown = render_report(None, &[rollup_of(cells, &["repo-deps"])]);
+    assert!(
+        markdown.contains("not recorded (test-audit typecheck)"),
+        "an unmeasurable companion must name itself: {markdown}"
+    );
+    assert!(
+        !markdown.contains("| ubuntu-latest | 1 | 5 | 0 |"),
+        "a `0` companion count reads as a suite that found nothing: {markdown}"
+    );
+}
+
+/// `--plan` alone is the documentation-only shape; `--results` alone is a
+/// rollup fold with no plan artifact. Neither may be required of the other.
+#[test]
+fn either_input_alone_produces_a_report() {
+    assert!(!render_report(Some(&reported_plan(change_inventory::FIXTURE_INVENTORY, "")), &[])
+        .is_empty());
+    assert!(!render_report(None, &[reported_slice()]).is_empty());
+}
+
 // --- The versioned result-schema migration -------------------------------
 
 #[test]
@@ -3817,6 +4065,12 @@ fn the_command_surface_writes_reads_and_judges_one_areas_slice() {
             "schema_version": PLAN_SCHEMA_VERSION,
             "packages": [{"package": "claudine"}, {"package": "playa"}],
             "cells": cells,
+            "change_inventory": serde_json::from_str::<serde_json::Value>(
+                change_inventory::FIXTURE_INVENTORY
+            )
+            .unwrap(),
+            "source_packages": ["claudine"],
+            "reverse_dependencies": ["claudine-cli"],
         })
         .to_string(),
     )
@@ -3922,8 +4176,12 @@ fn the_command_surface_writes_reads_and_judges_one_areas_slice() {
     .unwrap();
     assert_eq!(cmd_verdict(&verdict_args).unwrap(), 0, "the slice is clear");
 
+    // The advisory report's own invocation: the plan beside the slices, which
+    // is what `ci-reporting` runs.
     let summarize_args = Args::parse(
         [
+            "--plan",
+            plan.to_str().unwrap(),
             "--results",
             results.to_str().unwrap(),
             "--summary",
@@ -3942,6 +4200,96 @@ fn the_command_surface_writes_reads_and_judges_one_areas_slice() {
         rendered.contains("refs/notes/ci-local/macos-latest"),
         "the reused cell's evidence must reach the step summary: {rendered}"
     );
+    for entry in change_inventory::FIXTURE_MARKDOWN_ENTRIES {
+        assert!(rendered.contains(entry), "the report omits {entry:?}:\n{rendered}");
+    }
+    assert!(
+        rendered.contains("| direct (own source changed) | `claudine` |"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("| reverse (reported, not selected) | `claudine-cli` |"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("## Tests by environment"), "{rendered}");
+    // The plan's own origin vocabulary, unchanged, and never `cicd`.
+    assert!(rendered.contains("| local |"), "{rendered}");
+    assert!(rendered.contains("| ci |"), "{rendered}");
+    assert!(!rendered.contains("cicd"), "{rendered}");
+    assert!(
+        rendered.contains("The merge decision belongs to `ci-gate`"),
+        "{rendered}"
+    );
+}
+
+/// `--plan` with no slice at all: the documentation-only shape `ci-reporting`
+/// runs when the scope selected nothing. It must render the inventory and say
+/// that no package test was required, not print an empty document.
+#[test]
+fn the_summarize_command_reports_a_run_that_scheduled_no_package() {
+    let temp = TempDir::new("docs-only");
+    let plan = temp.path().join("resolved-plan.json");
+    fs::write(
+        &plan,
+        serde_json::json!({
+            "schema_version": PLAN_SCHEMA_VERSION,
+            "packages": [],
+            "cells": [],
+            "change_inventory": serde_json::from_str::<serde_json::Value>(
+                change_inventory::FIXTURE_INVENTORY
+            )
+            .unwrap(),
+            "source_packages": [],
+            "reverse_dependencies": [],
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let summary = temp.path().join("summary.md");
+    let args = Args::parse(
+        ["--plan", plan.to_str().unwrap(), "--summary", summary.to_str().unwrap()]
+            .into_iter()
+            .map(str::to_owned),
+    )
+    .unwrap();
+    assert_eq!(cmd_summarize(&args).unwrap(), 0);
+
+    let rendered = fs::read_to_string(&summary).unwrap();
+    for entry in change_inventory::FIXTURE_MARKDOWN_ENTRIES {
+        assert!(rendered.contains(entry), "{rendered}");
+    }
+    assert!(rendered.contains(NO_PACKAGE_TESTS), "{rendered}");
+    assert!(
+        rendered.contains("| direct (own source changed) | none |"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn a_scheduled_run_whose_slices_never_arrived_says_so_rather_than_reading_as_docs_only() {
+    let plan = reported_plan(
+        change_inventory::FIXTURE_INVENTORY,
+        r#"{"package":"claudine","area":"claudine","environment":"ubuntu-latest",
+        "gate":"L1","execution":"execute","origin":"ci","state":"pending"}"#,
+    );
+    let markdown = render_report(Some(&plan), &[]);
+    assert!(markdown.contains("The plan scheduled 1 cell(s)"), "{markdown}");
+    assert!(
+        !markdown.contains(NO_PACKAGE_TESTS),
+        "a vanished area must not read as a change that required no test: {markdown}"
+    );
+}
+
+/// Neither input is optional in both directions: with no plan AND no slice
+/// there is nothing to report, and an empty report would read as a run that
+/// measured nothing rather than one that was asked the wrong question.
+#[test]
+fn the_summarize_command_refuses_to_run_with_neither_a_plan_nor_a_slice() {
+    let args = Args::parse(["--summary", "/dev/null"].into_iter().map(str::to_owned)).unwrap();
+    let error = format!("{:#}", cmd_summarize(&args).expect_err("must refuse"));
+    assert!(error.contains("--results"), "{error}");
+    assert!(error.contains("--plan"), "{error}");
 }
 
 /// R10 under the plan: a `gates = false` package owns no plan cells, so its

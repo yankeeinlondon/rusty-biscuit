@@ -1540,6 +1540,87 @@ class AreaFanOutTests(unittest.TestCase):
         self.assertNotIn("beta", scope["area_matrix"])
 
 
+class AllReusedAreaFanOutTests(unittest.TestCase):
+    """AC16: an area whose test cells were all reused still fans out.
+
+    `ci-reporting` reads the per-area `ci-results-<slug>` slices, and only an
+    area that fans out produces one. The area matrix is therefore derived from
+    the plan's GATING PACKAGES and never narrowed by execution: an area that
+    dropped out because every test cell was satisfied by a receipt would take
+    those cells' results out of the report with it.
+    """
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        packages = [package(self.root, "alpha-core", "alpha/lib/Cargo.toml")]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": item["id"], "deps": []} for item in packages]},
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def plan(self, accepted: list[dict[str, object]] | None = None) -> dict[str, object]:
+        return calculate_scope(
+            ["alpha/lib/src/lib.rs"],
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            accepted_cells=accepted,
+        )
+
+    def test_an_area_whose_test_cells_are_all_reused_still_fans_out(self) -> None:
+        reusable = [
+            {
+                "package": cell["package"],
+                "environment": cell["environment"],
+                "gate": cell["gate"],
+                "origin": "local",
+                "outcome": "pass",
+                "evidence": f"refs/notes/ci-local/{cell['environment']}",
+            }
+            for cell in self.plan()["cells"]
+            if cell["reusable"]
+        ]
+        self.assertTrue(reusable, "the fixture needs at least one reusable cell")
+
+        plan = self.plan(reusable)
+        self.assertEqual(
+            [],
+            [
+                f"{cell['package']}/{cell['environment']}/{cell['gate']}"
+                for cell in plan["cells"]
+                if cell["reusable"] and cell["execution"] == "execute"
+            ],
+            "the fixture must leave no reusable cell executing",
+        )
+
+        scope = legacy_scope_document(plan)
+        self.assertIn("alpha", scope["scheduled_areas"])
+        self.assertIn("alpha", scope["area_matrix"])
+        self.assertEqual("alpha", scope["area_slugs"]["alpha"])
+        self.assertEqual(
+            ["alpha-core"],
+            [entry["package"] for entry in scope["area_matrix"]["alpha"]["include"]],
+        )
+        self.assertEqual(
+            [],
+            scope["area_matrix"]["alpha"]["include"][0]["native_environments"],
+            "no test leg is scheduled, yet the area still fans out so its "
+            "coverage audit publishes the reused cells' slice",
+        )
+
+
 class MatrixLimitTests(unittest.TestCase):
     def test_over_256_gating_packages_fails_loudly(self) -> None:
         root = Path(tempfile.mkdtemp())
@@ -3600,6 +3681,67 @@ class RealWorkspaceAreaFanOutTests(unittest.TestCase):
                 f"area {area} slugs to {slug!r}, which GitHub rejects as an artifact name",
             )
         self.assertEqual(len(set(slugs.values())), len(slugs))
+
+
+class RealWorkspaceDocumentationOnlyTests(unittest.TestCase):
+    """AC11/AC13 at all three documentation ownership levels, on the real tree.
+
+    A passive corpus case over the shipped workspace: a document owned by the
+    repository, by an area, or by a package must account for itself and select
+    nothing. Whether the two renderers then NAME those documents is asserted by
+    `ci-plan-tests.rs`, `ci-rollup-tests.rs`, and `test_ci_local.py`; this
+    fixture owns the planner's half — the inventory they read, and the zero
+    package and preflight executions beside it.
+    """
+
+    #: Repository-owned, area-owned, and package-owned, in that order. Each is
+    #: a tracked file, so a rename that makes one of them stop existing is a
+    #: fixture failure rather than a silently weaker assertion.
+    LEVELS = (
+        "docs/topics/ci-cd.md",
+        "darkmatter/docs/topics/caching.md",
+        "biscuit-file/README.md",
+    )
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.metadata = load_metadata(ROOT)
+        cls.environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        cls.policy = package_ci_policy(
+            workspace_packages(cls.metadata),
+            runner_labels={environment["runner"] for environment in cls.environments},
+            root=ROOT,
+            today=TODAY,
+        )
+
+    def test_each_ownership_level_exists_in_the_tree(self) -> None:
+        for path in self.LEVELS:
+            self.assertTrue((ROOT / path).is_file(), f"{path} is no longer tracked")
+
+    def test_each_ownership_level_selects_nothing_and_names_its_document(self) -> None:
+        for path in self.LEVELS:
+            with self.subTest(path=path):
+                plan = calculate_scope(
+                    [path], ROOT, self.metadata, self.environments, self.policy
+                )
+                self.assertEqual([], plan["packages"])
+                self.assertEqual([], plan["cells"])
+                self.assertEqual([], plan["areas"])
+                self.assertEqual(
+                    [],
+                    plan["preflight_os"],
+                    "a change that selects no gating package establishes nothing, "
+                    "so preflight must skip too",
+                )
+                inventory = plan["change_inventory"]
+                self.assertTrue(inventory["diff_available"])
+                self.assertEqual([path], inventory["paths"]["documentation"])
+                self.assertEqual(1, inventory["counts"]["total"])
+                self.assertEqual(
+                    [],
+                    legacy_scope_document(plan)["scheduled_areas"],
+                    "no area fans out, so no runner is spent",
+                )
 
 
 class RealWorkspaceRetirementScopeTests(unittest.TestCase):
