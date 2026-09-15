@@ -1,6 +1,9 @@
 ---
 created: 2026-09-15
 status: draft
+clarified: true
+needs_rulings: false
+clarified_by: opencode/zai-coding-plan/glm-5.3
 reviewed: true
 reviewed_by: codex/gpt-5.6-sol
 reviewed_on: 2026-09-15
@@ -29,8 +32,14 @@ is the "before" picture this spec changes.
 
 ## Status
 
-Reviewed draft. The recommended answer to the remaining open question is
-implementation-ready unless maintainers choose a broader suppression policy.
+Reviewed draft. No open questions remain: the absence-predicate question is
+resolved as [Resolved Decision 9](#resolved-decisions), and the ratified
+scope, warning mechanics, and audit boundaries are recorded as Decisions
+10–12. Decisions 13–16 record the merge-dedup key shape, the performance
+posture, diagnostic-code governance, and the successor charter. Decisions
+17–18, ratified 2026-09-16, record the three-way spec consolidation
+(annex-absorb; both July drafts superseded in place) and the
+bracket-literal-key scope boundary. Implementation-ready.
 
 ## Motivation
 
@@ -61,14 +70,25 @@ brace regex is not valid compatibility evidence, however: it includes inert
 triple-brace literals, fenced documentation examples, and GitHub Actions
 `${{ fromJSON(inputs.l2-environments) }}`, whose grammar is not Darkmatter's.
 
-Before implementation, add or extend a parser-backed shipped-artifact audit
-that classifies only executable Darkmatter surfaces: body and frontmatter
+Before implementation, stand up the compatibility audit as a permanent L1
+corpus test in [`lib/tests/`](../../lib/tests/), a sibling of
+`shipped_schema_and_trigger_corpus_parses_passively`
+([`schema_phase_validation.rs`](../../lib/tests/schema_phase_validation.rs)).
+It directory-walks shipped markdown artifacts — root `prompts/`,
+`.claude/commands/`, `darkmatter/prompts/`, and claudine's prompts — and
+classifies only executable Darkmatter surfaces (body and frontmatter
 interpolations, `when=` expressions, Expression-typed frontmatter values, and
-`$()` ternary conditions/branches. Record every currently valid unspaced
-subtraction of the breaking identifier-like form. The implementation may rely
-on the current finding that no shipped executable expression uses that form only
-after this audit proves it; string literals such as `'review-' + iteration` do
-not count because their dash is never tokenized as an operator.
+`$()` ternary conditions/branches) via the library's own extraction, never
+regex: string literals such as `'review-' + iteration` do not count because
+their dash is never tokenized as an operator. The gate asserts zero usages of
+the breaking form — identifier-like operand, unspaced `-`,
+identifier-continuation follower — and must be green before the lexer change
+merges; after the change, the same test fences that every shipped executable
+expression still parses under the new grammar (parse-only; typo detection
+belongs to Requirement 4's runtime warning, not this test). The pre-approved
+collision fallback rewrites `{{iteration-1}}` to `{{ iteration - 1 }}`,
+semantics-preserving under both grammars; escalate only for files that cannot
+be edited.
 
 Kebab frontmatter keys in the repo include `depends-on`, `supersedes-revision`,
 `document-schema`, and — in `.claude/commands/` — `argument-hint` and
@@ -118,9 +138,14 @@ and the two spellings an author reaches for first — `{{spec-name}}` and
 > **mid-identifier** and the next character continues an identifier
 > (`char::is_alphanumeric()` or `_`). Otherwise `-` is an operator.
 
-Stated for authors: **binary minus requires whitespace before it**, unless the
-left operand ends in `)`, `]`, a string delimiter, or a digit belonging to a
-number literal. A digit at the end of an identifier does not create that
+Stated for authors: a `-` joins into an identifier exactly when the scan is
+already **mid-identifier** and the next character continues an identifier —
+what follows the dash decides, not what precedes it. `a-b` is therefore one
+name, while `a - b`, `a -b`, and `a- b` are all subtraction. Arithmetic after
+an identifier or boolean operand needs whitespace before the minus; no
+whitespace is needed when the left operand cannot end an identifier (`)`, `]`,
+a string delimiter, or a number literal), so `4-2` and `f(x)-1` stay
+subtraction. A digit at the end of an identifier does not create that
 exception: `phase-2` is one identifier after this change.
 
 The decision lives inside `read_variable`
@@ -185,6 +210,14 @@ text in frontmatter must stop degrading those failures to warnings.
 | `when="…"` conditions | fatal, exit 1 | fatal, exit 1 | correct |
 | `$()` ternary conditions and branches | fatal, exit 1 | fatal, exit 1 | correct |
 | Body interpolation | fatal, exit 1 | fatal, exit 1 | **warns, emits `{{ … }}` verbatim, exit 0 when `fail_fast` is false** |
+
+This requirement — and Requirement 4's warning — changes behavior only within
+full-document composition. Darkmatter's public condition API
+(`evaluate_condition`, `parse_condition` + `evaluate`) keeps its exact current
+contract: parse and evaluation failures propagate as `Result` errors and each
+caller owns its failure disposition. Verified in code: claudine's loop
+conditions are already fatal; hook `when=` handling deliberately
+warns-and-skips.
 
 The public `ComposeOptions::with_fail_fast(false)` option remains meaningful for
 recoverable non-expression stages such as TOC linking and non-structural
@@ -258,7 +291,13 @@ namespace-specific diagnostics continue to own invalid members so this feature
 does not emit a duplicate unknown-identifier diagnostic. A frontmatter root is
 known when it is present in the document or declared by DMLS's effective schema
 shape. Checking deeper object members requires schema-aware path analysis and is
-outside this feature.
+outside this feature. The same boundary covers string-literal index keys in
+bracket access: `doc['typo-key']` is not diagnosed by this feature, because
+the diagnostic walk visits `Variable` nodes only and a bracket key is a
+literal, not an identifier. Schema-aware path analysis that would cover
+bracket keys remains out of scope and is noted as candidate successor work
+([Expression Type System](../2026-09-16-expression-type-system/spec.md);
+[Resolved Decision 18](#resolved-decisions)).
 
 ### Dash-separated-key diagnostic
 
@@ -285,7 +324,11 @@ span instead of separate generic diagnostics for its operand variables.
 A well-formed identifier that resolves to nothing is **not** an error. Its type
 is `any` by default, and `null`/undefined is a valid inhabitant of `any`, so
 composition proceeds and it renders as an empty string exactly as it does today.
-But in most documents it is a typo, so it must not be silent either.
+But in most documents it is a typo, so it must not be silent either. When the
+successor type-system work lands an explicit `unknown` type
+([Expression Type System](../2026-09-16-expression-type-system/spec.md),
+chartered under [Follow-On Work](#follow-on-work)), this "`any` by default"
+language is renamed to `unknown`; the behavior does not change.
 
 The deciding question is whether the root name is **known** to the request. A
 root is known when it is present in effective state (including an explicit
@@ -307,7 +350,13 @@ frontmatter interpolation in both passes, body interpolation, `when=`
 conditions (including transclusion/page-block conditions), and `$()` ternary
 conditions or branches. Use one shared classifier/collector so these surfaces
 cannot drift. Passive schema parsing and DMLS validation perform no evaluation;
-DMLS applies the corresponding static rule from Requirement 3.
+DMLS applies the corresponding static rule from Requirement 3. The scope
+boundary from Requirement 2 holds here as well: only full-document composition
+changes. Any future unknown-root warning exposure for direct condition-API
+callers must ride the existing `EvaluationLookup::is_known_variable_root` hook
+([`expression/mod.rs`](../../lib/src/markdown/compose/expression/mod.rs),
+whose default `true` keeps third-party lookups silent), preserving the trait's
+compatibility defaults.
 
 ### Preserve compose ordering with deferred candidates
 
@@ -324,8 +373,38 @@ and may classify immediately because their effective state is available.
 
 Candidate collection is observational only: it must not execute an expression a
 surface would not otherwise evaluate, perform schema or file I/O, or recapture
-request context. The accumulator travels with the existing compose request and
-source provenance.
+request context. The accumulator travels with `ComposeOptions`/`ComposeContext`
+— the existing compose request and its source provenance.
+
+### Warning mechanics
+
+The warning is an existing `ComposeWarning`
+([`context/report.rs`](../../lib/src/markdown/compose/context/report.rs))
+carrying the stable code `dm.expression.unknown_identifier` — cross-surface
+parity with DMLS — with `source`, `path`, and `line_number` set. No new
+diagnostic type is introduced. One condition carries one code on any surface:
+`dm.*` is the product diagnostic namespace regardless of emitting surface (an
+LSP diagnostic and a compose warning for the same condition share the code),
+and severity is per-surface. `ComposeReport::merge` deduplication is
+generalized from schema-advisory-only to Requirement 5's typed identity keys —
+this family's key is `(source, code, normalized root)` — through one
+mechanism keyed by per-family identity
+([Resolved Decision 13](#resolved-decisions)).
+
+Because transclusion resolution and frontmatter shell expansion run under
+parallel iteration with per-unit reports merged afterward, candidate collection
+must either share interior-mutable state or fold per-unit at the existing merge
+points. That is an implementation constraint, not a prescription.
+
+Two follow-ups are explicitly out of scope for this feature — this is their
+one canonical statement; later sections and decisions point here: a
+`--deny-warnings`-style promotion flag for CI (mirroring `--strict-style`), and
+machine-readable warning output (`--format json` currently emits the document
+only; warnings are stderr-only today and stay that way in this feature). Both
+are tracked in the successor spec's scope
+([Expression Type System](../2026-09-16-expression-type-system/spec.md);
+[Resolved Decision 16](#resolved-decisions)). See
+[Follow-On Work](#follow-on-work).
 
 ### Worked examples
 
@@ -393,6 +472,20 @@ condition and are suppressed too; this keeps the documented
 `color ? color : "none"` idiom silent. A different unknown root in either branch
 still warns.
 
+A direct bare-variable argument to `is_null(...)` or `is_empty(...)` — or their
+registered aliases, resolved through the function catalog (`FunctionBinding`),
+never duplicated as string literals in the walker — likewise suppresses the
+warning for that variable: the predicate states absence intent explicitly.
+Nested uses such as `is_empty(trim(x))` still warn for `x`, because the
+predicate no longer directly guards that lookup. A bare unknown root in a
+`when="x"` condition warns — a misspelled gate silently disabling content is
+the motivating failure class reborn. The predicate rule is **interim**: the
+successor type-system work ([Expression Type
+System](../2026-09-16-expression-type-system/spec.md), chartered under
+[Follow-On Work](#follow-on-work)) generalizes it to "any parameter whose type
+admits null" once parameter nullability is expressible, and landing that
+generalization retires the interim rule.
+
 | Expression | Unresolved `x` warns? |
 | --- | --- |
 | `{{ x }}` | yes |
@@ -401,12 +494,16 @@ still warns.
 | `{{ x ? a : b }}` | no — ternary condition |
 | `{{ x ? x : b }}` | no — the branch reference is guarded by `x` |
 | `{{ a ? x : b }}` | yes when the `x` branch is evaluated |
+| `{{ is_null(x) }}` | no — direct absence-predicate argument |
+| `{{ is_empty(trim(x)) }}` | yes — nested; the predicate no longer directly guards the lookup |
+| bare `when="x"` | yes — a misspelled gate silently disabling content |
 
 Runtime warnings follow evaluation reachability: an unchosen ternary branch or
 short-circuited fallback is not a runtime issue and must not warn. DMLS remains
 static and may diagnose an unknown identifier in either non-suppressed branch,
-but it applies the same fallback-primary, ternary-condition, and guarded-root
-suppressions so editor and runtime do not disagree about intentional absence.
+but it applies the same fallback-primary, ternary-condition, guarded-root, and
+absence-predicate suppressions so editor and runtime do not disagree about
+intentional absence.
 The runtime collector must preserve the evaluator's short-circuit behavior
 rather than blindly walking the whole AST before evaluation.
 
@@ -471,7 +568,7 @@ substitutes for the other, and neither is suppressed because the other exists.
 | 4 | [`overlay/expressions.rs`](../../dmls/src/overlay/expressions.rs) + [`dsl.rs`](../../dmls/src/providers/dsl.rs) + [`diagnostics/frontmatter.rs`](../../dmls/src/diagnostics/frontmatter.rs) + [`code_actions.rs`](../../dmls/src/providers/code_actions.rs) | add a full-AST variable walk for the two diagnostic call sites while preserving `root_identifier` for navigation/graph indexing; carry a structured safe replacement into the quick-fix provider (Requirement 3) |
 | 5 | request-scoped diagnostics, effective-state/schema handoff, evaluator, and condition/`$()` call sites | collect source-spanned candidates, reconcile them against final request state/schema, and emit evaluation-aware unresolved-root warnings through one shared policy (Requirement 4) |
 | 6 | [`dsl.rs:696`](../../dmls/src/providers/dsl.rs), [`diagnostics/frontmatter.rs:653`](../../dmls/src/diagnostics/frontmatter.rs) | raise `dm.expression.unknown_identifier` from `INFORMATION` to `WARNING` |
-| 7 | interpolation rescan and `ComposeReport` merge paths | preserve source provenance and deduplicate by the stable identities in Requirement 5 |
+| 7 | interpolation rescan and `ComposeReport` merge paths | preserve source provenance and deduplicate by the stable identities in Requirement 5, generalizing `ComposeReport::merge` from schema-advisory-only to per-family identity keys for every coded warning (Resolved Decision 13) |
 
 DMLS parses through darkmatter's own `parse_spanned` / `parse_condition_spanned`,
 so the AST, spans, and both expression diagnostics follow the lexer change.
@@ -488,6 +585,22 @@ single `Variable` token with no dot and an ASCII alphabetic-or-`_` first
 character. This is consistent with the rest of the change. Add parser coverage,
 including that a quoted key remains required where the existing ASCII-first
 guard requires one.
+
+## Performance Posture
+
+Four qualitative invariants bound the mechanics above; each is verifiable by
+inspection, and none introduces a numeric budget.
+
+1. The DMLS diagnostic walk is single-pass and linear in AST nodes over an
+   already-parsed AST — no additional parses.
+2. The runtime accumulator adds O(1) work per variable evaluation;
+   reconciliation is O(candidates).
+3. No cross-document lock joins the parallel compose hot path — candidates fold
+   per-unit at the existing merge points, preserving rayon parallelism.
+4. No numeric budgets. If a regression is suspected, measure against the
+   existing criterion bench suite ([`lib/benches/`](../../lib/benches/), e.g.
+   [`compose_schema_transclusion.rs`](../../lib/benches/compose_schema_transclusion.rs))
+   rather than adding new SLOs.
 
 ## Compatibility
 
@@ -512,15 +625,82 @@ guard requires one.
 - **Persisted output.** None. No AST variant, serialized form, or public
   signature changes.
 
+## Follow-On Work
+
+The decisions above ship a narrow, lexical fix now and charter the structural
+program behind it — the human-ratified "ship now + charter" split. Nothing in
+this section is required by Requirements 1–5, and none of it may delay them.
+
+The chartered successor now has a real artifact:
+[Expression Type System](../2026-09-16-expression-type-system/spec.md)
+(`2026-09-16-expression-type-system`, active and dated). That spec owns the
+program's phases, open questions, and interface seam; the arc and seam below
+stay inline as context. The two CLI follow-ups deferred from Requirement 4's
+warning mechanics are stated once in [Warning
+mechanics](#warning-mechanics) and tracked in that spec's scope, not lost.
+The retirement trigger is explicit: Resolved
+Decision 9's interim absence-predicate suppression is retired when the
+successor's null-admitting-parameter suppression lands (Resolved Decision 16).
+
+### Type-system arc (successor charter summary)
+
+1. Add an explicit `unknown` type — preferred over `any` — and an explicit
+   `null` type to SimplifiedSchema's `SimplifiedType` vocabulary. Today it has
+   `Any` but neither `unknown` nor `null`; union machinery exists at property
+   and root level, but there is no `null` keyword.
+2. Express expression-engine function schemas in SimplifiedSchema. The function
+   catalog
+   ([`docs/schemas/expression-functions.yaml`](../../docs/schemas/expression-functions.yaml))
+   plus `ExpressionFunctionDescriptor`/`ParamType` is today a parallel ad-hoc
+   system sharing only the type vocabulary.
+3. Build a type-aware expression parser in which untyped variables default to
+   `unknown`.
+4. Understand optional-but-typed properties as the union `A | null`, with null
+   as YAML's representation of undefined.
+5. Add flow-sensitive type narrowing: inside conditional blocks (`::block
+   when="x"` narrowing `file | null` to `file`), in ternary truthiness branches
+   (`x ? frontmatter(x, 'foo') : null` narrows `x` in the true branch), and in
+   `&&`-guarded calls (`file_exists(x) && frontmatter(x, 'foo')`).
+6. Once nullability is expressible, generalize this spec's interim
+   absence-predicate suppression (Resolved Decision 9) to "any parameter whose
+   type admits null," and add parameter type diagnostics: a known-null value
+   passed to a non-null parameter is an error; a union-including-null argument
+   is a warning. When that lands, rename this spec's "type is `any` by
+   default" language to `unknown` — Requirement 4 carries the forward-compat
+   note.
+
+### Interface seam
+
+Darkmatter owns parsing, evaluation, and type safety end-to-end. Callers such
+as claudine ask darkmatter to evaluate and extend the language by passing in
+functions plus type definitions (SimplifiedSchema) — never by bespoke grammar
+or evaluation. Verified today: claudine already calls darkmatter's parser and
+evaluator and supplies variables through `EvaluationLookup`; the residual
+coupling is read-only AST walks, and formalizing those is part of that
+successor spec. The deferred CLI follow-ups land there, in its scope
+([Warning mechanics](#warning-mechanics)).
+
 ## Implementation Plan
 
 ### Phase 0 — Compatibility inventory
 
-Extend the passive shipped-artifact corpus to classify every executable
-Darkmatter expression surface and pin the current unspaced-subtraction
-inventory. Resolve any real collision before changing the lexer; do not count
-GitHub Actions syntax, interpolation literals, fenced examples, or string
-contents as Darkmatter operator use.
+Stand up the permanent L1 corpus audit described in
+[Motivation](#motivation): a sibling of
+`shipped_schema_and_trigger_corpus_parses_passively`
+([`schema_phase_validation.rs`](../../lib/tests/schema_phase_validation.rs)) in
+[`lib/tests/`](../../lib/tests/) that directory-walks root `prompts/`,
+`.claude/commands/`, `darkmatter/prompts/`, and claudine's prompts,
+classifying every executable Darkmatter expression surface through the
+library's own extraction. The gate asserts zero breaking-form usages —
+identifier-like operand, unspaced `-`, identifier-continuation follower — and
+must be green before the lexer change merges; after the change, the same test
+asserts every shipped executable expression still parses under the new grammar
+(parse-only; typo detection belongs to Requirement 4's runtime warning).
+Resolve any real collision before changing the lexer — the pre-approved
+fallback rewrites `{{iteration-1}}` to `{{ iteration - 1 }}`, escalating only
+for files that cannot be edited — and do not count GitHub Actions syntax,
+interpolation literals, fenced examples, or string contents as Darkmatter
+operator use.
 
 ### Phase 1 — Lexer
 
@@ -567,6 +747,12 @@ frontmatter call sites, plus the exact dash-separated-key message and quick-fix.
 - [`docs/inline/interpolation.md`](../../docs/inline/interpolation.md) — the
   empty-string fallback paragraph now carries a warning unless the property is
   known to effective state/schema or the absence is explicitly handled
+- [`dmls/docs/diagnostics.md`](../../dmls/docs/diagnostics.md) — a short
+  "`dm.*` registry rules" note (~15 lines: ownership, one-condition-one-code,
+  severity-per-surface, and the procedure for new codes — a
+  [`codes.rs`](../../dmls/src/diagnostics/codes.rs) entry plus a doc row) in
+  the "Sources and codes" area, referenced from
+  [`docs/topics/parsing/`](../../docs/topics/parsing/index.md)
 - public `ComposeOptions::with_fail_fast`, `ComposeWarning`, and subtree
   strictness docs — distinguish expression authoring failures from other
   recoverable compose failures and preserve explicit lenient subtree behavior
@@ -608,7 +794,10 @@ and diagnostic count together — including that the `number(required)` row fail
 with the schema's own message and **no** additional unresolved-identifier
 warning. Every row of the
 [suppression table](#explicitly-handled-absence-must-stay-silent), asserting the
-evaluated branch/right-hand-side positions warn and unreachable ones do not.
+evaluated branch/right-hand-side positions warn and unreachable ones do not —
+including the absence-predicate rows: a direct `is_null(x)`/`is_empty(x)`
+argument (or registered alias) stays silent, nested `is_empty(trim(x))` warns,
+and a bare unknown `when="x"` root warns.
 Assert no warning when a root arrives via `--set`, inherited state, another
 caller layer, baseline/trigger schema, or as an explicit null/empty value.
 Cover a body expression, mixed frontmatter value, page-block `when=`,
@@ -628,9 +817,14 @@ diagnostic data, and that ambiguous arithmetic offers no fix.
 
 These tests are L1 because none requires a real terminal, browser, device, or
 host input. Run them with `just test` in `darkmatter/`; do not place them in
-`just test-l2`. Because this changes a parser and a shipped prompt path, extend
-the shared passive shipped-artifact corpus and keep one end-to-end composition
-of `prompts/_reviews/feature-review.md` through its normal invocation path.
+`just test-l2`. Because this changes a parser and a shipped prompt path, the
+Phase 0 audit is itself a permanent L1 corpus test in
+[`lib/tests/`](../../lib/tests/), a sibling of
+`shipped_schema_and_trigger_corpus_parses_passively`
+([`schema_phase_validation.rs`](../../lib/tests/schema_phase_validation.rs))
+walking root `prompts/`, `.claude/commands/`, `darkmatter/prompts/`, and
+claudine's prompts; keep one end-to-end composition of
+`prompts/_reviews/feature-review.md` through its normal invocation path.
 
 ## Resolved Decisions
 
@@ -667,31 +861,171 @@ of `prompts/_reviews/feature-review.md` through its normal invocation path.
 8. **Diagnostic walking does not replace `root_identifier`.** Navigation and
    graph-index consumers retain their one-root contract. Only the two diagnostic
    providers use the new all-variable walk.
+9. **Recognized absence predicates suppress; bare condition gates do not.**
+   A direct bare-variable argument to `is_null(...)` or `is_empty(...)` — or
+   their registered aliases, resolved through the function catalog
+   (`FunctionBinding`), never duplicated as string literals in the walker —
+   suppresses the Requirement 4 unknown-root warning for that variable. Nested
+   uses such as `is_empty(trim(x))` still warn for `x`: the predicate no longer
+   directly guards the lookup. A bare unknown root in a `when="x"` condition
+    warns, because a misspelled gate silently disabling content is the
+    motivating failure class reborn. DMLS applies the same absence-predicate
+    suppression in its static walk — a direct bare-variable argument to
+    `is_null(...)`/`is_empty(...)` (or a registered alias) stays silent there
+    too — consistent with Decision 6's editor/runtime suppression parity. The
+    rule is **interim** — the successor type-system work ([Expression Type
+    System](../2026-09-16-expression-type-system/spec.md)) generalizes it to
+    "any parameter whose type admits null" once parameter nullability is
+    expressible, and Resolved Decision 16 records the retirement trigger.
+    Approved 2026-09-15.
+10. **Requirements 2 and 4 bind full-document composition only.** The public
+    condition API (`evaluate_condition`, `parse_condition` + `evaluate`) keeps
+    its exact current contract: parse/evaluation failures propagate as
+    `Result` errors and each caller owns its failure disposition (verified in
+    code: claudine loop conditions are already fatal; hook `when=` deliberately
+    warns-and-skips). Any future unknown-root warning exposure for direct
+    condition-API callers must ride the existing
+    `EvaluationLookup::is_known_variable_root` hook, whose default `true` keeps
+    third-party lookups silent, preserving the trait's compatibility defaults.
+11. **The warning reuses the existing reporting machinery.** Unresolved-root
+    warnings are emitted as `ComposeWarning`s carrying the stable code
+    `dm.expression.unknown_identifier` (cross-surface parity with DMLS), with
+    `source`, `path`, and `line_number` set — no new diagnostic type.
+    `ComposeReport::merge` deduplication is generalized from
+    schema-advisory-only to Requirement 5's typed identity keys, one
+    mechanism keyed by per-family identity (Resolved Decision 13). One
+    condition carries one code on any surface — `dm.*` is the product
+    diagnostic namespace regardless of emitting surface, and severity is
+    per-surface (Resolved Decision 15). The accumulator travels with
+    `ComposeOptions`/`ComposeContext`; because transclusion resolution and
+    frontmatter shell expansion run under parallel iteration with per-unit
+    reports merged afterward, candidate collection must either share
+    interior-mutable state or fold per-unit at the existing merge points — an
+    implementation constraint, not a prescription. The two deferred CLI
+    follow-ups are stated once in Requirement 4's [warning
+    mechanics](#warning-mechanics) and tracked in the successor spec's scope
+    (Resolved Decision 16).
+12. **The Phase 0 audit is a permanent corpus test, not a one-off inventory.**
+    It lives in `lib/tests/` as a sibling of
+    `shipped_schema_and_trigger_corpus_parses_passively`
+    ([`schema_phase_validation.rs`](../../lib/tests/schema_phase_validation.rs)),
+    directory-walking root `prompts/`, `.claude/commands/`,
+    `darkmatter/prompts/`, and claudine's prompts, and classifying executable
+    surfaces via the library's own extraction — never regex, so string
+    literals such as `'review-' + iteration` do not count. Its gate asserts
+    zero breaking-form usages (identifier-like operand, unspaced `-`,
+    identifier-continuation follower) and must be green before the lexer
+    change merges; after the change the same test fences that every shipped
+    executable expression still parses (parse-only; typo detection belongs to
+    Requirement 4's runtime warning). The pre-approved collision fallback
+     rewrites `{{iteration-1}}` to `{{ iteration - 1 }}` (semantics-preserving
+     under both grammars); escalation only for files that cannot be edited.
+13. **Merge deduplication keys each coded-warning family by identity, not
+    message.** One dedup mechanism in `ComposeReport::merge`, keyed by
+    `(source, code, family_key)`. The schema-advisory family's extractor
+    returns exactly today's `(source, code, path)` triple — behavior-preserving
+    by construction and pinned by the existing merge tests. The
+    `dm.expression.unknown_identifier` family contributes the normalized root
+    name; expression failures contribute the original source span —
+    Requirement 5's keys unchanged. Future coded-warning families declare
+    their family key at their definition site. A universal
+    `(source, code, message)` key is rejected: message is prose, not
+    identity — it can over-merge distinct advisories and under-merge reworded
+    ones.
+14. **The performance posture is qualitative and verified by inspection.**
+    The four invariants recorded in [Performance
+    Posture](#performance-posture) hold: the DMLS walk is single-pass and
+    linear over an already-parsed AST; the accumulator adds O(1) work per
+    variable evaluation with O(candidates) reconciliation; no cross-document
+    lock joins the parallel compose hot path; and no numeric budgets are
+    introduced — a suspected regression is measured against the existing
+    criterion benches. Rationale: this is a correctness-driven feature, the
+    bench culture already exists, and there are no baselines to budget
+    against.
+15. **One condition, one code, any surface.** `dm.*` is the product
+    diagnostic namespace regardless of emitting surface — an LSP diagnostic
+    and a compose warning for the same condition share one code; severity is
+    per-surface. Phase 6 adds a short "`dm.*` registry rules" note to
+    [`dmls/docs/diagnostics.md`](../../dmls/docs/diagnostics.md)
+    ("Sources and codes" area, referenced from the parsing docs): ownership,
+    one-condition-one-code, severity-per-surface, and the procedure for new
+    codes — a `codes.rs` entry plus a doc row. A shared Rust code-constant
+    module across crates is deferred until a second shared code exists; that
+    is the machine-readable follow-up.
+16. **The successor program is chartered as a dated, active spec.**
+    [Expression Type System](../2026-09-16-expression-type-system/spec.md)
+    (`2026-09-16-expression-type-system`) owns the type-system arc, the
+    interface seam, and the two deferred CLI items — tracked there, not lost.
+    Retirement trigger: Resolved Decision 9's interim absence-predicate
+    suppression is retired when the successor's null-admitting-parameter
+    suppression lands.
+17. **The three-way spec consolidation is annex-absorb; the skeleton stays
+    primary.** Ratified 2026-09-16. The successor skeleton
+    ([Expression Type System](../2026-09-16-expression-type-system/spec.md))
+    remains the primary spec. The July type-system draft
+    ([2026-07-15-type-system](../2026-07-15-type-system/spec.md)) is
+    superseded in place, its design body re-homed — with dated corrections —
+    into the successor's declarations annex
+    ([declarations-design.md](../2026-09-16-expression-type-system/declarations-design.md))
+    as Phase C/E detail. The explicit-null draft
+    ([2026-07-22-explicit-null](../2026-07-22-explicit-null/spec.md)) is
+    folded into the successor's Phase A — the `null` keyword's core plus the
+    XOR authoring idiom as a Phase A test case — and superseded in place.
+    The July draft's null-union stance is consciously overturned: optionality
+    is a default constraint (`optional` unless `required`) exactly as
+    `max-length: 5` refines `string`, so an optional property with declared
+    type A has effective runtime type `A | null` — `null` is YAML's
+    representation of undefined. The full translation model, and the
+    rejected required-by-default alternative, live in the annex. See the
+    [absorption audit](#absorption-audit-2026-09-16-consolidation) below
+    for what was absorbed from and dropped out of each retired spec.
+18. **Bracket string-literal keys are not diagnosed.** Ratified 2026-09-16.
+    The Requirement 3 diagnostic walk visits `Variable` nodes only, so a
+    string-literal index key in bracket access — `doc['typo-key']` —
+    receives no unknown-key diagnostic from this feature. Schema-aware path
+    analysis that would cover bracket keys (and deeper object members)
+    remains out of scope and is recorded as candidate successor work in the
+    type-system skeleton
+    ([Expression Type System](../2026-09-16-expression-type-system/spec.md)).
+
+### Absorption audit (2026-09-16 consolidation)
+
+Recorded per repo precedent for Resolved Decision 17 — what was absorbed
+from each retired spec and what was consciously dropped:
+
+- **From [2026-07-15-type-system](../2026-07-15-type-system/spec.md)
+  (absorbed into the successor's declarations annex):** the ownership seam;
+  the `VariableDeclarations` /
+  `LayeredLookup::with_variable_declarations` declaration layer and public
+  integration seam; the union normalization algebra, adjusted for the
+  ratified null semantics; the known-root rule and layered precedence,
+  including the host ambient scope list (`err`, loop variables);
+  `validate_expression_roots` / `evaluate_strict`; `PreparedComposition`
+  retention and the preflight/event phase split; the whole-value rescan
+  bound; the conservative raw-JSON-Schema projection, kept with an explicit
+  phase-deferral note; the motivating regression as an acceptance scenario;
+  D1–D7 and the acceptance criteria, restructured per phase; and the
+  sequencing constraints.
+- **From 2026-07-15-type-system (consciously dropped):** the stale ten-file
+  `inputs` frontmatter list; the "does not authorize changes" gating
+  language; and the null-union stance — that schema nullability and
+  optional absence contribute no `null` type to the union — which is
+  overturned rather than carried (Decision 17; the annex records the dated
+  reversal).
+- **From [2026-07-22-explicit-null](../2026-07-22-explicit-null/spec.md)
+  (absorbed into Phase A):** the `null` keyword's specced core and the XOR
+  authoring idiom (`spec: file(required)` / `review: null` union arms) as a
+  Phase A test case. Nothing was dropped; the draft specified nothing
+  beyond that core.
 
 ## Open Questions
 
-1. **Should recognized absence predicates suppress unknown-root warnings?**
-   `is_null(x)` and `is_empty(x)` can deliberately inspect absence, while a bare
-   unknown `when="x"` is just as likely to be a typo as any other reference.
-
-   - **Suppress predicate arguments and bare `when=` roots.** Pros: maximally
-     permissive for conditional authoring. Cons: a misspelled gate silently
-     disables content, recreating the motivating failure class.
-   - **Suppress only direct arguments to recognized absence predicates
-     (recommended).** Pros: models explicit intent without hiding misspelled
-     `when=` conditions; it is a small, catalog-driven rule. Cons: adding a new
-     absence predicate requires updating the suppression catalog.
-   - **Suppress neither.** Pros: smallest implementation and strongest typo
-     detection. Cons: warns on the clearest function-based way to ask whether a
-     value is absent.
-
-   **Recommendation:** suppress only a direct unknown argument to the canonical
-   `is_null` / `is_empty` functions or their registered aliases, and keep bare
-   `when=` roots warning. These functions state the author's absence intent
-   explicitly; a bare condition does not. Resolve aliases through the function
-   catalog rather than duplicating strings in the diagnostic walker. Nested
-   uses such as `is_empty(trim(x))` still warn for `x` because the predicate is
-   no longer directly guarding that lookup.
+None remain. The one question this spec carried — absence-predicate
+suppression — was resolved 2026-09-15 and is recorded as
+[Resolved Decision 9](#resolved-decisions). Chartered successor work,
+explicitly outside this feature, is described in
+[Follow-On Work](#follow-on-work) and carried by its own spec,
+[Expression Type System](../2026-09-16-expression-type-system/spec.md).
 
 ## Success Criteria
 
