@@ -137,13 +137,17 @@ You will log your implementation progress to: {{log}}
     - set `implemented_by` to "{{ctx.agent}}/{{ctx.model}}"
     - set `started_phase` to "{{phase}}"
 ::end-block
+
+Now we need to update the specification file's frontmatter ({{spec}}):
+
+- set `implemented` to `true`
+- set `implemented_by` to "{{ctx.agent}}/{{ctx.model}}"
+
 ::block when="file_exists(log)"
 - the log file already exists 
 - but you'll need to add a new H2 section `## Phase {{phase}}` to the document for log entries during this phase of the implementation
 ::block when="phase > 1"
-- since we are implementing phase {{phase}}, we do have the log entries for {{phase - 1}} which you can review here:
-
-::file {{log}} 
+- since we are implementing phase {{phase}}, we do have the log entries for {{phase - 1}} which you can review at: {{log}}
 ::end-block
 ::end-block
 
