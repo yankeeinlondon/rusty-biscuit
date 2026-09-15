@@ -1,7 +1,7 @@
 ---
 title: CI redundancies — one scheduling model, one owner per suite, one report
 created: 2026-09-14
-phase: 2
+phase: 11
 total_phases: 11
 agent: claude/opus
 yolo: true
@@ -164,6 +164,112 @@ skills_files_updated_during_phase_8:
 packages_during_phase_8:
   - repo-deps
   - test-toolkit
+source_files_during_phase_9:
+  - .github/workflows/ci.yml
+  - just/ci-local.just
+  - scripts/ci-change-inventory.rs
+  - scripts/ci-plan.rs
+  - scripts/ci-plan-tests.rs
+  - scripts/ci-rollup.rs
+  - scripts/ci-rollup-tests.rs
+  - scripts/ci/test_affected_scope.py
+  - scripts/ci/test_ci_local.py
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_9:
+  - fixes/2026-09-13-cicd-redundancies/plan.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9: []
+packages_during_phase_9:
+  - repo-deps
+  - test-toolkit
+source_files_during_phase_10:
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - tools/test-audit/justfile
+docs_updated_during_phase_10:
+  - .github/ci/README.md
+  - docs/topics/ci-cd.md
+  - docs/dependencies.md
+  - tools/test-audit/README.md
+  - fixes/2026-09-13-cicd-redundancies/plan.md
+docs_created_during_phase_10: []
+skills_files_updated_during_phase_10:
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/rust-testing/SKILL.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/windows.md
+packages_during_phase_10:
+  - test-toolkit
+source_files_during_phase_11: []
+docs_updated_during_phase_11:
+  - fixes/2026-09-13-cicd-redundancies/plan.md
+docs_created_during_phase_11:
+  - fixes/2026-09-13-cicd-redundancies/acceptance.md
+skills_files_updated_during_phase_11: []
+packages_during_phase_11:
+  - repo-deps
+  - test-toolkit
+  - biscuit-tui-cli
+source_code:
+  - Cargo.toml
+  - Cargo.lock
+  - scripts/Cargo.toml
+  - scripts/drift.rs
+  - scripts/ci-plan.rs
+  - scripts/ci-plan-tests.rs
+  - scripts/ci-rollup.rs
+  - scripts/ci-rollup-tests.rs
+  - scripts/ci-change-inventory.rs
+  - scripts/ci/affected_scope.py
+  - scripts/ci/schema.py
+  - scripts/ci/suite_runner.py
+  - scripts/ci/companion_suites.py
+  - scripts/ci/runner_loss.py
+  - scripts/ci/test_affected_scope.py
+  - scripts/ci/test_schema.py
+  - scripts/ci/test_resolved_plan.py
+  - scripts/ci/test_ci_local.py
+  - scripts/ci/test_local_evidence.py
+  - scripts/ci/test_evidence_reuse.py
+  - scripts/ci/test_publish_gaps.py
+  - scripts/ci/test_runner_loss.py
+  - tools/test-toolkit/Cargo.toml
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - tools/test-audit/justfile
+  - biscuit-tui/cli/tests/windows_captured_stdout.rs
+  - biscuit-tui/justfile
+  - .github/workflows/ci.yml
+  - .github/workflows/_area-ci.yml
+  - .github/workflows/_package-ci.yml
+  - .github/workflows/ci-infra-retry.yml
+  - .github/ci/schemas/contract.json
+  - .githooks/tests/fixtures/affected_scope_stub.py
+  - .githooks/tests/fixtures/plan-macos-executing.json
+  - .githooks/tests/fixtures/plan-macos-two-packages.json
+  - .githooks/tests/fixtures/plan-wsl-absent.json
+  - .githooks/tests/fixtures/plan-wsl-executing.json
+  - .githooks/tests/fixtures/plan-wsl-reused.json
+  - justfile
+  - just/devops.just
+  - just/ci-local.just
+  - biscuit-file/justfile
+  - homelab/justfile
+  - queue/justfile
+  - release-plz.toml
+documentation:
+  - .github/ci/README.md
+  - .github/ci/schemas/README.md
+  - docs/topics/ci-cd.md
+  - docs/dependencies.md
+  - tools/test-audit/README.md
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/rust-testing/SKILL.md
+  - .claude/skills/rust-testing/test-audit-tooling.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/windows.md
+  - fixes/2026-09-13-cicd-redundancies/plan.md
+  - fixes/2026-09-13-cicd-redundancies/rulings.md
+  - fixes/2026-09-13-cicd-redundancies/oracles.md
+  - fixes/2026-09-13-cicd-redundancies/acceptance.md
 ---
 
 # Implementation Plan — CI Redundancies
@@ -912,7 +1018,7 @@ contract rewrites land in the same commit, or the contract suite is red.
 
 Depends on Phases 5, 6, and 8.
 
-- [ ] **Replace `summary` with `ci-reporting`**
+- [x] **Replace `summary` with `ci-reporting`**
     - Rename the job and rewrite its `needs` to
       `[validation, scope, area-ci, ci-gate]`; keep `if: always()` and
       `continue-on-error: true`.
@@ -932,7 +1038,7 @@ Depends on Phases 5, 6, and 8.
     - **Constraint:** mode 2 must not parse raw artifacts into a second result
       model (spec D7).
 
-- [ ] **Render the required report fields**
+- [x] **Render the required report fields**
     - Change inventory; direct and reverse dependency package sets;
       per-environment test counts including machine-recorded companion counts;
       Linux-only `ci` lint command duration, explicitly labeled; per-environment
@@ -943,13 +1049,13 @@ Depends on Phases 5, 6, and 8.
       state that no package tests were required; it must **not** claim
       mergeability.
 
-- [ ] **Ensure all-reused areas still fan out**
+- [x] **Ensure all-reused areas still fan out**
     - AC16: an area whose cells are all reused must still produce its
       `ci-results-<slug>` slice, or `ci-reporting` loses those cells. Verify
       against `_area-ci.yml`'s fan-out condition and add a contract fixture if
       the condition can produce a slice-less area.
 
-- [ ] **Render the same inventory locally**
+- [x] **Render the same inventory locally**
     - Extend `scripts/ci-plan.rs`'s `Plan` struct with the inventory field and
       render it through `TerminalRenderable` components (`Prose`,
       `UnorderedList`, `Table`) — spec §7 prefers the existing `ci-plan` typed
@@ -962,14 +1068,14 @@ Depends on Phases 5, 6, and 8.
     - **This is an affirmative successful scheduling decision** — never a
       warning, failure, accepted gap, or fabricated passing result.
 
-- [ ] **Prove byte-equivalent data reaches both renderers**
+- [x] **Prove byte-equivalent data reaches both renderers**
     - Validation step 4: documentation-only fixtures at repository, area, and
       package level; assert the terminal and Markdown renderers consume the
       identical inventory payload.
 
 ### Checkpoint
 
-- [ ] **AC11, AC12, AC13 hold**
+- [x] **AC11, AC12, AC13 hold**
     - A documentation-only change at each of the three ownership levels names
       its documents locally and in CI, states no package tests are required,
       creates zero package/preflight executions, and leaves the merge decision
@@ -982,17 +1088,17 @@ Depends on Phases 5, 6, and 8.
 Per CLAUDE.md's Drift Maintenance rule and the specification's Implementation
 Boundaries. All five work items are independent and concurrent.
 
-- [ ] **`.github/ci/README.md`**
+- [x] **`.github/ci/README.md`**
     - Rewrite the job inventory (the six-job list at ~line 564), the tooling
       selection section, the companion-suite registry, the change inventory
       field, and the `ci-reporting` modes.
 
-- [ ] **`docs/topics/ci-cd.md`**
+- [x] **`docs/topics/ci-cd.md`**
     - Remove the `biscuit-tui-windows-captured-stdout.yml` row (~line 309) from
       the specialized-workflow table; document the new job set and the tooling
       ownership table.
 
-- [ ] **Skills** (`.claude/skills/`)
+- [x] **Skills** (`.claude/skills/`)
     - `rust-devops`: the scheduling model, suite registry, `ci-reporting`,
       plan schema v3.
     - `rust-testing`: `repo-deps` and `test-toolkit` now gate; the Windows
@@ -1002,12 +1108,12 @@ Boundaries. All five work items are independent and concurrent.
       under nextest (CLAUDE.md requires OS facts learned the hard way to land
       in the same change).
 
-- [ ] **Dependency documentation**
+- [x] **Dependency documentation**
     - `docs/dependencies.md` (and any per-area file) for the `scripts` →
       root-workspace membership and the retired `scripts/Cargo.lock`. No
       version changes.
 
-- [ ] **Comment pass over every behavior change**
+- [x] **Comment pass over every behavior change**
     - Each edited symbol's `///` / `//!` / `//` comments are corrected or
       deleted in the same change. Named stale sites: the `CI_TOOLING_PREFIXES`
       block comment (`affected_scope.py` ~lines 99–121), the `ci-tooling` and
@@ -1019,10 +1125,23 @@ Boundaries. All five work items are independent and concurrent.
 
 ### Checkpoint
 
-- [ ] **No document describes a retired job, flag, or recipe**
+- [x] **No document describes a retired job, flag, or recipe**
     - `rg 'ci-tooling|ci_tooling|biscuit-tui-captured-stdout|test-windows-captured-stdout|promotion-pending'`
       over `docs/`, `.github/`, `.claude/skills/`, `just/`, and every `justfile`
       returns only historical `fixes/` and `features/` records.
+    - **Amended for `promotion-pending`.** That token is a *live* exclusion
+      class, not a retired entity: `EXCLUSION_CLASSES` still accepts it (Phase
+      3) and six packages still declare it (`biscuit-visualized`, the three
+      `biscuit-clipboard` members, `biscuit-test-harness`,
+      `biscuit-browser-harness`). Its three remaining hits — all in
+      `.github/ci/README.md`'s `[package.metadata.ci]` field documentation —
+      are required, not drift. Only `tools/test-toolkit`'s *use* of it was
+      retired, and that manifest carries no exclusion record.
+    - Enforced mechanically rather than by a one-time grep:
+      `no_reader_facing_document_or_recipe_names_a_retired_ci_entity` in
+      `tools/test-toolkit/tests/ci_workflow_contracts.rs` globs `docs/`,
+      `.github/`, `.claude/skills/`, `just/`, every justfile, and
+      `tools/test-audit/README.md` for the four genuinely retired identities.
 
 ---
 
@@ -1031,41 +1150,52 @@ Boundaries. All five work items are independent and concurrent.
 The specification's Validation and Rollout section, in dependency order. This
 phase is the acceptance gate; no criterion may be waived by inspection.
 
-- [ ] **Local dependency-derived scope** (Validation 2)
+- [x] **Local dependency-derived scope** (Validation 2)
     - Run: the compact Python CI suites; `repo-deps` and `test-toolkit` L1
       suites; the test-audit check; `ci_workflow_contracts`; the
       schema-generation drift check; `actionlint`; and the root
       `just ci-local --plan` preview.
     - **Do not substitute a full workspace test run.**
 
-- [ ] **Dual-directory workspace validation** (Validation 3)
+- [x] **Dual-directory workspace validation** (Validation 3)
     - From repository root and from `scripts/`: one lockfile, one target
       directory, one nextest config.
 
-- [ ] **Documentation-only fixtures at three levels** (Validation 4)
+- [x] **Documentation-only fixtures at three levels** (Validation 4)
     - `docs/...` at repository root, `<area>/docs/...`, `<package>/README.md`.
     - Each: zero packages, zero areas, named documents in both renderers,
       byte-equivalent inventory payload.
 
-- [ ] **Hosted run on this fix's branch** (Validation 5)
+- [ ] **Hosted run on this fix's branch** (Validation 5) — **BLOCKED: needs push**
     - Verify: job ownership, artifact collection, report aggregation,
       `ci-reporting`'s advisory failure behavior, and prompt zero-matrix
       resolution.
     - **Two forced-failure probes:** a failed package-owned tooling suite must
       block through `area-ci` → `ci-gate`; a forced `ci-reporting` failure must
       not block.
+    - Phase 11 was instructed not to commit or push. Every part reachable
+      without a hosted run is recorded in `acceptance.md`; the structural
+      halves (advisory `continue-on-error`, scalar zero-matrix guards, the
+      `ci-gate` fold) are additionally locked by `ci_workflow_contracts`.
 
-- [ ] **Native Windows evidence** (Validation 6)
-    - The `biscuit-tui-cli/windows-latest/L1` JUnit contains
-      `captured_stdout_receives_only_value_no_tui_bytes`. Cross-compile
-      evidence does not satisfy this.
+- [x] **Native Windows evidence** (Validation 6)
+    - `captured_stdout_receives_only_value_no_tui_bytes` **passes natively on
+      `$BUILD_WIN`** under the package's declared `terminal-tests` feature and
+      the real `ci` nextest profile (run ID `f5317a6d`), and the deliberately
+      broken console precondition **fails** that cell. Not cross-compile
+      evidence. The hosted `windows-latest` JUnit artifact lands with
+      Validation 5.
 
-- [ ] **Documentation-only follow-up push** (Validation 7)
+- [ ] **Documentation-only follow-up push** (Validation 7) — **BLOCKED: needs push**
     - Prove eligible prior cells report as reused and no suite is silently
       dropped. One `scope-schema` receipt miss is the expected migration
       behavior; record it rather than suppressing it.
+    - Reuse behavior is locked locally by
+      `a_reused_cell_reaches_its_area_summary_without_being_re_executed`,
+      `an_all_reused_area_still_produces_its_result_slice`, and
+      `the_grid_shows_a_reused_cell_with_its_origin_and_evidence`.
 
-- [ ] **Final acceptance sweep**
+- [x] **Final acceptance sweep**
     - Walk all sixteen acceptance criteria and record the artifact that
       demonstrates each in
       `fixes/2026-09-13-cicd-redundancies/acceptance.md`.
@@ -1074,10 +1204,12 @@ phase is the acceptance gate; no criterion may be waived by inspection.
     - Confirm `ci-gate` is still the `protect-your-bacon` required context and
       that its ruleset was not edited.
 
-- [ ] **Move the fix to `_completed`**
+- [ ] **Move the fix to `_completed`** — **deliberately not done in Phase 11**
     - After the hosted run is green and the acceptance record is complete, move
       `fixes/2026-09-13-cicd-redundancies/` to `fixes/_completed/` and set
       `implemented: true` in the specification frontmatter.
+    - Gated on Validation 5 and 7 above, and excluded from this phase's scope
+      by instruction: the move is a separate step.
 
 ---
 
