@@ -63,14 +63,71 @@ when investigating changes to external dependencies or hosted runners.
 
 On reuse, `scope`, `preflight`, the whole `area-ci` fan-out (which needs
 `scope`), and every rollup are skipped; `ci-gate` folds those skipped results
-and passes, and the advisory summary links the original PR run. The `ci`
+and passes, and advisory `ci-reporting` links the original PR run. The `ci`
 workflow still completes on `main`, preserving Release-plz's existing
 successful-CI trigger. Runs predating receipt publication cannot be reused.
 
 Validate this boundary with `python3 scripts/ci/test_reuse_validation.py`,
 `actionlint .github/workflows/ci.yml`, and the `ci_workflow_contracts` nextest
-suite. The Python suite also runs in preflight on every selected OS and in
-the CI-tooling job, which runs the `ci_workflow_contracts` suite as well.
+suite. Both are ordinary package suites — the Python one belongs to `repo-deps`
+and the Rust one to `test-toolkit` — so they run in their owners' own cells and
+nowhere else.
+
+## `ci.yml`'s jobs
+
+`ci.yml` defines exactly six top-level jobs, and a contract test pins the set:
+
+| job | blocks the merge? | what it is for |
+|---|---|---|
+| `validation` | yes | on a `main` push, decides whether successful PR validation covers this tree |
+| `scope` | yes | sources the resolved plan — a matching scope receipt or one selection run — and publishes it |
+| `preflight` | yes | bootstrap prerequisites only, per selected OS. Runs no test suite |
+| `area-ci` | yes | one caller identity per selected package area; every package gate lives under it |
+| `ci-gate` | yes — **the required check** | a policy-free fold of the four above |
+| `ci-reporting` | no (`continue-on-error: true`) | renders one reader-facing report of the run |
+
+There is no job that owns a test suite on CI's behalf. Every suite belongs to a
+package (see [CI's own tooling](#cis-own-tooling)) and runs in that package's
+own cell, so the plan places it once and one owner answers for it.
+
+`preflight` and `area-ci` are both matrix jobs guarded by a **scalar** plan
+output read before matrix expansion — `preflight_os != '[]'` and
+`has_packages == 'true'`. A run that schedules no OS and no area therefore
+resolves both to `skipped` immediately after `scope`, which is a decision rather
+than a property of GitHub's empty-matrix handling.
+
+### `ci-reporting`
+
+Advisory, `if: always()`, `continue-on-error: true`, and `needs` the whole run
+including `ci-gate` — so the report is written after the decision it declines to
+make. It never claims mergeability; `ci-gate` alone does that. It applies no
+baseline, accepted-gap, missing-cell, or merge policy.
+
+It has three modes, selected from its `needs` results:
+
+1. **Reused PR validation** — `validation` succeeded with `reuse == true`. It
+   links the authoritative prior run and states that this run executed no
+   package cell.
+2. **Successful scope** — it downloads the resolved plan and this run's
+   `ci-results-<slug>` area slices and renders them through
+   `ci-rollup summarize`, the same typed model the areas wrote. It does **not**
+   parse raw JUnit here: a second result model could disagree with the area that
+   produced it.
+3. **Failed or cancelled bootstrap** — it names the first actionable
+   infrastructure failure in dependency order (`validation`, then `scope`).
+   `area-ci` is deliberately absent: every package gate is a cell in its own
+   area's coverage audit.
+
+Mode 2 renders the plan's change inventory, the direct and reverse dependency
+sets, per-environment test counts and durations including machine-recorded
+companion counts, the Linux-only `ci` lint command duration explicitly labeled
+as such, and each cell's literal `ci` / `local` / `prior-local` origin. A
+measurement it does not have renders as `not recorded` with the reason — never
+as `0`. There is no `cicd` origin, and `check` and `lint` remain CI-origin.
+
+Because every area uploads its result slice under `always()`, an area whose
+cells were all reused still produces one; a missing slice means that area never
+started.
 
 ## `environment` is not `os`
 
@@ -745,6 +802,25 @@ The resolved plan and the validation receipt are defined and validated in
 `scripts/ci/schema.py` and documented in [`schemas/README.md`](schemas/README.md).
 `schemas/contract.json` is the field contract dumped from that module for Rust
 tooling; regenerate it with `python3 scripts/ci/schema.py`.
+
+### `change_inventory`
+
+Plan schema version 3 added the required `change_inventory`: the changed paths
+the calculator already received, normalized to one repository-relative spelling,
+sorted, de-duplicated, and bucketed exhaustively into `configuration`,
+`documentation`, `source`, and `other` with per-bucket and total counts. A
+rename contributes one logical path. A full-scope request (`--all`,
+`workflow_dispatch`) has no diff, so it records that explicitly rather than an
+empty list that would read as "nothing changed".
+
+It is a sibling of `change_class`, not a replacement: `classify_preflight()`
+still returns `change_class` and that is still what sets preflight breadth.
+
+Both readers consume that one field and neither re-derives it — `ci-plan`
+renders it in the terminal through the `TerminalRenderable` components, and
+`ci-reporting` renders it as GitHub Markdown. A scope receipt written against
+version 2 is refused once with the existing `scope-schema` reason and one fresh
+calculation follows; it is never upgraded in place.
 
 ## CI's own tooling
 

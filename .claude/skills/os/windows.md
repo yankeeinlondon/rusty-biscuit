@@ -144,6 +144,47 @@ Compare against that, never against `to_string_lossy()`.
   `SetConsoleCtrlHandler` path exists; see the claudine skill's
   `signal-handling.md`, "Windows parity".
 
+## Attaching a console inside a nextest process
+
+`biscuit-tui/cli/tests/windows_captured_stdout.rs` is ordinary `windows-latest`
+**L1** evidence inside `biscuit-tui-cli`'s own cell — not an `#[ignore]`d test
+behind a hand-invoked recipe or workflow. Everything below was measured on
+`build-win-native` at the CI thread count (`--test-threads 4`), 2026-09-14.
+
+- **Process-wide handle rewiring is safe only because nextest gives each test
+  its own process.** `AllocConsole` + `SetStdHandle` mutate process state; under
+  `cargo test`'s shared harness they would corrupt every sibling test in the
+  binary. Say so in the test's `//!` docs — it is the reason the tier is L1
+  rather than a serialized L3.
+- **`AllocConsole` returning `ERROR_ACCESS_DENIED` (0x80070005) is the normal
+  path, not a failure.** A console is usually already present, and the API
+  reports that as access denied. Treat "already present or failed" as one state
+  and assert the *precondition you actually need* — `stderr.is_terminal()` and
+  `CONOUT$` openable — instead of the call's return value.
+- **Redirecting a std handle to `CONOUT$` makes everything printed afterwards
+  invisible to nextest.** The line goes to the attached console, not to the
+  harness pipe. Two consequences, both found the hard way: a success diagnostic
+  printed after the redirect never reaches the log (`grep -c` returns 0), and —
+  worse — an assertion that panics *after* the redirect leaves nextest reporting
+  `FAIL` with an empty message. Redirect only the handle the contract requires
+  (stderr here; the stdout redirect was deleted as unnecessary), capture the
+  original handle before redirecting, and restore it the moment the child exits
+  so later failures are reported through the pipe.
+- **The console input buffer queues injected records**, so a written input
+  record survives the child not having started its event loop yet. The 750 ms /
+  250 ms fixed sleeps this test shipped with were covering a measured
+  requirement of **0 ms**: the test's real work is ~45 ms and the sleep *was*
+  its 0.78 s runtime. A bounded readiness loop — 2 s deadline, 25 ms poll,
+  re-inject at 500 ms — replaced them; no passing run has needed the second
+  injection. Keep the loop anyway: it converts a timing assumption into an
+  assertion that fails loudly at its own deadline rather than at nextest's 90 s
+  `ci` termination ceiling, and it kills and reaps the child so the cell reports
+  `FAIL` rather than `LEAK`.
+- Six consecutive clean runs, zero flakes (392 run / 392 passed / 7 skipped).
+  Runs that died in `git fetch` with `ssh: connect to host github.com port 22`
+  are a build-host network fault, not a test result — exclude them rather than
+  counting them as failures.
+
 ## The `windows-latest` leg
 
 - **Malformed bytes with an audio extension still reach host playback.**

@@ -112,6 +112,12 @@ The hook is controlled by `RUSTY_BISCUIT_PRE_PUSH`:
 - `warn` — run and report, but never block the push
 - `strict` — run and block the push on failure (the default)
 
+`just ci-local --plan` prints the plan's change inventory before the cell list, from the same field
+`ci-reporting` renders, so the terminal and the GitHub report cannot disagree about what changed.
+When the plan schedules no cell it names the changed documents and states that no package test is
+required. That is an **affirmative scheduling decision**, not a warning, a failure, an accepted
+gap, or a fabricated passing result.
+
 `scripts/cross-check.sh` publishes a `wsl2-ubuntu` receipt only when its WSL leg ran the outgoing
 head's exact tree on a clean remote worktree with no test filter; every other run prints why it
 published nothing. It ships the developer's local tree, uncommitted work included, so most of its
@@ -182,6 +188,19 @@ Run the hook's local regression suite with
 surface, obtains the changed file set from the event's exact base and head SHAs, verifies every
 published local receipt per cell, and resolves the plan.
 
+`ci.yml` defines **exactly six top-level jobs**, and a contract test pins the set: `validation`
+(does successful PR validation cover this tree?), `scope` (source the plan), `preflight`
+(bootstrap prerequisites per selected OS — no test suite), `area-ci` (one caller identity per
+selected area), `ci-gate` (the required check, a policy-free fold of those four), and advisory
+`ci-reporting`. No job owns a test suite on CI's behalf: every suite belongs to a package and runs
+in that package's own cell, so the plan places it once and one owner answers for it.
+
+`preflight` and `area-ci` are both matrix jobs guarded by a **scalar** plan output read before
+matrix expansion — `preflight_os != '[]'` and `has_packages == 'true'`. A documentation-only
+change classifies to an empty `preflight_os` and schedules no area, so both resolve to `skipped`
+immediately after `scope` as a decision rather than as a property of GitHub's empty-matrix
+handling.
+
 The tested half of a run is **one top-level entry per selected package area**. `ci.yml`'s
 `area-ci` job fans out over the planner's `scheduled_areas` and calls `_area-ci.yml`, which fans
 out over that area's package matrix and calls `_package-ci.yml`, which delegates the `wsl2-ubuntu`
@@ -211,11 +230,30 @@ estimate from 486 to 432.
 Per-package policy — L2/browser tier ownership, native libraries, Cargo features, runner tools,
 and companion suites — lives in each package's `[package.metadata.ci]`; environment capabilities
 live in `.github/ci/environments.json`. Documentation, manifests, lockfiles, Just recipes, and
-workflow configuration select no package jobs. CI tooling runs its own compact contract suites
-(the Python scope tests, the rollup and plan renderer bins, and the `ci_workflow_contracts`
-suite, which a workflow edit also selects), and `workflow_dispatch` remains the explicit
-full-workspace path. See
-[testing-strategy.md](../testing-strategy.md).
+workflow configuration select no package jobs, and `workflow_dispatch` remains the explicit
+full-workspace path. See [testing-strategy.md](../testing-strategy.md).
+
+**CI's own suites have owners.** Two ordinary workspace members hold them: `repo-deps`
+(`scripts/`) owns the merge-gate and plan binaries' Nextest suites plus the `scripts/ci/test_*.py`
+contracts, and `test-toolkit` (`tools/test-toolkit/`) owns `ci_workflow_contracts` and the
+`tools/test-audit` typecheck/Vitest pair. Both gate, so a change to CI's own tooling reaches CI as
+an ordinary package job rather than as a job that exists to run suites for everyone.
+
+`SUITE_REGISTRY` in `affected_scope.py` is the one declaration site — suite name → owner, canonical
+recipe, environment, kind (`cargo` or `companion`), and how that suite reports counts — and
+`validate_suite_registry` rejects an unknown, unowned, doubly-owned, recipe-less, or undeclared
+suite. Selection follows ownership: `scripts/**` and `tools/test-toolkit/**` are their owners'
+package directories and need no entry, while `SUITE_OWNER_PREFIXES` / `SUITE_OWNER_PATHS` carry
+only what lies outside a member directory.
+
+| changed input | selects |
+|---|---|
+| `.github/ci/**`, `scripts/Cargo.toml` | `repo-deps` |
+| `.github/workflows/**`, `tools/test-audit/**`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `tools/test-toolkit/Cargo.toml` | `test-toolkit` |
+
+A trigger selection is narrower than a source change: the changed path says nothing about the
+owner's public API, so it contributes no reverse dependencies and no dependent seam. No path here
+selects the full workspace.
 
 Only cells not already satisfied by verified evidence get a hosted runner: the environment lists
 the area hands each package are the plan's *executing* set. A reused cell is published straight
@@ -272,7 +310,7 @@ blocking top-level job, runs `if: always()`, and passes only when each `needs.*.
 `success` or `skipped` — an unselected area's job is skipped and must not block, while `failure`
 and `cancelled` do. It reads no plan, policy, baseline, or artifact; a `MISSING` cell is caught by
 its area's own coverage audit. `continue-on-error` hides a failure from the fold, so
-exactly one job (`ci.yml`'s advisory summary) carries it. The semantics were
+exactly one job (`ci.yml`'s advisory `ci-reporting`) carries it. The semantics were
 proven in a scratch repository (`fixes/2026-09-11-cicd-cleanup/fixtures/scratch-2026-09-12.md`).
 
 Test, lint, and compile steps fail their producer jobs visibly. Their
@@ -281,9 +319,10 @@ coverage audit, and every matrix uses `fail-fast: false`, so one failure does no
 cancel the remaining cells that lack qualifying local evidence. `ci-baseline.toml`
 is a skip budget only; failures cannot be pardoned downstream after the
 producer has truthfully reached the gate.
-The `protect-your-bacon` ruleset still names `ci-verdict`, the required check until 2026-09-12;
-until Ken switches that context to `ci-gate` — after this change's own run is green — every PR
-shows `ci-verdict — Expected` and cannot merge.
+The `protect-your-bacon` ruleset (id 19747338) has required `ci-gate` since 2026-09-13. It named
+`ci-verdict` until then, and because that job no longer existed in `ci.yml`, every pull request sat
+on a `ci-verdict — Expected` check that could never arrive. The admin `pull_request` bypass actor
+on that ruleset was left untouched by the swap.
 
 `ci-results.json` and the skip-only baseline are independently versioned; both
 currently use `schema_version: 3`. Identity is
@@ -293,6 +332,31 @@ still `{package, environment, tier}`; each cell also carries its derived `area`,
 document carries `accepted_evidence`, one entry per reused cell — the same set accepted for
 *scheduling*, so the scheduler and the report cannot disagree. A document from an earlier
 generation is refused with a migration error rather than partly read.
+
+### The run report
+
+`ci-reporting` is advisory: `if: always()`, `continue-on-error: true`, and it `needs` the whole run
+including `ci-gate`, so it is written after the decision it declines to make. It never claims
+mergeability and applies no baseline, accepted-gap, missing-cell, or merge policy. It has three
+modes — a reused PR validation (link the prior run, state that no package cell executed), a
+successful scope (read the plan and this run's `ci-results-<slug>` area slices through
+`ci-rollup summarize`, the same typed model the areas wrote, never a second model parsed from raw
+JUnit), and a failed or cancelled bootstrap (name the first actionable infrastructure failure).
+
+The successful-scope mode renders the plan's change inventory, the direct and reverse dependency
+sets, per-environment test counts and durations including machine-recorded companion counts, the
+Linux-only `ci` lint **command** duration labeled as such, and each cell's literal `ci` /
+`local` / `prior-local` origin. A measurement it does not have renders as `not recorded` with the
+reason, never as `0`. There is no `cicd` origin.
+
+The **change inventory** arrived with plan schema version 3: the changed paths normalized to one
+repository-relative spelling, sorted, de-duplicated, and bucketed exhaustively into
+`configuration`, `documentation`, `source`, and `other` with per-bucket and total counts. A rename
+contributes one logical path; `--all` records no diff inventory rather than an empty list that
+would read as "nothing changed". It is a sibling of `change_class`, not a replacement, and both
+readers — `ci-plan` in the terminal, `ci-reporting` in GitHub Markdown — consume the one field.
+A scope receipt written against version 2 is refused once with the existing `scope-schema` reason
+and one fresh calculation follows.
 
 ### Layer 3 — Affected coverage and specialized workflows
 

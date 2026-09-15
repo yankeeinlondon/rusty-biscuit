@@ -137,6 +137,21 @@ Symptoms that you have mis-tiered an OS-specific test:
   *resource*;
 - a tier prefix and a `#[cfg]` gate encode the same fact twice.
 
+`biscuit-tui/cli/tests/windows_captured_stdout.rs` had all three at once: an
+`#[ignore = "requires a Windows host"]`, a hand-written recipe, and a whole
+specialized workflow that invoked it by exact name. `biscuit-tui-cli` already
+declared `features = ["terminal-tests"]`, so its CI L1 cell had been *compiling*
+that target all along and only the `#[ignore]` kept it from running. Deleting
+the attribute, the recipe, and the workflow made it ordinary `windows-latest`
+L1 evidence inside the package's own cell; the `#![cfg(windows)]` inner
+attribute is the whole Windows-only declaration.
+
+That test also rewires **process-wide** std handles through `SetStdHandle`.
+That is safe here only because nextest runs one test per process — under
+`cargo test`'s shared-process harness it would corrupt every sibling. Treat
+"nextest gives me a process to myself" as a property worth naming in the test's
+`//!` docs whenever you rely on it.
+
 **Compile the other platform's arms locally.** An area's `just check-windows`
 runs `cargo check -p <crates> --tests --target x86_64-pc-windows-gnu`
 (mingw, with `-Wa,-mbig-obj`; `rustup target add x86_64-pc-windows-gnu`
@@ -345,7 +360,18 @@ For durable native CI, declare package policy in the package's own
 caller calculates source-changed workspace packages plus check-only direct
 reverse Cargo dependencies, reads that policy, and fans the resulting matrix into
 `.github/workflows/_package-ci.yml` — one result-producing job per package. A
-bootstrap `preflight` job gates that fan-out (`needs: [scope, preflight]`).
+bootstrap `preflight` job gates that fan-out (`needs: [scope, preflight]`); it
+is **prerequisites only** and runs no test suite of any language.
+
+**CI's own suites are owned by two ordinary gating packages.** `repo-deps`
+(`scripts/`, a root-workspace member since the cicd-redundancies fix) owns the
+`ci-plan`/`ci-rollup` Nextest suites and the `scripts/ci/test_*.py` contracts;
+`test-toolkit` (`tools/test-toolkit/`, whose CI exclusion record is retired)
+owns `ci_workflow_contracts` and the `tools/test-audit` typecheck and
+Vitest pair. Both fan out like any other package, so a test added to either runs
+in that package's own cell — `just _test repo-deps` / `just _test test-toolkit`
+from the repository root — and a change under `scripts/` or
+`tools/test-toolkit/` now schedules real CI work.
 For each package, `check`, `lint` (build + clippy), and `test` (L1) are
 independent gates; only the expensive `l2`/`browser` tiers stage behind
 `test`. Lint does not gate L1 — one clippy hint must not delete a package's
