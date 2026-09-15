@@ -29,8 +29,17 @@ spec: |-
                 :  null
             : null
     }}
+# The implementation's log file
+log: |-
+    {{
+        parent_dir(spec) + "/implementation-log.md"
+    }}    
 initialize:
     stack:
+        - when: "phase != 1"
+          action:
+              - set:
+                  epilog: null
         - when: "!total_phases || total_phases <= 0"
           action:
               - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
@@ -41,12 +50,15 @@ initialize:
               - stderr: |-
                     The previous phase's agent has passed a message to this agent:
 
-                    > {{frontmatter(log, 'message_to_agent'}}
+                    > {{frontmatter(log, 'message_to_agent')}}
               - message: |-
                     The previous phase's agent has passed a message to this agent:
         
-                    > {{frontmatter(log, 'message_to_agent'}}
+                    > {{frontmatter(log, 'message_to_agent')}}
               - set:
+                  epilog: "{{message_to_agent}}"
+                  message_to_agent: null
+                  
                   
 start:
     message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
@@ -127,6 +139,11 @@ You will log your implementation progress to: {{log}}
 ::block when="file_exists(log)"
 - the log file already exists 
 - but you'll need to add a new H2 section `## Phase {{phase}}` to the document for log entries during this phase of the implementation
+::block when="phase > 1"
+- since we are implementing phase {{phase}}, we do have the log entries for {{phase - 1}} which you can review here:
+
+::file {{log}} 
+::end-block
 ::end-block
 
 ## Test Design Requirements
