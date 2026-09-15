@@ -31,10 +31,14 @@ name: sniff-performance
 
 on:
   pull_request:
+    # The root `Cargo.toml` and `Cargo.lock` are deliberately absent. They match
+    # every workspace-member addition and every unrelated dependency bump in a
+    # 40+ package monorepo, so they fired this workflow on changes with no sniff
+    # content at all. A dependency bump that does move sniff's performance is
+    # caught by the nightly work counts, which are the actionable signal here;
+    # the Criterion subset can be requested for one with `workflow_dispatch`.
     paths:
       - "sniff/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
       - ".github/workflows/sniff-performance.yml"
   schedule:
     # Nightly, in its own schedule slot to avoid contending with other scheduled runs.
@@ -120,6 +124,10 @@ jobs:
 
   sniff-work-counts:
     name: Work counts (${{ matrix.os }})
+    # Scheduled and dispatch only, per this file's header. A counter delta is
+    # only actionable against the previous run on the same runner class, which
+    # the nightly series provides and a one-off PR run does not.
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
