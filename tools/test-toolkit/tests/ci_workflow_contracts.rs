@@ -10,7 +10,7 @@
 //! manifest source so a regression fails locally without a live GitHub Actions
 //! run.
 
-use std::{fs, path::PathBuf, process::Command};
+use std::{collections::BTreeMap, fs, path::PathBuf, process::Command};
 
 fn repo_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -1881,6 +1881,175 @@ fn no_reusable_workflow_call_is_advisory() {
     }
 }
 
+/// One real execution of the Lint step body.
+#[cfg(unix)]
+struct LintStepRun {
+    exit_code: Option<i32>,
+    /// The value the step published for `duration_s`, empty when it published
+    /// the key with no measurement.
+    duration_s: String,
+    context: String,
+}
+
+/// The host's `bash`, resolved absolutely: one Lint-step case hands the script
+/// a `PATH` stripped down to the fixture's stubs, and which shell interprets
+/// the body must not depend on that.
+#[cfg(unix)]
+fn host_bash() -> PathBuf {
+    let located = Command::new("sh")
+        .arg("-c")
+        .arg("command -v bash")
+        .output()
+        .expect("`sh` must be runnable");
+    assert!(located.status.success(), "the host must provide `bash`");
+    PathBuf::from(String::from_utf8_lossy(&located.stdout).trim())
+}
+
+/// Runs the real Lint step body with `just` stubbed to exit `just_exit`.
+///
+/// `python3_visible` chooses between a `PATH` carrying the host's interpreters
+/// and one holding only the fixture's stubs, which reaches the
+/// no-interpreter case without uninstalling anything.
+#[cfg(unix)]
+fn run_lint_step(script: &str, just_exit: i32, python3_visible: bool) -> LintStepRun {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().expect("temp dir");
+    let bin = temp.path().join("bin");
+    fs::create_dir(&bin).expect("the stub directory is created");
+    let stub = bin.join("just");
+    fs::write(&stub, format!("#!/bin/sh\nexit {just_exit}\n")).expect("the `just` stub is written");
+    fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).expect("the stub is executable");
+    let github_output = temp.path().join("github-output");
+    fs::write(&github_output, "").expect("the step output file exists");
+
+    let path = if python3_visible {
+        format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default())
+    } else {
+        bin.display().to_string()
+    };
+    let output = Command::new(host_bash())
+        .arg("-c")
+        .arg(script)
+        .env_clear()
+        .env("PATH", path)
+        .env("GITHUB_OUTPUT", &github_output)
+        .output()
+        .expect("bash must be runnable");
+
+    let written = fs::read_to_string(&github_output).expect("the step output is readable");
+    let context = format!(
+        "`just` stub exiting {just_exit}, python3 {}; wrote {written:?}\n{}\n{}",
+        if python3_visible { "visible" } else { "hidden" },
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let duration_s = written
+        .trim()
+        .strip_prefix("duration_s=")
+        .unwrap_or_else(|| panic!("the lint step must publish `duration_s`; {context}"))
+        .to_owned();
+    LintStepRun { exit_code: output.status.code(), duration_s, context }
+}
+
+/// The interpolated Lint step body, as the runner hands it to Bash.
+#[cfg(unix)]
+fn lint_step_script() -> String {
+    let job = job_block("_package-ci.yml", "  lint:");
+    let steps = steps(&job);
+    let lint = step_with_id(&steps, "clippy")
+        .expect("_package-ci.yml: `lint` must carry the `clippy` gate step");
+    step_script(lint).replace("${{ inputs.package }}", "queue")
+}
+
+/// AC13: the lint step must MEASURE a command that finishes in under a second
+/// rather than recording the `0` an absent measurement is reported as, and the
+/// timing must never decide the gate.
+///
+/// Run for real, with `just` stubbed — the case Bash's integer `SECONDS` wrote
+/// `duration_s=0` for, which `ci-rollup` could not tell apart from a step that
+/// never ran. The host's own `bash` executes the step body, so the portability
+/// traps are part of the assertion rather than a CI-only surprise: macOS ships
+/// Bash 3.2 (no `EPOCHREALTIME`) and BSD `date` has no `%N`.
+///
+/// A failing stub runs too, because a step that owns the timing can swallow the
+/// child's status: a failing lint must exit with the child's code AND still
+/// publish its duration. The success case repeats because a clock read in two
+/// processes is only *usually* ordered — review 3 of
+/// `fixes/2026-09-13-cicd-redundancies` saw the two-interpreter form publish
+/// `duration_s=-0.001`, so a single sample can pass by luck.
+#[cfg(unix)]
+#[test]
+fn the_lint_step_measures_a_sub_second_command_instead_of_recording_zero() {
+    let script = lint_step_script();
+
+    for (just_exit, samples) in [(0, 8), (7, 1)] {
+        for _ in 0..samples {
+            let run = run_lint_step(&script, just_exit, true);
+            assert_eq!(
+                run.exit_code,
+                Some(just_exit),
+                "the lint step must exit with its gate's status, not the timing machinery's; {}",
+                run.context
+            );
+
+            let recorded = &run.duration_s;
+            let seconds: f64 = recorded.parse().unwrap_or_else(|error| {
+                panic!("`duration_s={recorded}` must be a number: {error}; {}", run.context)
+            });
+            assert!(
+                seconds.is_finite(),
+                "the lint duration must be a finite measurement — NaN and infinity reach the \
+                 artifact as values the report cannot rank; {}",
+                run.context
+            );
+            assert!(
+                seconds > 0.0,
+                "a command that ran took a measurable, non-negative amount of time; two \
+                 `time.monotonic` readings taken in separate interpreters subtract unrelated \
+                 origins and can go backwards; {}",
+                run.context
+            );
+            assert!(
+                recorded.contains('.'),
+                "the lint duration must be fractional — an integer clock reports a fast command \
+                 as `0`, which the report renders as `not recorded`; {}",
+                run.context
+            );
+            assert!(
+                seconds < 60.0,
+                "the step must time the COMMAND, not the epoch; {}",
+                run.context
+            );
+        }
+    }
+}
+
+/// A measurement the step cannot take is an unavailable MEASUREMENT, never a
+/// gate verdict: with no `python3` on `PATH` the step still runs `just _lint`,
+/// still exits with its status, and publishes an EMPTY `duration_s` rather than
+/// the `0` the report renders identically to a step that never ran.
+#[cfg(unix)]
+#[test]
+fn the_lint_step_publishes_an_empty_duration_when_it_cannot_time_the_command() {
+    let script = lint_step_script();
+
+    for just_exit in [0, 7] {
+        let run = run_lint_step(&script, just_exit, false);
+        assert_eq!(
+            run.exit_code,
+            Some(just_exit),
+            "an unavailable clock must not change the gate's status; {}",
+            run.context
+        );
+        assert_eq!(
+            run.duration_s, "",
+            "an unavailable measurement is spelled as an empty `duration_s`; {}",
+            run.context
+        );
+    }
+}
+
 /// The fold, run for real: each producer's status script is executed under
 /// the job/gate outcome combinations its `always()` step may observe, and the
 /// artifact it writes is read back. Unix only because the
@@ -2048,7 +2217,9 @@ fn the_producer_status_carries_one_record_per_companion_suite() {
             } else if value.contains("steps.companion.outcome") {
                 "failure".to_owned()
             } else if value.contains(".outputs.duration_s") {
-                "37".to_owned()
+                // Fractional, because the lint step measures a monotonic clock:
+                // the fold must carry the measurement through unrounded.
+                "0.42".to_owned()
             } else if value.contains("${{") {
                 "success".to_owned()
             } else {
@@ -2094,9 +2265,11 @@ fn the_producer_status_carries_one_record_per_companion_suite() {
         if header == "  lint:" {
             assert_eq!(
                 json["duration_s"],
-                serde_json::json!(37),
-                "R14: the lint COMMAND's duration is recorded, because no JUnit \
-                 report carries it: {written}"
+                serde_json::json!(0.42),
+                "R14/AC13: the lint COMMAND's duration is recorded, because no JUnit \
+                 report carries it — and a sub-second measurement survives the fold \
+                 as a measurement rather than being rounded to the `0` that reads as \
+                 an absence: {written}"
             );
         }
     }
@@ -2295,6 +2468,22 @@ fn post_merge_reuse_preserves_the_gate_and_normal_ci_fallback() {
     }
 }
 
+/// The policy/verdict words `the_report_makes_no_merge_or_policy_claim` in
+/// `scripts/ci-rollup-tests.rs` bans from the Rust advisory renderer. That test
+/// exercises the renderer only, so the reuse-mode shell in `ci.yml` — which
+/// writes its own step summary and never reaches the renderer — is held to the
+/// same list here.
+const POLICY_VOCABULARY: [&str; 8] = [
+    "BLOCKED",
+    "CLEAR —",
+    "must not merge",
+    "may merge",
+    "baseline-",
+    "policy-gap-",
+    "## CI verdict",
+    "cicd",
+];
+
 #[test]
 fn only_ci_gate_makes_a_run_level_claim() {
     let package_ci = workflow("_package-ci.yml");
@@ -2308,6 +2497,22 @@ fn only_ci_gate_makes_a_run_level_claim() {
         !report.contains("No gate reported a failure"),
         "the advisory report must make no run-level green claim"
     );
+    // Emphasis, code spans, and the shell's backslash escaping are removed
+    // first: `**CLEAR**` is the same verdict as `CLEAR` and must not evade a
+    // literal match.
+    let prose = report.replace(['*', '`', '\\'], "");
+    let rollup_tests = read("scripts/ci-rollup-tests.rs");
+    for policy_word in POLICY_VOCABULARY {
+        assert!(
+            rollup_tests.contains(&format!("{policy_word:?},")),
+            "scripts/ci-rollup-tests.rs no longer bans {policy_word:?}; the two \
+             vocabularies must stay identical"
+        );
+        assert!(
+            !prose.contains(policy_word),
+            "the ci-reporting job applied policy ({policy_word:?}): {report}"
+        );
+    }
     assert!(
         !report.contains("needs.area-ci.result"),
         "every package gate is covered by its own area's workflow; the advisory \
@@ -2317,6 +2522,434 @@ fn only_ci_gate_makes_a_run_level_claim() {
         report.contains("ci-gate") && !report.contains("ci-verdict"),
         "the advisory report must name ci-gate as the run's gate"
     );
+}
+
+// --- `ci-reporting`'s three modes: exclusive, exhaustive, and executed -------
+
+/// One token of the GitHub-expression subset the `ci-reporting` guards use.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum GuardToken {
+    Not,
+    And,
+    Or,
+    Open,
+    Close,
+    Eq,
+    Ne,
+    Path(String),
+    Literal(String),
+}
+
+fn tokenize_guard(expression: &str) -> Vec<GuardToken> {
+    let chars: Vec<char> = expression.chars().collect();
+    let mut tokens = Vec::new();
+    let mut at = 0;
+    while at < chars.len() {
+        match chars[at] {
+            ' ' | '\t' | '\n' => at += 1,
+            '(' => {
+                tokens.push(GuardToken::Open);
+                at += 1;
+            }
+            ')' => {
+                tokens.push(GuardToken::Close);
+                at += 1;
+            }
+            '\'' => {
+                at += 1;
+                let start = at;
+                while at < chars.len() && chars[at] != '\'' {
+                    at += 1;
+                }
+                assert!(at < chars.len(), "unterminated literal in {expression:?}");
+                tokens.push(GuardToken::Literal(chars[start..at].iter().collect()));
+                at += 1;
+            }
+            '&' | '|' => {
+                let pair = chars[at];
+                assert_eq!(
+                    chars.get(at + 1),
+                    Some(&pair),
+                    "a single {pair:?} is not a GitHub operator: {expression:?}"
+                );
+                tokens.push(if pair == '&' {
+                    GuardToken::And
+                } else {
+                    GuardToken::Or
+                });
+                at += 2;
+            }
+            '=' => {
+                assert_eq!(chars.get(at + 1), Some(&'='), "expected `==` in {expression:?}");
+                tokens.push(GuardToken::Eq);
+                at += 2;
+            }
+            '!' => {
+                if chars.get(at + 1) == Some(&'=') {
+                    tokens.push(GuardToken::Ne);
+                    at += 2;
+                } else {
+                    tokens.push(GuardToken::Not);
+                    at += 1;
+                }
+            }
+            other => {
+                let start = at;
+                while at < chars.len()
+                    && (chars[at].is_ascii_alphanumeric() || matches!(chars[at], '.' | '_' | '-'))
+                {
+                    at += 1;
+                }
+                assert!(
+                    at > start,
+                    "unsupported character {other:?} in guard {expression:?}"
+                );
+                tokens.push(GuardToken::Path(chars[start..at].iter().collect()));
+            }
+        }
+    }
+    tokens
+}
+
+struct GuardParser<'a> {
+    tokens: &'a [GuardToken],
+    at: usize,
+    context: &'a BTreeMap<String, String>,
+    source: &'a str,
+}
+
+impl GuardParser<'_> {
+    fn peek(&self) -> Option<&GuardToken> {
+        self.tokens.get(self.at)
+    }
+
+    fn any(&mut self) -> bool {
+        let mut value = self.all();
+        while self.peek() == Some(&GuardToken::Or) {
+            self.at += 1;
+            value = self.all() || value;
+        }
+        value
+    }
+
+    fn all(&mut self) -> bool {
+        let mut value = self.unary();
+        while self.peek() == Some(&GuardToken::And) {
+            self.at += 1;
+            value = self.unary() && value;
+        }
+        value
+    }
+
+    fn unary(&mut self) -> bool {
+        if self.peek() == Some(&GuardToken::Not) {
+            self.at += 1;
+            return !self.unary();
+        }
+        self.comparison()
+    }
+
+    fn comparison(&mut self) -> bool {
+        if self.peek() == Some(&GuardToken::Open) {
+            self.at += 1;
+            let value = self.any();
+            assert_eq!(
+                self.peek(),
+                Some(&GuardToken::Close),
+                "unbalanced parentheses in {}",
+                self.source
+            );
+            self.at += 1;
+            return value;
+        }
+        let Some(GuardToken::Path(path)) = self.peek().cloned() else {
+            panic!("expected a `needs.…` path in {}", self.source);
+        };
+        self.at += 1;
+        let operator = self.peek().cloned();
+        self.at += 1;
+        let Some(GuardToken::Literal(literal)) = self.peek().cloned() else {
+            panic!("expected a quoted literal after `{path}` in {}", self.source);
+        };
+        self.at += 1;
+        // A guard that reads state this test does not model is drift, not a
+        // default: fail here rather than silently evaluate it as absent.
+        let actual = self.context.get(&path).unwrap_or_else(|| {
+            panic!(
+                "the guard reads `{path}`, which this contract's context does not model: {}",
+                self.source
+            )
+        });
+        match operator {
+            Some(GuardToken::Eq) => *actual == literal,
+            Some(GuardToken::Ne) => *actual != literal,
+            other => panic!("unsupported operator {other:?} after `{path}` in {}", self.source),
+        }
+    }
+}
+
+fn eval_guard(guard: &str, context: &BTreeMap<String, String>) -> bool {
+    let body = guard
+        .trim()
+        .strip_prefix("${{")
+        .and_then(|rest| rest.strip_suffix("}}"))
+        .unwrap_or_else(|| {
+            panic!("a ci-reporting guard must be one `${{{{ … }}}}` expression: {guard:?}")
+        });
+    let tokens = tokenize_guard(body);
+    let mut parser = GuardParser {
+        tokens: &tokens,
+        at: 0,
+        context,
+        source: guard,
+    };
+    let value = parser.any();
+    assert_eq!(parser.at, tokens.len(), "trailing tokens in guard {guard:?}");
+    value
+}
+
+fn step_guard(step: &str) -> Option<String> {
+    step.lines()
+        .find_map(|line| line.strip_prefix("        if: "))
+        .map(|guard| guard.trim().to_owned())
+}
+
+/// The three mode guards as `ci.yml` writes them, in step order, together with
+/// the step names assigned to each. Read from the workflow so a guard that
+/// drifts cannot be satisfied by a copy kept here.
+fn reporting_mode_guards() -> Vec<String> {
+    let job = job_block("ci.yml", "  ci-reporting:");
+    let job_steps = steps(&job);
+    assert!(
+        job_steps.len() >= 3,
+        "ci-reporting must carry all three modes"
+    );
+
+    let mut guards: Vec<String> = Vec::new();
+    let mut mode_of_step: Vec<(String, usize)> = Vec::new();
+    for step in &job_steps {
+        let guard = step_guard(step).unwrap_or_else(|| {
+            panic!("every ci-reporting step must name the mode it belongs to:\n{step}")
+        });
+        let mode = match guards.iter().position(|known| known == &guard) {
+            Some(index) => index,
+            None => {
+                guards.push(guard);
+                guards.len() - 1
+            }
+        };
+        mode_of_step.push((step_name(step), mode));
+    }
+
+    assert_eq!(
+        guards.len(),
+        3,
+        "ci-reporting has exactly three modes, so exactly three distinct guards: {guards:#?}"
+    );
+    assert_eq!(
+        mode_of_step.first().map(|(name, mode)| (name.as_str(), *mode)),
+        Some(("Reuse successful PR validation", 0)),
+        "mode 1 is the first step"
+    );
+    assert_eq!(
+        mode_of_step.last().map(|(name, mode)| (name.as_str(), *mode)),
+        Some(("Classify the first actionable failure", 2)),
+        "mode 3 is the last step"
+    );
+    for (name, mode) in &mode_of_step[1..mode_of_step.len() - 1] {
+        assert_eq!(
+            *mode, 1,
+            "`{name}` sits between modes 1 and 3 and must carry mode 2's guard"
+        );
+    }
+    guards
+}
+
+fn bootstrap_context(validation: &str, reuse: &str, scope: &str) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("needs.validation.result".to_owned(), validation.to_owned()),
+        (
+            "needs.validation.outputs.reuse".to_owned(),
+            reuse.to_owned(),
+        ),
+        ("needs.scope.result".to_owned(), scope.to_owned()),
+    ])
+}
+
+/// The 1-based modes whose guard is true for a given bootstrap state.
+fn speaking_modes(guards: &[String], context: &BTreeMap<String, String>) -> Vec<usize> {
+    guards
+        .iter()
+        .enumerate()
+        .filter(|(_, guard)| eval_guard(guard, context))
+        .map(|(index, _)| index + 1)
+        .collect()
+}
+
+/// Specification section 6 gives `ci-reporting` three modes and one voice. That
+/// is a property of the guards together, not of any one of them: overlapping
+/// guards render two reports for the same run, and a gap renders none.
+#[test]
+fn exactly_one_ci_reporting_mode_speaks_for_every_bootstrap_state() {
+    let guards = reporting_mode_guards();
+
+    /// (validation.result, validation.outputs.reuse, scope.result, mode)
+    const NAMED: [(&str, &str, &str, usize); 7] = [
+        // A reused whole-PR validation skips scope entirely.
+        ("success", "true", "skipped", 1),
+        // The ordinary scoped run: the full report, and only the full report.
+        ("success", "false", "success", 2),
+        ("failure", "false", "skipped", 3),
+        ("cancelled", "false", "skipped", 3),
+        ("success", "false", "failure", 3),
+        ("success", "false", "cancelled", 3),
+        // Reuse recorded by a validation job that did not itself succeed: mode
+        // 1 declines it, so mode 3 has to take it or the run says nothing.
+        ("failure", "true", "skipped", 3),
+    ];
+
+    for (validation, reuse, scope, expected) in NAMED {
+        let speaking = speaking_modes(&guards, &bootstrap_context(validation, reuse, scope));
+        assert_eq!(
+            speaking,
+            vec![expected],
+            "validation={validation} reuse={reuse} scope={scope}: mode {expected} alone must \
+             report this run, but {speaking:?} did"
+        );
+    }
+
+    for validation in JOB_RESULTS {
+        for reuse in ["true", "false"] {
+            for scope in JOB_RESULTS {
+                let speaking =
+                    speaking_modes(&guards, &bootstrap_context(validation, reuse, scope));
+                assert_eq!(
+                    speaking.len(),
+                    1,
+                    "validation={validation} reuse={reuse} scope={scope}: the three modes must \
+                     be exclusive and exhaustive, but {speaking:?} spoke"
+                );
+            }
+        }
+    }
+}
+
+const JOB_RESULTS: [&str; 4] = ["success", "failure", "cancelled", "skipped"];
+
+/// Mode 3's `RESULTS` document with the `needs.*` expressions resolved, exactly
+/// as the runner would hand it to the script.
+#[cfg(unix)]
+fn bootstrap_results_document(step: &str, validation: &str, scope: &str) -> String {
+    let (_, rest) = step
+        .split_once("\n          RESULTS: |\n")
+        .expect("mode 3 must list the bootstrap stages it can see as a `RESULTS` block");
+    let document = rest
+        .lines()
+        .take_while(|line| line.starts_with("            "))
+        .map(|line| {
+            line[12..]
+                .replace("${{ needs.validation.result }}", validation)
+                .replace("${{ needs.scope.result }}", scope)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !document.contains("${{"),
+        "mode 3 reads a stage this contract does not resolve: {document}"
+    );
+    document
+}
+
+/// Mode 3 promises "a failed or cancelled bootstrap". Run for real — a source
+/// scan can see that both labels exist while the loop still matches only
+/// `failure`, which is how a cancelled validation came to be reported as
+/// no bootstrap failure at all.
+///
+/// Unix only because the step declares `shell: bash` and the assertion is about
+/// what that script renders; `test-toolkit`'s own suite runs on Linux too.
+#[cfg(unix)]
+#[test]
+fn the_bootstrap_report_names_cancellation_instead_of_denying_a_failure() {
+    let job = job_block("ci.yml", "  ci-reporting:");
+    let job_steps = steps(&job);
+    let classify = step_named(&job_steps, "Classify the first actionable failure")
+        .expect("ci-reporting must carry the failed-or-cancelled bootstrap mode");
+    let script = step_script(classify);
+
+    /// (validation.result, scope.result, must appear, must not appear)
+    const CASES: [(&str, &str, &str, &str); 4] = [
+        (
+            "cancelled",
+            "skipped",
+            "First actionable failure class: bootstrap (reuse check) (cancelled)",
+            "No bootstrap stage failed",
+        ),
+        (
+            "failure",
+            "skipped",
+            "First actionable failure class: bootstrap (reuse check) (failed)",
+            "No bootstrap stage failed",
+        ),
+        (
+            "success",
+            "cancelled",
+            "First actionable failure class: bootstrap (scope calculation) (cancelled)",
+            "No bootstrap stage failed",
+        ),
+        // Nothing failed and nothing was cancelled, yet mode 3 is speaking, so
+        // scope did not succeed either. The report says that rather than
+        // inventing a failure.
+        (
+            "success",
+            "skipped",
+            "No bootstrap stage failed or was cancelled",
+            "First actionable failure class",
+        ),
+    ];
+
+    for (validation, scope, expected, forbidden) in CASES {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let summary = temp.path().join("step-summary.md");
+        fs::write(&summary, "").expect("the runner pre-creates the step summary");
+
+        let output = Command::new("bash")
+            .arg("-c")
+            .arg(&script)
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .env("GITHUB_STEP_SUMMARY", &summary)
+            .env(
+                "RESULTS",
+                bootstrap_results_document(classify, validation, scope),
+            )
+            .output()
+            .expect("bash must be runnable");
+        let case = format!("validation={validation}, scope={scope}");
+        assert!(
+            output.status.success(),
+            "{case}: the report script must exit 0 — it is the run's only account of a \
+             bootstrap that produced no result artifacts:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let rendered = fs::read_to_string(&summary).expect("the script writes the step summary");
+        assert!(
+            rendered.contains(expected),
+            "{case}: the report must state {expected:?}, but rendered:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains(forbidden),
+            "{case}: the report must not state {forbidden:?}, but rendered:\n{rendered}"
+        );
+        // The observed state of every stage is rendered, so the reader can tell
+        // a cancelled stage from a skipped one without opening the run.
+        assert!(
+            rendered.contains(&format!("- bootstrap (reuse check): {validation}"))
+                && rendered.contains(&format!("- bootstrap (scope calculation): {scope}")),
+            "{case}: the report must name each stage's observed state, but rendered:\n{rendered}"
+        );
+    }
 }
 
 // --- shared recipes must stay usable from a runner ---------------------------

@@ -565,8 +565,10 @@ jobs:
 
   # The run's reader-facing account of itself, in exactly three modes
   # (specification section 6): a reused whole-PR validation, a successful scope,
-  # or a failed bootstrap. Each step below is one of them, and each is guarded
-  # so only one speaks.
+  # or a bootstrap that failed or was cancelled. Each step below belongs to one
+  # of them, and the guards are exclusive AND exhaustive: for any combination of
+  # the validation result, its reuse output, and the scope result, exactly one
+  # mode speaks.
   #
   # It deliberately makes NO run-level claim. The old "No gate reported a
   # failure" line was a green verdict computed from job results alone, which
@@ -614,7 +616,7 @@ jobs:
           {
             echo "## Reused PR validation"
             echo ""
-            echo "**CLEAR** — this push has the same Git tree and integration base as successful PR validation, so every area job was skipped and \`ci-gate\` folds only skipped and successful jobs."
+            echo "This push has the same Git tree and integration base as a successful PR validation."
             echo ""
             echo "This run executed no package cell; the authoritative results are the linked run's."
             echo ""
@@ -671,14 +673,21 @@ jobs:
             --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
             "${args[@]}"
       # --- mode 3: a failed or cancelled bootstrap -------------------------
+      # Spelled as the negation of modes 1 and 2 rather than as a condition of
+      # its own, because the three modes have to be exhaustive as well as
+      # exclusive and a hand-rolled third condition drops whatever neither of
+      # the other two happens to cover. The previous `reuse != 'true'` did both:
+      # it doubled up with mode 2 on every successful scope, and it left the run
+      # with no report at all when a reuse-marked validation did not itself
+      # succeed.
       - name: Classify the first actionable failure
-        if: ${{ needs.validation.outputs.reuse != 'true' }}
+        if: ${{ !(needs.validation.result == 'success' && needs.validation.outputs.reuse == 'true') && !(needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success') }}
         shell: bash
         env:
-          # Listed in dependency order: an earlier stage's failure is the root
-          # cause, and later stages were skipped or would only repeat it.
-          # `area-ci` is absent on purpose — every package gate is a cell in its
-          # own area's coverage audit.
+          # Listed in dependency order: an earlier stage's failure or
+          # cancellation is the root cause, and later stages were skipped or
+          # would only repeat it. `area-ci` is absent on purpose — every package
+          # gate is a cell in its own area's coverage audit.
           RESULTS: |
             bootstrap (reuse check):${{ needs.validation.result }}
             bootstrap (scope calculation):${{ needs.scope.result }}
@@ -691,21 +700,28 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
 
           first=""
+          state=""
           while IFS= read -r entry; do
             [ -n "$entry" ] || continue
-            if [ "${entry##*:}" = "failure" ]; then
-              first="${entry%:*}"
-              break
+            stage="${entry%:*}"
+            result="${entry##*:}"
+            echo "- ${stage}: ${result}" >>"$GITHUB_STEP_SUMMARY"
+            if [ -z "$first" ]; then
+              case "$result" in
+                failure) first="$stage"; state="failed" ;;
+                cancelled) first="$stage"; state="cancelled" ;;
+              esac
             fi
           done <<<"$RESULTS"
+          echo "" >>"$GITHUB_STEP_SUMMARY"
 
           if [ -z "$first" ]; then
-            echo "No bootstrap stage failed. **The run's gate is \`ci-gate\`, not this line** — it folds every blocking job's result, including \`preflight\`, and package results live in each area's coverage-audit grid." >>"$GITHUB_STEP_SUMMARY"
+            echo "No bootstrap stage failed or was cancelled, yet the scope calculation did not succeed, so this run scheduled no package cell. **The run's gate is \`ci-gate\`, not this line** — it folds every blocking job's result, including \`preflight\`, and package results live in each area's coverage-audit grid." >>"$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
           {
-            echo "**First actionable failure class: ${first}**"
+            echo "**First actionable failure class: ${first} (${state})**"
             echo ""
             echo "This stage emits no result artifacts, so no area coverage audit can see it; \`ci-gate\` blocks on its result directly. Open that job first — later red jobs are usually the same root cause."
           } >>"$GITHUB_STEP_SUMMARY"
