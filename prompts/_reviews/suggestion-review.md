@@ -11,8 +11,8 @@ usage: |-
     - pass in the `review` property as a file reference to the review baseline
     - (_optionally_) pass in a `partial` property to express that only a _portion_ of the review has been implemented and to ground this review on the just that set of suggestions
         - **Note:** use this _only_ when the implementation implemented only a subset of the baseline review's 
-iteration: {{ file_index(review) + 1 }}
-output: {{ dirname(review) + "/" + basename_without_index(review) + "-" + iteration }}
+iteration: "{{ file_index(review) + 1 }}"
+output: '{{ dirname(review) + "/" + basename_without_index(review) + "-" + iteration }}'
 ---
 # Review of the Implementation of Suggestions
 
