@@ -31,15 +31,23 @@ name: sniff-performance
 
 on:
   pull_request:
-    # The root `Cargo.toml` and `Cargo.lock` are deliberately absent. They match
-    # every workspace-member addition and every unrelated dependency bump in a
-    # 40+ package monorepo, so they fired this workflow on changes with no sniff
-    # content at all. A dependency bump that does move sniff's performance is
-    # caught by the nightly work counts, which are the actionable signal here;
-    # the Criterion subset can be requested for one with `workflow_dispatch`.
+    # `sniff/**` and nothing else. Two patterns were removed deliberately:
+    #
+    #   - the root `Cargo.toml` and `Cargo.lock`, which match every
+    #     workspace-member addition and every unrelated dependency bump in a
+    #     40+ package monorepo, and so fired this workflow on changes carrying
+    #     no sniff content at all;
+    #   - this file itself. A `pull_request` path filter is evaluated against
+    #     the PR's WHOLE diff, not the commits just pushed, so a PR that edits
+    #     this file re-triggers the workflow on every later push for the life
+    #     of the PR — including pushes that touch nothing sniff owns.
+    #
+    # Neither is a coverage loss worth the cost. A dependency bump that does
+    # move sniff's performance is caught by the nightly work counts, which this
+    # file's header already names as the actionable signal, and a change to the
+    # bench steps can be validated on demand with `workflow_dispatch`.
     paths:
       - "sniff/**"
-      - ".github/workflows/sniff-performance.yml"
   schedule:
     # Nightly, in its own schedule slot to avoid contending with other scheduled runs.
     - cron: "0 4 * * *"
