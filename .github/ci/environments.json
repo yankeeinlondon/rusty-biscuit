@@ -9,6 +9,7 @@
         "tmux": true,
         "headless_browser": true,
         "node_pnpm": true,
+        "cargo_toolchain": true,
         "archive_only": false,
         "wezterm": {
           "available": false,
@@ -49,6 +50,7 @@
           "expiry": "2027-01-31"
         },
         "node_pnpm": false,
+        "cargo_toolchain": true,
         "archive_only": false,
         "wezterm": {
           "available": false,
@@ -86,6 +88,7 @@
           "expiry": "2027-01-31"
         },
         "node_pnpm": false,
+        "cargo_toolchain": true,
         "archive_only": false,
         "wezterm": {
           "available": false,
@@ -114,7 +117,7 @@
       "capabilities": {
         "tmux": {
           "available": false,
-          "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests — the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
+          "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests \u2014 the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
           "owner": "@yankeeinlondon",
           "expiry": "2026-12-31",
           "closes": "features/_unscheduled/wsl2-l2-ci-leg"
@@ -126,6 +129,13 @@
           "expiry": "2026-12-31"
         },
         "node_pnpm": false,
+        "cargo_toolchain": {
+          "available": false,
+          "reason": "the WSL2 leg runs a prebuilt nextest archive: the guest has no cargo or rustc, and its /bin/sh is dash. A suite that shells out to `cargo` or a `just` recipe therefore cannot run here, however its binaries got into the archive. Installing a toolchain in the guest would defeat the archive design the leg exists to exercise.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2026-12-31",
+          "closes": "features/_unscheduled/wsl2-l2-ci-leg"
+        },
         "archive_only": true,
         "wezterm": {
           "available": false,

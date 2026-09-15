@@ -75,3 +75,7 @@ companion-suites = [
     "test_runner_loss.py",
     "test_schema.py",
 ]
+# `ci-rollup`'s round-trip test runs the real planner, and the planner opens the
+# workspace with `cargo metadata`. Environments without a toolchain render a
+# governed ACCEPTED GAP instead of a red cell.
+requires-toolchain = true

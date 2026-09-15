@@ -346,7 +346,14 @@ native-package installer, and a `capabilities` map over a closed vocabulary:
 | `tmux` | whether a headless L2 terminal backend can be provisioned here |
 | `headless_browser` | whether a headless browser can be hosted here |
 | `node_pnpm` | whether Node 22 + pnpm 10 are provisioned here |
+| `cargo_toolchain` | whether a runnable `cargo`/`rustc` is present, for suites that shell out to one |
 | `archive_only` | whether this environment runs from a prebuilt nextest archive (no Cargo) |
+
+`cargo_toolchain` and `archive_only` are distinct questions that happen to
+share an answer today. `archive_only` says *how* a cell executes;
+`cargo_toolchain` says *what the guest holds*. A test binary runs perfectly
+well from an archive — until it shells out to `cargo metadata` or a `just`
+recipe, which is what `cargo_toolchain` governs.
 
 A capability value is either a boolean or, for a **governed unavailability**, an
 object carrying `available: false` plus `reason`, `owner`, `expiry`, and
@@ -455,6 +462,13 @@ would silently exempt a package and miss its first test.
 | `l1-include-slow` | bool | `false` | keep `slow_` tests inside the L1 selection (darkmatter's contract) |
 | `runner-tools` | string[] | `[]` | closed vocabulary: `ai-provider-stubs`, `darkmatter-md-fixture`, `messenger-desktop-stubs`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn`, `neovim`, `zed-extension` |
 | `companion-suites` | string[] | `[]` | non-Cargo suites this package owns; the closed vocabulary is `SUITE_REGISTRY`'s companion half in `affected_scope.py` |
+| `requires-toolchain` | bool | `false` | this package's L1 shells out to `cargo` or `just`, so an environment without `cargo_toolchain` renders a governed `ACCEPTED GAP` rather than a red cell |
+
+`requires-toolchain` is for the minority of suites that test the repository's
+own tooling — they open the workspace with `cargo metadata` or drive real
+`just` recipes in a scratch tree. Declaring it is not a way to opt out of an
+environment: the cell still appears, still names the capability it lacks, and
+still carries an owner and expiry.
 
 `[package.metadata.ci.native]`: a map of runner OS (`ubuntu-latest`,
 `windows-latest`, `macos-latest`) → system packages needed to build/test. The

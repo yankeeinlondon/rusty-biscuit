@@ -979,6 +979,7 @@ class MatrixRecordTests(unittest.TestCase):
                 "l1_include_slow": False,
                 "runner_tools": ["node-22", "pnpm-10"],
                 "companion_suites": ["homelab-frontend"],
+                "requires_toolchain": False,
             },
             area="homelab",
             target_kinds=["lib"],
@@ -1658,6 +1659,7 @@ class EstimateJobsTests(unittest.TestCase):
                 "l1_include_slow": False,
                 "runner_tools": [],
                 "companion_suites": [],
+                "requires_toolchain": False,
             },
             area="a",
             target_kinds=["lib", "bench"],
@@ -1683,6 +1685,7 @@ class EstimateJobsTests(unittest.TestCase):
             "l1_include_slow": False,
             "runner_tools": [],
             "companion_suites": [],
+            "requires_toolchain": False,
         }
         environments = environments_for_tests()
         scheduled = package_cells(arguments, "a", ["lib"], environments, {})
@@ -1717,6 +1720,7 @@ class CheckCellTests(unittest.TestCase):
         "l1_include_slow": False,
         "runner_tools": [],
         "companion_suites": [],
+        "requires_toolchain": False,
     }
     CONSTRAINT = {
         "owner": "ken",
@@ -3213,6 +3217,7 @@ class CompanionAttachmentTests(unittest.TestCase):
             "l1_include_slow": False,
             "runner_tools": [],
             "companion_suites": list(suites),
+            "requires_toolchain": False,
         }
 
     def cells(self, *suites: str) -> dict[tuple[str, str], dict[str, object]]:
@@ -3986,6 +3991,7 @@ def plan_package(**overrides: object) -> dict[str, object]:
         "l2_backends": [],
         "runner_tools": [],
         "companion_suites": [],
+        "requires_toolchain": False,
         "l1_include_slow": False,
         "native": {},
     }

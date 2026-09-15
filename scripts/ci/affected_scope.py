@@ -272,6 +272,7 @@ CI_TEST_FIELDS = {
     "l1-include-slow",
     "runner-tools",
     "companion-suites",
+    "requires-toolchain",
 }
 EXCLUSION_FIELDS = {"exclusion-class", "owner", "reason", "expiry"}
 
@@ -389,6 +390,11 @@ KNOWN_CAPABILITIES = {
     "apple-terminal",
     "headless_browser",
     "node_pnpm",
+    # A runnable Cargo/rustc toolchain, for the minority of L1 suites that
+    # SHELL OUT to one. Distinct from `archive_only`, which says how a cell is
+    # executed: the two coincide today only because the archive design is what
+    # leaves its guest without a toolchain.
+    "cargo_toolchain",
     "archive_only",
 }
 
@@ -818,6 +824,8 @@ def validate_package_ci(
         )
     if not isinstance(tests.get("l1-include-slow", False), bool):
         raise RuntimeError(f"{label}.tests field 'l1-include-slow' must be a boolean")
+    if not isinstance(tests.get("requires-toolchain", False), bool):
+        raise RuntimeError(f"{label}.tests field 'requires-toolchain' must be a boolean")
 
     tools = tests.get("runner-tools", [])
     if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
@@ -900,6 +908,7 @@ def package_ci_policy(
             "l1_include_slow": tests.get("l1-include-slow", False),
             "runner_tools": tests.get("runner-tools", []),
             "companion_suites": tests.get("companion-suites", []),
+            "requires_toolchain": tests.get("requires-toolchain", False),
             "native": ci.get("native", {}),
         }
         if not record["gates"]:
@@ -1954,6 +1963,17 @@ def package_cells(
         for tier in record["tiers"]:
             if tier == "L1":
                 companions = companion_records(record["companion_suites"], name, "L1")
+                # A suite that shells out to `cargo`, `just`, or a script that
+                # calls either cannot run where no toolchain exists, however
+                # the binaries got there. It is a GOVERNED GAP rather than a
+                # silent omission: the coverage is genuinely absent on that
+                # environment, and the area audit must say so out loud.
+                toolchain_gap = (
+                    gap_record(environment, ["cargo_toolchain"])
+                    if record["requires_toolchain"]
+                    and not capability(environment, "cargo_toolchain")
+                    else None
+                )
                 add(
                     name,
                     "L1",
@@ -1974,6 +1994,7 @@ def package_cells(
                     # to which environments happen to carry `node_pnpm`.
                     reusable=not companions,
                     companions=companions,
+                    gap=toolchain_gap,
                 )
             elif tier == "L2":
                 hostable = any(

@@ -52,3 +52,8 @@ reason = "Test helper crate; no measurable hot paths."
 [package.metadata.ci.tests]
 tiers = ["L1"]
 companion-suites = ["test-audit-typecheck", "test-audit-vitest"]
+# These contracts read the workspace through `cargo metadata` and drive the
+# real `just` recipes in a scratch tree, so the suite needs a live toolchain
+# and not merely a compiled archive. Environments without one render a
+# governed ACCEPTED GAP instead of a red cell.
+requires-toolchain = true

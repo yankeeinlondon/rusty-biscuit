@@ -21,6 +21,16 @@ guest has no rustup, no cargo, and no toolchain. Consequences:
   guest. That includes recipes: the canonical `just` test chain has a
   passthrough (`BISCUIT_NEXTEST_BIN`, `BISCUIT_JUNIT_TARGET_DIR`,
   `BISCUIT_JUNIT_WORKSPACE_ROOT`) that the workflow verifies is still wired.
+  A suite that cannot avoid the shell-out — one that tests the repository's
+  own tooling, say — declares `requires-toolchain = true` under
+  `[package.metadata.ci.tests]`. The planner then renders that package's cell
+  on any environment lacking the `cargo_toolchain` capability as a governed
+  `ACCEPTED GAP` instead of scheduling a run that cannot pass. Do not reach
+  for this to quiet an ordinary failure; it declares absent coverage, and the
+  gap carries an owner and an expiry.
+- The guest's `/bin/sh` is **dash**, not bash. A recipe or script using a bash
+  builtin dies with `sh: 1: [[: not found` — which surfaces as the *recipe*
+  failing, not the test, so the traceback names the wrong thing.
 - The archive does include the package's non-test binaries and the linked
   paths nextest knows about, so a correctly resolved `bin_exe!` works.
 
