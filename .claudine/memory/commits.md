@@ -205,6 +205,18 @@ belong here.
 - In cycle-close bodies quote what the diff says; do not paraphrase into
   claims the staged text did not make ("smoke test failed" vs. "smoke attempt
   interrupted by host load").
+- Multi-spec consolidation is one atomic `planning(<area>):` commit, not
+  N+M separate commits: marking N existing specs `status: superseded`
+  (with `superseded_by: ../<new>/spec.md` frontmatter pointer), adding
+  M new spec/annex files that absorb their content, and recording the
+  ratification in a charter spec's decision block all belong together.
+  Splitting the A's from the M's ships the new spec without the supersede
+  banner, so the successor exists without historical evidence anything
+  was retired; splitting the M's from the A's retires the old specs but
+  leaves readers with no path to the successor. The supersede
+  relationship between old and new IS the consolidation — commit both
+  sides together. See `4616e9aec` for a 5-file example (3 M supersede +
+  ratification, 2 A new spec + design annex).
 
 - A brief that says "write the message body to a temp file" yields a file
   with no subject line, and `git commit -F` then collapses every bullet into
