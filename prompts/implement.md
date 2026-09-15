@@ -16,7 +16,12 @@ description: |-
         - if there is no associated spec then we will look for an associated review
         - if neither spec or review's are found nearby we'll implement the plan without linked/associated content
 
-pending_review: "{{ spec ? replace(spec, basename(spec), 'review-' + (frontmatter(spec, 'review_iterations') || 1) + '.md') : null }}"
+pending_review: |-
+    {{ 
+        spec 
+            ? replace(spec, basename(spec), 'review-' + (frontmatter(spec, 'review_iterations') || 1) + '.md') 
+            : null 
+    }}
 
 initialize: 
     stack:
