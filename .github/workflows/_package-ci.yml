@@ -432,6 +432,24 @@ jobs:
           set -euo pipefail
           node --version
           pnpm --version
+      # Workspace dependencies, from the ROOT lockfile that owns both members
+      # (`homelab/server/frontend`, `tools/test-audit`). A toolchain on PATH is
+      # not a runnable suite: `tsc` and `vitest` resolve through
+      # `node_modules`, so without this the first companion dies on a missing
+      # binary. The job that used to own these suites paired the install with
+      # the command in one step; moving them onto the registry carried the
+      # suites over but not the install, and `test-audit-typecheck` failed on
+      # ubuntu-latest for that reason alone.
+      #
+      # Not every node companion needs it — `homelab`'s frontend recipes
+      # install their own subtree — but a suite whose recipe calls `pnpm`
+      # directly has nowhere else to get its dependencies.
+      - name: Install workspace Node dependencies
+        if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
       # Gate command. Its outcome is both the producer and cell outcome.
       - name: L1 tests
         id: l1

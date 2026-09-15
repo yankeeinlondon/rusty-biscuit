@@ -1531,13 +1531,23 @@ fn a_declared_node_capability_is_provisioned_verified_and_hard_required() {
         test_job
             .matches("if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}")
             .count(),
-        3,
-        "pnpm setup, Node setup, and the verification step must each gate on the declared \
-         capability"
+        4,
+        "pnpm setup, Node setup, the verification step, and the workspace install must each \
+         gate on the declared capability"
     );
     assert!(
         test_job.contains("- name: Verify the pnpm toolchain") && test_job.contains("pnpm --version"),
         "a declared node capability must be verified reachable in its own named step"
+    );
+    // A toolchain on PATH is not a runnable suite. `tsc` and `vitest` resolve
+    // through `node_modules`, so a companion whose recipe calls `pnpm` directly
+    // dies on a missing binary without this — which is how
+    // `test-audit-typecheck` failed once the suites moved onto the registry,
+    // away from a job whose own step paired the install with the command.
+    assert!(
+        test_job.contains("- name: Install workspace Node dependencies")
+            && test_job.contains("pnpm install --frozen-lockfile"),
+        "a declared node capability must install the workspace lockfile before any suite runs"
     );
     assert!(
         test_job.contains("BISCUIT_FRONTEND_REQUIRED: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) && '1' || '' }}"),

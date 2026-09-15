@@ -32,7 +32,6 @@ test *args="":
 # typecheck → test, for local use. CI invokes each half separately, as the two
 # companion suites `SUITE_REGISTRY` registers to `test-toolkit`, so that it can
 # record a per-suite outcome, count, and duration instead of one shared result.
-# typecheck → test; the local convenience path.
 check: typecheck test
 
 # Run a test-audit command, e.g. `just run junit <dir> --config <cfg>`.
