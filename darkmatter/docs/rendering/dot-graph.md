@@ -30,4 +30,4 @@ This directive can be used as either a _block_ or _inline_ directive:
     - you can start any line with the `::dot` prefix
     - you can also have any amount of whitespace before the prefix `{whitespace}::dot`
 - Inline Directive:
-    - to support putting these diagrams into tables and other structural containers that Markdown provides, it's very useful to have an _inline_ variant as well:
+    - to support putting these diagrams into tables and other structural containers that Markdown provides, it's very useful to have an _inline_ variant as well

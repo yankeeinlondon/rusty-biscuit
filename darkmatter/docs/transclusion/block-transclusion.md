@@ -35,7 +35,7 @@ This process is a form of state transfer is not confined to JUST the very start 
 
 ### Filepaths
 
-We will _resolve_ file referencing by leveraging the `biscuit-file` library's [`FileReference` struct](@biscuit-file/lib/src/file_reference/mod.rs).
+We will _resolve_ file referencing by leveraging the `biscuit-file` library's [`FileReference` struct](^biscuit-file/lib/src/file_reference/mod.rs).
 
 The example showed a relative path used to the foreign file and this is the recommended way to reference local files in most cases but it is not the only approach. Here's a summary of the allowed file referencing strategies:
 
