@@ -41,6 +41,16 @@ belong here.
   HEAD`. The staged snapshot of any `AM`/`MM` paths you want to commit at their
   pre-supersede content is already in the real index; you only need the temp
   index when sibling staged paths must be excluded from the tree.
+- **Plumbing is for merged multi-agent batches, not sequential commits.** The
+  temp-index fallback only restores the full tree at the merge of all sibling
+  branches; for *sequential* commits on a single branch, the fallback's
+  missing HEAD paths propagate into every subsequent `--only` commit (whose
+  tree is `previous-HEAD + named-change`, with `previous-HEAD` itself sparse)
+  and the cumulative state loses the other files. Prefer `--only` for
+  non-clean-superset `AM` paths in any sequential flow even though it commits
+  working-tree content beyond the staged snapshot — describe those additions
+  in the body so the bullet list matches the diff. Reserve the plumbing
+  fallback for parallel branches that converge in a merge.
 - `--only` on a clean-superset `MM` path still captures working-tree-only
   content (e.g. a manifest `[[test]]` block whose source file is currently
   untracked). The pre-flight `git show :<path>` only sees the staged blob;
@@ -163,12 +173,17 @@ belong here.
 - Conventional Commits, lowercase after the colon, subject < 72 chars.
 - `planning` covers moves into `_completed` / out of `_unscheduled`, **new
   spec files added to `features/_unscheduled/`** (a pure `A` for the spec —
-  `planning(<area>): schedule <name> for implementation`), **new spec files
+  `planning(<area>): schedule <name>` for implementation), **new spec files
   added to an active `fixes/YYYY-MM-DD-<name>/` directory** (a new dated fix
   being scheduled for implementation, distinct from `_unscheduled/`; same
   `planning(<area>): schedule <name>` shape — see `97f12132c` adding
   `fixes/2026-09-10-local-affected-scope/spec.md`, `aedeeb46d` adding
-  `fixes/2026-09-11-cicd-cleanup/spec.md`), AND review-cycle doc edits
+  `fixes/2026-09-11-cicd-cleanup/spec.md`), **new spec files added to an
+  active `features/YYYY-MM-DD-<name>/` directory** (the `features/` analog
+  of the dated-fix case above — same `planning(<area>): schedule <name>`
+  shape; see `c36f72fd0c` adding `features/2026-09-09-more-context/spec.md`,
+  `0b80ca7c9` adding `features/2026-09-15-dasherized-identifiers/spec.md`),
+  AND review-cycle doc edits
   inside a fix/feature directory (`log.md` entry, `review-N.md` flipping
   `implemented: true`, new `review-(N+1).md`, `spec.md` bumping
   `review_iterations`): `planning(<area>): close <fix> cycle N, open
@@ -180,10 +195,28 @@ belong here.
   The active-fix-spec case uses the same rationale: no code ships, the
   dated directory is a planning surface, the frontmatter `area` is the
   scope (e.g. `area: repository-ci` for a repo-wide CI fix still becomes
-  `planning(repo):` per the analogous `97f12132c` precedent).
+  `planning(repo):` per the analogous `97f12132c` precedent). The
+  active-feature-spec case (`features/YYYY-MM-DD-<name>/spec.md`) is the
+  same reasoning: the `'features/'` segment is a project-naming convention
+  for active work, not a claim that code ships in this commit — `feat` is
+  reserved for code that actually ships — and the frontmatter `area` is
+  the scope, so `area: darkmatter` becomes `planning(darkmatter):` even
+  though the path lives under `features/`.
 - In cycle-close bodies quote what the diff says; do not paraphrase into
   claims the staged text did not make ("smoke test failed" vs. "smoke attempt
   interrupted by host load").
+- Multi-spec consolidation is one atomic `planning(<area>):` commit, not
+  N+M separate commits: marking N existing specs `status: superseded`
+  (with `superseded_by: ../<new>/spec.md` frontmatter pointer), adding
+  M new spec/annex files that absorb their content, and recording the
+  ratification in a charter spec's decision block all belong together.
+  Splitting the A's from the M's ships the new spec without the supersede
+  banner, so the successor exists without historical evidence anything
+  was retired; splitting the M's from the A's retires the old specs but
+  leaves readers with no path to the successor. The supersede
+  relationship between old and new IS the consolidation — commit both
+  sides together. See `4616e9aec` for a 5-file example (3 M supersede +
+  ratification, 2 A new spec + design annex).
 
 - A brief that says "write the message body to a temp file" yields a file
   with no subject line, and `git commit -F` then collapses every bullet into

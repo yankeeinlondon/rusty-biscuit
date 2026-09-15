@@ -5,8 +5,8 @@ description: |-
   test design, fixture isolation, `require_level!` / `expect_level!` gating,
   nextest filtersets, suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 61d07be7e22c9f45-5e3087a71564a05a
-last_updated: 2026-09-12
+hash: 61d07be7e22c9f45-6f2ea54170be340f
+last_updated: 2026-09-15
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -136,6 +136,21 @@ Symptoms that you have mis-tiered an OS-specific test:
 - it is `#[ignore]`d with a reason that names a *platform* rather than a
   *resource*;
 - a tier prefix and a `#[cfg]` gate encode the same fact twice.
+
+`biscuit-tui/cli/tests/windows_captured_stdout.rs` had all three at once: an
+`#[ignore = "requires a Windows host"]`, a hand-written recipe, and a whole
+specialized workflow that invoked it by exact name. `biscuit-tui-cli` already
+declared `features = ["terminal-tests"]`, so its CI L1 cell had been *compiling*
+that target all along and only the `#[ignore]` kept it from running. Deleting
+the attribute, the recipe, and the workflow made it ordinary `windows-latest`
+L1 evidence inside the package's own cell; the `#![cfg(windows)]` inner
+attribute is the whole Windows-only declaration.
+
+That test also rewires **process-wide** std handles through `SetStdHandle`.
+That is safe here only because nextest runs one test per process — under
+`cargo test`'s shared-process harness it would corrupt every sibling. Treat
+"nextest gives me a process to myself" as a property worth naming in the test's
+`//!` docs whenever you rely on it.
 
 **Compile the other platform's arms locally.** An area's `just check-windows`
 runs `cargo check -p <crates> --tests --target x86_64-pc-windows-gnu`
@@ -315,6 +330,35 @@ Every curated package area defines these 12 recipes:
 
 Delegate to shared recipes in `just/devops.just` (e.g. `@just _test my-crate`).
 
+### Fail-fast is an environment policy, not a flag preference
+
+Locally, fail fast — nextest's default, and the right one. The first failure is
+usually enough to act on, and if more than one test is broken, fixing the first
+surfaces the next. In CI, run to completion instead. The rule keys on **how
+expensive the next run is**, which is what makes it a property of the
+environment rather than a preference between flags: a truncated Windows or WSL2
+report costs a full round-trip measured in hours to learn what the second
+failure was.
+
+**CI already passes `--no-fail-fast`** — in `.github/workflows/_package-ci.yml`,
+`.github/workflows/_wsl-ci.yml`, and `just/ci-local.just`. Do not add it.
+
+Root `just test` keeps the flag by explicit decision (2026-09-15,
+`fixes/2026-09-14-cicd-improvements`). It is the repository's broadest local
+scope and re-running it is expensive enough to sit on the CI side of the
+cost-of-next-run test. **At the repository root** the choice is also not
+reversible from the command line — every argument there is consumed as a
+selector — so selector-narrowed invocations such as `just test claudine` inherit
+the flag by design, not by oversight. Inside a package area the arguments reach
+nextest, so an area `just test` keeps nextest's fail-fast default and you can
+override it per run.
+
+**Consequence for non-vacuous proofs.** Proving a guard fix non-vacuous — neuter
+the guard, confirm the new tests go red, restore — needs the complete failure
+list when the pass runs at CI-shaped or multi-package scope, because a truncated
+list looks exactly like a narrow blast radius, which is the opposite of what the
+proof is for. Against a single package locally, fail-fast is correct and faster.
+
 ## Scope Verification Gates by Blast Radius
 
 Before running any final build, test, or lint gate:
@@ -345,7 +389,18 @@ For durable native CI, declare package policy in the package's own
 caller calculates source-changed workspace packages plus check-only direct
 reverse Cargo dependencies, reads that policy, and fans the resulting matrix into
 `.github/workflows/_package-ci.yml` — one result-producing job per package. A
-bootstrap `preflight` job gates that fan-out (`needs: [scope, preflight]`).
+bootstrap `preflight` job gates that fan-out (`needs: [scope, preflight]`); it
+is **prerequisites only** and runs no test suite of any language.
+
+**CI's own suites are owned by two ordinary gating packages.** `repo-deps`
+(`scripts/`, a root-workspace member since the cicd-redundancies fix) owns the
+`ci-plan`/`ci-rollup` Nextest suites and the `scripts/ci/test_*.py` contracts;
+`test-toolkit` (`tools/test-toolkit/`, whose CI exclusion record is retired)
+owns `ci_workflow_contracts` and the `tools/test-audit` typecheck and
+Vitest pair. Both fan out like any other package, so a test added to either runs
+in that package's own cell — `just _test repo-deps` / `just _test test-toolkit`
+from the repository root — and a change under `scripts/` or
+`tools/test-toolkit/` now schedules real CI work.
 For each package, `check`, `lint` (build + clippy), and `test` (L1) are
 independent gates; only the expensive `l2`/`browser` tiers stage behind
 `test`. Lint does not gate L1 — one clippy hint must not delete a package's

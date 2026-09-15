@@ -78,6 +78,25 @@
     }
   ],
   "change_class": "package",
+  "change_inventory": {
+    "counts": {
+      "configuration": 0,
+      "documentation": 0,
+      "other": 0,
+      "source": 2,
+      "total": 2
+    },
+    "diff_available": true,
+    "paths": {
+      "configuration": [],
+      "documentation": [],
+      "other": [],
+      "source": [
+        "alpha/src/lib.rs",
+        "beta/src/lib.rs"
+      ]
+    }
+  },
   "environments": [
     {
       "capabilities": {
@@ -189,7 +208,7 @@
   "preflight_reason": "package-local change",
   "prohibited_cells": [],
   "reverse_dependencies": [],
-  "schema_version": 2,
+  "schema_version": 3,
   "source_packages": [
     "alpha",
     "beta"

@@ -68,10 +68,29 @@ def fixed_plan(base: str, head: str) -> dict:
         "native": {},
     }
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "base": base,
         "head": head,
         "change_class": "package",
+        # Fixed, like every other field of this plan. The real bucketing rule
+        # is `affected_scope.change_bucket`; no hook fixture reads a bucket, so
+        # the stub only has to emit something the schema accepts.
+        "change_inventory": {
+            "diff_available": True,
+            "paths": {
+                "configuration": [],
+                "documentation": [],
+                "source": ["alpha/src/lib.rs"],
+                "other": [],
+            },
+            "counts": {
+                "configuration": 0,
+                "documentation": 0,
+                "source": 1,
+                "other": 0,
+                "total": 1,
+            },
+        },
         "full_scope": False,
         "full_scope_gates": [],
         "areas": [{"area": "pkg", "selection_reason": "source change", "packages": ["alpha"]}],
@@ -120,6 +139,14 @@ def empty_plan(base: str, head: str) -> dict:
     plan = fixed_plan(base, head)
     plan.update(
         change_class="documentation",
+        change_inventory={
+            "diff_available": True,
+            "paths": {name: [] for name in ("configuration", "documentation", "source", "other")},
+            "counts": {
+                name: 0
+                for name in ("configuration", "documentation", "source", "other", "total")
+            },
+        },
         areas=[],
         packages=[],
         source_packages=[],
@@ -227,6 +254,13 @@ def main() -> None:
             plan.update(base=base, head=head, preflight_reason=preflight_reason())
         else:
             plan = fixed_plan(base, head)
+        if "--all" in flags:
+            # A full-scope request consults no diff, so it records the absence
+            # rather than buckets it did not compute.
+            plan["change_inventory"] = {
+                "diff_available": False,
+                "reason": "explicit full-scope request; no diff was consulted",
+            }
     if "--plan-out" in values:
         with open(values["--plan-out"], "w", encoding="utf-8") as handle:
             handle.write(json.dumps(plan, sort_keys=True, separators=(",", ":")))

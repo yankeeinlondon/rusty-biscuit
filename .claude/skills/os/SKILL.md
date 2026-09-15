@@ -105,6 +105,10 @@ push mode.
 - **Red only on `windows-latest` with an elapsed time equal to some child's
   timeout:** handle inheritance. Detached grandchildren keep the parent's pipe
   ends open on Windows; see [windows.md](windows.md).
+- **Red only on `windows-latest` with an empty failure message:** the test
+  attached a console and redirected a std handle to `CONOUT$`, so the panic
+  message went to that console instead of nextest's pipe. See "Attaching a
+  console inside a nextest process" in [windows.md](windows.md).
 - **Red only on the macOS host, L2, with a shell prompt in the captured
   frame:** a host shell-startup prompt swallowed the input; see
   [macos.md](macos.md). Not a repo defect.
@@ -150,8 +154,9 @@ push mode.
   cache-quota and `main`-cancellation behavior, merge-gate bypass, and the
   cross-run noise and comparison rules.
 - [windows.md](windows.md) — path spelling, home directory lookup, handle
-  inheritance, batch-file argument rule, Ctrl+C status, cross-compile targets,
-  Markdown backslash escapes.
+  inheritance, batch-file argument rule, Ctrl+C status, console allocation and
+  `CONOUT$` redirection under nextest, cross-compile targets, Markdown
+  backslash escapes.
 - [macos.md](macos.md) — `/var` symlink, Docker for Linux evidence, L2
   capture wedges, subprocess forks from terminal detection, perf triage,
   lldb work counters, shell-init and `cd` traps.

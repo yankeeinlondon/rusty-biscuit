@@ -72,12 +72,10 @@ jobs:
       package_names: ${{ steps.scope.outputs.package_names }}
       full_scope: ${{ steps.scope.outputs.full_scope }}
       sniff: ${{ steps.scope.outputs.sniff }}
-      biscuit_tui: ${{ steps.scope.outputs.biscuit_tui }}
       preflight_os: ${{ steps.scope.outputs.preflight_os }}
       preflight_reason: ${{ steps.scope.outputs.preflight_reason }}
       change_class: ${{ steps.scope.outputs.change_class }}
       job_estimate: ${{ steps.scope.outputs.job_estimate }}
-      ci_tooling: ${{ steps.scope.outputs.ci_tooling }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -261,8 +259,6 @@ jobs:
             echo "has_packages=$(jq -r '.matrix | length > 0' <<<"$scope_json")"
             echo "full_scope=$(jq -r '.full_scope' <<<"$scope_json")"
             echo "sniff=$(jq -r '.flags.sniff' <<<"$scope_json")"
-            echo "biscuit_tui=$(jq -r '.flags."biscuit-tui"' <<<"$scope_json")"
-            echo "ci_tooling=$(jq -r '.flags.ci_tooling' <<<"$scope_json")"
             echo "job_estimate=$(jq -r '.job_estimate' <<<"$scope_json")"
             echo "preflight_os=$(jq -c '.preflight_os' <<<"$scope_json")"
             echo "preflight_reason=$(jq -r '.preflight_reason' <<<"$scope_json")"
@@ -369,12 +365,24 @@ jobs:
           if-no-files-found: error
 
   # Bootstrap preflight (D3). Verifies a clean runner can initialize the shared
-  # toolchain, discover scope, and pass the canonical-recipe and scope-calc
-  # guards on every selected OS BEFORE any package fans out. Matrix breadth
-  # scales with change class: a package-local change runs the scope host plus
-  # the runner OSes its environments land on; a global CI/tooling change runs
-  # all three. Package jobs depend on this, so a broken bootstrap produces one
-  # actionable failure per selected OS instead of dozens of package failures.
+  # toolchain, discover scope, and pass the canonical-recipe guard on every
+  # selected OS BEFORE any package fans out. Prerequisites ONLY: CI's own test
+  # suites are owned by `repo-deps` and `test-toolkit` and run in those
+  # packages' own cells, so a suite here would be a second scheduler for work
+  # the plan already placed. Matrix breadth scales with change class: a
+  # package-local change runs the scope host plus the runner OSes its
+  # environments land on; a full-scope request runs all three; a change that
+  # selects no gating package establishes nothing and runs none. Package jobs
+  # depend on this, so a broken bootstrap produces one actionable failure per
+  # selected OS instead of dozens of package failures.
+  #
+  # The `if:` is a SCALAR guard read before matrix expansion, not a reliance on
+  # GitHub's empty-matrix handling: an empty `preflight_os` resolves this job to
+  # `skipped` immediately after `scope`, which `ci-gate` accepts and `area-ci`'s
+  # `!cancelled()` still admits. `needs.scope.result == 'success'` restores what
+  # the implicit `success()` provided before the guard existed — a skipped
+  # `scope` publishes an empty string, not `[]`, and `fromJSON('')` raises.
+  #
   # No `name:`. GitHub labels a matrix job it EXPANDS from the matrix values
   # (`preflight (ubuntu-latest)`) but never evaluates the matrix context for a
   # job it SKIPS, so a declared `name:` carrying `${{ matrix.os }}` reaches the
@@ -382,6 +390,9 @@ jobs:
   # human-readable job id instead (AC10).
   preflight:
     needs: scope
+    if: >-
+      needs.scope.result == 'success' &&
+      needs.scope.outputs.preflight_os != '[]'
     strategy:
       fail-fast: false
       matrix:
@@ -416,24 +427,6 @@ jobs:
         run: cargo metadata --no-deps --format-version 1 >/dev/null
       - name: Validate canonical area recipes
         run: just check-canonical
-      - name: Test the CI contract schemas
-        run: python3 scripts/ci/test_schema.py
-      - name: Test affected-scope calculation
-        run: python3 scripts/ci/test_affected_scope.py
-      - name: Test the resolved execution plan
-        run: python3 scripts/ci/test_resolved_plan.py
-      - name: Test local validation evidence
-        run: python3 scripts/ci/test_local_evidence.py
-      - name: Test multi-environment evidence reuse
-        run: python3 scripts/ci/test_evidence_reuse.py
-      - name: Test the execution-constraint store
-        run: python3 scripts/ci/test_constraints.py
-      - name: Test the accepted-gap publisher
-        run: python3 scripts/ci/test_publish_gaps.py
-      - name: Test PR validation reuse
-        run: python3 scripts/ci/test_reuse_validation.py
-      - name: Test runner-loss attribution and retry decision
-        run: python3 scripts/ci/test_runner_loss.py
 
   # One caller identity per selected AREA — the top-level entry a reader sees
   # for the tested half of the run (AC2). The area's packages, their gates, and
@@ -443,6 +436,13 @@ jobs:
   # and can therefore be skipped as a whole, and a skipped matrix job never has
   # its matrix context evaluated. The default label is `area-ci` when skipped
   # and `area-ci (claudine)` when it runs.
+  #
+  # `has_packages` is the scalar guard, read before matrix expansion for the
+  # reason `preflight_os` is: a run that schedules no area resolves this job
+  # immediately after `scope` instead of expanding an empty matrix. It is
+  # derived from the MATRIX rather than the impacted package list, so a change
+  # touching only `gates = false` packages skips here rather than failing at
+  # strategy evaluation.
   #
   # No stage sits in front of the fan-out. A sampled canary was tried and
   # removed: gating on it erased 20 areas' evidence for one unrelated failure,
@@ -481,97 +481,6 @@ jobs:
       packages: ${{ toJSON(fromJSON(needs.scope.outputs.area_matrix)[matrix.area]) }}
       accepted-gaps: ${{ contains(fromJSON(needs.scope.outputs.gap_areas), matrix.area) }}
     secrets: inherit
-
-  # Specialized runtime contract (D12): orchestrated by the primary workflow,
-  # selected from affected scope, so there is one CI run per commit instead of a
-  # separate wall of path-triggered workflows. It preserves its unique runtime
-  # evidence; shared bootstrap lives in the reusable workflow it calls.
-  biscuit-tui-captured-stdout:
-    name: biscuit-tui-captured-stdout
-    needs: [scope, preflight]
-    if: >-
-      !cancelled() &&
-      needs.scope.outputs.biscuit_tui == 'true'
-    uses: ./.github/workflows/biscuit-tui-windows-captured-stdout.yml
-    secrets: inherit
-
-  # CI's own tooling — the merge-gate binary (`scripts/ci-rollup*.rs`), the
-  # scope calculator (`scripts/ci/`), and the policy store (`.github/ci/`) —
-  # is not a Cargo package, so a change to it selects nothing and would
-  # otherwise exercise nothing. This leg runs their own test suites. Its
-  # selection flag is derived by `affected_scope.py`, not hardcoded here.
-  ci-tooling:
-    name: ci-tooling (rollup + scope tests)
-    needs: [scope, preflight]
-    if: >-
-      !cancelled() &&
-      needs.scope.outputs.ci_tooling == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v5
-      - name: Set up the pinned Rust toolchain
-        run: rustup show
-      - uses: taiki-e/install-action@nextest
-      - uses: taiki-e/install-action@just
-      - name: Test PR validation reuse
-        run: python3 scripts/ci/test_reuse_validation.py
-      - name: Test the CI contract schemas
-        run: python3 scripts/ci/test_schema.py
-      - name: Test the scope calculator
-        run: python3 scripts/ci/test_affected_scope.py
-      - name: Test the resolved execution plan
-        run: python3 scripts/ci/test_resolved_plan.py
-      - name: Test concurrency policy and local L2 routing
-        run: python3 scripts/ci/test_ci_local.py
-      - name: Test local validation evidence
-        run: python3 scripts/ci/test_local_evidence.py
-      - name: Test multi-environment evidence reuse
-        run: python3 scripts/ci/test_evidence_reuse.py
-      - name: Test the execution-constraint store
-        run: python3 scripts/ci/test_constraints.py
-      - name: Test the accepted-gap publisher
-        run: python3 scripts/ci/test_publish_gaps.py
-      # The workflow-contract suite is the evidence behind the workflow
-      # invariants, but `test-toolkit` is `gates = false` (promotion pending),
-      # so no area job schedules it. Run exactly that binary here; the flag
-      # above also fires on workflow edits and on this file so a regression
-      # the suite would catch cannot merge on a run that never invoked it.
-      - name: Test the workflow contracts
-        run: |
-          export NEXTEST_TEST_THREADS="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
-          cargo nextest run -p test-toolkit --test ci_workflow_contracts
-      # `--no-default-features` deselects the crates the other two bins in
-      # `scripts/` need and this one does not. Same shape as the coverage audit's build.
-      - name: Test the rollup and verdict
-        run: |
-          export NEXTEST_TEST_THREADS="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
-          cargo nextest run \
-            --manifest-path scripts/Cargo.toml \
-            --no-default-features --bin ci-rollup
-      # The shared test-suite audit tool (`tools/test-audit`) is TypeScript and
-      # resolves through the root pnpm workspace; its typecheck and vitest suite
-      # are the only automated checks it has. Ordinary Rust test legs never
-      # provision Node for it — only this tooling leg does.
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Check the test-audit tool
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --dir tools/test-audit check
-      # The plan renderer is `local-tools`-gated, so this one DOES link
-      # biscuit-terminal and sniff. It runs here, in the leg that only fires
-      # when CI tooling changed, and never in the always-runs rollup build.
-      - name: Test the resolved-plan renderer
-        run: |
-          export NEXTEST_TEST_THREADS="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
-          cargo nextest run --manifest-path scripts/Cargo.toml --bin ci-plan
 
   # THE single required branch-protection check: a policy-free fold.
   #
@@ -614,15 +523,13 @@ jobs:
     name: ci-gate
     # Every top-level job whose failure must block. Each package's gates are
     # nested inside `area-ci`'s `_area-ci.yml` → `_package-ci.yml` fan-out and
-    # reach this list through the area workflow. The advisory `summary` is
-    # deliberately absent.
+    # reach this list through the area workflow. The advisory `ci-reporting`
+    # is deliberately absent.
     needs:
       - validation
       - scope
       - preflight
       - area-ci
-      - biscuit-tui-captured-stdout
-      - ci-tooling
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -635,8 +542,6 @@ jobs:
             scope:${{ needs.scope.result }}
             preflight:${{ needs.preflight.result }}
             area-ci:${{ needs.area-ci.result }}
-            biscuit-tui-captured-stdout:${{ needs.biscuit-tui-captured-stdout.result }}
-            ci-tooling:${{ needs.ci-tooling.result }}
         run: |
           set -euo pipefail
           blocking=""
@@ -658,14 +563,12 @@ jobs:
           fi
           echo "ci-gate: every blocking job succeeded or was skipped"
 
-  # Navigation aid for the jobs no area coverage audit can see, and ONLY those.
-  #
-  # `ci-rollup` covers every package in the run's resolved policy. It cannot
-  # cover the bootstrap stages or the specialized workflows: those emit no
-  # `manifest.jsonl`, and can never appear in an affected scope, so their
-  # migrated baseline entries are reported `baseline-out-of-scope` and ignored
-  # (plan 3.5 is what closes this). Without a line here they would fail
-  # invisibly beside green areas.
+  # The run's reader-facing account of itself, in exactly three modes
+  # (specification section 6): a reused whole-PR validation, a successful scope,
+  # or a bootstrap that failed or was cancelled. Each step below belongs to one
+  # of them, and the guards are exclusive AND exhaustive: for any combination of
+  # the validation result, its reuse output, and the scope result, exactly one
+  # mode speaks.
   #
   # It deliberately makes NO run-level claim. The old "No gate reported a
   # failure" line was a green verdict computed from job results alone, which
@@ -674,28 +577,35 @@ jobs:
   # success criterion 1 asks for a single view; that view is each area's
   # rollup grid.
   #
+  # The successful-scope mode reads the plan and the per-area `ci-results-*`
+  # slices through `ci-rollup summarize`, which is the same typed model the
+  # areas wrote. Parsing the raw JUnit artifacts here would build a second
+  # result model that could disagree with the area that produced them (D7).
+  #
   # ADVISORY. This job always succeeds, and `continue-on-error: true` makes
   # that structural rather than a property of its script: `ci-gate` folds
   # `needs.*.result`, and `continue-on-error` is exactly what keeps a
   # reporting job's failure out of that fold. Every job that is allowed to
   # block is either a tested area's workflow or a named infrastructure gate.
   #
-  # Two notes the retired whole-run verdict used to write live here now,
-  # because both are reporting rather than judgement: the link to reused PR
-  # validation, and the statement that a run scheduled no package. That is why
-  # this job also runs on reuse, when every other downstream job is skipped.
-  summary:
-    name: infrastructure summary (advisory)
+  # `needs` waits for the whole run, `ci-gate` included, so the report is
+  # written once the decision it declines to make has been taken. `area-ci` is
+  # waited on for its slices and never read as a result: each package gate is a
+  # cell in its own area's coverage audit. On reuse every one of those is
+  # skipped, which is why this job also runs then.
+  ci-reporting:
+    name: ci-reporting (advisory)
     needs:
       - validation
       - scope
-      - preflight
-      - biscuit-tui-captured-stdout
-      - ci-tooling
+      - area-ci
+      - ci-gate
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     continue-on-error: true
+    permissions:
+      contents: read
     steps:
       - name: Reuse successful PR validation
         if: ${{ needs.validation.result == 'success' && needs.validation.outputs.reuse == 'true' }}
@@ -706,35 +616,81 @@ jobs:
           {
             echo "## Reused PR validation"
             echo ""
-            echo "**CLEAR** — this push has the same Git tree and integration base as successful PR validation, so every area job was skipped and \`ci-gate\` folds only skipped and successful jobs."
+            echo "This push has the same Git tree and integration base as a successful PR validation."
+            echo ""
+            echo "This run executed no package cell; the authoritative results are the linked run's."
             echo ""
             echo "[Original validation]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$VALIDATED_RUN)"
           } >>"$GITHUB_STEP_SUMMARY"
-      # Success criterion 7: a docs-only change schedules no test leg anywhere,
-      # so no area coverage audit runs and nothing renders a grid. Stated out loud
-      # rather than left as a silently green run.
-      - name: No package was scheduled
-        if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' && needs.scope.outputs.has_packages != 'true' }}
+      # --- mode 2: a successful scope --------------------------------------
+      - name: Check out the repository
+        if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' }}
+        uses: actions/checkout@v5
+      - name: Download the resolved execution plan
+        if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' }}
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-resolved-plan
+          path: ci-artifacts/ci-resolved-plan
+      # A run that scheduled no package produces no slice, and a pattern that
+      # matches nothing is that run's answer rather than an error — the report
+      # states the absence. Every area uploads its slice under `always()`, so a
+      # missing one here means the area never started.
+      - name: Download this run's area result slices
+        if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: 'ci-results-*'
+          path: ci-artifacts
+          merge-multiple: false
+      - name: Set up the pinned Rust toolchain
+        if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' }}
+        run: rustup show
+      # `--no-default-features` deselects biscuit-terminal, sniff, and
+      # cargo_metadata, which this bin does not need. Measured: ~8s versus 40s+.
+      - name: Build ci-rollup
+        if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' }}
+        run: |
+          cargo build --release \
+            -p repo-deps \
+            --no-default-features --bin ci-rollup
+      # One reader-facing report from the two documents the run already wrote:
+      # the plan (what changed, whom it reached) and each area's own result
+      # slice (what was measured). It applies no baseline, gap, missing-cell, or
+      # merge policy, and it states when a run required no package test.
+      - name: Render the run report
+        if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' }}
         shell: bash
         run: |
-          {
-            echo "## No package was scheduled"
-            echo ""
-            echo "The affected-scope calculation selected no package, so this run scheduled no test leg: there is no area coverage audit and no skip comparison. \`ci-gate\` still folds the bootstrap jobs above."
-          } >>"$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          args=()
+          while IFS= read -r slice; do
+            [ -n "$slice" ] || continue
+            args+=(--results "$slice")
+          done < <(find ci-artifacts -type f -path 'ci-artifacts/ci-results-*/*.json' | sort)
+          ./target/release/ci-rollup summarize \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
+            "${args[@]}"
+      # --- mode 3: a failed or cancelled bootstrap -------------------------
+      # Spelled as the negation of modes 1 and 2 rather than as a condition of
+      # its own, because the three modes have to be exhaustive as well as
+      # exclusive and a hand-rolled third condition drops whatever neither of
+      # the other two happens to cover. The previous `reuse != 'true'` did both:
+      # it doubled up with mode 2 on every successful scope, and it left the run
+      # with no report at all when a reuse-marked validation did not itself
+      # succeed.
       - name: Classify the first actionable failure
-        if: ${{ needs.validation.outputs.reuse != 'true' }}
+        if: ${{ !(needs.validation.result == 'success' && needs.validation.outputs.reuse == 'true') && !(needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success') }}
         shell: bash
         env:
-          # Listed in dependency order: an earlier stage's failure is the root
-          # cause, and later stages were skipped or would only repeat it.
-          # `area-ci` is absent on purpose — every package gate is a cell in its
-          # own area's coverage audit.
+          # Listed in dependency order: an earlier stage's failure or
+          # cancellation is the root cause, and later stages were skipped or
+          # would only repeat it. `area-ci` is absent on purpose — every package
+          # gate is a cell in its own area's coverage audit.
           RESULTS: |
+            bootstrap (reuse check):${{ needs.validation.result }}
             bootstrap (scope calculation):${{ needs.scope.result }}
-            bootstrap (preflight):${{ needs.preflight.result }}
-            biscuit-tui Windows captured stdout:${{ needs.biscuit-tui-captured-stdout.result }}
-            ci tooling (rollup and scope):${{ needs.ci-tooling.result }}
         run: |
           set -euo pipefail
           {
@@ -744,21 +700,28 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
 
           first=""
+          state=""
           while IFS= read -r entry; do
             [ -n "$entry" ] || continue
-            if [ "${entry##*:}" = "failure" ]; then
-              first="${entry%:*}"
-              break
+            stage="${entry%:*}"
+            result="${entry##*:}"
+            echo "- ${stage}: ${result}" >>"$GITHUB_STEP_SUMMARY"
+            if [ -z "$first" ]; then
+              case "$result" in
+                failure) first="$stage"; state="failed" ;;
+                cancelled) first="$stage"; state="cancelled" ;;
+              esac
             fi
           done <<<"$RESULTS"
+          echo "" >>"$GITHUB_STEP_SUMMARY"
 
           if [ -z "$first" ]; then
-            echo "No bootstrap or specialized workflow failed. **The run's gate is \`ci-gate\`, not this line** — it folds every blocking job's result, and package results live in each area's coverage-audit grid." >>"$GITHUB_STEP_SUMMARY"
+            echo "No bootstrap stage failed or was cancelled, yet the scope calculation did not succeed, so this run scheduled no package cell. **The run's gate is \`ci-gate\`, not this line** — it folds every blocking job's result, including \`preflight\`, and package results live in each area's coverage-audit grid." >>"$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
           {
-            echo "**First actionable failure class: ${first}**"
+            echo "**First actionable failure class: ${first} (${state})**"
             echo ""
             echo "This stage emits no result artifacts, so no area coverage audit can see it; \`ci-gate\` blocks on its result directly. Open that job first — later red jobs are usually the same root cause."
           } >>"$GITHUB_STEP_SUMMARY"

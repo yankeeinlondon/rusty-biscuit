@@ -1,6 +1,5 @@
 ---
 created: 2026-09-13
-status: draft
 reviewed: false
 implemented: false
 clarified: true
@@ -115,7 +114,7 @@ defect.
 
 On 2026-09-13 `prompts/review.md` proxied to
 `prompts/_reviews/review-spec-inline.md` for an inline review of
-`fixes/2026-09-13-cicd-redundancies/spec.md`. The review ran to completion
+`fixes/_complete/2026-09-13-cicd-redundancies/spec.md`. The review ran to completion
 under Codex and marked the spec `reviewed: true`. Then the `success`
 lifecycle event fired and the run exited non-zero with:
 

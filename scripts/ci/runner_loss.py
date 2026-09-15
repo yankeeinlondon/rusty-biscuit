@@ -94,7 +94,14 @@ WSL_DELEGATION_SEGMENT = "wsl2"
 # change could fail it for a lost producer. A new `coverage-audit` failure is
 # not ignored: its enforcement runs only after every producer succeeded, so it
 # represents an independent completeness or exception-policy failure.
-NON_PRODUCER_JOBS = {"ci-gate", "infrastructure summary (advisory)"}
+# `infrastructure summary (advisory)` is the pre-`ci-reporting` spelling, kept
+# for the same reason as the legacy rollup one: a retry decision may be taken
+# over a run created before the rename.
+NON_PRODUCER_JOBS = {
+    "ci-gate",
+    "ci-reporting (advisory)",
+    "infrastructure summary (advisory)",
+}
 LEGACY_AREA_ROLLUP_JOB = re.compile(r"^area-ci \(.+\) / rollup$")
 
 

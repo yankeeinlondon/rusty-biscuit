@@ -2,13 +2,31 @@
 
 ## Recent Dependency Notes
 
+- `scripts/` (package `repo-deps`) is a **root Cargo workspace member**. It
+  carried a nested `[workspace]` stanza and its own `scripts/Cargo.lock` until
+  the 2026-09-13 cicd-redundancies fix; both are deleted, `"scripts"` is in the
+  root `members` list, and the package now resolves against the one root
+  `Cargo.lock`, the one root `target/`, and the root `.config/nextest.toml`
+  whether Cargo is invoked from the repository root or from `scripts/`. **No
+  dependency version changed to make this possible** — `rstest 0.23`,
+  `quick-xml 0.38`, and `toml 1.0` unified with what the root already resolved.
+  Build output that used to land in `scripts/target/` is stale; it is gitignored
+  and no recipe cleans it up. Call sites select the package rather than its
+  manifest: `-p repo-deps`, not `--manifest-path scripts/Cargo.toml`.
+- `repo-deps` keeps `publish = false`, so root-workspace membership does not
+  enrol it in release-plz or the maintenance audit. Its `local-tools` default
+  feature still gates `biscuit-terminal`, `sniff`, `cargo_metadata`, and
+  `ctrlc`, so the always-runs merge-gate build stays
+  `cargo build -p repo-deps --no-default-features --bin ci-rollup` and links
+  none of them.
 - `tools/test-audit` is a TypeScript pnpm-workspace member (registered in the
   root `pnpm-workspace.yaml`, pinned through the root `pnpm-lock.yaml`), not a
   Cargo package. It depends on `fast-xml-parser` (JUnit reports),
   `web-tree-sitter` + `tree-sitter-rust` (prebuilt wasm; source-side test
   attribute scans), and `zod` (area configuration validation), with
-  `typescript`, `tsx`, and `vitest` as dev dependencies. Only the
-  `ci-tooling` CI leg provisions Node for it; Rust test legs never do.
+  `typescript`, `tsx`, and `vitest` as dev dependencies. Node is provisioned
+  only for `test-toolkit`'s `ubuntu-latest` companion-suite cells, which own
+  the tool's typecheck and Vitest suites; Rust test legs never do.
 - `biscuit-test-harness` uses `tempfile` as a regular dependency to retain private
   WezTerm client configuration files through subprocess completion and remove
   them afterward.

@@ -1,17 +1,31 @@
 ---
 created: 2026-09-13
-status: proposed
-implemented: false
+status: complete
+closed_on: 2026-09-15
+implemented: true
 reviewed: true
 reviewed_by: codex/gpt-5.6-sol
 reviewed_on: 2026-09-13
-review_iterations: 1
+review_iterations: 7
 area: repository-ci
 depends-on:
   - fixes/2026-09-11-cicd-cleanup/spec.md
 ---
 
 # CI Redundancies: One Scheduling Model, One Owner Per Suite, One Consolidated Report
+
+## Closure decision — 2026-09-15
+
+Closed by explicit user decision with the remaining hosted validation uncertainty
+accepted. Validations 5 and 7 and the accumulated hosted assertions in Review 7
+are **DEFERRED**, not passed. The implementation and existing local evidence are
+accepted as sufficient to close this spec; no new hosted evidence is claimed.
+
+Observe the first normal implementation CI run and a subsequent documentation-only
+change. Report observed defects as focused fixes; reopen this work only if a core
+design assumption fails. Passive observation does not guarantee coverage of
+forced reporting failures, cancellation, or the other controlled probe cases.
+See [Acceptance](acceptance.md#closure-decision--2026-09-15) for the disposition.
 
 ## Objective
 

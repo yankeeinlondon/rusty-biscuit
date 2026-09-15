@@ -1,11 +1,12 @@
 {
   "resolved_plan": {
-    "schema_version": 2,
+    "schema_version": 3,
     "document": {
       "schema_version": true,
       "base": true,
       "head": true,
       "change_class": true,
+      "change_inventory": true,
       "full_scope": true,
       "full_scope_gates": true,
       "areas": true,
@@ -61,7 +62,14 @@
       "evidence": false,
       "gap": false,
       "prohibition": false,
-      "dependents": false
+      "dependents": false,
+      "companions": false
+    },
+    "change_inventory": {
+      "diff_available": true,
+      "paths": false,
+      "counts": false,
+      "reason": false
     }
   },
   "receipt": {
@@ -182,6 +190,12 @@
       "reused",
       "accepted-gap",
       "prohibited"
+    ],
+    "change_buckets": [
+      "configuration",
+      "documentation",
+      "source",
+      "other"
     ],
     "accepted_gap_state": "ACCEPTED GAP",
     "completions": [

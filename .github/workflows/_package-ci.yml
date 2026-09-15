@@ -99,11 +99,15 @@ on:
         type: string
         default: '[]'
       companion-suites:
-        description: "JSON array of non-Cargo suites this package owns (closed vocabulary: homelab-frontend)."
+        description: "JSON array of non-Cargo suites this package owns. The closed vocabulary is SUITE_REGISTRY in scripts/ci/affected_scope.py, which also owns each suite's recipe, environment, and counts strategy."
+        type: string
+        default: '[]'
+      companion-environments:
+        description: "JSON array of environments whose test cell runs at least one of this package's declared companion suites. Derived from the registry's per-suite environment (R7)."
         type: string
         default: '[]'
       node-environments:
-        description: "JSON array of environments where Node + pnpm are provisioned for a declared companion suite. Empty when the package declares none."
+        description: "JSON array of environments where Node + pnpm are provisioned for a declared companion suite that needs them. Empty when the package declares none."
         type: string
         default: '[]'
       native:
@@ -397,15 +401,16 @@ jobs:
           if ! command -v md >/dev/null 2>&1 && [ ! -x target/debug/md ] && [ ! -x target/debug/md.exe ]; then
             cargo build -q -p darkmatter-cli --bin md
           fi
-      # Node + pnpm for a package whose declared companion suite is a
-      # JavaScript suite (today `homelab-frontend`, owned by `homelab-server`:
-      # Vue + Vitest + jsdom). Until this provisioning existed,
+      # Node + pnpm for a package that declares a JavaScript companion suite
+      # (`homelab-frontend`, `test-audit-*`). Until this provisioning existed,
       # `pnpm: command not found` killed the suite on EVERY runner while the
       # rollup — which parses Rust JUnit only — rendered the area PASS
       # 222/0/0 on three environments (measured, run 30427703024).
       #
       # Which environments qualify is DERIVED by `affected_scope.py` from the
-      # environment capability table; nothing here decides it.
+      # environment capability table crossed with the suites that declare
+      # `node`; nothing here decides it, and a package whose companions are
+      # Python contract suites provisions nothing.
       - name: Set up pnpm
         if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
         uses: pnpm/action-setup@v5
@@ -427,6 +432,24 @@ jobs:
           set -euo pipefail
           node --version
           pnpm --version
+      # Workspace dependencies, from the ROOT lockfile that owns both members
+      # (`homelab/server/frontend`, `tools/test-audit`). A toolchain on PATH is
+      # not a runnable suite: `tsc` and `vitest` resolve through
+      # `node_modules`, so without this the first companion dies on a missing
+      # binary. The job that used to own these suites paired the install with
+      # the command in one step; moving them onto the registry carried the
+      # suites over but not the install, and `test-audit-typecheck` failed on
+      # ubuntu-latest for that reason alone.
+      #
+      # Not every node companion needs it — `homelab`'s frontend recipes
+      # install their own subtree — but a suite whose recipe calls `pnpm`
+      # directly has nowhere else to get its dependencies.
+      - name: Install workspace Node dependencies
+        if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
       # Gate command. Its outcome is both the producer and cell outcome.
       - name: L1 tests
         id: l1
@@ -441,11 +464,28 @@ jobs:
       # frontend, exactly as the old area recipe's combined status worked —
       # and its outcome reaches the producer status below, so a green Rust
       # JUnit report can never hide a failed or skipped companion suite.
-      - name: Companion suite homelab-frontend
+      #
+      # Which suites run here is the registry's answer, not this file's: the
+      # runner resolves the package's declared names against
+      # `scripts/ci/affected_scope.py`'s `SUITE_REGISTRY` and runs the ones
+      # this cell's environment hosts. On every other environment it resolves
+      # to nothing and succeeds. It records one outcome, one count, and one
+      # command duration PER SUITE, so one suite's success can never stand in
+      # for a suite that never ran.
+      - name: Companion suites
         id: companion
-        if: ${{ !cancelled() && contains(fromJSON(inputs.companion-suites), 'homelab-frontend') && contains(fromJSON(inputs.node-environments), matrix.environment) }}
+        if: ${{ !cancelled() && contains(fromJSON(inputs.companion-environments), matrix.environment) }}
         shell: bash
-        run: cd homelab && just test-frontend
+        env:
+          COMPANION_SUITES: ${{ inputs.companion-suites }}
+          ENVIRONMENT: ${{ matrix.environment }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/companion_suites.py \
+            --suites "$COMPANION_SUITES" \
+            --environment "$ENVIRONMENT" \
+            --gate L1 \
+            --out "$RUNNER_TEMP/companions.json"
       # Per-package/environment JUnit. The artifact name carries the
       # ENVIRONMENT, not the runner label, so a WSL leg (which runs on
       # windows-latest) can never collide with, or be merged into, the native
@@ -489,7 +529,7 @@ jobs:
           JOB_STATUS: ${{ job.status }}
           GATE: ${{ steps.l1.outcome }}
           COMPANION: ${{ steps.companion.outcome }}
-          COMPANION_SUITES: ${{ inputs.companion-suites }}
+          COMPANIONS_FILE: ${{ runner.temp }}/companions.json
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/status"
@@ -497,26 +537,32 @@ jobs:
           result="$JOB_STATUS"
           if [ "$result" = "success" ] && { [ "$GATE" = "failure" ] || [ "$COMPANION" = "failure" ]; }; then
             result=failure
-            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::L1 tests: ${GATE}; companion suite: ${COMPANION}."
+            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::L1 tests: ${GATE}; companion suites: ${COMPANION}."
           fi
-          # A DECLARED companion suite always records its step outcome, not
-          # only on failure: a SKIPPED companion leaves no other evidence, and
-          # the rollup downgrades a green Rust cell whose declared companion
-          # produced no success evidence (R12).
-          companion_json=""
-          if [ "$(jq -r 'length' <<<"$COMPANION_SUITES")" -gt 0 ]; then
-            companion_json="$(printf ',"companion":"%s"' "${COMPANION:-skipped}")"
+          # Every DECLARED companion suite records its own outcome, counts, and
+          # command duration, not only on failure: a SKIPPED companion leaves no
+          # other evidence, and the rollup downgrades a green Rust cell whose
+          # declared companion produced no success evidence (R12).
+          companions='{}'
+          if [ -f "$COMPANIONS_FILE" ]; then
+            companions="$(cat "$COMPANIONS_FILE")"
           fi
+          detail=""
           if [ "$COMPANION" = "failure" ]; then
-            detail="companion suite homelab-frontend FAILED; the Rust JUnit report does not cover it"
-            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"%s}\n' \
-              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$result" "$detail" "$companion_json" \
-              >"$RUNNER_TEMP/status/status.json"
-          else
-            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"%s}\n' \
-              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$result" "$companion_json" \
-              >"$RUNNER_TEMP/status/status.json"
+            failed="$(jq -r '[to_entries[] | select(.value.outcome != "success") | .key] | join(", ")' <<<"$companions")"
+            detail="companion suite(s) ${failed:-unreported} FAILED; the Rust JUnit report does not cover them"
           fi
+          jq -nc \
+            --arg package "$PACKAGE" \
+            --arg job "$JOB" \
+            --arg environment "$ENVIRONMENT" \
+            --arg result "$result" \
+            --arg detail "$detail" \
+            --argjson companions "$companions" \
+            '{package: $package, job: $job, environment: $environment, result: $result}
+             + (if $detail == "" then {} else {detail: $detail} end)
+             + (if ($companions | length) == 0 then {} else {companions: $companions} end)' \
+            >"$RUNNER_TEMP/status/status.json"
       - name: Upload producer status
         if: ${{ always() }}
         uses: actions/upload-artifact@v6
@@ -626,19 +672,82 @@ jobs:
           node --version
           pnpm --version
       # Gate commands. Their outcomes are both producer and cell outcomes.
+      #
+      # The COMMAND is timed, not the job: the job also carries checkout,
+      # toolchain setup, cache restore, and optional Node provisioning, none of
+      # which the report means by "lint duration" (R14). The duration is
+      # recorded whether clippy passed or failed, because a slow failing lint is
+      # exactly as worth seeing as a slow passing one.
+      #
+      # `python3` rather than Bash's integer `SECONDS`: a package whose clippy
+      # run finishes in under a second still made a measurement, and the
+      # integer clock recorded `0` for it, which the report could not tell
+      # apart from a step that never ran (AC13). `python3` is already a hard
+      # dependency of these workflows (`scripts/ci/*.py`) and `time.monotonic`
+      # is immune to a clock step; the portable alternatives are not —
+      # `EPOCHREALTIME` needs Bash 5 (macOS ships 3.2) and `date +%N` is a GNU
+      # extension BSD `date` does not have.
+      #
+      # Python fixes the reference point of `time.monotonic` only WITHIN one
+      # process, so the timing process is the one that owns the child: reading
+      # the two endpoints in separate interpreters subtracts unrelated origins.
+      # macOS's `/usr/bin/python3` (CPython 3.9) is the counterexample that
+      # broke the shipped regression — its `time.monotonic` counts from process
+      # start, so two short-lived readings are both near zero and subtracting
+      # them yields `-0.002`, `0`, or `0.001` at random.
+      #
+      # Neither the clock nor the interpreter may fail the gate: a measurement
+      # this step cannot take is an unavailable MEASUREMENT, and an empty
+      # `duration_s` is exactly how the status step spells that. Clippy's own
+      # result is what the exit status carries either way.
       - name: Lint
         id: clippy
-        run: just _lint "${{ inputs.package }}"
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v python3 >/dev/null 2>&1; then
+            status=0
+            just _lint "${{ inputs.package }}" || status=$?
+            echo "duration_s=" >>"$GITHUB_OUTPUT"
+            exit "$status"
+          fi
+          python3 - "${{ inputs.package }}" <<'PY'
+          import os
+          import subprocess
+          import sys
+          import time
+
+          started = time.monotonic()
+          completed = subprocess.run(["just", "_lint", sys.argv[1]], check=False)
+          elapsed = round(time.monotonic() - started, 3)
+          destination = os.environ.get("GITHUB_OUTPUT")
+          if destination:
+              with open(destination, "a", encoding="utf-8") as output:
+                  output.write(f"duration_s={elapsed}\n")
+          sys.exit(completed.returncode)
+          PY
       - name: Verify the Zed extension package
         id: zed
         if: ${{ !cancelled() && contains(fromJSON(inputs.runner-tools), 'zed-extension') }}
         shell: bash
         run: cd darkmatter && just zed-verify
-      - name: Companion suite homelab-frontend lint
+      # The lint half of this package's companion suites — only the suites that
+      # declare a `lint_recipe` in the registry, which is why a package whose
+      # companions are test-only leaves this step with nothing to run instead
+      # of a lint cell expecting evidence nobody produces.
+      - name: Companion suites (lint)
         id: companion
-        if: ${{ !cancelled() && contains(fromJSON(inputs.companion-suites), 'homelab-frontend') && contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
+        if: ${{ !cancelled() && inputs.companion-suites != '[]' }}
         shell: bash
-        run: cd homelab && just lint-frontend
+        env:
+          COMPANION_SUITES: ${{ inputs.companion-suites }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/companion_suites.py \
+            --suites "$COMPANION_SUITES" \
+            --environment ubuntu-latest \
+            --gate lint \
+            --out "$RUNNER_TEMP/companions.json"
       # `lint` emits no JUnit, so this artifact is the sole basis for its
       # rollup cell — and the reason `ci-baseline.toml` can carry
       # `tier = "lint"` entries at all.
@@ -651,9 +760,10 @@ jobs:
           ENVIRONMENT: ubuntu-latest
           JOB_STATUS: ${{ job.status }}
           GATE: ${{ steps.clippy.outcome }}
+          GATE_DURATION: ${{ steps.clippy.outputs.duration_s }}
           ZED: ${{ steps.zed.outcome }}
           COMPANION: ${{ steps.companion.outcome }}
-          COMPANION_SUITES: ${{ inputs.companion-suites }}
+          COMPANIONS_FILE: ${{ runner.temp }}/companions.json
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/status"
@@ -663,20 +773,33 @@ jobs:
             result=failure
             echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::clippy: ${GATE}; Zed extension: ${ZED}; companion lint: ${COMPANION}."
           fi
-          companion_json=""
-          if [ "$(jq -r 'length' <<<"$COMPANION_SUITES")" -gt 0 ]; then
-            companion_json="$(printf ',"companion":"%s"' "${COMPANION:-skipped}")"
+          companions='{}'
+          if [ -f "$COMPANIONS_FILE" ]; then
+            companions="$(cat "$COMPANIONS_FILE")"
           fi
+          detail=""
           if [ "$COMPANION" = "failure" ]; then
-            detail="companion suite homelab-frontend lint FAILED; clippy's result does not cover it"
-            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"%s}\n' \
-              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$result" "$detail" "$companion_json" \
-              >"$RUNNER_TEMP/status/status.json"
-          else
-            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"%s}\n' \
-              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$result" "$companion_json" \
-              >"$RUNNER_TEMP/status/status.json"
+            failed="$(jq -r '[to_entries[] | select(.value.outcome != "success") | .key] | join(", ")' <<<"$companions")"
+            detail="companion suite(s) ${failed:-unreported} lint FAILED; clippy's result does not cover them"
           fi
+          # An unmeasured duration is ABSENT: the lint step never ran (a
+          # cancelled job) and inventing a measurement for it would be a
+          # fabrication (AC13). A RECORDED duration is emitted exactly as the
+          # step measured it, fraction included — `0.4` is a fast clippy run,
+          # and only the absent field means "not recorded".
+          jq -nc \
+            --arg package "$PACKAGE" \
+            --arg job "$JOB" \
+            --arg environment "$ENVIRONMENT" \
+            --arg result "$result" \
+            --arg detail "$detail" \
+            --arg duration "$GATE_DURATION" \
+            --argjson companions "$companions" \
+            '{package: $package, job: $job, environment: $environment, result: $result}
+             + (if $detail == "" then {} else {detail: $detail} end)
+             + (if $duration == "" then {} else {duration_s: ($duration | tonumber)} end)
+             + (if ($companions | length) == 0 then {} else {companions: $companions} end)' \
+            >"$RUNNER_TEMP/status/status.json"
       - name: Upload producer status
         if: ${{ always() }}
         uses: actions/upload-artifact@v6

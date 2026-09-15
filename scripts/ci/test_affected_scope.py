@@ -3,17 +3,24 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
 import unittest
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
+import unittest.mock
+
+import affected_scope
+import companion_suites
 import schema
 from affected_scope import (
+    EXCLUSION_CLASSES,
     calculate_scope,
     legacy_scope_document,
     package_area,
@@ -334,10 +341,13 @@ class AffectedScopeTests(unittest.TestCase):
             scope = self.scope([path])
             self.assertEqual([], scope["packages"], path)
 
-    def test_the_scope_calculator_runs_only_ci_tooling(self) -> None:
+    def test_the_scope_calculator_selects_nothing_without_its_owner(self) -> None:
+        # `scripts/` is `repo-deps`'s package directory, and this workspace
+        # does not contain it: the suite-owner table is repository policy, and
+        # the metadata is the authority on membership. Ownership must therefore
+        # select nothing here rather than inventing a package.
         scope = self.scope(["scripts/ci/affected_scope.py"])
         self.assertEqual([], scope["packages"])
-        self.assertTrue(scope["flags"]["ci_tooling"])
 
     # -- content-aware global triggers (2026-08-28) -------------------------
     #
@@ -533,15 +543,14 @@ class AffectedScopeTests(unittest.TestCase):
             ["macos-latest", "ubuntu-latest", "windows-latest"], scope["preflight_os"]
         )
 
-    def test_global_change_uses_scope_host_preflight(self) -> None:
+    def test_a_global_config_change_selecting_no_package_expands_no_preflight(self) -> None:
+        # R10: `.config/nextest.toml` widens every gate, but this fixture's
+        # workspace has no package under it, so nothing fans out and there is
+        # no bootstrap to establish.
         scope = self.scope([".config/nextest.toml"])
         self.assertEqual("documentation", scope["change_class"])
-        self.assertEqual(["ubuntu-latest"], scope["preflight_os"])
-
-    def test_documentation_only_change_uses_scope_host_preflight(self) -> None:
-        scope = self.scope(["docs/architecture.md"])
-        self.assertEqual("documentation", scope["change_class"])
-        self.assertEqual(["ubuntu-latest"], scope["preflight_os"])
+        self.assertEqual([], scope["preflight_os"])
+        self.assertTrue(scope["preflight_reason"], "the skip must still state its decision")
 
 
 class ClosureTests(unittest.TestCase):
@@ -713,6 +722,42 @@ class PackagePolicyTests(unittest.TestCase):
                 ci.pop(missing.replace("_", "-"))
                 with self.assertRaises(RuntimeError):
                     validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
+
+    def test_an_unknown_exclusion_class_is_rejected(self) -> None:
+        ci = ci_policy(
+            gates=False,
+            reason="x",
+            owner="@o",
+            **{"exclusion-class": "not-a-class", "expiry": "2027-01-31"},
+        )
+        with self.assertRaises(RuntimeError) as raised:
+            validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
+        message = str(raised.exception)
+        self.assertIn("exclusion-class", message)
+        self.assertIn("promotion-pending", message)
+
+    def test_promotion_pending_remains_a_legal_exclusion_class(self) -> None:
+        # `test-toolkit` was the tree's only user of this class and was promoted
+        # out of it; the class itself stays available to the next package.
+        self.assertIn("promotion-pending", EXCLUSION_CLASSES)
+        ci = ci_policy(
+            gates=False,
+            reason="x",
+            owner="@o",
+            **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+        )
+        validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
+        resolved = package_ci_policy(
+            {"a": {"name": "a", "metadata": {"ci": ci}}},
+            self.RUNNER_LABELS,
+            Path("/"),
+            today=TODAY,
+        )
+        self.assertFalse(resolved["a"]["gates"])
+        self.assertEqual(
+            resolved["a"]["exclusion"]["exclusion_class"],
+            "promotion-pending",
+        )
 
     def test_an_expired_exclusion_fails(self) -> None:
         ci = ci_policy(
@@ -934,6 +979,7 @@ class MatrixRecordTests(unittest.TestCase):
                 "l1_include_slow": False,
                 "runner_tools": ["node-22", "pnpm-10"],
                 "companion_suites": ["homelab-frontend"],
+                "requires_toolchain": False,
             },
             area="homelab",
             target_kinds=["lib"],
@@ -1117,7 +1163,9 @@ class NonPropagationTests(unittest.TestCase):
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
         (self.root / "homelab").mkdir()
-        (self.root / "homelab" / "justfile").write_text("test-frontend:\n")
+        (self.root / "homelab" / "justfile").write_text(
+            "test-frontend:\nlint-frontend:\n"
+        )
         packages = [
             package(self.root, "consumer", "consumer/Cargo.toml"),
             package(
@@ -1493,6 +1541,87 @@ class AreaFanOutTests(unittest.TestCase):
         self.assertNotIn("beta", scope["area_matrix"])
 
 
+class AllReusedAreaFanOutTests(unittest.TestCase):
+    """AC16: an area whose test cells were all reused still fans out.
+
+    `ci-reporting` reads the per-area `ci-results-<slug>` slices, and only an
+    area that fans out produces one. The area matrix is therefore derived from
+    the plan's GATING PACKAGES and never narrowed by execution: an area that
+    dropped out because every test cell was satisfied by a receipt would take
+    those cells' results out of the report with it.
+    """
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        packages = [package(self.root, "alpha-core", "alpha/lib/Cargo.toml")]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": item["id"], "deps": []} for item in packages]},
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def plan(self, accepted: list[dict[str, object]] | None = None) -> dict[str, object]:
+        return calculate_scope(
+            ["alpha/lib/src/lib.rs"],
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            accepted_cells=accepted,
+        )
+
+    def test_an_area_whose_test_cells_are_all_reused_still_fans_out(self) -> None:
+        reusable = [
+            {
+                "package": cell["package"],
+                "environment": cell["environment"],
+                "gate": cell["gate"],
+                "origin": "local",
+                "outcome": "pass",
+                "evidence": f"refs/notes/ci-local/{cell['environment']}",
+            }
+            for cell in self.plan()["cells"]
+            if cell["reusable"]
+        ]
+        self.assertTrue(reusable, "the fixture needs at least one reusable cell")
+
+        plan = self.plan(reusable)
+        self.assertEqual(
+            [],
+            [
+                f"{cell['package']}/{cell['environment']}/{cell['gate']}"
+                for cell in plan["cells"]
+                if cell["reusable"] and cell["execution"] == "execute"
+            ],
+            "the fixture must leave no reusable cell executing",
+        )
+
+        scope = legacy_scope_document(plan)
+        self.assertIn("alpha", scope["scheduled_areas"])
+        self.assertIn("alpha", scope["area_matrix"])
+        self.assertEqual("alpha", scope["area_slugs"]["alpha"])
+        self.assertEqual(
+            ["alpha-core"],
+            [entry["package"] for entry in scope["area_matrix"]["alpha"]["include"]],
+        )
+        self.assertEqual(
+            [],
+            scope["area_matrix"]["alpha"]["include"][0]["native_environments"],
+            "no test leg is scheduled, yet the area still fans out so its "
+            "coverage audit publishes the reused cells' slice",
+        )
+
+
 class MatrixLimitTests(unittest.TestCase):
     def test_over_256_gating_packages_fails_loudly(self) -> None:
         root = Path(tempfile.mkdtemp())
@@ -1530,6 +1659,7 @@ class EstimateJobsTests(unittest.TestCase):
                 "l1_include_slow": False,
                 "runner_tools": [],
                 "companion_suites": [],
+                "requires_toolchain": False,
             },
             area="a",
             target_kinds=["lib", "bench"],
@@ -1555,6 +1685,7 @@ class EstimateJobsTests(unittest.TestCase):
             "l1_include_slow": False,
             "runner_tools": [],
             "companion_suites": [],
+            "requires_toolchain": False,
         }
         environments = environments_for_tests()
         scheduled = package_cells(arguments, "a", ["lib"], environments, {})
@@ -1589,6 +1720,7 @@ class CheckCellTests(unittest.TestCase):
         "l1_include_slow": False,
         "runner_tools": [],
         "companion_suites": [],
+        "requires_toolchain": False,
     }
     CONSTRAINT = {
         "owner": "ken",
@@ -2116,7 +2248,9 @@ class ApplyFixture(unittest.TestCase):
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
         (self.root / "homelab").mkdir()
-        (self.root / "homelab" / "justfile").write_text("test-frontend:\n")
+        (self.root / "homelab" / "justfile").write_text(
+            "test-frontend:\nlint-frontend:\n"
+        )
         packages = [
             package(
                 self.root,
@@ -2319,8 +2453,434 @@ class ApplyCliTests(ApplyFixture):
                     self.assertIn("performs no selection", result.stderr)
 
 
-class CiToolingFlagTests(unittest.TestCase):
-    """M4: a change to CI's own tooling must exercise its test suites."""
+# ---------------------------------------------------------------------------
+# Suite ownership, path-to-owner selection, and the change inventory
+# — fixes/2026-09-13-cicd-redundancies
+#
+# Every fixture below entered as a `@pending` oracle (see
+# `pending_contracts.py`) and has been promoted. The oracle strings survive as
+# failure-message prefixes so a regression still names the contract it broke.
+# ---------------------------------------------------------------------------
+
+#: Oracle for every fixture that reaches for the suite-ownership registry.
+SUITE_REGISTRY_ORACLE = "affected_scope declares no suite-ownership registry"
+
+#: Oracle for the path-to-owner selection fixtures.
+OWNER_SELECTION_ORACLE = "the path-to-owner table does not select its owner"
+
+
+def suite_registry() -> dict[str, dict[str, str]]:
+    """The declared suite-ownership table (Phase 4, spec section 2).
+
+    Target shape: suite `name` → `{"owner", "recipe", "environment", "kind"}`,
+    where `kind` is `"cargo"` or `"companion"` and `environment` names the one
+    CI environment the suite runs on. R7 requires the environment to be
+    DECLARED rather than derived from a runner capability.
+    """
+    registry = getattr(affected_scope, "SUITE_REGISTRY", None)
+    if registry is None:
+        raise AssertionError(
+            f"{SUITE_REGISTRY_ORACLE}: `SUITE_REGISTRY` is not defined, so no "
+            "suite has a declared owner, recipe, or environment"
+        )
+    return registry
+
+
+def validate_suite_registry(
+    registry: dict[str, dict[str, str]],
+    declarations: dict[str, list[str]] | None = None,
+) -> list[str]:
+    """Problems in a candidate registry and the packages that declare it.
+
+    `declarations` maps a package name to the suite names its
+    `[package.metadata.ci.tests].companion-suites` claims. Returns one problem
+    per defect, each naming the offending suite.
+    """
+    validator = getattr(affected_scope, "validate_suite_registry", None)
+    if validator is None:
+        raise AssertionError(
+            f"{SUITE_REGISTRY_ORACLE}: `validate_suite_registry` is not "
+            "defined, so an unknown, unowned, doubly-owned, or recipe-less "
+            "suite fails nothing"
+        )
+    return validator(registry, declarations or {})
+
+
+def change_inventory(plan: dict[str, object]) -> dict[str, object]:
+    """The plan's categorized inventory of the changed paths.
+
+    Reached through an accessor rather than `plan["change_inventory"]` so a
+    plan that dropped the field fails with the field list it does carry,
+    instead of a bare `KeyError`.
+    """
+    inventory = plan.get("change_inventory")
+    if inventory is None:
+        raise AssertionError(
+            "`change_inventory` is absent from the resolved plan, whose fields "
+            f"are {sorted(plan)}"
+        )
+    return inventory  # type: ignore[return-value]
+
+
+class SuiteOwnershipRegistryTests(unittest.TestCase):
+    """AC4: every named suite has one owner, one recipe, one environment."""
+
+    #: The specification's ownership table (section 2), plus the companion
+    #: suite that already exists. `repo-deps` owns every `scripts/ci/test_*.py`
+    #: suite including `test_ci_local.py` and `test_runner_loss.py`;
+    #: `test-toolkit` owns the two `tools/test-audit` suites.
+    EXPECTED_COMPANION_OWNERS = {
+        "homelab-frontend": "homelab-server",
+        "test_affected_scope.py": "repo-deps",
+        "test_ci_local.py": "repo-deps",
+        "test_constraints.py": "repo-deps",
+        "test_evidence_reuse.py": "repo-deps",
+        "test_local_evidence.py": "repo-deps",
+        "test_publish_gaps.py": "repo-deps",
+        "test_resolved_plan.py": "repo-deps",
+        "test_reuse_validation.py": "repo-deps",
+        "test_runner_loss.py": "repo-deps",
+        "test_schema.py": "repo-deps",
+        "test-audit-typecheck": "test-toolkit",
+        "test-audit-vitest": "test-toolkit",
+    }
+
+    def companion_entries(self) -> dict[str, dict[str, str]]:
+        return {
+            name: entry
+            for name, entry in suite_registry().items()
+            if entry.get("kind") == "companion"
+        }
+
+    def test_every_registered_suite_has_exactly_one_owner(self) -> None:
+        entries = self.companion_entries()
+        self.assertEqual(
+            self.EXPECTED_COMPANION_OWNERS,
+            {name: entry["owner"] for name, entry in entries.items()},
+            "the companion half of the registry must be the specification's "
+            "ownership table exactly",
+        )
+        recipeless = [name for name, entry in entries.items() if not entry["recipe"].strip()]
+        self.assertEqual(
+            [],
+            recipeless,
+            "a suite with no canonical recipe would be declared and silently never run",
+        )
+        # R7: the environment is declared, never derived from a capability that
+        # happens to be true on one runner today.
+        self.assertEqual(
+            {"ubuntu-latest"},
+            {entry["environment"] for entry in entries.values()},
+            "S3: node_pnpm and python3 are provisioned on ubuntu-latest and "
+            "nowhere else, so every suite in this fix declares it",
+        )
+
+    def test_an_unknown_suite_name_fails_validation(self) -> None:
+        problems = validate_suite_registry(
+            suite_registry(), {"homelab-server": ["no-such-suite"]}
+        )
+        self.assertTrue(
+            any("no-such-suite" in problem for problem in problems),
+            f"an unregistered suite name must be rejected by name: {problems}",
+        )
+
+    def test_a_doubly_owned_suite_fails_validation(self) -> None:
+        problems = validate_suite_registry(
+            suite_registry(),
+            {"homelab-server": ["homelab-frontend"], "repo-deps": ["homelab-frontend"]},
+        )
+        self.assertTrue(
+            any("homelab-frontend" in problem for problem in problems),
+            f"a suite claimed by two packages must be rejected by name: {problems}",
+        )
+
+    def test_a_recipe_less_suite_fails_validation(self) -> None:
+        registry = {
+            name: dict(entry) for name, entry in suite_registry().items()
+        }
+        registry["homelab-frontend"]["recipe"] = ""
+        problems = validate_suite_registry(
+            registry, {"homelab-server": ["homelab-frontend"]}
+        )
+        self.assertTrue(
+            any("homelab-frontend" in problem for problem in problems),
+            f"a suite with no canonical recipe must be rejected by name: {problems}",
+        )
+
+    def test_a_registered_suite_nobody_declares_fails_validation(self) -> None:
+        problems = validate_suite_registry(suite_registry(), {})
+        self.assertTrue(
+            any("homelab-frontend" in problem for problem in problems),
+            f"a registered suite no package declares must be rejected by "
+            f"name: {problems}",
+        )
+
+    def test_every_registered_python_suite_names_a_shipped_file(self) -> None:
+        # Passive corpus check over the shipped artifacts the registry names:
+        # a renamed or deleted suite must fail here rather than in CI.
+        missing = [
+            name
+            for name, entry in self.companion_entries().items()
+            if name.endswith(".py") and not (ROOT / "scripts" / "ci" / name).is_file()
+        ]
+        self.assertEqual(
+            [], missing, f"the registry names Python suites that do not exist: {missing}"
+        )
+
+    def test_the_shipped_registry_validates_against_its_own_owners(self) -> None:
+        registry = suite_registry()
+        declarations: dict[str, list[str]] = {}
+        for name, entry in registry.items():
+            if entry.get("kind") == "companion":
+                declarations.setdefault(entry["owner"], []).append(name)
+        self.assertEqual(
+            [],
+            validate_suite_registry(registry, declarations),
+            "the shipped registry must validate cleanly against the owners it "
+            "itself declares",
+        )
+
+    # -- the remaining malformed shapes a registry can take -----------------
+
+    def mutated(self, suite: str, **fields: object) -> dict[str, dict[str, object]]:
+        registry = {name: dict(entry) for name, entry in suite_registry().items()}
+        registry[suite].update(fields)
+        return registry
+
+    def test_a_suite_declared_by_someone_other_than_its_owner_fails_validation(
+        self,
+    ) -> None:
+        # Distinct from double ownership: exactly one package claims it, and it
+        # is the wrong one. A registry that only counted claimants would pass.
+        problems = validate_suite_registry(
+            suite_registry(), {"repo-deps": ["homelab-frontend"]}
+        )
+        self.assertTrue(
+            any(
+                "homelab-frontend" in problem and "repo-deps" in problem
+                for problem in problems
+            ),
+            f"a suite declared by a non-owner must name both: {problems}",
+        )
+
+    def test_an_unknown_suite_kind_fails_validation(self) -> None:
+        problems = validate_suite_registry(
+            self.mutated("homelab-frontend", kind="typescript"),
+            {"homelab-server": ["homelab-frontend"]},
+        )
+        self.assertTrue(
+            any("typescript" in problem for problem in problems),
+            f"the kind vocabulary must be closed: {problems}",
+        )
+
+    def test_a_companion_on_an_unknown_environment_fails_validation(self) -> None:
+        # R7: the environment is declared, so a typo must fail here rather than
+        # silently attach the suite to a cell no environment produces.
+        problems = validate_suite_registry(
+            self.mutated("homelab-frontend", environment="ubuntu-24.04"),
+            {"homelab-server": ["homelab-frontend"]},
+        )
+        self.assertTrue(
+            any("ubuntu-24.04" in problem for problem in problems),
+            f"an unknown companion environment must be rejected: {problems}",
+        )
+
+    def test_a_cargo_suite_pinned_to_one_environment_fails_validation(self) -> None:
+        # The converse: a Cargo suite runs wherever its owner's policy places
+        # its cells, so pinning one here would be a second, driftable answer.
+        problems = validate_suite_registry(
+            self.mutated("repo-deps-l1", environment="ubuntu-latest"),
+            {"homelab-server": ["homelab-frontend"]},
+        )
+        self.assertTrue(
+            any("repo-deps-l1" in problem for problem in problems),
+            f"a pinned cargo suite must be rejected by name: {problems}",
+        )
+
+    def test_an_ownerless_entry_fails_validation(self) -> None:
+        problems = validate_suite_registry(
+            self.mutated("test-audit-vitest", owner="  "),
+            {"homelab-server": ["homelab-frontend"]},
+        )
+        self.assertTrue(
+            any("test-audit-vitest" in problem for problem in problems),
+            f"an entry with no owner must be rejected by name: {problems}",
+        )
+
+
+class ToolingPathOwnershipTests(unittest.TestCase):
+    """AC5/R13: a tooling input selects the package that owns its suite.
+
+    The workspace here is synthetic but keyed on the real manifest directories,
+    because the selection rule is a function of the changed path and the
+    member set, not of the checkout. `SuiteOwnershipCorpusTests` in
+    `test_resolved_plan.py` runs the same table against the real workspace.
+    """
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        packages = [
+            package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
+            package(self.root, "repo-deps", "scripts/Cargo.toml"),
+            package(self.root, "test-toolkit", "tools/test-toolkit/Cargo.toml"),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {
+                "nodes": [{"id": item["id"], "deps": []} for item in packages]
+            },
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def selected(self, path: str) -> list[str]:
+        plan = calculate_scope(
+            [path],
+            self.root,
+            self.metadata,  # type: ignore[arg-type]
+            environments_for_tests(),
+            self.policy,
+        )
+        return [entry["package"] for entry in plan["packages"]]
+
+    def assert_selects(self, path: str, expected: list[str]) -> None:
+        selected = self.selected(path)
+        if selected != expected:
+            raise AssertionError(
+                f"{path} must select exactly {expected}, got {selected}: "
+                f"{OWNER_SELECTION_ORACLE}"
+            )
+
+    def test_a_scope_calculator_change_selects_repo_deps_alone(self) -> None:
+        # R13.4: `scripts/**` needs no trigger entry, because it is
+        # `repo-deps`'s own package directory. This fixture is what proves the
+        # table adds no `scripts/**` trigger that would double-select.
+        for path in ("scripts/ci/schema.py", "scripts/ci-rollup.rs", "scripts/ci/test_ci_local.py"):
+            self.assert_selects(path, ["repo-deps"])
+
+    def test_the_owners_manifest_is_an_explicit_trigger(self) -> None:
+        # The repository-wide rule is that a manifest selects nothing; R13.6
+        # rules these two packages the exception, because their manifests are
+        # where CI's own suites are declared to run at all.
+        self.assert_selects("scripts/Cargo.toml", ["repo-deps"])
+        self.assert_selects("tools/test-toolkit/Cargo.toml", ["test-toolkit"])
+
+    def test_another_packages_manifest_is_not_a_trigger(self) -> None:
+        # The other half of R13.6: the exception is two paths wide, not general.
+        self.assert_selects("alpha/lib/Cargo.toml", [])
+
+    def test_a_policy_store_change_selects_repo_deps_alone(self) -> None:
+        for path in (".github/ci/ci-baseline.toml", ".github/ci/environments.json"):
+            self.assert_selects(path, ["repo-deps"])
+
+    def test_a_workflow_change_selects_test_toolkit_alone(self) -> None:
+        # R13: global-path escalation no longer selects any package, so
+        # `ci.yml` is NOT a full-workspace trigger. It selects the package that
+        # owns the workflow-contract suite, exactly like every other workflow.
+        for path in (
+            ".github/workflows/_area-ci.yml",
+            ".github/workflows/ci.yml",
+            ".github/workflows/_package-ci.yml",
+        ):
+            self.assert_selects(path, ["test-toolkit"])
+
+    def test_a_test_audit_change_selects_test_toolkit_alone(self) -> None:
+        for path in (
+            "tools/test-audit/package.json",
+            "tools/test-audit/src/cli.ts",
+            "pnpm-lock.yaml",
+            "pnpm-workspace.yaml",
+        ):
+            self.assert_selects(path, ["test-toolkit"])
+
+    def test_test_toolkit_source_still_selects_itself_alone(self) -> None:
+        # A member directory already selects its own package. Pinned so the
+        # deletion of `CI_TOOLING_PATHS` cannot narrow it, and so the
+        # `.github/workflows/**` trigger cannot widen it.
+        self.assert_selects("tools/test-toolkit/tests/ci_workflow_contracts.rs", ["test-toolkit"])
+
+    def test_a_windows_spelled_trigger_selects_the_same_owner(self) -> None:
+        # `git diff --name-only` yields forward slashes, but callers hand the
+        # planner paths from other sources too, and every other path rule in
+        # this module normalizes. A trigger that did not would select nothing
+        # on exactly one OS.
+        self.assert_selects(r".github\workflows\ci.yml", ["test-toolkit"])
+        self.assert_selects("./pnpm-lock.yaml", ["test-toolkit"])
+
+    def test_inputs_of_two_owners_select_both(self) -> None:
+        # One push, two suites: the table is applied per path, so neither
+        # owner's trigger may suppress the other's.
+        plan = calculate_scope(
+            [".github/ci/environments.json", ".github/workflows/ci.yml"],
+            self.root,
+            self.metadata,  # type: ignore[arg-type]
+            environments_for_tests(),
+            self.policy,
+        )
+        self.assertEqual(
+            ["repo-deps", "test-toolkit"],
+            sorted(entry["package"] for entry in plan["packages"]),
+        )
+
+    def test_a_trigger_selection_states_the_input_that_selected_it(self) -> None:
+        plan = calculate_scope(
+            [".github/workflows/_area-ci.yml"],
+            self.root,
+            self.metadata,  # type: ignore[arg-type]
+            environments_for_tests(),
+            self.policy,
+        )
+        record = next(
+            entry for entry in plan["packages"] if entry["package"] == "test-toolkit"
+        )
+        self.assertEqual(
+            "suite input .github/workflows/_area-ci.yml selects its registered owner",
+            record["selection_reason"],
+        )
+        self.assertEqual(
+            ["changed suite input owned by package(s) test-toolkit"],
+            [entry["selection_reason"] for entry in plan["areas"]],
+            "an area selected by a trigger must not claim a source change",
+        )
+        self.assertEqual([], plan["source_packages"])
+
+    def test_documentation_selects_neither_tooling_owner(self) -> None:
+        # What stops the trigger table from being satisfied by selecting an
+        # owner for everything.
+        for path in (
+            "docs/topics/ci-cd.md",
+            "alpha/docs/design.md",
+            "alpha/lib/README.md",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual([], self.selected(path))
+
+    def test_the_ci_tooling_flag_is_gone_from_the_plan(self) -> None:
+        plan = calculate_scope(
+            ["scripts/ci/schema.py"],
+            self.root,
+            self.metadata,  # type: ignore[arg-type]
+            environments_for_tests(),
+            self.policy,
+        )
+        if "ci_tooling" in plan["flags"]:
+            raise AssertionError(
+                "the plan still carries flags.ci_tooling; ownership replaces "
+                "the boolean, it does not sit beside it"
+            )
+
+
+class PreflightSkipTests(unittest.TestCase):
+    """R10/spec section 3: no package work means preflight has no prerequisites."""
 
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
@@ -2346,52 +2906,197 @@ class CiToolingFlagTests(unittest.TestCase):
             files, self.root, self.metadata, environments_for_tests(), self.policy
         )
 
-    def test_rollup_and_scope_changes_set_the_tooling_flag(self) -> None:
-        for path in [
-            "scripts/ci-rollup.rs",
-            "scripts/ci-rollup-tests.rs",
-            "scripts/ci/test_affected_scope.py",
-            ".github/ci/ci-baseline.toml",
-            "tools/test-audit/src/cli.ts",
-            "pnpm-lock.yaml",
-        ]:
-            with self.subTest(path=path):
-                scope = self.scope([path])
-                self.assertTrue(scope["flags"]["ci_tooling"])
+    def test_a_documentation_only_change_expands_no_preflight_job(self) -> None:
+        for path in ("docs/architecture.md", "alpha/docs/design.md", "alpha/lib/README.md"):
+            scope = self.scope([path])
+            self.assertEqual("documentation", scope["change_class"])
+            if scope["preflight_os"] != []:
+                raise AssertionError(
+                    "documentation-class preflight must expand no job, got "
+                    f"{scope['preflight_os']} for {path}"
+                )
+            self.assertTrue(
+                scope["preflight_reason"], "the skip must still state its decision"
+            )
 
-    def test_a_package_change_does_not_set_the_tooling_flag(self) -> None:
+    def test_a_package_change_keeps_its_preflight_breadth(self) -> None:
+        # NOT pending: R10 narrows the documentation class alone. A trigger
+        # table that emptied preflight for real package work would pass the
+        # fixture above and break the bootstrap gate.
         scope = self.scope(["alpha/lib/src/lib.rs"])
-        self.assertFalse(scope["flags"]["ci_tooling"])
+        self.assertEqual("package", scope["change_class"])
+        self.assertEqual(
+            ["macos-latest", "ubuntu-latest", "windows-latest"], scope["preflight_os"]
+        )
 
-    def test_workflow_changes_set_the_tooling_flag(self) -> None:
-        for path in [
-            ".github/workflows/ci.yml",
-            ".github/workflows/_area-ci.yml",
-            "./.github/workflows/release-plz.yml",
-        ]:
-            with self.subTest(path=path):
-                scope = self.scope([path])
-                self.assertTrue(scope["flags"]["ci_tooling"])
 
-    def test_the_workflow_contract_suite_sets_the_tooling_flag(self) -> None:
-        for path in [
-            "tools/test-toolkit/tests/ci_workflow_contracts.rs",
-            "tools\\test-toolkit\\tests\\ci_workflow_contracts.rs",
-        ]:
-            with self.subTest(path=path):
-                scope = self.scope([path])
-                self.assertTrue(scope["flags"]["ci_tooling"])
+class ChangeInventoryTests(unittest.TestCase):
+    """AC10/spec section 5: the plan classifies its changed paths once."""
 
-    def test_other_test_toolkit_and_docs_changes_leave_the_tooling_flag_alone(self) -> None:
-        for path in [
-            "tools/test-toolkit/tests/audio_spool.rs",
-            "tools/test-toolkit/src/lib.rs",
-            "docs/topics/ci-cd.md",
-            ".github/dependabot.yml",
-        ]:
-            with self.subTest(path=path):
-                scope = self.scope([path])
-                self.assertFalse(scope["flags"]["ci_tooling"])
+    BUCKETS = ("configuration", "documentation", "other", "source")
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        packages = [package(self.root, "alpha-core", "alpha/lib/Cargo.toml")]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def plan(self, files: list[str], **kwargs: object) -> dict[str, object]:
+        return calculate_scope(
+            files,
+            self.root,
+            self.metadata,  # type: ignore[arg-type]
+            environments_for_tests(),
+            self.policy,
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    def test_the_inventory_buckets_every_changed_path_exactly_once(self) -> None:
+        files = [
+            "docs/architecture.md",
+            "alpha/lib/src/lib.rs",
+            ".github/ci/environments.json",
+            "LICENSE",
+        ]
+        inventory = change_inventory(self.plan(files))
+        paths = inventory["paths"]
+        self.assertLessEqual(
+            set(self.BUCKETS),
+            set(paths),  # type: ignore[arg-type]
+            "the inventory separates at least configuration, documentation, "
+            "source, and other",
+        )
+        placed = [entry for bucket in paths.values() for entry in bucket]  # type: ignore[attr-defined]
+        self.assertEqual(
+            sorted(files),
+            sorted(placed),
+            "the inventory is exhaustive: every input path lands in exactly one bucket",
+        )
+        self.assertEqual(
+            len(placed), len(set(placed)), "no path appears in two buckets"
+        )
+        self.assertIn("docs/architecture.md", paths["documentation"])  # type: ignore[index]
+        self.assertIn("alpha/lib/src/lib.rs", paths["source"])  # type: ignore[index]
+        self.assertIn(".github/ci/environments.json", paths["configuration"])  # type: ignore[index]
+
+    def test_each_bucket_is_sorted_normalized_and_counted(self) -> None:
+        inventory = change_inventory(
+            self.plan(["./docs/b.md", "docs/a.md", "alpha\\lib\\src\\lib.rs"])
+        )
+        paths = inventory["paths"]
+        counts = inventory["counts"]
+        for bucket, entries in paths.items():  # type: ignore[attr-defined]
+            self.assertEqual(sorted(entries), list(entries), f"{bucket} must be sorted")
+            self.assertEqual(
+                len(entries), counts[bucket], f"{bucket} count must match its list"  # type: ignore[index]
+            )
+            for entry in entries:
+                self.assertNotIn("\\", entry, f"{entry} must be spelled with /")
+                self.assertFalse(entry.startswith("./"), f"{entry} must carry no ./ prefix")
+        self.assertEqual(["docs/a.md", "docs/b.md"], paths["documentation"])  # type: ignore[index]
+        self.assertEqual(["alpha/lib/src/lib.rs"], paths["source"])  # type: ignore[index]
+        self.assertEqual(
+            sum(len(entries) for entries in paths.values()),  # type: ignore[attr-defined]
+            counts["total"],  # type: ignore[index]
+        )
+
+    def test_a_rename_contributes_one_logical_path(self) -> None:
+        # Both callers supply `git diff --name-only`, which yields a rename's
+        # DESTINATION and nothing else (`just/ci-local.just:212`,
+        # `.github/workflows/ci.yml:123`). The de-duplication that matters is
+        # therefore over spellings of one destination.
+        inventory = change_inventory(
+            self.plan(["docs/renamed.md", "./docs/renamed.md", "docs\\renamed.md"])
+        )
+        self.assertEqual(["docs/renamed.md"], inventory["paths"]["documentation"])  # type: ignore[index]
+        self.assertEqual(1, inventory["counts"]["total"])  # type: ignore[index]
+
+    def test_a_full_scope_run_records_no_diff_inventory(self) -> None:
+        inventory = change_inventory(self.plan([], force_all=True))
+        self.assertIs(
+            False,
+            inventory["diff_available"],
+            "a manual full-scope run has no diff and must say so rather than "
+            "reporting an empty list that reads as `nothing changed`",
+        )
+        self.assertTrue(inventory.get("reason"), "the absence carries a reason")  # type: ignore[union-attr]
+
+    def test_change_class_is_retained_beside_the_inventory(self) -> None:
+        # R8: the two answer different questions and must be allowed to
+        # disagree. The real-workspace case is in `test_resolved_plan.py`; here
+        # the point is only that `change_class` survives the addition.
+        plan = self.plan(["alpha/lib/README.md"])
+        self.assertEqual("documentation", plan["change_class"])
+        inventory = change_inventory(plan)
+        self.assertEqual(["alpha/lib/README.md"], inventory["paths"]["documentation"])  # type: ignore[index]
+
+
+class ChangeBucketCorpusTests(unittest.TestCase):
+    """The bucketing table, exercised against every path this repository ships.
+
+    A hand-written fixture only proves the rules it names. The table is
+    data-driven, so the corpus is the only thing that says what it does to the
+    11k paths a full-scope diff could hand it.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        completed = subprocess.run(
+            ["git", "ls-files"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+        if completed.returncode != 0:
+            raise unittest.SkipTest("no Git checkout to enumerate")
+        cls.tracked = [line for line in completed.stdout.splitlines() if line]
+
+    def test_every_tracked_path_lands_in_exactly_one_declared_bucket(self) -> None:
+        self.assertTrue(self.tracked, "the corpus must not be empty")
+        buckets = {affected_scope.change_bucket(path) for path in self.tracked}
+        self.assertLessEqual(buckets, set(schema.CHANGE_BUCKETS))
+
+    def test_the_repositorys_own_kinds_are_never_filed_as_other(self) -> None:
+        # `other` is a legitimate answer for a symlink, a snapshot, or a binary
+        # asset. It is never the answer for the four kinds this repository's CI
+        # is actually about.
+        misfiled: dict[str, list[str]] = {}
+        for path in self.tracked:
+            suffix = PurePosixPath(path).suffix
+            if suffix in (".rs", ".py", ".md", ".toml"):
+                bucket = affected_scope.change_bucket(path)
+                if bucket == "other":
+                    misfiled.setdefault(suffix, []).append(path)
+        self.assertEqual({}, misfiled)
+
+    def test_the_suffix_tables_do_not_overlap(self) -> None:
+        # Overlap would make the bucket depend on the order of the checks
+        # rather than on a declared rule, which is how a table silently
+        # reclassifies a path when someone reorders it.
+        tables = {
+            "source": affected_scope.SOURCE_SUFFIXES,
+            "documentation": affected_scope.DOCUMENTATION_SUFFIXES,
+            "configuration": affected_scope.CONFIGURATION_SUFFIXES,
+        }
+        for left, right in itertools.combinations(sorted(tables), 2):
+            self.assertEqual(
+                set(), tables[left] & tables[right], f"{left} and {right} overlap"
+            )
 
 
 class CompanionRecipeCheckTests(unittest.TestCase):
@@ -2417,7 +3122,9 @@ class CompanionRecipeCheckTests(unittest.TestCase):
             )
 
     def test_the_real_recipe_definition_satisfies_the_check(self) -> None:
-        root = self.justfile_root("test-frontend:\n    echo test\n")
+        root = self.justfile_root(
+            "test-frontend:\n    echo test\nlint-frontend:\n    echo lint\n"
+        )
         validate_package_ci(
             "a",
             ci_policy(tests={**{"companion-suites": ["homelab-frontend"]}}),
@@ -2427,7 +3134,9 @@ class CompanionRecipeCheckTests(unittest.TestCase):
         )
 
     def test_a_recipe_with_parameters_satisfies_the_check(self) -> None:
-        root = self.justfile_root('test-frontend *args="":\n    echo test\n')
+        root = self.justfile_root(
+            'test-frontend *args="":\n    echo test\nlint-frontend:\n    echo lint\n'
+        )
         validate_package_ci(
             "a",
             ci_policy(tests={**{"companion-suites": ["homelab-frontend"]}}),
@@ -2435,6 +3144,412 @@ class CompanionRecipeCheckTests(unittest.TestCase):
             root=root,
             today=TODAY,
         )
+
+
+class CompanionCountsDeclarationTests(unittest.TestCase):
+    """AC13: a companion reports counts, or says why it cannot. Never `0`."""
+
+    def entry(self, **overrides: object) -> dict[str, dict[str, object]]:
+        entry: dict[str, object] = {
+            "owner": "homelab-server",
+            "kind": "companion",
+            "environment": "ubuntu-latest",
+            "recipe": "cd homelab && just test-frontend",
+            "counts": "vitest",
+            "counts_args": "--reporter=json --outputFile={out}",
+        }
+        entry.update(overrides)
+        return {"homelab-frontend": entry}
+
+    def problems(self, registry: dict[str, dict[str, object]]) -> list[str]:
+        return validate_suite_registry(registry, {"homelab-server": ["homelab-frontend"]})
+
+    def test_every_shipped_companion_declares_one_of_the_two_states(self) -> None:
+        # Passive corpus check: no shipped entry may sit between "reports
+        # counts" and "says why it does not".
+        for name, entry in affected_scope.SUITE_REGISTRY.items():
+            if entry["kind"] != "companion":
+                continue
+            with self.subTest(suite=name):
+                self.assertEqual(
+                    [], affected_scope.companion_counts_problems(name, entry)
+                )
+
+    def test_a_strategy_with_no_output_argument_fails_validation(self) -> None:
+        problems = self.problems(self.entry(counts_args="--reporter=json"))
+        self.assertTrue(
+            any("homelab-frontend" in problem for problem in problems),
+            f"a counts strategy with nowhere to write must be rejected: {problems}",
+        )
+
+    def test_an_unknown_counts_strategy_fails_validation(self) -> None:
+        problems = self.problems(self.entry(counts="tap"))
+        self.assertTrue(
+            any("tap" in problem for problem in problems),
+            f"the counts vocabulary must be closed: {problems}",
+        )
+
+    def test_an_unmeasurable_suite_without_a_reason_fails_validation(self) -> None:
+        problems = self.problems(self.entry(counts=None, counts_args=None))
+        self.assertTrue(
+            any("never `0`" in problem for problem in problems),
+            f"an unmeasured suite must be made to say why: {problems}",
+        )
+        self.assertEqual(
+            [],
+            self.problems(
+                self.entry(counts=None, counts_reason="typecheck gate reports no test counts")
+            ),
+            "with a reason, the same entry is well formed",
+        )
+
+
+class CompanionAttachmentTests(unittest.TestCase):
+    """R7: a companion attaches to the ONE cell its registry entry declares."""
+
+    def record(self, *suites: str) -> dict[str, object]:
+        return {
+            "package": "homelab-server",
+            "tiers": ["L1"],
+            "l2_backends": [],
+            "features": [],
+            "all_features": False,
+            "l1_include_slow": False,
+            "runner_tools": [],
+            "companion_suites": list(suites),
+            "requires_toolchain": False,
+        }
+
+    def cells(self, *suites: str) -> dict[tuple[str, str], dict[str, object]]:
+        cells = package_cells(
+            self.record(*suites),
+            area="homelab",
+            target_kinds=["lib"],
+            environments=environments_for_tests(),
+            accepted={},
+        )
+        return {(cell["environment"], cell["gate"]): cell for cell in cells}
+
+    def test_a_companion_attaches_to_its_declared_environment_only(self) -> None:
+        records = affected_scope.companion_records(
+            ["homelab-frontend"], "ubuntu-latest", "L1"
+        )
+        self.assertEqual(["homelab-frontend"], [entry["name"] for entry in records])
+        self.assertEqual("cd homelab && just test-frontend", records[0]["recipe"])
+        self.assertIn("{out}", records[0]["counts_args"])
+        for environment in ("macos-latest", "windows-latest", "wsl2-ubuntu"):
+            with self.subTest(environment=environment):
+                self.assertEqual(
+                    [],
+                    affected_scope.companion_records(
+                        ["homelab-frontend"], environment, "L1"
+                    ),
+                )
+
+    def test_only_the_declaring_environments_cell_loses_its_reuse(self) -> None:
+        # The defect R7 names: deriving this from `node_pnpm` made every L1
+        # cell of a companion-owning package hostage to a capability flag.
+        cells = self.cells("homelab-frontend")
+        hosting = cells[("ubuntu-latest", "L1")]
+        self.assertFalse(hosting["reusable"])
+        self.assertEqual(
+            ["homelab-frontend"], [entry["name"] for entry in hosting["companions"]]
+        )
+        for environment in ("macos-latest", "windows-latest", "wsl2-ubuntu"):
+            with self.subTest(environment=environment):
+                elsewhere = cells[(environment, "L1")]
+                self.assertTrue(elsewhere["reusable"])
+                self.assertNotIn("companions", elsewhere)
+
+    def test_a_package_with_no_companion_keeps_every_cell_reusable(self) -> None:
+        cells = self.cells()
+        for environment in (
+            "ubuntu-latest",
+            "macos-latest",
+            "windows-latest",
+            "wsl2-ubuntu",
+        ):
+            with self.subTest(environment=environment):
+                self.assertTrue(cells[(environment, "L1")]["reusable"])
+
+    def test_the_lint_cell_carries_only_the_suites_that_lint(self) -> None:
+        lint = self.cells("homelab-frontend")[("ubuntu-latest", "lint")]
+        self.assertEqual(
+            ["homelab-frontend"], [entry["name"] for entry in lint["companions"]]
+        )
+        self.assertEqual("cd homelab && just lint-frontend", lint["companions"][0]["recipe"])
+        self.assertIsNone(
+            lint["companions"][0]["counts"],
+            "a linter has no test cardinality, and the test reporter's flags "
+            "would not even be accepted by it",
+        )
+        self.assertTrue(lint["companions"][0]["counts_reason"])
+
+    def test_a_test_only_companion_leaves_the_lint_cell_empty(self) -> None:
+        # `repo-deps`'s ten Python contract suites have no lint half. A lint
+        # cell that expected them would fail every run of that package.
+        cells = self.cells("test_schema.py")
+        self.assertEqual(
+            ["test_schema.py"],
+            [entry["name"] for entry in cells[("ubuntu-latest", "L1")]["companions"]],
+        )
+        self.assertNotIn("companions", cells[("ubuntu-latest", "lint")])
+
+    def test_the_policy_record_separates_the_lint_half(self) -> None:
+        record = affected_scope.policy_record(
+            {
+                **self.record("homelab-frontend", "test_schema.py"),
+                "area": "homelab",
+                "gates": True,
+                "exclusion": None,
+            }
+        )
+        self.assertEqual(
+            ["homelab-frontend", "test_schema.py"], record["companion_suites"]
+        )
+        self.assertEqual(["homelab-frontend"], record["lint_companion_suites"])
+
+    def test_the_matrix_names_the_environments_that_run_a_companion(self) -> None:
+        # The companion step is skipped where nothing is attached, rather than
+        # started and resolved to an empty set: a runner without the suites'
+        # interpreter must not be able to fail a cell that was never asked to
+        # run them.
+        record = matrix_record(
+            plan_package(
+                package="homelab-server", companion_suites=["homelab-frontend"]
+            ),
+            environments=environments_for_tests(),
+        )
+        self.assertEqual(["ubuntu-latest"], record["companion_environments"])
+        self.assertEqual(
+            [],
+            matrix_record(
+                plan_package(package="alpha"), environments=environments_for_tests()
+            )["companion_environments"],
+        )
+
+    def test_node_provisioning_follows_the_suites_that_need_it(self) -> None:
+        # A Python-only owner must not install pnpm on every capable runner.
+        python_only = matrix_record(
+            plan_package(package="repo-deps", companion_suites=["test_schema.py"]),
+            environments=environments_for_tests(),
+        )
+        self.assertEqual([], python_only["node_environments"])
+
+        javascript = matrix_record(
+            plan_package(
+                package="test-toolkit",
+                companion_suites=["test-audit-typecheck", "test-audit-vitest"],
+            ),
+            environments=environments_for_tests(),
+        )
+        self.assertEqual(["ubuntu-latest"], javascript["node_environments"])
+
+
+class CompanionRunnerTests(unittest.TestCase):
+    """`companion_suites.py` runs each declared suite once and records it."""
+
+    COUNTS = {"total": 3, "passed": 2, "failed": 0, "skipped": 1, "errored": 0}
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.out = self.root / "companions.json"
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def fake_suite(self, name: str, *, counts: bool, exit_code: int) -> str:
+        """A suite command that behaves like a real one, on any OS."""
+        script = self.root / f"{name}.py"
+        body = "import sys\n"
+        if counts:
+            body += (
+                "import json\n"
+                f"json.dump({self.COUNTS!r}, open(sys.argv[1], 'w'))\n"
+            )
+        body += f"sys.exit({exit_code})\n"
+        script.write_text(body, encoding="utf-8")
+        return f'"{sys.executable}" "{script}"'
+
+    def registry(self, **entries: dict[str, object]) -> dict[str, dict[str, object]]:
+        return entries
+
+    def run_suites(
+        self, registry: dict[str, dict[str, object]], names: list[str], gate: str = "L1"
+    ) -> tuple[int, dict[str, dict[str, object]]]:
+        with unittest.mock.patch.dict(
+            affected_scope.SUITE_REGISTRY, registry, clear=True
+        ):
+            code = companion_suites.main(
+                [
+                    "--suites",
+                    json.dumps(names),
+                    "--environment",
+                    "ubuntu-latest",
+                    "--gate",
+                    gate,
+                    "--out",
+                    str(self.out),
+                    "--root",
+                    str(self.root),
+                ]
+            )
+        if not self.out.is_file():
+            return code, {}
+        return code, json.loads(self.out.read_text(encoding="utf-8"))
+
+    def companion(self, **overrides: object) -> dict[str, object]:
+        entry: dict[str, object] = {
+            "owner": "owner",
+            "kind": "companion",
+            "environment": "ubuntu-latest",
+            "counts": "json",
+            "counts_args": "{out}",
+        }
+        entry.update(overrides)
+        return entry
+
+    def test_each_declared_suite_records_its_own_outcome_and_counts(self) -> None:
+        registry = self.registry(
+            first=self.companion(recipe=self.fake_suite("first", counts=True, exit_code=0)),
+            second=self.companion(recipe=self.fake_suite("second", counts=True, exit_code=0)),
+        )
+        code, results = self.run_suites(registry, ["first", "second"])
+        self.assertEqual(0, code)
+        self.assertEqual(["first", "second"], sorted(results))
+        for name in ("first", "second"):
+            with self.subTest(suite=name):
+                self.assertEqual("success", results[name]["outcome"])
+                self.assertEqual(self.COUNTS, results[name]["counts"])
+                self.assertGreaterEqual(results[name]["duration_s"], 0)
+
+    def test_one_suites_failure_does_not_stop_or_cover_the_others(self) -> None:
+        registry = self.registry(
+            broken=self.companion(recipe=self.fake_suite("broken", counts=True, exit_code=1)),
+            healthy=self.companion(recipe=self.fake_suite("healthy", counts=True, exit_code=0)),
+        )
+        code, results = self.run_suites(registry, ["broken", "healthy"])
+        self.assertEqual(1, code, "a failed companion fails the step")
+        self.assertEqual("failure", results["broken"]["outcome"])
+        self.assertEqual(
+            "success",
+            results["healthy"]["outcome"],
+            "the runner must not stop at the first failure; the other suite's "
+            "evidence is exactly what a reviewer needs",
+        )
+
+    def test_an_unmeasured_suite_records_a_reason_and_never_a_zero(self) -> None:
+        registry = self.registry(
+            silent=self.companion(recipe=self.fake_suite("silent", counts=False, exit_code=0)),
+            gate=self.companion(
+                recipe=self.fake_suite("gate", counts=False, exit_code=0),
+                counts=None,
+                counts_args=None,
+                counts_reason="typecheck gate reports no test counts",
+            ),
+        )
+        _, results = self.run_suites(registry, ["silent", "gate"])
+        for name in ("silent", "gate"):
+            with self.subTest(suite=name):
+                self.assertNotIn(
+                    "counts",
+                    results[name],
+                    "an absent measurement is absent, not a zero that reads as "
+                    "a suite which ran and found nothing",
+                )
+                self.assertTrue(results[name]["reason"])
+        self.assertEqual(
+            "typecheck gate reports no test counts", results["gate"]["reason"]
+        )
+
+    def test_a_suite_the_cell_does_not_host_is_not_run(self) -> None:
+        registry = self.registry(
+            elsewhere=self.companion(
+                recipe=self.fake_suite("elsewhere", counts=True, exit_code=1),
+                environment="macos-latest",
+            ),
+        )
+        code, results = self.run_suites(registry, ["elsewhere"])
+        self.assertEqual(0, code)
+        self.assertEqual({}, results)
+
+    def test_the_lint_gate_runs_only_the_suites_with_a_lint_recipe(self) -> None:
+        registry = self.registry(
+            both=self.companion(
+                recipe=self.fake_suite("both-test", counts=True, exit_code=1),
+                lint_recipe=self.fake_suite("both-lint", counts=False, exit_code=0),
+            ),
+            test_only=self.companion(
+                recipe=self.fake_suite("test-only", counts=True, exit_code=1)
+            ),
+        )
+        code, results = self.run_suites(registry, ["both", "test_only"], gate="lint")
+        self.assertEqual(0, code, "the test halves must not run in the lint job")
+        self.assertEqual(["both"], sorted(results))
+        self.assertEqual("success", results["both"]["outcome"])
+
+    def test_an_unregistered_suite_name_is_a_runner_error(self) -> None:
+        code, _ = self.run_suites(self.registry(), ["no-such-suite"])
+        self.assertEqual(
+            2, code, "an unregistered name is a mis-wired producer, not a test failure"
+        )
+
+    def test_a_shipped_suite_runs_and_reports_its_real_counts(self) -> None:
+        # End to end through the shipped artifact and its normal invocation
+        # path: the registry's own recipe for a real suite, run as CI runs it.
+        entry = affected_scope.SUITE_REGISTRY["test_runner_loss.py"]
+        counts_out = self.root / "counts.json"
+        command = shlex.split(entry["recipe"]) + shlex.split(
+            entry["counts_args"].replace(
+                affected_scope.COUNTS_OUT_PLACEHOLDER, str(counts_out)
+            )
+        )
+        # The recipe's own interpreter spelling, resolved to the one running
+        # this suite: `python3` is not on PATH under every Windows shell, and
+        # the subject here is the wrapper, not the launcher.
+        self.assertEqual("python3", command[0])
+        command[0] = sys.executable
+        completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        counts = json.loads(counts_out.read_text(encoding="utf-8"))
+        self.assertGreater(counts["total"], 0)
+        self.assertEqual(counts["total"], counts["passed"] + counts["skipped"])
+        self.assertEqual(0, counts["failed"])
+        self.assertIn("duration_s", counts)
+
+    def test_the_wrapper_reports_a_failing_suite_as_failed(self) -> None:
+        suite = ROOT / "scripts" / "ci" / "test_affected_scope.py"
+        self.assertTrue(suite.is_file(), "the wrapper's subject must exist")
+        script = self.root / "failing_suite.py"
+        script.write_text(
+            "import unittest\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_fails(self):\n"
+            "        self.fail('deliberate')\n"
+            "    def test_passes(self):\n"
+            "        pass\n",
+            encoding="utf-8",
+        )
+        counts_out = self.root / "counts.json"
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "ci" / "suite_runner.py"),
+                "failing_suite",
+                "--counts-out",
+                str(counts_out),
+            ],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": str(self.root)},
+        )
+        self.assertEqual(1, completed.returncode, completed.stderr)
+        counts = json.loads(counts_out.read_text(encoding="utf-8"))
+        self.assertEqual(2, counts["total"])
+        self.assertEqual(1, counts["failed"])
+        self.assertEqual(1, counts["passed"])
 
 
 class L2BackendAxisTests(unittest.TestCase):
@@ -2571,6 +3686,67 @@ class RealWorkspaceAreaFanOutTests(unittest.TestCase):
                 f"area {area} slugs to {slug!r}, which GitHub rejects as an artifact name",
             )
         self.assertEqual(len(set(slugs.values())), len(slugs))
+
+
+class RealWorkspaceDocumentationOnlyTests(unittest.TestCase):
+    """AC11/AC13 at all three documentation ownership levels, on the real tree.
+
+    A passive corpus case over the shipped workspace: a document owned by the
+    repository, by an area, or by a package must account for itself and select
+    nothing. Whether the two renderers then NAME those documents is asserted by
+    `ci-plan-tests.rs`, `ci-rollup-tests.rs`, and `test_ci_local.py`; this
+    fixture owns the planner's half — the inventory they read, and the zero
+    package and preflight executions beside it.
+    """
+
+    #: Repository-owned, area-owned, and package-owned, in that order. Each is
+    #: a tracked file, so a rename that makes one of them stop existing is a
+    #: fixture failure rather than a silently weaker assertion.
+    LEVELS = (
+        "docs/topics/ci-cd.md",
+        "darkmatter/docs/topics/caching.md",
+        "biscuit-file/README.md",
+    )
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.metadata = load_metadata(ROOT)
+        cls.environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        cls.policy = package_ci_policy(
+            workspace_packages(cls.metadata),
+            runner_labels={environment["runner"] for environment in cls.environments},
+            root=ROOT,
+            today=TODAY,
+        )
+
+    def test_each_ownership_level_exists_in_the_tree(self) -> None:
+        for path in self.LEVELS:
+            self.assertTrue((ROOT / path).is_file(), f"{path} is no longer tracked")
+
+    def test_each_ownership_level_selects_nothing_and_names_its_document(self) -> None:
+        for path in self.LEVELS:
+            with self.subTest(path=path):
+                plan = calculate_scope(
+                    [path], ROOT, self.metadata, self.environments, self.policy
+                )
+                self.assertEqual([], plan["packages"])
+                self.assertEqual([], plan["cells"])
+                self.assertEqual([], plan["areas"])
+                self.assertEqual(
+                    [],
+                    plan["preflight_os"],
+                    "a change that selects no gating package establishes nothing, "
+                    "so preflight must skip too",
+                )
+                inventory = plan["change_inventory"]
+                self.assertTrue(inventory["diff_available"])
+                self.assertEqual([path], inventory["paths"]["documentation"])
+                self.assertEqual(1, inventory["counts"]["total"])
+                self.assertEqual(
+                    [],
+                    legacy_scope_document(plan)["scheduled_areas"],
+                    "no area fans out, so no runner is spent",
+                )
 
 
 class RealWorkspaceRetirementScopeTests(unittest.TestCase):
@@ -2755,6 +3931,9 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
                 "playa-cli",
                 "rendezvous-core",
                 "rendezvous-daemon",
+                # `repo-deps` joined the root workspace when `scripts/` was
+                # promoted to a gating package; `drift` links sniff.
+                "repo-deps",
                 "research",
                 "sniff-cli",
                 "unchained-ai",
@@ -2812,6 +3991,7 @@ def plan_package(**overrides: object) -> dict[str, object]:
         "l2_backends": [],
         "runner_tools": [],
         "companion_suites": [],
+        "requires_toolchain": False,
         "l1_include_slow": False,
         "native": {},
     }

@@ -96,30 +96,146 @@ GLOBAL_PREFIXES = GLOBAL_PREFIXES_ALL_GATES + JUST_PREFIXES
 # not recoverable from the file alone.
 LOCKFILE_PATH = "Cargo.lock"
 
-# CI's own tooling — the merge-gate binary (`scripts/ci-rollup*.rs`), the
-# scope calculator (`scripts/ci/`), and the policy store (`.github/ci/`) — is
-# not a Cargo package, so a change to it selects no package. It must still
-# exercise something: `ci.yml` runs the rollup and scope test suites on the
-# `ci_tooling` flag. (`scripts/ci/affected_scope.py` and
-# `.github/ci/environments.json` are additionally GLOBAL_PATHS, since every
-# package's scope depends on them.) The shared test-suite audit tool
-# (`tools/test-audit/`, a pnpm workspace member) and the root pnpm workspace
-# files it resolves through are tooling for the same reason: no Cargo package
-# selects them, and `ci.yml` runs their typecheck and vitest suite on this flag.
+# The two execution models a registered suite can have. A `cargo` suite runs
+# inside its owner's ordinary Nextest cells, so no single environment hosts it.
+# A `companion` suite is a non-Cargo suite the owner's package job runs beside
+# them, on exactly one declared environment.
+SUITE_KINDS = ("cargo", "companion")
+
+# What a `cargo` suite declares instead of an environment: its owner's
+# `[package.metadata.ci.tests]` environment set governs, and duplicating that
+# here would be a second, driftable answer.
+EVERY_DECLARED_ENVIRONMENT = "*"
+
+# How a companion suite's runner obtains machine-readable counts. `json` is
+# this repository's own counts document, written by `scripts/ci/suite_runner.py`;
+# `vitest` is Vitest's `--reporter=json` output. A suite with no strategy
+# declares WHY in `counts_reason`, because AC13 requires an unmeasured suite to
+# render `not recorded` with a reason rather than a `0` that reads as evidence.
+COUNTS_STRATEGIES = ("json", "vitest")
+
+# The substitution the runner makes in `counts_args` before invoking a suite.
+COUNTS_OUT_PLACEHOLDER = "{out}"
+
+# Every test suite CI runs that is not reached by `just _test <pkg>` alone,
+# plus the two Cargo suites that verify CI itself. One owner, one canonical
+# recipe, one environment each (R7, spec section 2). This is a declared table
+# in the planner, never a persistent store (spec D9).
 #
-# The same leg runs the workflow-contract suite, whose subject is every file
-# under `.github/workflows/`. A workflow edit widens the package gates but can
-# select zero packages, and `test-toolkit` is `gates = false`, so without this
-# trigger the one suite that inspects workflows would run on no job.
-CI_TOOLING_PREFIXES = (
-    "scripts/",
-    ".github/ci/",
-    ".github/workflows/",
-    "tools/test-audit/",
-    "pnpm-lock.yaml",
-    "pnpm-workspace.yaml",
+# `repo-deps` (`scripts/`) owns the planner's Python contracts and the
+# rollup/plan Rust suites; `test-toolkit` (`tools/test-toolkit/`) owns the
+# workflow contracts and the `tools/test-audit` typecheck/Vitest pair;
+# `homelab-server` owns the frontend suite that predates the registry.
+#
+# `just` is present only where a canonical recipe IS a Just recipe: each
+# `(directory, recipe)` pair is what `validate_package_ci` checks still exists,
+# so a renamed recipe fails here rather than silently never running.
+#
+# `lint_recipe` is the suite's half of the owner's LINT cell, present only for
+# a suite that has one. A suite without it is absent from the lint cell
+# entirely rather than expected there and never run.
+#
+# `counts`/`counts_args` are how `scripts/ci/companion_suites.py` obtains
+# machine-readable counts; `counts_reason` replaces them for a gate with no
+# test cardinality to report (S3: `tsc --noEmit` has none, and no flag can
+# invent one). `node` marks the suites that need the Node + pnpm toolchain, so
+# a Python-only owner does not provision one.
+SUITE_REGISTRY: dict[str, dict[str, Any]] = {
+    "repo-deps-l1": {
+        "owner": "repo-deps",
+        "kind": "cargo",
+        "environment": EVERY_DECLARED_ENVIRONMENT,
+        "recipe": "just _test repo-deps",
+    },
+    "test-toolkit-l1": {
+        "owner": "test-toolkit",
+        "kind": "cargo",
+        "environment": EVERY_DECLARED_ENVIRONMENT,
+        "recipe": "just _test test-toolkit",
+    },
+    "homelab-frontend": {
+        "owner": "homelab-server",
+        "kind": "companion",
+        "environment": "ubuntu-latest",
+        "recipe": "cd homelab && just test-frontend",
+        "lint_recipe": "cd homelab && just lint-frontend",
+        "just": (("homelab", "test-frontend"), ("homelab", "lint-frontend")),
+        "node": True,
+        "counts": "vitest",
+        "counts_args": f"--reporter=json --outputFile={COUNTS_OUT_PLACEHOLDER}",
+    },
+    "test-audit-typecheck": {
+        "owner": "test-toolkit",
+        "kind": "companion",
+        "environment": "ubuntu-latest",
+        "recipe": "pnpm --dir tools/test-audit typecheck",
+        "node": True,
+        "counts": None,
+        "counts_reason": "typecheck gate reports no test counts",
+    },
+    "test-audit-vitest": {
+        "owner": "test-toolkit",
+        "kind": "companion",
+        "environment": "ubuntu-latest",
+        "recipe": "pnpm --dir tools/test-audit test",
+        "node": True,
+        "counts": "vitest",
+        "counts_args": f"--reporter=json --outputFile={COUNTS_OUT_PLACEHOLDER}",
+    },
+    **{
+        suite: {
+            "owner": "repo-deps",
+            "kind": "companion",
+            "environment": "ubuntu-latest",
+            # The wrapper, not the bare module: it is what CI runs, and a
+            # recipe that names something else is a recipe nobody can
+            # reproduce. `python3 scripts/ci/<suite>` still runs the same
+            # tests; it just reports no counts.
+            "recipe": f"python3 scripts/ci/suite_runner.py {suite}",
+            "counts": "json",
+            "counts_args": f"--counts-out {COUNTS_OUT_PLACEHOLDER}",
+        }
+        for suite in (
+            "test_affected_scope.py",
+            "test_ci_local.py",
+            "test_constraints.py",
+            "test_evidence_reuse.py",
+            "test_local_evidence.py",
+            "test_publish_gaps.py",
+            "test_resolved_plan.py",
+            "test_reuse_validation.py",
+            "test_runner_loss.py",
+            "test_schema.py",
+        )
+    },
+}
+
+# Inputs a registered suite verifies that ordinary source ownership does not
+# select. `scripts/**` and `tools/test-toolkit/**` need no entry: they are their
+# owners' package directories, so `source_paths_by_package` already selects them
+# (R13.4). What is left is everything outside a member directory — and the two
+# owners' own manifests, which `changed_package_ids` deliberately excludes
+# repository-wide.
+#
+# The manifest exception is NOT general (R13 amendment). These two packages
+# exist only to verify CI, and their `[package.metadata.ci.tests]` blocks are
+# where the suites above are declared to run at all; a manifest edit that
+# selected nothing would ship a change to CI's own scheduling unverified. Every
+# other package's manifest keeps the repository-wide rule, because the next
+# source edit exercises the resulting package graph.
+#
+# A path MAY name more than one owner when both owners' suites consume it.
+SUITE_OWNER_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (".github/ci/", ("repo-deps",)),
+    (".github/workflows/", ("test-toolkit",)),
+    ("tools/test-audit/", ("test-toolkit",)),
 )
-CI_TOOLING_PATHS = {"tools/test-toolkit/tests/ci_workflow_contracts.rs"}
+SUITE_OWNER_PATHS: dict[str, tuple[str, ...]] = {
+    "pnpm-lock.yaml": ("test-toolkit",),
+    "pnpm-workspace.yaml": ("test-toolkit",),
+    "scripts/Cargo.toml": ("repo-deps",),
+    "tools/test-toolkit/Cargo.toml": ("test-toolkit",),
+}
 
 # Bootstrap-preflight breadth (D3). A global CI/tooling change validates every
 # runner OS before fan-out; a package-local change validates only the scope host
@@ -144,11 +260,6 @@ KNOWN_RUNNER_TOOLS = {
     "zed-extension",
 }
 
-# Companion suites are non-Cargo test suites owned by a package. Each name maps
-# to the justfile (by directory) and recipe that executes it; the recipe must
-# exist, or the suite would be declared and silently never run.
-COMPANION_SUITES = {"homelab-frontend": ("homelab", "test-frontend")}
-
 # `[package.metadata.ci]` field vocabulary. Unknown fields fail loudly — a typo
 # here silently mis-scopes CI otherwise.
 CI_FIELDS = {"gates", "exclusion-class", "owner", "reason", "expiry", "native", "tests"}
@@ -161,6 +272,7 @@ CI_TEST_FIELDS = {
     "l1-include-slow",
     "runner-tools",
     "companion-suites",
+    "requires-toolchain",
 }
 EXCLUSION_FIELDS = {"exclusion-class", "owner", "reason", "expiry"}
 
@@ -278,6 +390,11 @@ KNOWN_CAPABILITIES = {
     "apple-terminal",
     "headless_browser",
     "node_pnpm",
+    # A runnable Cargo/rustc toolchain, for the minority of L1 suites that
+    # SHELL OUT to one. Distinct from `archive_only`, which says how a cell is
+    # executed: the two coincide today only because the archive design is what
+    # leaves its guest without a toolchain.
+    "cargo_toolchain",
     "archive_only",
 }
 
@@ -442,6 +559,121 @@ def backend_hostable(environment: dict[str, Any], backend: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def companion_counts_problems(name: str, entry: dict[str, Any]) -> list[str]:
+    """Defects in one companion entry's counts declaration (AC13).
+
+    Every companion resolves to exactly one of two states: it reports counts
+    through a known strategy, or it says why it cannot. The state in between —
+    no strategy and no reason — is what renders an unmeasured suite as `0`.
+    """
+    strategy = entry.get("counts")
+    if strategy is None:
+        if not str(entry.get("counts_reason", "")).strip():
+            return [
+                f"companion suite '{name}' reports no counts and gives no "
+                "reason; an unmeasured suite renders `not recorded` WITH a "
+                "reason, never `0`"
+            ]
+        return []
+    problems: list[str] = []
+    if strategy not in COUNTS_STRATEGIES:
+        problems.append(
+            f"companion suite '{name}' declares counts strategy {strategy!r}; "
+            f"the vocabulary is closed: {list(COUNTS_STRATEGIES)}"
+        )
+    if COUNTS_OUT_PLACEHOLDER not in str(entry.get("counts_args", "")):
+        problems.append(
+            f"companion suite '{name}' declares a counts strategy but no "
+            f"`counts_args` naming {COUNTS_OUT_PLACEHOLDER}, so its runner has "
+            "nowhere to read counts from"
+        )
+    return problems
+
+
+def validate_suite_registry(
+    registry: dict[str, dict[str, Any]],
+    declarations: dict[str, list[str]],
+) -> list[str]:
+    """Defects in a suite registry and the declarations that claim its entries.
+
+    `declarations` maps a package name to the suite names its
+    `[package.metadata.ci.tests].companion-suites` claims. The two documents
+    are checked against each other because neither alone can catch the failure
+    this registry exists to prevent: a suite that is declared and never runs,
+    or runs and is attributed to nobody.
+
+    ## Returns
+
+    One problem per defect, each naming the offending suite. An empty list
+    means every registered suite has exactly one owner, one canonical recipe,
+    one declared environment, and exactly one package claiming it.
+    """
+    problems: list[str] = []
+
+    for name, entry in sorted(registry.items()):
+        if entry.get("kind") not in SUITE_KINDS:
+            problems.append(
+                f"suite '{name}' declares kind {entry.get('kind')!r}; the "
+                f"vocabulary is closed: {list(SUITE_KINDS)}"
+            )
+        if not str(entry.get("owner", "")).strip():
+            problems.append(f"suite '{name}' declares no owning package")
+        if not str(entry.get("recipe", "")).strip():
+            problems.append(
+                f"suite '{name}' declares no canonical recipe, so it would be "
+                "registered and silently never run"
+            )
+        environment = entry.get("environment", "")
+        if entry.get("kind") == "companion":
+            if environment not in schema.ENVIRONMENTS:
+                problems.append(
+                    f"companion suite '{name}' declares environment "
+                    f"{environment!r}, which is not a policy environment: "
+                    f"{sorted(schema.ENVIRONMENTS)}"
+                )
+            problems += companion_counts_problems(name, entry)
+        elif environment != EVERY_DECLARED_ENVIRONMENT:
+            problems.append(
+                f"cargo suite '{name}' declares environment {environment!r}; a "
+                f"cargo suite runs wherever its owner's policy places its "
+                f"cells, spelled {EVERY_DECLARED_ENVIRONMENT!r}"
+            )
+
+    claimants: dict[str, list[str]] = {}
+    for package, claimed in sorted(declarations.items()):
+        for name in claimed:
+            claimants.setdefault(name, []).append(package)
+
+    for name, packages in sorted(claimants.items()):
+        entry = registry.get(name, {})
+        if not entry:
+            problems.append(
+                f"package(s) {sorted(packages)} declare suite '{name}', which "
+                f"is not registered; registered: {sorted(registry)}"
+            )
+            continue
+        if len(packages) > 1:
+            problems.append(
+                f"suite '{name}' is declared by {sorted(packages)}; a suite has "
+                "exactly one owner, or one owner's success hides another's skip"
+            )
+        elif packages[0] != entry.get("owner"):
+            problems.append(
+                f"suite '{name}' is declared by '{packages[0]}' but registered "
+                f"to '{entry.get('owner')}'"
+            )
+
+    for name, entry in sorted(registry.items()):
+        if entry.get("kind") == "companion" and name not in claimants:
+            problems.append(
+                f"companion suite '{name}' is registered to "
+                f"'{entry.get('owner')}' but no package declares it, so nothing "
+                "schedules it"
+            )
+
+    return problems
+
+
 def validate_native_map(label: str, native: Any, runner_labels: set[str]) -> None:
     """Validate a `native` OS -> system-package declaration.
 
@@ -476,8 +708,8 @@ def validate_package_ci(
 
     Raises ``RuntimeError`` on an unknown field, an invalid tier or tool name,
     conflicting `features`/`all-features`, an expired or unowned exclusion, an
-    L2 tier without backends, or a companion suite with no registered canonical
-    recipe.
+    L2 tier without backends, or a companion suite that is unregistered or
+    missing its registered canonical recipe.
     """
     label = f"package '{name}' [package.metadata.ci]"
     unknown = ci.keys() - CI_FIELDS
@@ -592,6 +824,8 @@ def validate_package_ci(
         )
     if not isinstance(tests.get("l1-include-slow", False), bool):
         raise RuntimeError(f"{label}.tests field 'l1-include-slow' must be a boolean")
+    if not isinstance(tests.get("requires-toolchain", False), bool):
+        raise RuntimeError(f"{label}.tests field 'requires-toolchain' must be a boolean")
 
     tools = tests.get("runner-tools", [])
     if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
@@ -608,27 +842,39 @@ def validate_package_ci(
         raise RuntimeError(
             f"{label}.tests field 'companion-suites' must be a list of suite names"
         )
+    companions = {
+        suite_name: entry
+        for suite_name, entry in SUITE_REGISTRY.items()
+        if entry["kind"] == "companion"
+    }
+    # Registration and recipe existence only. Whether the DECLARER is the
+    # registered owner is a property of the whole declaration set — one manifest
+    # cannot tell a wrong owner from a second one — so `validate_suite_registry`
+    # owns that check.
     for suite in suites:
-        registered = COMPANION_SUITES.get(suite)
+        registered = companions.get(suite)
         if registered is None:
             raise RuntimeError(
                 f"{label}.tests names unknown companion suite '{suite}'; registered: "
-                f"{sorted(COMPANION_SUITES)}"
+                f"{sorted(companions)}"
             )
-        directory, recipe = registered
-        justfile = root / directory / "justfile"
-        # A recipe DEFINITION, not a substring: `test-frontend-watch:` must not
-        # satisfy the check for `test-frontend`.
-        recipe_defined = justfile.is_file() and re.search(
-            rf"^{re.escape(recipe)}(?::|\s)",
-            justfile.read_text(encoding="utf-8"),
-            re.MULTILINE,
-        )
-        if not recipe_defined:
-            raise RuntimeError(
-                f"companion suite '{suite}' expects the canonical recipe '{recipe}' in "
-                f"{directory}/justfile, which does not exist"
+        # Every Just recipe the suite names, test half and lint half alike: a
+        # renamed `lint-frontend` would otherwise leave the lint cell expecting
+        # a companion nothing can run.
+        for directory, recipe in registered.get("just", ()):
+            justfile = root / directory / "justfile"
+            # A recipe DEFINITION, not a substring: `test-frontend-watch:` must
+            # not satisfy the check for `test-frontend`.
+            recipe_defined = justfile.is_file() and re.search(
+                rf"^{re.escape(recipe)}(?::|\s)",
+                justfile.read_text(encoding="utf-8"),
+                re.MULTILINE,
             )
+            if not recipe_defined:
+                raise RuntimeError(
+                    f"companion suite '{suite}' expects the canonical recipe '{recipe}' in "
+                    f"{directory}/justfile, which does not exist"
+                )
 
 
 def package_ci_policy(
@@ -662,6 +908,7 @@ def package_ci_policy(
             "l1_include_slow": tests.get("l1-include-slow", False),
             "runner_tools": tests.get("runner-tools", []),
             "companion_suites": tests.get("companion-suites", []),
+            "requires_toolchain": tests.get("requires-toolchain", False),
             "native": ci.get("native", {}),
         }
         if not record["gates"]:
@@ -952,8 +1199,18 @@ def validate_no_shadow_workspaces(metadata: dict[str, Any], root: Path) -> None:
         )
 
 
+def normalized_path(raw_file: str) -> str:
+    """One spelling for a changed path, whatever the caller's OS produced.
+
+    Every path comparison here — ownership, global triggers, the change
+    inventory — is defined over this form, so a Windows-spelled diff and a
+    POSIX-spelled one select the same packages and inventory the same paths.
+    """
+    return raw_file.replace("\\", "/").removeprefix("./")
+
+
 def is_global_path(raw_file: str) -> bool:
-    normalized = raw_file.replace("\\", "/").removeprefix("./")
+    normalized = normalized_path(raw_file)
     return normalized in GLOBAL_PATHS or normalized.startswith(GLOBAL_PREFIXES)
 
 
@@ -1180,7 +1437,7 @@ def gate_triggers(
     for raw_file in files:
         if not is_global_path(raw_file):
             continue
-        normalized = raw_file.replace("\\", "/").removeprefix("./")
+        normalized = normalized_path(raw_file)
         diff = differ(base_ref, normalized) if base_ref is not None else None
         if diff is not None and not diff_changes_more_than_comments(diff):
             continue
@@ -1330,7 +1587,7 @@ def source_paths_by_package(
     owned: dict[str, list[str]] = {}
 
     for raw_file in files:
-        normalized = raw_file.replace("\\", "/").removeprefix("./")
+        normalized = normalized_path(raw_file)
         changed = PurePosixPath(normalized)
         if not is_package_source_path(changed):
             continue
@@ -1338,6 +1595,42 @@ def source_paths_by_package(
             if changed == directory or directory in changed.parents:
                 owned.setdefault(package_id, []).append(normalized)
                 break
+
+    return owned
+
+
+def suite_owner_paths(
+    files: list[str], packages: dict[str, dict[str, Any]]
+) -> dict[str, list[str]]:
+    """The changed suite inputs each package owns, in the order given.
+
+    `SUITE_OWNER_PREFIXES` / `SUITE_OWNER_PATHS` name the inputs a registered
+    suite verifies that lie outside its owner's package directory, so ordinary
+    source ownership cannot select them. An owner the workspace does not
+    contain selects nothing: the table is repository policy and the metadata is
+    the authority on membership.
+
+    ## Returns
+
+    Package id -> the paths that selected it. Paths, not identities, for the
+    same reason as [`source_paths_by_package`]: the record must state a
+    concrete reason.
+    """
+    ids_by_name = {entry["name"]: package_id for package_id, entry in packages.items()}
+    owned: dict[str, list[str]] = {}
+
+    for raw_file in files:
+        normalized = normalized_path(raw_file)
+        owners = SUITE_OWNER_PATHS.get(normalized, ())
+        if not owners:
+            for prefix, prefix_owners in SUITE_OWNER_PREFIXES:
+                if normalized.startswith(prefix):
+                    owners = prefix_owners
+                    break
+        for owner in owners:
+            package_id = ids_by_name.get(owner)
+            if package_id is not None:
+                owned.setdefault(package_id, []).append(normalized)
 
     return owned
 
@@ -1352,7 +1645,9 @@ def changed_package_ids(
 
     Non-source inputs have dedicated validation and never fan out unchanged
     packages. ``Cargo.toml`` and lockfile edits therefore select no package by
-    themselves; the next source edit exercises the resulting package graph.
+    themselves; the next source edit exercises the resulting package graph. The
+    two CI-tooling owners' manifests are the one exception, taken through
+    [`suite_owner_paths`] rather than here (see `SUITE_OWNER_PATHS`).
     """
     return set(source_paths_by_package(files, root, packages)), False
 
@@ -1461,6 +1756,57 @@ def mark_reused(cell: dict[str, Any], evidence: dict[str, Any]) -> None:
     cell.pop("prohibition", None)
 
 
+def companion_records(
+    names: Sequence[str], environment: str, gate: str
+) -> list[dict[str, Any]]:
+    """The registry records one `{environment, gate}` cell must run.
+
+    R7: a companion attaches to the ONE environment it declares, so only that
+    cell carries it — and only that cell loses its reuse. A suite attaches to
+    the lint gate only when it declares a `lint_recipe`; a Python contract
+    suite has no lint half and must not leave the lint cell expecting evidence
+    nothing produces.
+
+    ## Returns
+
+    One record per attached suite, sorted by name, carrying the name, the
+    command that runs it, its environment, and whether counts are expected —
+    everything a producer needs to run it and a reader needs to judge a
+    missing measurement.
+    """
+    command_field = "lint_recipe" if gate == "lint" else "recipe"
+    records: list[dict[str, Any]] = []
+    for name in sorted(set(names)):
+        entry = SUITE_REGISTRY.get(name)
+        if entry is None or entry.get("kind") != "companion":
+            continue
+        if entry.get("environment") != environment:
+            continue
+        command = entry.get(command_field)
+        if not command:
+            continue
+        # The counts strategy describes the suite's TESTS. Its lint half runs a
+        # linter, which has no test cardinality at all and would reject the
+        # test reporter's flags.
+        strategy = entry.get("counts") if gate != "lint" else None
+        record: dict[str, Any] = {
+            "name": name,
+            "recipe": command,
+            "environment": entry["environment"],
+            "counts": strategy,
+        }
+        if strategy is None:
+            record["counts_reason"] = (
+                "a lint gate reports no test counts"
+                if gate == "lint"
+                else entry.get("counts_reason", "")
+            )
+        else:
+            record["counts_args"] = entry["counts_args"]
+        records.append(record)
+    return records
+
+
 def package_cells(
     record: dict[str, Any],
     area: str,
@@ -1503,6 +1849,7 @@ def package_cells(
         gap: dict[str, Any] | None = None,
         reusable: bool = True,
         compiled_dependents: Sequence[str] = (),
+        companions: Sequence[dict[str, Any]] = (),
     ) -> None:
         cell: dict[str, Any] = {
             "package": package,
@@ -1519,6 +1866,8 @@ def package_cells(
         }
         if compiled_dependents:
             cell["dependents"] = list(compiled_dependents)
+        if companions:
+            cell["companions"] = list(companions)
         if gap is not None:
             cell["execution"] = "omit"
             cell["origin"] = "none"
@@ -1551,6 +1900,9 @@ def package_cells(
         "",
         f"lint gate for {package}, hosted on {LINT_ENVIRONMENT}",
         reusable=False,
+        companions=companion_records(
+            record["companion_suites"], LINT_ENVIRONMENT, "lint"
+        ),
     )
 
     unchecked = uncovered_target_kinds(target_kinds)
@@ -1610,6 +1962,18 @@ def package_cells(
         archive_only = capability(environment, "archive_only")
         for tier in record["tiers"]:
             if tier == "L1":
+                companions = companion_records(record["companion_suites"], name, "L1")
+                # A suite that shells out to `cargo`, `just`, or a script that
+                # calls either cannot run where no toolchain exists, however
+                # the binaries got there. It is a GOVERNED GAP rather than a
+                # silent omission: the coverage is genuinely absent on that
+                # environment, and the area audit must say so out loud.
+                toolchain_gap = (
+                    gap_record(environment, ["cargo_toolchain"])
+                    if record["requires_toolchain"]
+                    and not capability(environment, "cargo_toolchain")
+                    else None
+                )
                 add(
                     name,
                     "L1",
@@ -1624,10 +1988,13 @@ def package_cells(
                     f"{package} declares the L1 tier; {name} is a required environment",
                     # A companion suite is not in any local receipt, so its CI
                     # host must still run even when the Rust half was validated
-                    # locally.
-                    reusable=not (
-                        record["companion_suites"] and capability(environment, "node_pnpm")
-                    ),
+                    # locally. Only the environment a companion DECLARES loses
+                    # its reuse (R7): deriving this from a runner capability
+                    # made every L1 cell of a companion-owning package hostage
+                    # to which environments happen to carry `node_pnpm`.
+                    reusable=not companions,
+                    companions=companions,
+                    gap=toolchain_gap,
                 )
             elif tier == "L2":
                 hostable = any(
@@ -1693,6 +2060,18 @@ def matrix_record(
         "l2_backends": record["l2_backends"],
         "runner_tools": record["runner_tools"],
         "companion_suites": companion_suites,
+        # The environments whose test cell runs at least one of them. The
+        # companion step is skipped everywhere else rather than started and
+        # resolved to nothing, so a runner without the suites' interpreter
+        # cannot fail a cell that was never asked to run them.
+        "companion_environments": sorted(
+            {
+                entry["environment"]
+                for suite in companion_suites
+                for entry in (SUITE_REGISTRY.get(suite, {}),)
+                if entry.get("kind") == "companion" and entry.get("recipe")
+            }
+        ),
         "native": record["native"],
         "native_environments": [
             environment["name"]
@@ -1727,13 +2106,19 @@ def matrix_record(
             if "browser" in tiers
             else []
         ),
+        # Only the suites that actually need the Node toolchain provision one.
+        # A package whose companions are Python contract suites would otherwise
+        # install pnpm on every capable runner, and declare a capability its
+        # recipes never touch.
         "node_environments": (
             [
                 environment["name"]
                 for environment in environments
                 if capability(environment, "node_pnpm")
             ]
-            if companion_suites
+            if any(
+                SUITE_REGISTRY.get(suite, {}).get("node") for suite in companion_suites
+            )
             or (testing and {"node-22", "pnpm-10"} & set(record["runner_tools"]))
             else []
         ),
@@ -1796,6 +2181,15 @@ def policy_record(
         # The rollup needs to know a companion suite was DECLARED: a green
         # Rust JUnit report must not hide a companion that never ran (R12).
         "companion_suites": record["companion_suites"] if testing else [],
+        # The lint half separately, because only a suite declaring a
+        # `lint_recipe` runs in the lint job. Expecting the others there would
+        # fail the lint cell of every package whose companions are test-only.
+        "lint_companion_suites": [
+            entry["name"]
+            for entry in companion_records(
+                record["companion_suites"], LINT_ENVIRONMENT, "lint"
+            )
+        ],
     }
     if not record["gates"]:
         shaped["exclusion"] = record["exclusion"]
@@ -1844,8 +2238,15 @@ def calculate_scope(
 
     source_paths = source_paths_by_package(list(files), root, packages)
     source_ids = set(source_paths)
+    # A suite owner selected by a changed input rather than by its own source:
+    # its gates run, but the changed path says nothing about its public API, so
+    # it contributes no reverse-dependency seam below.
+    suite_paths = suite_owner_paths(list(files), packages)
+    suite_ids = set(suite_paths) - source_ids
     reverse_map = reverse_dependency_map(metadata, packages)
-    reverse_ids = direct_dependents(source_ids, metadata, packages) - source_ids
+    reverse_ids = (
+        direct_dependents(source_ids, metadata, packages) - source_ids - suite_ids
+    )
 
     # AC1: an unchanged direct reverse dependent is *reported* here and
     # selected nowhere — no area, no package record, no cell. Its seam is
@@ -1855,7 +2256,7 @@ def calculate_scope(
     # dependents attributed to it. A dependent that is itself selected is
     # excluded (its own gates cover it), and a full-scope run selects
     # everything, so it attributes none.
-    affected_ids = set(packages) if full_scope else source_ids
+    affected_ids = set(packages) if full_scope else source_ids | suite_ids
     packages_by_name = {package["name"]: package for package in packages.values()}
 
     def attributed_dependents(package_id: str) -> list[str]:
@@ -1883,11 +2284,15 @@ def calculate_scope(
         package_id = id_of[name]
         record = policy[name]
         area = package_area(manifest_directory(root, packages[package_id]))
-        reason = (
-            "explicit full-scope request"
-            if full_scope
-            else f"source change in {source_paths[package_id][0]}"
-        )
+        if full_scope:
+            reason = "explicit full-scope request"
+        elif package_id in source_paths:
+            reason = f"source change in {source_paths[package_id][0]}"
+        else:
+            reason = (
+                f"suite input {suite_paths[package_id][0]} selects its "
+                "registered owner"
+            )
         if not record["gates"]:
             package_records.append(
                 non_gating_package_record(record, area, reason)
@@ -1895,7 +2300,11 @@ def calculate_scope(
             continue
 
         target_kinds = declared_target_kinds(packages[package_id])
-        seam = dependent_seam(attributed_dependents(package_id), packages_by_name)
+        seam = (
+            None
+            if package_id in suite_ids
+            else dependent_seam(attributed_dependents(package_id), packages_by_name)
+        )
         owned = package_cells(
             record,
             area,
@@ -1959,22 +2368,22 @@ def calculate_scope(
     }
     flags = {
         directory: directory in top_dirs
-        for directory in ("claudine", "darkmatter", "sniff", "biscuit-tui", "playa")
+        for directory in ("claudine", "darkmatter", "sniff", "playa")
     }
-    normalized_files = [raw.replace("\\", "/").removeprefix("./") for raw in files]
-    flags["ci_tooling"] = any(
-        path.startswith(CI_TOOLING_PREFIXES) or path in CI_TOOLING_PATHS
-        for path in normalized_files
-    )
 
     return {
         "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
         "base": base,
         "head": head,
         "change_class": outcomes["change_class"],
+        "change_inventory": change_inventory(files, full_scope),
         "full_scope": full_scope,
         "full_scope_gates": sorted(full_gates, key=GATES.index),
-        "areas": area_records(package_records, full_scope),
+        "areas": area_records(
+            package_records,
+            full_scope,
+            {packages[package_id]["name"] for package_id in suite_ids},
+        ),
         "packages": package_records,
         "source_packages": sorted(
             packages[package_id]["name"] for package_id in source_ids
@@ -2171,28 +2580,129 @@ def closure_directories(
 
 
 def area_records(
-    package_records: list[dict[str, Any]], full_scope: bool
+    package_records: list[dict[str, Any]],
+    full_scope: bool,
+    suite_owners: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Areas grouped from their packages, in sorted order.
 
     Area is a grouping derived from package, never a stored identity (Design
     Decision 1), so it is assembled here rather than carried anywhere.
+
+    `suite_owners` names the packages selected because a registered suite they
+    own verifies a changed input rather than because their own source changed;
+    an area holding only those must not claim a source change it did not see.
     """
+    owners = suite_owners or set()
     grouped: dict[str, list[str]] = {}
     for entry in package_records:
         grouped.setdefault(entry["area"], []).append(entry["package"])
+
+    def reason(members: list[str]) -> str:
+        if full_scope:
+            return "explicit full-scope request"
+        named = ", ".join(sorted(members))
+        if set(members) <= owners:
+            return f"changed suite input owned by package(s) {named}"
+        return f"source change in package(s) {named}"
+
     return [
         {
             "area": area,
-            "selection_reason": (
-                "explicit full-scope request"
-                if full_scope
-                else f"source change in package(s) {', '.join(sorted(members))}"
-            ),
+            "selection_reason": reason(members),
             "packages": sorted(members),
         }
         for area, members in sorted(grouped.items())
     ]
+
+
+# ---------------------------------------------------------------------------
+# Change inventory
+# ---------------------------------------------------------------------------
+
+#: Suffixes that make a changed path code. `.py` is here because `scripts/ci/`
+#: is the planner's own source, not its configuration.
+SOURCE_SUFFIXES = frozenset({
+    ".bash", ".c", ".cc", ".cjs", ".cpp", ".cs", ".css", ".fish", ".go", ".h",
+    ".hpp", ".html", ".java", ".js", ".jsx", ".kt", ".lua", ".mjs", ".nu",
+    ".php", ".pl", ".proto", ".ps1", ".py", ".rb", ".rs", ".scala", ".scm",
+    ".scss", ".sh", ".sql", ".svelte", ".swift", ".ts", ".tsx", ".vue", ".zsh",
+})
+
+DOCUMENTATION_SUFFIXES = frozenset({
+    ".adoc", ".markdown", ".md", ".mdx", ".rst", ".txt",
+})
+
+CONFIGURATION_SUFFIXES = frozenset({
+    ".cfg", ".conf", ".ini", ".json", ".json5", ".jsonc", ".just", ".lock",
+    ".properties", ".toml", ".xml", ".yaml", ".yml",
+})
+
+#: Extension-less files that are still build or tooling configuration. Compared
+#: case-insensitively so `justfile` and `Justfile` are one rule.
+CONFIGURATION_NAMES = frozenset({
+    ".dockerignore", ".editorconfig", ".env", ".gitattributes", ".gitignore",
+    ".npmrc", ".nvmrc", "dockerfile", "justfile", "makefile",
+})
+
+
+def change_bucket(path: str) -> str:
+    """The one inventory bucket a normalized `path` belongs to.
+
+    What a file *is* outranks where it sits: `.github/ci/README.md` is
+    documentation even though everything else under `.github/` is
+    configuration. `other` is reached deliberately, not by falling through — an
+    extension-less `LICENSE` is neither code, prose the repo publishes, nor
+    configuration anything reads.
+    """
+    name = path.rsplit("/", 1)[-1]
+    suffix = PurePosixPath(name).suffix.lower()
+    if suffix in SOURCE_SUFFIXES:
+        return "source"
+    if suffix in DOCUMENTATION_SUFFIXES:
+        return "documentation"
+    if suffix in CONFIGURATION_SUFFIXES or name.lower() in CONFIGURATION_NAMES:
+        return "configuration"
+    if "docs" in path.split("/")[:-1]:
+        return "documentation"
+    if path.startswith(".github/"):
+        return "configuration"
+    return "other"
+
+
+def change_inventory(files: Sequence[str], full_scope: bool) -> dict[str, Any]:
+    """What changed, classified once, for every reader of the plan.
+
+    R8: computed from the changed paths alone and deliberately independent of
+    `change_class`, which [`classify_preflight`] derives from the *gating
+    packages* a change selects. The two answer different questions and are
+    allowed to disagree — a lone `Cargo.lock` edit reports
+    `change_class: documentation` because it selects no gating package, while
+    its path is plainly `configuration`.
+
+    A manual full-scope run consulted no diff, so it records that fact rather
+    than empty buckets a reader would take for "nothing changed": `paths` and
+    `counts` are present exactly when `diff_available` is true.
+    """
+    if full_scope:
+        return {
+            "diff_available": False,
+            "reason": (
+                "explicit full-scope request selects every package; no diff "
+                "was consulted"
+            ),
+        }
+
+    buckets: dict[str, set[str]] = {bucket: set() for bucket in schema.CHANGE_BUCKETS}
+    for raw_file in files:
+        path = normalized_path(raw_file).strip()
+        if path:
+            buckets[change_bucket(path)].add(path)
+
+    paths = {bucket: sorted(buckets[bucket]) for bucket in schema.CHANGE_BUCKETS}
+    counts = {bucket: len(entries) for bucket, entries in paths.items()}
+    counts["total"] = sum(counts.values())
+    return {"diff_available": True, "paths": paths, "counts": counts}
 
 
 def classify_preflight(
@@ -2233,10 +2743,14 @@ def classify_preflight(
         )
         return "package", sorted(os_set), reason
 
+    # R10: preflight establishes the prerequisites a package fan-out consumes.
+    # With no gating package there is no fan-out, so there is nothing to
+    # establish and the matrix is empty — `ci.yml`'s scalar guard reads this
+    # exact `[]` and resolves the job to `skipped` right after `scope`.
     return (
         "documentation",
-        [SCOPE_HOST_OS],
-        "no build/test packages affected; preflight runs on the scope host only",
+        [],
+        "no build/test packages affected; there is no fan-out to bootstrap",
     )
 
 

@@ -5,6 +5,30 @@ repository's CI, pre-push hook, or release automation. The live authorities are
 `docs/topics/ci-cd.md`, `.github/ci/README.md`, package
 `[package.metadata.ci]`, and `.github/ci/environments.json`.
 
+## The six jobs of `ci.yml`
+
+`ci.yml` defines exactly six top-level jobs and a contract test pins the set:
+`validation`, `scope`, `preflight`, `area-ci`, `ci-gate`, `ci-reporting`. The
+first five block; `ci-reporting` is advisory and carries
+`continue-on-error: true`.
+
+**No job owns a test suite on CI's behalf.** `preflight` is bootstrap
+prerequisites only — checkout, `rustup show`, `just`, nextest, the
+toolchain/tooling verification, the no-wrapper `cargo metadata` probe, and
+`just check-canonical`. It runs no Python, Rust, or TypeScript suite, because a
+suite there would be a second scheduler for work the plan already placed. Two
+further jobs and one specialized Biscuit TUI workflow were deleted for the same
+reason — each existed to run work a package cell now owns — and a contract test
+fails if any of them reappears.
+
+`preflight` and `area-ci` are matrix jobs carrying a **scalar** `if:` guard read
+before matrix expansion (`preflight_os != '[]'`, `has_packages == 'true'`), so a
+run that schedules nothing resolves both to `skipped` right after `scope`
+instead of depending on GitHub's empty-matrix handling. Neither may declare a
+`name:` containing a matrix expression — GitHub never evaluates the matrix
+context for a job it skips, so such a label reaches the Checks tab as raw
+expression text.
+
 ## Affected scope
 
 `scripts/ci/affected_scope.py` is the canonical deterministic calculator for
@@ -40,9 +64,20 @@ local and hosted runs. Its package policy is deliberately narrow:
   reaches only the owning Ubuntu check, where setup combines it with the
   changed package's own requirements. Other jobs retain the original native
   map.
-- Documentation, manifests, lockfiles, Just recipes, workflow configuration,
-  and other CI configuration select no package jobs. CI tooling has compact
-  contract tests of its own.
+- Documentation, manifests, lockfiles, and Just recipes select no package jobs.
+- CI's own inputs are the exception, because CI's own suites now have owners.
+  `SUITE_REGISTRY` in `affected_scope.py` declares every suite's owner,
+  canonical recipe, environment, and kind (`cargo` or `companion`);
+  `SUITE_OWNER_PREFIXES` / `SUITE_OWNER_PATHS` map the inputs those suites read
+  to that owner. `.github/ci/**` and `scripts/Cargo.toml` select `repo-deps`;
+  `.github/workflows/**`, `tools/test-audit/**`, `pnpm-lock.yaml`,
+  `pnpm-workspace.yaml`, and `tools/test-toolkit/Cargo.toml` select
+  `test-toolkit`. `scripts/**` and `tools/test-toolkit/**` need no entry — they
+  are those packages' own directories. The manifest entries are a deliberate
+  two-path exception to the repository-wide "a manifest selects nothing" rule
+  and are not generalized. A trigger selection is narrower than a source
+  change: it reports no reverse dependencies and carries no dependent seam,
+  because the changed path says nothing about the owner's public API.
 - `workflow_dispatch` is the explicit full-workspace path. Do not turn an
   infrastructure edit or uncertainty into an implicit full run.
 
@@ -57,6 +92,24 @@ Package remains the stored identity everywhere; **area is a derived grouping**,
 computed from the manifest directory with the same rule as
 `sniff repo package-area` and kept honest by a drift contract rather than by a
 committed mapping file.
+
+`RESOLVED_PLAN_SCHEMA_VERSION` is **3**. Version 3 added the required
+`change_inventory`: the calculator's own input paths, normalized to one
+repository-relative spelling, sorted, de-duplicated, and bucketed exhaustively
+into `configuration`, `documentation`, `source`, `other` with per-bucket and
+total counts. A rename is one logical path; `--all` records that no diff was
+consulted rather than an empty list that would read as "nothing changed". It is
+a **sibling** of `change_class`, not a replacement — `classify_preflight()`
+still returns `change_class`, and that is still what sets preflight breadth.
+Both readers consume the one field and neither re-derives it: `ci-plan` in the
+terminal, `ci-reporting` in GitHub Markdown.
+
+Only the plan version moved. `SCOPE_RECEIPT_SCHEMA_VERSION` stays 1 — its
+embedded `plan_schema_version` check is what refuses a version-2 receipt once
+with the existing `scope-schema` reason, forcing one fresh calculation rather
+than an in-place upgrade. `RECEIPT_SCHEMA_VERSION` and
+`LEGACY_RECEIPT_SCHEMA_VERSION` are unchanged, so validation receipts stay
+reusable wherever their cell and gate-input checks still qualify.
 
 ## Local scope and validation evidence
 
@@ -154,8 +207,11 @@ new run replace the cells it actually reran.
 The rollup consumes that evidence. `ci-rollup rollup --plan` reads the resolved
 execution plan, so a cell a receipt satisfied is reported as a completed
 local-origin result with its counts, duration, and the notes ref behind it —
-not as `MISSING`. Result documents are `schema_version: 3` and are refused
-across generations; the skip-only baseline keeps its own version 3. `--area` on `rollup`
+not as `MISSING`. Result documents are `schema_version: 4` — version 4 made a
+cell's `counts` an optional measurement, so an unmeasured cell omits it instead
+of reporting zero — and a document from another generation is refused by its
+version before any cell is interpreted, naming the migration and telling the
+reader to re-run the rollup. The skip-only baseline keeps its own version 3. `--area` on `rollup`
 and `verdict` narrows a document to one area's slice (cells, scope, scheduled
 set, and accepted evidence together), and `summarize` folds slices into a view
 that applies no policy.
@@ -232,21 +288,56 @@ artifact — `ci_gate_is_the_single_required_check` in
 `WorkflowGateStepTests` in `scripts/ci/test_ci_local.py` runs the extracted
 fold against every result shape.
 
-Ruleset `protect-your-bacon` (19747338) still names the retired `ci-verdict`
-context. Until Ken switches it to `ci-gate` — a separate approval, after this
-change's own run is green (specification Validation and Rollout step 6) —
-every pull request shows `ci-verdict — Expected` and cannot merge. The admin
-bypass actor is untouched. The consumers moved with the job: `runner_loss.py`
+Ruleset `protect-your-bacon` (19747338) has required `ci-gate` since
+2026-09-13. It named `ci-verdict` until then, and because that job no longer
+existed in `ci.yml`, every pull request sat on a `ci-verdict — Expected` check
+that could never arrive; the swap was taken as the cicd-cleanup
+specification's Validation and Rollout step 6. The admin bypass actor is
+untouched. The consumers moved with the job: `runner_loss.py`
 excludes `ci-gate`, `just ci-diff` downloads the per-area `ci-results-<slug>`
 slices and folds them through `ci-rollup compare --base … --base … --head …`,
 and `.claudine/scripts/ci-watchdog.ts` waits for `ci-gate`.
 
 The run conclusion is a faithful conjunction: exactly one job
-(`ci.yml:summary`) carries `continue-on-error: true`, asserted as an exact set
-over all four reader-facing workflows. `reuse_validation.py` and
+(`ci.yml:ci-reporting`) carries `continue-on-error: true`, asserted as an exact
+set over all four reader-facing workflows. `reuse_validation.py` and
 `release-plz.yml` key on a completed, successful `ci` run, which the scratch
 fixture showed can read `cancelled` with a green gate (s6) — the safe
 direction, so neither needs rewiring.
+
+## `ci-reporting`
+
+The run's one reader-facing report, and deliberately powerless. `if: always()`,
+`continue-on-error: true`, and `needs: [validation, scope, area-ci, ci-gate]`
+— it waits for the whole run so it is written after the decision it declines to
+make. It may state that no package test was required; it must never claim
+mergeability, and it applies no baseline, accepted-gap, missing-cell, or merge
+policy.
+
+Three modes, chosen from its `needs` results:
+
+1. **Reused PR validation** — link the authoritative prior run, state that this
+   run executed no package cell.
+2. **Successful scope** — download the resolved plan and this run's
+   `ci-results-<slug>` slices and render them through `ci-rollup summarize`.
+   That is the same typed model the areas wrote; parsing the raw JUnit
+   artifacts here would build a second result model free to disagree with the
+   area that produced them.
+3. **Failed or cancelled bootstrap** — name the first actionable infrastructure
+   failure in dependency order (`validation`, then `scope`). `area-ci` is
+   deliberately absent: every package gate is a cell in its own area's coverage
+   audit.
+
+Mode 2 renders the change inventory, the direct and reverse dependency sets,
+per-environment test counts and durations including machine-recorded companion
+counts, the Linux-only `ci` lint **command** duration labeled as such, and each
+cell's literal `ci` / `local` / `prior-local` origin. An unavailable measurement
+renders as `not recorded` with its reason — never `0`. There is no `cicd`
+origin literal, and `check` and `lint` stay CI-origin.
+
+Every area uploads its result slice under `always()`, including an area whose
+cells were all reused, so a missing slice means that area never started rather
+than that it had nothing to say.
 
 ## Governed policy gaps
 
