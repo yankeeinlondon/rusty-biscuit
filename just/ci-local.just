@@ -289,7 +289,7 @@ ci-local *args="":
         # compiles on demand: a pre-trigger review must not start a build.
         # Without the prebuilt binary the same cells render as plain lines.
         echo "Constraint store: ${constraints_dir}"
-        plan_bin="${BISCUIT_CI_PLAN_BIN:-scripts/target/release/ci-plan}"
+        plan_bin="${BISCUIT_CI_PLAN_BIN:-target/release/ci-plan}"
         if [[ -x "${plan_bin}" ]] && "${plan_bin}" "${plan_view}"; then
             :
         else

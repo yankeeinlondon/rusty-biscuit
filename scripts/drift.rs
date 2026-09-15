@@ -167,7 +167,7 @@ impl Ui {
             })
             .collect::<Vec<_>>();
         let list = UnorderedList::from(items).with_bullet("- ");
-        let rendered = list.fallback_render(&self.term);
+        let rendered = list.render(&self.term);
         print_prefixed_stdout(&self.drift_prefix, &rendered);
     }
 
@@ -191,7 +191,7 @@ impl Ui {
         self.print_line(&format!(
             "  {} {}",
             self.prose("<cyan>phase:</cyan>"),
-            format!("{phase} (agent={agent})")
+            format_args!("{phase} (agent={agent})")
         ));
         self.print_line(&format!(
             "  {} waiting for agent output...",
@@ -220,7 +220,7 @@ impl Ui {
     }
 
     fn prose(&self, text: &str) -> String {
-        Prose::new(text).fallback_render(&self.term)
+        Prose::new(text).render(&self.term)
     }
 
     fn print_line(&self, text: &str) {
@@ -250,7 +250,7 @@ fn format_duration(duration: Duration) -> String {
 }
 
 fn render_prefix(term: &Terminal, markup: &str) -> String {
-    Prose::new(markup).fallback_render(term)
+    Prose::new(markup).render(term)
 }
 
 fn ensure_not_cancelled(cancellation: &Cancellation) -> Result<()> {
@@ -708,16 +708,65 @@ fn collect_readmes(workspace_root: &Path, package_area: &str) -> Result<Vec<Stri
     Ok(targets)
 }
 
+/// Root manifests that mark a directory as the head of a workspace chain.
+const ROOT_MANIFESTS: [&str; 5] = [
+    "Cargo.toml",
+    "package.json",
+    "pnpm-workspace.yaml",
+    "go.mod",
+    "pyproject.toml",
+];
+
+/// The outermost ancestor of `start` worth asking [`detect_repo`] about.
+///
+/// `detect_repo` is a tree walk, so running it on a home directory or `/` costs
+/// minutes. The enclosing repository is the only place the answer can live, and
+/// `.git` is what marks it — a path (file for a worktree, directory otherwise)
+/// rather than a manifest, because a nested Cargo workspace also has a manifest.
+/// The *innermost* `.git` wins: an outer one belongs to a different repository
+/// (a dotfiles checkout over `$HOME`, a superproject over a submodule), and
+/// crossing into it would answer with a package this repository does not own.
+///
+/// ## Notes
+///
+/// Without any `.git`, the ceiling is the outermost ancestor reachable from
+/// `start` through an unbroken chain of root manifests — one nested-workspace
+/// chain. The first manifest-less ancestor ends it, so an unrelated manifest
+/// further up cannot pull the search out of the tree.
+fn repository_search_ceiling(start: &Path) -> PathBuf {
+    if let Some(git_root) = start
+        .ancestors()
+        .find(|candidate| candidate.join(".git").exists())
+    {
+        return git_root.to_path_buf();
+    }
+
+    let mut ceiling = start;
+    for candidate in start.ancestors() {
+        let has_manifest = ROOT_MANIFESTS
+            .iter()
+            .any(|manifest| candidate.join(manifest).is_file());
+        if !has_manifest {
+            break;
+        }
+        ceiling = candidate;
+    }
+    ceiling.to_path_buf()
+}
+
 fn resolve_workspace_root_for_package_area(
     metadata_workspace_root: &Path,
     package_area: &str,
 ) -> PathBuf {
+    let ceiling = repository_search_ceiling(metadata_workspace_root);
     for candidate_root in metadata_workspace_root.ancestors() {
-        let Ok(Some(repo_info)) = detect_repo(candidate_root) else {
-            continue;
-        };
-        if repo_contains_package_area(&repo_info, package_area) {
-            return candidate_root.to_path_buf();
+        if let Ok(Some(repo_info)) = detect_repo(candidate_root) {
+            if repo_contains_package_area(&repo_info, package_area) {
+                return candidate_root.to_path_buf();
+            }
+        }
+        if candidate_root == ceiling {
+            break;
         }
     }
     metadata_workspace_root.to_path_buf()
@@ -1080,11 +1129,7 @@ impl MarkdownStreamRenderer {
         }
 
         let rendered = render_markdownish_line(line, &self.term);
-        if had_newline {
-            print_prefixed_stdout(&self.agent_prefix, &rendered);
-        } else {
-            print_prefixed_stdout(&self.agent_prefix, &rendered);
-        }
+        print_prefixed_stdout(&self.agent_prefix, &rendered);
     }
 }
 
@@ -1512,7 +1557,7 @@ fn render_markdown_table_block(lines: &[String], term: &Terminal) -> Option<Stri
         .collect::<Vec<_>>();
 
     let table = Table::new().with_columns(columns).with_data(data);
-    Some(table.fallback_render(term))
+    Some(table.render(term))
 }
 
 fn parse_markdown_row(line: &str) -> Option<Vec<String>> {
@@ -1608,7 +1653,7 @@ fn render_markdown_list_block(lines: &[String], term: &Terminal) -> Option<Strin
         match component {
             RenderableTerminalContent::String(text) => output.push_str(&text),
             RenderableTerminalContent::Component(component) => {
-                output.push_str(&component.fallback_render(term))
+                output.push_str(&component.render(term))
             }
         }
         if !output.ends_with('\n') {
@@ -1672,7 +1717,7 @@ fn render_markdownish_line(line: &str, term: &Terminal) -> String {
         normalized = markdown_inline_code_to_dim(&normalized);
     }
 
-    Prose::new(normalized).fallback_render(term)
+    Prose::new(normalized).render(term)
 }
 
 fn markdown_heading_text(line: &str) -> Option<String> {
@@ -1718,10 +1763,9 @@ fn markdown_bold_to_prose(input: &str) -> String {
 
 fn markdown_inline_code_to_dim(input: &str) -> String {
     let mut output = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
     let mut code_open = false;
 
-    while let Some(ch) = chars.next() {
+    for ch in input.chars() {
         if ch == '`' {
             if code_open {
                 output.push_str("</dim>");
@@ -1750,18 +1794,31 @@ fn cleanup_markdown_inline(input: &str) -> String {
 fn osc8_file_link(workspace_root: &Path, path: &Path) -> String {
     let absolute = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let absolute_uri = file_uri(&absolute);
-    let display = path
-        .strip_prefix(workspace_root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .into_owned();
+    let display = path_to_slash_string(path.strip_prefix(workspace_root).unwrap_or(path));
 
     format!("\x1b]8;;{absolute_uri}\x1b\\{display}\x1b]8;;\x1b\\")
 }
 
+/// A `file://` URI for `path`.
+///
+/// Windows needs three corrections Unix does not. `fs::canonicalize` returns a
+/// verbatim `\\?\` spelling, which no URI may contain; the native separator is
+/// `\`, which percent-encodes to `%5C` and yields a link no terminal opens; and
+/// a drive-absolute path needs the extra leading `/` that makes `file:///C:/…`.
+/// A UNC share becomes the URI's authority instead.
 fn file_uri(path: &Path) -> String {
-    let text = path.to_string_lossy();
-    format!("file://{}", percent_encode_path_for_uri(&text))
+    let text = path.to_string_lossy().replace('\\', "/");
+    let authority_and_path = if let Some(share) = text.strip_prefix("//?/UNC/") {
+        share.to_owned()
+    } else {
+        let local = text.strip_prefix("//?/").unwrap_or(&text);
+        match local.strip_prefix("//") {
+            Some(share) => share.to_owned(),
+            None if local.starts_with('/') => local.to_owned(),
+            None => format!("/{local}"),
+        }
+    };
+    format!("file://{}", percent_encode_path_for_uri(&authority_and_path))
 }
 
 fn percent_encode_path_for_uri(path: &str) -> String {
@@ -2058,6 +2115,7 @@ mod tests {
         let package_root = package_area_root.join("define");
         fs::create_dir_all(&package_root).unwrap();
 
+        fs::create_dir_all(repo_root.join(".git")).unwrap();
         fs::write(
             repo_root.join("Cargo.toml"),
             "[workspace]\nmembers = [\"schematic/define\"]\n",
@@ -2087,6 +2145,7 @@ mod tests {
         let package_root = repo_root.join("foo");
         fs::create_dir_all(&package_root).unwrap();
 
+        fs::create_dir_all(repo_root.join(".git")).unwrap();
         fs::write(
             repo_root.join("Cargo.toml"),
             "[workspace]\nmembers = [\"foo\"]\n",
@@ -2098,8 +2157,134 @@ mod tests {
         )
         .unwrap();
 
+        let started = Instant::now();
         let resolved = resolve_workspace_root_for_package_area(&repo_root, "schematic");
+        let elapsed = started.elapsed();
         assert_eq!(resolved, repo_root);
+        // Before the search ceiling existed this walked every ancestor to `/`,
+        // calling `detect_repo` on the temp, home, and root directories; it was
+        // measured still running after 400 s. The budget is ~40x the work the
+        // bounded walk actually does.
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "the not-found walk must stay inside the repository; took {elapsed:?}"
+        );
+
+        fs::remove_dir_all(test_root).unwrap();
+    }
+
+    #[test]
+    fn resolve_workspace_root_does_not_cross_out_of_the_enclosing_repository() {
+        let test_root = unique_temp_root();
+        // The package area lives in an OUTER repository that must never be
+        // consulted: an unbounded walk finds `schematic` here and answers with a
+        // root that does not own the inner checkout.
+        let outer_root = test_root.join("outer");
+        let outer_area = outer_root.join("schematic");
+        let outer_package = outer_area.join("define");
+        let inner_root = outer_root.join("inner");
+        let inner_package = inner_root.join("foo");
+        fs::create_dir_all(&outer_package).unwrap();
+        fs::create_dir_all(&inner_package).unwrap();
+
+        fs::write(
+            outer_root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"schematic/define\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            outer_package.join("Cargo.toml"),
+            "[package]\nname = \"schematic-define\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        fs::write(
+            inner_root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"foo\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            inner_package.join("Cargo.toml"),
+            "[package]\nname = \"foo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        // `.git` is what marks the inner checkout as its own repository.
+        fs::create_dir_all(inner_root.join(".git")).unwrap();
+
+        let resolved = resolve_workspace_root_for_package_area(&inner_root, "schematic");
+        assert_eq!(resolved, inner_root);
+
+        fs::remove_dir_all(test_root).unwrap();
+    }
+
+    #[test]
+    fn repository_search_ceiling_stops_at_the_innermost_git_marker() {
+        let test_root = marker_free_temp_root();
+        let outer_root = test_root.join("outer");
+        let inner_root = outer_root.join("inner");
+        let nested_workspace = inner_root.join("nested");
+        fs::create_dir_all(&nested_workspace).unwrap();
+        fs::create_dir_all(outer_root.join(".git")).unwrap();
+        fs::create_dir_all(inner_root.join(".git")).unwrap();
+
+        assert_eq!(repository_search_ceiling(&nested_workspace), inner_root);
+
+        fs::remove_dir_all(test_root).unwrap();
+    }
+
+    #[test]
+    fn repository_search_ceiling_accepts_a_worktree_git_file() {
+        let test_root = marker_free_temp_root();
+        let repo_root = test_root.join("worktree");
+        let nested_workspace = repo_root.join("nested");
+        fs::create_dir_all(&nested_workspace).unwrap();
+        fs::write(repo_root.join(".git"), "gitdir: /elsewhere/.git/worktrees/wt\n").unwrap();
+
+        assert_eq!(repository_search_ceiling(&nested_workspace), repo_root);
+
+        fs::remove_dir_all(test_root).unwrap();
+    }
+
+    #[test]
+    fn repository_search_ceiling_follows_an_unbroken_manifest_chain_without_git() {
+        let test_root = marker_free_temp_root();
+        let repo_root = test_root.join("workspace");
+        let area_root = repo_root.join("schematic");
+        let nested_workspace = area_root.join("schema");
+        fs::create_dir_all(&nested_workspace).unwrap();
+        fs::write(repo_root.join("Cargo.toml"), "[workspace]\n").unwrap();
+        fs::write(area_root.join("Cargo.toml"), "[workspace]\n").unwrap();
+        fs::write(nested_workspace.join("Cargo.toml"), "[workspace]\n").unwrap();
+
+        assert_eq!(repository_search_ceiling(&nested_workspace), repo_root);
+
+        fs::remove_dir_all(test_root).unwrap();
+    }
+
+    #[test]
+    fn repository_search_ceiling_stops_at_the_first_manifest_less_ancestor() {
+        let test_root = marker_free_temp_root();
+        let unrelated_root = test_root.join("unrelated");
+        // A manifest above the gap must not pull the search out of the tree.
+        let gap = unrelated_root.join("gap");
+        let repo_root = gap.join("workspace");
+        let nested_workspace = repo_root.join("nested");
+        fs::create_dir_all(&nested_workspace).unwrap();
+        fs::write(unrelated_root.join("Cargo.toml"), "[workspace]\n").unwrap();
+        fs::write(repo_root.join("Cargo.toml"), "[workspace]\n").unwrap();
+        fs::write(nested_workspace.join("Cargo.toml"), "[workspace]\n").unwrap();
+
+        assert_eq!(repository_search_ceiling(&nested_workspace), repo_root);
+
+        fs::remove_dir_all(test_root).unwrap();
+    }
+
+    #[test]
+    fn repository_search_ceiling_falls_back_to_the_start_with_no_markers() {
+        let test_root = marker_free_temp_root();
+        let bare = test_root.join("bare");
+        fs::create_dir_all(&bare).unwrap();
+
+        assert_eq!(repository_search_ceiling(&bare), bare);
 
         fs::remove_dir_all(test_root).unwrap();
     }
@@ -2124,6 +2309,33 @@ mod tests {
         assert!(link.contains("%20"));
 
         fs::remove_dir_all(test_root).unwrap();
+    }
+
+    #[test]
+    fn file_uri_rejects_every_windows_path_spelling() {
+        // The spellings are asserted as literals rather than through
+        // `fs::canonicalize` so the macOS and Linux cells cover the Windows
+        // shapes too; `\\?\` is what canonicalize returns there on every call.
+        for (path, expected) in [
+            (r"\\?\C:\Users\ken\a b.md", "file:///C:/Users/ken/a%20b.md"),
+            ("C:\\Users\\ken\\a b.md", "file:///C:/Users/ken/a%20b.md"),
+            (r"\\?\UNC\server\share\a.md", "file://server/share/a.md"),
+            (r"\\server\share\a.md", "file://server/share/a.md"),
+        ] {
+            assert_eq!(
+                file_uri(Path::new(path)),
+                expected,
+                "{path} must not leak a verbatim prefix or a backslash"
+            );
+        }
+    }
+
+    #[test]
+    fn file_uri_leaves_a_unix_path_unchanged() {
+        assert_eq!(
+            file_uri(Path::new("/home/ken/a b.md")),
+            "file:///home/ken/a%20b.md"
+        );
     }
 
     #[test]
@@ -2285,5 +2497,33 @@ mod tests {
             .unwrap()
             .as_nanos();
         env::temp_dir().join(format!("drift-tests-{}-{nanos}", std::process::id()))
+    }
+
+    /// A temp root whose ancestry carries no repository marker.
+    ///
+    /// `repository_search_ceiling` reads the real filesystem above its argument,
+    /// so a `.git` or root manifest anywhere over `$TMPDIR` — a dotfiles checkout
+    /// over `C:\Users\<user>` is the realistic case — would silently change what
+    /// these fixtures measure. Asserting the premise turns that into a legible
+    /// failure instead.
+    fn marker_free_temp_root() -> PathBuf {
+        let test_root = unique_temp_root();
+        for ancestor in test_root.ancestors().skip(1) {
+            assert!(
+                !ancestor.join(".git").exists(),
+                "TMPDIR is inside a git repository ({}); these fixtures need a \
+                 marker-free ancestry",
+                ancestor.display()
+            );
+            for manifest in ROOT_MANIFESTS {
+                assert!(
+                    !ancestor.join(manifest).is_file(),
+                    "TMPDIR ancestor {} holds a root manifest ({manifest}); these \
+                     fixtures need a marker-free ancestry",
+                    ancestor.display()
+                );
+            }
+        }
+        test_root
     }
 }

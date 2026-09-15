@@ -2196,14 +2196,14 @@ ci-diff ref="":
 
     # Same flags CI builds it with; --no-default-features keeps this off gix,
     # duckdb, and the terminal renderer.
-    cargo build --release --quiet --manifest-path scripts/Cargo.toml \
+    cargo build --release --quiet -p repo-deps \
         --no-default-features --bin ci-rollup
 
     echo -e "base {{ bold }}main{{ reset }} run ${base_run} $(gh run view "${base_run}" --json createdAt --jq .createdAt)"
     echo -e "head {{ bold }}${branch}{{ reset }} run ${head_run} $(gh run view "${head_run}" --json createdAt --jq .createdAt)"
 
     status=0
-    ./scripts/target/release/ci-rollup compare "${compare_args[@]}" || status=$?
+    ./target/release/ci-rollup compare "${compare_args[@]}" || status=$?
 
     if [[ "${status}" -eq 2 ]]; then
         echo -e "{{ red }}❌ {{ bold }}${branch}{{ reset }}{{ red }} fails something main does not.{{ reset }}"

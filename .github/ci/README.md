@@ -397,7 +397,7 @@ would silently exempt a package and miss its first test.
 | `all-features` | bool | `false` | run with `--all-features`. Conflicts with `features` |
 | `l1-include-slow` | bool | `false` | keep `slow_` tests inside the L1 selection (darkmatter's contract) |
 | `runner-tools` | string[] | `[]` | closed vocabulary: `ai-provider-stubs`, `darkmatter-md-fixture`, `messenger-desktop-stubs`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn`, `neovim`, `zed-extension` |
-| `companion-suites` | string[] | `[]` | non-Cargo suites this package owns; closed vocabulary: `homelab-frontend` |
+| `companion-suites` | string[] | `[]` | non-Cargo suites this package owns; the closed vocabulary is `SUITE_REGISTRY`'s companion half in `affected_scope.py` |
 
 `[package.metadata.ci.native]`: a map of runner OS (`ubuntu-latest`,
 `windows-latest`, `macos-latest`) → system packages needed to build/test. The
@@ -452,15 +452,29 @@ for a package result.
 
 ### Companion suites
 
-`companion-suites` names non-Cargo test suites this package owns, from a
-closed vocabulary. `homelab-frontend` invokes the existing non-focusing
-frontend recipe (`homelab/justfile::test-frontend`) and attributes its
-producer status to `homelab-server`/L1. A companion suite must emit
-machine-readable evidence or a producer failure: a green Rust JUnit report
-must never hide a failed OR SKIPPED companion suite
-(the producer-status `failure` downgrades the cell in the rollup, and a
-companion outcome other than `success` — or none at all — downgrades it the
-same way).
+`companion-suites` names non-Cargo test suites this package owns, from the
+closed vocabulary `SUITE_REGISTRY` declares. Each registered suite has one
+owner, one canonical recipe, one declared environment, and one machine-readable
+outcome; the registry — never the workflow — decides which recipe runs where:
+
+| registry field | meaning |
+|---|---|
+| `recipe` | the command the owner's **test** job runs |
+| `lint_recipe` | the command the owner's **lint** job runs, when the suite has a lint half. A suite without one is absent from the lint cell rather than expected there and never run |
+| `environment` | the ONE environment that runs it. Only that cell loses its reuse (R7); the owner's other L1 cells stay reusable |
+| `counts` / `counts_args` | how `companion_suites.py` obtains machine-readable counts: `json` (this repository's own document, written by `suite_runner.py`) or `vitest` (`--reporter=json`) |
+| `counts_reason` | why a suite reports no counts, for a gate with no test cardinality (`tsc --noEmit`). Rendered as `not recorded` with this reason — never `0` |
+| `node` | the suite needs the Node + pnpm toolchain, which is what `node-environments` is derived from |
+
+`_package-ci.yml` runs one step per job that invokes
+`scripts/ci/companion_suites.py` for that cell's `{environment, gate}`; the
+runner resolves the package's declared names against the registry, runs each
+attached suite once, and records **one** outcome, count, and command duration
+per suite. A green Rust JUnit report must never hide a failed OR SKIPPED
+companion suite, and one suite's success can never cover another's: every
+declared suite is answered for separately, an unreported suite fails its cell,
+and an outcome for a suite the cell never declared fails it as a mis-wired
+producer.
 
 ### Exclusions must be owned and time-bounded
 
@@ -561,15 +575,15 @@ removed its execution from the environment lists the area hands each package.
 
 `ci.yml`'s `ci-gate` job is the **only** check branch protection should
 require. It applies no policy: it `needs` every blocking top-level job
-(`validation`, `scope`, `preflight`, `area-ci`, `biscuit-tui-captured-stdout`,
-`ci-tooling`), runs `if: always()`, and its one step folds `needs.*.result`,
+(`validation`, `scope`, `preflight`, `area-ci`), runs `if: always()`, and its
+one step folds `needs.*.result`,
 passing only when every result is `success` or `skipped`. `skipped` is
 accepted by design — an unselected area's job is skipped through its `if:`,
 and on a reused validation every downstream job is — while `failure` and
 `cancelled` block. Because `needs` names static job ids, a cell the plan
 scheduled and no job produced (`MISSING`) is invisible to the fold; each
 area's own coverage audit catches it. `continue-on-error` turns a failed job's result
-into `success` for the fold, so it is reserved for the advisory summary and no
+into `success` for the fold, so it is reserved for advisory `ci-reporting` and no
 blocking job may carry it. All of this was measured in a scratch repository:
 `fixes/2026-09-11-cicd-cleanup/fixtures/scratch-2026-09-12.md`.
 
@@ -621,7 +635,7 @@ junit-<package>-<tier>-<environment>/
     <tier>/<package>.xml      that invocation's verbatim JUnit document
 
 status-<package>-<job>[-<environment>]/
-    status.json               {"package","job","environment","result"[,"detail"][,"companion"]}
+    status.json               {"package","job","environment","result"[,"detail"][,"duration_s"][,"companions"]}
 ```
 
 Every test job uploads the whole `target/nextest/ci-reports` **staging
@@ -634,11 +648,17 @@ with no covering manifest record has no trustworthy identity and is dropped.
 producer job visibly; the status document preserves the exact cell identity
 and diagnosis. The status step and its upload carry `if: ${{ always() }}`, so
 a job that failed in setup or was cancelled still reports itself; a job that reports nothing at all is
-`MISSING`, never a pass. A package that
-declares a companion suite also records the companion step's `companion`
-outcome on every run — not only on failure — because a *skipped* companion
-leaves no other evidence, and the rollup downgrades a green cell whose
-declared companion produced no success evidence (R12).
+`MISSING`, never a pass. A package that declares companion suites records one
+`companions` entry per suite on every run — not only on failure — because a
+*skipped* companion leaves no other evidence, and the rollup downgrades a green
+cell whose declared companion produced no success evidence (R12). Each entry
+carries that suite's own `outcome`, its `counts` or the `reason` it has none,
+and its command `duration_s`.
+
+A gate with no JUnit report to carry its duration records it here instead:
+`lint` times the `just _lint` invocation itself, not the job, which also
+includes checkout, toolchain setup, cache restore, and provisioning (R14). An
+unmeasured duration is **absent**, never `0`.
 
 ### `job` is read as a tier
 
@@ -728,14 +748,34 @@ tooling; regenerate it with `python3 scripts/ci/schema.py`.
 
 ## CI's own tooling
 
-The merge-gate binary (`scripts/ci-rollup*.rs`), the scope calculator
-(`scripts/ci/`), and the policy store (`.github/ci/`) are not Cargo packages,
-so a change to them selects nothing. `affected_scope.py` maps those paths to a
-`ci_tooling` flag and `ci.yml` runs their own suites (the scope tests and the
-rollup's nextest suite) on a dedicated `ci-tooling` leg, classified in the
-advisory summary like the specialized workflows. The same leg runs the R11
-workflow-contract suite (`cargo nextest run -p test-toolkit --test
-ci_workflow_contracts`), and a change to any `.github/workflows/` file or to
-that suite's source also sets the flag, because `test-toolkit` is
-`gates = false` (promotion-pending, expiry 2026-10-31) and no area job
-schedules it. The durable fix remains its promotion to a gating package.
+CI's own suites are owned by two ordinary workspace members. `repo-deps`
+(`scripts/`) owns the merge-gate and plan binaries' Nextest suites and the
+`scripts/ci/test_*.py` contracts; `test-toolkit` (`tools/test-toolkit/`) owns
+`ci_workflow_contracts` and the `tools/test-audit` typecheck/Vitest pair. Both
+gate, so a change to CI's own tooling reaches CI as an ordinary package job.
+
+`SUITE_REGISTRY` in `affected_scope.py` is the one declaration site: suite name
+→ owner, canonical recipe, environment, kind (`cargo` or `companion`), and how
+that suite reports counts. `validate_suite_registry` rejects an unknown,
+unowned, doubly-owned, recipe-less, or undeclared suite, and a companion that
+neither reports counts nor says why it cannot.
+
+Selection follows ownership. `scripts/**` and `tools/test-toolkit/**` are their
+owners' package directories, so ordinary source ownership already selects them.
+`SUITE_OWNER_PREFIXES` / `SUITE_OWNER_PATHS` carry only what lies outside a
+member directory, plus the two owners' own manifests:
+
+| changed input | selects |
+|---|---|
+| `.github/ci/**` | `repo-deps` |
+| `scripts/Cargo.toml` | `repo-deps` |
+| `.github/workflows/**` | `test-toolkit` |
+| `tools/test-audit/**`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` | `test-toolkit` |
+| `tools/test-toolkit/Cargo.toml` | `test-toolkit` |
+
+A trigger selection is narrower than a source change: the changed path says
+nothing about the owner's public API, so it contributes no reverse
+dependencies and no dependent seam, and the owner's area reports
+`changed suite input owned by package(s) …` rather than a source change.
+No path selects the full workspace; `workflow_dispatch` / `--all` remains the
+only full-scope route.

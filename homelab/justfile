@@ -374,7 +374,10 @@ lint-frontend:
 # test` AFTER every Rust package had passed, and the rollup parses Rust JUnit
 # only, so `homelab` rendered PASS 222/0/0 on three environments while every
 # `homelab / test` job was red (run 30427703024).
-test-frontend:
+# `args` reach Vitest verbatim, which is how CI asks the suite for machine-
+# readable counts (`--reporter=json --outputFile=...`) without a second recipe
+# that could drift from this one.
+test-frontend *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v pnpm >/dev/null 2>&1; then
@@ -401,7 +404,7 @@ test-frontend:
     echo ""
     cd ./server/frontend
     pnpm install --frozen-lockfile 2>/dev/null || pnpm install
-    pnpm test
+    pnpm test {{ args }}
 
 # typecheck frontend
 typecheck-frontend:
@@ -472,7 +475,7 @@ drift *args="":
     @echo "- step 3: review CLAUDE.md for needed updates"
     @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
     @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- homelab {{ DOCS }} {{ args }}
+    @cargo run -p repo-deps --bin drift -- homelab {{ DOCS }} {{ args }}
     @_speak "the drift recipe for the homelab package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
 
 # No-op recipe: reference color vars so linters won't report them as unused.

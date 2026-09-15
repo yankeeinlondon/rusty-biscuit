@@ -1,5 +1,3 @@
-[workspace]
-
 [package]
 name = "repo-deps"
 version = "0.1.0"
@@ -12,7 +10,7 @@ publish = false
 # without this split the CI job whose entire purpose is to be the fast,
 # always-runs required check would pay for gix, duckdb, and the terminal
 # renderer. CI builds it as:
-#     cargo run --manifest-path scripts/Cargo.toml --no-default-features --bin ci-rollup
+#     cargo run -p repo-deps --no-default-features --bin ci-rollup
 [features]
 default = ["local-tools"]
 local-tools = [
@@ -55,3 +53,25 @@ sniff = { path = "../sniff/lib", optional = true }
 
 [dev-dependencies]
 rstest = "0.23"
+
+# The L1 suite covers `ci-rollup`, `ci-plan`, and `drift`, all of which need the
+# default `local-tools` feature; declaring no `features` here is what selects it.
+#
+# The planner's Python contracts are this package's companion suites: they test
+# `scripts/ci/`, they are not reachable through `cargo nextest`, and every one
+# is registered to `repo-deps` in `scripts/ci/affected_scope.py`'s
+# `SUITE_REGISTRY`. They run on the one environment that registry declares.
+[package.metadata.ci.tests]
+tiers = ["L1"]
+companion-suites = [
+    "test_affected_scope.py",
+    "test_ci_local.py",
+    "test_constraints.py",
+    "test_evidence_reuse.py",
+    "test_local_evidence.py",
+    "test_publish_gaps.py",
+    "test_resolved_plan.py",
+    "test_reuse_validation.py",
+    "test_runner_loss.py",
+    "test_schema.py",
+]

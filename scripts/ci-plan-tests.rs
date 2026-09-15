@@ -22,7 +22,7 @@ fn plan_json(prohibited: bool) -> String {
     };
     format!(
         r#"{{
-        "schema_version":2,"base":"{a}","head":"{b}","change_class":"package",
+        "schema_version":3,"base":"{a}","head":"{b}","change_class":"package",
         "full_scope":false,"full_scope_gates":[],
         "areas":[{{"area":"pkg","selection_reason":"source change","packages":["alpha"]}}],
         "packages":[],"source_packages":["alpha"],"reverse_dependencies":[],
@@ -45,7 +45,7 @@ fn plan_json(prohibited: bool) -> String {
         "accepted_evidence":[],"evidence_rejections":["gate-inputs-changed: alpha/macos-latest/L1"],
         "policy_gaps":[],"prohibited_cells":{prohibited_cells},
         "job_estimate":4,"preflight_os":["ubuntu-latest"],
-        "preflight_reason":"package-local change","flags":{{"ci_tooling":false}}}}"#,
+        "preflight_reason":"package-local change","flags":{{}}}}"#,
         a = "a".repeat(40),
         b = "b".repeat(40),
         wsl = wsl,

@@ -6,7 +6,7 @@ is also their validator.
 
 | Document | Version | Written by | Read by |
 |---|---|---|---|
-| Resolved plan | 2 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
+| Resolved plan | 3 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
 | Validation receipt | 2 | the pre-push hook, `scripts/cross-check.sh` | `scripts/ci/local_evidence.py`, the planner, `ci-rollup` |
 | Scope receipt | 1 | the pre-push hook (`local_evidence.py scope-record`) | `ci.yml` through `local_evidence.py scope-verify` |
 
@@ -33,7 +33,7 @@ so Rust tooling can assert against it without running Python. Regenerate it with
 >
 > A third document, the rollup's own `ci-results.json`, is **not** defined here:
 > it is Rust-owned by `scripts/ci-rollup.rs` and is at `schema_version: 3`,
-> versioned independently of the plan's 2, the receipt's 2, and the baseline's
+> versioned independently of the plan's 3, the receipt's 2, and the baseline's
 > 2. The plan fields that tool reads are asserted against `contract.json` by
 > `plan_fields_match_the_frozen_contract`, so renaming one breaks a test rather
 > than silently dropping a field serde never recognized.
@@ -54,6 +54,13 @@ so Rust tooling can assert against it without running Python. Regenerate it with
 > `reusable`. They are required, so a version-1 scope receipt misses as
 > `scope-schema` and CI calculates scope itself — the miss the receipt
 > contract permits — rather than hitting and then having to re-run selection.
+>
+> Version 3 adds the required `change_inventory`: the changed paths,
+> normalized and bucketed once by the calculator so the plan renderer, the
+> pre-push report, and `ci-reporting` all state the same thing about what
+> changed. A version-2 scope receipt misses once as `scope-schema` for the same
+> reason a version-1 one did; validation receipts are untouched, so their
+> version stays at 2 and nothing already-recorded is invalidated.
 
 ## Resolved plan
 
@@ -67,6 +74,16 @@ identity** of every cell, artifact, baseline entry, and receipt. **Area is a
 derived grouping field** carried alongside it for presentation and outcome
 ownership. A cell whose `area` disagrees with its package record is invalid.
 
+- `change_inventory` — the changed paths, normalized to one repository-relative
+  POSIX spelling, de-duplicated, and sorted into exactly one of
+  `configuration`, `documentation`, `source`, `other`, with per-bucket and
+  total counts. A manual full-scope run consulted no diff and records
+  `diff_available: false` with a reason instead of empty buckets, which would
+  read as "nothing changed". It is computed from the paths alone and is a
+  *sibling* of `change_class`, not a summary of it: `change_class` is derived
+  from the gating packages a change selects, so a change to a `gates = false`
+  package's Rust source correctly reports `change_class: documentation` beside
+  a `source` bucket.
 - `areas[]` — one entry per selected area, with the reason it was selected and
   the packages contributing to it. Nested areas such as `claudine/rendezvous`
   are their own entries, never folded into a parent.

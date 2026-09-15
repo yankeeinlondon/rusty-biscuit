@@ -302,11 +302,9 @@ then repeat the workspace.
 
 Specialized runtime contracts are **reusable workflows called by `ci.yml`**, not independently
 path-triggered ones, so a commit produces one CI run rather than a wall of overlapping ones. Each
-is selected from affected scope and gated on preflight:
-
-| Workflow | Selected when | Unique evidence |
-|---|---|---|
-| `biscuit-tui-windows-captured-stdout.yml` | `biscuit-tui` in scope | attached-console captured-stdout boundary |
+would be selected from affected scope and gated on preflight. **The inventory is currently empty:**
+the last entry retired when Biscuit TUI's attached-console captured-stdout test became ordinary
+`windows-latest` L1 evidence inside `biscuit-tui-cli`'s own cell.
 
 Messenger and all three Rendezvous crates are owned by their ordinary
 package-keyed L1 cells on Ubuntu, Windows, macOS, and WSL2. Messenger declares

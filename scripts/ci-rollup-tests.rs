@@ -5,6 +5,7 @@
 
 use super::*;
 use rstest::rstest;
+use std::env;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -67,11 +68,38 @@ fn passing_record(package: &str, environment: &str, tier: Tier) -> RunRecord {
 
 /// The repository root. `scripts/` is a workspace of its own, so the manifest
 /// directory is one level down.
+/// The repository checkout these fixtures read.
+///
+/// `CARGO_MANIFEST_DIR` is baked in at compile time, so a nextest archive built
+/// on one host and run on another — which is exactly how the `wsl2-ubuntu` cell
+/// runs — resolves it to a path the guest does not have. Falling back to the
+/// run-time working directory finds the remapped checkout there; `.github/ci`
+/// is the marker because every fixture below reads something under it.
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    let baked = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("scripts/ has a parent")
-        .to_path_buf()
+        .to_path_buf();
+    if is_checkout(&baked) {
+        return baked;
+    }
+    env::current_dir()
+        .ok()
+        .and_then(|cwd| cwd.ancestors().find(|a| is_checkout(a)).map(Path::to_path_buf))
+        .unwrap_or(baked)
+}
+
+fn is_checkout(path: &Path) -> bool {
+    path.join(".github/ci").is_dir()
+}
+
+/// [`repo_root`], but `None` when no checkout is reachable at all.
+///
+/// A fixture that reads the real tree must distinguish "the archive is running
+/// somewhere without the sources" from a genuine contract failure.
+fn checkout_root() -> Option<PathBuf> {
+    let root = repo_root();
+    is_checkout(&root).then_some(root)
 }
 
 fn expectation(package: &str, environment: &str, tier: Tier) -> ExpectedCell {
@@ -178,6 +206,7 @@ fn policy(package: &str) -> PackagePolicy {
         tiers: vec![Tier::L1],
         l2_backends: Vec::new(),
         companion_suites: Vec::new(),
+        lint_companion_suites: Vec::new(),
         exclusion: None,
     }
 }
@@ -546,6 +575,8 @@ fn a_failing_lint_is_never_blamed_for_a_missing_l1_cell() {
         environment: None,
         detail: None,
         companion: None,
+        companions: BTreeMap::new(),
+        duration_s: None,
         dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
@@ -586,6 +617,8 @@ fn a_producer_detail_explains_why_a_cell_has_no_evidence() {
         environment: Some("wsl2-ubuntu".to_owned()),
         detail: Some("the WSL2 guest became unreachable after the test step".to_owned()),
         companion: None,
+        companions: BTreeMap::new(),
+        duration_s: None,
         dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
@@ -616,6 +649,8 @@ fn a_failing_l1_is_still_blamed_for_a_missing_l2_cell() {
         environment: None,
         detail: None,
         companion: None,
+        companions: BTreeMap::new(),
+        duration_s: None,
         dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
@@ -740,6 +775,8 @@ fn a_producer_failure_downgrades_a_green_report() {
                 .to_owned(),
         ),
         companion: None,
+        companions: BTreeMap::new(),
+        duration_s: None,
         dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
@@ -777,6 +814,8 @@ fn a_producer_success_never_upgrades_a_failing_cell() {
         environment: Some("ubuntu-latest".to_owned()),
         detail: None,
         companion: None,
+        companions: BTreeMap::new(),
+        duration_s: None,
         dependents: Vec::new(),
     }];
     let expected_tests = BTreeMap::new();
@@ -811,6 +850,8 @@ fn companion_status(result: &str, companion: Option<&str>) -> ProducerStatus {
         environment: Some("ubuntu-latest".to_owned()),
         detail: None,
         companion: companion.map(str::to_owned),
+        companions: BTreeMap::new(),
+        duration_s: None,
         dependents: Vec::new(),
     }
 }
@@ -900,6 +941,7 @@ fn a_companion_with_no_reported_outcome_downgrades_a_green_report() {
 fn a_skipped_companion_downgrades_a_green_lint() {
     let mut homelab = policy("homelab-server");
     homelab.companion_suites = vec!["homelab-frontend".to_owned()];
+    homelab.lint_companion_suites = vec!["homelab-frontend".to_owned()];
     let statuses = vec![ProducerStatus {
         package: "homelab-server".to_owned(),
         job: "lint".to_owned(),
@@ -907,6 +949,8 @@ fn a_skipped_companion_downgrades_a_green_lint() {
         environment: None,
         detail: None,
         companion: Some("skipped".to_owned()),
+        companions: BTreeMap::new(),
+        duration_s: None,
         dependents: Vec::new(),
     }];
 
@@ -922,6 +966,74 @@ fn a_skipped_companion_downgrades_a_green_lint() {
     assert_eq!(cell.state, CellState::Fail);
 }
 
+/// The other half of that rule: a companion with no lint recipe is not the
+/// lint cell's to evidence. `repo-deps` owns ten Python contract suites and no
+/// lint companion at all, so a lint cell that demanded companion evidence from
+/// its declaration alone would fail every one of its runs.
+#[test]
+fn a_test_only_companion_does_not_downgrade_a_green_lint() {
+    let mut owner = policy("repo-deps");
+    owner.companion_suites = vec!["test_schema.py".to_owned()];
+    owner.lint_companion_suites = Vec::new();
+    let statuses = vec![ProducerStatus {
+        package: "repo-deps".to_owned(),
+        job: "lint".to_owned(),
+        result: "success".to_owned(),
+        environment: None,
+        detail: None,
+        companion: None,
+        companions: BTreeMap::new(),
+        duration_s: Some(42),
+        dependents: Vec::new(),
+    }];
+
+    let cell = only_cell(status_cells(
+        &statuses,
+        &scope_of(&["repo-deps"]),
+        &[],
+        &[owner],
+        &[],
+    ));
+    assert_eq!(cell.state, CellState::Pass, "{:?}", cell.reasons);
+    assert!(cell.companions.is_empty());
+    assert_eq!(
+        cell.duration_s, 42,
+        "R14: the lint COMMAND's duration reaches the cell, because no JUnit \
+         report carries it"
+    );
+}
+
+/// AC13: an unmeasured lint command is absent, never a `0` a reader would take
+/// for an instantaneous clippy run.
+#[test]
+fn a_lint_status_with_no_duration_records_none() {
+    let statuses = vec![ProducerStatus {
+        package: "queue".to_owned(),
+        job: "lint".to_owned(),
+        result: "failure".to_owned(),
+        environment: None,
+        detail: None,
+        companion: None,
+        companions: BTreeMap::new(),
+        duration_s: None,
+        dependents: Vec::new(),
+    }];
+    let cell = only_cell(status_cells(
+        &statuses,
+        &scope_of(&["queue"]),
+        &[],
+        &[policy("queue")],
+        &[],
+    ));
+    assert_eq!(cell.duration_s, 0);
+    let rendered = serde_json::to_string(&rollup_of(vec![cell], &["queue"]))
+        .expect("the rollup serializes");
+    assert!(
+        !rendered.contains("\"companions\""),
+        "a cell with no companions declares none rather than an empty list: {rendered}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // status_cells: job results -> cell states
 // ---------------------------------------------------------------------------
@@ -935,6 +1047,8 @@ fn status_cells_map_each_job_result_to_a_cell_state() {
         environment: None,
         detail: None,
         companion: None,
+        companions: BTreeMap::new(),
+        duration_s: None,
         dependents: Vec::new(),
     };
     let statuses = vec![
@@ -979,6 +1093,8 @@ fn status_cells_skip_test_tiers_and_out_of_scope_packages() {
             environment: Some("ubuntu-latest".to_owned()),
             detail: None,
             companion: None,
+            companions: BTreeMap::new(),
+            duration_s: None,
             dependents: Vec::new(),
         },
         ProducerStatus {
@@ -988,6 +1104,8 @@ fn status_cells_skip_test_tiers_and_out_of_scope_packages() {
             environment: None,
             detail: None,
             companion: None,
+            companions: BTreeMap::new(),
+            duration_s: None,
             dependents: Vec::new(),
         },
     ];
@@ -1186,12 +1304,11 @@ fn capability_values_parse_as_booleans_or_governed_objects() {
 
 #[test]
 fn the_checked_in_environments_table_parses_and_is_well_governed() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join(".github")
-        .join("ci")
-        .join("environments.json");
+    let Some(root) = checkout_root() else {
+        eprintln!("the checkout is not present; skipping the checked-in environments fixture");
+        return;
+    };
+    let path = root.join(".github").join("ci").join("environments.json");
     let text = fs::read_to_string(&path).expect("environments.json is readable");
     let doc: EnvironmentsDoc = serde_json::from_str(&text).expect("environments.json parses");
 
@@ -1768,12 +1885,11 @@ fn an_out_of_scope_skip_entry_is_ignored() {
 
 #[test]
 fn the_checked_in_baseline_parses_and_every_entry_is_well_formed() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join(".github")
-        .join("ci")
-        .join("ci-baseline.toml");
+    let Some(root) = checkout_root() else {
+        eprintln!("the checkout is not present; skipping the checked-in baseline fixture");
+        return;
+    };
+    let path = root.join(".github").join("ci").join("ci-baseline.toml");
     let baseline = load_baseline(&path).expect("the checked-in baseline is valid");
 
     for entry in &baseline.skip {
@@ -3275,6 +3391,8 @@ fn a_cancelled_job_is_not_an_accepted_gap() {
         environment: Some("windows-latest".to_owned()),
         detail: None,
         companion: None,
+        companions: BTreeMap::new(),
+        duration_s: None,
         dependents: Vec::new(),
     }];
     let cells = status_cells(
@@ -3317,6 +3435,8 @@ fn a_status_gate_reports_the_target_coverage_the_plan_scheduled_it_for() {
         environment: Some("windows-latest".to_owned()),
         detail: None,
         companion: None,
+        companions: BTreeMap::new(),
+        duration_s: None,
         dependents: Vec::new(),
     }];
 
@@ -3457,7 +3577,11 @@ fn the_result_and_baseline_schemas_version_independently() {
     // The baseline is hand-edited policy and versions its own semantic changes.
     assert_eq!(RESULT_SCHEMA_VERSION, 3);
     assert_eq!(BASELINE_SCHEMA_VERSION, 3);
-    let baseline = load_baseline(&repo_root().join(".github/ci/ci-baseline.toml"))
+    let Some(root) = checkout_root() else {
+        eprintln!("the checkout is not present; skipping the shipped-baseline fixture");
+        return;
+    };
+    let baseline = load_baseline(&root.join(".github/ci/ci-baseline.toml"))
         .expect("the shipped baseline loads");
     assert!(baseline.skip.is_empty());
 }
@@ -3484,7 +3608,11 @@ fn a_plan_from_another_generation_is_refused_rather_than_partly_read() {
 /// recognize.
 #[test]
 fn plan_fields_match_the_frozen_contract() {
-    let text = fs::read_to_string(repo_root().join(".github/ci/schemas/contract.json"))
+    let Some(root) = checkout_root() else {
+        eprintln!("the checkout is not present; skipping the shipped-contract fixture");
+        return;
+    };
+    let text = fs::read_to_string(root.join(".github/ci/schemas/contract.json"))
         .expect("the frozen contract is shipped");
     let contract: serde_json::Value =
         serde_json::from_str(&text).expect("the frozen contract parses");
@@ -3535,7 +3663,11 @@ fn plan_fields_match_the_frozen_contract() {
 /// description; a link to a deleted feature is worse than none.
 #[test]
 fn the_shipped_capability_table_names_what_closes_its_l2_gaps() {
-    let text = fs::read_to_string(repo_root().join(".github/ci/environments.json"))
+    let Some(root) = checkout_root() else {
+        eprintln!("the checkout is not present; skipping the shipped-capability fixture");
+        return;
+    };
+    let text = fs::read_to_string(root.join(".github/ci/environments.json"))
         .expect("environments.json is readable");
     let doc: EnvironmentsDoc = serde_json::from_str(&text).expect("environments.json parses");
 
@@ -3552,11 +3684,26 @@ fn the_shipped_capability_table_names_what_closes_its_l2_gaps() {
             "{environment}'s tmux gap names no closing work"
         );
         assert!(
-            repo_root().join(&gap.closes).exists(),
+            root.join(&gap.closes).exists(),
             "{environment}'s tmux gap points at {}, which does not exist",
             gap.closes
         );
     }
+}
+
+/// The first Python interpreter on `PATH` that actually runs.
+///
+/// Windows ships an App Execution Alias for `python3` that spawns successfully
+/// and then exits non-zero telling the caller to install from the Microsoft
+/// Store, so a `Command::output()` that returns `Ok` is not evidence an
+/// interpreter exists. Only a successful `--version` is.
+fn python_interpreter() -> Option<&'static str> {
+    ["python3", "python"].into_iter().find(|candidate| {
+        std::process::Command::new(candidate)
+            .arg("--version")
+            .output()
+            .is_ok_and(|probe| probe.status.success())
+    })
 }
 
 /// End to end over the real planner: the shipped `affected_scope.py` writes a
@@ -3567,8 +3714,16 @@ fn the_shipped_capability_table_names_what_closes_its_l2_gaps() {
 /// rather than failing: the Rust suite must still run on a host without it.
 #[test]
 fn the_real_planners_plan_rolls_up() {
-    let Ok(output) = std::process::Command::new("python3")
-        .current_dir(repo_root())
+    let Some(python) = python_interpreter() else {
+        eprintln!("no Python interpreter is available; skipping the end-to-end plan fixture");
+        return;
+    };
+    let Some(root) = checkout_root() else {
+        eprintln!("the checkout is not present; skipping the end-to-end plan fixture");
+        return;
+    };
+    let output = std::process::Command::new(python)
+        .current_dir(&root)
         .args([
             "scripts/ci/affected_scope.py",
             "--resolved-plan",
@@ -3576,10 +3731,7 @@ fn the_real_planners_plan_rolls_up() {
             "claudine/lib/src/lib.rs",
         ])
         .output()
-    else {
-        eprintln!("python3 is unavailable; skipping the end-to-end plan fixture");
-        return;
-    };
+        .expect("the probed interpreter must still be runnable");
     assert!(
         output.status.success(),
         "the planner failed: {}",
@@ -4185,4 +4337,302 @@ fn a_failed_producer_with_no_report_is_missing() {
     assert_eq!(cell.state, CellState::Missing);
     let findings = verdict(&rollup_of(vec![cell], &["queue"]), &Baseline::default(), None);
     assert!(blocks_with_rule(&findings, "cell-missing"), "{findings:#?}");
+}
+
+// ---------------------------------------------------------------------------
+// Per-suite companion outcomes — fixes/2026-09-13-cicd-redundancies, Phase 5
+//
+// A producer records ONE outcome, count, and command duration PER declared
+// suite. The shape these replaced carried a single `companion` string for the
+// whole cell, so one suite's success satisfied every suite the package
+// declared, and no outcome carried a suite name, counts, or a duration.
+//
+// The fixtures are written against the producer status's JSON — the real
+// artifact `_package-ci.yml` uploads — rather than against the `ProducerStatus`
+// literal, so they assert what a producer actually has to write.
+//
+// The family that pins the single-outcome fallback
+// (`a_successful_companion_keeps_the_cell_green`,
+// `a_skipped_companion_downgrades_a_green_report`, ...) stays above: an
+// artifact from a producer that predates per-suite records must still
+// downgrade its cell.
+// ---------------------------------------------------------------------------
+
+/// A second declared suite, so one producer status has to carry more than one
+/// outcome. Named from `test-toolkit`'s half of the ownership table rather
+/// than invented, so the fixture and the registry cannot drift apart.
+const SECOND_SUITE: &str = "test-audit-vitest";
+
+/// A producer status parsed from the JSON `_package-ci.yml` uploads.
+///
+/// Deserializing rather than constructing keeps these fixtures honest about
+/// the artifact: a field the workflow does not actually write cannot satisfy
+/// them.
+fn status_json(json: &str) -> ProducerStatus {
+    serde_json::from_str(json).expect("the producer status fixture must parse")
+}
+
+fn two_suite_expectation() -> ExpectedCell {
+    let mut expectation = expectation("homelab-server", "ubuntu-latest", Tier::L1);
+    expectation.companion_suites =
+        vec!["homelab-frontend".to_owned(), SECOND_SUITE.to_owned()];
+    expectation
+}
+
+fn classify_one(expected: &[ExpectedCell], statuses: &[ProducerStatus]) -> Cell {
+    let expected_tests = BTreeMap::new();
+    only_cell(classify(&ClassifyInputs {
+        expected,
+        records: &[passing_record("homelab-server", "ubuntu-latest", Tier::L1)],
+        statuses,
+        expected_tests: &expected_tests,
+    }))
+}
+
+/// AC4: one suite's success must not cover another suite that never ran.
+#[test]
+fn one_declared_suites_success_cannot_cover_anothers_skip() {
+    let status = status_json(
+        r#"{
+            "package": "homelab-server",
+            "job": "L1",
+            "result": "success",
+            "environment": "ubuntu-latest",
+            "companion": "success",
+            "companions": {
+                "homelab-frontend": {"outcome": "success", "tests": 218, "duration_s": 1},
+                "test-audit-vitest": {"outcome": "skipped"}
+            }
+        }"#,
+    );
+    let cell = classify_one(&[two_suite_expectation()], &[status]);
+    assert_eq!(
+        cell.state,
+        CellState::Fail,
+        "a successful companion must not cover a second declared suite \
+         that was skipped"
+    );
+    assert!(
+        cell.reasons.iter().any(|reason| reason.contains(SECOND_SUITE)),
+        "the downgrade must name the suite that never ran, not the one \
+         that passed: {:?}",
+        cell.reasons
+    );
+}
+
+/// AC4: an outcome for a suite the package never declared is a mis-wired
+/// producer, not evidence.
+#[test]
+fn a_status_naming_an_unregistered_suite_fails_validation() {
+    let status = status_json(
+        r#"{
+            "package": "homelab-server",
+            "job": "L1",
+            "result": "success",
+            "environment": "ubuntu-latest",
+            "companion": "success",
+            "companions": {"not-a-registered-suite": {"outcome": "success"}}
+        }"#,
+    );
+    let mut expectation = expectation("homelab-server", "ubuntu-latest", Tier::L1);
+    expectation.companion_suites = vec!["homelab-frontend".to_owned()];
+    let cell = classify_one(&[expectation], &[status]);
+
+    assert_eq!(
+        cell.state,
+        CellState::Fail,
+        "an unregistered companion suite in a producer status is a \
+         mis-wired producer, not evidence"
+    );
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|reason| reason.contains("not-a-registered-suite")),
+        "an unregistered companion suite must be rejected by name: {:?}",
+        cell.reasons
+    );
+}
+
+/// AC13: an unmeasured suite renders `not recorded` with a reason, never `0`.
+///
+/// S3 measured the concrete case: `pnpm --dir tools/test-audit typecheck` is
+/// `tsc --noEmit`, a pass/fail gate with no test cardinality at all. No flag
+/// can invent counts for it.
+#[test]
+fn a_companion_with_no_counts_renders_not_recorded_never_zero() {
+    let status = status_json(
+        r#"{
+            "package": "homelab-server",
+            "job": "L1",
+            "result": "success",
+            "environment": "ubuntu-latest",
+            "companion": "success",
+            "companions": {
+                "homelab-frontend": {
+                    "outcome": "success",
+                    "reason": "typecheck gate reports no test counts"
+                }
+            }
+        }"#,
+    );
+    let mut expectation = expectation("homelab-server", "ubuntu-latest", Tier::L1);
+    expectation.companion_suites = vec!["homelab-frontend".to_owned()];
+    let cell = classify_one(&[expectation], &[status]);
+    assert_eq!(cell.state, CellState::Pass, "an unmeasured suite still passed");
+
+    let rendered = serde_json::to_string(&rollup_of(vec![cell], &["homelab-server"]))
+        .expect("the rollup serializes");
+    assert!(
+        rendered.contains("not recorded"),
+        "an unmeasured companion must reach the report as `not \
+         recorded`, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("typecheck gate reports no test counts"),
+        "`not recorded` must carry the producer's reason: {rendered}"
+    );
+}
+
+/// A cell that declared no companion at all is still not a place to run one.
+#[test]
+fn a_companion_outcome_on_a_cell_that_declared_none_is_rejected() {
+    let status = status_json(
+        r#"{
+            "package": "queue",
+            "job": "L1",
+            "result": "success",
+            "environment": "ubuntu-latest",
+            "companions": {"homelab-frontend": {"outcome": "success"}}
+        }"#,
+    );
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[expectation("queue", "ubuntu-latest", Tier::L1)],
+        records: &[passing_record("queue", "ubuntu-latest", Tier::L1)],
+        statuses: &[status],
+        expected_tests: &BTreeMap::new(),
+    }));
+    assert_eq!(cell.state, CellState::Fail);
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|reason| reason.contains("unregistered companion suite")),
+        "{:?}",
+        cell.reasons
+    );
+}
+
+/// The measured case, so `not recorded` stays a statement about a measurement
+/// that does not exist rather than the only thing this path can render.
+#[test]
+fn a_measured_companion_reports_its_counts_and_duration() {
+    let status = status_json(
+        r#"{
+            "package": "homelab-server",
+            "job": "L1",
+            "result": "success",
+            "environment": "ubuntu-latest",
+            "companions": {
+                "homelab-frontend": {
+                    "outcome": "success",
+                    "counts": {"total": 218, "passed": 189, "failed": 0, "skipped": 29, "errored": 0},
+                    "duration_s": 0.96
+                }
+            }
+        }"#,
+    );
+    let mut expectation = expectation("homelab-server", "ubuntu-latest", Tier::L1);
+    expectation.companion_suites = vec!["homelab-frontend".to_owned()];
+    let cell = classify_one(&[expectation], &[status]);
+    assert_eq!(cell.state, CellState::Pass, "{:?}", cell.reasons);
+
+    let companion = cell
+        .companions
+        .iter()
+        .find(|companion| companion.suite == "homelab-frontend")
+        .expect("the measured suite reaches the report");
+    assert_eq!(companion.outcome, "success");
+    assert_eq!(companion.counts.expect("counts were recorded").total, 218);
+    assert_eq!(companion.duration_s, Some(0.96));
+    assert_eq!(companion.measurements, "218 test(s), 0 failed, 1s");
+
+    let rendered = serde_json::to_string(&rollup_of(vec![cell], &["homelab-server"]))
+        .expect("the rollup serializes");
+    assert!(
+        !rendered.contains("not recorded"),
+        "a measured suite must not be rendered as unrecorded: {rendered}"
+    );
+}
+
+/// R7: the plan decides which cell runs a companion, and the rollup reads that
+/// decision rather than re-deriving it from a runner capability.
+#[test]
+fn the_rollup_takes_its_companion_expectation_from_the_plan_cell() {
+    let mut hosting = plan_cell_json("homelab-server", "ubuntu-latest", "L1", false);
+    hosting["companions"] = serde_json::json!([{
+        "name": "homelab-frontend",
+        "recipe": "cd homelab && just test-frontend",
+        "environment": "ubuntu-latest",
+        "counts": "vitest",
+    }]);
+    let elsewhere = plan_cell_json("homelab-server", "windows-latest", "L1", false);
+    let plan = plan_of(vec![hosting, elsewhere]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+
+    let hosting = expected
+        .iter()
+        .find(|cell| cell.key.environment == "ubuntu-latest")
+        .expect("the ubuntu cell survives");
+    assert_eq!(hosting.companion_suites, vec!["homelab-frontend".to_owned()]);
+    let elsewhere = expected
+        .iter()
+        .find(|cell| cell.key.environment == "windows-latest")
+        .expect("the windows cell survives");
+    assert!(
+        elsewhere.companion_suites.is_empty(),
+        "a cell the plan attached no companion to expects none"
+    );
+
+    // And the expectation is load-bearing: the hosting cell's green Rust
+    // report does not answer for the suite, while the other cell's does.
+    let records = [
+        passing_record("homelab-server", "ubuntu-latest", Tier::L1),
+        passing_record("homelab-server", "windows-latest", Tier::L1),
+    ];
+    let cells = classify(&ClassifyInputs {
+        expected: &expected,
+        records: &records,
+        statuses: &[],
+        expected_tests: &BTreeMap::new(),
+    });
+    assert_eq!(
+        find_cell(&cells, "homelab-server", "ubuntu-latest", Tier::L1).state,
+        CellState::Fail
+    );
+    assert_eq!(
+        find_cell(&cells, "homelab-server", "windows-latest", Tier::L1).state,
+        CellState::Pass
+    );
+}
+
+/// NOT pending: the single-outcome shape these contracts replace.
+///
+/// Kept so Phase 5 cannot satisfy the fixtures above by changing what the
+/// fixture builds rather than what the rollup reads — a status carrying only
+/// the legacy field must still downgrade a green cell when it is not
+/// `success`.
+#[test]
+fn the_legacy_single_companion_outcome_still_downgrades() {
+    let status = status_json(
+        r#"{
+            "package": "homelab-server",
+            "job": "L1",
+            "result": "success",
+            "environment": "ubuntu-latest",
+            "companion": "skipped"
+        }"#,
+    );
+    let mut expectation = expectation("homelab-server", "ubuntu-latest", Tier::L1);
+    expectation.companion_suites = vec!["homelab-frontend".to_owned()];
+    let cell = classify_one(&[expectation], &[status]);
+    assert_eq!(cell.state, CellState::Fail);
 }

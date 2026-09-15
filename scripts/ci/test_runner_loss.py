@@ -532,11 +532,17 @@ class JobNameCorpusTests(unittest.TestCase):
     def test_the_legacy_area_rollup_label_remains_non_producer(self) -> None:
         self.assertTrue(is_non_producer("area-ci (playa) / rollup"))
 
-    def test_the_advisory_summary_is_recognized_as_a_judge(self) -> None:
-        summary = jobs_in("ci.yml")["summary"]
-        label = job_label("summary", summary, self.PACKAGE, self.ENVIRONMENT)
-        self.assertIn("continue-on-error: true", summary)
+    def test_the_advisory_report_is_recognized_as_a_judge(self) -> None:
+        report = jobs_in("ci.yml")["ci-reporting"]
+        label = job_label("ci-reporting", report, self.PACKAGE, self.ENVIRONMENT)
+        self.assertIn("continue-on-error: true", report)
         self.assertTrue(is_non_producer(label), label)
+
+    def test_the_pre_rename_advisory_spelling_stays_recognized(self) -> None:
+        # A retry decision may be taken over a run created before `summary`
+        # became `ci-reporting`; reading that run's advisory job as a producer
+        # would veto an otherwise legitimate runner-loss retry.
+        self.assertTrue(is_non_producer("infrastructure summary (advisory)"))
 
 
 if __name__ == "__main__":

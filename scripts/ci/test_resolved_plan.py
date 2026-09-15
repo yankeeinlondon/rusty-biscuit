@@ -20,10 +20,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import affected_scope  # noqa: E402
 import schema  # noqa: E402
 from affected_scope import (  # noqa: E402
     ENVIRONMENTS_CONFIG,
     ROOT,
+    apply_accepted_cells,
     area_slug,
     calculate_scope,
     legacy_scope_document,
@@ -188,10 +190,118 @@ class SelectionTests(PlannerFixture):
         self.assertEqual([], self.job_packages(plan))
         self.assertEqual("documentation", plan["change_class"])
 
-    def test_ci_tooling_change_selects_no_cargo_package_job(self) -> None:
+    def test_ci_tooling_change_schedules_its_owner_and_nothing_else(self) -> None:
+        # Until `scripts/` joined the root workspace these suites ran in a job
+        # no plan selected. `repo-deps` owns them now, so the change reaches CI
+        # as an ordinary package job — and still only that one.
         plan = self.plan("scripts/ci/affected_scope.py")
-        self.assertEqual([], self.job_packages(plan))
-        self.assertTrue(plan["flags"]["ci_tooling"])
+        self.assertEqual(["repo-deps"], self.job_packages(plan))
+        record = self.package_record(plan, "repo-deps")
+        self.assertEqual("root", record["area"])
+        self.assertEqual("package", plan["change_class"])
+
+
+class SuiteOwnershipCorpusTests(PlannerFixture):
+    """AC4/AC5 against the shipped registry, manifests, and workspace graph.
+
+    `test_affected_scope.py` validates the registry as a table. These fixtures
+    are what stop the table from being internally consistent and wrong about
+    the repository: an owner that is not a member, a manifest claiming a suite
+    the registry gives to someone else, or a trigger that selects the wrong
+    package once the real member set is in play.
+    """
+
+    def test_every_registered_owner_is_a_workspace_member(self) -> None:
+        members = {record["name"] for record in self.packages.values()}
+        orphans = sorted(
+            {
+                entry["owner"]
+                for entry in affected_scope.SUITE_REGISTRY.values()
+                if entry["owner"] not in members
+            }
+        )
+        self.assertEqual(
+            [],
+            orphans,
+            "a suite owned by a non-member is owned by nothing CI can schedule",
+        )
+
+    def test_every_declared_companion_is_registered_to_its_declarer(self) -> None:
+        declarations = {
+            name: record["companion_suites"]
+            for name, record in self.policy.items()
+            if record["companion_suites"]
+        }
+        for package, suites in sorted(declarations.items()):
+            for suite in suites:
+                entry = affected_scope.SUITE_REGISTRY.get(suite, {})
+                self.assertEqual(
+                    package,
+                    entry.get("owner"),
+                    f"{package} declares companion suite '{suite}', registered "
+                    f"to {entry.get('owner')!r}",
+                )
+
+    def test_every_shipped_declaration_validates_against_the_registry(self) -> None:
+        declarations = {
+            name: list(record["companion_suites"])
+            for name, record in self.policy.items()
+            if record["companion_suites"]
+        }
+        # Only the declared subset: a registered suite no manifest claims yet is
+        # the separate defect `test_affected_scope.py` pins on the whole table.
+        declared = {
+            name: entry
+            for name, entry in affected_scope.SUITE_REGISTRY.items()
+            if any(name in suites for suites in declarations.values())
+        }
+        self.assertEqual(
+            [], affected_scope.validate_suite_registry(declared, declarations)
+        )
+
+    def test_each_tooling_trigger_selects_exactly_its_owner(self) -> None:
+        for path, expected in (
+            (".github/ci/ci-baseline.toml", ["repo-deps"]),
+            (".github/ci/environments.json", ["repo-deps"]),
+            ("scripts/Cargo.toml", ["repo-deps"]),
+            (".github/workflows/ci.yml", ["test-toolkit"]),
+            (".github/workflows/_area-ci.yml", ["test-toolkit"]),
+            ("tools/test-audit/package.json", ["test-toolkit"]),
+            ("pnpm-lock.yaml", ["test-toolkit"]),
+            ("pnpm-workspace.yaml", ["test-toolkit"]),
+            ("tools/test-toolkit/Cargo.toml", ["test-toolkit"]),
+            ("docs/topics/ci-cd.md", []),
+            ("darkmatter/README.md", []),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(expected, self.job_packages(self.plan(path)))
+
+    def test_a_trigger_selection_compiles_no_reverse_dependents(self) -> None:
+        # A workflow edit says nothing about test-toolkit's public API, so the
+        # dependent seam its own source change carries must not appear here —
+        # that seam compiles eleven consumers on Linux.
+        triggered = self.plan(".github/workflows/_area-ci.yml")
+        self.assertEqual(["test-toolkit"], self.job_packages(triggered))
+        self.assertEqual([], triggered["reverse_dependencies"])
+        self.assertNotIn(
+            "dependent_seam", self.package_record(triggered, "test-toolkit")
+        )
+        self.assertEqual(
+            [],
+            [
+                cell
+                for cell in self.cells(triggered)
+                if cell["gate"] == "check"
+            ],
+            "no unchanged dependent means no check cell to compile it in",
+        )
+
+        sourced = self.plan("tools/test-toolkit/src/lib.rs")
+        self.assertIn(
+            "dependent_seam",
+            self.package_record(sourced, "test-toolkit"),
+            "a real source change must still carry the seam",
+        )
 
 
 class DependentSeamTests(PlannerFixture):
@@ -776,6 +886,140 @@ class ResultCompletenessTests(PlannerFixture):
         for area, slug in slugs.items():
             self.assertEqual(area_slug(area), slug)
             self.assertNotIn("/", f"ci-results-{slug}.json")
+
+
+class ScopeReceiptMigrationTests(PlannerFixture):
+    """R9/AC10: the inventory bump costs exactly one scope-receipt miss.
+
+    `SCOPE_RECEIPT_SCHEMA_VERSION` does not move. The miss comes from the
+    receipt's embedded `plan_schema_version`, which is exactly what makes it a
+    single rejection followed by one fresh calculation rather than an in-place
+    upgrade of a document written against the previous generation.
+    """
+
+    def receipt(self, plan: dict, plan_schema_version: int) -> dict:
+        projection = legacy_scope_document(plan)
+        return {
+            "schema_version": schema.SCOPE_RECEIPT_SCHEMA_VERSION,
+            "plan_schema_version": plan_schema_version,
+            "base": plan["base"],
+            "head": plan["head"],
+            "tree": "d" * 40,
+            "plan": plan,
+            "scope": {
+                name: projection[name] for name in schema.SCOPE_PROJECTION_FIELDS
+            },
+        }
+
+    def test_a_version_2_scope_receipt_misses_once_with_scope_schema(self) -> None:
+        plan = self.plan("docs/testing-strategy.md")
+        problems = schema.validate_scope_receipt(self.receipt(plan, 2))
+        if not problems:
+            raise AssertionError(
+                "a version-2 scope receipt must miss with scope-schema once "
+                "the plan carries the change inventory; it validated cleanly"
+            )
+        self.assertTrue(
+            problems[0].startswith("scope-schema:"),
+            f"the miss must use the existing coded reason: {problems}",
+        )
+        # "One fresh calculation, never an in-place upgrade": the rejected
+        # receipt's plan is left exactly as it was found, and the planner's own
+        # answer is the current generation.
+        self.assertEqual(2, self.receipt(plan, 2)["plan_schema_version"])
+        self.assertEqual(
+            schema.RESOLVED_PLAN_SCHEMA_VERSION, self.plan("docs/testing-strategy.md")["schema_version"]
+        )
+
+    def test_a_current_generation_scope_receipt_still_validates(self) -> None:
+        # NOT pending, and the non-vacuity guard for the fixture above: the
+        # rejection must come from the version comparison, not from a receipt
+        # this fixture builds wrongly.
+        plan = self.plan("docs/testing-strategy.md")
+        receipt = self.receipt(plan, schema.RESOLVED_PLAN_SCHEMA_VERSION)
+        self.assertEqual([], schema.validate_scope_receipt(receipt))
+
+
+class ChangeInventoryEndToEndTests(PlannerFixture):
+    """AC10 through the shipped planner and its normal invocation path.
+
+    The unit fixtures in `test_affected_scope.py` build a synthetic workspace.
+    These run the real script the way `ci.yml` and `just/ci-local.just` run it,
+    against the real checkout, so a change that only works in a temporary tree
+    is still caught.
+    """
+
+    #: One real path per bucket. `tools/test-toolkit` is deliberate: it gates
+    #: nothing, so R8's "the two are allowed to disagree" is exercised by real
+    #: policy rather than by a fixture arranged to produce it.
+    FILES = {
+        "configuration": ".github/ci/environments.json",
+        "documentation": "docs/testing-strategy.md",
+        "source": "tools/test-toolkit/src/lib.rs",
+        "other": "LICENSE",
+    }
+
+    def run_planner(self, *args: str) -> dict:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "ci" / "affected_scope.py"),
+                "--resolved-plan",
+                *args,
+            ],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        return json.loads(completed.stdout)
+
+    def test_the_cli_buckets_the_real_paths_it_was_handed(self) -> None:
+        plan = self.run_planner(*self.FILES.values())
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        self.assertEqual(schema.RESOLVED_PLAN_SCHEMA_VERSION, plan["schema_version"])
+        inventory = plan["change_inventory"]
+        self.assertIs(True, inventory["diff_available"])
+        for bucket, path in self.FILES.items():
+            self.assertEqual([path], inventory["paths"][bucket])
+            self.assertEqual(1, inventory["counts"][bucket])
+        self.assertEqual(len(self.FILES), inventory["counts"]["total"])
+
+    def test_the_cli_records_no_diff_inventory_for_a_full_scope_run(self) -> None:
+        inventory = self.run_planner("--all")["change_inventory"]
+        self.assertIs(False, inventory["diff_available"])
+        self.assertTrue(inventory["reason"])
+        self.assertNotIn("paths", inventory)
+        self.assertNotIn("counts", inventory)
+
+    def test_the_inventory_survives_a_persist_read_persist_cycle(self) -> None:
+        # The plan is persisted twice on the receipt path: `--plan-out` writes
+        # it, the hook stores it in a Git note, and CI reads it back and applies
+        # evidence to it. The inventory describes what changed, which evidence
+        # cannot alter, so it must reach the fan-out byte-identical.
+        first = schema.canonical(self.plan(*self.FILES.values()))
+        applied = apply_accepted_cells(json.loads(first), [], [])
+        second = schema.canonical(applied)
+        third = schema.canonical(apply_accepted_cells(json.loads(second), [], []))
+        self.assertEqual(
+            json.loads(first)["change_inventory"],
+            json.loads(second)["change_inventory"],
+        )
+        self.assertEqual(second, third)
+
+    def test_the_inventory_disagrees_with_change_class_where_the_truth_does(
+        self,
+    ) -> None:
+        # R8: the two answer different questions. `Cargo.lock` selects no
+        # gating package, so the class is `documentation`; the path is plainly
+        # `configuration`, and a reader seeing both is seeing the truth.
+        plan = self.plan("Cargo.lock")
+        self.assertEqual("documentation", plan["change_class"])
+        self.assertEqual(
+            ["Cargo.lock"], plan["change_inventory"]["paths"]["configuration"]
+        )
+        self.assertEqual([], plan["change_inventory"]["paths"]["documentation"])
 
 
 if __name__ == "__main__":

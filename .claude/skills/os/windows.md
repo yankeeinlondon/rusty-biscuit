@@ -37,12 +37,22 @@ helper that resolves it is named so it is not re-derived.
    preserves them; when a Windows-only failure shows a path missing one
    backslash, suspect Markdown escape handling, not path resolution.
 
+6. **A `file://` URI must carry neither the verbatim prefix nor a `\`.**
+   Percent-encoding a canonicalized Windows path yields
+   `file://%5C%5C%3F%5CC:/…`, which no terminal opens, and a drive-absolute
+   path still needs the extra leading `/` that makes `file:///C:/…`. Normalize
+   separators to `/`, strip `\\?\` (mapping `\\?\UNC\server\share` to the URI
+   authority `server/share`), then prefix. Test the spellings as string
+   literals so the macOS and Linux cells cover them too — `fs::canonicalize`
+   only produces the verbatim form on Windows, so a fixture built from it is
+   dead code everywhere else. Found 2026-09-14 in `scripts/drift.rs::file_uri`.
+
 Contract to test against: `ctx.repo_root`, `package_root`,
 `package_area_root`, and `area_root` are portable `/`-separated strings
 without verbatim prefixes on every OS (`biscuit_file::to_portable_string`).
 Compare against that, never against `to_string_lossy()`.
 
-6. **A user-typed path fragment never matches walker output by raw text.**
+7. **A user-typed path fragment never matches walker output by raw text.**
    `ignore::Walk` yields native `\` paths; the fragment is whatever was typed,
    `/` on every platform. Claudine's partial-file and operation-file
    autocomplete compared them raw and found zero candidates on Windows for
@@ -95,6 +105,16 @@ Compare against that, never against `to_string_lossy()`.
   `HANDLE_FLAG_INHERIT` on the current process's stdio before setting the
   detached creation flags (needs `windows-sys` features `Win32_Foundation`
   and `Win32_System_Console`). Unix never sees this; fds are close-on-exec.
+- **`python3` is an App Execution Alias, not an interpreter.** Windows ships a
+  stub at `python3.exe` that *spawns successfully* and then exits non-zero with
+  "Python was not found; run without arguments to install from the Microsoft
+  Store". `Command::new("python3").output()` returning `Ok` is therefore not
+  evidence an interpreter exists, and every "skip where python3 is missing"
+  guard written against `Err` fails on Windows instead of skipping. Probe
+  `--version` and require `status.success()`, and try `python` as well — the
+  hosted `windows-latest` image installs the real interpreter under that name.
+  Found 2026-09-14 by the first native-Windows run of `repo-deps`
+  (`scripts/ci-rollup-tests.rs::python_interpreter`).
 - **A `.cmd`/`.bat` cannot receive an argument containing a newline** ("batch
   file arguments are invalid"). A fake provider that receives a multi-line
   prompt must be a compiled `.exe`; see the rustc-built fixture in claudine's

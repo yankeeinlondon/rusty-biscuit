@@ -27,6 +27,7 @@ def plan(**overrides: object) -> dict:
         "base": SHA_A,
         "head": SHA_B,
         "change_class": "package",
+        "change_inventory": change_inventory(),
         "full_scope": False,
         "full_scope_gates": [],
         "areas": [
@@ -76,7 +77,28 @@ def plan(**overrides: object) -> dict:
         "job_estimate": 3,
         "preflight_os": ["ubuntu-latest"],
         "preflight_reason": "package-local change",
-        "flags": {"ci_tooling": False},
+        "flags": {},
+    }
+    document.update(overrides)
+    return document
+
+
+def change_inventory(**overrides: object) -> dict:
+    document = {
+        "diff_available": True,
+        "paths": {
+            "configuration": [],
+            "documentation": [],
+            "source": ["claudine/lib/src/lib.rs"],
+            "other": [],
+        },
+        "counts": {
+            "configuration": 0,
+            "documentation": 0,
+            "source": 1,
+            "other": 0,
+            "total": 1,
+        },
     }
     document.update(overrides)
     return document
@@ -153,6 +175,50 @@ class ContractArtifactTests(unittest.TestCase):
         expected = json.dumps(schema.contract(), indent=2) + "\n"
         self.assertEqual(schema.CONTRACT_PATH.read_text(encoding="utf-8"), expected)
 
+    # -----------------------------------------------------------------------
+    # R9: `RESOLVED_PLAN_SCHEMA_VERSION` 2 -> 3 when the plan gains the change
+    # inventory. `RECEIPT_SCHEMA_VERSION`, `LEGACY_RECEIPT_SCHEMA_VERSION`, and
+    # `SCOPE_RECEIPT_SCHEMA_VERSION` do NOT move; the scope receipt's embedded
+    # `plan_schema_version` check is what produces the one intended miss.
+    # -----------------------------------------------------------------------
+
+    def test_the_plan_schema_carries_the_change_inventory_at_version_3(self):
+        if schema.RESOLVED_PLAN_SCHEMA_VERSION != 3:
+            raise AssertionError(
+                "the resolved plan schema must be version 3 once it carries "
+                f"the change inventory, got {schema.RESOLVED_PLAN_SCHEMA_VERSION}"
+            )
+        self.assertIn(
+            "change_inventory",
+            schema.RESOLVED_PLAN_FIELDS,
+            "the inventory is a REQUIRED plan field, not an optional sibling",
+        )
+        self.assertIs(True, schema.RESOLVED_PLAN_FIELDS["change_inventory"])
+        shipped = json.loads(schema.CONTRACT_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(3, shipped["resolved_plan"]["schema_version"])
+        self.assertIn("change_inventory", shipped["resolved_plan"]["document"])
+
+    def test_a_plan_without_the_inventory_is_rejected(self):
+        document = plan()
+        document.pop("change_inventory", None)
+        problems = schema.validate_resolved_plan(document)
+        if not problems:
+            raise AssertionError(
+                "a plan without a change inventory must be rejected; "
+                "validate_resolved_plan reported nothing"
+            )
+        self.assertTrue(
+            any("change_inventory" in problem for problem in problems),
+            f"the rejection must name the missing field: {problems}",
+        )
+
+    def test_the_other_schema_counters_do_not_move(self):
+        # NOT pending (R9): pinned so the inventory bump cannot drag a receipt
+        # version with it and invalidate evidence this fix never touched.
+        self.assertEqual(2, schema.RECEIPT_SCHEMA_VERSION)
+        self.assertEqual(1, schema.LEGACY_RECEIPT_SCHEMA_VERSION)
+        self.assertEqual(1, schema.SCOPE_RECEIPT_SCHEMA_VERSION)
+
     def test_vocabularies_are_disjoint_where_they_must_be(self):
         # A cell state and an execution are separate axes; overlapping spellings
         # would let a reader confuse "what will happen" with "what is true now".
@@ -173,6 +239,152 @@ class ContractArtifactTests(unittest.TestCase):
         self.assertNotIn(
             schema.ACCEPTED_GAP_STATE.lower(),
             {"cancelled", "neutral", "skipped", "success", "failure"},
+        )
+
+
+class ChangeInventoryValidationTests(unittest.TestCase):
+    """AC10: a malformed inventory is a rejected plan, not a rendered lie.
+
+    Every reader of the plan — the local renderer, `ci-reporting`, a human
+    reading the artifact — takes the inventory at face value, so each invariant
+    it rests on is refused here rather than discovered downstream.
+    """
+
+    def problems(self, **overrides: object) -> list[str]:
+        return schema.validate_resolved_plan(
+            plan(change_inventory=change_inventory(**overrides))
+        )
+
+    def assert_named(self, problems: list[str], fragment: str) -> None:
+        self.assertTrue(problems, "the defect was accepted")
+        self.assertTrue(
+            all(problem.startswith("malformed-receipt:") for problem in problems),
+            f"every inventory problem carries a code: {problems}",
+        )
+        self.assertTrue(
+            any(fragment in problem for problem in problems),
+            f"no problem named {fragment!r}: {problems}",
+        )
+
+    def test_a_no_diff_inventory_validates_with_its_reason(self):
+        document = plan(
+            change_inventory={"diff_available": False, "reason": "manual full scope"}
+        )
+        self.assertEqual([], schema.validate_resolved_plan(document))
+
+    def test_a_no_diff_inventory_must_state_why(self):
+        document = plan(change_inventory={"diff_available": False})
+        self.assert_named(schema.validate_resolved_plan(document), "must state why")
+
+    def test_a_no_diff_inventory_may_not_also_carry_buckets(self):
+        document = plan(
+            change_inventory={
+                "diff_available": False,
+                "reason": "manual full scope",
+                "paths": {bucket: [] for bucket in schema.CHANGE_BUCKETS},
+            }
+        )
+        self.assert_named(schema.validate_resolved_plan(document), "'paths'")
+
+    def test_a_diff_inventory_may_not_also_carry_an_absence_reason(self):
+        self.assert_named(self.problems(reason="both at once"), "absence reason")
+
+    def test_a_diff_inventory_must_carry_its_buckets(self):
+        document = plan(change_inventory={"diff_available": True})
+        self.assert_named(schema.validate_resolved_plan(document), "'paths'")
+
+    def test_an_unknown_bucket_is_rejected(self):
+        paths = {bucket: [] for bucket in schema.CHANGE_BUCKETS}
+        paths["vendored"] = []
+        self.assert_named(self.problems(paths=paths), "must name exactly")
+
+    def test_an_unsorted_bucket_is_rejected(self):
+        self.assert_named(
+            self.problems(
+                paths={
+                    "configuration": [],
+                    "documentation": ["docs/b.md", "docs/a.md"],
+                    "source": ["claudine/lib/src/lib.rs"],
+                    "other": [],
+                },
+                counts={
+                    "configuration": 0,
+                    "documentation": 2,
+                    "source": 1,
+                    "other": 0,
+                    "total": 3,
+                },
+            ),
+            "is not sorted",
+        )
+
+    def test_a_windows_spelled_path_is_rejected(self):
+        self.assert_named(
+            self.problems(
+                paths={
+                    "configuration": [],
+                    "documentation": [],
+                    "source": ["claudine\\lib\\src\\lib.rs"],
+                    "other": [],
+                }
+            ),
+            "not a normalized repository-relative path",
+        )
+
+    def test_a_path_in_two_buckets_is_rejected(self):
+        self.assert_named(
+            self.problems(
+                paths={
+                    "configuration": [],
+                    "documentation": ["README.md"],
+                    "source": ["README.md"],
+                    "other": [],
+                },
+                counts={
+                    "configuration": 0,
+                    "documentation": 1,
+                    "source": 1,
+                    "other": 0,
+                    "total": 2,
+                },
+            ),
+            "more than one bucket",
+        )
+
+    def test_a_count_that_disagrees_with_its_bucket_is_rejected(self):
+        self.assert_named(
+            self.problems(
+                counts={
+                    "configuration": 0,
+                    "documentation": 0,
+                    "source": 7,
+                    "other": 0,
+                    "total": 7,
+                }
+            ),
+            "but the bucket holds 1",
+        )
+
+    def test_a_total_that_disagrees_with_the_buckets_is_rejected(self):
+        self.assert_named(
+            self.problems(
+                counts={
+                    "configuration": 0,
+                    "documentation": 0,
+                    "source": 1,
+                    "other": 0,
+                    "total": 99,
+                }
+            ),
+            "but the buckets hold 1",
+        )
+
+    def test_an_unknown_inventory_field_is_rejected(self):
+        self.assert_named(self.problems(change_class="documentation"), "unknown field")
+
+    def test_a_non_object_inventory_is_rejected(self):
+        self.assert_named(
+            schema.validate_resolved_plan(plan(change_inventory=[])), "must be an object"
         )
 
 

@@ -40,9 +40,20 @@ local and hosted runs. Its package policy is deliberately narrow:
   reaches only the owning Ubuntu check, where setup combines it with the
   changed package's own requirements. Other jobs retain the original native
   map.
-- Documentation, manifests, lockfiles, Just recipes, workflow configuration,
-  and other CI configuration select no package jobs. CI tooling has compact
-  contract tests of its own.
+- Documentation, manifests, lockfiles, and Just recipes select no package jobs.
+- CI's own inputs are the exception, because CI's own suites now have owners.
+  `SUITE_REGISTRY` in `affected_scope.py` declares every suite's owner,
+  canonical recipe, environment, and kind (`cargo` or `companion`);
+  `SUITE_OWNER_PREFIXES` / `SUITE_OWNER_PATHS` map the inputs those suites read
+  to that owner. `.github/ci/**` and `scripts/Cargo.toml` select `repo-deps`;
+  `.github/workflows/**`, `tools/test-audit/**`, `pnpm-lock.yaml`,
+  `pnpm-workspace.yaml`, and `tools/test-toolkit/Cargo.toml` select
+  `test-toolkit`. `scripts/**` and `tools/test-toolkit/**` need no entry — they
+  are those packages' own directories. The manifest entries are a deliberate
+  two-path exception to the repository-wide "a manifest selects nothing" rule
+  and are not generalized. A trigger selection is narrower than a source
+  change: it reports no reverse dependencies and carries no dependent seam,
+  because the changed path says nothing about the owner's public API.
 - `workflow_dispatch` is the explicit full-workspace path. Do not turn an
   infrastructure edit or uncertainty into an implicit full run.
 

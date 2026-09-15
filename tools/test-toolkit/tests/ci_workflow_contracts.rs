@@ -557,7 +557,7 @@ fn package_ci_treats_rust_warnings_as_failures_and_runs_lint() {
         );
     }
     assert!(
-        shared.contains(r#"run: just _lint "${{ inputs.package }}""#),
+        shared.contains(r#"just _lint "${{ inputs.package }}""#),
         "package CI must lint through the canonical _lint recipe"
     );
     let devops = read("just/devops.just");
@@ -748,11 +748,13 @@ fn the_l1_suite_runs_no_fail_fast() {
 
 /// Each surviving specialized runtime workflow the primary orchestrator calls,
 /// paired with its unique runtime evidence and scope selector.
-const ORCHESTRATED: [(&str, &str, &str); 1] = [(
-    "biscuit-tui-windows-captured-stdout.yml",
-    "captured_stdout_receives_only_value_no_tui_bytes",
-    "needs.scope.outputs.biscuit_tui == 'true'",
-)];
+///
+/// Empty as of `fixes/2026-09-13-cicd-redundancies`: the last entry,
+/// `biscuit-tui-windows-captured-stdout.yml`, retired when its test became
+/// ordinary `windows-latest` L1 evidence inside `biscuit-tui-cli`'s own cell.
+/// The shape contract below still applies to any entry that returns, which is
+/// why the inventory survives as a declaration rather than being deleted.
+const ORCHESTRATED: [(&str, &str, &str); 0] = [];
 
 #[test]
 fn retired_specialized_workflows_and_jobs_are_absent() {
@@ -761,6 +763,7 @@ fn retired_specialized_workflows_and_jobs_are_absent() {
         "messenger-desktop-tests.yml",
         "rendezvous-tests.yml",
         "playa-windows.yml",
+        "biscuit-tui-windows-captured-stdout.yml",
     ] {
         if repo_root().join(".github/workflows").join(name).exists() {
             live.push(format!("workflow file {name}"));
@@ -774,6 +777,9 @@ fn retired_specialized_workflows_and_jobs_are_absent() {
         "  playa-windows:",
         "  claudine-generator-signals:",
         "  darkmatter-no-color:",
+        "  biscuit-tui-captured-stdout:",
+        "  ci-tooling:",
+        "  summary:",
     ] {
         if jobs(&ci).iter().any(|job| job.starts_with(header)) {
             live.push(format!("ci.yml job {}", header.trim_end_matches(':').trim()));
@@ -784,16 +790,6 @@ fn retired_specialized_workflows_and_jobs_are_absent() {
         live.is_empty(),
         "retired specialized graph entries remain: {}",
         live.join(", ")
-    );
-}
-
-#[test]
-fn specialized_inventory_contains_only_surviving_workflows() {
-    let names: Vec<&str> = ORCHESTRATED.iter().map(|(name, _, _)| *name).collect();
-    assert_eq!(
-        names,
-        ["biscuit-tui-windows-captured-stdout.yml"],
-        "the specialized inventory must contain only workflows that remain specialized"
     );
 }
 
@@ -817,6 +813,7 @@ fn active_ci_authority_matches_the_retirement_contract() {
         "messenger-desktop-tests.yml",
         "rendezvous-tests.yml",
         "playa-windows.yml",
+        "biscuit-tui-windows-captured-stdout.yml",
     ] {
         assert!(
             !corpus.contains(retired),
@@ -833,11 +830,6 @@ fn active_ci_authority_matches_the_retirement_contract() {
     );
 
     let ci_topic = read("docs/topics/ci-cd.md");
-    let survivor = "biscuit-tui-windows-captured-stdout.yml";
-    assert!(
-        ci_topic.contains(survivor),
-        "the active specialized inventory must retain {survivor}"
-    );
     assert!(
         !ci_topic.contains("claudine-windows-ctrl-c.yml"),
         "the active specialized inventory must contain only executable survivors"
@@ -1544,10 +1536,16 @@ fn a_declared_node_capability_is_provisioned_verified_and_hard_required() {
         "the leg that declared the capability must hard-require it through the recipe too"
     );
 
-    // AC13: the companion suite itself is invoked, not dropped.
+    // AC13: the declared companion suites are invoked, not dropped. Which
+    // suites those are is the registry's answer (spec section 3: validate
+    // identities and owners, not shell-command strings), so what this pins is
+    // that the job runs the registry-driven runner for its own cell.
     assert!(
-        test_job.contains("Companion suite homelab-frontend"),
-        "the declared companion suite must execute, not be dropped by the conversion"
+        test_job.contains("scripts/ci/companion_suites.py")
+            && test_job.contains("--gate L1")
+            && test_job.contains(r#"--environment "$ENVIRONMENT""#),
+        "the declared companion suites must execute, resolved against the \
+         registry for THIS cell's environment"
     );
     // Its producer status downgrades a green Rust JUnit report on failure (R12).
     // Comment lines are excluded: a YAML comment mentioning the mechanism must
@@ -1685,10 +1683,10 @@ const GATE_STEPS: [(&str, &str, &str, &str); 10] = [
     ("_package-ci.yml", "  check:", "check", "cargo check (declared example/bench kinds)"),
     ("_package-ci.yml", "  check:", "dependents", "Compile unchanged dependents"),
     ("_package-ci.yml", "  test:", "l1", "L1 tests"),
-    ("_package-ci.yml", "  test:", "companion", "Companion suite homelab-frontend"),
+    ("_package-ci.yml", "  test:", "companion", "Companion suites"),
     ("_package-ci.yml", "  lint:", "clippy", "Lint"),
     ("_package-ci.yml", "  lint:", "zed", "Verify the Zed extension package"),
-    ("_package-ci.yml", "  lint:", "companion", "Companion suite homelab-frontend lint"),
+    ("_package-ci.yml", "  lint:", "companion", "Companion suites (lint)"),
     ("_package-ci.yml", "  test-l2:", "l2", "L2 tests"),
     ("_package-ci.yml", "  test-browser:", "browser", "Browser tests"),
     ("_wsl-ci.yml", "  wsl:", "l1", "L1 tests from the archive"),
@@ -1879,7 +1877,7 @@ fn no_reusable_workflow_call_is_advisory() {
 /// the job/gate outcome combinations its `always()` step may observe, and the
 /// artifact it writes is read back. Unix only because the
 /// scripts declare `shell: bash` and the assertion is about Bash semantics,
-/// not about the host; CI's `ci-tooling` job is Linux.
+/// not about the host; `test-toolkit`'s own suite runs on Linux too.
 #[cfg(unix)]
 #[test]
 fn the_status_fold_preserves_every_failure_shape() {
@@ -1935,9 +1933,16 @@ fn the_status_fold_preserves_every_failure_shape() {
                     gate
                 } else if value.contains("steps.companion.outcome") {
                     companion
-                } else if value.contains("inputs.companion-suites") {
-                    "[]"
-                } else if value.contains("inputs.dependents") {
+                } else if value.contains(".outputs.duration_s") {
+                    // A measured command duration, not a step outcome. The
+                    // status folds it as a number, so "success" would make the
+                    // script die where the real runner would not.
+                    "12"
+                } else if value.contains("inputs.companion-suites")
+                    || value.contains("inputs.dependents")
+                {
+                    // Both are JSON list inputs; an empty list is the case the
+                    // fold under test is exercised against.
                     "[]"
                 } else if value.contains("inputs.package") {
                     "pkg"
@@ -1985,6 +1990,110 @@ fn the_status_fold_preserves_every_failure_shape() {
     }
 }
 
+/// AC4/AC13/R14: the producer status carries ONE record per companion suite,
+/// with that suite's own counts and command duration.
+///
+/// Run for real, like the fold above: the status script is executed with a
+/// companions document beside it and the artifact it writes is read back. The
+/// single `companion` string this replaced could not say which suite ran, how
+/// many tests it had, or how long it took — so one suite's success satisfied
+/// every suite the package declared.
+#[cfg(unix)]
+#[test]
+fn the_producer_status_carries_one_record_per_companion_suite() {
+    let companions = serde_json::json!({
+        "homelab-frontend": {
+            "outcome": "success",
+            "duration_s": 0.96,
+            "counts": {"total": 218, "passed": 189, "failed": 0, "skipped": 29, "errored": 0},
+        },
+        "test-audit-typecheck": {
+            "outcome": "failure",
+            "duration_s": 0.86,
+            "reason": "typecheck gate reports no test counts",
+        },
+    });
+
+    for header in ["  test:", "  lint:"] {
+        let job = job_block("_package-ci.yml", header);
+        let steps = steps(&job);
+        let status = step_named(&steps, "Record producer status").expect("checked elsewhere");
+        let temp = tempfile::tempdir().expect("temp dir");
+        fs::write(
+            temp.path().join("companions.json"),
+            serde_json::to_string(&companions).expect("the fixture serializes"),
+        )
+        .expect("the companions document is written where the runner writes it");
+
+        let mut command = Command::new("bash");
+        command
+            .arg("-c")
+            .arg(step_script(status))
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .env("RUNNER_TEMP", temp.path());
+        for (key, value) in step_env(status) {
+            let resolved = if value.contains("runner.temp") {
+                format!("{}/companions.json", temp.path().display())
+            } else if value.contains("job.status") {
+                "success".to_owned()
+            } else if value.contains("steps.companion.outcome") {
+                "failure".to_owned()
+            } else if value.contains(".outputs.duration_s") {
+                "37".to_owned()
+            } else if value.contains("${{") {
+                "success".to_owned()
+            } else {
+                value.clone()
+            };
+            command.env(key, resolved);
+        }
+        let output = command.output().expect("bash must be runnable");
+        assert!(
+            output.status.success(),
+            "_package-ci.yml `{}`: the status script must exit 0:\n{}",
+            header.trim(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let written = fs::read_to_string(temp.path().join("status/status.json"))
+            .expect("the status artifact is written");
+        let json: serde_json::Value =
+            serde_json::from_str(&written).expect("the status artifact is JSON");
+        let recorded = &json["companions"];
+        assert_eq!(
+            recorded["homelab-frontend"]["counts"]["total"],
+            serde_json::json!(218),
+            "each suite's own counts reach the artifact: {written}"
+        );
+        assert_eq!(
+            recorded["homelab-frontend"]["duration_s"],
+            serde_json::json!(0.96),
+            "each suite's own command duration reaches the artifact: {written}"
+        );
+        assert_eq!(
+            recorded["test-audit-typecheck"]["reason"],
+            serde_json::json!("typecheck gate reports no test counts"),
+            "an unmeasured suite carries its reason rather than a zero: {written}"
+        );
+        assert_eq!(json["result"], serde_json::json!("failure"));
+        let detail = json["detail"].as_str().unwrap_or_default();
+        assert!(
+            detail.contains("test-audit-typecheck") && !detail.contains("homelab-frontend"),
+            "the detail must name the suite that failed and not the one that \
+             passed; got {detail:?}"
+        );
+        if header == "  lint:" {
+            assert_eq!(
+                json["duration_s"],
+                serde_json::json!(37),
+                "R14: the lint COMMAND's duration is recorded, because no JUnit \
+                 report carries it: {written}"
+            );
+        }
+    }
+}
+
 #[test]
 fn junit_uploads_carry_the_whole_staging_directory_and_its_manifest() {
     // `.config/nextest.toml` writes every ci-profile invocation to the SAME
@@ -2026,15 +2135,8 @@ fn junit_uploads_carry_the_whole_staging_directory_and_its_manifest() {
 }
 
 /// The jobs `ci-gate` folds: every top-level job of `ci.yml` whose failure
-/// must block a merge. The advisory summary is the only job outside it.
-const GATED_JOBS: [&str; 6] = [
-    "validation",
-    "scope",
-    "preflight",
-    "area-ci",
-    "biscuit-tui-captured-stdout",
-    "ci-tooling",
-];
+/// must block a merge. The advisory `ci-reporting` is the only job outside it.
+const GATED_JOBS: [&str; 4] = ["validation", "scope", "preflight", "area-ci"];
 
 /// Spec §5 / OQ3 Option B, proven in
 /// `fixes/2026-09-11-cicd-cleanup/fixtures/scratch-2026-09-12.md`: the single
@@ -2113,12 +2215,12 @@ fn ci_gate_is_the_single_required_check() {
 /// reaches the required check. Derived from the workflow, so a new top-level
 /// job cannot be added without deciding whether it blocks.
 #[test]
-fn every_top_level_job_is_either_folded_by_ci_gate_or_the_advisory_summary() {
+fn every_top_level_job_is_either_folded_by_ci_gate_or_the_advisory_report() {
     let ci = workflow("ci.yml");
     let mut headers = jobs(&ci)
         .iter()
         .map(|block| block.lines().next().unwrap_or("").trim().trim_end_matches(':').to_owned())
-        .filter(|name| name != "ci-gate" && name != "summary")
+        .filter(|name| name != "ci-gate" && name != "ci-reporting")
         .collect::<Vec<_>>();
     headers.sort_unstable();
     let mut gated = GATED_JOBS.map(str::to_owned).to_vec();
@@ -2148,31 +2250,39 @@ fn post_merge_reuse_preserves_the_gate_and_normal_ci_fallback() {
     );
     // On reuse every downstream job is skipped, which the fold accepts, so
     // the gate passes; the reused-run link is reporting and lives in the
-    // advisory summary, which therefore has to run on reuse too.
+    // advisory report, which therefore has to run on reuse too.
     let gate = job_block("ci.yml", "  ci-gate:");
     assert!(
         gate.contains("      - validation\n") && gate.contains("if: always()"),
         "the required gate must fold the validation job and run on reuse"
     );
-    let summary = job_block("ci.yml", "  summary:");
+    let report = job_block("ci.yml", "  ci-reporting:");
     assert!(
-        summary.contains("      - validation\n")
-            && summary.contains("\n    if: always()\n")
-            && summary.contains("needs.validation.result == 'success'")
-            && summary.contains("actions/runs/$VALIDATED_RUN"),
-        "the advisory summary must run on reuse and link the reused evidence"
+        report.contains("      - validation\n")
+            && report.contains("\n    if: always()\n")
+            && report.contains("needs.validation.result == 'success'")
+            && report.contains("actions/runs/$VALIDATED_RUN"),
+        "the advisory report must run on reuse and link the reused evidence"
     );
-    let steps = summary.split_once("    steps:\n").unwrap().1;
+    let steps = report.split_once("    steps:\n").unwrap().1;
     for step in steps.split("      - ").skip(2) {
         assert!(
             step.contains("needs.validation.outputs.reuse != 'true'"),
-            "every other summary step must stay silent on reuse: {step}"
+            "every other report step must stay silent on reuse: {step}"
         );
     }
-    for job in ["  preflight:", "  ci-tooling:"] {
+    // The reuse decision is verified by its own suite, which `repo-deps` owns
+    // and schedules as an ordinary cell. No workflow job runs it a second
+    // time — that duplication is what this fix removes.
+    let policy = read("scripts/ci/affected_scope.py");
+    assert!(
+        policy.contains(r#""test_reuse_validation.py","#),
+        "the reuse decision suite must be registered to an owning package"
+    );
+    for job in ["  preflight:", "  ci-gate:"] {
         assert!(
-            job_block("ci.yml", job).contains("python3 scripts/ci/test_reuse_validation.py"),
-            "the reuse decision tests must run in {job}"
+            !job_block("ci.yml", job).contains("scripts/ci/test_"),
+            "{job} must run no CI suite; its owner's cell does"
         );
     }
 }
@@ -2185,19 +2295,19 @@ fn only_ci_gate_makes_a_run_level_claim() {
         "_package-ci.yml must not carry a second, environment-blind failure reporter"
     );
 
-    let summary = job_block("ci.yml", "  summary:");
+    let report = job_block("ci.yml", "  ci-reporting:");
     assert!(
-        !summary.contains("No gate reported a failure"),
-        "the advisory summary must make no run-level green claim"
+        !report.contains("No gate reported a failure"),
+        "the advisory report must make no run-level green claim"
     );
     assert!(
-        !summary.contains("needs.area-ci.result"),
+        !report.contains("needs.area-ci.result"),
         "every package gate is covered by its own area's workflow; the advisory \
-         summary must not report them a second time"
+         report must not report them a second time"
     );
     assert!(
-        summary.contains("ci-gate") && !summary.contains("ci-verdict"),
-        "the advisory summary must name ci-gate as the run's gate"
+        report.contains("ci-gate") && !report.contains("ci-verdict"),
+        "the advisory report must name ci-gate as the run's gate"
     );
 }
 
@@ -2552,72 +2662,68 @@ fn the_fan_out_gate_derives_from_the_matrix_not_the_impacted_list() {
     );
 }
 
-/// M4: CI's own tooling — the merge-gate binary, the scope calculator, and
-/// the policy store — is not a Cargo package, so a change to it must schedule
-/// the leg that runs their own test suites.
+/// CI's own tooling is verified by two ordinary workspace members, so an input
+/// one of their suites reads must select that OWNER — not a boolean flag whose
+/// only consumer was a job outside the scheduling model.
 #[test]
-fn ci_tooling_changes_schedule_the_tooling_leg() {
+fn tooling_inputs_select_their_registered_suite_owner() {
     let policy = read("scripts/ci/affected_scope.py");
-    // Membership, not the exact tuple: the leg also owns suites no Cargo
-    // package selects (the test-audit tool and the pnpm workspace it resolves
-    // through), so the list grows. These three are the ones this contract owns.
     let declared = policy
-        .split_once("CI_TOOLING_PREFIXES = (")
-        .and_then(|(_, rest)| rest.split_once(')'))
+        .split_once("SUITE_OWNER_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (")
+        .and_then(|(_, rest)| rest.split_once("\n)"))
         .map(|(block, _)| block)
-        .expect("affected_scope.py must declare CI_TOOLING_PREFIXES");
-    for prefix in [r#""scripts/""#, r#"".github/ci/""#, r#"".github/workflows/""#] {
+        .expect("affected_scope.py must declare SUITE_OWNER_PREFIXES");
+    for (prefix, owner) in [
+        (".github/ci/", "repo-deps"),
+        (".github/workflows/", "test-toolkit"),
+        ("tools/test-audit/", "test-toolkit"),
+    ] {
         assert!(
-            declared.contains(prefix),
-            "affected_scope.py must map {prefix} to the ci_tooling flag"
+            declared.contains(&format!(r#"("{prefix}", ("{owner}",))"#)),
+            "affected_scope.py must select {owner} for a change under {prefix}"
         );
     }
+    // R13.4: `scripts/` is `repo-deps`'s own package directory, so ordinary
+    // source ownership already selects it. A trigger here would double-select.
+    assert!(
+        !declared.contains(r#""scripts/""#),
+        "`scripts/` must not be a trigger prefix; it is repo-deps's package directory"
+    );
 
+    for retired in ["CI_TOOLING_PREFIXES", "CI_TOOLING_PATHS"] {
+        assert!(
+            !policy.contains(retired),
+            "{retired} is replaced by the suite-owner table; a flag nothing \
+             schedules on cannot select a package"
+        );
+    }
     let ci = workflow("ci.yml");
     assert!(
-        ci.contains("ci_tooling=$(jq -r '.flags.ci_tooling'"),
-        "the scope job must emit the derived ci_tooling flag"
-    );
-    let leg = job_block("ci.yml", "  ci-tooling:");
-    assert!(
-        leg.contains("needs.scope.outputs.ci_tooling == 'true'"),
-        "the ci-tooling leg must be gated on the scope-derived flag"
-    );
-    assert!(
-        leg.contains("python3 scripts/ci/test_affected_scope.py"),
-        "the ci-tooling leg must run the scope tests"
-    );
-    assert!(
-        leg.contains("cargo nextest run") && leg.contains("--bin ci-rollup"),
-        "the ci-tooling leg must run the rollup's test suite"
-    );
-    // A red tooling leg must not be invisible under a CLEAR verdict.
-    let summary = job_block("ci.yml", "  summary:");
-    assert!(
-        summary.contains("needs.ci-tooling.result"),
-        "the advisory summary must classify a ci-tooling failure"
+        !ci.contains(".flags.ci_tooling"),
+        "the scope job must emit no ci_tooling flag; ownership replaces it"
     );
 }
 
-/// This suite is the evidence behind AC10, AC11, and AC14–AC17, but
-/// `test-toolkit` is `gates = false`, so no area job schedules it. Until it is
-/// promoted, the tooling leg must invoke exactly this binary, and the scope
-/// calculator must select that leg for a change to this file (the workflow
-/// prefix is asserted by `ci_tooling_changes_schedule_the_tooling_leg`).
+/// Spec section 3: every registered suite has exactly one owner. This suite is
+/// the evidence behind AC10, AC11, and AC14–AC17; `test-toolkit` owns it and
+/// therefore has to gate.
 #[test]
-fn ci_tooling_leg_runs_the_workflow_contract_suite() {
-    let leg = job_block("ci.yml", "  ci-tooling:");
+fn the_workflow_contract_suite_is_owned_by_test_toolkit() {
+    let policy = read("scripts/ci/affected_scope.py");
+    let registry = policy
+        .split_once("SUITE_REGISTRY: dict[str, dict[str, Any]] = {")
+        .and_then(|(_, rest)| rest.split_once("\n}"))
+        .map(|(block, _)| block)
+        .expect("affected_scope.py must declare SUITE_REGISTRY");
     assert!(
-        leg.contains("cargo nextest run -p test-toolkit --test ci_workflow_contracts"),
-        "the ci-tooling leg must run the ci_workflow_contracts test binary"
+        registry.contains(r#""test-toolkit-l1": {"#) && registry.contains(r#""test-toolkit","#),
+        "the registry must name this package's Cargo suite and its owner"
     );
 
-    let policy = read("scripts/ci/affected_scope.py");
+    let manifest = read("tools/test-toolkit/Cargo.toml");
     assert!(
-        policy.contains(
-            r#"CI_TOOLING_PATHS = {"tools/test-toolkit/tests/ci_workflow_contracts.rs"}"#
-        ),
-        "affected_scope.py must map this suite's source file to the ci_tooling flag"
+        !manifest.contains("gates = false"),
+        "test-toolkit owns a registered suite, so it cannot opt out of gating"
     );
 }
 
@@ -2880,10 +2986,9 @@ fn empty_execution_matrices_skip_before_expansion() {
 /// AC13/spec §7: the concurrency correction survives the scheduling redesign.
 #[test]
 fn the_worker_policy_survives_the_area_restructure() {
-    let ci = workflow("ci.yml");
     let package_ci = workflow("_package-ci.yml");
     assert!(
-        ci.contains("just _test_threads"),
+        package_ci.contains("just _test_threads"),
         "the CI worker policy must still come from the shared `_test_threads` recipe"
     );
     let l2 = job_block("_package-ci.yml", "  test-l2:");
@@ -2904,10 +3009,10 @@ fn the_worker_policy_survives_the_area_restructure() {
 /// AC11 (Phase 7): a failure-classifying job must not fail the run.
 #[test]
 fn advisory_jobs_cannot_fail_the_run_and_gates_are_not_advisory() {
-    let summary = job_block("ci.yml", "  summary:");
+    let report = job_block("ci.yml", "  ci-reporting:");
     assert!(
-        summary.contains("continue-on-error: true"),
-        "the advisory summary must be structurally unable to fail the run: the \
+        report.contains("continue-on-error: true"),
+        "the advisory report must be structurally unable to fail the run: the \
          merge gate this repository is moving to folds the run's conclusion"
     );
     // The converse. Anything that is allowed to block must not silently opt
@@ -2915,7 +3020,6 @@ fn advisory_jobs_cannot_fail_the_run_and_gates_are_not_advisory() {
     for (file, header) in [
         ("ci.yml", "  scope:"),
         ("ci.yml", "  preflight:"),
-        ("ci.yml", "  ci-tooling:"),
         ("ci.yml", "  ci-gate:"),
         ("_area-ci.yml", "  coverage-audit:"),
     ] {
@@ -2974,9 +3078,13 @@ fn the_verdict_consumers_are_rewired_when_the_job_goes() {
         "the CI watchdog must wait for the `ci-gate` job"
     );
     let runner_loss = read("scripts/ci/runner_loss.py");
+    let non_producers = runner_loss
+        .split_once("NON_PRODUCER_JOBS = {")
+        .and_then(|(_, rest)| rest.split_once('}'))
+        .map(|(block, _)| block)
+        .expect("runner_loss.py must declare NON_PRODUCER_JOBS");
     assert!(
-        runner_loss.contains("NON_PRODUCER_JOBS = {\"ci-gate\"")
-            && !runner_loss.contains("\"ci-verdict\""),
+        non_producers.contains("\"ci-gate\"") && !runner_loss.contains("\"ci-verdict\""),
         "runner-loss attribution must exclude the gate, not the retired verdict"
     );
 }
@@ -3025,9 +3133,9 @@ fn every_downstream_consumer_reads_the_same_ci_run_conclusion() {
 }
 
 /// Spec §5: a `continue-on-error` job is invisible to the run conclusion, so
-/// exactly one job — the advisory summary — may carry it.
+/// exactly one job — the advisory report — may carry it.
 #[test]
-fn only_the_advisory_summary_is_excluded_from_the_run_conclusion() {
+fn only_the_advisory_report_is_excluded_from_the_run_conclusion() {
     let mut advisory = Vec::new();
     for file in READER_FACING_WORKFLOWS {
         let source = workflow(file);
@@ -3044,9 +3152,9 @@ fn only_the_advisory_summary_is_excluded_from_the_run_conclusion() {
         }
     }
     assert_eq!(
-        vec!["ci.yml:summary:".to_owned()],
+        vec!["ci.yml:ci-reporting:".to_owned()],
         advisory,
-        "only the advisory summary may opt out of the run conclusion; every \
+        "only the advisory report may opt out of the run conclusion; every \
          other job's failure has to reach the gate that folds it"
     );
 }
@@ -3270,15 +3378,18 @@ fn the_gap_publisher_is_the_only_job_holding_checks_write() {
 fn the_rollup_binary_is_still_built_without_the_monorepo_crates() {
     // `scripts/Cargo.toml`'s `local-tools` feature exists so the always-runs
     // required check does not pay for gix, duckdb, and the terminal renderer.
-    // Phase 4's `--plan` renderer stays out of this invocation, and so does
-    // every per-area coverage audit.
-    for file in ["ci.yml", "_area-ci.yml"] {
-        let source = workflow(file);
-        assert!(
-            source.contains("--no-default-features") && source.contains("--bin ci-rollup"),
-            "{file} must build ci-rollup with --no-default-features"
-        );
-    }
+    // Phase 4's `--plan` renderer stays out of this invocation. Every per-area
+    // coverage audit builds it; `ci.yml` builds nothing itself, because CI's
+    // own Cargo suites now run in `repo-deps`'s ordinary cells.
+    let source = workflow("_area-ci.yml");
+    assert!(
+        source.contains("--no-default-features") && source.contains("--bin ci-rollup"),
+        "_area-ci.yml must build ci-rollup with --no-default-features"
+    );
+    assert!(
+        !workflow("ci.yml").contains("cargo nextest run"),
+        "ci.yml must run no Cargo suite of its own; its packages' cells do"
+    );
     let rollup = read("scripts/ci-rollup.rs");
     assert!(
         !rollup.contains("biscuit_terminal"),
@@ -3473,4 +3584,244 @@ fn the_ci_documentation_states_the_implemented_behavior() {
             "{file} must describe `ci-gate` as the required check"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// The post-surgery workflow graph — fixes/2026-09-13-cicd-redundancies
+//
+// Each fixture below entered as a `pending_contract` oracle and was promoted
+// with Phase 8's surgery. They pin the SHAPE of the graph; the assertions
+// above — `GATED_JOBS`, `ci_gate_is_the_single_required_check`,
+// `retired_specialized_workflows_and_jobs_are_absent`, and the two
+// suite-ownership tests — pin what each surviving job may do.
+// ---------------------------------------------------------------------------
+
+/// One job's block, or `None` when the workflow does not define it.
+///
+/// [`job_block`] panics with its own wording for a missing job; the caller
+/// below needs to say which job is missing and why that matters instead.
+fn optional_job_block(file: &str, header: &str) -> Option<String> {
+    jobs(&workflow(file))
+        .into_iter()
+        .find(|job| job.starts_with(header))
+}
+
+/// Every top-level job id of `ci.yml`, in file order.
+fn top_level_job_ids(file: &str) -> Vec<String> {
+    jobs(&workflow(file))
+        .iter()
+        .map(|block| {
+            block
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .trim_end_matches(':')
+                .to_owned()
+        })
+        .collect()
+}
+
+/// `ci.yml`'s whole top-level job set. `ci-tooling` and
+/// `biscuit-tui-captured-stdout` retired into their owners' package cells, and
+/// the advisory `summary` became `ci-reporting`.
+const TARGET_CI_JOBS: [&str; 6] = [
+    "validation",
+    "scope",
+    "preflight",
+    "area-ci",
+    "ci-gate",
+    "ci-reporting",
+];
+
+/// AC7: the retired jobs are gone and no new one appeared beside them.
+#[test]
+fn ci_defines_exactly_the_six_surviving_top_level_jobs() {
+    let mut actual = top_level_job_ids("ci.yml");
+    actual.sort_unstable();
+    let mut expected = TARGET_CI_JOBS.map(str::to_owned).to_vec();
+    expected.sort_unstable();
+    assert_eq!(
+        expected, actual,
+        "ci.yml must define exactly {expected:?}, got {actual:?}"
+    );
+}
+
+/// AC15/R11: the gate loses two `needs` entries and nothing else.
+#[test]
+fn ci_gate_needs_exactly_the_four_surviving_blocking_jobs() {
+    let gate = job_block("ci.yml", "  ci-gate:");
+    let executable: String = gate
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let needs: Vec<String> = executable
+        .split_once("    needs:\n")
+        .expect("ci-gate must declare a needs list")
+        .1
+        .lines()
+        .take_while(|line| line.starts_with("      - "))
+        .map(|line| line.trim_start_matches("      - ").trim().to_owned())
+        .collect();
+    let expected = ["validation", "scope", "preflight", "area-ci"];
+    assert_eq!(
+        expected.map(str::to_owned).to_vec(),
+        needs,
+        "ci-gate must fold exactly {expected:?}, got {needs:?}"
+    );
+
+    for retired in ["biscuit-tui-captured-stdout", "ci-tooling"] {
+        assert!(
+            !executable.contains(retired),
+            "ci-gate must fold exactly the surviving jobs; its RESULTS \
+             block still names {retired}"
+        );
+    }
+
+    // Unchanged by this fix (spec D6): the accept clause and the
+    // fixed name the `protect-your-bacon` ruleset requires.
+    assert!(
+        executable.contains("success|skipped)") && executable.contains("exit 1"),
+        "ci-gate must still accept exactly `success` and `skipped`"
+    );
+    assert!(
+        executable.contains("\n    name: ci-gate\n"),
+        "the required context name is not this fix's to change"
+    );
+}
+
+/// AC7: the dedicated Windows workflow retires with the job that called it.
+#[test]
+fn the_windows_captured_stdout_workflow_is_absent() {
+    let path = repo_root()
+        .join(".github/workflows/biscuit-tui-windows-captured-stdout.yml");
+    assert!(
+        !path.exists(),
+        "biscuit-tui-windows-captured-stdout.yml must be absent once \
+         the test is ordinary L1 evidence"
+    );
+    assert!(
+        ORCHESTRATED.is_empty(),
+        "the specialized-workflow inventory must be absent of retired \
+         entries; it still names {:?}",
+        ORCHESTRATED.map(|(name, _, _)| name)
+    );
+
+    // B4: retiring the caller orphans the flag that selected it. A
+    // flag nothing reads is the shape this whole fix removes.
+    let ci = workflow("ci.yml");
+    assert!(
+        !ci.contains("biscuit_tui"),
+        "the `biscuit_tui` scope output must be absent once its only \
+         consumer is gone"
+    );
+    assert!(
+        !read("scripts/ci/affected_scope.py").contains("\"biscuit-tui\""),
+        "the `biscuit-tui` area flag must be absent from the planner"
+    );
+}
+
+/// AC12: the report is advisory, and nothing that blocks may be.
+#[test]
+fn ci_reporting_is_advisory_and_no_blocking_job_is() {
+    let report = optional_job_block("ci.yml", "  ci-reporting:").unwrap_or_else(|| {
+        panic!("ci-reporting must exist; `summary` has not been replaced")
+    });
+    assert!(
+        report.contains("\n    if: always()\n"),
+        "ci-reporting must run even when every producer failed"
+    );
+    assert!(
+        report.contains("\n    continue-on-error: true\n"),
+        "ci-reporting must be structurally advisory, not advisory by \
+         virtue of its script always succeeding"
+    );
+
+    // R11: it is NOT folded. `continue-on-error` would convert its
+    // failure to `success` in the fold anyway, so listing it would be
+    // misleading rather than merely redundant. Comments are stripped first —
+    // `ci-gate`'s `needs:` comment names the job it deliberately omits.
+    let gate = job_block("ci.yml", "  ci-gate:");
+    let gate_executable: String = gate
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !gate_executable.contains("ci-reporting"),
+        "ci-gate must not fold the advisory report"
+    );
+
+    for id in TARGET_CI_JOBS {
+        if id == "ci-reporting" {
+            continue;
+        }
+        let block = job_block("ci.yml", &format!("  {id}:"));
+        assert!(
+            !block.contains("\n    continue-on-error:"),
+            "ci-reporting must be the only advisory job; `{id}` carries \
+             continue-on-error at job level"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Work-group 2.C — the Windows captured-stdout test becomes ordinary L1
+// ---------------------------------------------------------------------------
+
+/// AC8/AC9: nothing stands between the test and normal L1 discovery.
+///
+/// Asserted from this suite rather than from a Biscuit TUI test because the
+/// subject is *discoverability* — a test that no recipe selects cannot assert
+/// its own reachability, which is the failure mode
+/// `features/2026-07-24-devops/ci-failure-inventory.md` records.
+#[test]
+fn the_windows_captured_stdout_test_is_discoverable_as_ordinary_l1() {
+    let test = read("biscuit-tui/cli/tests/windows_captured_stdout.rs");
+    assert!(
+        !test.contains("#[ignore"),
+        "the test must be reachable by the canonical L1 recipe, but it \
+         is still `#[ignore]`d"
+    );
+    assert!(
+        !test.contains("sleep(Duration::from_millis("),
+        "the test must be reachable by the canonical L1 recipe without \
+         a fixed readiness sleep (AC9); bounded observation replaces it"
+    );
+    // The tier contract expresses "Windows-only" with the `cfg`, never
+    // with a prefix or an attribute (spec D4).
+    assert!(
+        test.contains("#![cfg(windows)]"),
+        "the test must be reachable by the canonical L1 recipe on \
+         Windows and compiled out elsewhere; its `#![cfg(windows)]` is \
+         gone"
+    );
+
+    let justfile = read("biscuit-tui/justfile");
+    assert!(
+        !justfile.contains("test-windows-captured-stdout"),
+        "the test must be reachable by the canonical L1 recipe, so the \
+         dedicated recipe that invoked it by exact name is gone"
+    );
+}
+
+/// NOT pending: the starting advantage Phase 7 depends on.
+///
+/// `biscuit-tui-cli` already declares `features = ["terminal-tests"]` under
+/// `[package.metadata.ci.tests]`, so the CI L1 cell already COMPILES this test
+/// target. Removing that declaration would leave the test green-by-absence.
+#[test]
+fn the_biscuit_tui_cli_l1_cell_already_compiles_the_terminal_test_target() {
+    let manifest = read("biscuit-tui/cli/Cargo.toml");
+    let tests = manifest
+        .split_once("[package.metadata.ci.tests]")
+        .expect("biscuit-tui-cli must declare its CI test policy")
+        .1;
+    assert!(
+        tests.contains(r#"features = ["terminal-tests"]"#),
+        "the CI L1 cell must compile the terminal-tests target, or the Windows \
+         captured-stdout test is absent rather than passing"
+    );
 }
