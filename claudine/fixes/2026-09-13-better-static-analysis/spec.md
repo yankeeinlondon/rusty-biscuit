@@ -1,6 +1,5 @@
 ---
 created: 2026-09-13
-status: draft
 reviewed: false
 implemented: false
 clarified: true
