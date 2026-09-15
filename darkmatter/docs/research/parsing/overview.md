@@ -21,6 +21,8 @@ You should now have a good foundational knowledge of to think about parsing in R
 ::end-block
 ::block when="is_last"
 
+::end-block
+
 
 ## Task
 
