@@ -6,6 +6,54 @@ agent: claude/opus
 yolo: true
 spec: fixes/2026-09-14-cicd-improvements/spec.md
 status: proposed
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+  - fixes/2026-09-14-cicd-improvements/plan.md
+  - fixes/2026-09-14-cicd-improvements/implementation-log.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
+human_review: false
+message_to_agent: |-
+  Phase 1 was read-only and produced five recorded rulings plus four
+  corrections to the plan's own premises. Read these before starting Phase 2.
+
+  1. R-1 = KEEP the flag (recommendation accepted), but the *reason* is
+     narrower than the plan states. `--no-fail-fast` is unrecoverable from the
+     command line ONLY at the repository root. Area-level `just test` (e.g.
+     `darkmatter/justfile:71`) forwards `{{ args }}` straight to nextest, so
+     `just test --no-fail-fast` works fine inside a package area — many
+     historical logs in the repo do exactly that. The plan's fact (3) is true
+     but unscoped; prose that repeats it unscoped would be factually wrong
+     about the recipe agents use most. Say "at the repository root".
+
+  2. The plan's fact (6) is WRONG. `.claude/skills/rust-testing/SKILL.md` is
+     NOT currently a hash fixed point — its committed `hash:` body half
+     (`5e3087a71564a05a`) is stale; the real value is `fb3622c484a86f23`. It
+     drifted in commit d14beb34a, which edited the body without refreshing the
+     hash. Do not treat "hash unchanged from the committed value" as a Phase 4
+     success test; Phase 4 must WRITE the correct value.
+
+  3. The Phase 4 hash ordering is CEREMONIAL, not required. Measured: bumping
+     `last_updated` does not move the hash, and writing the `hash:` field does
+     not move the hash. `md hash` excludes both fields. Only body edits and
+     other frontmatter fields (e.g. `name`) move it. The one real constraint
+     is "hash after the last body edit".
+
+  4. AC7's verification command CANNOT PASS as written. Three pre-existing
+     commits on `fix/cicd-improvements` (0a750f407, 1fd610a7b, 2ed6b0f04)
+     already touch `.github/workflows/`, so `git diff --name-only
+     <merge-base>...HEAD` lists 5 workflow files before this fix changes
+     anything. AC7's intent — this fix touches no workflow file — must be
+     checked against this fix's own changes, not the whole branch. Use the
+     corrected command recorded under R-6 below.
+
+  Also note: R-2's cited line number has drifted. "Canonical Just Recipes" is
+  `SKILL.md:312`, not 297 (line 297 is inside the `expect_level!` gating
+  section). And for R3, `just complete` (`just/lifecycle.just:108`) is a real
+  recipe that performs the `_completed/` move — the CLAUDE.md prohibition
+  should name it, or an agent will read the prohibition and still press the
+  button that the `just` skill documents.
 ---
 
 # Plan — Three Conventions Agents Keep Getting Wrong
@@ -145,7 +193,26 @@ this document and a small evidence baseline that Phase 4 compares against.
 These must be answered before Phase 2 starts. Each carries a recommendation;
 the recommendation is the default if the author does not rule otherwise.
 
-- [ ] **R-1 — `_test_workspace`: keep, drop, or condition the flag?**
+- [x] **R-1 — `_test_workspace`: keep, drop, or condition the flag?**
+    - **DECIDED 2026-09-15 — recommendation ACCEPTED: keep the flag,
+      unconditionally, and rewrite the comment.** Decided after the
+      flag-reversibility spike reported, not before.
+    - The spike confirmed fact (3) empirically at the repository root
+      (`just test --no-fail-fast` → `No workspace packages matched`, exit 1)
+      and confirmed fact (1) (`just test biscuit-hash` selects 2 packages).
+    - **It also narrowed the reasoning.** Reversibility is scope-dependent,
+      which the plan did not know: root `just test` sends `*args` to
+      `_test_workspace *selectors` and they are consumed as selectors, but an
+      *area* `just test` (e.g. `darkmatter/justfile:71`) forwards `{{ args }}`
+      to `_test_local_all` and onward to nextest, so `just test --no-fail-fast`
+      works normally from inside a package area.
+    - This strengthens *keep* rather than weakening it: the single recipe whose
+      callers cannot re-specify the flag is precisely the one that has it baked
+      in, while every area recipe — the one agents actually use daily — keeps
+      full control and retains nextest's fail-fast default.
+    - **Phase 2 constraint:** the new comment must scope the irreversibility
+      claim to the repository root. An unscoped restatement of fact (3) would
+      be false about area recipes.
     - The spec offers two options (keep and say the rule keys on
       cost-of-next-run; or drop and say the rule is strictly environmental).
       Fact (1) exposes a third: the recipe covers both a full sweep *and*
@@ -163,7 +230,16 @@ the recommendation is the default if the author does not rule otherwise.
     - **Rejecting this recommendation is a supported outcome** — see Phase 2's
       conditional task and Phase 3's conditional drift task.
 
-- [ ] **R-2 — Does R1's documentation live in `SKILL.md` or in `nextest.md`?**
+- [x] **R-2 — Does R1's documentation live in `SKILL.md` or in `nextest.md`?**
+    - **DECIDED — recommendation ACCEPTED: `SKILL.md`, "Canonical Just
+      Recipes".** Only one file gets a hash refresh; the Topic Pages table
+      needs no row update.
+    - **Line-number correction:** "Canonical Just Recipes" is at `SKILL.md:312`,
+      not 297. Line 297 sits inside the `expect_level!` gating discussion.
+    - **Do not restate mechanism.** `SKILL.md:405-408` already describes
+      `_test_workspace`'s one-invocation `--no-fail-fast` behavior correctly.
+      That is *mechanism*; what Phase 2 adds at line 312 is *policy*. Keeping
+      the two distinct is what lets Phase 3's no-duplicate check pass.
     - `.claude/skills/rust-testing/nextest.md` is the skill's nextest topic
       page and is the mechanically obvious home for a flag discussion.
     - **Recommendation: `SKILL.md`, in/adjacent to "Canonical Just Recipes"
@@ -175,7 +251,19 @@ the recommendation is the default if the author does not rule otherwise.
       cheap). Consequence of rejecting: two files need hash refreshes and the
       Topic Pages table (line 749) needs a row update.
 
-- [ ] **R-3 — Where exactly does R2 go in `CLAUDE.md`?**
+- [x] **R-3 — Where exactly does R2 go in `CLAUDE.md`?**
+    - **DECIDED — recommendation ACCEPTED: option (a),** a new H2
+      `## CI/CD Test-scope Discipline` immediately before
+      `## Evidence Reuse and Execution Constraints` (verified still at
+      `CLAUDE.md:51`).
+    - **Addition for the R3/AC5 half of Work-group 2B:** the sweep found that
+      `just complete` (`just/lifecycle.just:108`) is a live recipe that
+      performs the `_completed/` move, and it is documented to agents in
+      `.claude/skills/just/SKILL.md:78` and `.claude/agents/just-scripter.md:23`.
+      A prohibition that does not name the command leaves the button
+      documented and unguarded. The CLAUDE.md text should name `just complete`
+      explicitly. This stays within "one or two lines — a prohibition, not a
+      procedure".
     - Candidates: (a) a new H2 immediately *before* "Evidence Reuse and
       Execution Constraints" (currently line 51); (b) a new H2 immediately
       after it; (c) new bullets inside it.
@@ -187,7 +275,13 @@ the recommendation is the default if the author does not rule otherwise.
     - Rejecting in favor of (c) risks exactly the failure the spec warns
       about: an unscoped reading that discourages local testing.
 
-- [ ] **R-4 — Does `rust-devops` get a pointer to R2?**
+- [x] **R-4 — Does `rust-devops` get a pointer to R2?**
+    - **DECIDED — recommendation ACCEPTED: no.** One home per rule.
+    - Checked while sweeping: `.claude/skills/rust-devops/` mentions fail-fast
+      exactly once (`ci-cd.md:271`), and that is the GitHub Actions matrix
+      `fail-fast: false` — an unrelated concept from nextest's flag. So there
+      is no existing near-duplicate to reconcile, and adding one would create
+      the first.
     - R2 is a CI/CD rule and `.claude/skills/rust-devops/SKILL.md` is the skill
       CLAUDE.md already tells agents to load "before changing CI scope".
     - **Recommendation: no.** The spec scopes R2's documentation to
@@ -195,17 +289,49 @@ the recommendation is the default if the author does not rule otherwise.
       loaded-on-demand skill creates two copies to keep in sync. Record the
       decision so a future reviewer does not re-open it.
 
-- [ ] **R-5 — Are the git-tracked `memory/*.md` files in scope for drift?**
+- [x] **R-5 — Are the git-tracked `memory/*.md` files in scope for drift?**
     - `memory/just.md` is tracked in the repository and discusses
       `_test_local_all` and `--no-fail-fast` argument forwarding. It is *not*
       the disabled per-project agent memory that the spec rules out of scope.
-    - **Recommendation: read-only check in Phase 3.** If a sentence there is
-      falsified by the R-1 outcome, fix that sentence and nothing else; if the
-      file's status is itself unclear, report it and leave it untouched.
+    - **DECIDED — recommendation ACCEPTED, and the read-only check is already
+      done (Phase 1 sweep). Outcome: not drift; Phase 3 has nothing to fix.**
+    - `memory/just.md:52` describes `_test_all` selecting `_test_local_all`
+      locally versus `_run_all _test` under CI. It makes no fail-fast claim and
+      is unaffected by R-1 either way.
+    - `memory/just.md:208` states that `just _recipe --no-fail-fast
+      --archive-file /x` passes all three through to a `*args` parameter. This
+      is **true** — it describes `just`'s own option parsing, not what a recipe
+      subsequently does with the arguments. It sits adjacent to the root-`just
+      test` trap without asserting anything false, so under Rule 3 it is left
+      untouched.
+    - The files' status is not unclear: they are tracked, live, and their
+      content is accurate. No report-and-leave case arose.
+
+- [x] **R-6 — How is AC7 actually verified on this branch?** *(new; raised by
+      the Phase 1 baseline, not present in the original plan)*
+    - AC7's command `git diff --name-only <merge-base>...HEAD | grep
+      '^\.github/workflows/'` **cannot return empty on this branch.** Three
+      commits that predate this fix — `0a750f407`, `1fd610a7b`, `2ed6b0f04` —
+      already touch `.github/workflows/`, so the merge-base diff lists five
+      workflow files before this fix changes anything.
+    - AC7's *intent* is unambiguous and unchanged: this fix touches no workflow
+      file. Only the measurement was wrong, because it measures the whole
+      branch rather than this fix's contribution.
+    - **DECIDED — verify against this fix's own changes:**
+
+      ```sh
+      git status --porcelain .github/workflows/          # must be empty
+      git diff --name-only HEAD -- .github/workflows/    # must be empty
+      ```
+
+      Both are empty as of the Phase 1 baseline, which is the condition Phases
+      2-4 must preserve. If this fix is committed before the AC audit runs,
+      substitute the range from the first commit of this fix to `HEAD`.
+    - No scope change: nothing about which files this fix may touch has moved.
 
 ### Work-group 1A — Decision spikes (all three run concurrently)
 
-- [ ] **Spike: flag reversibility**
+- [x] **Spike: flag reversibility**
     - Confirm fact (3) empirically: run `just test --no-fail-fast` at the repo
       root and capture that the argument is consumed as a selector and the
       recipe exits non-zero with "No workspace packages matched".
@@ -214,8 +340,14 @@ the recommendation is the default if the author does not rule otherwise.
       line; interrupting before the suite finishes is fine and expected).
     - Output: a yes/no on whether removing the flag is reversible by a caller.
       This is the deciding input for R-1. **Blocks R-1.**
+    - **RESULT — No, not at the repository root.** `just test --no-fail-fast`
+      printed `No workspace packages matched: --no-fail-fast` and exited 1;
+      `just test biscuit-hash` selected 2 packages and exited 0. The spike
+      additionally established that reversibility *is* available at area scope
+      (`darkmatter/justfile:71` forwards `{{ args }}` to nextest), which R-1
+      folds into its reasoning. Full transcript in the implementation log.
 
-- [ ] **Spike: hash fixed-point mechanics**
+- [x] **Spike: hash fixed-point mechanics**
     - On a scratch copy of `.claude/skills/rust-testing/SKILL.md`, change only
       `last_updated` and re-run `md hash`. Confirm the frontmatter half of the
       hash moves, proving the Phase 4 ordering (edit everything → bump
@@ -223,8 +355,19 @@ the recommendation is the default if the author does not rule otherwise.
       than ceremonial.
     - Do not modify the tracked file. Delete the scratch copy.
     - Output: the confirmed hash-refresh procedure, written into Phase 4's task.
+    - **RESULT — the premise is falsified twice; see Phase 4's amended task.**
+      (a) The tracked file is **not** currently a fixed point: `md hash`
+      returns `61d07be7e22c9f45-fb3622c484a86f23` while the committed field
+      reads `...-5e3087a71564a05a`. The working tree is clean and the HEAD blob
+      hashes identically, so this is committed drift dating to `d14beb34a`.
+      (b) Bumping `last_updated` does **not** move the hash, and neither does
+      rewriting the `hash:` field — `md hash` excludes both. Changing `name`
+      moves the frontmatter half; appending a body line moves the body half.
+      The ordering is therefore ceremonial; the only real constraint is
+      "hash after the final body edit". Scratch copy deleted; tracked file
+      untouched.
 
-- [ ] **Spike: contradiction sweep (read-only)**
+- [x] **Spike: contradiction sweep (read-only)**
     - Search the repository for live statements that either R-1 outcome would
       falsify, and for passive-voice `_completed/` language beyond
       `CLAUDE.md:138`.
@@ -237,10 +380,23 @@ the recommendation is the default if the author does not rule otherwise.
     - Output: a checklist of file:line drift candidates, carried into Phase 3.
       **Note:** `docs/testing-strategy.md:304-309` and `memory/just.md:52,208`
       are already known and should be on the list before the sweep starts.
+    - **RESULT — 17-entry checklist recorded in the implementation log's
+      Phase 1 section**, including both known entries. Two entries are actual
+      drift: `just/devops.just:1204-1205` (the R-1 comment, fixed in Phase 2)
+      and `CLAUDE.md:138` (the AC5 target). Two more are *conditional* on R-1
+      and stay correct under the keep ruling: `docs/testing-strategy.md:302-306`
+      and `.claude/skills/rust-testing/SKILL.md:405-408`. The remaining 13 are
+      recorded as not-drift with a one-line reason each, which satisfies
+      Phase 3's first checkpoint item in advance.
+    - Two findings worth carrying beyond the checklist: `docs/topics/ci-cd.md`
+      and `rust-devops/ci-cd.md` use `fail-fast` only in the GitHub Actions
+      matrix sense (an unrelated concept — do not "reconcile" them), and no
+      passive-voice `_completed/` guidance exists in any live file other than
+      `CLAUDE.md:138`, so AC5 has exactly one edit site.
 
 ### Work-group 1B — Evidence baseline (concurrent with 1A)
 
-- [ ] **Capture pre-change baselines**
+- [x] **Capture pre-change baselines**
     - `just --summary` at the repo root, exit code and output recorded
       (it currently exits 0). Phase 4 compares against this.
     - `md hash .claude/skills/rust-testing/SKILL.md` recorded (currently
@@ -249,15 +405,34 @@ the recommendation is the default if the author does not rule otherwise.
       `git diff --name-only <base>...HEAD`.
     - Confirm the working tree has no unrelated staged changes that would
       pollute the AC7 check.
+    - **RESULT.** `just --summary` at the root: exit **0**, 84 recipes.
+      `md hash .claude/skills/rust-testing/SKILL.md`:
+      `61d07be7e22c9f45-fb3622c484a86f23` — **not** the value this plan
+      predicted, see the hash spike. `git merge-base HEAD main`:
+      `aad933bdb725259062b446c0baba8f708c4ccbde` (30 commits behind HEAD).
+      **Staged changes: none.**
+    - Two caveats the baseline exposed, both carried into later phases:
+      **(i)** the AC7 check is invalid as written — see R-6; **(ii)** the
+      working tree carries unrelated *unstaged* modifications
+      (`darkmatter/`, `prompts/`, untracked `claudine/fixes/`), so Phase 2's
+      "`git diff --stat` lists only authorized files" checkpoint must be path
+      scoped: `git diff --stat -- CLAUDE.md just/devops.just
+      .claude/skills/rust-testing/`.
 
 ### Phase 1 Validation Checkpoint
 
-- [ ] Every ruling R-1 … R-5 has a recorded answer (accepted recommendation or
-      an explicit override) written into this plan document.
-- [ ] R-1 was decided *after* the flag-reversibility spike reported, not before.
-- [ ] The drift candidate checklist exists and includes the two known entries.
-- [ ] Baselines captured. No file outside `fixes/2026-09-14-cicd-improvements/`
-      has been modified.
+- [x] Every ruling R-1 … R-5 has a recorded answer (accepted recommendation or
+      an explicit override) written into this plan document. *(All five
+      accepted their recommendation; R-1, R-2, R-3, and R-5 carry recorded
+      refinements. A sixth ruling, R-6, was added for the invalid AC7 check.)*
+- [x] R-1 was decided *after* the flag-reversibility spike reported, not before.
+      *(And the spike changed its reasoning — scope-dependent reversibility —
+      rather than rubber-stamping the code read.)*
+- [x] The drift candidate checklist exists and includes the two known entries.
+      *(17 entries; known entries are rows 2, 6, and 7.)*
+- [x] Baselines captured. No file outside `fixes/2026-09-14-cicd-improvements/`
+      has been modified. *(Verified with `git status --porcelain`; the only
+      changes are this plan and the implementation log.)*
 
 ---
 
@@ -269,7 +444,10 @@ dependency between them and no shared file.
 
 ### Work-group 2A — R1 (`.claude/skills/rust-testing/SKILL.md`, `just/devops.just`)
 
-- [ ] **Write the fail-fast policy** *(satisfies AC1)*
+- [x] **Write the fail-fast policy** *(satisfies AC1)* — `SKILL.md:333`, new H3
+      "Fail-fast is an environment policy, not a flag preference" inside
+      "Canonical Just Recipes". Cites the three CI files by name only. The
+      irreversibility claim is scoped to the repository root per R-1.
     - Add the rule to the section chosen in R-2 (default: "Canonical Just
       Recipes", `SKILL.md:297`).
     - Must state, in this order: locally fail fast (nextest's default, and the
@@ -287,7 +465,10 @@ dependency between them and no shared file.
     - Keep it proportionate: this is a rule, not an essay. The existing
       section is a table plus a sentence; match that altitude.
 
-- [ ] **Write the non-vacuous-proof consequence** *(satisfies AC2)*
+- [x] **Write the non-vacuous-proof consequence** *(satisfies AC2)* —
+      `SKILL.md:356`, the final paragraph of the same H3, opening with
+      "**Consequence for non-vacuous proofs.**" so it cannot read as a
+      standalone always-use-this-flag rule.
     - Place it adjacent to the fail-fast rule, framed explicitly as a
       *consequence* of R1 — not as a standalone "always use this flag" rule.
       The spec is emphatic on this: the earlier "always run the neutered pass
@@ -299,7 +480,11 @@ dependency between them and no shared file.
     - Per fact (8) there is no existing wrong sentence to delete; this is
       additive.
 
-- [ ] **Execute the R-1 decision at `just/devops.just:1206`** *(satisfies AC3)*
+- [x] **Execute the R-1 decision at `just/devops.just:1206`** *(satisfies AC3)*
+      — KEEP branch taken. Flag untouched; the two-line comment became eight
+      lines at `just/devops.just:1204-1211`. `git diff` for this file shows
+      comment lines only (verified). Smoke: `just test biscuit-hash` → 70/70
+      passed.
     - *If keep (default):* leave the flag, replace the two-line comment above
       it. The replacement must not claim the recipe is always a full-workspace
       sweep, and must explain the selector case. Comment-only change — confirm
@@ -315,7 +500,10 @@ dependency between them and no shared file.
 
 ### Work-group 2B — R2 and R3 (`CLAUDE.md`)
 
-- [ ] **Add the CI/CD test-scope rule** *(satisfies AC4)*
+- [x] **Add the CI/CD test-scope rule** *(satisfies AC4)* — `CLAUDE.md:51`, new
+      H2 `## CI/CD Test-scope Discipline` immediately before "Evidence Reuse and
+      Execution Constraints" (option (a)). The scope sentence is the **first**
+      bullet, not a footnote.
     - Insert at the position chosen in R-3 (default: new H2
       `## CI/CD Test-scope Discipline` immediately before "Evidence Reuse and
       Execution Constraints", currently line 51).
@@ -332,7 +520,10 @@ dependency between them and no shared file.
       (must it re-run).
     - Match the file's existing bullet style and line width.
 
-- [ ] **Name the owner of the `_completed/` move** *(satisfies AC5)*
+- [x] **Name the owner of the `_completed/` move** *(satisfies AC5)* —
+      `CLAUDE.md:152-155`. Two bullets, active voice, names the author as the only
+      mover and names `just complete` explicitly per R-3. `AGENTS.md` confirmed
+      a symlink to `CLAUDE.md`; not edited.
     - Replace `CLAUDE.md:138` — "when a feature/fix is completed it is moved to
       `_completed`" — with active-voice text naming the **author** as the only
       party who makes that move, after the review cycle closes.
@@ -345,13 +536,21 @@ dependency between them and no shared file.
 
 ### Phase 2 Validation Checkpoint
 
-- [ ] `git diff --stat` lists only the files the executed rulings authorize —
-      at most `SKILL.md`, `CLAUDE.md`, `just/devops.just`.
-- [ ] Nothing under `.github/workflows/` appears in the diff (AC7 interim).
-- [ ] If R-1 kept the flag: `git diff just/devops.just` shows comment lines
-      only.
-- [ ] `just --summary` at the repo root still exits 0 and its recipe list
-      matches the Phase 1 baseline.
+- [x] `git diff --stat` lists only the files the executed rulings authorize —
+      at most `SKILL.md`, `CLAUDE.md`, `just/devops.just`. **Scope the command
+      to those paths;** the working tree carries unrelated unstaged changes
+      (Phase 1 baseline), so a bare `git diff --stat` will not be clean:
+      `git diff --stat -- CLAUDE.md just/devops.just .claude/skills/rust-testing/`
+      *(Exactly those three files, +55/-3.)*
+- [x] Nothing under `.github/workflows/` appears in the diff (AC7 interim),
+      checked with `git status --porcelain .github/workflows/` per R-6.
+      *(Both R-6 commands empty.)*
+- [x] If R-1 kept the flag: `git diff just/devops.just` shows comment lines
+      only. *(Verified — the only non-comment line in the hunk is the unchanged
+      context line `just _test_local_all "${specs}" --no-fail-fast`.)*
+- [x] `just --summary` at the repo root still exits 0 and its recipe list
+      matches the Phase 1 baseline. *(Exit 0, 84 recipes, byte-identical to the
+      Phase 1 capture.)*
 
 ---
 
@@ -402,16 +601,33 @@ Must run last: the hash is a function of the final bytes, so any Phase 3 edit
 to a skill file invalidates a hash computed earlier.
 
 - [ ] **Refresh skill hashes** *(satisfies AC6)*
-    - For each edited skill file, in this exact order (per the Phase 1 spike):
-      1. confirm all body edits are final;
-      2. bump `last_updated` to `2026-09-14`;
+    - **Procedure confirmed and amended by the Phase 1 spike.** `md hash`
+      excludes `hash` and `last_updated` from the frontmatter half, so the
+      strict ordering this plan originally specified is not load-bearing. The
+      one real constraint is that the hash is computed **after the final body
+      edit**. For each edited skill file:
+      1. confirm all body edits are final — this is the only ordering
+         requirement;
+      2. bump `last_updated` to the completion date (does not affect the hash);
       3. run `md hash <file>`;
-      4. write the result into the `hash:` frontmatter field;
-      5. re-run `md hash <file>` and confirm the value is unchanged — a fixed
-         point, as the file was before this change.
-    - Default scope is one file, `.claude/skills/rust-testing/SKILL.md`. If
-      R-2 was overridden, `nextest.md` is added and its Topic Pages row
-      (`SKILL.md:749`) updated *before* step 1 above.
+      4. write the result into the `hash:` frontmatter field (writing this
+         field does not itself change the hash — that is what makes a
+         self-referential hash field possible);
+      5. re-run `md hash <file>` and confirm it is unchanged. **Keep this
+         step.** It is cheap, and per the Phase 1 spike it is exactly the check
+         that would have caught the drift described next.
+    - **The file does not start as a fixed point.** Contrary to this plan's
+      fact (6), the committed `hash:` on
+      `.claude/skills/rust-testing/SKILL.md` is stale: it reads
+      `61d07be7e22c9f45-5e3087a71564a05a` while the file actually hashes to
+      `61d07be7e22c9f45-fb3622c484a86f23`, and has since commit `d14beb34a`
+      edited the body without refreshing. So AC6 is satisfied by **computing
+      and writing** the value, never by asserting it is unchanged from the
+      committed one. Repairing this pre-existing drift is a side effect, not a
+      scope expansion.
+    - Default scope is one file, `.claude/skills/rust-testing/SKILL.md`. Per
+      R-2 this remains the only skill file edited, so `nextest.md` and the
+      Topic Pages table are out of scope.
     - `CLAUDE.md` takes no hash (fact (7)). Do not add frontmatter to it.
 
 - [ ] **Run the spec's verification list**
@@ -429,9 +645,12 @@ to a skill file invalidates a hash computed earlier.
 
 - [ ] **Acceptance-criteria audit**
     - Walk AC1 … AC7 from the spec one at a time against the final diff, and
-      record a file:line pointer for each. AC7 is
-      `git diff --name-only <merge-base>...HEAD | grep '^\.github/workflows/'`
-      returning nothing.
+      record a file:line pointer for each.
+    - **AC7 uses the R-6 command, not the one originally written here.** The
+      merge-base form cannot pass: three commits predating this fix already
+      touch `.github/workflows/`. Verify this fix's own contribution instead —
+      `git status --porcelain .github/workflows/` and
+      `git diff --name-only HEAD -- .github/workflows/` must both be empty.
     - Re-read the two rules the spec warns are easy to get subtly wrong:
       AC2's framing (a consequence of R1, not a standalone always-use-this
       rule) and AC4's scope sentence (CI/CD only, not a blanket discouragement
