@@ -665,16 +665,19 @@ slices (there is no whole-run `ci-results` artifact any more) and
 
 ### The result document
 
-`ci-results.json` and the skip-only baseline are independently versioned; both
-currently use `schema_version: 3`. Identity is still
+`ci-results.json` and the skip-only baseline are independently versioned:
+the result document is at `schema_version: 4` and the baseline at 3. Identity is still
 `{package, environment, tier}`; each cell also
 carries its derived `area`, its `origin` (`ci`, `local`, `prior-local`, or
 `none`), the `evidence` behind a reused result, its measured `duration_s`, and
-the `target_kinds` and `compile_coverage_from` the plan assigned it. The
-document carries `accepted_evidence`, one entry per reused cell — the same set
-that was accepted for *scheduling*, so the scheduler and the report cannot
-disagree. A document from an earlier generation is refused with a migration
-error rather than partly read.
+the `target_kinds` and `compile_coverage_from` the plan assigned it. Version 4
+made `counts` optional alongside `duration_s`, so a cell nobody measured omits
+the field rather than reporting a zero that reads as a suite which found
+nothing. The document carries `accepted_evidence`, one entry per reused cell —
+the same set that was accepted for *scheduling*, so the scheduler and the
+report cannot disagree. A document from an earlier generation is refused by its
+version, before any cell is interpreted, with the migration that applies named;
+the fix is to re-run the rollup that produced it.
 
 `rollup` and `verdict` both take `--area`, which narrows the document, its
 scope, its scheduled set, and its accepted evidence together: an area then

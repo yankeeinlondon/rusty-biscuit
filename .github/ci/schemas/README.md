@@ -32,9 +32,9 @@ so Rust tooling can assert against it without running Python. Regenerate it with
 > half can go.
 >
 > A third document, the rollup's own `ci-results.json`, is **not** defined here:
-> it is Rust-owned by `scripts/ci-rollup.rs` and is at `schema_version: 3`,
+> it is Rust-owned by `scripts/ci-rollup.rs` and is at `schema_version: 4`,
 > versioned independently of the plan's 3, the receipt's 2, and the baseline's
-> 2. The plan fields that tool reads are asserted against `contract.json` by
+> 3. The plan fields that tool reads are asserted against `contract.json` by
 > `plan_fields_match_the_frozen_contract`, so renaming one breaks a test rather
 > than silently dropping a field serde never recognized.
 >

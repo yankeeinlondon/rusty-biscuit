@@ -222,6 +222,13 @@ fn classify_simple(expected: &[ExpectedCell], records: &[RunRecord]) -> Vec<Cell
     })
 }
 
+/// A cell's counts where the test's subject is the tally rather than its
+/// availability. Absence fails here, so a regression that erases a measurement
+/// cannot pass as a zero.
+fn measured_counts(cell: &Cell) -> Counts {
+    cell.counts.expect("the cell measured its tests")
+}
+
 fn only_cell(cells: Vec<Cell>) -> Cell {
     assert_eq!(cells.len(), 1, "expected exactly one cell, got {cells:#?}");
     cells.into_iter().next().unwrap()
@@ -438,6 +445,29 @@ fn state_missing_when_the_report_is_unreadable() {
         &[rec],
     ));
     assert_eq!(cell.state, CellState::Missing);
+}
+
+/// AC13 at the seam that decides it, rather than at the renderer that shows
+/// it. Both MISSING shapes carry `Counts::default()` internally, and only the
+/// absence of the measurement keeps them distinguishable from an invocation
+/// that ran and selected zero tests.
+#[test]
+fn a_cell_with_no_readable_report_measures_no_counts() {
+    let nothing_reported = only_cell(classify_simple(
+        &[expectation("a", "ubuntu-latest", Tier::L1)],
+        &[],
+    ));
+    assert_eq!(nothing_reported.state, CellState::Missing);
+    assert_eq!(nothing_reported.counts, None, "nothing measured this cell's tests");
+
+    let mut rec = record("a", "ubuntu-latest", Tier::L1);
+    rec.parse_error = Some("truncated JUnit XML".to_owned());
+    let unreadable = only_cell(classify_simple(
+        &[expectation("a", "ubuntu-latest", Tier::L1)],
+        &[rec],
+    ));
+    assert_eq!(unreadable.state, CellState::Missing);
+    assert_eq!(unreadable.counts, None, "an unreadable report is not a measurement");
 }
 
 #[test]
@@ -983,7 +1013,7 @@ fn a_test_only_companion_does_not_downgrade_a_green_lint() {
         detail: None,
         companion: None,
         companions: BTreeMap::new(),
-        duration_s: Some(42),
+        duration_s: Some(42.0),
         dependents: Vec::new(),
     }];
 
@@ -997,7 +1027,7 @@ fn a_test_only_companion_does_not_downgrade_a_green_lint() {
     assert_eq!(cell.state, CellState::Pass, "{:?}", cell.reasons);
     assert!(cell.companions.is_empty());
     assert_eq!(
-        cell.duration_s, 42,
+        cell.duration_s, Some(42.0),
         "R14: the lint COMMAND's duration reaches the cell, because no JUnit \
          report carries it"
     );
@@ -1025,7 +1055,7 @@ fn a_lint_status_with_no_duration_records_none() {
         &[policy("queue")],
         &[],
     ));
-    assert_eq!(cell.duration_s, 0);
+    assert_eq!(cell.duration_s, None);
     let rendered = serde_json::to_string(&rollup_of(vec![cell], &["queue"]))
         .expect("the rollup serializes");
     assert!(
@@ -1768,12 +1798,12 @@ fn skip_cell(skips: &[&str]) -> Cell {
     Cell {
         state: CellState::Pass,
         origin: Origin::Ci,
-        counts: Counts {
+        counts: Some(Counts {
             total: 5,
             passed: 5 - skips.len() as u32,
             skipped: skips.len() as u32,
             ..Counts::default()
-        },
+        }),
         scheduled: true,
         skipped_tests: skips.iter().map(|s| (*s).to_owned()).collect(),
         ..blank_cell(cell_key("biscuit-terminal", "ubuntu-latest", Tier::L2))
@@ -2347,7 +2377,7 @@ fn a_passing_wsl2_leg_renders_pass_not_not_scheduled() {
 
     assert_eq!(cell.state, CellState::Pass);
     assert!(cell.scheduled);
-    assert_eq!(cell.counts.passed, 3);
+    assert_eq!(measured_counts(cell).passed, 3);
 }
 
 /// The dangerous inverse. A leg policy scheduled that uploads nothing must not
@@ -2397,7 +2427,7 @@ fn passing_evidence_for_an_unscheduled_cell_renders_pass_and_blocks() {
         CellState::Pass,
         "a leg that ran and passed is not `NOT SCHEDULED`"
     );
-    assert_eq!(cell.counts.passed, 3);
+    assert_eq!(measured_counts(&cell).passed, 3);
 
     let findings = verdict(&rollup_of(cells, &["ghost"]), &Baseline::default(), None);
     assert!(blocks_with_rule(&findings, "cell-unscheduled-evidence"));
@@ -2912,9 +2942,9 @@ fn a_reused_cell_carries_the_measurements_its_receipt_recorded() {
     let cells = pr76_cells_from_the_plan();
     let cell = find_cell(&cells, "claudine", "macos-latest", Tier::L1);
 
-    assert_eq!(cell.counts.passed, 3);
-    assert_eq!(cell.counts.total, 3);
-    assert_eq!(cell.duration_s, 12);
+    assert_eq!(measured_counts(cell).passed, 3);
+    assert_eq!(measured_counts(cell).total, 3);
+    assert_eq!(cell.duration_s, Some(12.0));
     let evidence = cell.evidence.clone().expect("a reused cell names its receipt");
     assert_eq!(evidence.reference, "refs/notes/ci-local/macos-latest");
     assert_eq!(evidence.measurements, "3 test(s), 0 failed, 12s");
@@ -3020,7 +3050,7 @@ fn a_version_one_receipt_renders_its_measurements_as_unrecorded() {
     let cell = only_cell(classify_simple(&expected, &[]));
 
     assert_eq!(cell.state, CellState::Pass);
-    assert_eq!(cell.counts, Counts::default());
+    assert_eq!(cell.counts, None, "a v1 receipt measured no tests");
     let evidence = cell.evidence.clone().expect("the note is still named");
     assert_eq!(evidence.measurements, "not recorded (v1 receipt)");
     assert_eq!(evidence.reference, "refs/notes/ci-local/macos-latest");
@@ -3095,11 +3125,11 @@ fn two_area_rollup() -> Rollup {
             area: "playa".to_owned(),
             state: CellState::Pass,
             origin: Origin::Ci,
-            counts: Counts {
+            counts: Some(Counts {
                 total: 4,
                 passed: 4,
                 ..Counts::default()
-            },
+            }),
             scheduled: true,
             ..blank_cell(cell_key("playa", "ubuntu-latest", Tier::L1))
         },
@@ -3572,8 +3602,8 @@ fn reported_slice() -> Rollup {
             area: "claudine".to_owned(),
             state: CellState::Pass,
             origin: Origin::Ci,
-            counts: Counts { total: 12, passed: 12, ..Counts::default() },
-            duration_s: 61,
+            counts: Some(Counts { total: 12, passed: 12, ..Counts::default() }),
+            duration_s: Some(61.0),
             companions: vec![
                 CompanionResult::new(
                     "test_schema.py",
@@ -3601,8 +3631,8 @@ fn reported_slice() -> Rollup {
             area: "claudine".to_owned(),
             state: CellState::Pass,
             origin: Origin::PriorLocal,
-            counts: Counts { total: 12, passed: 12, ..Counts::default() },
-            duration_s: 7,
+            counts: Some(Counts { total: 12, passed: 12, ..Counts::default() }),
+            duration_s: Some(7.0),
             scheduled: true,
             ..blank_cell(cell_key("claudine", "macos-latest", Tier::L1))
         },
@@ -3610,7 +3640,7 @@ fn reported_slice() -> Rollup {
             area: "claudine".to_owned(),
             state: CellState::Pass,
             origin: Origin::Ci,
-            duration_s: 43,
+            duration_s: Some(43.0),
             scheduled: true,
             ..blank_cell(cell_key("claudine", "ubuntu-latest", Tier::parse("lint")))
         },
@@ -3725,12 +3755,14 @@ fn a_lint_cell_is_reported_as_the_linux_only_ci_command_duration() {
     );
 }
 
+/// The genuinely absent case: the producer staged no command duration at all,
+/// which is `None` and not a `0` a reader would take for an instantaneous run.
 #[test]
 fn an_unmeasured_lint_command_renders_not_recorded_rather_than_zero() {
     let mut slice = reported_slice();
     for cell in &mut slice.cells {
         if cell.key.tier == Tier::parse("lint") {
-            cell.duration_s = 0;
+            cell.duration_s = None;
         }
     }
     let markdown = render_report(None, &[slice]);
@@ -3747,6 +3779,88 @@ fn an_unmeasured_lint_command_renders_not_recorded_rather_than_zero() {
     );
 }
 
+/// The lint table inferred "measured" from `duration_s > 0`, so a clippy run
+/// that finished in under a second was reported as never measured at all.
+#[test]
+fn a_sub_second_lint_command_renders_its_measurement_rather_than_not_recorded() {
+    let mut slice = reported_slice();
+    for cell in &mut slice.cells {
+        if cell.key.tier == Tier::parse("lint") {
+            cell.duration_s = Some(0.42);
+        }
+    }
+    let markdown = render_report(None, &[slice]);
+    assert!(
+        markdown.contains("| claudine | ubuntu-latest | ci | 0.42s |"),
+        "a measured sub-second lint command must render its measurement: {markdown}"
+    );
+    assert!(
+        !markdown.contains("the producer recorded no command duration"),
+        "a measured command must never be reported as unavailable: {markdown}"
+    );
+}
+
+/// The other end of the same rule: a recorded zero is a command that finished
+/// faster than the producer's resolution, and presence is independent of the
+/// number.
+#[test]
+fn a_zero_lint_duration_is_a_measurement_not_an_absence() {
+    let mut slice = reported_slice();
+    for cell in &mut slice.cells {
+        if cell.key.tier == Tier::parse("lint") {
+            cell.duration_s = Some(0.0);
+        }
+    }
+    let markdown = render_report(None, &[slice]);
+    assert!(
+        markdown.contains("| claudine | ubuntu-latest | ci | 0.00s |"),
+        "a recorded `0` is a measurement, not an absent one: {markdown}"
+    );
+    assert!(
+        !markdown.contains("the producer recorded no command duration"),
+        "a recorded `0` must not be reported as unavailable: {markdown}"
+    );
+}
+
+/// Presence has to survive the producer's own JSON: a status that recorded
+/// `0.42` is a measurement and one that recorded nothing is an absence, and
+/// neither may be inferred from the number.
+#[test]
+fn a_lint_producer_status_carries_presence_independently_of_the_number() {
+    let status = |duration: &str| {
+        status_json(&format!(
+            r#"{{"package": "queue", "job": "lint", "result": "success"{duration}}}"#
+        ))
+    };
+    let measured = only_cell(status_cells(
+        &[status(r#", "duration_s": 0.42"#)],
+        &scope_of(&["queue"]),
+        &[],
+        &[policy("queue")],
+        &[],
+    ));
+    assert_eq!(measured.duration_s, Some(0.42));
+    let absent = only_cell(status_cells(
+        &[status("")],
+        &scope_of(&["queue"]),
+        &[],
+        &[policy("queue")],
+        &[],
+    ));
+    assert_eq!(absent.duration_s, None);
+
+    let markdown = render_report(None, &[rollup_of(vec![measured], &["queue"])]);
+    assert!(
+        markdown.contains("| queue | ubuntu-latest | ci | 0.42s |"),
+        "{markdown}"
+    );
+    let markdown = render_report(None, &[rollup_of(vec![absent], &["queue"])]);
+    assert!(
+        markdown.contains("not recorded (the producer recorded no command duration)"),
+        "{markdown}"
+    );
+}
+
 #[test]
 fn an_environment_no_producer_reported_renders_not_recorded_rather_than_zero() {
     let cells = vec![Cell {
@@ -3759,10 +3873,340 @@ fn an_environment_no_producer_reported_renders_not_recorded_rather_than_zero() {
     let markdown = render_report(None, &[rollup_of(cells, &["claudine"])]);
     assert!(
         markdown.contains(
-            "| windows-latest | 1 | 0 | none declared | not recorded (no producer reported \
-             a result for this environment) | none |"
+            "| windows-latest | 1 | not recorded (no producer recorded a test count for \
+             this environment) | none declared | not recorded (no producer recorded \
+             a test duration for this environment) | none |"
         ),
         "{markdown}"
+    );
+    assert!(
+        !markdown.contains("| windows-latest | 1 | 0 |"),
+        "a `0` count reads as a suite that ran and selected nothing: {markdown}"
+    );
+}
+
+/// The environment table had the same defect as the lint table: it inferred
+/// "this was measured" from `duration_s > 0` (falling back to the cell's
+/// origin), so an environment whose tests ran in under a second was reported
+/// as having no measurement at all.
+#[test]
+fn a_sub_second_environment_duration_is_reported_as_a_measurement() {
+    let cells = vec![Cell {
+        area: "claudine".to_owned(),
+        state: CellState::Pass,
+        origin: Origin::Ci,
+        counts: Some(Counts { total: 2, passed: 2, ..Counts::default() }),
+        duration_s: Some(0.4),
+        scheduled: true,
+        ..blank_cell(cell_key("claudine", "ubuntu-latest", Tier::L1))
+    }];
+    let markdown = render_report(None, &[rollup_of(cells, &["claudine"])]);
+    assert!(
+        markdown.contains("| ubuntu-latest | 1 | 2 | none declared | 0.40s | ci |"),
+        "a measured sub-second environment must render its measurement: {markdown}"
+    );
+    assert!(
+        !markdown.contains("no producer recorded a test duration"),
+        "a measured environment must never be reported as unavailable: {markdown}"
+    );
+}
+
+/// One `ubuntu-latest` environment row's cells, as `(package, tier,
+/// duration_s)`. Distinct keys, so every entry survives into its own cell.
+fn environment_cells(spec: &[(&str, Tier, Option<f64>)]) -> Vec<Cell> {
+    spec.iter()
+        .map(|(package, tier, duration_s)| Cell {
+            area: "claudine".to_owned(),
+            state: CellState::Pass,
+            origin: Origin::Ci,
+            counts: Some(Counts { total: 2, passed: 2, ..Counts::default() }),
+            duration_s: *duration_s,
+            scheduled: true,
+            ..blank_cell(cell_key(package, "ubuntu-latest", tier.clone()))
+        })
+        .collect()
+}
+
+fn environment_report(spec: &[(&str, Tier, Option<f64>)]) -> String {
+    render_report(None, &[rollup_of(environment_cells(spec), &["claudine"])])
+}
+
+/// AC13, review-3: an environment measured only in PART summed the durations
+/// it had and printed the total as the environment's own, so an unmeasured
+/// producer — a missing cell, or a legacy receipt carrying no duration —
+/// vanished behind a complete-looking number. The sum stays (discarding a real
+/// measurement loses what the reader came for), but it has to say what it
+/// leaves out, and name the cell that did not record.
+#[test]
+fn a_mixed_measured_and_unmeasured_environment_reports_a_partial_duration() {
+    let markdown = environment_report(&[
+        ("claudine", Tier::L1, Some(61.0)),
+        ("claudine", Tier::L2, None),
+    ]);
+    assert!(
+        markdown.contains(
+            "| ubuntu-latest | 2 | 4 | none declared | 61s (partial; not recorded: \
+             claudine/L2) | ci |"
+        ),
+        "a partly measured environment must label its sum and name the unmeasured cell: \
+         {markdown}"
+    );
+    assert!(
+        !markdown.contains("| none declared | 61s |"),
+        "the sum of a subset was reported as the environment's whole duration: {markdown}"
+    );
+}
+
+/// The guard on the normal path: nothing is missing, so nothing is said to be.
+#[test]
+fn an_environment_whose_cells_all_measured_reports_one_complete_duration() {
+    let markdown = environment_report(&[
+        ("claudine", Tier::L1, Some(61.0)),
+        ("claudine", Tier::L2, Some(7.0)),
+    ]);
+    assert!(
+        markdown.contains("| ubuntu-latest | 2 | 4 | none declared | 68s | ci |"),
+        "{markdown}"
+    );
+    assert!(
+        !markdown.contains("partial"),
+        "a fully measured environment must not be labeled partial: {markdown}"
+    );
+    assert!(!markdown.contains(UNRECORDED), "{markdown}");
+}
+
+/// The other end: no cell measured anything, so there is no sum to label and
+/// the row stays an absence with its reason.
+#[test]
+fn an_environment_whose_cells_are_all_unmeasured_stays_not_recorded() {
+    let markdown = environment_report(&[
+        ("claudine", Tier::L1, None),
+        ("claudine", Tier::L2, None),
+    ]);
+    assert!(
+        markdown.contains(
+            "| ubuntu-latest | 2 | 4 | none declared | not recorded (no producer recorded \
+             a test duration for this environment) | ci |"
+        ),
+        "{markdown}"
+    );
+    assert!(
+        !markdown.contains("| none declared | 0s |"),
+        "an unmeasured environment must never render a number: {markdown}"
+    );
+}
+
+/// An environment row is one table cell, and a whole-workspace run can leave
+/// dozens of cells unmeasured. Name the first few and count the rest, as `why`
+/// does for failing tests.
+#[test]
+fn a_partial_environment_duration_bounds_the_cells_it_names() {
+    let mut spec: Vec<(&str, Tier, Option<f64>)> = vec![("claudine", Tier::L1, Some(5.0))];
+    for package in ["a", "b", "c", "d", "e", "f"] {
+        spec.push((package, Tier::L1, None));
+    }
+    let markdown = environment_report(&spec);
+    assert!(
+        markdown.contains("5s (partial; not recorded: a/L1, b/L1, c/L1, d/L1, e/L1 (+1 more))"),
+        "{markdown}"
+    );
+}
+
+// --- AC13, review-4: the same treatment for test COUNTS ------------------
+
+/// One `ubuntu-latest` environment row's cells, as `(package, tier, total)`,
+/// where `None` is a cell that carries no count measurement at all. Every cell
+/// measures a duration, so the count column is the only variable.
+fn counted_environment_report(spec: &[(&str, Tier, Option<u32>)]) -> String {
+    let cells = spec
+        .iter()
+        .map(|(package, tier, total)| Cell {
+            area: "claudine".to_owned(),
+            state: CellState::Pass,
+            origin: Origin::Ci,
+            counts: total.map(|total| Counts { total, passed: total, ..Counts::default() }),
+            duration_s: Some(1.0),
+            scheduled: true,
+            ..blank_cell(cell_key(package, "ubuntu-latest", tier.clone()))
+        })
+        .collect();
+    render_report(None, &[rollup_of(cells, &["claudine"])])
+}
+
+/// The counts column had the defect review 3 closed for durations: it summed
+/// what it had and printed the total as the environment's own, so a cell that
+/// measured no cardinality vanished behind a complete-looking number.
+#[test]
+fn a_mixed_measured_and_unmeasured_environment_reports_a_partial_test_count() {
+    let markdown = counted_environment_report(&[
+        ("claudine", Tier::L1, Some(12)),
+        ("claudine", Tier::L2, None),
+    ]);
+    assert!(
+        markdown.contains(
+            "| ubuntu-latest | 2 | 12 (partial; not recorded: claudine/L2) | none declared \
+             | 2s | ci |"
+        ),
+        "a partly measured environment must label its sum and name the unmeasured cell: \
+         {markdown}"
+    );
+    assert!(
+        !markdown.contains("| ubuntu-latest | 2 | 12 |"),
+        "the sum of a subset was reported as the environment's whole count: {markdown}"
+    );
+}
+
+/// The guard on the normal path, and on the bound: nothing is missing, so
+/// nothing is said to be.
+#[test]
+fn an_environment_whose_cells_all_measured_reports_one_complete_test_count() {
+    let markdown = counted_environment_report(&[
+        ("claudine", Tier::L1, Some(12)),
+        ("claudine", Tier::L2, Some(3)),
+    ]);
+    assert!(
+        markdown.contains("| ubuntu-latest | 2 | 15 | none declared | 2s | ci |"),
+        "{markdown}"
+    );
+    assert!(
+        !markdown.contains("no producer recorded a test count"),
+        "a fully measured environment must never be reported as unavailable: {markdown}"
+    );
+}
+
+/// A version-1 receipt carries no counts by contract, so the cell it satisfies
+/// has no cardinality to report — and a `0` there would read as a suite that
+/// ran and found nothing.
+#[test]
+fn a_version_one_receipt_cell_reports_no_test_count() {
+    let mut cell = plan_cell_json("claudine", "macos-latest", "L1", true);
+    cell["evidence"] = serde_json::json!({
+        "origin": "local",
+        "evidence": "refs/notes/ci-local/macos-latest",
+    });
+    let plan = plan_of(vec![cell]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let cell = only_cell(classify_simple(&expected, &[]));
+    assert_eq!(cell.counts, None, "a v1 receipt carries no counts to report");
+
+    let markdown = render_report(None, &[rollup_of(vec![cell], &["claudine"])]);
+    assert!(
+        markdown.contains(
+            "| macos-latest | 1 | not recorded (no producer recorded a test count for \
+             this environment) |"
+        ),
+        "{markdown}"
+    );
+    assert!(
+        !markdown.contains("| macos-latest | 1 | 0 |"),
+        "a reused v1 cell must never report a measured zero: {markdown}"
+    );
+}
+
+/// The anti-regression that keeps the fix honest. An invocation that ran and
+/// selected zero tests DID measure its cardinality, and `0` is the answer; only
+/// an absent measurement may render as `not recorded`.
+#[test]
+fn an_executed_suite_that_selected_zero_tests_still_reports_zero() {
+    let cells = classify_simple(
+        &[expectation("tabby", "ubuntu-latest", Tier::L1)],
+        &[record("tabby", "ubuntu-latest", Tier::L1)],
+    );
+    assert_eq!(cells[0].state, CellState::NothingToRun);
+    assert_eq!(
+        cells[0].counts,
+        Some(Counts::default()),
+        "the invocation succeeded and reported zero tests, which is a measurement"
+    );
+
+    let markdown = render_report(None, &[rollup_of(cells, &["tabby"])]);
+    assert!(
+        markdown.contains("| ubuntu-latest | 1 | 0 | none declared |"),
+        "a measured zero must stay a number: {markdown}"
+    );
+    assert!(
+        !markdown.contains("no producer recorded a test count"),
+        "a measured zero must never be reported as unavailable: {markdown}"
+    );
+}
+
+/// The per-area aggregate repeated the environment table's unconditional sum.
+#[test]
+fn an_area_with_no_measured_counts_reports_not_recorded_rather_than_zero() {
+    let cells = vec![Cell {
+        area: "claudine".to_owned(),
+        state: CellState::Missing,
+        origin: Origin::Unproduced,
+        scheduled: true,
+        ..blank_cell(cell_key("claudine", "windows-latest", Tier::L1))
+    }];
+    let markdown = render_combined_summary(&[rollup_of(cells, &["claudine"])]);
+    assert!(
+        markdown.contains(
+            "| claudine | 1 | 0 | 0 | 1 | 0 | 0 | not recorded (no producer recorded a \
+             test count for this area) |"
+        ),
+        "{markdown}"
+    );
+}
+
+/// An area spans environments, so an unmeasured cell names its whole key: a
+/// bare `claudine/L1` would not say which leg failed to record.
+#[test]
+fn a_mixed_measured_and_unmeasured_area_reports_a_partial_test_count() {
+    let cells = vec![
+        Cell {
+            area: "claudine".to_owned(),
+            state: CellState::Pass,
+            origin: Origin::Ci,
+            counts: Some(Counts { total: 12, passed: 12, ..Counts::default() }),
+            scheduled: true,
+            ..blank_cell(cell_key("claudine", "ubuntu-latest", Tier::L1))
+        },
+        Cell {
+            area: "claudine".to_owned(),
+            state: CellState::Missing,
+            origin: Origin::Unproduced,
+            scheduled: true,
+            ..blank_cell(cell_key("claudine", "windows-latest", Tier::L1))
+        },
+    ];
+    let markdown = render_combined_summary(&[rollup_of(cells, &["claudine"])]);
+    assert!(
+        markdown.contains(
+            "| claudine | 2 | 1 | 0 | 1 | 0 | 0 | 12 (partial; not recorded: \
+             claudine/windows-latest/L1) |"
+        ),
+        "{markdown}"
+    );
+}
+
+/// A compile gate has no cardinality to report and never will, so it is
+/// excluded from the area's count rather than named as an absence.
+#[test]
+fn an_areas_lint_and_check_cells_do_not_make_its_test_count_partial() {
+    let cells = vec![
+        Cell {
+            area: "claudine".to_owned(),
+            state: CellState::Pass,
+            origin: Origin::Ci,
+            counts: Some(Counts { total: 12, passed: 12, ..Counts::default() }),
+            scheduled: true,
+            ..blank_cell(cell_key("claudine", "ubuntu-latest", Tier::L1))
+        },
+        Cell {
+            area: "claudine".to_owned(),
+            state: CellState::Pass,
+            origin: Origin::Ci,
+            duration_s: Some(43.0),
+            scheduled: true,
+            ..blank_cell(cell_key("claudine", "ubuntu-latest", Tier::parse("lint")))
+        },
+    ];
+    let markdown = render_combined_summary(&[rollup_of(cells, &["claudine"])]);
+    assert!(
+        markdown.contains("| claudine | 2 | 2 | 0 | 0 | 0 | 0 | 12 |"),
+        "a lint cell is not an unmeasured test cell: {markdown}"
     );
 }
 
@@ -3772,8 +4216,8 @@ fn a_companion_with_no_recorded_counts_is_never_reported_as_zero() {
         area: "root".to_owned(),
         state: CellState::Pass,
         origin: Origin::Ci,
-        counts: Counts { total: 5, passed: 5, ..Counts::default() },
-        duration_s: 3,
+        counts: Some(Counts { total: 5, passed: 5, ..Counts::default() }),
+        duration_s: Some(3.0),
         companions: vec![CompanionResult::new("test-audit typecheck", None)],
         scheduled: true,
         ..blank_cell(cell_key("repo-deps", "ubuntu-latest", Tier::L1))
@@ -3800,22 +4244,108 @@ fn either_input_alone_produces_a_report() {
 
 // --- The versioned result-schema migration -------------------------------
 
+/// Each superseded generation keeps its own diagnostic: a message that names
+/// the wrong migration sends the reader after a difference that is not there.
 #[test]
 fn a_result_document_from_the_previous_generation_is_refused() {
     let dir = std::env::temp_dir().join(format!("ci-rollup-r2-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("v2-results.json");
+
+    let v3 = dir.join("v3-results.json");
     fs::write(
-        &path,
+        &v3,
+        r#"{"schema_version":3,"scope":[],"scope_degraded":false,"records":[],"cells":[]}"#,
+    )
+    .unwrap();
+    let message = format!(
+        "{:#}",
+        load_rollup(&v3).expect_err("the previous generation must be refused")
+    );
+    assert!(
+        message.contains("optional measurement"),
+        "the error must name the version-4 migration: {message}"
+    );
+
+    let v2 = dir.join("v2-results.json");
+    fs::write(
+        &v2,
         r#"{"schema_version":2,"scope":[],"scope_degraded":false,"records":[],"cells":[]}"#,
     )
     .unwrap();
-
-    let err = load_rollup(&path).expect_err("the previous generation must be refused");
-    let message = format!("{err:#}");
+    let message = format!(
+        "{:#}",
+        load_rollup(&v2).expect_err("the version-2 generation must be refused")
+    );
     assert!(
         message.contains("area, origin, and evidence"),
-        "the error must name the migration: {message}"
+        "the error must name the version-3 migration: {message}"
+    );
+    assert!(
+        !message.contains("optional measurement"),
+        "a version-2 document must not be told the version-4 migration: {message}"
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// The version has to be decided before the cells are, because each generation
+/// redefined the cell: this fixture's cell is one no reader of the current
+/// contract can deserialize, so a reader that parsed first would answer with a
+/// serde type error instead of the migration.
+#[test]
+fn a_superseded_result_document_is_refused_by_version_before_its_cells_are_read() {
+    let text =
+        r#"{"schema_version":3,"scope":[],"scope_degraded":false,"records":[],"cells":[{"counts":"three"}]}"#;
+    let parse_error = format!(
+        "{}",
+        serde_json::from_str::<Rollup>(text).expect_err("the fixture's cell must be unreadable")
+    );
+    assert!(
+        parse_error.contains("invalid type"),
+        "the fixture proves nothing unless deserializing it fails on the cell: {parse_error}"
+    );
+
+    let dir = std::env::temp_dir().join(format!("ci-rollup-order-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("v3-unreadable-cells.json");
+    fs::write(&path, text).unwrap();
+
+    let message = format!(
+        "{:#}",
+        load_rollup(&path).expect_err("the superseded generation must be refused")
+    );
+    assert!(
+        message.contains("schema_version 3") && message.contains("optional measurement"),
+        "the version must be refused by its migration: {message}"
+    );
+    assert!(
+        !message.contains("invalid type"),
+        "the cells were interpreted before the version was: {message}"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// `Rollup::schema_version` has no serde default, and the probe must not give
+/// it one: a document that never declared a generation is unversioned, not
+/// generation zero.
+#[test]
+fn a_result_document_without_a_schema_version_is_refused_by_name() {
+    let dir = std::env::temp_dir().join(format!("ci-rollup-unversioned-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("unversioned-results.json");
+    fs::write(
+        &path,
+        r#"{"scope":[],"scope_degraded":false,"records":[],"cells":[]}"#,
+    )
+    .unwrap();
+
+    let message = format!(
+        "{:#}",
+        load_rollup(&path).expect_err("an unversioned document must be refused")
+    );
+    assert!(
+        message.contains("no readable `schema_version`") && message.contains("missing field"),
+        "the error must report the field as missing rather than as generation zero: {message}"
     );
     fs::remove_dir_all(&dir).ok();
 }
@@ -3823,7 +4353,7 @@ fn a_result_document_from_the_previous_generation_is_refused() {
 #[test]
 fn the_result_and_baseline_schemas_version_independently() {
     // The baseline is hand-edited policy and versions its own semantic changes.
-    assert_eq!(RESULT_SCHEMA_VERSION, 3);
+    assert_eq!(RESULT_SCHEMA_VERSION, 4);
     assert_eq!(BASELINE_SCHEMA_VERSION, 3);
     let Some(root) = checkout_root() else {
         eprintln!("the checkout is not present; skipping the shipped-baseline fixture");
@@ -3903,6 +4433,80 @@ fn plan_fields_match_the_frozen_contract() {
         contract["vocabulary"]["accepted_gap_state"].as_str(),
         Some(CellState::AcceptedGap.label()),
         "the accepted-gap state name drifted from `CellState`"
+    );
+}
+
+/// `.github/ci/schemas/README.md` as one line, with blockquote markers and
+/// line wrapping removed, so a claim spanning three wrapped lines of a
+/// blockquote reads as the single sentence it is.
+fn schema_readme_prose(root: &Path) -> String {
+    let text = fs::read_to_string(root.join(".github/ci/schemas/README.md"))
+        .expect("the schema README is shipped");
+    text.lines()
+        .map(|line| line.trim_start().trim_start_matches('>'))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The number stated immediately after `literal`, searched for from `from`,
+/// with the offset just past it.
+///
+/// `None` when the literal is absent: a reworded claim must fail the caller
+/// rather than match nothing and leave it asserting over an empty set.
+fn version_stated_after(prose: &str, literal: &str, from: usize) -> Option<(u32, usize)> {
+    let start = from + prose[from..].find(literal)? + literal.len();
+    let digits: String = prose[start..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    let end = start + digits.len();
+    digits.parse().ok().map(|version| (version, end))
+}
+
+/// The schema README's version inventory, against the constants it describes.
+///
+/// Prose notices nothing when a counter moves underneath it: the README named
+/// baseline generation 2 for as long as this tool read 3. The plan, receipt,
+/// and scope-receipt numbers it also states belong to `scripts/ci/schema.py`
+/// and are asserted there, by `scripts/ci/test_schema.py`.
+#[test]
+fn the_schema_readme_states_this_tools_versions() {
+    let Some(root) = checkout_root() else {
+        eprintln!("the checkout is not present; skipping the schema-README fixture");
+        return;
+    };
+    let prose = schema_readme_prose(&root);
+
+    let (result, cursor) = version_stated_after(
+        &prose,
+        "`scripts/ci-rollup.rs` and is at `schema_version: ",
+        0,
+    )
+    .expect("the schema README must still state the result document's version");
+    assert_eq!(
+        result, RESULT_SCHEMA_VERSION,
+        "the schema README states result schema_version {result}, \
+         but `RESULT_SCHEMA_VERSION` is {RESULT_SCHEMA_VERSION}"
+    );
+
+    let (stated_baseline, _) = version_stated_after(&prose, ", and the baseline's ", cursor)
+        .expect("the schema README must still state the baseline's version");
+    assert_eq!(
+        stated_baseline, BASELINE_SCHEMA_VERSION,
+        "the schema README states baseline version {stated_baseline}, \
+         but `BASELINE_SCHEMA_VERSION` is {BASELINE_SCHEMA_VERSION}"
+    );
+
+    let shipped = load_baseline(&root.join(".github/ci/ci-baseline.toml"))
+        .expect("the shipped baseline loads");
+    assert_eq!(
+        stated_baseline, shipped.schema_version,
+        "the schema README states baseline version {stated_baseline}, \
+         but the shipped `.github/ci/ci-baseline.toml` carries {}",
+        shipped.schema_version
     );
 }
 
@@ -4126,7 +4730,7 @@ fn the_command_surface_writes_reads_and_judges_one_areas_slice() {
     );
     assert_eq!(document.accepted_evidence.len(), 1);
     assert_eq!(
-        document.cells[1].duration_s, 7,
+        document.cells[1].duration_s, Some(7.0),
         "the executed cell reports the duration its manifest recorded"
     );
 

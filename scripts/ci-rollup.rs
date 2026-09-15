@@ -58,9 +58,12 @@ use change_inventory::{ChangeInventory, NO_PACKAGE_TESTS};
 /// Version 3 keeps that identity and adds the area-owned result model: each
 /// cell carries its derived `area`, its `origin`, the evidence behind a reused
 /// result, its measured duration, and its target coverage, and the document
-/// carries the accepted evidence the run was scheduled against. A consumer that
-/// reads a higher version must refuse to interpret it.
-const RESULT_SCHEMA_VERSION: u32 = 3;
+/// carries the accepted evidence the run was scheduled against. Version 4 makes
+/// `counts` an optional measurement alongside `duration_s`, so a cell nobody
+/// measured omits the field rather than serializing a zero that reads as a
+/// suite which found nothing. A consumer that reads a higher version must
+/// refuse to interpret it.
+const RESULT_SCHEMA_VERSION: u32 = 4;
 
 /// Version of `.github/ci/ci-baseline.toml`. Version 3 removed known-failure
 /// entries: producer jobs now fail visibly, so a downstream rollup cannot
@@ -482,11 +485,26 @@ struct Cell {
     /// Whether this result was produced by this run or reused from a receipt.
     #[serde(default)]
     origin: Origin,
-    counts: Counts,
+    /// The tests behind this cell, or `None` when nothing measured any.
+    ///
+    /// `duration_s`'s rule, applied to cardinality: a cell nobody reported, one
+    /// whose report could not be read, and a version-1 receipt all have no
+    /// count measurement, while `Some(Counts::default())` is an invocation that
+    /// ran and selected zero tests. Only the first three render as
+    /// `not recorded` (AC13). The distinction cannot be recovered from the
+    /// number, which is why it is carried rather than derived.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    counts: Option<Counts>,
     /// Wall time of the executions behind this cell, summed across its records,
     /// or the receipt's recorded duration for a reused cell.
-    #[serde(default)]
-    duration_s: u64,
+    ///
+    /// `None` is the absence of a measurement, and it is the ONLY thing that
+    /// renders as `not recorded`: `Some(0.0)` is a command that finished faster
+    /// than the producer's resolution, which is a measurement (AC13). Presence
+    /// is therefore independent of the number, and a legacy slice whose cell
+    /// omits the field deserializes as unmeasured rather than as instantaneous.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    duration_s: Option<f64>,
     /// Cargo target kinds the cell's gate covers, from the plan. Empty when the
     /// rollup ran without a plan.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -762,10 +780,12 @@ struct ProducerStatus {
     #[serde(default)]
     companions: BTreeMap<String, CompanionOutcome>,
     /// Wall time of the gate COMMAND, for a gate with no JUnit report to carry
-    /// it (today: `lint`). Absent when the command never ran; never `0`, which
-    /// would read as a measurement (AC13).
+    /// it (today: `lint`). Absent when the command never ran. Fractional: the
+    /// producer times the command with a monotonic clock, so a command faster
+    /// than a second records `0.4` rather than being rounded into the `0` that
+    /// an unmeasured command used to be indistinguishable from (AC13).
     #[serde(default)]
-    duration_s: Option<u64>,
+    duration_s: Option<f64>,
     /// The unchanged direct reverse dependencies a `check` producer also
     /// compiled inside this cell (Open Question 1, Option B). Names only; a
     /// failure of that half arrives as `result: failure` with a `detail`
@@ -1035,8 +1055,12 @@ struct ReusedResult {
     /// `false` when the receipt recorded a complete failure for the cell. A
     /// complete failed local result stays a failure (spec section 3.5).
     passed: bool,
-    counts: Counts,
-    duration_s: u64,
+    /// The receipt's recorded counts, or `None` for an acceptance that carried
+    /// none (a version-1 receipt), alongside its `duration_s` sibling.
+    counts: Option<Counts>,
+    /// The receipt's recorded duration, or `None` for an acceptance that
+    /// carried no measurement (a version-1 receipt).
+    duration_s: Option<f64>,
     failed_tests: Vec<String>,
     evidence: Evidence,
 }
@@ -1460,20 +1484,24 @@ fn plan_expected_cells(plan: &ResolvedPlan) -> Result<Vec<ExpectedCell>> {
 
         if cell.execution == "reuse" {
             let evidence = cell.evidence.as_ref();
-            let counts = evidence.and_then(|record| record.counts).unwrap_or_default();
-            let measured = evidence.is_some_and(|record| record.outcome.is_some());
+            let counts = evidence.and_then(|record| record.counts);
             let mut link = evidence.map(PlanEvidence::link).unwrap_or_default();
             if link.measurements.is_empty() {
-                link.measurements = if measured {
-                    format!(
+                // The counts decide, not the outcome. A version-1 acceptance
+                // carries an outcome by contract — it is pass-only — and no
+                // counts at all, so keying on the outcome rendered its absent
+                // cardinality as `0 test(s), 0 failed`, which AC13 forbids.
+                // `RECEIPT_CELL_FIELDS` requires counts of every later receipt,
+                // so absent counts are exactly the version-1 shape.
+                link.measurements = match counts {
+                    Some(counts) => format!(
                         "{} test(s), {} failed, {}s",
                         counts.total,
                         counts.bad(),
                         evidence.and_then(|record| record.duration_s).unwrap_or(0.0) as u64
-                    )
-                } else {
+                    ),
                     // Spec section 3.6's verbatim text for a version-1 receipt.
-                    "not recorded (v1 receipt)".to_owned()
+                    None => "not recorded (v1 receipt)".to_owned(),
                 };
             }
             if link.reference.is_empty() {
@@ -1487,8 +1515,7 @@ fn plan_expected_cells(plan: &ResolvedPlan) -> Result<Vec<ExpectedCell>> {
                 counts,
                 duration_s: evidence
                     .and_then(|record| record.duration_s)
-                    .unwrap_or(0.0)
-                    .max(0.0) as u64,
+                    .map(|duration| duration.max(0.0)),
                 failed_tests: evidence
                     .map(|record| record.failed_tests.clone())
                     .unwrap_or_default(),
@@ -1900,12 +1927,14 @@ fn classify_one(
     let mut packages_with_evidence = BTreeSet::new();
     let mut reasons = Vec::new();
     let mut has_unusable_record = false;
-    let mut duration_s = 0u64;
+    // `None` until a record contributes one: a cell with no records has no
+    // measurement, which is not the same as a run that took no time (AC13).
+    let mut duration_s: Option<f64> = None;
 
     for &index in indices {
         let record = &inputs.records[index];
         counts.add(&record.counts);
-        duration_s += record.duration_s;
+        duration_s = Some(duration_s.unwrap_or(0.0) + record.duration_s as f64);
         failed_tests.extend(record.failed_tests.iter().cloned());
         observed_skips.extend(record.skipped_tests.iter().cloned());
         observed_tests.extend(record.failed_tests.iter().cloned());
@@ -2050,6 +2079,14 @@ fn classify_one(
     // owned, unexpired entry in the capability table. Both are *states of the
     // cell*, not reasons to drop it, which is what makes the PR #76 shape —
     // omitting an execution and losing the cell — unrepresentable here.
+
+    // The same seam `classify_state_from_evidence` uses to tell MISSING from
+    // NOTHING TO RUN: with no record, or with one that could not be read, the
+    // zeros accumulated above are the absence of evidence rather than a suite
+    // that selected nothing. A partly unreadable cell counts as unmeasured —
+    // it is MISSING, and half a report is not this cell's cardinality.
+    let mut counts_measured = !indices.is_empty() && !has_unusable_record;
+
     let reused = expectation.and_then(|cell| cell.reused.as_ref());
     let reuse_contested = reused.is_some() && !indices.is_empty();
     if reuse_contested {
@@ -2065,7 +2102,8 @@ fn classify_one(
             "reused {} evidence from {}: {}",
             result.origin, result.evidence.reference, result.evidence.measurements
         ));
-        counts = result.counts;
+        counts = result.counts.unwrap_or_default();
+        counts_measured = result.counts.is_some();
         duration_s = result.duration_s;
         failed_tests.extend(result.failed_tests.iter().cloned());
     }
@@ -2157,10 +2195,10 @@ fn classify_one(
             _ if indices.is_empty() => Origin::Unproduced,
             _ => Origin::Ci,
         },
-        counts: Counts {
+        counts: counts_measured.then(|| Counts {
             skipped: counts.skipped + absent_skips.len() as u32,
             ..counts
-        },
+        }),
         duration_s,
         target_kinds: expectation
             .map(|cell| cell.target_kinds.clone())
@@ -2342,7 +2380,7 @@ fn status_cells(
             },
             // A gate with no JUnit report carries its command duration in its
             // producer status, or carries none at all.
-            duration_s: status.and_then(|status| status.duration_s).unwrap_or_default(),
+            duration_s: status.and_then(|status| status.duration_s),
             target_kinds: expectation.target_kinds.clone(),
             compile_coverage_from: expectation.compile_coverage_from.clone(),
             scheduled: true,
@@ -2389,7 +2427,7 @@ fn status_cells(
             area,
             state,
             origin: Origin::Ci,
-            duration_s: status.duration_s.unwrap_or_default(),
+            duration_s: status.duration_s,
             scheduled: true,
             dependents: status.dependents.clone(),
             companions: companion_results(&expected_companions, Some(status)),
@@ -2595,8 +2633,8 @@ fn blank_cell(key: CellKey) -> Cell {
         area: String::new(),
         state: CellState::NotScheduled,
         origin: Origin::Unproduced,
-        counts: Counts::default(),
-        duration_s: 0,
+        counts: None,
+        duration_s: None,
         target_kinds: Vec::new(),
         compile_coverage_from: String::new(),
         evidence: None,
@@ -3332,13 +3370,13 @@ fn grid_text(cell: &Cell) -> String {
             } else {
                 String::new()
             };
-            format!(
-                "{} {}/{}/{}{origin}",
-                cell.state.label(),
-                cell.counts.passed,
-                cell.counts.bad(),
-                cell.counts.skipped
-            )
+            let tally = match &cell.counts {
+                Some(counts) => {
+                    format!("{}/{}/{}", counts.passed, counts.bad(), counts.skipped)
+                }
+                None => UNRECORDED.to_owned(),
+            };
+            format!("{} {tally}{origin}", cell.state.label())
         }
     }
 }
@@ -3365,12 +3403,15 @@ fn why(cell: &Cell) -> String {
     }
 
     if parts.is_empty() {
-        format!(
-            "{} pass / {} fail / {} skip",
-            cell.counts.passed,
-            cell.counts.bad(),
-            cell.counts.skipped
-        )
+        match &cell.counts {
+            Some(counts) => format!(
+                "{} pass / {} fail / {} skip",
+                counts.passed,
+                counts.bad(),
+                counts.skipped
+            ),
+            None => format!("{UNRECORDED} (nothing measured this cell's tests)"),
+        }
     } else {
         parts.join("; ")
     }
@@ -4040,11 +4081,7 @@ fn cmd_verdict(args: &Args) -> Result<i32> {
     let results_path = PathBuf::from(args.required("results")?);
     let baseline_path = PathBuf::from(args.required("baseline")?);
 
-    let results_text = fs::read_to_string(&results_path)
-        .with_context(|| format!("failed to read {}", results_path.display()))?;
-    let rollup: Rollup = serde_json::from_str(&results_text)
-        .with_context(|| format!("invalid result document {}", results_path.display()))?;
-    reject_old_schema(rollup.schema_version, &results_path)?;
+    let rollup = load_rollup(&results_path)?;
 
     // Narrowing to an area is what makes the outcome area-owned: this verdict
     // sees that area's cells, that area's scope, and that area's accepted
@@ -4196,6 +4233,19 @@ fn render_change_report(plan: &ResolvedPlan) -> String {
     out
 }
 
+/// A measured duration, in the report's whole-second spelling — except below a
+/// second, where two decimals keep the measurement visible.
+///
+/// A fast command that rendered as `0s` would read as no measurement at all,
+/// which is the one thing `not recorded` is reserved to say (AC13).
+fn format_duration(seconds: f64) -> String {
+    if seconds < 1.0 {
+        format!("{seconds:.2}s")
+    } else {
+        format!("{}s", seconds.round() as u64)
+    }
+}
+
 /// Per-environment test counts, durations, and origins (spec section 6).
 ///
 /// Companion counts are carried separately because a companion suite has no
@@ -4224,14 +4274,6 @@ fn render_environment_report(slices: &[Rollup]) -> String {
          | --- | --- | --- | --- | --- | --- |\n",
     );
     for (environment, cells) in &by_environment {
-        let tests: u32 = cells.iter().map(|cell| cell.counts.total).sum();
-        let duration: u64 = cells.iter().map(|cell| cell.duration_s).sum();
-        // `duration_s` is `0` both for "ran in under a second" and for "no
-        // producer recorded one", and only the cells' origins can separate
-        // them: a cell nothing produced has no measurement to report (AC13).
-        let measured = cells
-            .iter()
-            .any(|cell| cell.duration_s > 0 || cell.origin != Origin::Unproduced);
         let origins = cells
             .iter()
             .map(|cell| cell.origin.label())
@@ -4243,18 +4285,120 @@ fn render_environment_report(slices: &[Rollup]) -> String {
             "| {} | {} | {} | {} | {} | {} |\n",
             cell_text(environment),
             cells.len(),
-            tests,
+            cell_text(&environment_tests(cells)),
             cell_text(&companion_tally(cells)),
-            if measured {
-                format!("{duration}s")
-            } else {
-                format!("{UNRECORDED} (no producer reported a result for this environment)")
-            },
+            cell_text(&environment_duration(cells)),
             origins
         ));
     }
     out.push('\n');
     out
+}
+
+/// The report's three-way spelling for a measurement summed over cells: the
+/// sum, that sum labeled partial and naming the cells missing from it, or
+/// `not recorded` with a reason when nothing measured anything (AC13).
+///
+/// `measured` is `None` exactly when no cell contributed a measurement — the
+/// only thing that renders as `not recorded`, since a measured zero is still a
+/// measurement. `unmeasured` labels the cells the sum leaves out; an unlabeled
+/// sum over a subset would read as the whole, which is a complete-looking
+/// number manufactured out of a partial measurement.
+///
+/// The list is bounded because one row is one table cell and a whole-workspace
+/// run can leave dozens of cells unmeasured, as `why` does for failing tests.
+fn partial_measurement(measured: Option<String>, unmeasured: &[String], absent: &str) -> String {
+    const SHOWN: usize = 5;
+    let Some(measured) = measured else {
+        return format!("{UNRECORDED} ({absent})");
+    };
+    if unmeasured.is_empty() {
+        return measured;
+    }
+    let mut listed = unmeasured.iter().take(SHOWN).cloned().collect::<Vec<_>>().join(", ");
+    if unmeasured.len() > SHOWN {
+        listed.push_str(&format!(" (+{} more)", unmeasured.len() - SHOWN));
+    }
+    format!("{measured} (partial; {UNRECORDED}: {listed})")
+}
+
+/// One environment's summed test duration, or how much of the environment that
+/// sum leaves out.
+fn environment_duration(cells: &[&Cell]) -> String {
+    // Presence, never the number: a cell that measured a sub-second run carries
+    // `Some(0.4)` and one nothing produced carries `None`, so `Some(0.0)` is a
+    // measurement and belongs in the sum rather than in the missing list.
+    // `reduce` is what makes that hold — it yields `None` for an empty sum
+    // rather than the `0` a `sum()` would manufacture.
+    let measured = cells.iter().filter_map(|cell| cell.duration_s).reduce(|a, b| a + b);
+    let unmeasured: Vec<String> = cells
+        .iter()
+        .filter(|cell| cell.duration_s.is_none())
+        .map(package_tier)
+        .collect();
+    partial_measurement(
+        measured.map(format_duration),
+        &unmeasured,
+        "no producer recorded a test duration for this environment",
+    )
+}
+
+/// One environment's summed Rust test count, or how much of the environment
+/// that sum leaves out.
+fn environment_tests(cells: &[&Cell]) -> String {
+    let measured = cells
+        .iter()
+        .filter_map(|cell| cell.counts)
+        .map(|counts| counts.total)
+        .reduce(|a, b| a + b);
+    let unmeasured: Vec<String> = cells
+        .iter()
+        .filter(|cell| cell.counts.is_none())
+        .map(package_tier)
+        .collect();
+    partial_measurement(
+        measured.map(|total| total.to_string()),
+        &unmeasured,
+        "no producer recorded a test count for this environment",
+    )
+}
+
+/// One area's summed Rust test count, over the test cells that can carry one.
+///
+/// `lint` and `check` have no cardinality to report and never will, so they are
+/// excluded rather than named: listing every compile gate as an unmeasured cell
+/// would bury the test cell that genuinely failed to record one.
+fn area_tests(cells: &[&Cell]) -> String {
+    let test_cells: Vec<&&Cell> = cells
+        .iter()
+        .filter(|cell| is_test_tier(&cell.key.tier))
+        .collect();
+    if test_cells.is_empty() {
+        return format!("{UNRECORDED} (this area has no test cell)");
+    }
+    let measured = test_cells
+        .iter()
+        .filter_map(|cell| cell.counts)
+        .map(|counts| counts.total)
+        .reduce(|a, b| a + b);
+    // The whole key, not `package_tier`: an area spans environments, so the
+    // shorter label would name the same cell once per leg.
+    let unmeasured: Vec<String> = test_cells
+        .iter()
+        .filter(|cell| cell.counts.is_none())
+        .map(|cell| cell.key.to_string())
+        .collect();
+    partial_measurement(
+        measured.map(|total| total.to_string()),
+        &unmeasured,
+        "no producer recorded a test count for this area",
+    )
+}
+
+/// How an unmeasured cell names itself in a row that already fixes its
+/// environment.
+fn package_tier(cell: &&Cell) -> String {
+    format!("{}/{}", cell.key.package, cell.key.tier)
 }
 
 /// One environment's companion-suite test count, or why there is none.
@@ -4313,10 +4457,9 @@ fn render_lint_report(slices: &[Rollup]) -> String {
             cell_text(&cell.key.package),
             cell_text(&cell.key.environment),
             cell.origin.label(),
-            if cell.duration_s > 0 {
-                format!("{}s", cell.duration_s)
-            } else {
-                format!("{UNRECORDED} (the producer recorded no command duration)")
+            match cell.duration_s {
+                Some(duration) => format_duration(duration),
+                None => format!("{UNRECORDED} (the producer recorded no command duration)"),
             }
         ));
     }
@@ -4355,7 +4498,7 @@ fn render_combined_summary(slices: &[Rollup]) -> String {
             count(CellState::Missing),
             count(CellState::AcceptedGap),
             cells.iter().filter(|cell| cell.origin.is_reused()).count(),
-            cells.iter().map(|cell| cell.counts.total).sum::<u32>(),
+            cell_text(&area_tests(cells)),
         ));
     }
 
@@ -4408,16 +4551,44 @@ fn load_rollups(paths: &[String], flag: &str) -> Result<Rollup> {
 fn load_rollup(path: &Path) -> Result<Rollup> {
     let text = fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
-    let rollup: Rollup = serde_json::from_str(&text)
-        .with_context(|| format!("invalid result document {}", path.display()))?;
-    reject_old_schema(rollup.schema_version, path)?;
-    Ok(rollup)
+    parse_rollup(&text, path)
+}
+
+/// Parse a result document, refusing another schema generation before any cell
+/// is interpreted.
+///
+/// The version guard has to outrank the cell shape, because each generation
+/// changed that shape: a version-3 cell's `counts` is a required object, so a
+/// reader that deserialized first would report a serde field error for a
+/// document whose actual problem is its generation. Both read paths go through
+/// here so they cannot disagree about that order.
+fn parse_rollup(text: &str, path: &Path) -> Result<Rollup> {
+    /// Just enough of the document to decide whether the rest may be read.
+    #[derive(Deserialize)]
+    struct SchemaProbe {
+        schema_version: u32,
+    }
+
+    let probe: SchemaProbe = serde_json::from_str(text).with_context(|| {
+        format!(
+            "result document {} has no readable `schema_version`",
+            path.display()
+        )
+    })?;
+    reject_old_schema(probe.schema_version, path)?;
+    serde_json::from_str(text)
+        .with_context(|| format!("invalid result document {}", path.display()))
 }
 
 /// Refuse a result document from another schema generation, in both
-/// directions. Version 1 was area-keyed; version 2 keys every identity on the
-/// package. Reading one as the other would silently mis-key every cell, so the
-/// error names the migration rather than just the mismatch.
+/// directions.
+///
+/// Every generation redefined what a cell means — version 1 was area-keyed,
+/// version 2 moved identity onto the package, version 3 added the area-owned
+/// result model, version 4 made `counts` an optional measurement — so reading
+/// one as another mis-keys or mis-reads cells instead of failing loudly. The
+/// error names the migration that actually applies, and a generation with no
+/// named migration says so rather than claiming someone else's.
 fn reject_old_schema(version: u32, path: &Path) -> Result<()> {
     if version > RESULT_SCHEMA_VERSION {
         bail!(
@@ -4427,24 +4598,25 @@ fn reject_old_schema(version: u32, path: &Path) -> Result<()> {
             path.display()
         );
     }
-    if version == 1 {
-        bail!(
-            "result document {} is schema_version 1 (area-keyed); this tool reads \
-             schema_version {RESULT_SCHEMA_VERSION} (package-keyed, area-grouped). Re-run \
-             the rollup that produced it — see fixes/2026-08-06-cicd/plan.md (Phase 4)",
-            path.display()
-        );
+    if version == RESULT_SCHEMA_VERSION {
+        return Ok(());
     }
-    if version < RESULT_SCHEMA_VERSION {
-        bail!(
-            "result document {} is schema_version {version}; this tool reads \
-             schema_version {RESULT_SCHEMA_VERSION}, which adds each cell's area, origin, \
-             and evidence. Re-run the rollup that produced it — see \
-             fixes/2026-09-11-cicd-cleanup/plan.md (Phase 5)",
-            path.display()
-        );
-    }
-    Ok(())
+    let migration = match version {
+        1 => "schema_version 1 is area-keyed, and this tool reads package-keyed, \
+              area-grouped cells — see fixes/2026-08-06-cicd/plan.md (Phase 4)",
+        2 => "schema_version 3 adds each cell's area, origin, and evidence — see \
+              fixes/2026-09-11-cicd-cleanup/plan.md (Phase 5)",
+        3 => "schema_version 4 makes each cell's counts an optional measurement, so a cell \
+              nobody measured carries no count instead of a zero — see \
+              fixes/2026-09-13-cicd-redundancies/spec.md",
+        _ => "its cell contract is not the one this tool reads",
+    };
+    bail!(
+        "result document {} is schema_version {version}; this tool reads \
+         schema_version {RESULT_SCHEMA_VERSION}: {migration}. Re-run the rollup that \
+         produced it",
+        path.display()
+    );
 }
 
 type ExpectedTests = BTreeMap<(String, Tier), BTreeMap<String, Vec<String>>>;

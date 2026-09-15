@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import unittest
 from copy import deepcopy
@@ -240,6 +241,81 @@ class ContractArtifactTests(unittest.TestCase):
             schema.ACCEPTED_GAP_STATE.lower(),
             {"cancelled", "neutral", "skipped", "success", "failure"},
         )
+
+
+SCHEMA_README_PATH = schema.ROOT / ".github" / "ci" / "schemas" / "README.md"
+
+
+def schema_readme_prose() -> str:
+    """The schema README as one line, with blockquote markers and wrapping removed."""
+    lines = [
+        re.sub(r"^\s*>\s?", "", line)
+        for line in SCHEMA_README_PATH.read_text(encoding="utf-8").splitlines()
+    ]
+    return re.sub(r"\s+", " ", " ".join(lines))
+
+
+class SchemaReadmeVersionTests(unittest.TestCase):
+    """The schema README states this module's version counters in prose.
+
+    Prose does not check itself: the README went on claiming a baseline
+    generation the rollup had already moved past. Every version number it
+    states about a document defined here is asserted against the constant
+    that defines it. The result and baseline counters belong to
+    `scripts/ci-rollup.rs` and are covered by `scripts/ci-rollup-tests.rs`.
+    """
+
+    def version_in_table(self, document: str) -> int:
+        match = re.search(
+            rf"^\|\s*{re.escape(document)}\s*\|\s*(\d+)\s*\|",
+            SCHEMA_README_PATH.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        if match is None:
+            raise AssertionError(
+                f"the schema README's table states no version for {document!r}; "
+                "a reworded row has to be taught to this contract, not ignored"
+            )
+        return int(match.group(1))
+
+    def test_the_table_states_this_modules_versions(self):
+        self.assertEqual(
+            schema.RESOLVED_PLAN_SCHEMA_VERSION, self.version_in_table("Resolved plan")
+        )
+        self.assertEqual(
+            schema.RECEIPT_SCHEMA_VERSION, self.version_in_table("Validation receipt")
+        )
+        self.assertEqual(
+            schema.SCOPE_RECEIPT_SCHEMA_VERSION, self.version_in_table("Scope receipt")
+        )
+
+    def test_the_prose_version_inventory_states_this_modules_versions(self):
+        match = re.search(
+            r"versioned independently of the plan's (\d+), the receipt's (\d+)",
+            schema_readme_prose(),
+        )
+        if match is None:
+            raise AssertionError(
+                "the schema README no longer states the plan and receipt versions "
+                "alongside the rollup's own; a reworded inventory has to be taught "
+                "to this contract, not ignored"
+            )
+        self.assertEqual(schema.RESOLVED_PLAN_SCHEMA_VERSION, int(match.group(1)))
+        self.assertEqual(schema.RECEIPT_SCHEMA_VERSION, int(match.group(2)))
+
+    def test_the_prose_restates_the_receipt_version_correctly(self):
+        prose = schema_readme_prose()
+        for pattern in (
+            r"Both receipt producers.*?write version (\d+)",
+            r"validation receipts are untouched, so their version stays at (\d+)",
+        ):
+            match = re.search(pattern, prose)
+            if match is None:
+                raise AssertionError(
+                    f"the schema README no longer states {pattern!r}; a reworded "
+                    "claim has to be taught to this contract, not ignored"
+                )
+            self.assertEqual(schema.RECEIPT_SCHEMA_VERSION, int(match.group(1)), pattern)
 
 
 class ChangeInventoryValidationTests(unittest.TestCase):

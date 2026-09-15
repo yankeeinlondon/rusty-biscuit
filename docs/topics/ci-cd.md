@@ -324,14 +324,17 @@ The `protect-your-bacon` ruleset (id 19747338) has required `ci-gate` since 2026
 on a `ci-verdict — Expected` check that could never arrive. The admin `pull_request` bypass actor
 on that ruleset was left untouched by the swap.
 
-`ci-results.json` and the skip-only baseline are independently versioned; both
-currently use `schema_version: 3`. Identity is
+`ci-results.json` and the skip-only baseline are independently versioned: the result document is
+at `schema_version: 4` and the baseline at 3. Identity is
 still `{package, environment, tier}`; each cell also carries its derived `area`, its `origin`
 (`ci`, `local`, `prior-local`, or `none`), the `evidence` behind a reused result, its measured
-`duration_s`, and the `target_kinds` and `compile_coverage_from` the plan assigned it. The
+`duration_s`, and the `target_kinds` and `compile_coverage_from` the plan assigned it. Version 4
+made `counts` optional alongside `duration_s`, so a cell nobody measured omits the field rather
+than reporting a zero that reads as a suite which found nothing. The
 document carries `accepted_evidence`, one entry per reused cell — the same set accepted for
 *scheduling*, so the scheduler and the report cannot disagree. A document from an earlier
-generation is refused with a migration error rather than partly read.
+generation is refused by its version, before any cell is interpreted, with the migration that
+applies named; the fix is to re-run the rollup that produced it.
 
 ### The run report
 

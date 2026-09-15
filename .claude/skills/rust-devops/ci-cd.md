@@ -207,8 +207,11 @@ new run replace the cells it actually reran.
 The rollup consumes that evidence. `ci-rollup rollup --plan` reads the resolved
 execution plan, so a cell a receipt satisfied is reported as a completed
 local-origin result with its counts, duration, and the notes ref behind it —
-not as `MISSING`. Result documents are `schema_version: 3` and are refused
-across generations; the skip-only baseline keeps its own version 3. `--area` on `rollup`
+not as `MISSING`. Result documents are `schema_version: 4` — version 4 made a
+cell's `counts` an optional measurement, so an unmeasured cell omits it instead
+of reporting zero — and a document from another generation is refused by its
+version before any cell is interpreted, naming the migration and telling the
+reader to re-run the rollup. The skip-only baseline keeps its own version 3. `--area` on `rollup`
 and `verdict` narrows a document to one area's slice (cells, scope, scheduled
 set, and accepted evidence together), and `summarize` folds slices into a view
 that applies no policy.
