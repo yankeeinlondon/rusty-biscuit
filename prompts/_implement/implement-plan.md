@@ -36,10 +36,11 @@ log: |-
     }}    
 initialize:
     stack:
+        - action:
+            - ensure_file: "{{log}}"
         - when: "phase != 1"
           action:
-              - set:
-                  epilog: null
+              - set: ["epilog", ""]
         - when: "!total_phases || total_phases <= 0"
           action:
               - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
@@ -55,9 +56,9 @@ initialize:
                     The previous phase's agent has passed a message to this agent:
         
                     > {{frontmatter(log, 'message_to_agent')}}
-              - set:
-                  epilog: "{{message_to_agent}}"
-                  message_to_agent: null
+              - set: ["epilog", "{{message_to_agent}}" ]
+              - set: ["message_to_agent", "{{message_to_agent}}"]
+
                   
                   
 start:

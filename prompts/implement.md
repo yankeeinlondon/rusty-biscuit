@@ -29,11 +29,13 @@ initialize:
           action:
             - info: |-
                 found the specification review that needs implementation: {{link(pending_review)}}. Will route to the **implement-suggestions** prompt for completion
+            - ensure_file: "{{ dirname(spec) + '/implementation-log.md' }}"
             - action: proxy
               target: ./_implement/implement-suggestions.md
               with:
                   review: "{{ pending_review }}"
                   iteration: "{{ file_index(pending_review) }}"
+                  log: "{{ dirname(spec) + '/implementation-log.md' }}"
         # - when: "spec && frontmatter(spec, 'implemented')"
         #   action: 
         #     - info: |-
@@ -43,7 +45,11 @@ initialize:
           action:
               - info: |-
                     a _specification file_ was passed in that has not been implemented yet; it will be routed to **implement-plan** so that the spec get's implemented
-              - proxy: ./_implement/implement-plan.md
+              - ensure_file: "{{ dirname(spec) + '/implementation-log.md' }}"
+              - action: proxy
+                target: ./_implement/implement-plan.md
+                with:
+                    log: "{{ dirname(spec) + '/implementation-log.md' }}"
         - when: review
           action:
               - info: "a _review_ was passed into the implementation router and will be routed to **implement-review**"
