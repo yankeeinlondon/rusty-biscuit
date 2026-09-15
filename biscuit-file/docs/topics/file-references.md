@@ -88,7 +88,7 @@ Rust but nothing about this library.
 
 Two modifiers compose with the kinds above:
 
-- a leading `%` switches to [recursive directory search](#recursive-search-);
+- a leading `%` switches to [recursive directory search](#recursive-search);
 - any segment may contain [`{{VAR}}` environment interpolation](#environment-variable-interpolation).
 
 **"Base directory"** above means: the process CWD in ambient mode, or the
@@ -262,6 +262,8 @@ primitives.
 
 In a shell, `&` is a control operator. Quote repository-root references passed
 as arguments or setter values, for example `spec='&docs/plan.md'`.
+
+### Recursive Search (`%`)
 
 ### Vault (`vault:` / `vault::`)
 
