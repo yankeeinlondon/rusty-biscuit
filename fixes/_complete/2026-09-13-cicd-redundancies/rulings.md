@@ -2,8 +2,8 @@
 title: Phase 1 rulings, spikes, and current-state baseline
 created: 2026-09-14
 phase: 1
-spec: fixes/2026-09-13-cicd-redundancies/spec.md
-plan: fixes/2026-09-13-cicd-redundancies/plan.md
+spec: fixes/_complete/2026-09-13-cicd-redundancies/spec.md
+plan: fixes/_complete/2026-09-13-cicd-redundancies/plan.md
 tree: aad933bdb (branch `fix/cicd-improvements`)
 host: macOS 27.0.0, Apple Silicon; native Windows evidence from `$BUILD_WIN`
 ---

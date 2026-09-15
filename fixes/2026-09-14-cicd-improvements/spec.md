@@ -5,7 +5,7 @@ implemented: false
 reviewed: false
 area: repository-ci
 related:
-    - fixes/2026-09-13-cicd-redundancies/spec.md
+    - fixes/_complete/2026-09-13-cicd-redundancies/spec.md
 ---
 
 # Three Conventions Agents Keep Getting Wrong Because Nobody Wrote Them Down

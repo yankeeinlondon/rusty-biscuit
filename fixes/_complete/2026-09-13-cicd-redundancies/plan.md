@@ -5,14 +5,14 @@ phase: 11
 total_phases: 11
 agent: claude/opus
 yolo: true
-spec: fixes/2026-09-13-cicd-redundancies/spec.md
+spec: fixes/_complete/2026-09-13-cicd-redundancies/spec.md
 depends_on:
   - fixes/2026-09-11-cicd-cleanup/spec.md
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
-  - fixes/2026-09-13-cicd-redundancies/plan.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/plan.md
 docs_created_during_phase_1:
-  - fixes/2026-09-13-cicd-redundancies/rulings.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/rulings.md
 skills_files_updated_during_phase_1: []
 packages:
   - repo-deps
@@ -25,9 +25,9 @@ source_files_during_phase_2:
   - scripts/ci-rollup-tests.rs
   - tools/test-toolkit/tests/ci_workflow_contracts.rs
 docs_updated_during_phase_2:
-  - fixes/2026-09-13-cicd-redundancies/plan.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/plan.md
 docs_created_during_phase_2:
-  - fixes/2026-09-13-cicd-redundancies/oracles.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/oracles.md
 skills_files_updated_during_phase_2: []
 source_files_during_phase_3:
   - Cargo.toml
@@ -50,8 +50,8 @@ source_files_during_phase_3:
   - queue/justfile
   - release-plz.toml
 docs_updated_during_phase_3:
-  - fixes/2026-09-13-cicd-redundancies/plan.md
-  - fixes/2026-09-13-cicd-redundancies/rulings.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/plan.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/rulings.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/os/windows.md
@@ -71,9 +71,9 @@ source_files_during_phase_4:
   - .github/workflows/ci.yml
 docs_updated_during_phase_4:
   - .github/ci/README.md
-  - fixes/2026-09-13-cicd-redundancies/plan.md
-  - fixes/2026-09-13-cicd-redundancies/rulings.md
-  - fixes/2026-09-13-cicd-redundancies/oracles.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/plan.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/rulings.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/oracles.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
   - .claude/skills/rust-devops/ci-cd.md
@@ -97,8 +97,8 @@ source_files_during_phase_5:
   - homelab/justfile
 docs_updated_during_phase_5:
   - .github/ci/README.md
-  - fixes/2026-09-13-cicd-redundancies/plan.md
-  - fixes/2026-09-13-cicd-redundancies/oracles.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/plan.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/oracles.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
 packages_during_phase_5:
@@ -126,7 +126,7 @@ source_files_during_phase_6:
   - .githooks/tests/fixtures/plan-wsl-reused.json
 docs_updated_during_phase_6:
   - .github/ci/schemas/README.md
-  - fixes/2026-09-13-cicd-redundancies/plan.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/plan.md
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6: []
 packages_during_phase_6:
@@ -136,8 +136,8 @@ source_files_during_phase_7:
   - biscuit-tui/justfile
   - tools/test-toolkit/tests/ci_workflow_contracts.rs
 docs_updated_during_phase_7:
-  - fixes/2026-09-13-cicd-redundancies/plan.md
-  - fixes/2026-09-13-cicd-redundancies/rulings.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/plan.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/rulings.md
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7: []
 packages_during_phase_7:
@@ -157,7 +157,7 @@ docs_updated_during_phase_8:
   - .github/ci/README.md
   - docs/topics/ci-cd.md
   - docs/dependencies.md
-  - fixes/2026-09-13-cicd-redundancies/plan.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/plan.md
 docs_created_during_phase_8: []
 skills_files_updated_during_phase_8:
   - .claude/skills/rust-testing/test-audit-tooling.md
@@ -176,7 +176,7 @@ source_files_during_phase_9:
   - scripts/ci/test_ci_local.py
   - tools/test-toolkit/tests/ci_workflow_contracts.rs
 docs_updated_during_phase_9:
-  - fixes/2026-09-13-cicd-redundancies/plan.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/plan.md
 docs_created_during_phase_9: []
 skills_files_updated_during_phase_9: []
 packages_during_phase_9:
@@ -190,7 +190,7 @@ docs_updated_during_phase_10:
   - docs/topics/ci-cd.md
   - docs/dependencies.md
   - tools/test-audit/README.md
-  - fixes/2026-09-13-cicd-redundancies/plan.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/plan.md
 docs_created_during_phase_10: []
 skills_files_updated_during_phase_10:
   - .claude/skills/rust-devops/ci-cd.md
@@ -201,9 +201,9 @@ packages_during_phase_10:
   - test-toolkit
 source_files_during_phase_11: []
 docs_updated_during_phase_11:
-  - fixes/2026-09-13-cicd-redundancies/plan.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/plan.md
 docs_created_during_phase_11:
-  - fixes/2026-09-13-cicd-redundancies/acceptance.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/acceptance.md
 skills_files_updated_during_phase_11: []
 packages_during_phase_11:
   - repo-deps
@@ -266,10 +266,10 @@ documentation:
   - .claude/skills/rust-testing/test-audit-tooling.md
   - .claude/skills/os/SKILL.md
   - .claude/skills/os/windows.md
-  - fixes/2026-09-13-cicd-redundancies/plan.md
-  - fixes/2026-09-13-cicd-redundancies/rulings.md
-  - fixes/2026-09-13-cicd-redundancies/oracles.md
-  - fixes/2026-09-13-cicd-redundancies/acceptance.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/plan.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/rulings.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/oracles.md
+  - fixes/_complete/2026-09-13-cicd-redundancies/acceptance.md
 ---
 
 # Implementation Plan — CI Redundancies
@@ -386,7 +386,7 @@ of decisions the remaining ten phases may cite without re-deriving.
 
 Each ruling below is a question the specification leaves under-determined
 against the actual tree. Record the answer in
-`fixes/2026-09-13-cicd-redundancies/rulings.md` with the evidence that settled
+`fixes/_complete/2026-09-13-cicd-redundancies/rulings.md` with the evidence that settled
 it; a later phase that contradicts a ruling must amend the record, not work
 around it.
 
@@ -672,7 +672,7 @@ The three work-groups touch disjoint files and run concurrently.
 
 - [x] **Prove every fixture fails for its recorded reason**
     - Run each suite and capture the failure message per fixture into
-      `fixes/2026-09-13-cicd-redundancies/oracles.md`. A fixture that fails for
+      `fixes/_complete/2026-09-13-cicd-redundancies/oracles.md`. A fixture that fails for
       a *setup* reason (import error, missing fixture file) is not an oracle and
       must be repaired before proceeding.
     - The Python suite as a whole must be **green** (pending fixtures invert),
@@ -1198,18 +1198,19 @@ phase is the acceptance gate; no criterion may be waived by inspection.
 - [x] **Final acceptance sweep**
     - Walk all sixteen acceptance criteria and record the artifact that
       demonstrates each in
-      `fixes/2026-09-13-cicd-redundancies/acceptance.md`.
+      `fixes/_complete/2026-09-13-cicd-redundancies/acceptance.md`.
     - Confirm every `@pending` decorator added in Phase 2 is gone and its test
       passes — a surviving pending fixture means a contract did not land.
     - Confirm `ci-gate` is still the `protect-your-bacon` required context and
       that its ruleset was not edited.
 
-- [ ] **Move the fix to `_completed`** — **deliberately not done in Phase 11**
-    - After the hosted run is green and the acceptance record is complete, move
-      `fixes/2026-09-13-cicd-redundancies/` to `fixes/_completed/` and set
-      `implemented: true` in the specification frontmatter.
-    - Gated on Validation 5 and 7 above, and excluded from this phase's scope
-      by instruction: the move is a separate step.
+- [x] **Close and move the fix to `_complete`** — user decision, 2026-09-15
+    - The user accepted the remaining hosted uncertainty and explicitly requested
+      `fixes/_complete/` as the destination.
+    - Validations 5 and 7 and accumulated hosted assertions remain deferred, not
+      passed; the closure decision in `acceptance.md` supersedes the hosted gate
+      on this archival step. The specification records `status: complete` and
+      `implemented: true`.
 
 ---
 

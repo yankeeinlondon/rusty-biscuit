@@ -2,9 +2,9 @@
 title: Phase 2 pending-contract oracles
 created: 2026-09-14
 phase: 2
-spec: fixes/2026-09-13-cicd-redundancies/spec.md
-plan: fixes/2026-09-13-cicd-redundancies/plan.md
-rulings: fixes/2026-09-13-cicd-redundancies/rulings.md
+spec: fixes/_complete/2026-09-13-cicd-redundancies/spec.md
+plan: fixes/_complete/2026-09-13-cicd-redundancies/plan.md
+rulings: fixes/_complete/2026-09-13-cicd-redundancies/rulings.md
 tree: aad933bdb (branch `fix/cicd-improvements`)
 host: macOS 27.0.0, Apple Silicon
 ---
