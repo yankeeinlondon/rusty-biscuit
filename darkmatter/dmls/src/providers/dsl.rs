@@ -1201,6 +1201,18 @@ mod tests {
         let length = expressions::function_descriptor("length").unwrap();
         assert!(markdown.contains(&length.typed_signature()));
         assert!(markdown.contains("| error"));
+        // The two serializers hover with the same catalog-backed block.
+        for name in ["as_json", "as_json5"] {
+            let descriptor = expressions::function_descriptor(name).unwrap();
+            let markdown =
+                interpolation_hover_markdown(&format!("{name}(items)"), 2, no_frontmatter, no_schema);
+            assert!(
+                markdown.contains(&expressions::format_function_block(descriptor)),
+                "`{name}` hover should carry its catalog block: {markdown}"
+            );
+            assert!(markdown.contains(&descriptor.typed_signature()));
+            assert!(markdown.contains(descriptor.description));
+        }
         // An unknown function keeps the generic parsed-expression hover.
         let markdown = interpolation_hover_markdown("mystery(items)", 3, no_frontmatter, no_schema);
         assert!(markdown.starts_with("**Expression**"));
@@ -1410,6 +1422,8 @@ mod tests {
             "as_line_separated",
             "as_unordered_list",
             "as_ordered_list",
+            "as_json",
+            "as_json5",
         ] {
             assert!(
                 candidates.iter().any(|candidate| candidate.new_text == name),

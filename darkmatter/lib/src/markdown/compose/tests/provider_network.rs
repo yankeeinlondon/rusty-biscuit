@@ -751,7 +751,7 @@ async fn a_successful_empty_query_is_still_an_empty_list() {
         .compose("---\nlist: \"{{ pr_list(5) }}\"\n---\nPRs: {{ pr_list(5) }}\n")
         .expect("compose succeeds");
     assert_eq!(frontmatter_list(&composed, "list"), Vec::<String>::new());
-    assert_eq!(composed.content(), "PRs: ");
+    assert_eq!(composed.content(), "PRs: []");
 }
 
 // ---------------------------------------------------------------------------

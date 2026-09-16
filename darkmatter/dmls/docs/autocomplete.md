@@ -75,9 +75,10 @@ Inside an interpolation, the DSL provider offers three candidate families:
 1. **Frontmatter keys** — the document's own top-level keys.
 2. **`ctx.*` context variables** — offered fully qualified (`ctx.today`,
    `ctx.packages`, …).
-3. **Expression functions** — every function in the catalog, including the six
-   list-formatting functions (`as_csv`, `as_tsv`, `as_space_separated`,
-   `as_line_separated`, `as_unordered_list`, `as_ordered_list`).
+3. **Expression functions** — every function in the catalog, including the
+   eight list-formatting functions (`as_csv`, `as_tsv`, `as_space_separated`,
+   `as_line_separated`, `as_unordered_list`, `as_ordered_list`, `as_json`,
+   `as_json5`).
 
 Matching is **prefix-based and case-sensitive**. `{{ ctx.pa }}` offers matching
 `ctx.*` variables; it does not offer the removed `*_list` aliases.
