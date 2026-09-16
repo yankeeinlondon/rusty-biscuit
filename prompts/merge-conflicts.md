@@ -15,7 +15,7 @@ initialize:
 
 You are in the **{{ctx.branch}}** of the **{{ctx.repo}}** repo. A merge has recently been performed and there are the following merge conflicts:
 
-{{ conflicts }}
+{{ as_unordered_list(conflicts) }}
 
 Recent git commits include (last 10):
 
