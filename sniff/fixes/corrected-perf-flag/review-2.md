@@ -8,7 +8,9 @@ human_review: false
 reviewed_by: codex/gpt-5.6-sol
 created: 2026-09-15T19:47:10-07:00
 spec: corrected-perf-flag/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: sniff/fixes/corrected-perf-flag/implementation-log.md
 description: "A **fix** review of `corrected-perf-flag/spec.md`"
 fix: corrected-perf-flag/review-2.md
 previous: corrected-perf-flag/review-1.md

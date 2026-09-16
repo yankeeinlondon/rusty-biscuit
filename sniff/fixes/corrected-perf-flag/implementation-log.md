@@ -51,6 +51,7 @@ documentation:
   - .claude/skills/os/build-hosts.md
 completed_phase: "4"
 implementation_1: "2026-09-15T19:13:09-07:00"
+implementation_2: "2026-09-15T21:24:33-07:00"
 implemented: true
 packages:
   - sniff-cli
@@ -1483,5 +1484,196 @@ component was fixed, and was rewritten to the short WHY that survives.
         `$BUILD_LINUX` cross-check lock, the `scripts/cross-check.sh` WSL
         receipt path defect, and the rewritten pre-existing CLI test) are
         untouched by this cycle and remain open.
+- **implementation complete, ready for review.** This fix was not moved to
+        `_completed` and `just complete` was not run.
+
+---
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-09-15T21:24:33-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-sniff/sniff/fixes/corrected-perf-flag/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- the review carries a single `medium` finding, routed to one dedicated
+        subagent:
+        - **F-1** — the two new Level 1 width-sweep regressions each render 242
+                widths and take over seven seconds, which puts a `slow_`-class
+                cost in the fast `sanity` tier; the remedy is to narrow both
+                matrices to the recorded 27–48 corrupt band (plus optional
+                minimum-width and first-clean boundary cases) while keeping an
+                explicit non-vacuity guard that at least one render truncates
+                immediately after an underscore
+- **scope note:** the finding touches one test in each of two package areas
+        (`biscuit-terminal/lib/src/components/metrics_tree.rs` and
+        `sniff/cli/src/output/perf_tree.rs`), so gates run in both areas, as in
+        cycle 1. The review explicitly forbids shrinking the Level 2 30–50
+        sweep, which is therefore left untouched.
+- starting the work on 'F-1 narrow the L1 width sweeps' at 21:25:01
+        - **retained widths: `once(20).chain(27..=49)` — 24 per glyph mode, 48
+                renders per test, down from 121 / 242.** The band is the
+                recorded corrupt range 27–48; 20 is the narrowest width the
+                component supports and 49 is the first clean width, so the two
+                extra cases pin both edges of the band for the price of two
+                renders. Widths 50–140 only re-prove the clean case and were
+                dropped. The Level 2 30–50 sweep in
+                `sniff/cli/tests/level2_perf_tree_rendering.rs` was **not**
+                touched, per the review.
+        - **non-vacuity is now measured, not assumed.** Before narrowing, both
+                tests were instrumented to record every `(unicode, width)` at
+                which a row actually cuts immediately after an underscore
+                (`_…` / `_...`), across the original 20..=140 sweep:
+                - component test — unicode `{26, 28, 30, 31, 39, 48}`, ASCII
+                        `{28, 30, 32, 33, 41, 50}`
+                - Sniff production-key test — unicode `{27, 28, 30, 31, 32, 34,
+                        35, 36, 37, 38, 39, 43, 44, 46, 55}`, ASCII `{29, 30,
+                        32, 33, 34, 36, 37, 38, 39, 40, 45, 46, 48, 57}`
+                - the retained set keeps 5 cut widths per glyph mode in the
+                        component test and 13–14 per mode in the Sniff test, so
+                        the guard has a wide margin in **both** modes rather
+                        than resting on a single width. Only 26/50 and 55/57
+                        fall outside, and each is redundant with several
+                        retained widths.
+                - the instrumentation was reverted; the shipped tests carry the
+                        assertion, not the recorder.
+        - **the component test gained the guard it lacked.** `metrics_tree.rs`
+                now tracks `saw_underscore_cut` over the stripped rows and
+                asserts it at the end, mirroring the Sniff test's existing
+                guard verbatim. A truncation change that stops stranding an
+                underscore now fails the test instead of leaving it green and
+                vacuous.
+        - comments in both tests were rewritten so the stated range matches the
+                code: they keep the WHY (unescaped underscore opens a Prose
+                italic span, shearing the value column off the pre-markup grid)
+                and now state which band is swept and why the edges are there.
+                No assertion was removed or weakened — italics absence, equal
+                visible row width, value-column alignment, the four-row count,
+                and timing-tree markup cleanliness all survive unchanged.
+        - **the review's 7.4 s / 7.6 s timings did not reproduce on this host,
+                by two orders of magnitude.** Measured A/B on the same warm
+                isolated `CARGO_TARGET_DIR`, three targeted Nextest runs each,
+                only the width range differing:
+                | test | before (20..=140) | after (20, 27..=49) |
+                |---|---|---|
+                | `truncated_underscore_labels_do_not_leak_markup_at_any_width` | 0.063 / 0.059 / 0.061 s | 0.023 / 0.020 / 0.020 s |
+                | `the_production_key_set_renders_clean_on_narrow_terminals` | 0.256 / 0.256 / 0.254 s | 0.065 / 0.060 / 0.060 s |
+                - roughly 3.0× and 4.3× faster respectively; the component
+                        test's residual is fixed per-test overhead, not sweep
+                        work, which is why it gains less than the 5× the render
+                        count alone predicts.
+                - under the full area suite the same tests reported 0.073 s →
+                        0.069 s (`biscuit-terminal`) and 0.311 s → 0.100 s
+                        (`sniff`). The whole `biscuit-terminal` L1 suite
+                        executes in 4.6–12.9 s wall clock, so a single 7.4 s
+                        test inside it is arithmetically impossible here.
+                - **the reduction is still worth keeping** on the review's own
+                        grounds — 194 of the 242 renders per test bought no
+                        distinct evidence — but the `slow_`-threshold breach
+                        the finding describes could not be observed on this
+                        machine. The author may want to know the recorded
+                        numbers likely came from a cold-target or
+                        build-inclusive measurement rather than test execution.
+        - **gates — `biscuit-terminal`** (`CARGO_TARGET_DIR` on an isolated
+                temp dir throughout, to avoid the `.rmeta` permission failure
+                the reviewer hit on the shared target):
+                - `just test` — 3,262 tests run, 3,262 passed, 0 failed, 55 tier
+                        skips.
+                - `just lint` — exit 0, no clippy or rustfmt output.
+        - **gates — `sniff`:**
+                - `just test` — 2,661 tests run, 2,661 passed, 0 failed, 24 tier
+                        skips.
+                - `just lint` — exit 0, no clippy or rustfmt output.
+        - `just test-l2` was **not** run: the L2 targets are untouched by this
+                change and cycle 1 already recorded the tmux evidence.
+        - two pre-existing `SLOW` reports surfaced during the area runs and are
+                unrelated to this change: `biscuit-terminal::layout_matrix`'s
+                `layout_matrix_browser_snapshots` and
+                `layout_matrix_markdown_snapshots`, and `sniff::bench_fixtures`'s
+                two `large_monorepo_*` tests. They crossed the threshold only on
+                the more loaded runs (host load average was 5.7 on 16 cores at
+                session start) and are noted for the author, not acted on.
+- work completed for 'F-1 narrow the L1 width sweeps' at 21:40:02
+
+### Orchestrator verification
+
+- the single finding was dispatched to one dedicated subagent; the orchestrator
+        then re-ran every gate itself against the final tree, because the
+        subagent's own runs used an isolated `CARGO_TARGET_DIR` and the
+        instrumentation it used to locate the underscore-cut widths was applied
+        and reverted inside that same session:
+        - `biscuit-terminal` `just test` — **3,262 run, 3,262 passed, 0 failed,
+                55 tier skips** (suite wall clock 4.633 s)
+        - `biscuit-terminal` `just lint` — exit 0
+        - `sniff` `just test` — **2,661 run, 2,661 passed, 0 failed, 24
+                pre-existing tier skips** (suite wall clock 22.395 s)
+        - `sniff` `just lint` — exit 0
+- the two narrowed tests were also re-timed individually by the orchestrator on
+        the shared warm target, confirming the subagent's figures:
+        - `metrics_tree::tests::truncated_underscore_labels_do_not_leak_markup_at_any_width`
+                — **0.023 s**
+        - `perf_tree::tests::the_production_key_set_renders_clean_on_narrow_terminals`
+                — **0.067 s**
+        - both are three orders of magnitude below the five-second `slow_`
+                threshold, so their ordinary unprefixed names are correct for
+                the `sanity` tier.
+- `git diff --stat` over the two package areas shows the change is confined to
+        the two test bodies and their comments; no production code and no Level
+        2 file was touched this cycle.
+
+### Successful Completion
+
+The implementation of review cycle 2 has completed successfully in 22 minutes.
+During this implementation all 1 review findings were evaluated to see if they
+could be fixed as a part of this implementation cycle: 1 were fixed, 0 were
+deferred.
+
+Nothing was deferred. The finding did require a performance measurement, and
+the measurement was obtainable: the host carried enough headroom for a credible
+warm A/B, taken three times per arm on one isolated target directory with only
+the width range differing, and the orchestrator reproduced the post-change
+figures independently on the shared target. No performance-deferral record was
+created and `deferred_perf_measurement` remains unset.
+
+One correction to the review's premise is worth the author's attention, and is
+recorded above in full: the 7.404 s and 7.557 s per-test durations the finding
+cites **do not reproduce on this host by two orders of magnitude**. The two
+tests measured 0.061 s and 0.256 s *before* the narrowing, and the whole
+`biscuit-terminal` Level 1 suite executes in under five seconds, which makes a
+7.4 s test inside it arithmetically impossible. The recorded numbers most
+plausibly came from a cold-target or build-inclusive measurement. The remedy was
+implemented anyway on the review's other, independently sound grounds — 194 of
+the 242 renders per test re-proved the already-clean case and bought no distinct
+regression evidence — and it delivered the predicted reduction, roughly 3.0× and
+4.3×.
+
+### Files changed in this cycle
+
+| File | Change |
+|---|---|
+| `biscuit-terminal/lib/src/components/metrics_tree.rs` | F-1 — narrow the sweep in `truncated_underscore_labels_do_not_leak_markup_at_any_width` to `once(20).chain(27..=49)`; add the `saw_underscore_cut` non-vacuity guard the test previously lacked; correct the comment's stated band |
+| `sniff/cli/src/output/perf_tree.rs` | F-1 — narrow the sweep in `the_production_key_set_renders_clean_on_narrow_terminals` to the same range; correct the comment's stated band. Its existing non-vacuity guard was kept and confirmed to retain 13–14 underscore-cut widths per glyph mode |
+| `sniff/fixes/corrected-perf-flag/implementation-log.md` | this log |
+| `sniff/fixes/corrected-perf-flag/review-2.md` | metadata only — `log`, `implemented`, `implemented_by` |
+
+### Carried forward for the author
+
+- **the review's timing figures could not be reproduced** (above). If the
+        `slow_` classification of these tests matters to the area's tier
+        policy, the measurement method behind the 7.4 s / 7.6 s numbers is
+        worth pinning down before acting on them further.
+- **pre-existing `SLOW` reports, untouched and unrelated to this change:**
+        `biscuit-terminal::layout_matrix`'s `layout_matrix_browser_snapshots`
+        and `layout_matrix_markdown_snapshots`, and `sniff::bench_fixtures`'s
+        two `large_monorepo_*` tests. They crossed the notice threshold only on
+        the more loaded runs.
+- **a concurrent editor in this worktree.** `sniff/docs/topics/repo/recent-commits.md`
+        changed size during this cycle without either agent touching it; it was
+        already modified at session start. Confirm its ownership before staging
+        anything here.
+- the `human_review_items` carried from Phase 4 and cycle 1 — the stale
+        `$BUILD_LINUX` cross-check lock, the `scripts/cross-check.sh` WSL
+        receipt path defect, the rewritten pre-existing CLI test, and the
+        `claudine` visible-output change — are untouched by this cycle and
+        remain open.
 - **implementation complete, ready for review.** This fix was not moved to
         `_completed` and `just complete` was not run.
