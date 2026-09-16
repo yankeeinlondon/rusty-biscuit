@@ -924,8 +924,15 @@ def record_cross_check(
     head: str,
     environment: str = "wsl2-ubuntu",
     host_label: str = "",
+    build_key: str = "",
+    build_digest: str = "",
 ) -> str:
     """The receipt for a qualifying `cross-check` run.
+
+    `build_key` and `build_digest` are the manifest the remote consumer
+    VERIFIED, not the plan's expectation of it: a receipt that named a key
+    nothing checked would be a claim rather than evidence. Both or neither —
+    a half-named build is recorded as no build at all.
 
     ## Errors
 
@@ -972,6 +979,8 @@ def record_cross_check(
             f"the remote run produced no usable report for {package}; nothing is "
             "published"
         )
+    if build_key and build_digest:
+        cell["build"] = {"key": build_key, "digest": build_digest}
     return assemble_receipt(
         plan,
         environment,
@@ -1127,6 +1136,8 @@ def parse_args() -> argparse.Namespace:
     cross.add_argument("--head", required=True)
     cross.add_argument("--environment", default="wsl2-ubuntu", choices=ENVIRONMENTS)
     cross.add_argument("--host-label", default="")
+    cross.add_argument("--build-key", default="")
+    cross.add_argument("--build-digest", default="")
 
     scope_recorder = subparsers.add_parser(
         "scope-record", help="emit a scope receipt for one committed base..head"
@@ -1217,6 +1228,8 @@ def main() -> None:
                     args.head,
                     args.environment,
                     args.host_label,
+                    args.build_key,
+                    args.build_digest,
                 )
             )
         except (OSError, ValueError) as refusal:

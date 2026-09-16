@@ -84,6 +84,19 @@ GATE_SEGMENT = re.compile(
 )
 NAME_TOKEN = re.compile(r"[A-Za-z0-9_.-]+")
 
+# `ci.yml`'s build owner. A top-level matrix job, so its label is one segment
+# and `parse_job_name` already answers `None` for it — a build owns no result
+# cell. It still owes its consumers an account of itself: a lost runner leaves
+# no build status either, and without one every dependent cell reads as an
+# unexplained MISSING rather than as blocked by a named build.
+BUILD_JOB_SEGMENT = re.compile(r"^build \((?P<artifact>[A-Za-z0-9_.-]+)\)$")
+
+
+def parse_build_job_name(name: str) -> str | None:
+    """The producer environment (or legacy artifact name) of a build job."""
+    matched = BUILD_JOB_SEGMENT.match(name.strip())
+    return matched["artifact"] if matched else None
+
 # `_package-ci.yml`'s delegating job, which owns no cell of its own: the WSL2
 # cell belongs to the package one segment further up.
 WSL_DELEGATION_SEGMENT = "wsl2"
@@ -303,6 +316,73 @@ def synthesize_status(
     return written
 
 
+def synthesize_build_status(
+    records: list[dict[str, Any]],
+    artifacts: Path,
+    builds: list[dict[str, Any]],
+    packages: set[str] | None = None,
+) -> list[str]:
+    """Write the build status each runner-lost owner leg could not; return paths.
+
+    A build record is plumbing, never a result cell: this creates no cell, and
+    the document it writes is only ever read to explain a cell that could not
+    run. `builds` is the resolved plan's `builds` list, which is the only place
+    the artifact name, package, producer, and key agree.
+    """
+    written: list[str] = []
+    for record in records:
+        artifact = parse_build_job_name(record["name"])
+        if artifact is None:
+            continue
+        for build in builds:
+            if artifact not in (build["artifact"], build["producer"]):
+                continue
+            if packages is not None and build["package"] not in packages:
+                continue
+            directory = artifacts / (
+                f"build-status-{build['package']}-{build['producer']}-{build['key']}"
+            )
+            target = directory / "build-status.json"
+            if target.exists():
+                # The owner's own account always wins over this proxy.
+                continue
+            step = record["step"] or "before any step reported"
+            directory.mkdir(parents=True, exist_ok=True)
+            target.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "key": build["key"],
+                        "package": build["package"],
+                        "producer": build["producer"],
+                        "artifact": build["artifact"],
+                        "result": "failure",
+                        "stage": "produce",
+                        "consumers": build.get("consumers", []),
+                        "detail": (
+                            f"the hosted runner lost communication with the server during "
+                            f"`{step}`; GitHub terminated the build owner and no archive "
+                            f"was uploaded (job {record['id']})"
+                        ),
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            written.append(str(target))
+    return written
+
+
+def plan_builds(path: str | None) -> list[dict[str, Any]]:
+    """The resolved plan's build records, or an empty list without a plan."""
+    if not path:
+        return []
+    document = json.loads(Path(path).read_text(encoding="utf-8"))
+    builds = document.get("builds")
+    return builds if isinstance(builds, list) else []
+
+
 # ---------------------------------------------------------------------------
 # GitHub access (kept behind one seam so everything above stays offline)
 # ---------------------------------------------------------------------------
@@ -366,6 +446,13 @@ def parse_args() -> argparse.Namespace:
             "comma-separated. An area-owned rollup passes its own packages"
         ),
     )
+    parser.add_argument(
+        "--plan",
+        help=(
+            "attribute: the resolved plan, so a runner-lost BUILD owner can be "
+            "attributed to the build record its consumers name"
+        ),
+    )
     parser.add_argument("--out", help="write the classification JSON here as well")
     return parser.parse_args()
 
@@ -387,10 +474,15 @@ def main() -> int:
         if not args.artifacts:
             print("attribute requires --artifacts", file=sys.stderr)
             return 2
+        selected = selected_packages(args.package)
         report["synthesized"] = synthesize_status(
+            classification["runner_lost"], Path(args.artifacts), selected
+        )
+        report["synthesized_builds"] = synthesize_build_status(
             classification["runner_lost"],
             Path(args.artifacts),
-            selected_packages(args.package),
+            plan_builds(args.plan),
+            selected,
         )
 
     if args.out:
