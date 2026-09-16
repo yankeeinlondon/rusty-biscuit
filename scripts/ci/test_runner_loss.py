@@ -14,12 +14,15 @@ from runner_loss import (
     failure_stage,
     interrupted_step,
     is_non_producer,
+    parse_build_job_name,
     parse_job_name,
     selected_packages,
     should_rerun,
     status_directory,
+    synthesize_build_status,
     synthesize_status,
 )
+from workflow_reading import job_blocks
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 
@@ -411,18 +414,7 @@ class SynthesizeStatusTests(unittest.TestCase):
 
 def jobs_in(workflow: str) -> dict[str, str]:
     """Every job id in a shipped workflow, mapped to its block as text."""
-    source = (WORKFLOWS / workflow).read_text(encoding="utf-8")
-    body = source.partition("\njobs:\n")[2]
-    blocks: dict[str, str] = {}
-    current = ""
-    for line in body.splitlines(keepends=True):
-        header = re.match(r"^  ([A-Za-z0-9_-]+):[ \t]*$", line)
-        if header:
-            current = header.group(1)
-            blocks[current] = ""
-        elif current:
-            blocks[current] += line
-    return blocks
+    return job_blocks(WORKFLOWS / workflow)
 
 
 def resolve(text: str, package: str, environment: str) -> str:
@@ -537,6 +529,173 @@ class JobNameCorpusTests(unittest.TestCase):
         label = job_label("summary", summary, self.PACKAGE, self.ENVIRONMENT)
         self.assertIn("continue-on-error: true", summary)
         self.assertTrue(is_non_producer(label), label)
+
+
+class BuildOwnerAttributionTests(unittest.TestCase):
+    """A runner-lost build owner owes its consumers an account of itself.
+
+    A build record is plumbing, never a result cell: nothing here creates a
+    cell. What it creates is the document that lets a dependent cell say WHICH
+    named build stopped it, instead of rendering the same blank MISSING a
+    never-scheduled leg gets.
+    """
+
+    ARTIFACT = "build-sniff-cli-ubuntu-latest-abc0123456789def"
+
+    BUILDS = [
+        {
+            "key": "abc0123456789def",
+            "package": "sniff-cli",
+            "producer": "ubuntu-latest",
+            "artifact": ARTIFACT,
+            "consumers": [
+                {"environment": "ubuntu-latest", "gate": "L1"},
+                {"environment": "wsl2-ubuntu", "gate": "L1"},
+            ],
+        }
+    ]
+
+    def lost(self, name: str) -> list[dict]:
+        return [{"id": 42, "name": name, "step": "Produce the archive", "cell": None}]
+
+    def test_a_build_owner_job_owns_no_result_cell(self) -> None:
+        name = f"build ({self.ARTIFACT})"
+        self.assertIsNone(
+            parse_job_name(name),
+            "a build produces no {package, environment, gate} result cell",
+        )
+        self.assertEqual(self.ARTIFACT, parse_build_job_name(name))
+        self.assertFalse(is_non_producer(name), "a build owner is not a judge either")
+
+    def test_a_lost_build_owner_is_attributed_to_its_build_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            artifacts = Path(temporary)
+            written = synthesize_build_status(
+                self.lost(f"build ({self.ARTIFACT})"), artifacts, self.BUILDS
+            )
+            self.assertEqual(1, len(written))
+            document = json.loads(
+                (
+                    artifacts
+                    / "build-status-sniff-cli-ubuntu-latest-abc0123456789def"
+                    / "build-status.json"
+                ).read_text()
+            )
+        self.assertEqual("failure", document["result"])
+        self.assertEqual("produce", document["stage"])
+        self.assertEqual("abc0123456789def", document["key"])
+        self.assertIn("lost communication", document["detail"])
+        self.assertIn("Produce the archive", document["detail"])
+        self.assertEqual(
+            [
+                {"environment": "ubuntu-latest", "gate": "L1"},
+                {"environment": "wsl2-ubuntu", "gate": "L1"},
+            ],
+            document["consumers"],
+            "the proxy names every cell the lost build was resolved for",
+        )
+
+    def test_a_lost_environment_owner_accounts_for_every_package_key(self) -> None:
+        second = {**self.BUILDS[0], "package": "alpha", "key": "123456789abcdef0",
+                  "artifact": "build-alpha-ubuntu-latest-123456789abcdef0"}
+        with tempfile.TemporaryDirectory() as temporary:
+            written = synthesize_build_status(
+                self.lost("build (ubuntu-latest)"), Path(temporary), [*self.BUILDS, second]
+            )
+            self.assertEqual(2, len(written))
+            self.assertEqual(
+                {self.ARTIFACT, second["artifact"]},
+                {json.loads(Path(p).read_text())["artifact"] for p in written},
+            )
+
+    def test_the_owners_own_account_always_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            artifacts = Path(temporary)
+            directory = artifacts / "build-status-sniff-cli-ubuntu-latest-abc0123456789def"
+            directory.mkdir(parents=True)
+            (directory / "build-status.json").write_text('{"result": "success"}')
+            self.assertEqual(
+                [],
+                synthesize_build_status(
+                    self.lost(f"build ({self.ARTIFACT})"), artifacts, self.BUILDS
+                ),
+            )
+            self.assertEqual(
+                {"result": "success"},
+                json.loads((directory / "build-status.json").read_text()),
+            )
+
+    def test_an_area_attributes_only_its_own_packages_builds(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            artifacts = Path(temporary)
+            self.assertEqual(
+                [],
+                synthesize_build_status(
+                    self.lost(f"build ({self.ARTIFACT})"),
+                    artifacts,
+                    self.BUILDS,
+                    {"queue"},
+                ),
+            )
+            self.assertEqual([], list(artifacts.iterdir()))
+
+    def test_a_build_the_plan_does_not_carry_is_not_invented(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            artifacts = Path(temporary)
+            self.assertEqual(
+                [],
+                synthesize_build_status(
+                    self.lost("build (build-ghost-ubuntu-latest-0000000000000000)"),
+                    artifacts,
+                    self.BUILDS,
+                ),
+            )
+
+    def test_a_lost_result_producer_writes_no_build_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            artifacts = Path(temporary)
+            self.assertEqual(
+                [],
+                synthesize_build_status(
+                    self.lost("area-ci (sniff) / sniff-cli / test (ubuntu-latest)"),
+                    artifacts,
+                    self.BUILDS,
+                ),
+            )
+
+    def test_a_real_build_failure_is_never_retried(self) -> None:
+        # A compile failure is not a lost runner. It reaches `other_failures`,
+        # which vetoes the one-shot retry: rerunning would only recompile the
+        # same broken tree.
+        jobs = [
+            {
+                "id": 7,
+                "name": f"build ({self.ARTIFACT})",
+                "status": "completed",
+                "conclusion": "failure",
+                "steps": [
+                    {
+                        "name": "Produce the archive",
+                        "status": "completed",
+                        "conclusion": "failure",
+                    }
+                ],
+            }
+        ]
+        classification = classify(jobs, {7: []})
+        self.assertEqual([], classification["runner_lost"])
+        self.assertEqual([f"build ({self.ARTIFACT})"], classification["other_failures"])
+        rerun, reason = should_rerun(classification, 1)
+        self.assertFalse(rerun)
+        self.assertIn("no job lost its runner", reason)
+
+    def test_the_shipped_owner_job_label_is_the_one_this_parser_reads(self) -> None:
+        # The label GitHub renders for a matrix leg is `<job id> (<value>)`, and
+        # the value is the artifact name the plan projected. Derived from the
+        # shipped workflow rather than trusted as a string.
+        ci = (WORKFLOWS / "ci.yml").read_text()
+        self.assertIn("build: ${{ fromJSON(needs.scope.outputs.build_producers) }}", ci)
+        self.assertIn("PRODUCER: ${{ matrix.build }}", ci)
 
 
 if __name__ == "__main__":

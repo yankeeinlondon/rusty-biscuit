@@ -48,6 +48,8 @@ def plan(**overrides: object) -> dict:
                 "check_args": "-p claudine",
                 "l2_backends": [],
                 "runner_tools": [],
+                "archive_includes": [],
+                "sidecars": [],
                 "companion_suites": [],
                 "l1_include_slow": False,
                 "native": {},
@@ -70,6 +72,7 @@ def plan(**overrides: object) -> dict:
             for name in schema.ENVIRONMENTS
         ],
         "cells": [cell()],
+        "builds": None,
         "accepted_evidence": [],
         "policy_gaps": [],
         "prohibited_cells": [],
@@ -79,6 +82,8 @@ def plan(**overrides: object) -> dict:
         "flags": {"ci_tooling": False},
     }
     document.update(overrides)
+    if document.get("builds") is None:
+        document["builds"] = builds_for(document["cells"])
     return document
 
 
@@ -97,7 +102,99 @@ def cell(**overrides: object) -> dict:
         "selection_reason": "source package on a required environment",
     }
     record.update(overrides)
+    # A build reference belongs to an executing test tier and nowhere else, so
+    # the fixture adds one on exactly the shape that must carry it. A case that
+    # wants the *absence* asserted passes `build=None` and pops it.
+    if (
+        "build" not in overrides
+        and record["execution"] == "execute"
+        and record["gate"] in schema.BUILD_GATES
+    ):
+        record["build"] = BUILD_KEY
+    if record.get("build") is None:
+        record.pop("build", None)
     return record
+
+
+#: One key for the whole module. A case that needs two distinct builds spells
+#: the second out rather than deriving it, so a fixture cannot accidentally
+#: satisfy a uniqueness rule it meant to break.
+BUILD_KEY = "0123456789abcdef"
+
+
+def build_identity(**overrides: object) -> dict:
+    record = {
+        "source_commit": SHA_B,
+        "lockfile": "fedcba9876543210",
+        "rust": "1.97.1",
+        "nextest": "latest",
+        "host": "x86_64-unknown-linux-gnu",
+        "target": "x86_64-unknown-linux-gnu",
+        "profile": "test",
+        "rustflags": "",
+        "cargo_config": [],
+        "linker": "cc",
+        "archive_format": "tar.zst",
+        "package": "claudine",
+        "target_kinds": ["lib", "test"],
+        "features": "",
+        "native": [],
+        "archive_includes": [],
+        "sidecars": [],
+    }
+    record.update(overrides)
+    return record
+
+
+def build(**overrides: object) -> dict:
+    key = str(overrides.get("key", BUILD_KEY))
+    package = str(overrides.get("package", "claudine"))
+    producer = str(overrides.get("producer", "ubuntu-latest"))
+    record = {
+        "key": key,
+        "package": package,
+        "producer": producer,
+        "artifact": f"build-{package}-{producer}-{key}",
+        "compatible_environments": ["ubuntu-latest", "wsl2-ubuntu"],
+        "compatibility_reason": "x86_64-unknown-linux-gnu archive produced on ubuntu-latest",
+        "consumers": [{"environment": "ubuntu-latest", "gate": "L1"}],
+        "identity": build_identity(package=package),
+    }
+    record.update(overrides)
+    return record
+
+
+def builds_for(cells: list[dict]) -> list[dict]:
+    """The build records the given cells demand, one per referenced key.
+
+    Derived rather than written out so a fixture that changes a cell's
+    execution cannot leave behind a record claiming a consumer that no longer
+    exists — which is a different defect from the one most cases are testing.
+    """
+    demand: dict[str, list[dict]] = {}
+    owner: dict[str, dict] = {}
+    for entry in cells:
+        key = entry.get("build")
+        if key is None:
+            continue
+        demand.setdefault(key, []).append(
+            {"environment": entry["environment"], "gate": entry["gate"]}
+        )
+        owner.setdefault(key, entry)
+    records = []
+    for key, consumers in sorted(demand.items()):
+        consumers.sort(key=lambda item: (item["environment"], item["gate"]))
+        records.append(
+            build(
+                key=key,
+                package=owner[key]["package"],
+                consumers=consumers,
+                compatible_environments=sorted(
+                    {entry["environment"] for entry in consumers} | {"ubuntu-latest"}
+                ),
+            )
+        )
+    return records
 
 
 def receipt(**overrides: object) -> dict:
@@ -222,17 +319,26 @@ class ResolvedPlanValidationTests(unittest.TestCase):
         )
 
     def test_every_area_package_and_cell_states_a_selection_reason(self):
-        for mutate in (
-            lambda doc: doc["areas"][0].update({"selection_reason": ""}),
-            lambda doc: doc["packages"][0].update({"selection_reason": ""}),
-            lambda doc: doc["cells"][0].update({"selection_reason": ""}),
+        # Three separate rules end in the same words, so matching the shared
+        # tail would also pass on the wrong one of the three firing.
+        for mutate, expected in (
+            (
+                lambda doc: doc["areas"][0].update({"selection_reason": ""}),
+                "malformed-receipt: area 'claudine' has no selection reason",
+            ),
+            (
+                lambda doc: doc["packages"][0].update({"selection_reason": ""}),
+                "malformed-receipt: package 'claudine' has no selection reason",
+            ),
+            (
+                lambda doc: doc["cells"][0].update({"selection_reason": ""}),
+                "malformed-receipt: cell claudine/ubuntu-latest/L1 has no selection "
+                "reason",
+            ),
         ):
             document = plan()
             mutate(document)
-            problems = schema.validate_resolved_plan(document)
-            self.assertTrue(
-                any("selection reason" in problem for problem in problems), problems
-            )
+            self.assertIn(expected, schema.validate_resolved_plan(document))
 
     def test_a_reused_cell_must_name_its_evidence(self):
         problems = schema.validate_resolved_plan(
@@ -296,6 +402,307 @@ class ResolvedPlanValidationTests(unittest.TestCase):
         self.assertTrue(
             any("unknown value 'all-targets'" in problem for problem in problems), problems
         )
+
+
+class BuildRecordValidationTests(unittest.TestCase):
+    """Build ownership, machine-checked before any workflow acts on the plan.
+
+    `fixes/2026-09-12-single-os-compile/spec.md` Design Decision 1: "Plan
+    validation rejects dangling references, unconsumed builds, duplicate owners
+    for one planned build key, and a consumer whose environment is incompatible
+    with the producer."
+    """
+
+    def linux_and_wsl_plan(self) -> dict:
+        """One Linux build serving distinct Linux and WSL2 result cells.
+
+        The shape spec section 5 is written around: two `{package, environment,
+        gate}` results, one archive, one owner.
+        """
+        cells = [
+            cell(environment="ubuntu-latest", gate="L1"),
+            cell(environment="wsl2-ubuntu", gate="L1", compile_coverage_from="ubuntu-latest archive build"),
+        ]
+        return plan(cells=cells)
+
+    # -- positive shapes ----------------------------------------------------
+
+    def test_one_linux_build_serves_distinct_linux_and_wsl2_cells(self):
+        document = self.linux_and_wsl_plan()
+        self.assertEqual([], schema.validate_resolved_plan(document))
+        self.assertEqual(1, len(document["builds"]))
+        record = document["builds"][0]
+        self.assertEqual(
+            [
+                {"environment": "ubuntu-latest", "gate": "L1"},
+                {"environment": "wsl2-ubuntu", "gate": "L1"},
+            ],
+            record["consumers"],
+        )
+        self.assertEqual(
+            {record["key"]}, {entry["build"] for entry in document["cells"]}
+        )
+
+    def test_a_mixed_reuse_execute_and_gap_plan_validates(self):
+        document = plan(
+            cells=[
+                cell(environment="ubuntu-latest", gate="L1"),
+                cell(
+                    environment="macos-latest",
+                    gate="L1",
+                    execution="reuse",
+                    origin="local",
+                    state="reused",
+                    evidence={"ref": "refs/notes/ci-local/macos-latest"},
+                ),
+                cell(
+                    environment="windows-latest",
+                    gate="L2",
+                    execution="omit",
+                    origin="none",
+                    state="accepted-gap",
+                    gap={"owner": "@o", "reason": "no backend", "expiry": "2027-01-31"},
+                ),
+            ]
+        )
+        self.assertEqual([], schema.validate_resolved_plan(document))
+        # Only the executing cell demands a build.
+        self.assertEqual(1, len(document["builds"]))
+        self.assertEqual(
+            [{"environment": "ubuntu-latest", "gate": "L1"}],
+            document["builds"][0]["consumers"],
+        )
+
+    def test_an_all_reused_plan_carries_no_build_at_all(self):
+        document = plan(
+            cells=[
+                cell(
+                    execution="reuse",
+                    origin="local",
+                    state="reused",
+                    evidence={"ref": "refs/notes/ci-local/ubuntu-latest"},
+                )
+            ]
+        )
+        self.assertEqual([], schema.validate_resolved_plan(document))
+        self.assertEqual([], document["builds"])
+
+    # -- refusals -----------------------------------------------------------
+
+    def test_a_test_execution_without_a_build_is_refused(self):
+        document = plan()
+        del document["cells"][0]["build"]
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(
+            any("will execute but references no build" in p for p in problems), problems
+        )
+
+    def test_a_dangling_build_reference_is_refused(self):
+        document = plan()
+        document["cells"][0]["build"] = "ffffffffffffffff"
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(
+            any("which the plan does not carry" in p for p in problems), problems
+        )
+
+    def test_an_unconsumed_build_is_refused(self):
+        document = plan(cells=[cell()], builds=[build(consumers=[])])
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(any("has no consumer" in p for p in problems), problems)
+
+    def test_two_owners_for_one_build_key_are_refused(self):
+        document = plan(
+            cells=[cell()],
+            builds=[build(), build(producer="macos-latest")],
+        )
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(any("has two owners" in p for p in problems), problems)
+
+    def test_an_artifact_name_collision_is_refused(self):
+        # Two records that agree on `{package, producer, key}` except for the
+        # key would still collide if either spelled its artifact by hand.
+        document = plan(
+            cells=[cell()],
+            builds=[build(), build(key="fedcba9876543210", artifact=build()["artifact"])],
+        )
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(any("artifact is" in p for p in problems), problems)
+
+    def test_an_artifact_that_is_not_package_keyed_is_refused(self):
+        document = plan(builds=[build(artifact="build-claudine-L1")])
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(any("artifact is 'build-claudine-L1'" in p for p in problems), problems)
+
+    def test_a_consumer_outside_the_producers_compatibility_is_refused(self):
+        # Native Windows may never execute the Linux owner's archive.
+        document = plan(
+            cells=[cell(environment="windows-latest")],
+            builds=[
+                build(
+                    consumers=[{"environment": "windows-latest", "gate": "L1"}],
+                    compatible_environments=["ubuntu-latest", "wsl2-ubuntu"],
+                )
+            ],
+        )
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(
+            any("does not declare compatible" in p for p in problems), problems
+        )
+
+    def test_a_producer_outside_its_own_compatibility_list_is_refused(self):
+        document = plan(builds=[build(compatible_environments=["wsl2-ubuntu"])])
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(
+            any("not among its own compatible_environments" in p for p in problems),
+            problems,
+        )
+
+    def test_unsorted_or_duplicated_consumers_are_refused(self):
+        document = plan(
+            cells=[
+                cell(environment="ubuntu-latest"),
+                cell(environment="wsl2-ubuntu"),
+            ],
+            builds=[
+                build(
+                    consumers=[
+                        {"environment": "wsl2-ubuntu", "gate": "L1"},
+                        {"environment": "ubuntu-latest", "gate": "L1"},
+                    ]
+                )
+            ],
+        )
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(any("must be sorted by" in p for p in problems), problems)
+
+    def test_a_consumer_the_cells_do_not_demand_is_refused(self):
+        document = plan(
+            cells=[cell(environment="ubuntu-latest")],
+            builds=[
+                build(
+                    consumers=[
+                        {"environment": "ubuntu-latest", "gate": "L1"},
+                        {"environment": "wsl2-ubuntu", "gate": "L1"},
+                    ]
+                )
+            ],
+        )
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(
+            any("but the cells referencing it are" in p for p in problems), problems
+        )
+
+    def test_a_build_attached_to_lint_or_check_is_refused(self):
+        for gate in ("lint", "check"):
+            document = plan(
+                cells=[cell(gate=gate, target_kinds=[], build=BUILD_KEY)],
+                builds=[build()],
+            )
+            problems = schema.validate_resolved_plan(document)
+            # One rule covers both halves of "only an executing test tier" —
+            # the gate being wrong and the cell not executing — so only the
+            # cell label in the exact text says which half reached it.
+            self.assertIn(
+                f"malformed-receipt: cell claudine/ubuntu-latest/{gate} references "
+                f"build '{BUILD_KEY}', but only an executing L1, L2, or browser "
+                "cell consumes one",
+                problems,
+            )
+
+    def test_a_reused_cell_may_not_reference_a_build(self):
+        document = plan(
+            cells=[
+                cell(
+                    execution="reuse",
+                    origin="local",
+                    state="reused",
+                    evidence={"ref": "refs/notes/ci-local/ubuntu-latest"},
+                    build=BUILD_KEY,
+                )
+            ],
+            builds=[build()],
+        )
+        problems = schema.validate_resolved_plan(document)
+        # The label naming a build gate is what separates this from the
+        # lint/check case above: on `L1` the rule is only reachable because the
+        # cell does not execute.
+        self.assertIn(
+            f"malformed-receipt: cell claudine/ubuntu-latest/L1 references build "
+            f"'{BUILD_KEY}', but only an executing L1, L2, or browser cell "
+            "consumes one",
+            problems,
+        )
+
+    def test_a_build_compiling_another_package_than_its_consumer_is_refused(self):
+        document = plan(builds=[build(package="playa")])
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(any("which compiles 'playa'" in p for p in problems), problems)
+
+    def test_a_build_for_an_unselected_package_is_refused(self):
+        document = plan(
+            cells=[cell()],
+            builds=[build(), build(key="fedcba9876543210", package="ghost", consumers=[])],
+        )
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(
+            any(p.startswith("unknown-package:") for p in problems), problems
+        )
+
+    def test_a_producer_outside_the_plans_environment_table_is_refused(self):
+        document = plan(
+            builds=[
+                build(
+                    producer="freebsd",
+                    artifact=f"build-claudine-freebsd-{BUILD_KEY}",
+                    compatible_environments=["ubuntu-latest"],
+                )
+            ]
+        )
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(
+            any(p.startswith("unknown-environment:") for p in problems), problems
+        )
+
+    # -- identity -----------------------------------------------------------
+
+    def test_the_key_must_be_a_sixteen_digit_hex_digest(self):
+        # A SHA-256 here would mean the key came from somewhere other than the
+        # one `ci-build key` boundary.
+        for forged in ("0" * 64, "not-a-digest", "ABCDEF0123456789"):
+            document = plan(
+                cells=[cell(build=forged)],
+                builds=[build(key=forged, artifact=f"build-claudine-ubuntu-latest-{forged}")],
+            )
+            problems = schema.validate_resolved_plan(document)
+            self.assertTrue(
+                any("16-digit hex build key" in p for p in problems), (forged, problems)
+            )
+
+    def test_every_unhashed_identity_field_is_required(self):
+        for field in schema.BUILD_IDENTITY_FIELDS:
+            identity = build_identity()
+            del identity[field]
+            problems = schema.validate_resolved_plan(plan(builds=[build(identity=identity)]))
+            self.assertTrue(
+                any(f"missing required field '{field}'" in p for p in problems),
+                (field, problems),
+            )
+
+    def test_an_identity_naming_another_package_is_refused(self):
+        document = plan(builds=[build(identity=build_identity(package="playa"))])
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(any("identity names package 'playa'" in p for p in problems), problems)
+
+    def test_identity_lists_must_be_sorted_so_one_configuration_is_one_key(self):
+        document = plan(
+            builds=[build(identity=build_identity(sidecars=["messenger-desktop-stubs", "darkmatter-md-fixture"]))]
+        )
+        problems = schema.validate_resolved_plan(document)
+        self.assertTrue(any("identity sidecars must be sorted" in p for p in problems), problems)
+
+    def test_builds_must_be_a_list(self):
+        problems = schema.validate_resolved_plan(plan(builds={"key": "x"}))
+        self.assertTrue(any("builds must be a list" in p for p in problems), problems)
 
 
 class ReceiptValidationTests(unittest.TestCase):
@@ -421,6 +828,27 @@ class ScopeReceiptValidationTests(unittest.TestCase):
         previous_plan = schema.RESOLVED_PLAN_SCHEMA_VERSION - 1
         self.assertTrue(schema.validate_scope_receipt(scope_receipt(schema_version=other))[0].startswith("scope-schema:"))
         self.assertTrue(schema.validate_scope_receipt(scope_receipt(plan_schema_version=previous_plan))[0].startswith("scope-schema:"))
+
+    def test_a_version_two_plan_misses_whole_rather_than_being_upgraded(self):
+        # The live migration case for `fixes/2026-09-12-single-os-compile`: a
+        # receipt written before build records carries cells that name no
+        # build. CI must decline the whole document and resolve the plan
+        # itself — deriving the missing builds here would mean inventing
+        # ownership for a selection this tool did not make.
+        stale = plan()
+        del stale["builds"]
+        for entry in stale["cells"]:
+            entry.pop("build", None)
+        stale["schema_version"] = schema.RESOLVED_PLAN_SCHEMA_VERSION - 1
+        receipt = scope_receipt(
+            plan=stale, plan_schema_version=schema.RESOLVED_PLAN_SCHEMA_VERSION - 1
+        )
+        problems = schema.validate_scope_receipt(receipt)
+        self.assertTrue(problems[0].startswith("scope-schema:"), problems)
+        self.assertEqual(1, len(problems), problems)
+        # Refused as a document, not repaired in place.
+        self.assertNotIn("builds", receipt["plan"])
+        self.assertTrue(all("build" not in cell for cell in receipt["plan"]["cells"]))
 
     def test_the_carried_plan_must_name_the_receipts_base_and_head(self):
         problems = schema.validate_scope_receipt(scope_receipt(plan=plan(base=SHA_T)))

@@ -12,6 +12,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
+import affected_scope
 import schema
 from affected_scope import (
     calculate_scope,
@@ -34,6 +35,8 @@ from affected_scope import (
     load_environments,
     package_ci_policy,
     validate_package_ci,
+    validate_sidecars,
+    load_sidecars,
     validate_no_shadow_workspaces,
     build_closure,
     estimate_jobs,
@@ -42,10 +45,43 @@ from affected_scope import (
     MATRIX_LIMIT,
     ROOT,
     ENVIRONMENTS_CONFIG,
+    build_contract,
+    build_owner_matrix,
+    archive_producers,
+    derive_build_records,
+    prune_build_records,
+    producer_of,
+    CONSUMER_BUILD_FIELDS,
+    PRODUCER_BUILD_FIELDS,
+    SIDECAR_TABLE,
 )
 
 # Pinned so an expiry test asserts the rule, not today's date.
 TODAY = date(2026, 7, 27)
+
+
+def seed_build_inputs(root: Path) -> None:
+    """Give a synthetic workspace the two files a planned build key reads.
+
+    The key digests the pinned toolchain and the resolved dependency graph, so
+    a root with neither has no build key to compute. Real checkouts always
+    carry both; a fixture root has to be told.
+    """
+    (root / "rust-toolchain.toml").write_text(
+        '[toolchain]\nchannel = "1.97.1"\n', encoding="utf-8"
+    )
+    lockfile = root / "Cargo.lock"
+    if not lockfile.exists():
+        lockfile.write_text("version = 4\n", encoding="utf-8")
+    # The closed sidecar vocabulary, for a fixture whose package declares one.
+    # Copied from the shipped table rather than invented, so a fixture cannot
+    # accept a name the real planner would refuse.
+    table = root / ".github" / "ci"
+    table.mkdir(parents=True, exist_ok=True)
+    (table / "sidecars.json").write_text(
+        (ROOT / SIDECAR_TABLE).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
 
 
 def scope_document(
@@ -101,6 +137,7 @@ class AffectedScopeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         # alpha-core depends on shared; beta-app depends on alpha-core.
         packages = [
             package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
@@ -550,6 +587,7 @@ class ClosureTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         # biscuit-speaks -> [playa (optional), espeak]; its dependents are the
         # real claudine/research closure from the repo.
         packages = [
@@ -632,6 +670,7 @@ class NativeClosureTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         # consumer (declares no native) -> native-lib (declares ALSA).
         packages = [
             package(self.root, "consumer", "consumer/Cargo.toml"),
@@ -831,14 +870,25 @@ class PackagePolicyTests(unittest.TestCase):
                 today=TODAY,
             )
 
-    def test_messenger_desktop_stubs_runner_tool_is_accepted(self) -> None:
+    def test_messenger_desktop_stubs_is_a_build_sidecar_not_a_runner_tool(self) -> None:
+        # It moved: the stubs are `required-features = ["desktop"]` bin targets
+        # the PRODUCER compiles, not a facility the consumer provisions. The
+        # old spelling has to stop validating, or both would be legal at once.
         validate_package_ci(
             "messenger",
-            ci_policy(tests={"runner-tools": ["messenger-desktop-stubs"]}),
+            ci_policy(tests={"sidecars": ["messenger-desktop-stubs"]}),
             self.RUNNER_LABELS,
-            root=Path("/"),
+            root=ROOT,
             today=TODAY,
         )
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "messenger",
+                ci_policy(tests={"runner-tools": ["messenger-desktop-stubs"]}),
+                self.RUNNER_LABELS,
+                root=ROOT,
+                today=TODAY,
+            )
 
     def test_zed_extension_runner_tool_is_accepted(self) -> None:
         validate_package_ci(
@@ -972,13 +1022,14 @@ class EnvironmentsTests(unittest.TestCase):
         from affected_scope import KNOWN_CAPABILITIES
 
         doc = {
-            "schema_version": 1,
+            "schema_version": 2,
             "environments": [
                 {
                     "name": "x",
                     "runner": "x",
                     "native_key": "x",
                     "capabilities": {key: True for key in KNOWN_CAPABILITIES if key != "tmux"},
+                    "build": producer_build("x", "x86_64", "gnu", "glibc", ["x"]),
                 }
             ],
         }
@@ -992,7 +1043,7 @@ class EnvironmentsTests(unittest.TestCase):
         import json
 
         doc = {
-            "schema_version": 1,
+            "schema_version": 2,
             "environments": [
                 {
                     "name": "x",
@@ -1004,6 +1055,7 @@ class EnvironmentsTests(unittest.TestCase):
                         "node_pnpm": True,
                         "archive_only": False,
                     },
+                    "build": producer_build("x", "x86_64", "gnu", "glibc", ["x"]),
                 }
             ],
         }
@@ -1011,6 +1063,536 @@ class EnvironmentsTests(unittest.TestCase):
         path.write_text(json.dumps(doc))
         with self.assertRaises(RuntimeError):
             load_environments(path, today=TODAY)
+
+
+class ArchiveIncludeAndSidecarPolicyTests(unittest.TestCase):
+    """`[package.metadata.ci.tests]`'s two producer-owned declarations.
+
+    An archive include or a sidecar is validated at SCHEDULING time because a
+    malformed one is a scheduling-time mistake: discovering it as a failed
+    producer minutes into a CI run costs a whole fan-out.
+    """
+
+    RUNNER_LABELS = {"ubuntu-latest", "windows-latest", "macos-latest"}
+
+    def validate(self, tests: dict) -> None:
+        validate_package_ci(
+            "alpha", ci_policy(tests=tests), self.RUNNER_LABELS, root=ROOT, today=TODAY
+        )
+
+    def test_a_profile_relative_include_with_platform_placeholders_is_accepted(self) -> None:
+        self.validate(
+            {
+                "archive-includes": [
+                    "examples/discovery_probe",
+                    "{DLL_PREFIX}archive_portability_dylib{DLL_SUFFIX}",
+                    "tools/probe{EXE_SUFFIX}",
+                ]
+            }
+        )
+
+    def test_an_absolute_include_is_refused(self) -> None:
+        for entry in ("/etc/passwd", "C:/Windows/system32/cmd.exe"):
+            with self.subTest(entry=entry), self.assertRaises(RuntimeError) as caught:
+                self.validate({"archive-includes": [entry]})
+            self.assertIn("relative", str(caught.exception))
+
+    def test_an_include_that_escapes_the_target_directory_is_refused(self) -> None:
+        with self.assertRaises(RuntimeError) as caught:
+            self.validate({"archive-includes": ["../../etc/passwd"]})
+        self.assertIn("escapes", str(caught.exception))
+
+    def test_a_backslash_spelling_is_refused(self) -> None:
+        # One spelling has to survive a Windows producer handing a path to a
+        # Linux consumer's manifest reader.
+        with self.assertRaises(RuntimeError) as caught:
+            self.validate({"archive-includes": ["examples\\probe"]})
+        self.assertIn("forward slashes", str(caught.exception))
+
+    def test_an_unknown_placeholder_is_refused(self) -> None:
+        with self.assertRaises(RuntimeError) as caught:
+            self.validate({"archive-includes": ["{PROFILE}/probe"]})
+        self.assertIn("placeholder", str(caught.exception))
+
+    def test_an_include_that_names_its_own_profile_directory_is_refused(self) -> None:
+        # The producer supplies `<triple>/<profile>`; a package that spelled it
+        # too would name `x86_64-.../debug/debug/examples/probe`.
+        for entry in ("debug/examples/probe", "release/probe", "target/debug/probe"):
+            with self.subTest(entry=entry), self.assertRaises(RuntimeError) as caught:
+                self.validate({"archive-includes": [entry]})
+            self.assertIn("profile directory", str(caught.exception))
+
+    def test_an_empty_or_padded_include_is_refused(self) -> None:
+        for entry in ("", " examples/probe"):
+            with self.subTest(entry=entry), self.assertRaises(RuntimeError):
+                self.validate({"archive-includes": [entry]})
+
+    def test_includes_must_be_a_list_of_strings(self) -> None:
+        for value in ("examples/probe", [1], {"path": "examples/probe"}):
+            with self.subTest(value=value), self.assertRaises(RuntimeError):
+                self.validate({"archive-includes": value})
+
+    def test_a_sidecar_outside_the_closed_table_is_refused(self) -> None:
+        with self.assertRaises(RuntimeError) as caught:
+            self.validate({"sidecars": ["build-whatever-i-like"]})
+        self.assertIn("unknown build sidecar", str(caught.exception))
+
+    def test_a_duplicated_sidecar_is_refused(self) -> None:
+        with self.assertRaises(RuntimeError) as caught:
+            self.validate({"sidecars": ["harness-broker", "harness-broker"]})
+        self.assertIn("duplicates", str(caught.exception))
+
+    def test_every_shipped_sidecar_name_is_accepted(self) -> None:
+        for name in load_sidecars(ROOT):
+            with self.subTest(sidecar=name):
+                self.validate({"sidecars": [name]})
+
+    def test_declaring_no_sidecars_never_reads_the_table(self) -> None:
+        # A workspace with no sidecars at all — every synthetic fixture, and
+        # most real packages — must not need the file to exist.
+        validate_sidecars("alpha", [], Path("/nonexistent-root-2b41"))
+
+    def test_the_shipped_sidecar_table_is_a_closed_well_formed_vocabulary(self) -> None:
+        # Passive corpus test over the one shipped artifact of this contract.
+        sidecars = load_sidecars(ROOT)
+        self.assertTrue(sidecars)
+        for name, spec in sidecars.items():
+            with self.subTest(sidecar=name):
+                self.assertIsInstance(spec.get("package"), str)
+                self.assertTrue(spec["package"])
+                self.assertTrue(spec.get("bins"))
+                self.assertTrue(all(isinstance(b, str) for b in spec["bins"]))
+                self.assertIsInstance(spec.get("features", []), list)
+                self.assertGreater(len(spec.get("reason", "")), 40)
+
+    def test_a_sidecar_table_from_another_generation_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / ".github" / "ci").mkdir(parents=True)
+            (root / SIDECAR_TABLE).write_text(
+                '{"schema_version": 99, "sidecars": {}}', encoding="utf-8"
+            )
+            with self.assertRaises(RuntimeError) as caught:
+                load_sidecars(root)
+        self.assertIn("schema version", str(caught.exception))
+
+    def test_a_compile_time_sidecar_never_reappears_as_a_runner_tool(self) -> None:
+        # Until Task 6.5 the two compile-time sidecars were projected back into
+        # `runner_tools` so the reusable workflow's legacy `cargo build` steps
+        # kept firing. Those steps are gone; a projection that outlived them
+        # would ask a consumer with no Cargo to build its own fixture.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            seed_build_inputs(root)
+            packages = [
+                package(
+                    root,
+                    "alpha",
+                    "alpha/Cargo.toml",
+                    ci=ci_policy(
+                        tests={
+                            "sidecars": ["darkmatter-md-fixture", "harness-broker"],
+                            "runner-tools": ["ai-provider-stubs"],
+                        }
+                    ),
+                )
+            ]
+            policy = package_ci_policy(
+                {item["id"]: item for item in packages},
+                runner_labels=self.RUNNER_LABELS,
+                root=root,
+                today=TODAY,
+            )
+        record = policy["alpha"]
+        self.assertEqual(
+            record["sidecars"], ["darkmatter-md-fixture", "harness-broker"]
+        )
+        self.assertEqual(record["runner_tools"], ["ai-provider-stubs"])
+
+
+class BuildContractTests(unittest.TestCase):
+    """The compile contracts of `.github/ci/environments.json`.
+
+    `fixes/2026-09-12-single-os-compile/spec.md` section 5: compatibility is
+    declared and predicate-checked, never inferred from an OS name, and
+    Linux-to-WSL2 is the only cross-environment edge the table can express.
+    """
+
+    def table(self, **mutate) -> list[dict]:
+        environments = environments_for_tests()
+        by_name = {entry["name"]: entry for entry in environments}
+        for name, changes in mutate.items():
+            by_name[name.replace("_", "-")]["build"].update(changes)
+        return environments
+
+    def write(self, environments: list[dict], version: int = 2) -> Path:
+        path = Path(tempfile.mkdtemp()) / "environments.json"
+        for entry in environments:
+            entry["capabilities"].setdefault("wezterm", False)
+            entry["capabilities"].setdefault("kitty", False)
+            entry["capabilities"].setdefault("apple-terminal", False)
+        path.write_text(json.dumps({"schema_version": version, "environments": environments}))
+        return path
+
+    # -- the shipped table --------------------------------------------------
+
+    def test_the_shipped_table_declares_one_contract_per_producer(self) -> None:
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        for name in ("ubuntu-latest", "windows-latest", "macos-latest"):
+            contract = build_contract(environments, name)
+            self.assertEqual(sorted(PRODUCER_BUILD_FIELDS), sorted(contract))
+            self.assertIn(name, contract["executes"])
+
+    def test_linux_to_wsl2_is_the_only_cross_environment_edge(self) -> None:
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        edges = {
+            environment["name"]: [
+                name
+                for name in environment["build"]["executes"]
+                if name != environment["name"]
+            ]
+            for environment in environments
+            if "executes" in environment["build"]
+        }
+        self.assertEqual(
+            {"ubuntu-latest": ["wsl2-ubuntu"], "windows-latest": [], "macos-latest": []},
+            edges,
+        )
+
+    def test_the_wsl2_guest_is_compiled_for_by_its_native_key(self) -> None:
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        self.assertEqual("ubuntu-latest", producer_of(environments, "wsl2-ubuntu"))
+        for name in ("ubuntu-latest", "windows-latest", "macos-latest"):
+            self.assertEqual(name, producer_of(environments, name))
+
+    def test_the_archive_only_guest_declares_only_its_runtime_predicates(self) -> None:
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        guest = next(e for e in environments if e["name"] == "wsl2-ubuntu")
+        self.assertEqual(sorted(CONSUMER_BUILD_FIELDS), sorted(guest["build"]))
+        with self.assertRaises(RuntimeError):
+            build_contract(environments, "wsl2-ubuntu")
+
+    def test_every_producer_in_the_shipped_table_owns_an_archive(self) -> None:
+        # Since Task 6.5 there is no held-back state to declare: every native
+        # producer owns the archive its consumers execute, and the WSL2 guest
+        # is carried by the Linux producer that hosts it. The assertion that
+        # would catch a regression to compiling in place is now that the set of
+        # producers and the set of archive owners are the same set.
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        producers = {
+            environment["name"]
+            for environment in environments
+            if "executes" in environment.get("build", {})
+        }
+        self.assertEqual(
+            {"ubuntu-latest", "macos-latest", "windows-latest"}, producers
+        )
+        self.assertEqual(producers, archive_producers(environments))
+
+    def test_a_producer_carries_its_guest_with_it(self) -> None:
+        # There is no state in which a producer's archive is consumed by one of
+        # its compatible environments and compiled again by another: ownership
+        # is per PRODUCER, and `executes` is what a producer serves.
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        for producer in archive_producers(environments):
+            contract = build_contract(environments, producer)
+            self.assertIn("wsl2-ubuntu", contract["executes"] + ["wsl2-ubuntu"])
+            self.assertEqual(producer, producer_of(environments, producer))
+
+    # -- refusals -----------------------------------------------------------
+
+    def test_a_contract_carrying_a_retired_migration_field_is_refused(self) -> None:
+        # `archive_cutover` was the Phase 4/5 switch; Task 6.5 removed it with
+        # the compile-in-place paths it guarded. The vocabulary is closed, so a
+        # table that still carries it fails rather than being quietly ignored —
+        # which is what would happen on a branch that revived the old data.
+        path = self.write(self.table(ubuntu_latest={"archive_cutover": True}))
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("archive_cutover", str(raised.exception))
+
+    def test_native_windows_cannot_be_paired_with_the_wsl2_guest(self) -> None:
+        # The guest's `native_key` is ubuntu-latest, so no Windows contract can
+        # claim it — before the ABI and libc comparison would also refuse it.
+        path = self.write(self.table(windows_latest={"executes": ["windows-latest", "wsl2-ubuntu"]}))
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("native_key", str(raised.exception))
+
+    def test_a_producer_may_not_execute_in_another_native_environment(self) -> None:
+        path = self.write(self.table(ubuntu_latest={"executes": ["macos-latest", "ubuntu-latest", "wsl2-ubuntu"]}))
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("archive-only", str(raised.exception))
+
+    def test_a_mismatched_abi_refuses_the_edge(self) -> None:
+        environments = environments_for_tests()
+        guest = next(e for e in environments if e["name"] == "wsl2-ubuntu")
+        guest["build"]["runtime"]["abi"] = "musl"
+        path = self.write(environments)
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("abi is", str(raised.exception))
+
+    def test_a_consumer_missing_a_required_native_library_refuses_the_edge(self) -> None:
+        path = self.write(
+            self.table(ubuntu_latest={"runtime": {
+                "arch": "x86_64", "abi": "gnu", "libc": "glibc",
+                "native_libraries": ["libasound2"],
+            }})
+        )
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("libasound2", str(raised.exception))
+
+    def test_a_nextest_skew_between_producer_and_guest_refuses_the_edge(self) -> None:
+        environments = environments_for_tests()
+        guest = next(e for e in environments if e["name"] == "wsl2-ubuntu")
+        guest["build"]["nextest"] = "0.9.100"
+        path = self.write(environments)
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("nextest", str(raised.exception))
+
+    def test_a_producer_that_does_not_execute_its_own_archive_is_refused(self) -> None:
+        path = self.write(self.table(macos_latest={"executes": []}))
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("always executes what it compiles", str(raised.exception))
+
+    def test_an_environment_without_a_build_contract_is_refused(self) -> None:
+        environments = environments_for_tests()
+        del environments[0]["build"]
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(self.write(environments), today=TODAY)
+        self.assertIn("must declare a 'build' contract", str(raised.exception))
+
+    def test_an_unknown_build_field_is_refused(self) -> None:
+        path = self.write(self.table(macos_latest={"sccache": True}))
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("sccache", str(raised.exception))
+
+    def test_a_version_one_table_is_refused_rather_than_read_without_contracts(self) -> None:
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(self.write(environments_for_tests(), version=1), today=TODAY)
+        self.assertIn("schema_version must be 2", str(raised.exception))
+
+    def test_an_unsorted_executes_list_is_refused(self) -> None:
+        path = self.write(self.table(ubuntu_latest={"executes": ["wsl2-ubuntu", "ubuntu-latest"]}))
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("sorted", str(raised.exception))
+
+
+class BuildDerivationTests(unittest.TestCase):
+    """Which cells create consumer demand, on a synthetic two-package workspace."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
+        packages = [
+            package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
+            package(self.root, "beta-app", "beta/app/Cargo.toml"),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {
+                "nodes": [
+                    {"id": "alpha-core", "deps": []},
+                    {"id": "beta-app", "deps": []},
+                ]
+            },
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def plan(self, *files: str, **kwargs) -> dict:
+        return calculate_scope(
+            list(files),
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            **kwargs,
+        )
+
+    def test_declared_includes_and_sidecars_reach_the_build_identity(self) -> None:
+        # They are IN the key because changing either set changes what the
+        # producer emits, and therefore what a consumer must find. Sorted, so
+        # two packages that declare the same set in a different order do not
+        # split a key over nothing.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            seed_build_inputs(root)
+            declared = ci_policy(
+                tests={
+                    "archive-includes": ["tools/probe{EXE_SUFFIX}", "examples/first"],
+                    "sidecars": ["harness-broker", "darkmatter-md-fixture"],
+                }
+            )
+            packages = [package(root, "alpha-core", "alpha/lib/Cargo.toml", ci=declared)]
+            metadata = {
+                "workspace_members": [item["id"] for item in packages],
+                "packages": packages,
+                "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+            }
+            policy = package_ci_policy(
+                {item["id"]: item for item in packages},
+                runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+                root=root,
+                today=TODAY,
+            )
+            plan = calculate_scope(
+                ["alpha/lib/src/lib.rs"],
+                root,
+                metadata,
+                environments_for_tests(),
+                policy,
+            )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        record = next(
+            entry for entry in plan["builds"] if entry["producer"] == "ubuntu-latest"
+        )
+        self.assertEqual(
+            record["identity"]["archive_includes"],
+            ["examples/first", "tools/probe{EXE_SUFFIX}"],
+        )
+        self.assertEqual(
+            record["identity"]["sidecars"],
+            ["darkmatter-md-fixture", "harness-broker"],
+        )
+        package_record = next(
+            entry for entry in plan["packages"] if entry["package"] == "alpha-core"
+        )
+        self.assertEqual(
+            package_record["archive_includes"],
+            ["tools/probe{EXE_SUFFIX}", "examples/first"],
+        )
+
+    def test_one_more_declared_include_splits_the_build_key(self) -> None:
+        # The reason includes are keyed at all: an archive built before a
+        # package declared a new payload is not the archive its tests now need.
+        keys = []
+        for includes in ([], ["examples/first"]):
+            with tempfile.TemporaryDirectory() as name:
+                root = Path(name)
+                seed_build_inputs(root)
+                packages = [
+                    package(
+                        root,
+                        "alpha-core",
+                        "alpha/lib/Cargo.toml",
+                        ci=ci_policy(tests={"archive-includes": includes}),
+                    )
+                ]
+                metadata = {
+                    "workspace_members": [item["id"] for item in packages],
+                    "packages": packages,
+                    "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+                }
+                policy = package_ci_policy(
+                    {item["id"]: item for item in packages},
+                    runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+                    root=root,
+                    today=TODAY,
+                )
+                plan = calculate_scope(
+                    ["alpha/lib/src/lib.rs"],
+                    root,
+                    metadata,
+                    environments_for_tests(),
+                    policy,
+                )
+            keys.append(
+                next(
+                    entry["key"]
+                    for entry in plan["builds"]
+                    if entry["producer"] == "ubuntu-latest"
+                )
+            )
+        self.assertNotEqual(keys[0], keys[1])
+
+    def test_a_prohibited_cell_demands_no_build(self) -> None:
+        # A constraint stops an EXECUTION, so the owner it would have needed
+        # must not be scheduled either.
+        plan = self.plan(
+            "alpha/lib/src/lib.rs",
+            prohibitions={
+                "macos-latest": {
+                    "owner": "ken",
+                    "reason": "do not run macOS for this branch",
+                    "expiry": "2099-01-01",
+                    "source": "macos.toml",
+                }
+            },
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        producers = {record["producer"] for record in plan["builds"]}
+        self.assertNotIn("macos-latest", producers)
+        self.assertIn("ubuntu-latest", producers)
+
+    def test_only_demanded_owners_are_scheduled(self) -> None:
+        plan = self.plan(
+            "alpha/lib/src/lib.rs",
+            accepted_cells=[
+                {
+                    "package": "alpha-core",
+                    "environment": environment,
+                    "gate": "L1",
+                    "outcome": "pass",
+                    "evidence": {"ref": f"refs/notes/ci-local/{environment}"},
+                }
+                for environment in ("windows-latest", "macos-latest")
+            ],
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        self.assertEqual(
+            ["ubuntu-latest"], sorted({r["producer"] for r in plan["builds"]})
+        )
+
+    def test_a_record_names_why_its_guest_is_compatible(self) -> None:
+        plan = self.plan("alpha/lib/src/lib.rs")
+        linux = next(r for r in plan["builds"] if r["producer"] == "ubuntu-latest")
+        self.assertIn("x86_64-unknown-linux-gnu", linux["compatibility_reason"])
+        self.assertIn("wsl2-ubuntu", linux["compatibility_reason"])
+        windows = next(r for r in plan["builds"] if r["producer"] == "windows-latest")
+        self.assertIn("own producer environment", windows["compatibility_reason"])
+
+    def test_prune_is_idempotent_and_removes_only_satisfied_demand(self) -> None:
+        plan = self.plan("alpha/lib/src/lib.rs")
+        once = prune_build_records(plan["builds"], plan["cells"])
+        twice = prune_build_records(once, plan["cells"])
+        self.assertEqual(plan["builds"], once)
+        self.assertEqual(once, twice)
+
+    def test_two_selected_packages_get_one_key_each_per_producer(self) -> None:
+        plan = self.plan("alpha/lib/src/lib.rs", "beta/app/src/lib.rs")
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        linux = sorted(
+            (r["package"], r["key"])
+            for r in plan["builds"]
+            if r["producer"] == "ubuntu-latest"
+        )
+        self.assertEqual(["alpha-core", "beta-app"], [name for name, _ in linux])
+        self.assertEqual(2, len({key for _, key in linux}))
+
+    def test_an_owner_matrix_entry_lists_the_packages_it_compiles(self) -> None:
+        plan = self.plan("alpha/lib/src/lib.rs", "beta/app/src/lib.rs")
+        owners = {entry["environment"]: entry for entry in build_owner_matrix(plan)}
+        self.assertEqual(
+            ["alpha-core", "beta-app"], owners["ubuntu-latest"]["packages"]
+        )
+        self.assertEqual(2, len(owners["ubuntu-latest"]["builds"]))
 
 
 class ShadowWorkspaceTests(unittest.TestCase):
@@ -1058,6 +1640,7 @@ class GatesFalseScopeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         packages = [
             package(self.root, "excluded", "excluded/Cargo.toml"),
         ]
@@ -1116,6 +1699,7 @@ class NonPropagationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         (self.root / "homelab").mkdir()
         (self.root / "homelab" / "justfile").write_text("test-frontend:\n")
         packages = [
@@ -1128,7 +1712,7 @@ class NonPropagationTests(unittest.TestCase):
                     tests={
                         "tiers": ["L1", "L2"],
                         "l2-backends": ["tmux"],
-                        "runner-tools": ["messenger-desktop-stubs"],
+                        "sidecars": ["messenger-desktop-stubs"],
                         "companion-suites": ["homelab-frontend"],
                     }
                 ),
@@ -1183,6 +1767,7 @@ class BuildClosureEdgeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         names = ["seed", "normal", "seed-dev", "transitive-dev", "normal-dev"]
         packages = [package(self.root, name, f"{name}/Cargo.toml") for name in names]
         self.packages = {item["id"]: item for item in packages}
@@ -1231,6 +1816,7 @@ class LockfileScopeBranchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         packages = [
             package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
             package(self.root, "beta-app", "beta/app/Cargo.toml"),
@@ -1307,6 +1893,7 @@ class TopLevelDirectoryFallbackTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         packages = [
             package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
             package(self.root, "alpha-cli", "alpha/cli/Cargo.toml"),
@@ -1366,6 +1953,7 @@ class AreaFanOutTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         # Two packages in one area, one in another, one nested area, and one
         # root-level member — the five layouts the repository actually uses.
         packages = [
@@ -1700,6 +2288,7 @@ class CheckCellScopeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         packages = [
             package(self.root, "alpha-core", "alpha/lib/Cargo.toml", targets=["lib", "example"]),
             package(self.root, "beta-app", "beta/app/Cargo.toml", targets=["bin", "test"]),
@@ -1779,6 +2368,7 @@ class DependentSeamTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         # beta-app and gamma-lib depend on alpha-core; gamma-lib also depends
         # on delta-lib; excluded-app depends on alpha-core but gates nothing.
         packages = [
@@ -2014,6 +2604,7 @@ class DependentSeamFixtureTests(unittest.TestCase):
             raise unittest.SkipTest("cargo is not on PATH")
         cls.temporary_directory = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temporary_directory.name).resolve()
+        seed_build_inputs(cls.root)
         (cls.root / "Cargo.toml").write_text(
             '[workspace]\nresolver = "2"\nmembers = ["alpha/lib", "beta/app"]\n',
             encoding="utf-8",
@@ -2115,6 +2706,7 @@ class ApplyFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         (self.root / "homelab").mkdir()
         (self.root / "homelab" / "justfile").write_text("test-frontend:\n")
         packages = [
@@ -2325,6 +2917,7 @@ class CiToolingFlagTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         packages = [package(self.root, "alpha-core", "alpha/lib/Cargo.toml")]
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
@@ -2606,8 +3199,10 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
             missing.append("all-feature policy")
         if messenger["native"] != {"ubuntu-latest": ["libdbus-1-dev"]}:
             missing.append("libdbus-1-dev native prerequisite")
-        if messenger["runner_tools"] != ["messenger-desktop-stubs"]:
-            missing.append("messenger-desktop-stubs runner tool")
+        if messenger["runner_tools"] != []:
+            missing.append("runner tools (its desktop stubs are a build sidecar)")
+        if messenger["sidecars"] != ["messenger-desktop-stubs"]:
+            missing.append("messenger-desktop-stubs build sidecar")
 
         scope = self.scope("messenger/lib/src/lib.rs")
         record = next(
@@ -2644,13 +3239,18 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
             "check-args: ${{ matrix.check_args }}" in area_ci,
             "test-args: ${{ matrix.test_args }}" in area_ci,
             "cargo check ${{ inputs.check-args }}" in package_ci,
-            'just _test "${{ inputs.package }}" --no-fail-fast ${{ inputs.test-args }}'
+            # The declared features still reach the canonical recipe; archive
+            # mode only adds the verified archive and this checkout ahead of
+            # them, and `_archive_drop_build_flags` drops what nextest refuses.
+            'just _test "${{ inputs.package }}" --no-fail-fast' in package_ci,
+            '${archive_args[@]+"${archive_args[@]}"} ${{ inputs.test-args }}'
             in package_ci,
-            # The archive build gets package and features only: `check_args`
-            # carries example/bench selectors that must not reach the guest.
-            "archive-args: -p ${{ inputs.package }} ${{ inputs.test-args }}" in package_ci,
+            # The guest is a pure consumer: it is handed the plan's build
+            # records and downloads one, so no archive selector exists for a
+            # check argument to leak into.
+            "builds: ${{ inputs.builds }}" in package_ci,
             "test-args: ${{ inputs.test-args }}" in package_ci,
-            "${{ inputs.archive-args }}" in wsl_ci,
+            "${{ inputs.builds }}" in wsl_ci,
             "${{ inputs.check-args }}" not in wsl_ci,
             "${{ inputs.test-args }}" in wsl_ci,
             # Per-gate selection: the matrix's `gates` reaches every job that
@@ -2789,10 +3389,12 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("name: ci-resolved-plan", plan)
         self.assertIn("path: ci-artifacts/ci-resolved-plan", plan)
         self.assertNotIn("github-token:", current)
-        self.assertIn("pattern: '{junit-*,status-*}'", current)
+        # Build statuses ride in the same union: a cell blocked by a named
+        # build record is only explicable if that record's account arrives too.
+        self.assertIn("pattern: '{junit-*,status-*,build-status-*}'", current)
         self.assertIn("github-token: ${{ github.token }}", newest)
         self.assertIn("run-id: ${{ github.run_id }}", newest)
-        self.assertIn("pattern: '{junit-*,status-*}'", newest)
+        self.assertIn("pattern: '{junit-*,status-*,build-status-*}'", newest)
 
 
 # --- helpers ---------------------------------------------------------------
@@ -2821,6 +3423,33 @@ def plan_package(**overrides: object) -> dict[str, object]:
     return record
 
 
+def producer_build(
+    host: str,
+    arch: str,
+    abi: str,
+    libc: str,
+    executes: list[str],
+) -> dict:
+    """A native producer's compile contract, in the shape the table declares."""
+    return {
+        "host": host,
+        "target": host,
+        "profile": "test",
+        "rustflags": "",
+        "cargo_config": [],
+        "linker": "cc",
+        "archive_format": "tar.zst",
+        "nextest": "latest",
+        "executes": executes,
+        "runtime": {
+            "arch": arch,
+            "abi": abi,
+            "libc": libc,
+            "native_libraries": [],
+        },
+    }
+
+
 def environments_for_tests() -> list[dict[str, object]]:
     return [
         {
@@ -2833,6 +3462,13 @@ def environments_for_tests() -> list[dict[str, object]]:
                 "node_pnpm": True,
                 "archive_only": False,
             },
+            "build": producer_build(
+                "x86_64-unknown-linux-gnu",
+                "x86_64",
+                "gnu",
+                "glibc",
+                ["ubuntu-latest", "wsl2-ubuntu"],
+            ),
         },
         {
             "name": "windows-latest",
@@ -2849,6 +3485,9 @@ def environments_for_tests() -> list[dict[str, object]]:
                 "node_pnpm": False,
                 "archive_only": False,
             },
+            "build": producer_build(
+                "x86_64-pc-windows-msvc", "x86_64", "msvc", "msvc", ["windows-latest"]
+            ),
         },
         {
             "name": "macos-latest",
@@ -2860,6 +3499,13 @@ def environments_for_tests() -> list[dict[str, object]]:
                 "node_pnpm": False,
                 "archive_only": False,
             },
+            "build": producer_build(
+                "aarch64-apple-darwin",
+                "aarch64",
+                "darwin",
+                "libSystem",
+                ["macos-latest"],
+            ),
         },
         {
             "name": "wsl2-ubuntu",
@@ -2876,6 +3522,15 @@ def environments_for_tests() -> list[dict[str, object]]:
                 "node_pnpm": False,
                 "archive_only": True,
             },
+            "build": {
+                "nextest": "latest",
+                "runtime": {
+                    "arch": "x86_64",
+                    "abi": "gnu",
+                    "libc": "glibc",
+                    "native_libraries": [],
+                },
+            },
         },
     ]
 
@@ -2887,6 +3542,107 @@ def workspace_packages_from(metadata: dict[str, object]) -> dict[str, dict[str, 
         for package in metadata["packages"]  # type: ignore[index]
         if package["id"] in members
     }
+
+
+class ArchiveInventoryClosureTests(unittest.TestCase):
+    """Task 6.4: what a real package's archive must carry, closed declaratively.
+
+    A passive corpus test over the whole workspace rather than a synthetic
+    fixture: the classes this closes — the L2 harness broker, the backend
+    proof, the cross-package `md` fixture, messenger's desktop stubs — are
+    exactly the ones a synthetic fixture cannot have, because they are real
+    binaries of real packages.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "ci" / "affected_scope.py"),
+                "--all",
+                "--resolved-plan",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if result.returncode != 0:
+            raise unittest.SkipTest(f"the planner could not resolve a plan: {result.stderr}")
+        cls.plan = json.loads(result.stdout)
+
+    def test_every_ci_hostable_l2_package_declares_the_binaries_its_recipe_needs(self) -> None:
+        offenders = {
+            record["package"]: affected_scope.missing_tier_sidecars(record)
+            for record in self.plan["packages"]
+            if affected_scope.missing_tier_sidecars(record)
+        }
+        self.assertEqual(
+            {},
+            offenders,
+            "these packages execute L2 on a CI runner and would have to build the "
+            "harness broker or the backend proof with a Cargo their archive "
+            "consumer does not have",
+        )
+
+    def test_the_rule_names_exactly_what_is_missing(self) -> None:
+        # The negative direction, on the same function the corpus check uses.
+        hostable = {"tiers": ["L1", "L2"], "l2_backends": ["tmux"]}
+        self.assertEqual(
+            ["backend-proof", "harness-broker"],
+            affected_scope.missing_tier_sidecars({**hostable, "sidecars": []}),
+        )
+        self.assertEqual(
+            ["backend-proof"],
+            affected_scope.missing_tier_sidecars(
+                {**hostable, "sidecars": ["harness-broker"]}
+            ),
+        )
+        self.assertEqual(
+            [],
+            affected_scope.missing_tier_sidecars(
+                {**hostable, "sidecars": ["backend-proof", "harness-broker"]}
+            ),
+        )
+
+    def test_a_gui_only_l2_tier_owes_no_sidecar(self) -> None:
+        # It renders a governed capability gap and never executes on a runner,
+        # so compiling two binaries for it would change its build key for
+        # nothing.
+        self.assertEqual(
+            [],
+            affected_scope.missing_tier_sidecars(
+                {"tiers": ["L1", "L2"], "l2_backends": ["wezterm", "kitty"], "sidecars": []}
+            ),
+        )
+
+    def test_at_least_one_real_package_exercises_each_declarative_class(self) -> None:
+        """The corpus must actually contain what it claims to be closing.
+
+        A rule that no package triggers is a rule that proves nothing, and this
+        is how the audit notices a class being silently dropped from the
+        vocabulary rather than fixed.
+        """
+        declared_sidecars = {
+            name for record in self.plan["packages"] for name in record["sidecars"]
+        }
+        table = set(load_sidecars(ROOT))
+        self.assertEqual(
+            table,
+            declared_sidecars,
+            "every sidecar in the table must be declared by some package, and no "
+            "package may declare one the table does not offer",
+        )
+        self.assertTrue(
+            any(record["archive_includes"] for record in self.plan["packages"]),
+            "no package declares an archive include; the dynamic-library and "
+            "build-output classes would then be untested against real metadata",
+        )
+        self.assertTrue(
+            any(record["companion_suites"] for record in self.plan["packages"]),
+            "no package declares a companion suite",
+        )
 
 
 if __name__ == "__main__":

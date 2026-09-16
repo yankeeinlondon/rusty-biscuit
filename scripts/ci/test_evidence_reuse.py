@@ -30,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import local_evidence  # noqa: E402
+import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
 from local_evidence import NOTES_PREFIX, verified_environment  # noqa: E402
 
@@ -159,7 +160,7 @@ class EvidenceFixture(unittest.TestCase):
                 ("wsl2-ubuntu", "L1"),
             )
         ]
-        return {
+        document = {
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": self.base,
             "head": self.head,
@@ -181,6 +182,8 @@ class EvidenceFixture(unittest.TestCase):
                     "check_args": f"-p {name}",
                     "l2_backends": [],
                     "runner_tools": [],
+                    "archive_includes": [],
+                    "sidecars": [],
                     "companion_suites": [],
                     "l1_include_slow": False,
                     "native": {},
@@ -209,6 +212,7 @@ class EvidenceFixture(unittest.TestCase):
                 for name in schema.ENVIRONMENTS
             ],
             "cells": cells,
+            "builds": [],
             "accepted_evidence": [],
             "policy_gaps": [],
             "prohibited_cells": [],
@@ -217,6 +221,7 @@ class EvidenceFixture(unittest.TestCase):
             "preflight_reason": "package-local change",
             "flags": {"ci_tooling": False},
         }
+        return plan_fixtures.attach_builds(document)
 
     def plan_cell(self, package: str, environment: str, gate: str) -> dict:
         return {
@@ -1135,6 +1140,9 @@ class BackendProofTests(EvidenceFixture):
                 entry["tiers"] = ["L1", "L2"]
                 entry["l2_backends"] = ["tmux"]
         plan["job_estimate"] = len(plan["cells"])
+        # The added L2 cell executes, so it owes a build: the macOS record it
+        # shares with alpha's own L1 cell on that producer.
+        plan_fixtures.attach_builds(plan)
         self.assertEqual([], schema.validate_resolved_plan(plan))
         self.plan_path.write_text(schema.canonical(plan), encoding="utf-8")
 
@@ -1262,6 +1270,38 @@ class CrossCheckPublicationTests(EvidenceFixture):
         )
         self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.keys(accepted))
         self.assertEqual([], rejections)
+
+    def test_a_verified_archive_run_records_the_build_it_actually_ran(self) -> None:
+        """Task 6.3: an exact-tree receipt names the build key and digest.
+
+        The archive is the program the cell tested; without the key and the
+        producer's realized digest the receipt says only that *something*
+        passed on that tree.
+        """
+        contents = self.publish_cross_check(
+            build_key="0f1e2d3c4b5a6978", build_digest="9a8b7c6d5e4f3021"
+        )
+        document = json.loads(contents)
+        self.assertEqual(
+            {"key": "0f1e2d3c4b5a6978", "digest": "9a8b7c6d5e4f3021"},
+            document["cells"][0]["build"],
+        )
+        self.assertEqual([], schema.validate_receipt(document))
+        # And it is still ordinary evidence: naming a build changes nothing
+        # about which cell it satisfies.
+        self.publish(contents, environment="wsl2-ubuntu")
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.keys(accepted))
+        self.assertEqual([], rejections)
+
+    def test_a_run_that_named_no_archive_records_no_build(self) -> None:
+        # The native path — and every receipt written before archives existed —
+        # must stay valid rather than carry a half-named build.
+        document = json.loads(self.publish_cross_check(build_key="0f1e2d3c4b5a6978"))
+        self.assertNotIn("build", document["cells"][0])
+        self.assertEqual([], schema.validate_receipt(document))
 
     def test_a_patched_tree_publishes_nothing(self) -> None:
         with self.assertRaisesRegex(ValueError, "is not this head's tree"):

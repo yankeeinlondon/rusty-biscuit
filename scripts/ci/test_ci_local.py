@@ -15,8 +15,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
 from affected_scope import legacy_scope_document  # noqa: E402
+from workflow_reading import (  # noqa: E402
+    WorkflowLayoutError,
+    job_names,
+    job_run_steps,
+    step_run_lines,
+    step_script,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -102,6 +110,8 @@ class CiLocalTests(unittest.TestCase):
                         "tiers": ["L1", "L2"],
                         "test_args": "--features terminal-tests,daemon-tests",
                         "runner_tools": ["l2-parallel-self-spawn"] if name == "parallel" else [],
+                        "archive_includes": [],
+                        "sidecars": [],
                         "l2_environments": ["macos-latest"],
                         "l2_backends": ["tmux"],
                     }
@@ -124,6 +134,7 @@ class CiLocalTests(unittest.TestCase):
                 "test_constraints.py",
                 "test_publish_gaps.py",
                 "test_runner_loss.py",
+                "test_build_key.py",
             ):
                 (scripts / suite).write_text("", encoding="utf-8")
             stubs = {
@@ -474,7 +485,7 @@ class PlanSurfaceTests(unittest.TestCase):
                 ),
             },
         ]
-        return {
+        return plan_fixtures.attach_builds({
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": "a" * 40,
             "head": "b" * 40,
@@ -496,6 +507,8 @@ class PlanSurfaceTests(unittest.TestCase):
                     "check_args": "-p alpha",
                     "l2_backends": ["tmux"],
                     "runner_tools": [],
+                    "archive_includes": [],
+                    "sidecars": [],
                     "companion_suites": [],
                     "l1_include_slow": False,
                     "native": {},
@@ -520,12 +533,13 @@ class PlanSurfaceTests(unittest.TestCase):
             "cells": cells,
             "accepted_evidence": [],
             "policy_gaps": [],
+            "builds": [],
             "prohibited_cells": [] if prohibited_is_covered else ["alpha/wsl2-ubuntu/L1"],
             "job_estimate": len(cells),
             "preflight_os": ["ubuntu-latest"],
             "preflight_reason": "package-local change",
             "flags": {"ci_tooling": False},
-        }
+        })
 
     def run_plan_with_output(self) -> tuple[str, dict]:
         """The rendered plan and the canonical JSON `--plan-out` wrote."""
@@ -765,6 +779,8 @@ class PlanFedRunTests(unittest.TestCase):
                 "check_args": f"-p {name}",
                 "l2_backends": [],
                 "runner_tools": [],
+                "archive_includes": [],
+                "sidecars": [],
                 "companion_suites": [],
                 "l1_include_slow": False,
                 "native": {},
@@ -808,7 +824,7 @@ class PlanFedRunTests(unittest.TestCase):
             cell("beta", "ubuntu-latest", "lint"),
             cell("beta", "macos-latest", "L1"),
         ]
-        return {
+        return plan_fixtures.attach_builds({
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": "a" * 40,
             "head": "b" * 40,
@@ -837,13 +853,14 @@ class PlanFedRunTests(unittest.TestCase):
             ],
             "cells": cells,
             "accepted_evidence": [cells[1]["evidence"]],
+            "builds": [],
             "policy_gaps": [],
             "prohibited_cells": [],
             "job_estimate": 4,
             "preflight_os": ["ubuntu-latest"],
             "preflight_reason": "package-local change",
             "flags": {"ci_tooling": False},
-        }
+        })
 
     def run_fed(self, alpha_reused_outcome: str = "pass", through_env: bool = False) -> dict:
         """Run `just ci-local --l2` from the fed plan; the gate and planner calls."""
@@ -872,6 +889,7 @@ class PlanFedRunTests(unittest.TestCase):
                 "test_constraints.py",
                 "test_publish_gaps.py",
                 "test_runner_loss.py",
+                "test_build_key.py",
             ):
                 (scripts / suite).write_text("", encoding="utf-8")
             stubs = {
@@ -963,6 +981,31 @@ class PlanFedRunTests(unittest.TestCase):
         self.assertIn("rerun  alpha/L1", run["stdout"])
         self.assertEqual(1, len(run["planner"]), run["planner"])
 
+    def test_the_cells_that_run_here_report_the_build_key_they_were_planned_for(self) -> None:
+        """Task 6.2: one local target tree, and the key that says what it holds.
+
+        A same-process run serializes no archive, so the planned build key is
+        the only thing by which this run and a CI run can be said to have
+        compiled the same program. It is reported for the cells that run on
+        THIS environment, and for no others.
+        """
+        run = self.run_fed("pass")
+        beta_key = plan_fixtures._key("beta", "macos-latest")
+        alpha_linux_key = plan_fixtures._key("alpha", "ubuntu-latest")
+        self.assertIn(
+            "Build keys for macos-latest (one local target tree, no archive serialized)",
+            run["stdout"],
+        )
+        self.assertIn(f"  beta  {beta_key}  L1", run["stdout"])
+        self.assertNotIn(
+            alpha_linux_key,
+            run["stdout"],
+            "a cell planned for another environment is not this run's build",
+        )
+        # alpha's macOS L1 is reused, so the planner gave it no build record at
+        # all; a reported key here would be an invented one.
+        self.assertNotIn("  alpha  ", run["stdout"].split("Build keys for")[1])
+
     def test_the_environment_form_feeds_the_same_plan_and_writes_it_back_unchanged(self) -> None:
         # The hook hands the plan over as BISCUIT_CI_PLAN_IN; `--plan-out` must
         # then be that plan byte-for-byte, evidence rejections included, so
@@ -981,92 +1024,6 @@ class PlanFedRunTests(unittest.TestCase):
 WORKFLOW = Path(os.environ.get("CI_WORKFLOW_UNDER_TEST") or ROOT / ".github" / "workflows" / "ci.yml")
 SCOPE_STEP = "Calculate package and area scope"
 NULL_OID = "0" * 40
-
-
-def workflow_step_script(workflow: Path, step_name: str) -> str:
-    """The `run: |` body of one named step, dedented into a standalone script.
-
-    The stdlib has no YAML parser, so this leans on the workflow's fixed
-    layout: a step opens at six spaces, its keys sit at eight, and a block
-    scalar's lines at ten. Reaching the next step before `run: |` fails
-    loudly rather than borrowing a neighbor's script.
-    """
-    lines = workflow.read_text(encoding="utf-8").splitlines()
-    start = lines.index(f"      - name: {step_name}")
-    run_index = None
-    for index in range(start + 1, len(lines)):
-        if lines[index].startswith("      - "):
-            break
-        if lines[index] == "        run: |":
-            run_index = index
-            break
-    if run_index is None:
-        raise AssertionError(f"step {step_name!r} has no `run: |` block")
-    indent = 10
-    body: list[str] = []
-    for line in lines[run_index + 1 :]:
-        if line.strip() and len(line) - len(line.lstrip()) < indent:
-            break
-        body.append(line[indent:])
-    return "\n".join(body) + "\n"
-
-
-class JobStep:
-    """One `run:` step of a job: its name, script, and whether a failure is fatal."""
-
-    def __init__(self, name: str, script: str, continue_on_error: bool) -> None:
-        self.name = name
-        self.script = script
-        self.continue_on_error = continue_on_error
-
-
-def workflow_job_run_steps(workflow: Path, job: str) -> list[JobStep]:
-    """Every `run:` step of one job, in order, as standalone scripts.
-
-    `uses:` steps have no script and are skipped. Same fixed-layout reading as
-    `workflow_step_script`: a job opens at two spaces, its steps at six, a
-    step's keys at eight, and a block scalar's lines at ten. Running the whole
-    job rather than one step is what lets a test see a toolchain step that
-    precedes the scope decision — a single extracted step cannot.
-    """
-    lines = workflow.read_text(encoding="utf-8").splitlines()
-    start = lines.index(f"  {job}:") + 1
-    end = next(
-        (index for index in range(start, len(lines)) if lines[index][:2] == "  " and lines[index][2:3] not in (" ", "")),
-        len(lines),
-    )
-    steps: list[JobStep] = []
-    index = start
-    while index < end:
-        if not lines[index].startswith("      - "):
-            index += 1
-            continue
-        step_end = next(
-            (candidate for candidate in range(index + 1, end) if lines[candidate].startswith("      - ")),
-            end,
-        )
-        # Six spaces off every line: the `- ` key lands at two, the rest of
-        # the keys at two, and a block scalar's lines at four.
-        step = ["  " + lines[index][len("      - "):]] + [line[6:] for line in lines[index + 1 : step_end]]
-        name = next((line[len("  name: "):] for line in step if line.startswith("  name: ")), "")
-        continue_on_error = "  continue-on-error: true" in step
-        script: str | None = None
-        for position, line in enumerate(step):
-            if line == "  run: |":
-                body = []
-                for following in step[position + 1 :]:
-                    if following.strip() and len(following) - len(following.lstrip()) < 4:
-                        break
-                    body.append(following[4:])
-                script = "\n".join(body) + "\n"
-                break
-            if line.startswith("  run: "):
-                script = line[len("  run: "):] + "\n"
-                break
-        if script is not None:
-            steps.append(JobStep(name, script, continue_on_error))
-        index = step_end
-    return steps
 
 
 BASH_OVERRIDE = "BISCUIT_TEST_BASH"
@@ -1233,7 +1190,7 @@ class WorkflowScopeStepTests(unittest.TestCase):
             if os.environ.get("CI"):
                 raise AssertionError(message)
             raise unittest.SkipTest(message)
-        steps = workflow_job_run_steps(WORKFLOW, "scope")
+        steps = job_run_steps(WORKFLOW, "scope")
         names = [step.name for step in steps]
         if SCOPE_STEP not in names:
             raise AssertionError(f"the scope job has no {SCOPE_STEP!r} run step")
@@ -1711,8 +1668,14 @@ class WorkflowScopeStepTests(unittest.TestCase):
     EVIDENCE_PLAN_FIELDS = (
         "accepted_evidence", "evidence_rejections", "prohibited_cells", "job_estimate",
         "change_class", "preflight_os", "preflight_reason",
+        # A cell satisfied by evidence stops demanding its build, and a record
+        # whose last consumer is satisfied is removed. The overlay derives no
+        # key — it only drops demand the carried plan already computed.
+        "builds",
     )
-    EVIDENCE_CELL_FIELDS = ("execution", "origin", "state", "evidence", "prohibition")
+    EVIDENCE_CELL_FIELDS = (
+        "execution", "origin", "state", "evidence", "prohibition", "build",
+    )
 
     @classmethod
     def without_evidence(cls, plan: dict) -> str:
@@ -1746,6 +1709,25 @@ class WorkflowScopeStepTests(unittest.TestCase):
         carried = json.loads(receipts["text"])["plan"]
         self.assertEqual(self.without_evidence(carried), self.without_evidence(run.plan))
         self.assertEqual([carried["cells"][0]["package"]], [cell["package"] for cell in run.plan["cells"][:1]])
+
+        # The reused macOS L1 cell was biscuit-hash's only consumer of the macOS
+        # build, so the overlay removes that record while every other producer's
+        # survives. No key is recomputed: the overlay reads no checkout.
+        def macos_builds(plan: dict) -> list[str]:
+            return [
+                record["key"]
+                for record in plan["builds"]
+                if record["package"] == "biscuit-hash" and record["producer"] == "macos-latest"
+            ]
+
+        self.assertEqual(1, len(macos_builds(carried)), carried["builds"])
+        self.assertEqual([], macos_builds(run.plan), run.plan["builds"])
+        self.assertTrue(run.plan["builds"], "unrelated producers must keep their records")
+        self.assertTrue(
+            {record["key"] for record in run.plan["builds"]}
+            <= {record["key"] for record in carried["builds"]},
+            "the overlay may only remove records, never mint one",
+        )
 
     def test_the_projection_on_an_evidence_hit_is_derived_from_the_written_plan(self) -> None:
         run = self.run_step("pull_request", scope_receipt=self.local_scope_receipt, validation_receipt=True)
@@ -1850,7 +1832,7 @@ class WorkflowGateStepTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.script = workflow_step_script(WORKFLOW, GATE_STEP)
+        cls.script = step_script(WORKFLOW, GATE_STEP)
         cls.bash = STEP_BASH or shutil.which("bash")
         if cls.bash is None:
             raise unittest.SkipTest("requires a Bash")
@@ -1988,7 +1970,7 @@ class StepBashResolverTests(unittest.TestCase):
 class NativeProvisioningTests(unittest.TestCase):
     def provision(self, workflow: str, job: str, runner: str, native: dict, dependents: list) -> list[str]:
         step = next(
-            step for step in workflow_job_run_steps(ROOT / ".github/workflows" / workflow, job)
+            step for step in job_run_steps(ROOT / ".github/workflows" / workflow, job)
             if step.name == "Install native prerequisites"
         )
         with tempfile.TemporaryDirectory(prefix="ci-native-") as temporary:
@@ -2028,13 +2010,45 @@ class NativeProvisioningTests(unittest.TestCase):
             with self.subTest(job=job):
                 self.assertEqual([], self.provision("_package-ci.yml", job, "ubuntu-latest", {}, []))
 
-    def test_archive_setup_installs_only_the_packages_own_closure(self) -> None:
-        self.assertEqual(
-            ["_ensure-native-libs", "own-dev"],
-            self.provision("_wsl-ci.yml", "archive", "ubuntu-latest",
-                           {"ubuntu-latest": ["own-dev"]}, ["consumer-dev"]),
+    def provision_owner(self, native: list) -> list[str]:
+        """The build owner's provisioning step, which takes a flat list.
+
+        The owner leg is given the prerequisites of the ONE record it compiles,
+        already resolved for its producer's runner label by the planner — not a
+        runner-keyed map to index into.
+        """
+        step = next(
+            step
+            for step in job_run_steps(ROOT / ".github/workflows/ci.yml", "build")
+            if step.name == "Install native prerequisites"
         )
-        self.assertEqual([], self.provision("_wsl-ci.yml", "archive", "ubuntu-latest", {}, []))
+        with tempfile.TemporaryDirectory(prefix="ci-native-owner-") as temporary:
+            output = Path(temporary) / "arguments"
+            environment = os.environ.copy()
+            environment.update(NATIVE=json.dumps(native), NATIVE_OUTPUT=str(output))
+            result = subprocess.run(
+                [
+                    shutil.which("bash"),
+                    "-c",
+                    'just() { printf "%s\\n" "$@" >> "$NATIVE_OUTPUT"; }\n' + step.script,
+                ],
+                cwd=temporary,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            return output.read_text().splitlines() if output.exists() else []
+
+    def test_the_build_owner_installs_only_its_own_records_closure(self) -> None:
+        # The WSL2 archive producer that used to own this step is gone: the
+        # guest consumes the run's Linux build, and that build's owner installs
+        # exactly what the record it compiles needs.
+        self.assertEqual(
+            ["_ensure-native-libs", "own-dev"], self.provision_owner(["own-dev"])
+        )
+        self.assertEqual([], self.provision_owner([]))
 
     def test_native_names_are_passed_as_literal_arguments(self) -> None:
         self.assertEqual(
@@ -2042,6 +2056,107 @@ class NativeProvisioningTests(unittest.TestCase):
             self.provision("_package-ci.yml", "check", "ubuntu-latest",
                            {"ubuntu-latest": ["literal*name", "name with spaces"]}, []),
         )
+
+
+MUTANTS = Path(__file__).resolve().parent / "fixtures" / "workflow_mutants"
+
+#: Mutants that really are a different workflow, so a reader that reads them
+#: differently is right rather than broken. Measured with `yaml.safe_load`
+#: during Spike 1; `comment-in-block` and `trailing-blank` add a line to a
+#: literal block scalar, `folded-scalar` rejoins one, and `alias-run` replaces
+#: a step's script.
+CHANGED_MUTANTS = frozenset({"folded-scalar", "comment-in-block", "trailing-blank", "alias-run"})
+
+#: `{mutant: {probe: "raises" | "differs"}}`, every probe not named here
+#: reading exactly what it reads on `base.yml`. A `differs` is only admissible
+#: for a `CHANGED_MUTANTS` entry -- see the non-vacuity test below.
+MUTANT_VERDICTS = {
+    "reindent-job": {"job_run_steps(ci-gate)": "raises", "step_run_lines(gate)": "raises"},
+    "folded-scalar": {"job_run_steps(preflight)": "raises", "step_script(toolchain)": "raises"},
+    "anchor": {},
+    "flow-mapping": {},
+    "key-reorder": {"step_script(toolchain)": "raises"},
+    "comment-in-block": {"job_run_steps(preflight)": "differs", "step_script(toolchain)": "differs"},
+    "quoted-job-name": {
+        "job_names": "raises",
+        "job_run_steps(preflight)": "raises",
+        "job_run_steps(ci-gate)": "raises",
+    },
+    "trailing-blank": {"job_run_steps(preflight)": "differs", "step_script(toolchain)": "differs"},
+    "flow-step": {"job_run_steps(preflight)": "raises"},
+    "alias-run": {"job_run_steps(preflight)": "raises"},
+}
+
+PROBES = {
+    "job_names": lambda path: job_names(path),
+    "job_run_steps(preflight)": lambda path: [
+        (step.name, step.script, step.continue_on_error) for step in job_run_steps(path, "preflight")
+    ],
+    "job_run_steps(ci-gate)": lambda path: [
+        (step.name, step.script, step.continue_on_error) for step in job_run_steps(path, "ci-gate")
+    ],
+    "step_script(toolchain)": lambda path: step_script(path, "Verify toolchain and required tooling"),
+    "step_run_lines(gate)": lambda path: step_run_lines(path, "Fold the blocking jobs' results"),
+}
+
+
+class WorkflowReadingCorpusTests(unittest.TestCase):
+    """`workflow_reading` against YAML it does not implement.
+
+    The reader is an indentation heuristic, which is what keeps `scripts/ci`
+    free of a PyYAML dependency the stock macOS and `build-linux` interpreters
+    do not have. The trade is only sound while every layout it cannot handle
+    makes it REFUSE: a reader that silently returns a shorter step list lets
+    `WorkflowScopeStepTests` execute a shorter job and still pass, and that
+    suite is the only thing that runs `ci.yml`'s scope step for real.
+
+    Each fixture in `fixtures/workflow_mutants/` is one YAML edit to
+    `base.yml`, itself cut verbatim from `ci.yml`. Spike 1 measured each
+    against a `yaml.safe_load` implementation of the same API and found no
+    case where the heuristic reads a mutant differently without refusing.
+    That is the property these tests hold onto.
+    """
+
+    def read(self, mutant: str, probe: str):
+        return PROBES[probe](MUTANTS / f"{mutant}.yml")
+
+    def test_every_mutant_is_either_read_the_same_or_refused(self) -> None:
+        for mutant, verdicts in MUTANT_VERDICTS.items():
+            for probe in PROBES:
+                with self.subTest(mutant=mutant, probe=probe):
+                    expected = verdicts.get(probe, "same")
+                    if expected == "raises":
+                        with self.assertRaises(WorkflowLayoutError):
+                            self.read(mutant, probe)
+                        continue
+                    read = self.read(mutant, probe)
+                    base = PROBES[probe](MUTANTS / "base.yml")
+                    if expected == "same":
+                        self.assertEqual(base, read)
+                    else:
+                        self.assertNotEqual(base, read)
+
+    def test_only_a_semantically_changed_mutant_may_be_read_differently(self) -> None:
+        # The load-bearing half: a silent `differs` on a mutant that did not
+        # change the workflow is the failure mode the heuristic is allowed to
+        # have none of.
+        for mutant, verdicts in MUTANT_VERDICTS.items():
+            for probe, verdict in verdicts.items():
+                if verdict == "differs":
+                    self.assertIn(mutant, CHANGED_MUTANTS, f"{mutant}/{probe}")
+
+    def test_the_corpus_on_disk_is_the_corpus_under_test(self) -> None:
+        # Non-vacuity: a mutant added to the fixtures without a verdict, or a
+        # verdict for a mutant nobody cut, would otherwise pass unnoticed.
+        on_disk = {path.stem for path in MUTANTS.glob("*.yml")} - {"base"}
+        self.assertEqual(set(MUTANT_VERDICTS), on_disk)
+
+    def test_the_base_itself_reads_cleanly(self) -> None:
+        base = MUTANTS / "base.yml"
+        self.assertEqual(["preflight", "ci-gate"], job_names(base))
+        for probe in PROBES:
+            with self.subTest(probe=probe):
+                self.assertTrue(PROBES[probe](base))
 
 
 if __name__ == "__main__":
