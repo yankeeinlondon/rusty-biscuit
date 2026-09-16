@@ -455,24 +455,57 @@ constructed revision that adds a `scripts/ci/` path.
 
 ## The `ci-tooling` leg and where area drift is enforced
 
-`ci-tooling` is path-gated (`scripts/ci/affected_scope.py:120-128`) and the gate
-**excludes `sniff/**`**, so a change to sniff alone schedules no area check
-there. AC15's three sniff contracts (`scripts/ci/test_resolved_plan.py:272`,
-`:299`, `:334`) skip wherever sniff is absent, and the leg installs only
-`nextest` and `just` — so they always skipped in CI, and the invariant was
-verified only on a developer host that happened to have sniff on `PATH`.
+`ci-tooling` is path-gated and its `CI_TOOLING_PREFIXES` **exclude `sniff/**`**,
+so a change to sniff alone schedules no area check there. AC15's three sniff
+contracts (`scripts/ci/test_resolved_plan.py`, class `AreaGroupingTests`) skip
+wherever sniff is absent, and the leg installs only `nextest` and `just`.
 
-They are enforced by `.github/workflows/area-drift.yml` (schedule, dispatch, and
-`pull_request` on `sniff/**`), which builds the binary once and sets
-`BISCUIT_REQUIRE_SNIFF=1` so an absent sniff **fails** rather than skips. It is
-not in `ci-tooling` because a release `sniff-cli` measures 264.6s cold / 99.5s
-warm against a leg that already runs 5m54s–6m43s. The contract asks sniff what
-area a *directory* resolves to; the cheaper inverted query (areas, then packages
-per area) answers a different question and loses `biscuit-test-harness`, which
-is the one divergence `SNIFF_SELF_INCONSISTENT` exists to record.
+They are enforced **on the merge path**, by `ci.yml`'s own `area-drift` job:
+`ci-gate` folds `needs.area-drift.result` like every other blocking job. The
+job builds `sniff-cli` once behind a `rust-cache` entry, puts it on `PATH`, and
+sets `BISCUIT_REQUIRE_SNIFF=1` so an absent sniff **fails** rather than skips.
 
-Two rules when adding a Python suite to this leg:
+It is a job of its own rather than a step of `ci-tooling` for two reasons: a
+release `sniff-cli` measures 264.6s cold / 99.5s warm against a leg that
+already runs 5m54s–6m43s and fires on every `scripts/` or `.github/` change,
+and a sniff compile error inside the CI-infrastructure gate would redden a gate
+that does not exist to report it. What makes the cost acceptable is scope. A
+second planner flag, `area_drift`, schedules the job, and it is true for
+`sniff/**`, `scripts/ci/affected_scope.py`,
+`scripts/ci/test_resolved_plan.py`, **and every `Cargo.toml` at any depth** — a
+manifest that appears or moves re-maps areas without touching either
+implementation, and `git diff --name-only` cannot say which manifest edits did.
+On every other pull request the job is `skipped`, which the fold accepts.
 
+`.github/workflows/area-drift.yml` keeps only its schedule and
+`workflow_dispatch`, as the backstop for the one defect the gate job cannot
+catch: the gate job is scheduled *by* the planner, so a bug in `area_drift`
+itself would skip the check silently. Its `pull_request` trigger is gone —
+on a pull request the gate job already runs the identical class.
+
+The contract asks sniff what area a *directory* resolves to; the cheaper
+inverted query (areas, then packages per area) answers a different question and
+loses `biscuit-test-harness`, which is the one divergence
+`SNIFF_SELF_INCONSISTENT` exists to record.
+
+Three rules when adding a Python suite to this leg:
+
+- **Gate every host tool through `scripts/ci/tool_guard.py`.**
+  `require_tools("just", "jq", enforced_by=…)` (or the `@requires_tools` class
+  decorator) skips where the tool is genuinely absent and **fails** where a job
+  declared it provisioned with `BISCUIT_REQUIRE_<TOOL>=1`. `enforced_by` is
+  keyword-only with no default, so a guard cannot be written without naming the
+  job that does run the contract — a skip saying only "requires just" claims
+  nothing about coverage. The declaration is **per job, never a blanket fail
+  under `CI`**: `preflight` runs three of these suites on up to three operating
+  systems and provisions neither `sniff` nor `jq`, so a global rule would turn
+  macOS and Windows red on every push. Today `preflight` and `ci-tooling`
+  declare `BISCUIT_REQUIRE_CARGO` on the `test_affected_scope.py` step,
+  `ci-tooling` declares `JUST`/`JQ`/`BASH` on the `test_ci_local.py` step, and
+  `area-drift` declares `SNIFF`.
+  `ci_workflow_contracts::every_tool_guard_declaration_is_set_by_the_job_that_enforces_it`
+  holds both directions: a guard whose variable no job sets, and a variable no
+  guard reads.
 - **Check what the suite needs from Git history.** The leg checks out with
   `fetch-depth: 0` because `test_build_baseline_revision.py` resolves
   `BASE_REVISION`. At the default depth 1 that revision is absent and the suite

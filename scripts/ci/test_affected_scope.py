@@ -14,6 +14,7 @@ from pathlib import Path
 
 import affected_scope
 import schema
+from tool_guard import require_tools
 from affected_scope import (
     calculate_scope,
     legacy_scope_document,
@@ -58,6 +59,15 @@ from affected_scope import (
 
 # Pinned so an expiry test asserts the rule, not today's date.
 TODAY = date(2026, 7, 27)
+
+#: Every job that runs this suite provisions a toolchain, so a missing Cargo
+#: here is a provisioning regression rather than a host without Rust. Both set
+#: BISCUIT_REQUIRE_CARGO; a developer host without Cargo still skips.
+CARGO_ENFORCED_BY = (
+    "`ci.yml`'s `preflight` matrix on every selected operating system and by "
+    "its `ci-tooling` job, both of which set up the pinned Rust toolchain and "
+    "set BISCUIT_REQUIRE_CARGO"
+)
 
 
 def seed_build_inputs(root: Path) -> None:
@@ -2598,10 +2608,7 @@ class DependentSeamFixtureTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        import shutil
-
-        if shutil.which("cargo") is None:
-            raise unittest.SkipTest("cargo is not on PATH")
+        require_tools("cargo", enforced_by=CARGO_ENFORCED_BY)
         cls.temporary_directory = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temporary_directory.name).resolve()
         seed_build_inputs(cls.root)
@@ -2985,6 +2992,101 @@ class CiToolingFlagTests(unittest.TestCase):
             with self.subTest(path=path):
                 scope = self.scope([path])
                 self.assertFalse(scope["flags"]["ci_tooling"])
+
+
+class AreaDriftFlagTests(unittest.TestCase):
+    """AC15: a change that can move planner-vs-sniff area derivation must run
+    the contract that asks sniff.
+
+    Scoped in both directions on purpose. Too narrow and a real divergence
+    schedules the contract nowhere, which is silent; too broad and every pull
+    request pays for a release `sniff-cli`.
+    """
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
+        packages = [package(self.root, "alpha-core", "alpha/lib/Cargo.toml")]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def scope(self, files: list[str]) -> dict[str, object]:
+        return scope_document(
+            files, self.root, self.metadata, environments_for_tests(), self.policy
+        )
+
+    def test_the_two_authorities_set_the_area_drift_flag(self) -> None:
+        for path in [
+            # sniff's own detection rule — the direction `ci_tooling` cannot see.
+            "sniff/lib/src/filesystem/repo/detection.rs",
+            "sniff/cli/src/main.rs",
+            # The planner's replica of that rule, and the contract itself.
+            "scripts/ci/affected_scope.py",
+            "scripts/ci/test_resolved_plan.py",
+            "./scripts/ci/affected_scope.py",
+            "scripts\\ci\\test_resolved_plan.py",
+        ]:
+            with self.subTest(path=path):
+                scope = self.scope([path])
+                self.assertTrue(scope["flags"]["area_drift"])
+
+    def test_any_manifest_at_any_depth_sets_the_area_drift_flag(self) -> None:
+        # A manifest that appears, moves, or disappears re-maps areas without
+        # touching either authority, and a name-only diff cannot say which of
+        # the three happened. The root manifest carries workspace membership.
+        for path in [
+            "Cargo.toml",
+            "alpha/lib/Cargo.toml",
+            "claudine/rendezvous/core/Cargo.toml",
+            "darkmatter/lib/tests/fixtures/validate/file_match_valid/Cargo.toml",
+            "tools\\test-toolkit\\Cargo.toml",
+        ]:
+            with self.subTest(path=path):
+                scope = self.scope([path])
+                self.assertTrue(scope["flags"]["area_drift"])
+
+    def test_changes_that_cannot_move_area_derivation_leave_the_flag_alone(self) -> None:
+        # Source, docs, the lockfile, workflows, and the rest of the CI tooling
+        # — including suites that share the tooling leg — cannot re-map an area.
+        # `Cargo.lock` is the near miss worth pinning: it sits beside the root
+        # manifest and names the resolved graph, but not where a manifest lives.
+        for path in [
+            "alpha/lib/src/lib.rs",
+            "Cargo.lock",
+            "docs/topics/ci-cd.md",
+            ".github/workflows/ci.yml",
+            "scripts/ci/test_affected_scope.py",
+            "scripts/ci-rollup.rs",
+            "sniffer/lib/src/lib.rs",
+        ]:
+            with self.subTest(path=path):
+                scope = self.scope([path])
+                self.assertFalse(scope["flags"]["area_drift"])
+
+    def test_the_tooling_and_area_drift_flags_are_independent(self) -> None:
+        # Both flags exist because neither covers the other: a sniff change
+        # schedules no tooling leg, and a tooling change schedules no sniff
+        # build. A single flag would either miss drift or pay for it every time.
+        sniff_only = self.scope(["sniff/lib/src/filesystem/repo/detection.rs"])
+        self.assertTrue(sniff_only["flags"]["area_drift"])
+        self.assertFalse(sniff_only["flags"]["ci_tooling"])
+
+        tooling_only = self.scope(["scripts/ci/test_ci_local.py"])
+        self.assertTrue(tooling_only["flags"]["ci_tooling"])
+        self.assertFalse(tooling_only["flags"]["area_drift"])
 
 
 class CompanionRecipeCheckTests(unittest.TestCase):
@@ -3556,6 +3658,9 @@ class ArchiveInventoryClosureTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
+        # The planner reads `cargo metadata`; without Cargo there is no
+        # workspace to close over and the guard says where that is checked.
+        require_tools("cargo", enforced_by=CARGO_ENFORCED_BY)
         result = subprocess.run(
             [
                 sys.executable,
@@ -3568,8 +3673,13 @@ class ArchiveInventoryClosureTests(unittest.TestCase):
             text=True,
             timeout=300,
         )
+        # A planner that cannot resolve a full-scope plan is the loudest
+        # failure this suite can see. This was a SkipTest until 2026-09-15,
+        # which reported the whole class green on a total planner regression.
         if result.returncode != 0:
-            raise unittest.SkipTest(f"the planner could not resolve a plan: {result.stderr}")
+            raise AssertionError(
+                f"the planner could not resolve a full-scope plan: {result.stderr}"
+            )
         cls.plan = json.loads(result.stdout)
 
     def test_every_ci_hostable_l2_package_declares_the_binaries_its_recipe_needs(self) -> None:

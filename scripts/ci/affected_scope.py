@@ -127,6 +127,36 @@ CI_TOOLING_PREFIXES = (
 )
 CI_TOOLING_PATHS = {"tools/test-toolkit/tests/ci_workflow_contracts.rs"}
 
+# AC15 makes `sniff` the authority on package areas: this planner replicates
+# sniff's rule and owns no mapping of its own. Nothing but the contracts in
+# `test_resolved_plan.py::AreaGroupingTests` notices when the two diverge — a
+# stale rule fans work out to the wrong area and every other check stays green
+# — and those contracts need the real binary, which only `ci.yml`'s
+# `area-drift` job provisions. This flag is what schedules that job, so it must
+# cover every change that can move either side of the equivalence.
+#
+# `ci_tooling` cannot serve: it follows `scripts/`, `.github/` and the pnpm
+# tooling only, so a change to sniff's own detection rule would schedule the
+# contracts nowhere.
+AREA_DRIFT_PREFIXES = ("sniff/",)
+AREA_DRIFT_PATHS = {
+    "scripts/ci/affected_scope.py",
+    "scripts/ci/test_resolved_plan.py",
+}
+
+# A package's area is a function of WHERE its manifest sits, so a manifest that
+# appears, moves, or disappears re-maps areas without touching sniff or this
+# file — the case a path list keyed on the two implementations structurally
+# cannot see. Every `Cargo.toml` at every depth therefore counts, fixture
+# manifests included: `sniff repo package-area` answers per directory, so a
+# manifest in an unusual location is precisely the input that separates the two
+# rules, and nothing distinguishes a fixture manifest from a real one without
+# reading it. The change list is `git diff --name-only`, which carries no
+# add/modify/delete status, so "a manifest moved" is not separable from "a
+# dependency was bumped" either. The over-approximation costs one parallel job
+# that `ci-gate` folds; the miss it prevents is silent.
+AREA_DRIFT_MANIFEST = "Cargo.toml"
+
 # Bootstrap-preflight breadth (D3). A global CI/tooling change validates every
 # runner OS before fan-out; a package-local change validates only the scope host
 # plus the runner OSes its selected packages' environments actually land on.
@@ -2730,6 +2760,12 @@ def calculate_scope(
     normalized_files = [raw.replace("\\", "/").removeprefix("./") for raw in files]
     flags["ci_tooling"] = any(
         path.startswith(CI_TOOLING_PREFIXES) or path in CI_TOOLING_PATHS
+        for path in normalized_files
+    )
+    flags["area_drift"] = any(
+        path.startswith(AREA_DRIFT_PREFIXES)
+        or path in AREA_DRIFT_PATHS
+        or path.rpartition("/")[2] == AREA_DRIFT_MANIFEST
         for path in normalized_files
     )
 

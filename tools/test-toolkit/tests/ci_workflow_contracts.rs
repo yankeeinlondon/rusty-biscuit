@@ -2186,7 +2186,7 @@ fn junit_uploads_carry_the_whole_staging_directory_and_its_manifest() {
 
 /// The jobs `ci-gate` folds: every top-level job of `ci.yml` whose failure
 /// must block a merge. The advisory summary is the only job outside it.
-const GATED_JOBS: [&str; 7] = [
+const GATED_JOBS: [&str; 8] = [
     "validation",
     "scope",
     "preflight",
@@ -2198,6 +2198,9 @@ const GATED_JOBS: [&str; 7] = [
     "area-ci",
     "biscuit-tui-captured-stdout",
     "ci-tooling",
+    // AC15's planner-vs-sniff contract. It skips on every pull request that
+    // cannot move area derivation, and the fold reads `skipped` as a pass.
+    "area-drift",
 ];
 
 /// Spec §5 / OQ3 Option B, proven in
@@ -2782,6 +2785,198 @@ fn ci_tooling_leg_runs_the_workflow_contract_suite() {
             r#"CI_TOOLING_PATHS = {"tools/test-toolkit/tests/ci_workflow_contracts.rs"}"#
         ),
         "affected_scope.py must map this suite's source file to the ci_tooling flag"
+    );
+}
+
+/// AC15: the planner replicates sniff's area rule and owns no mapping of its
+/// own, so the contract that asks the real binary belongs ON the merge path.
+/// It is a job of its own — not a step of `ci-tooling`, whose gate must not go
+/// red for a sniff compile error — scoped by its own planner flag and folded by
+/// `ci-gate` like every other blocking job. `area-drift.yml` keeps only the
+/// nightly backstop, because a planner defect could skip the gate job itself.
+#[test]
+fn the_area_drift_contract_is_enforced_on_the_merge_path() {
+    let policy = read("scripts/ci/affected_scope.py");
+    for source in [r#"AREA_DRIFT_PREFIXES = ("sniff/",)"#, r#"AREA_DRIFT_MANIFEST = "Cargo.toml""#] {
+        assert!(
+            policy.contains(source),
+            "affected_scope.py must declare `{source}` — sniff and every package \
+             manifest are the inputs `ci_tooling` structurally cannot see"
+        );
+    }
+    assert!(
+        policy.contains(r#"flags["area_drift"] = any("#),
+        "the resolved plan must carry the area_drift flag"
+    );
+
+    let ci = workflow("ci.yml");
+    assert!(
+        ci.contains("area_drift=$(jq -r '.flags.area_drift'"),
+        "the scope job must emit the derived area_drift flag"
+    );
+
+    let leg = job_block("ci.yml", "  area-drift:");
+    assert!(
+        leg.contains("needs.scope.outputs.area_drift == 'true'"),
+        "the area-drift job must be gated on the scope-derived flag"
+    );
+    assert!(
+        leg.contains("cargo build -p sniff-cli --release"),
+        "the area-drift job must build the area authority it compares against"
+    );
+    // The guard turns an unprovisioned binary into a failure. Without it the
+    // job would report three green tests having run nothing — the exact shape
+    // this contract exists to prevent.
+    assert!(
+        leg.contains(r#"BISCUIT_REQUIRE_SNIFF: "1""#),
+        "the area-drift job must set BISCUIT_REQUIRE_SNIFF so an absent sniff fails"
+    );
+    assert!(
+        leg.contains("python3 scripts/ci/test_resolved_plan.py AreaGroupingTests"),
+        "the area-drift job must run the contract class, not the whole suite"
+    );
+    // Folding is asserted structurally by `ci_gate_is_the_single_required_check`
+    // against `GATED_JOBS`; named here so the two cannot drift apart silently.
+    assert!(
+        GATED_JOBS.contains(&"area-drift"),
+        "ci-gate must fold the area-drift job"
+    );
+
+    // The standalone workflow is the backstop for a planner defect that would
+    // skip the gate job. Its pull-request leg would now duplicate that job on
+    // the same pull request.
+    let backstop = workflow("area-drift.yml");
+    assert!(
+        backstop.contains("schedule:") && backstop.contains("workflow_dispatch:"),
+        "area-drift.yml must keep the scheduled and manual backstop legs"
+    );
+    assert!(
+        !backstop.contains("pull_request:"),
+        "area-drift.yml must not re-run the gate job's class on the same pull request"
+    );
+}
+
+/// Every host-tool guard in the CI Python suites, the workflow job that
+/// provisions its tools, and the tools that job therefore declares.
+///
+/// Rows are `(suite, workflow, job header, tools)`. The declaration is per job
+/// rather than a blanket fail under `CI`: `preflight` runs three of these
+/// suites on up to three operating systems and provisions neither `sniff` nor
+/// the tools `test_ci_local.py` needs, so a global rule would turn macOS and
+/// Windows red on every push.
+const TOOL_GUARD_DECLARATIONS: &[(&str, &str, &str, &[&str])] = &[
+    ("test_affected_scope.py", "ci.yml", "  preflight:", &["CARGO"]),
+    ("test_affected_scope.py", "ci.yml", "  ci-tooling:", &["CARGO"]),
+    ("test_ci_local.py", "ci.yml", "  ci-tooling:", &["JUST", "JQ", "BASH"]),
+    ("test_resolved_plan.py", "ci.yml", "  area-drift:", &["SNIFF"]),
+    ("test_resolved_plan.py", "area-drift.yml", "  sniff-area-drift:", &["SNIFF"]),
+];
+
+/// The one step of `job` whose body mentions `needle`, as source.
+///
+/// Step-level rather than job-level because a `BISCUIT_REQUIRE_*` set on some
+/// other step of the same job reaches the suite's process not at all.
+fn step_containing(job: &str, needle: &str) -> String {
+    job.split("\n      - ")
+        .find(|step| step.contains(needle))
+        .unwrap_or_else(|| panic!("no step of this job runs `{needle}`"))
+        .to_string()
+}
+
+/// A guard on a host tool must skip on a developer host and FAIL in the job
+/// that provisioned the tool, and its skip must name where the contract is
+/// enforced. `BISCUIT_REQUIRE_<TOOL>` is how a job declares the tool present;
+/// a declaration no job sets is the same silent skip wearing a different hat,
+/// so both directions are closed here.
+#[test]
+fn every_tool_guard_declaration_is_set_by_the_job_that_enforces_it() {
+    let mut declared: Vec<String> = Vec::new();
+    for (suite, file, header, tools) in TOOL_GUARD_DECLARATIONS {
+        let job = job_block(file, header);
+        let step = step_containing(&job, &format!("scripts/ci/{suite}"));
+        for tool in *tools {
+            let variable = format!("BISCUIT_REQUIRE_{tool}");
+            assert!(
+                step.contains(&format!("{variable}: \"1\"")),
+                "{file}'s `{}` job runs {suite} and provisions {tool}, so that step \
+                 must set {variable} — without it the guard skips and reports a green \
+                 cell that verified nothing",
+                header.trim().trim_end_matches(':')
+            );
+            declared.push(variable);
+        }
+    }
+
+    // The reverse direction: a variable a workflow sets that no guard reads is
+    // as dead as one no workflow sets.
+    let workflows = repo_root().join(".github/workflows");
+    for entry in fs::read_dir(&workflows).expect("read .github/workflows") {
+        let path = entry.expect("workflow entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("yml") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let source = read(&format!(".github/workflows/{name}"));
+        for line in source.lines() {
+            let Some(start) = line.find("BISCUIT_REQUIRE_") else {
+                continue;
+            };
+            let variable: String = line[start..]
+                .chars()
+                .take_while(|character| character.is_ascii_uppercase() || *character == '_')
+                .collect();
+            let variable = variable.trim_end_matches('_').to_string();
+            assert!(
+                declared.contains(&variable),
+                "{name} mentions {variable}, which no guard in TOOL_GUARD_DECLARATIONS reads"
+            );
+        }
+    }
+}
+
+/// One mechanism, not thirteen. `tool_guard.require_tools` is the only place a
+/// CI Python suite may decide that an absent host tool means skip: it forces
+/// every caller to name the enforcing job, and it fails where that job declared
+/// the tool. A suite that reaches for `unittest.skipUnless(shutil.which(...))`
+/// again has reintroduced the guard that can only ever skip.
+#[test]
+fn no_ci_python_suite_gates_a_host_tool_outside_the_shared_guard() {
+    let directory = repo_root().join("scripts/ci");
+    let mut suites_using_the_guard = 0;
+    for entry in fs::read_dir(&directory).expect("read scripts/ci") {
+        let path = entry.expect("scripts/ci entry").path();
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        if !name.starts_with("test_") || !name.ends_with(".py") {
+            continue;
+        }
+        let source = read(&format!("scripts/ci/{name}"));
+        if source.contains("require_tools(") {
+            suites_using_the_guard += 1;
+        }
+        for line in source.lines() {
+            assert!(
+                !(line.contains("skipUnless") && line.contains("which(")),
+                "{name} gates a host tool with skipUnless: `{}` — use \
+                 tool_guard.require_tools, which names its enforcing job and fails \
+                 where that job provisioned the tool",
+                line.trim()
+            );
+        }
+    }
+    assert!(
+        suites_using_the_guard >= 3,
+        "the three suites holding host-tool guards must all reach the shared \
+         mechanism; found {suites_using_the_guard}"
+    );
+
+    // Prioritized action 3 of `reviews/2026-09-15-python-test-code`: a planner
+    // that cannot resolve a full-scope plan is the loudest failure this corpus
+    // test can see, and it used to report the whole class green.
+    let scope_suite = read("scripts/ci/test_affected_scope.py");
+    assert!(
+        scope_suite.contains("the planner could not resolve a full-scope plan"),
+        "ArchiveInventoryClosureTests must fail, not skip, when the planner cannot \
+         resolve a plan"
     );
 }
 

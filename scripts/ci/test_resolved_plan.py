@@ -12,7 +12,6 @@ from __future__ import annotations
 import copy
 import json
 import os
-import shutil
 import subprocess
 import sys
 import unittest
@@ -24,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import build_key  # noqa: E402
 import schema  # noqa: E402
+from tool_guard import require_tools  # noqa: E402
 from affected_scope import (  # noqa: E402
     ENVIRONMENTS_CONFIG,
     ROOT,
@@ -63,27 +63,20 @@ SNIFF_SELF_INCONSISTENT = {"biscuit-test-harness": ("root", "biscuit-test-harnes
 #: binary: a release `sniff-cli` costs 4m25s cold and 1m39s with a warm
 #: dependency cache, measured in
 #: `reviews/2026-09-15-python-test-code/spike-4-results.md`.
-SNIFF_ENFORCEMENT = (
-    "sniff is absent, so AC15's area-drift contract did not run here. It is "
-    "enforced by the `area-drift` workflow, which builds sniff-cli and sets "
-    "BISCUIT_REQUIRE_SNIFF so that a missing binary fails instead of skipping, "
-    "and by `just ci-local` on a developer host that has sniff installed. "
-    "`ci-tooling` and `preflight` do not provision it."
+SNIFF_ENFORCED_BY = (
+    "`ci.yml`'s `area-drift` job, which builds sniff-cli, sets "
+    "BISCUIT_REQUIRE_SNIFF, and whose result `ci-gate` folds"
+)
+SNIFF_DETAIL = (
+    "The nightly `area-drift` workflow is the backstop, and `just ci-local` on "
+    "a developer host that has sniff installed runs it too. `ci-tooling` and "
+    "`preflight` do not provision it."
 )
 
 
 def require_sniff() -> None:
-    """Skip where `sniff` is genuinely absent; fail where it was provisioned.
-
-    `BISCUIT_REQUIRE_SNIFF` is set by the job that installs the binary, so a
-    provisioning regression there fails loudly rather than reporting three
-    green tests that ran nothing.
-    """
-    if shutil.which("sniff"):
-        return
-    if os.environ.get("BISCUIT_REQUIRE_SNIFF"):
-        raise AssertionError(SNIFF_ENFORCEMENT)
-    raise unittest.SkipTest(SNIFF_ENFORCEMENT)
+    """Skip where `sniff` is genuinely absent; fail where it was provisioned."""
+    require_tools("sniff", enforced_by=SNIFF_ENFORCED_BY, detail=SNIFF_DETAIL)
 
 
 def sniff_package_area(directory: Path) -> str:

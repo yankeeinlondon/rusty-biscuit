@@ -442,10 +442,11 @@ ci-local *args="":
     # Validate scheduling before treating package results as reusable evidence.
     selftest_log="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-selftest.XXXXXX")"
     # `test_resolved_plan.py` carries the sniff area-drift contract (AC15),
-    # which only runs where sniff is installed — a developer host, not a
-    # hosted runner. `test_runner_loss.py` derives every producer's composite
-    # job label from the shipped workflows, so a rename that would silently
-    # kill runner-loss attribution fails here rather than on a dead runner.
+    # which runs wherever sniff is installed: a developer host, and `ci.yml`'s
+    # `area-drift` job, which builds it. `test_runner_loss.py` derives every
+    # producer's composite job label from the shipped workflows, so a rename
+    # that would silently kill runner-loss attribution fails here rather than
+    # on a dead runner.
     # `test_build_key.py` defends the single hashing boundary: a planner that
     # fell back to a second digest would still emit a plan, and every
     # downstream comparison against a producer's manifest would stop meaning

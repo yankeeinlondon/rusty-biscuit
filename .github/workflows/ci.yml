@@ -112,6 +112,7 @@ jobs:
       change_class: ${{ steps.scope.outputs.change_class }}
       job_estimate: ${{ steps.scope.outputs.job_estimate }}
       ci_tooling: ${{ steps.scope.outputs.ci_tooling }}
+      area_drift: ${{ steps.scope.outputs.area_drift }}
       has_builds: ${{ steps.scope.outputs.has_builds }}
       build_artifacts: ${{ steps.scope.outputs.build_artifacts }}
       build_producers: ${{ steps.scope.outputs.build_producers }}
@@ -312,6 +313,7 @@ jobs:
             echo "sniff=$(jq -r '.flags.sniff' <<<"$scope_json")"
             echo "biscuit_tui=$(jq -r '.flags."biscuit-tui"' <<<"$scope_json")"
             echo "ci_tooling=$(jq -r '.flags.ci_tooling' <<<"$scope_json")"
+            echo "area_drift=$(jq -r '.flags.area_drift' <<<"$scope_json")"
             echo "job_estimate=$(jq -r '.job_estimate' <<<"$scope_json")"
             echo "preflight_os=$(jq -c '.preflight_os' <<<"$scope_json")"
             echo "preflight_reason=$(jq -r '.preflight_reason' <<<"$scope_json")"
@@ -483,7 +485,13 @@ jobs:
         run: just check-canonical
       - name: Test the CI contract schemas
         run: python3 scripts/ci/test_schema.py
+      # `rustup show` above provisions Cargo on every leg of this matrix, so
+      # the two Cargo-gated classes must run here rather than skip. Declared
+      # per job and not by a blanket fail under `CI`: this matrix provisions
+      # neither `sniff` nor the tools `test_ci_local.py` needs.
       - name: Test affected-scope calculation
+        env:
+          BISCUIT_REQUIRE_CARGO: "1"
         run: python3 scripts/ci/test_affected_scope.py
       - name: Test the resolved execution plan
         run: python3 scripts/ci/test_resolved_plan.py
@@ -744,14 +752,24 @@ jobs:
       - name: Test the CI contract schemas
         run: python3 scripts/ci/test_schema.py
       - name: Test the scope calculator
+        env:
+          BISCUIT_REQUIRE_CARGO: "1"
         run: python3 scripts/ci/test_affected_scope.py
       # Three of this suite's tests SKIP here, and deliberately: AC15's
       # area-drift contract needs the real `sniff`, which costs a 4m25s cold
-      # release build of a workspace package. `area-drift.yml` provisions it
-      # and fails rather than skips; the skip message names that job.
+      # release build of a workspace package. The `area-drift` job below
+      # provisions it and fails rather than skips; the skip message names it.
       - name: Test the resolved execution plan
         run: python3 scripts/ci/test_resolved_plan.py
+      # This job installs `just`; `jq` and a Bash >= 4.4 come with the
+      # ubuntu-latest image. It is the only job that runs this suite, so
+      # declaring the three here is what stops ~40 recipe and workflow-step
+      # contracts from reporting green without executing.
       - name: Test concurrency policy and local L2 routing
+        env:
+          BISCUIT_REQUIRE_JUST: "1"
+          BISCUIT_REQUIRE_JQ: "1"
+          BISCUIT_REQUIRE_BASH: "1"
         run: python3 scripts/ci/test_ci_local.py
       # `cross-check` reaches build hosts CI has none of, so its suite asserts
       # the remote scripts it SHIPS. That is the half a hosted runner can check,
@@ -841,6 +859,64 @@ jobs:
           BISCUIT_CI_BUILD_BIN: ${{ github.workspace }}/scripts/target/debug/ci-build
         run: python3 scripts/ci/test_build_key.py
 
+  # AC15 makes `sniff` the authority on package areas: `affected_scope.py`
+  # replicates sniff's rule and owns no mapping of its own. Nothing but this
+  # contract notices when the two diverge — a stale rule fans work out to the
+  # wrong area and every other check stays green — and no fixture can stand in
+  # for it, because asking the other tool is the whole point.
+  #
+  # It is a job of its own rather than a step of `ci-tooling` for two reasons.
+  # A release `sniff-cli` costs 1m39s warm and 4m25s cold (measured on a
+  # 16-core M4 at four Cargo jobs; `reviews/2026-09-15-python-test-code/
+  # spike-4-results.md`) on a leg that already runs ~6 minutes and fires on
+  # every `scripts/` or `.github/` change; and building a workspace package
+  # inside the CI-infrastructure gate would turn that gate red for a sniff
+  # compile error, which is not what it reports. Its own `area_drift` flag —
+  # sniff, the planner, the contract suite, and every package manifest —
+  # confines the cost to the pull requests that can actually move either side
+  # of the equivalence. `ci-gate` folds `skipped` as a pass, so every other
+  # pull request pays nothing and is blocked by nothing.
+  area-drift:
+    name: area-drift (planner areas match sniff)
+    needs: [scope, preflight]
+    if: >-
+      !cancelled() &&
+      needs.scope.outputs.area_drift == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # The repository tracks no rustc wrapper; cleared explicitly so a stray
+      # environment value cannot silently intercept this job's build.
+      RUSTC_WRAPPER: ""
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.scope.outputs.head }}
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      # No native-prerequisites step: nothing in sniff-cli's build closure
+      # declares `[package.metadata.ci.native]`, and this workflow's build
+      # owner compiles every package on this runner from that same union.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: area-drift
+      - name: Build the area authority
+        run: cargo build -p sniff-cli --release
+      # The class holds the three sniff contracts plus the four pure-planner
+      # area fixtures; running the class rather than the file keeps this job's
+      # red confined to area derivation. `BISCUIT_REQUIRE_SNIFF` is what makes
+      # the run honest: with it set, an absent binary fails `require_sniff()`
+      # instead of skipping three tests green.
+      - name: Enforce the planner's area mapping against sniff
+        env:
+          BISCUIT_REQUIRE_SNIFF: "1"
+        run: |
+          set -euo pipefail
+          export PATH="${GITHUB_WORKSPACE}/target/release:${PATH}"
+          sniff --version
+          python3 scripts/ci/test_resolved_plan.py AreaGroupingTests
+
   # THE single required branch-protection check: a policy-free fold.
   #
   # Every selected area already owns its coverage audit in `_area-ci.yml`.
@@ -899,6 +975,7 @@ jobs:
       - area-ci
       - biscuit-tui-captured-stdout
       - ci-tooling
+      - area-drift
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -914,6 +991,7 @@ jobs:
             area-ci:${{ needs.area-ci.result }}
             biscuit-tui-captured-stdout:${{ needs.biscuit-tui-captured-stdout.result }}
             ci-tooling:${{ needs.ci-tooling.result }}
+            area-drift:${{ needs.area-drift.result }}
         run: |
           set -euo pipefail
           blocking=""

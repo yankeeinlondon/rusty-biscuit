@@ -5,33 +5,24 @@ name: area-drift
 # it live in `scripts/ci/test_resolved_plan.py` and need the real binary —
 # asking the other tool is the whole point, so no fixture can stand in for it.
 #
-# They cannot run in the two jobs that already run that suite. `ci-tooling` and
-# `preflight` provision neither sniff nor a Cargo cache, and a release
-# `sniff-cli` costs 4m25s cold / 1m39s with a warm dependency cache (measured
-# on a 16-core M4 at four Cargo jobs with the host compiler cache bypassed;
-# `reviews/2026-09-15-python-test-code/spike-4-results.md`) against a 2-minute
-# job-delta budget. `preflight` would pay it three times, Windows included.
-# Building a workspace package inside the CI-infrastructure gate would also
-# turn `ci-tooling` red for a sniff compile error, which that gate does not
-# exist to report.
+# THE MERGE PATH OWNS ENFORCEMENT. `ci.yml`'s `area-drift` job runs the same
+# class, behind the planner's own `area_drift` flag, and `ci-gate` folds its
+# result like every other blocking job. A pull request that can move either
+# side of the equivalence is therefore blocked by it, and one that cannot skips
+# the job and pays nothing.
 #
-# So enforcement lives here, off the merge path: nothing in `ci-gate` folds
-# this workflow's result. The pull-request trigger is the half that matters
-# most — `affected_scope.py`'s `ci_tooling` flag follows `scripts/`,
-# `.github/ci/`, `.github/workflows/` and `tools/test-audit/` only, so a change
-# to sniff's own detection rule schedules the suite NOWHERE. Watching `sniff/**`
-# here is what closes that direction; the schedule catches the rest.
+# THIS WORKFLOW IS THE BACKSTOP, and only that. The gate job is scheduled BY
+# the planner, so a defect in `affected_scope.py`'s own flag would let a real
+# drift skip its own check with nothing to report it. A daily run of the same
+# contract, independent of any flag, is what catches that class of bug. It
+# carries no `pull_request` trigger: on a pull request the gate job already
+# runs, and a second run of the identical class is the duplication the
+# repository's CI/CD test-scope discipline exists to prevent.
 #
 # `BISCUIT_REQUIRE_SNIFF` is what makes the run honest: with it set, an absent
 # binary fails `require_sniff()` instead of skipping three tests green.
 
 on:
-  pull_request:
-    paths:
-      - "sniff/**"
-      - "scripts/ci/affected_scope.py"
-      - "scripts/ci/test_resolved_plan.py"
-      - ".github/workflows/area-drift.yml"
   schedule:
     # Its own slot: clear of sniff-performance's 04:00 nightly.
     - cron: "40 5 * * *"
