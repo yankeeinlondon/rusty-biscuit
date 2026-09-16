@@ -3057,6 +3057,35 @@ fn a_version_one_receipt_renders_its_measurements_as_unrecorded() {
 }
 
 #[test]
+fn a_check_reused_through_its_l1_receipt_reports_no_test_counts() {
+    // `affected_scope.check_evidence`: a check cell has no receipt of its own,
+    // so it links the package's L1 receipt without carrying its counts.
+    let mut cell = plan_cell_json("claudine", "macos-latest", "check", true);
+    cell["evidence"] = serde_json::json!({
+        "package": "claudine",
+        "environment": "macos-latest",
+        "gate": "check",
+        "origin": "local",
+        "outcome": "pass",
+        "covered_by": "L1",
+        "measurements": "compile-only; covered by the passing L1 on macos-latest",
+        "evidence": receipt_evidence("claudine", "L1", "pass", 3, 0)["evidence"],
+    });
+    let plan = plan_of(vec![cell]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let cell = only_cell(classify_simple(&expected, &[]));
+
+    assert_eq!(cell.state, CellState::Pass);
+    assert_eq!(cell.counts, None, "an L1 test count is not a check measurement");
+    let evidence = cell.evidence.clone().expect("the L1 receipt is still named");
+    assert_eq!(
+        evidence.measurements,
+        "compile-only; covered by the passing L1 on macos-latest"
+    );
+    assert_eq!(evidence.reference, "refs/notes/ci-local/macos-latest");
+}
+
+#[test]
 fn a_reused_cell_that_also_produced_ci_evidence_reports_the_executed_result() {
     // The plan and the run disagree: something executed work the plan reused.
     // The executed result is the one with a report behind it, and the
