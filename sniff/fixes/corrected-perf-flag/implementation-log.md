@@ -50,6 +50,7 @@ documentation:
   - .claude/skills/sniff/cli.md
   - .claude/skills/os/build-hosts.md
 completed_phase: "4"
+implementation_1: "2026-09-15T19:13:09-07:00"
 implemented: true
 packages:
   - sniff-cli
@@ -1188,3 +1189,299 @@ R-11 and spec R1 hold across the whole fix.
 Two decisions are the author's, not an agent's: the S-1 scope ruling carried
 forward unchanged from Phase 1, and moving this directory to `_completed`. This
 fix was not moved and `just complete` was not run.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-15T19:13:09-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-sniff/sniff/fixes/corrected-perf-flag/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- the review carries two findings, both `high`, and both were routed to a
+        dedicated subagent in series:
+        - **F-1** — narrow terminals corrupt underscore-heavy metric rows; the
+                remedy the reviewer prescribes lands in
+                `biscuit-terminal::MetricsTree::build_markup`, not in Sniff
+        - **F-2** — the new terminal rendering has no Level 2 verification; the
+                remedy is a `level2_` Sniff test through the shared terminal
+                harness
+- **scope note:** F-1 resolves the S-1 scope ruling that Phases 1–4 left open in
+        `human_review_items`. The reviewer explicitly rules on it — "Fix
+        `MetricsTree::build_markup` so literal label text is escaped after
+        truncation and padding … Do not escape labels in Sniff before width
+        calculation" — so the review supplies the authorization the earlier
+        phases lacked, and `biscuit-terminal` is now in scope for this cycle.
+        Gates therefore run in both the `biscuit-terminal` and `sniff` package
+        areas rather than `sniff` alone.
+- starting the work on 'F-1 narrow-terminal label corruption' at 19:14:24
+        - **root cause confirmed by repro, not by reading.** A throwaway width
+                probe in `metrics_tree.rs` rendered the production key set at
+                widths 20/27/33/40/48/49/60. Width 48 came back
+                `italics=true` with the root row 48 visible columns wide and
+                both child rows 47 — one column short. The mechanism is
+                `prose::markdown::convert_italics`: its flanking rule treats `_`
+                as an italics opener whenever it is *not* between two word
+                characters, and `truncate_to_width` leaves
+                `classified_embedded_language_` pressed against `…`, which is
+                not a word character. `find_closing_single` then finds the
+                closing `_` on a *later row*, so the span crosses rows and both
+                underscores are deleted from the visible text — after
+                `build_markup` already computed the column grid from the bare
+                strings.
+        - **escaping approach:** `Prose::escape_text` applied to the
+                already-truncated, already-padded label in
+                `MetricsTree::build_markup`, immediately before the optional
+                `<b>` wrap. Verified rather than assumed: the backslashes Prose
+                consumes are invisible, so the padded width computed upstream is
+                exactly what reaches the screen — the re-run probe shows width
+                48 back to a uniform 48 columns with the underscore intact. This
+                is the same precedent the `share` cell already set with
+                `.replace('<', "\\<")`, widened from one character to the full
+                Prose special set (`< > { * _ [ ] ( ) \`). Escaping *before* the
+                column math was rejected as the review directed: it inflates the
+                measured label by one column per special character.
+        - **widths verified:** 20 through 140 inclusive, Unicode and ASCII, in
+                both regressions. The old failing band (27–48) is inside the
+                sweep; so is the width-20 floor where `MIN_LABEL_W` holds the
+                row wider than the terminal.
+        - **tests added:**
+                - `biscuit-terminal` —
+                        `components::metrics_tree::tests::truncated_underscore_labels_do_not_leak_markup_at_any_width`.
+                        Asserts no `ESC[3m` reaches the output and that the
+                        undecorated row grid stays uniform, plus explicit
+                        value-column (unit) alignment.
+                - `sniff-cli` —
+                        `output::perf_tree::tests::the_production_key_set_renders_clean_on_narrow_terminals`.
+                        Drives the real `baseline_counters()` /
+                        `baseline_stages()` key sets through
+                        `counter_metrics_tree` and `timing_metrics_tree`. It
+                        carries a non-vacuity guard: the sweep must actually
+                        produce at least one label cut immediately after an
+                        underscore, otherwise it fails rather than passing
+                        silently.
+        - **both regressions were proven to fail without the fix.** The escape
+                call was temporarily reverted and each test re-run: the
+                component test failed at `unicode=true, width=39` with a visible
+                `ESC[3m` in the rendered bytes, and the Sniff test failed on the
+                counter-row width check. The escape was then restored.
+        - **stale comment removed.** `perf_tree.rs::timing_node` no longer
+                claims the fix "is deliberately deferred pending a scope ruling"
+                or that "corruption is confined to terminals narrower than 49
+                columns" — both are now false. What replaces it is the four-line
+                WHY a future reader still needs: labels reach `MetricsTree`
+                unescaped on purpose, because the component measures and pads
+                before Prose sees them. A grep for `deferred` / `scope ruling` /
+                `49 column` / `escap` across `perf_tree.rs` and `render.rs`
+                found no sibling comments repeating the claim.
+        - **reverse dependencies checked.** `grep` over `Cargo.toml` found 17
+                packages depending on `biscuit-terminal`; only `worktree/cli`
+                and `claudine/cli` construct a `MetricsTree`. Their perf suites
+                were run scoped (`-p worktree-cli -p claudine-cli -E
+                'test(perf)'`): **88 passed, 0 failed**. `worktree` labels are
+                `&'static str` stage names with no Prose specials, so its output
+                is byte-identical. `claudine` labels can carry `::shell` command
+                text; those characters now render literally instead of being
+                parsed as markup, which is what `MetricNode::label`'s "rendered
+                verbatim" contract already promised — a latent corruption of the
+                same family, closed by the same change.
+        - **gates, all four green, no `cargo fmt` run:**
+                - `biscuit-terminal` `just test` — **3,262 passed, 0 failed, 55
+                        skipped** (tier skips)
+                - `biscuit-terminal` `just lint` — clean
+                - `sniff` `just test` — **2,661 passed, 0 failed, 24 skipped**
+                        (the same pre-existing tier skips the review recorded)
+                - `sniff` `just lint` — clean
+                - the shared Cargo target directory was writable this session,
+                        so the reviewer's `CARGO_TARGET_DIR` workaround was not
+                        needed.
+        - nothing deferred.
+- work completed for 'F-1 narrow-terminal label corruption' at 19:24:56
+
+- starting the work on 'F-2 Level 2 terminal verification' at 19:26:30
+        - **what the gap was.** The `--perf` rendering contract — hierarchy,
+                unit-aligned duration and count columns, the styled HOT marker,
+                truncation, and width degradation — had only Level 1 coverage:
+                `perf_tree.rs` builds a synthetic `Terminal` in-process and
+                `cli.rs` spawns the CLI with captured pipes and `--plain`.
+                Neither has an emulator interpreting SGR, measuring glyph cells,
+                or deciding a wrap. A piped run also never truncates at all,
+                because nothing reports a narrow width to it.
+        - **new test binary:** `sniff/cli/tests/level2_perf_tree_rendering.rs`,
+                registered as a `[[test]]` with `required-features =
+                ["test-fixtures"]` alongside the area's two existing L2 targets.
+                Modelled on `level2_cicd_styling.rs` and
+                `level2_git_status_styling.rs`: same `require_level!(Level::L2,
+                TmuxHarness::available(), Backend::Tmux)` gate, same
+                `common::capture_until` poll, same `#![cfg(feature =
+                "test-fixtures")]` guard.
+        - **no fixture binary, no production change.** Both tests run the real
+                `sniff` binary (`cargo_bin("sniff")`) with `os --perf` inside
+                the pane, so the evidence is the shipped CLI's own terminal
+                detection and render path rather than a helper's. Nothing under
+                `src/` was touched; the only non-test edit is the `[[test]]`
+                stanza in `sniff/cli/Cargo.toml`.
+        - **test 1 — `level2_perf_trees_render_aligned_and_styled_in_tmux`**,
+                pane **100x70** (wider than the longest label plus columns, and
+                wider than the 98-column overlap note, so nothing truncates).
+                What it proves that L1 cannot:
+                - **interpreted SGR.** The HOT row's captured *raw* line carries
+                        bold (`ESC[1m`) for the marker and red (`ESC[31m`) for
+                        its value; the overlap note's line carries italic
+                        (`ESC[3m`); the value units carry a dim or grey SGR. L1
+                        asserts markup text, not what the emulator received.
+                - **glyph column alignment as the emulator measures it.** Every
+                        row's value mantissa ends on the same *display column*
+                        and every share cell's right edge lands on the same
+                        display column, with `TAB`-free box connectors, `…`,
+                        `µ`, and `—` counted as the cells they occupy. The L1
+                        helpers use `str::find`, whose byte offsets are not
+                        columns in a pane containing those glyphs.
+                - **no wrapped or corrupted rows.** Every contiguous non-blank
+                        line of each tree must parse as a `label value share`
+                        triple; a wrapped row loses that triple on both
+                        fragments, so a parse failure *is* the wrap detector.
+                - **hierarchy and tree separation.** `Total` owns column 0;
+                        `Total < detect < os` by label column, with at least
+                        three distinct depths; the `Counters` tree is a separate
+                        root rendered after the timing tree *and* its note,
+                        every one of its rows carrying a unitless count.
+                - **exactly one HOT row**, and it is a measured stage rather
+                        than the synthetic root.
+        - **test 2 —
+                `level2_perf_trees_survive_narrow_pane_truncation_in_tmux`**,
+                sweeping panes **30x70 through 50x70**. The component derives
+                its label column from the pane width, so consecutive widths
+                slide the truncation point one character at a time across every
+                label — which is what walks the cut onto an underscore without
+                hard-coding a width or a host-specific stage name. At each width
+                it re-asserts column alignment, row parseability, absence of a
+                leaked escape character, and — the F-1 signature — that **no
+                tree row carries an italic SGR**, since rows use only bold, red,
+                dim, and grey. It then *requires* that at least one swept width
+                actually reached an underscore boundary, so the sweep cannot
+                pass vacuously.
+        - **boundaries actually exercised on this host** (printed by the test):
+                `(33, "directories_…")`, `(39, "package_…")`,
+                `(39, "command_…")`, `(46, "command_exists_…")`,
+                `(49, "command_exists_in_…")`. All five render intact — F-1's
+                fix holds in a real terminal.
+        - **proven non-vacuous.** The F-1 escape call in
+                `MetricsTree::build_markup` was temporarily reverted and the
+                sweep re-run: it failed at 38 columns with `` `Total` row
+                `package…` breaks the unit-aligned value column (`391.0µs` ends
+                at 24, `684.0µs` at 25) ``. The escape was then restored and the
+                file verified byte-identical to its pre-experiment state.
+        - **readiness is polled, never slept.** Each invocation appends
+                `printf '\nPERF-DONE-%s\n' <width>`; the predicate requires the
+                performance heading, both tree roots, and that marker on a line
+                of its own. The marker's *output* form cannot appear in the
+                echoed command line and its nonce differs per width, so a stale
+                frame from the previous width can never satisfy it. Its leading
+                blank line also keeps it out of the counter tree's block.
+        - **owned panes, not the shared broker pane.** Pane geometry *is* the
+                contract here, and the broker's pane is not this test's to
+                resize. Each test spawns its own tmux session, which `Drop`
+                kills; tmux is headless and carries no global OS state, so
+                nothing is shared and nothing leaks (`tmux ls` reported no
+                server after the run).
+        - **assertion helpers: re-derived, not promoted.** `cli.rs`'s
+                `performance_section` / `metric_row` / `metric_value` /
+                `metric_offset` are private to another test binary, but the
+                decisive reason is that they locate rows with `str::find` —
+                a byte offset, not a display column — which cannot express the
+                alignment equality a real-terminal test has to assert. The
+                pane-grid equivalents keep all three portability rules the
+                originals encode: a label is matched as a whole whitespace cell,
+                a value is read as the cell *after* the label (never the last
+                cell, which is the share and folds from an em dash to a hyphen
+                without Unicode), and hierarchy is an offset ordering rather
+                than a named connector glyph. Nothing was added to
+                `cli/tests/common/`.
+        - **no Level 3 added**, per the review: this feature has no keyboard,
+                mouse, paste, or IME interaction.
+        - **gates, all green, no `cargo fmt` run** (the file was hand-formatted
+                to match; `rustfmt --check` on it is clean):
+                - `sniff` `just test-l2` — **4 tests run, 4 passed, 852
+                        skipped**. Both new tests **ran**, neither skipped:
+                        `level2_perf_trees_render_aligned_and_styled_in_tmux`
+                        in 0.91 s and
+                        `level2_perf_trees_survive_narrow_pane_truncation_in_tmux`
+                        in 9.62 s (nextest marks the sweep `SLOW` at its 5 s
+                        notice threshold; the local termination ceiling is 30 s
+                        and CI's is 90 s).
+                - `sniff` `just test` — **2,661 passed, 0 failed, 24 skipped**
+                        (the same pre-existing tier skips).
+                - `sniff` `just lint` — clean. `just lint` builds without
+                        `test-fixtures`, so the new target was additionally
+                        checked with `cargo clippy -p sniff-cli --features
+                        test-fixtures --all-targets -- -D warnings` — clean.
+                - the shared Cargo target directory stayed writable, so no
+                        isolated `CARGO_TARGET_DIR` was needed.
+        - nothing deferred.
+- work completed for 'F-2 Level 2 terminal verification' at 19:45:40
+
+### Orchestrator verification
+
+- both findings were dispatched to a dedicated subagent in series; F-2 depended
+        on F-1 landing first, because the review's narrow-pane requirement is
+        only assertable once the component defect is closed
+- the orchestrator re-ran the `biscuit-terminal` gates itself **after** F-2
+        finished, because F-1's gate run predated F-2's non-vacuity experiment
+        (which temporarily reverted the escape in `metrics_tree.rs` and restored
+        it). Independent confirmation of the final tree:
+        - `biscuit-terminal` `just test` — 3,262 passed, 0 failed, 55 skipped
+        - `biscuit-terminal` `just lint` — clean
+        - `metrics_tree.rs:332` holds the single
+                `Prose::escape_text(&format!("{truncated:<label_w$}"))` call, so
+                the restore was genuine
+- `sniff` gates were last run by F-2, i.e. with both findings in the tree:
+        `just test` 2,661 passed / 0 failed / 24 pre-existing skips,
+        `just test-l2` 4 run / 4 passed, `just lint` clean
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 33 minutes.
+During this implementation all 2 review findings were evaluated to see if they
+could be fixed as a part of this implementation cycle: 2 were fixed, 0 were
+deferred.
+
+Nothing was deferred, and no performance measurement was required by either
+finding, so no performance-deferral record was created.
+
+Of particular note, this cycle closes the **S-1 scope ruling** that Phases 1
+through 4 carried as an open `human_review_items` entry. The reviewer ruled on
+it directly — the fix belongs in `biscuit-terminal::build_markup`, and labels
+must *not* be escaped in Sniff before width calculation — which supplied the
+authorization the earlier phases could not obtain in a non-interactive session.
+The deferral comment in `perf_tree.rs::timing_node` was drift the moment the
+component was fixed, and was rewritten to the short WHY that survives.
+
+### Files changed in this cycle
+
+| File | Change |
+|---|---|
+| `biscuit-terminal/lib/src/components/metrics_tree.rs` | F-1 — escape the padded label through `Prose::escape_text` before it enters component markup; component regression across widths 20..=140 in both glyph modes |
+| `sniff/cli/src/output/perf_tree.rs` | F-1 — retire the stale deferral comment in `timing_node`; add the production-key-set narrow-terminal regression |
+| `sniff/cli/tests/level2_perf_tree_rendering.rs` | F-2 — new, the two `level2_` real-terminal tests |
+| `sniff/cli/Cargo.toml` | F-2 — register the new `[[test]]` target behind `required-features = ["test-fixtures"]`; correct the drifted CI-policy comment that named the CI/CD test as the area's only L2 target |
+| `sniff/fixes/corrected-perf-flag/implementation-log.md` | this log |
+| `sniff/fixes/corrected-perf-flag/review-1.md` | metadata only — `log`, `implemented`, `implemented_by` |
+
+### Carried forward for the author
+
+- **`claudine` visible-output change, not a regression but worth a look.** Of
+        the 17 packages depending on `biscuit-terminal`, only `worktree/cli` and
+        `claudine/cli` construct a `MetricsTree`. `worktree`'s labels are
+        `&'static str` stage names with no Prose specials, so its output is
+        byte-identical. `claudine`'s labels carry `::shell` command text, and
+        those characters now render literally rather than being parsed as
+        markup. That matches `MetricNode::label`'s "rendered verbatim" contract,
+        and it closes a latent corruption of the same family — but it is a real
+        change to a second package's output. Scoped verification
+        `-p worktree-cli -p claudine-cli -E 'test(perf)'` ran 88 passed, 0
+        failed.
+- the three other open `human_review_items` from Phase 4 (the stale
+        `$BUILD_LINUX` cross-check lock, the `scripts/cross-check.sh` WSL
+        receipt path defect, and the rewritten pre-existing CLI test) are
+        untouched by this cycle and remain open.
+- **implementation complete, ready for review.** This fix was not moved to
+        `_completed` and `just complete` was not run.
