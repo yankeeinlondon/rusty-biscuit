@@ -41,7 +41,7 @@ pub mod argon;
 pub use xx::{HashVariant, xx_hash, xx_hash_bytes, xx_hash_variant};
 
 #[cfg(feature = "blake3")]
-pub use blake::{blake3_hash, blake3_hash_bytes, blake3_hash_trimmed};
+pub use blake::{blake3_hash, blake3_hash_bytes, blake3_hash_reader, blake3_hash_trimmed};
 
 #[cfg(feature = "argon2id")]
 pub use argon::{
