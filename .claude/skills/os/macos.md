@@ -134,3 +134,22 @@ Strip ANSI before matching libtest's output. lldb refuses Apple-signed
 platform binaries but attaches to locally built ones. Resolve the binary with
 the same `-p` selection the recipe uses, or feature unification names a
 different artifact.
+
+## CI shell and runtime inspection (2026-09-15)
+
+`/bin/bash` is 3.2: associative arrays and `${args[*]@Q}` are unavailable, and
+empty indexed arrays need `${args[@]+"${args[@]}"}` under `set -u`. The
+cross-check shipping tests must use `/bin/bash` explicitly on macOS. Python CI
+helpers support Python 3.9; `TestCase.enterContext` requires a newer interpreter,
+so temporary resources use `addCleanup` or a context manager.
+
+System dylibs may exist only in dyld's shared cache. `otool -L` reads an emitted
+binary's dependencies, but an absent `/usr/lib/*.dylib` file does not establish
+that its dependency is missing. `dyld_info -uuid <install-name>` observes cached
+library identities without loading test programs or opening a window.
+
+When walking shared-cache dependencies, `dyld_info -linked_dylibs` marks
+`weak-link` imports that dyld permits to be absent. macOS 27's libobjc lists
+`/usr/lib/libobjc-env.dylib` this way; treating it as a required library falsely
+rejects valid programs. Traverse required dependencies and preserve the weak
+import distinction.

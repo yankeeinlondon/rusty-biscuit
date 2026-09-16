@@ -34,8 +34,9 @@ none are recorded here (see "Noise" below).
 ### Linux (`ubuntu-latest`)
 
 - Fastest leg for Claudine and Darkmatter.
-- It is also the **builder** for the WSL2 nextest archive; the guest only
-  executes what Linux compiled ([wsl.md](wsl.md)).
+- It is the **build owner** for both the native Linux cells and the WSL2 guest:
+  one archive per planned key, consumed by L1, L2, browser, and the guest alike
+  ([wsl.md](wsl.md)). Its own test legs compile nothing.
 - Anonymous GitHub API calls from a runner are rate-limited at 60 per hour
   per IP, and the IPs are shared Azure addresses. Any shell-script installer
   that resolves "latest" through the API fails sporadically. Use the setup
@@ -52,7 +53,9 @@ none are recorded here (see "Noise" below).
 ### Windows (`windows-latest`)
 
 - Slowest **build** phase of the four legs, noticeably behind both Unix
-  legs, while its test phase is not the bottleneck.
+  legs, while its test phase is not the bottleneck. That cost now lands in the
+  native-Windows owner leg rather than inside each tier, and it is never shared
+  with WSL2 — the two are structurally incompatible producers.
 - Runs fewer test identities because `#![cfg(unix)]` binaries are excluded.
   Declare those as platform exclusions in the package's CI config rather than
   treating them as lost coverage.
@@ -108,11 +111,14 @@ none are recorded here (see "Noise" below).
   receipt. `lint` and `check` stage no report and are always CI-origin; browser
   and companion-suite work remains in CI.
 
-- **Caches do not warm across runs.** Per-package, per-environment caching
-  cannot survive the 10 GB repository cache quota: one full run saves more
-  caches than the quota holds and evicts its own predecessors. Only intra-run reuse works
-  (the L2, browser, and WSL-archive jobs restore the key their own run saved).
-  Do not diagnose a cold build as a cache-key bug.
+- **Caches do not warm across runs, and only the compiling legs have one.**
+  Per-package, per-environment caching cannot survive the 10 GB repository cache
+  quota: one full run saves more caches than the quota holds and evicts its own
+  predecessors. Since `fixes/2026-09-12-single-os-compile` the only cached legs
+  are the build owner, `check`, and `lint`; a test tier consumes a verified
+  archive and restores nothing. Do not diagnose a cold build as a cache-key bug,
+  and do not add a cache to a consumer — a restored cache is the one thing that
+  can make a silent rebuild look fast.
 - **A push to `main` cancels the in-flight `main` run.** The concurrency
   group is `ci-${{ github.ref }}`, and for `main` that ref is constant. A
   full-scope `main` run takes several hours. PR runs use
@@ -128,3 +134,19 @@ none are recorded here (see "Noise" below).
 - **Compare matched test identities within one environment only.** Report
   missing identities and platform exclusions separately from the timing
   comparison, so an exclusion is never mistaken for a speed-up.
+- **Compare stages, not job totals.** Every cell reports seven windows
+  separately — producer queue, compile+archive, upload; consumer download,
+  verify, extract, execute — precisely so a comparison cannot credit a
+  compile-once change with time that actually moved into transfer or setup. A
+  post-cutover total that looks flat can still be a large compile saving paid
+  back in download, and only the stage split shows it. Report total runner
+  compute and end-to-end critical path separately as well: moving one compile
+  off three legs changes those two numbers in opposite directions.
+
+### Compiler-work probes (2026-09-15)
+
+Cargo on the Linux build host issues a stdin target-information query with
+`--crate-name ___` and `--print=...` even on some warm builds. Exclude that query
+from compiler-work counts, just like `rustc -vV`; retain invocations with
+`--emit` and real build-script feature-probe compilations. The CI counter's
+warm-rebuild fixture caught this distinction on Linux.

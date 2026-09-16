@@ -7,9 +7,9 @@ what that contract means for a test author and how to reproduce its failures.
 
 ## The archive-mode contract
 
-CI builds `x86_64-unknown-linux-gnu` test binaries once on `ubuntu-latest`
-with `cargo nextest archive` and only *runs* them inside the WSL2 guest. The
-guest has no rustup, no cargo, and no toolchain. Consequences:
+CI builds `x86_64-unknown-linux-gnu` test binaries once on `ubuntu-latest` with
+`cargo nextest archive` and only *runs* them inside the WSL2 guest. The guest
+has no rustup, no cargo, and no toolchain. Consequences:
 
 - Anything resolved at **compile time** to a builder path does not exist in
   the guest. `env!("CARGO_BIN_EXE_<name>")` names the builder's target
@@ -29,6 +29,32 @@ phase is only the archive download and extraction, and its wall clock is
 dominated by slow test execution, so it is never evidence for
 native Windows behavior and is never compared with the `windows-latest` leg
 as one environment ([ci-runners.md](ci-runners.md)).
+
+Since `fixes/2026-09-12-single-os-compile`, `_wsl-ci.yml` owns **no producer
+job**. It downloads the same `build-<package>-ubuntu-latest-<key>` artifact,
+checksum, and realized digest native Linux consumes, and publishes its own
+distinct `{package, wsl2-ubuntu, L1}` cell. Three things follow that a test
+author hits:
+
+- **Verification runs in the guest, not on its Windows host.** The predicates
+  that matter are the guest's — architecture, ABI, libc, and the dynamic
+  libraries the archived binaries resolve against. `ci-build`'s `host_runtime()`
+  reads `cfg!`, so a host-side run would report `msvc` and prove nothing. The
+  verifier travels inside the artifact; the guest could not build one.
+- **The guest clones to its own `GUEST_ROOT`** (`/home/biscuit/checkout`), a
+  path chosen to coincide with no producer's. It used to recreate the manifest's
+  `producer_workspace` because ~160 targets read the compile-time
+  `env!("CARGO_MANIFEST_DIR")` whatever `--workspace-remap` said; those are
+  migrated to `biscuit_test_harness::manifest_dir!()`, and
+  `tools/test-toolkit/tests/archive_path_guard.rs` fails the run if one returns.
+  Do not reintroduce the derivation — it would hide the next baked path rather
+  than surface it.
+- **The guest cannot write `$GITHUB_OUTPUT`** (it is a Windows path). Anything
+  the host needs from the guest crosses the 9p workspace as a file: the
+  manifest is read on the host, and the guest leaves
+  `wsl-timing/verify.seconds`, `wsl-timing/l1.seconds`, and a copy of the
+  verdict for the status step to read. A guest that dies leaves none, and the
+  stages report as absent rather than zero.
 
 ## Faithful reproduction on the WSL host
 
