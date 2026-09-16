@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-c770ae4731a7a009
-last_updated: 2026-09-02
+hash: ef46db3751d8e999-3dadcf4453a273ba
+last_updated: 2026-09-16
 ---
 # Compose Pipeline
 
@@ -315,12 +315,25 @@ All date/time variables have `_utc` variants (e.g., `today_utc`, `day_utc`,
 (plus UTC variants).
 
 List-valued variables (`string[]` / `object[]`) are real arrays. A bare
-`{{ ctx.foo }}` renders an array **line-separated** (one element per line). For
-other shapes use the list-formatting functions: `as_csv`, `as_tsv`,
-`as_space_separated`, `as_line_separated`, `as_unordered_list`, and
-`as_ordered_list` (the Markdown-list renderers auto-nest nested arrays and the
-`depends_on` / `used_by` object shape). The former `_list` twin variables (e.g.
+`{{ ctx.foo }}` embedded in text renders an array as **compact JSON**
+(`["a","b","c"]`, and `[]` when empty); `as_json(ctx.foo)` is the explicit
+spelling of that default. For other shapes use the list-formatting functions:
+`as_csv`, `as_tsv`, `as_space_separated`, `as_line_separated`,
+`as_unordered_list`, `as_ordered_list`, `as_json`, and `as_json5` (the
+Markdown-list renderers auto-nest nested arrays and the `depends_on` /
+`used_by` object shape). The former `_list` twin variables (e.g.
 `ctx.dirty_files_list`) are removed — use `{{ as_unordered_list(ctx.dirty_files) }}`.
+
+Only a value embedded in _surrounding text_ is stringified. A frontmatter value
+whose entire trimmed content is one span (`path: "{{ ctx.packages }}"`) still
+resolves to a typed array, as do loop mutations over a single typed span and
+typed dynamic sequence sources.
+
+**Migration.** A bare `{{ ctx.foo }}` used to render newline-joined. Documents
+that relied on that move to `{{ as_line_separated(ctx.foo) }}`, which is
+unchanged, or to whichever explicit function matches the intent —
+`as_unordered_list` for Markdown bullets, `as_csv` for a prose list, `as_json` /
+`as_json5` when the structure is the point.
 
 Full specification lives in `darkmatter/docs/topics/context-variables.md`.
 
