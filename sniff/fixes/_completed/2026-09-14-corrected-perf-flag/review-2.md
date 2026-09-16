@@ -14,6 +14,7 @@ log: sniff/fixes/corrected-perf-flag/implementation-log.md
 description: "A **fix** review of `corrected-perf-flag/spec.md`"
 fix: corrected-perf-flag/review-2.md
 previous: corrected-perf-flag/review-1.md
+next: corrected-perf-flag/review-3.md
 ---
 
 # Review 2 — Corrected Perf Flag
