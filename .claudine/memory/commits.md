@@ -102,6 +102,18 @@ belong here.
   `git show :Cargo.lock | grep '"<dep>"'` against the staged manifest; a lock
   entry with no declaring manifest in the same commit is an orphan. In a
   parallel batch the manifest's group commits first, or absorbs the lock.
+- A workflow `BISCUIT_REQUIRE_<TOOL>: "1"` declaration on a step is coupled
+  to a `require_tools("<tool>", ...)` call in the Python suite that step
+  runs: the env var only does work when the guard reads it, and the guard
+  only fails (vs. skips) when the var is set. Either half alone is dead —
+  declaration without consumer is a marker no test reads, consumer without
+  declaration is a guard that can only ever skip. When splitting the work
+  into multiple commits, ship the declaration alongside its consumer in
+  the commit that introduces the guard, or accept the intermediate state
+  where one half is dead until the matching half catches up. The
+  `ci_workflow_contracts::every_tool_guard_declaration_is_set_by_the_job_
+  that_enforces_it` test pins both directions: a guard whose variable no
+  job sets, and a variable no guard reads.
 
 ## Path-Limited Commits
 
