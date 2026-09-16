@@ -48,6 +48,7 @@ biscuit-speaks = { path = "../../biscuit-speaks/lib" }
 sniff = { path = "../../sniff/lib"}
 
 [dev-dependencies]
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
 proptest = "1"
 serde_yaml_ng = "0.10"
 serial_test = "3"

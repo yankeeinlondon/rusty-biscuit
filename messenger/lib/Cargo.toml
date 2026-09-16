@@ -114,7 +114,9 @@ bench = false
 [package.metadata.ci.tests]
 all-features = true
 local-features = ["desktop"]
-runner-tools = ["messenger-desktop-stubs"]
+# `required-features = ["desktop"]` bin targets that nextest does not archive
+# with the test binaries; the producer compiles them and ships them beside it.
+sidecars = ["messenger-desktop-stubs"]
 
 [package.metadata.ci.native]
 ubuntu-latest = ["libdbus-1-dev"]
