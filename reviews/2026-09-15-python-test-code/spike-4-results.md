@@ -9,6 +9,17 @@ decision: "Not in `ci-tooling`: a release `sniff-cli` is 4m25s cold against a 2-
 
 # Spike 4 results — Can the sniff area-drift contract run on a hosted runner?
 
+> **The placement ruling below was overturned on 2026-09-15**, after this spike
+> reported. Enforcement is now a merge-path job in `ci.yml`, gated by the
+> planner's `area_drift` flag and folded by `ci-gate`; `area-drift.yml` kept its
+> schedule and dispatch as a backstop and lost its pull-request trigger. The
+> measurements here stand and are what the ruling was decided on — only the
+> conclusion that enforcement must live off the merge path was rejected, because
+> the cost that drove it applies to the always-on `ci-tooling` job and not to a
+> path-scoped job that is `skipped` on most pull requests. See
+> `fixes/2026-09-12-single-os-compile/review-4.md`. The query-semantics ruling
+> (**A**) stands unchanged.
+
 ## Results to record
 
 | Measurement | Value |
