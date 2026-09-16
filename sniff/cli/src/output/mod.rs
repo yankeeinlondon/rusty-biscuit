@@ -11,6 +11,7 @@ mod just;
 mod network;
 mod notification_helpers;
 mod os;
+mod perf_tree;
 mod programs;
 pub(crate) mod recent_commits;
 mod remote;

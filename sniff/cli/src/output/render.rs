@@ -5,6 +5,11 @@
 
 use std::path::Path;
 
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::terminal::Terminal;
+
+use super::perf_tree;
+
 /// Format bytes into human-readable units (KB, MB, GB, TB)
 pub(crate) fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;
@@ -89,47 +94,168 @@ pub(crate) fn format_uptime(seconds: u64) -> String {
     }
 }
 
+/// Render a performance report as a `## Performance` section.
+///
+/// The section carries a hierarchical timing tree rooted at `Total` and, when
+/// the report recorded any work counters, a separate count tree rooted at
+/// `Counters` below it. Sniff decides what each tree contains — the hierarchy
+/// read out of dotted stage and counter names, measured-versus-synthetic
+/// values, wall-clock shares, call counts, and the single HOT row.
+/// `biscuit-terminal` decides how it reaches the terminal, including width,
+/// connectors, unit alignment, glyph fallback, and color degradation, so the
+/// detected [`Terminal`] is the only capability input.
+///
+/// The returned string ends in exactly one newline; the `CliPerf` emit seams
+/// print it without adding one.
 pub fn render_performance_section(report: &sniff::PerformanceReport) -> String {
+    let terminal = Terminal::default();
+
     let mut out = String::new();
     out.push_str("\n## Performance\n\n");
-    out.push_str(&format!("Total: {:.2} ms\n", report.total_duration_ms));
+    out.push_str(
+        perf_tree::timing_metrics_tree(report)
+            .render(&terminal)
+            .trim_end(),
+    );
 
-    if !report.stages.is_empty() {
-        out.push_str("\nStages:\n");
-        let mut stages: Vec<_> = report.stages.iter().collect();
-        stages.sort_by(|a, b| {
-            b.1.total_duration_ms
-                .total_cmp(&a.1.total_duration_ms)
-                .then_with(|| a.0.cmp(b.0))
-        });
-        for (name, stage) in stages {
-            out.push_str(&format!(
-                "- {}: {:.2} ms total ({} call{}, max {:.2} ms, last {:.2} ms)\n",
-                name,
-                stage.total_duration_ms,
-                stage.calls,
-                if stage.calls == 1 { "" } else { "s" },
-                stage.max_duration_ms,
-                stage.last_duration_ms
-            ));
-        }
+    if let Some(counters) = perf_tree::counter_metrics_tree(report) {
+        out.push_str("\n\n");
+        out.push_str(counters.render(&terminal).trim_end());
     }
 
-    if !report.counters.is_empty() {
-        out.push_str("\nCounters:\n");
-        let mut counters: Vec<_> = report.counters.iter().collect();
-        counters.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
-        for (name, value) in counters {
-            out.push_str(&format!("- {}: {}\n", name, value));
-        }
-    }
-
+    out.push('\n');
     out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::collections::BTreeMap;
+
+    use biscuit_terminal::prelude::strip_escape_codes;
+    use sniff::PerformanceReport;
+    use sniff::performance::PerformanceStage;
+
+    fn perf_report(stages: &[(&str, f64, u64)], counters: &[(&str, u64)]) -> PerformanceReport {
+        PerformanceReport {
+            total_duration_ms: 1000.0,
+            stages: stages
+                .iter()
+                .map(|(name, ms, calls)| {
+                    (
+                        (*name).to_string(),
+                        PerformanceStage {
+                            calls: *calls,
+                            total_duration_ms: *ms,
+                            max_duration_ms: *ms,
+                            last_duration_ms: *ms,
+                        },
+                    )
+                })
+                .collect(),
+            counters: counters
+                .iter()
+                .map(|(name, value)| ((*name).to_string(), *value))
+                .collect(),
+        }
+    }
+
+    fn rendered(report: &PerformanceReport) -> String {
+        strip_escape_codes(render_performance_section(report))
+    }
+
+    #[test]
+    fn the_performance_section_keeps_its_heading_and_one_trailing_newline() {
+        let section = render_performance_section(&perf_report(
+            &[("detect.total", 1000.0, 1), ("hardware.gpu", 40.0, 1)],
+            &[],
+        ));
+
+        assert!(
+            section.starts_with("\n## Performance\n\n"),
+            "unexpected head: {:?}",
+            section.chars().take(24).collect::<String>()
+        );
+        assert!(section.ends_with('\n'));
+        assert!(!section.ends_with("\n\n"), "section ends with blank lines");
+    }
+
+    #[test]
+    fn the_timing_tree_replaces_the_flat_stage_list() {
+        let section = rendered(&perf_report(
+            &[
+                ("detect.total", 1000.0, 1),
+                ("detect.hardware", 400.0, 1),
+                ("hardware.gpu", 40.0, 7),
+            ],
+            &[],
+        ));
+
+        assert!(section.contains("Total"), "{section}");
+        // R-9: rows are labelled by the last dotted segment, nested under their
+        // parent rather than repeating the full key.
+        assert!(section.contains("gpu"), "{section}");
+        assert!(!section.contains("hardware.gpu"), "{section}");
+        // The retired flat rendering and its headers are gone.
+        assert!(!section.contains("Total: "), "{section}");
+        assert!(!section.contains("Stages:"), "{section}");
+        assert!(!section.contains("ms total"), "{section}");
+        // The overlap note travels with the timing tree.
+        assert!(section.contains("do not sum to wall-clock time"), "{section}");
+    }
+
+    #[test]
+    fn the_counter_tree_is_omitted_when_the_report_has_no_counters() {
+        let section = rendered(&perf_report(&[("detect.total", 1000.0, 1)], &[]));
+
+        assert!(!section.contains("Counters"), "{section}");
+    }
+
+    #[test]
+    fn the_counter_tree_follows_the_timing_tree_after_a_blank_line() {
+        let section = rendered(&perf_report(
+            &[("detect.total", 1000.0, 1), ("hardware.gpu", 40.0, 1)],
+            &[("process.spawns", 3), ("git.blob_loads", 27)],
+        ));
+
+        let lines: Vec<&str> = section.lines().collect();
+        let root = lines
+            .iter()
+            .position(|line| line.trim_start().starts_with("Counters"))
+            .unwrap_or_else(|| panic!("no Counters root in:\n{section}"));
+
+        assert!(root > 0, "Counters is the first line of:\n{section}");
+        assert!(
+            lines[root - 1].trim().is_empty(),
+            "no blank line above Counters in:\n{section}"
+        );
+        // Counter rows nest by their dotted names and keep their raw values.
+        assert!(section.contains("blob_loads"), "{section}");
+        assert!(section.contains("27"), "{section}");
+        // Counters never enter the timing tree: the timing rows end at the note.
+        let timing = lines[..root].join("\n");
+        assert!(!timing.contains("blob_loads"), "{timing}");
+    }
+
+    #[test]
+    fn a_report_with_no_stages_renders_the_root_alone() {
+        let section = rendered(&perf_report(&[], &[]));
+
+        assert!(section.contains("Total"), "{section}");
+        assert!(!section.contains("HOT"), "{section}");
+    }
+
+    #[test]
+    fn a_malformed_report_renders_without_panicking() {
+        let section = rendered(&PerformanceReport {
+            total_duration_ms: f64::NAN,
+            stages: BTreeMap::new(),
+            counters: BTreeMap::new(),
+        });
+
+        assert!(section.contains("Total"), "{section}");
+    }
 
     #[test]
     fn test_format_uptime_zero() {

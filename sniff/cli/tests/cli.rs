@@ -400,14 +400,246 @@ fn repo_aggregate_perf_covers_complete_command() {
          total={total_ms}, detection={detect_ms}, aggregate={aggregate_ms}"
     );
 
+    // The human report is a hierarchy: rows carry the last dotted segment of
+    // their key, and the measured value sits in its own aligned column. Keys are
+    // matched segment-wise rather than as whole dotted strings, and the connector
+    // glyph is never asserted because it follows the runner's locale.
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("cli.repo.aggregate_projection"),
+        stderr.contains("aggregate_projection"),
         "stderr report must include post-detection aggregate projection: {stderr}"
     );
+    for (counter, expected) in [("repository_discoveries", "1"), ("status_walks", "1")] {
+        let row = stderr
+            .lines()
+            .find(|line| line.contains(counter))
+            .unwrap_or_else(|| {
+                panic!("stderr report must include command-wide bounds: {stderr}")
+            });
+        let cells: Vec<&str> = row.split_whitespace().collect();
+        let label = cells
+            .iter()
+            .position(|cell| *cell == counter)
+            .expect("the label owns its own cell");
+        assert_eq!(
+            cells.get(label + 1).copied(),
+            Some(expected),
+            "unexpected `{counter}` row: {row}"
+        );
+    }
+}
+
+// ============================================================================
+// `--perf` rendering contract tests
+// ============================================================================
+
+/// Everything the `## Performance` heading introduces.
+fn performance_section(rendered: &str) -> &str {
+    rendered
+        .split_once("## Performance")
+        .unwrap_or_else(|| panic!("output must carry a performance section:\n{rendered}"))
+        .1
+}
+
+/// The row a metrics-tree label owns. Labels are matched as whole whitespace
+/// cells so a short label can never hit a substring of a longer one, and the
+/// connector prefix is never matched — it follows the runner's locale rather
+/// than the report.
+fn metric_row<'a>(section: &'a str, label: &str) -> &'a str {
+    section
+        .lines()
+        .find(|line| line.split_whitespace().any(|cell| cell == label))
+        .unwrap_or_else(|| panic!("performance section must carry a `{label}` row:\n{section}"))
+}
+
+/// A row's measured value: the cell immediately after its label. Reading from
+/// the end of the row would pick up the share instead, which folds from an em
+/// dash to a hyphen on a runner without Unicode.
+fn metric_value<'a>(section: &'a str, label: &str) -> &'a str {
+    let row = metric_row(section, label);
+    let cells: Vec<&str> = row.split_whitespace().collect();
+    let label_cell = cells
+        .iter()
+        .position(|cell| *cell == label)
+        .expect("a located row owns its label cell");
+    cells
+        .get(label_cell + 1)
+        .copied()
+        .unwrap_or_else(|| panic!("`{label}` row carries no value: {row}"))
+}
+
+/// How deep a row sits, as the offset its label starts at. Connectors occupy
+/// that prefix under either glyph set, so a child's offset always exceeds its
+/// parent's — an ordering that holds without naming a single glyph.
+fn metric_offset(section: &str, label: &str) -> usize {
+    let row = metric_row(section, label);
+    row.find(label).expect("a located row contains its label")
+}
+
+/// `--plain` must remove every escape sequence while leaving the timing tree a
+/// hierarchy. Rows are found by the last dotted segment of their stage name,
+/// never by a connector glyph.
+#[test]
+fn perf_plain_output_is_ansi_free_and_hierarchical() {
+    let assert = common::owned_sniff_command()
+        .args(["os", "--perf", "--plain"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+
     assert!(
-        stderr.contains("git.repository_discoveries: 1") && stderr.contains("git.status_walks: 1"),
-        "stderr report must include complete command-wide bounds: {stderr}"
+        !stdout.contains('\u{1b}'),
+        "--plain output must carry no escape sequence: {stdout:?}"
+    );
+
+    let section = performance_section(&stdout);
+    assert!(
+        metric_row(section, "Total").contains("100%"),
+        "the synthetic root owns the full share: {section}"
+    );
+    assert!(
+        metric_offset(section, "detect") < metric_offset(section, "os"),
+        "`detect.os` must render as an `os` row nested below `detect`: {section}"
+    );
+
+    // The retired flat list must be gone, not merely joined by a tree: it
+    // printed one `- <full.dotted.key>: N ms total (...)` bullet per stage
+    // under a `Stages:` header.
+    for retired in ["Stages:", "ms total", "Total: ", "detect.os"] {
+        assert!(
+            !section.contains(retired),
+            "the flat stage list must not survive alongside the tree (`{retired}`): {section}"
+        );
+    }
+}
+
+/// A scriptable text command keeps its data on stdout and the whole
+/// performance section — both trees and the overlap note — on stderr.
+#[test]
+fn perf_on_a_scriptable_text_command_stays_off_stdout() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = common::owned_sniff_command()
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "language",
+            "--perf",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
+
+    assert_eq!(
+        stdout.trim(),
+        "Rust",
+        "scriptable stdout must carry its datum alone: {stdout:?}"
+    );
+    for leaked in ["## Performance", "Total", "Counters", "may overlap"] {
+        assert!(
+            !stdout.contains(leaked),
+            "`{leaked}` must not reach a scriptable command's stdout: {stdout:?}"
+        );
+    }
+
+    let section = performance_section(&stderr);
+    metric_row(section, "Total");
+    metric_row(section, "Counters");
+    assert!(
+        section.contains("may overlap"),
+        "the overlap note travels with the section: {section}"
+    );
+}
+
+/// `--json --perf` stdout must remain exactly one JSON document carrying the
+/// structured report, with the human tree routed to stderr.
+#[test]
+fn json_perf_stdout_is_exactly_one_document() {
+    let assert = common::owned_sniff_command()
+        .args(["os", "--json", "--perf", "--plain"])
+        .assert()
+        .success();
+    let stdout = assert.get_output().stdout.clone();
+
+    let mut documents = serde_json::Deserializer::from_slice(&stdout).into_iter::<Value>();
+    let value = documents
+        .next()
+        .unwrap_or_else(|| panic!("stdout must carry a JSON document: {stdout:?}"))
+        .unwrap_or_else(|error| {
+            panic!(
+                "stdout must parse as JSON: {error}\n{}",
+                String::from_utf8_lossy(&stdout)
+            )
+        });
+    assert!(
+        documents.next().is_none(),
+        "stdout must hold one document and nothing after it: {}",
+        String::from_utf8_lossy(&stdout)
+    );
+
+    let report = value
+        .get("performance")
+        .unwrap_or_else(|| panic!("--perf must attach the structured report: {value}"));
+    assert!(
+        report.get("total_duration_ms").is_some()
+            && report["stages"].is_object()
+            && report["counters"].is_object(),
+        "the structured report keeps its schema: {report}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&stdout).contains("## Performance"),
+        "the human report must never reach JSON stdout"
+    );
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
+    let section = performance_section(&stderr);
+    assert!(
+        metric_offset(section, "detect") < metric_offset(section, "os"),
+        "the human tree still renders on stderr: {section}"
+    );
+}
+
+/// Counters reach the human report as their own tree below the timing one, and
+/// never as timing rows.
+#[test]
+fn counter_tree_reaches_the_human_report() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = common::owned_sniff_command()
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "filesystem",
+            "--perf",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    let section = performance_section(&stdout);
+
+    let (timing, counters) = section
+        .split_once("Counters")
+        .unwrap_or_else(|| panic!("the report must carry a counter tree: {section}"));
+    assert!(
+        timing.contains("shared_walk"),
+        "the timing tree precedes the counter tree: {section}"
+    );
+    assert!(
+        !timing.contains("bytes_read"),
+        "counter data must never enter the timing tree: {section}"
+    );
+
+    // `filesystem.io.bytes_read` counts bytes read from the fixture's
+    // manifests, so the row exists on every platform and is never zero.
+    let bytes_read: u64 = metric_value(counters, "bytes_read")
+        .parse()
+        .unwrap_or_else(|error| panic!("`bytes_read` must render as a count: {error}\n{counters}"));
+    assert!(bytes_read > 0, "manifest reads move bytes: {counters}");
+    assert!(
+        !counters.contains("HOT"),
+        "the counter tree carries no HOT marker: {counters}"
     );
 }
 
