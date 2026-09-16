@@ -250,9 +250,28 @@ belong here.
   paths — empirically verified with `AM file1.txt / A  file2.txt` plus
   `git commit --only -- file1.txt`, which leaves `A  file2.txt` staged.
 - A brief that pairs a pathspec file with `xargs -I {} git commit …` yields N
-  stacked commits (a 35-path refactor landed as 35 identical commits). Say
-  explicitly: one invocation with all paths positional, or
-  `--pathspec-from-file`, never a per-path loop.
+    stacked commits (a 35-path refactor landed as 35 identical commits). Say
+    explicitly: one invocation with all paths positional, or
+    `--pathspec-from-file`, never a per-path loop.
+- For 100+ path commits (e.g. the `*/tests/*` mass sweep that landed
+    archive-compatible `manifest_dir!()` across the monorepo), construct the
+    pathspec with `git diff --cached --name-only <scope-glob> > /tmp/paths.txt`
+    and then `git commit --only -F msg --pathspec-from-file=/tmp/paths.txt`.
+    Two hazards the per-line file avoids that an inline arg list does not:
+    (a) shell expansion of a glob inside the args (`git commit … -- '*/tests/*'
+    '*/benches/*' …` lets zsh expand `*/tests/*` against the current
+    worktree, producing a `pathspec 'file1 file2 …' did not match` failure
+    that surfaces as a noise wall); (b) shell ARG_MAX limits when the path
+    list is in the thousands. Verify by counting `wc -l < /tmp/paths.txt`
+    against `git diff --cached --name-only <scope-glob> | wc -l`.
+- When a glob pathspec misses a few paths (e.g. `*/tests/*` did not match
+    `claudine/gen/src/agent_errors_check/review6_tests.rs` and
+    `playa/lib/src/detached/tests.rs` — both `src/*tests.rs` unit-test
+    files whose path the glob did not reach), ship the missed paths as a
+    *follow-up* `test(<scope>): follow-up …` commit rather than amending the
+    mass commit. The corpus guard in `test-toolkit::archive_path_guard`
+    catches the same miss next run, so the follow-up is documentation, not
+    drift.
 - Recovery from N agent-authored stacked commits: `git update-ref HEAD <new>
   <old>` (ref, new, old) is a CAS soft-reset; index and working tree are kept
   and the paths reappear staged for a single recommit.
