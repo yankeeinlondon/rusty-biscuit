@@ -953,7 +953,7 @@ mod tests {
         // Regression: on the rusty-biscuit repo, `primary_layer()` must agree
         // with the first layer — and select Cargo over the pnpm workspace that
         // also lives at the repo root.
-        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest_dir = biscuit_test_harness::manifest_dir!();
         let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
         let info = detect_repo_structure(repo_root)
             .expect("detect_repo_structure should succeed")

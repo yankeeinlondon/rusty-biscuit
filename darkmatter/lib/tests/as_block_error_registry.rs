@@ -12,10 +12,10 @@ use std::path::Path;
 
 #[test]
 fn as_block_error_registry_covers_all_block_error_impls() {
-    let src_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let src_root = biscuit_test_harness::manifest_dir!().join("src");
     assert!(
         src_root.exists(),
-        "source root {} does not exist — is CARGO_MANIFEST_DIR set correctly?",
+        "source root {} does not exist — is the manifest directory resolved correctly?",
         src_root.display()
     );
 

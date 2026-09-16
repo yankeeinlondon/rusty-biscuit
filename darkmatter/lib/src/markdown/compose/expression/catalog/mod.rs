@@ -731,7 +731,7 @@ functions:
     /// the catalog output exactly.
     #[test]
     fn narrative_doc_function_table_matches_catalog() {
-        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest_dir = biscuit_test_harness::manifest_dir!();
         let doc_path = manifest_dir
             .join("../../darkmatter/docs/topics/darkmatter-expressions.md");
         let content = std::fs::read_to_string(&doc_path)
@@ -776,7 +776,7 @@ functions:
 
         // The link is authored sibling-relative, so it resolves against the
         // topic doc's own directory.
-        let doc_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        let doc_path = biscuit_test_harness::manifest_dir!()
             .join("../../darkmatter/docs/topics/darkmatter-expressions.md");
         let content = std::fs::read_to_string(&doc_path)
             .expect("darkmatter-expressions.md should be readable");
@@ -1081,7 +1081,7 @@ mod list_formatting_example_files {
     /// `returns` string — the verified-example requirement (spec E3 / task 7).
     #[test]
     fn example_files_evaluate_to_their_declared_returns() {
-        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest_dir = biscuit_test_harness::manifest_dir!();
         let dir = manifest_dir
             .join("../features/_completed/2026-07-08-single-sourcing-schema/examples");
         let files = [

@@ -694,10 +694,9 @@ fn pre_init_hook_buffer_flushes_when_oversized() {
 
 #[test]
 fn claude_fixture_full_replay_produces_no_provider_extensions() {
-    let fixture = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/providers/claude.ndjson"
-    ))
+    let fixture = std::fs::read_to_string(
+        biscuit_test_harness::manifest_dir!().join("tests/fixtures/providers/claude.ndjson"),
+    )
     .expect("claude.ndjson must exist");
 
     let (sink, mut parser) = new_parser();

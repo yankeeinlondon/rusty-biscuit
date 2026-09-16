@@ -13,6 +13,7 @@
 
 mod common;
 
+use biscuit_test_harness::manifest_dir;
 use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
@@ -34,8 +35,11 @@ static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 
 /// Returns the absolute path to a fixture file.
 fn fixture_path(name: &str) -> String {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    format!("{}/tests/fixtures/{}", manifest_dir, name)
+    manifest_dir!()
+        .join("tests/fixtures")
+        .join(name)
+        .display()
+        .to_string()
 }
 
 /// Positions the cursor at a known row using `tput` so that image

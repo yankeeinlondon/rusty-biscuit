@@ -778,7 +778,7 @@ fn the_raw_command_surface_rejects_an_ambient_context_outside_the_workspace() {
     let fixture = CliProcessFixture::named("fixture-raw-ambient-context-rejected");
     let _ = fixture
         .command_builder()
-        .ambient_context(Path::new(env!("CARGO_MANIFEST_DIR")))
+        .ambient_context(&biscuit_test_harness::manifest_dir!())
         .build_std();
 }
 
@@ -856,7 +856,7 @@ fn ambient_context_escape_pins_the_cwd_to_a_test_built_repository() {
     let recorded_cwd = PathBuf::from(&recorded["CWD"])
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(&recorded["CWD"]));
-    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let checkout = biscuit_test_harness::manifest_dir!();
     assert!(
         !recorded_cwd.starts_with(&checkout),
         "the rusty-biscuit checkout must never become the launch context: {recorded_cwd:?}"
@@ -869,7 +869,7 @@ fn ambient_context_escape_rejects_a_directory_outside_the_workspace() {
     let fixture = CliProcessFixture::named("fixture-ambient-context-rejected");
     let _ = fixture
         .command_builder()
-        .ambient_context(Path::new(env!("CARGO_MANIFEST_DIR")));
+        .ambient_context(&biscuit_test_harness::manifest_dir!());
 }
 
 #[test]

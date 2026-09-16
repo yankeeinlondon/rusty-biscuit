@@ -16,9 +16,13 @@ use claudine_gen::{
 
 /// The claudine package-area root (parent of this crate's manifest dir).
 fn area() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("gen crate lives under the claudine package area")
+    static AREA: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    AREA.get_or_init(|| {
+        biscuit_test_harness::manifest_dir!()
+            .parent()
+            .expect("gen crate lives under the claudine package area")
+            .to_path_buf()
+    })
 }
 
 /// Phase 1 byte baseline for every committed artifact owned by the provider
@@ -30,7 +34,7 @@ fn area() -> &'static Path {
 /// that tree, and the pin must not move with it.
 #[test]
 fn committed_generated_artifacts_match_phase_1_byte_baseline() {
-    let baseline_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let baseline_path = biscuit_test_harness::manifest_dir!()
         .join("tests/fixtures/generated-artifact-baseline.json");
     let raw = std::fs::read(&baseline_path).unwrap_or_else(|err| {
         panic!(

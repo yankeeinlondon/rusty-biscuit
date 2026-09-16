@@ -6,6 +6,8 @@ mod source_scan;
 
 use source_scan::{is_ident, line_at, sanitize};
 
+use biscuit_test_harness::manifest_dir;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -33,7 +35,7 @@ struct AllowEntry {
 const SPAWN_ALLOWLIST: &[AllowEntry] = &[];
 
 fn tests_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests")
+    manifest_dir!().join("tests")
 }
 
 fn excluded(relative: &str) -> bool {

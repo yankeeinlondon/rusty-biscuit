@@ -1,7 +1,7 @@
 //! Executable contracts established in Phase 1 for the SimplifiedSchema
 //! semantic meta-types.
 
-use std::{fs, path::Path};
+use std::fs;
 
 use biscuit_file::FileReference;
 use darkmatter::markdown::{
@@ -221,7 +221,7 @@ fn native_mapping_depth_uses_the_shared_structured_limit() {
 
 #[test]
 fn shipped_schema_corpus_is_passively_classified_without_resolution() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas");
+    let root = biscuit_test_harness::manifest_dir!().join("../docs/schemas");
     let mut paths = fs::read_dir(&root)
         .expect("schema directory")
         .map(|entry| entry.expect("schema entry").path())

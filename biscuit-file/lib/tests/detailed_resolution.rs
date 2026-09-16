@@ -7,6 +7,8 @@
 //! I/O probe failures stay typed and identify the failing candidate rather than
 //! collapsing into "not found".
 
+use biscuit_test_harness::manifest_dir;
+
 use std::fs;
 use std::path::Path;
 
@@ -373,8 +375,8 @@ fn supplied_repository_root_anchors_and_suppresses_ancestor_discovery() {
 fn explicit_implicit_reference_does_not_discover_repository_root() {
     // The base is inside a real git repository (this crate's own worktree). The
     // legacy fallback discovered that root live; the explicit context must not.
-    let base = env!("CARGO_MANIFEST_DIR");
-    let ctx = FileResolutionContext::new(base);
+    let base = manifest_dir!();
+    let ctx = FileResolutionContext::new(&base);
     let plan = FileReference::new("Cargo.toml")
         .unwrap()
         .candidate_plan(&ctx)
@@ -386,7 +388,7 @@ fn explicit_implicit_reference_does_not_discover_repository_root() {
         "no repository root was supplied, so only the base candidate exists: {plan:?}",
     );
     assert_eq!(plan[0].provenance(), RootProvenance::Source);
-    assert_eq!(plan[0].path(), Path::new(base).join("Cargo.toml"));
+    assert_eq!(plan[0].path(), base.join("Cargo.toml"));
 }
 
 #[test]

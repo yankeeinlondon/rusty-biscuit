@@ -112,7 +112,7 @@ fn minimal_collection_validates_ok() {
 /// `null`, and duplicate request names must be disambiguated.
 #[test]
 fn emqx_grouped_collection_validates_against_postman_schema() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let path = biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("schematic/gen has parent")
         .join("postman")

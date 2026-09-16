@@ -794,7 +794,7 @@ mod tests {
     #[test]
     fn embedded_vocabulary_matches_the_topic_doc() {
         let doc = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            biscuit_test_harness::manifest_dir!()
                 .join("../docs/topics/darkmatter-expressions.md"),
         )
         .expect("darkmatter-expressions.md should be readable");

@@ -136,7 +136,7 @@ fn opencode_and_kilo_completion_only_tools_keep_trailing_text_and_count_once() {
 
 #[test]
 fn saved_opencode_voip_replay_keeps_only_its_last_text_part() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let path = biscuit_test_harness::manifest_dir!()
         .join("../lib/tests/fixtures/providers/opencode-voip-2026-09-05.ndjson");
     let raw = std::fs::read_to_string(path).expect("read saved OpenCode voip transcript");
     let lines: Vec<&str> = raw.lines().collect();

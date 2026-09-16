@@ -80,7 +80,7 @@ fn capture_schema_about(harness: &mut TmuxHarness, colorfgbg: &str) -> CapturedF
     run_with_sentinel(harness, "clear", colorfgbg);
     // The broker pane can outlive a prior fixture CWD, so every invocation
     // reestablishes a stable package directory before terminal discovery.
-    let working_dir = shell_quote(env!("CARGO_MANIFEST_DIR"));
+    let working_dir = shell_quote(&biscuit_test_harness::manifest_dir!().to_string_lossy());
     let command = format!(
         "cd {working_dir} && {} schema about",
         shell_quote(&md_bin())

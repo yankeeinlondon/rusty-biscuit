@@ -1,7 +1,7 @@
 //! Phase 4 contracts for semantic meta-type JSON Schema lowering, validation,
 //! coercion preservation, trigger matching, and shipped-artifact compatibility.
 
-use std::{fs, path::Path};
+use std::fs;
 
 use darkmatter::markdown::{
     Markdown,
@@ -261,7 +261,7 @@ fn semantic_types_match_triggers_by_passive_parse() {
 
 #[test]
 fn shipped_schema_artifacts_validate_through_semantic_keywords() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas");
+    let root = biscuit_test_harness::manifest_dir!().join("../docs/schemas");
     let mut declarations = Vec::new();
     let mut definitions = Vec::new();
     let mut paths = fs::read_dir(&root)

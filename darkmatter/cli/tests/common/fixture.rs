@@ -139,16 +139,17 @@ const TEMP_DIR_VARIABLE: &str = if cfg!(windows) {
 
 static WORKSPACE_NONCE: AtomicU64 = AtomicU64::new(0);
 
-/// The rusty-biscuit checkout this test binary was compiled from: the nearest
-/// ancestor of the crate directory carrying a `.git` entry (a directory for a
-/// clone, a file for a worktree), canonicalized.
+/// The rusty-biscuit checkout this test binary reads its sources from: the
+/// nearest ancestor of the run-time crate directory carrying a `.git` entry
+/// (a directory for a clone, a file for a worktree), canonicalized.
 ///
 /// ## Returns
 ///
 /// `None` when no ancestor carries `.git`, as in a relocated
 /// `cargo nextest archive` run: there is no checkout there to be captured by.
 pub fn checkout_root() -> Option<PathBuf> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    let crate_dir = biscuit_test_harness::manifest_dir!();
+    crate_dir
         .ancestors()
         .find(|ancestor| ancestor.join(".git").exists())
         .and_then(|checkout| checkout.canonicalize().ok())

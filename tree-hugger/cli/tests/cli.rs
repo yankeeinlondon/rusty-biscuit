@@ -1,15 +1,15 @@
+use biscuit_test_harness::manifest_dir;
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::Value;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
 
 #[allow(deprecated)] // We need Command struct to set current_dir
 fn hug_cmd() -> Command {
     let mut cmd = Command::cargo_bin("hug").unwrap();
     // Set working directory to repo root (2 levels up from cli/tests/)
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let repo_root = manifest_dir!()
         .parent()
         .unwrap()
         .parent()
@@ -899,7 +899,7 @@ fn test_prelude_env_var_multiple_names() {
 fn test_prelude_flag_with_real_prelude_file() {
     // biscuit-terminal/lib has a real prelude.rs
     // Run from biscuit-terminal/lib to pick up its prelude
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let repo_root = manifest_dir!()
         .parent()
         .unwrap()
         .parent()
@@ -918,7 +918,7 @@ fn test_prelude_flag_with_real_prelude_file() {
 
 #[test]
 fn test_symbols_prelude_reports_direct_prelude_exports() {
-    let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/prelude_pkg");
+    let fixture_pkg = manifest_dir!().join("tests/fixtures/prelude_pkg");
 
     let mut cmd = hug_cmd();
     cmd.current_dir(&fixture_pkg)
@@ -938,7 +938,7 @@ fn test_symbols_prelude_reports_direct_prelude_exports() {
 
 #[test]
 fn test_symbols_prelude_comments_show_resolved_doc_comments() {
-    let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/prelude_pkg");
+    let fixture_pkg = manifest_dir!().join("tests/fixtures/prelude_pkg");
 
     let mut cmd = hug_cmd();
     cmd.current_dir(&fixture_pkg)

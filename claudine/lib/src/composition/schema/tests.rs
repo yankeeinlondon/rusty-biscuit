@@ -19,7 +19,7 @@ fn make_source(dir: &TempDir, document: &str) -> ResolvedCompositionSource {
 }
 
 fn shipped_implement_plan() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .ancestors()
         .nth(2)
         .expect("repository root is two levels above claudine/lib")

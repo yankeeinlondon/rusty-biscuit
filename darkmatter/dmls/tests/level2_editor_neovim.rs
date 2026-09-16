@@ -77,7 +77,7 @@ let fenced = "{{ nope }}";
 const DMLS_TOML: &str = "[semantic_tokens]\nenable = true\n";
 
 fn fixture_path(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .join("tests/fixtures/editor_neovim")
         .join(name)
 }

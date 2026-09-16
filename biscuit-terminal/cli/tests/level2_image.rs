@@ -28,6 +28,7 @@ mod common;
 
 use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::kitty::KittyHarness;
+use biscuit_test_harness::manifest_dir;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use common::pane_geometry::{
@@ -48,8 +49,11 @@ static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 
 /// Returns the absolute path to a fixture file.
 fn fixture_path(name: &str) -> String {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    format!("{manifest_dir}/tests/fixtures/{name}")
+    manifest_dir!()
+        .join("tests/fixtures")
+        .join(name)
+        .display()
+        .to_string()
 }
 
 /// Positions the cursor at a known row using `tput` so that image
