@@ -18,11 +18,11 @@ findings:
     priority: medium
   - title: The self-test suite list is coupled across four files and fails loudly only by accident
     priority: medium
-human_review: true
+human_review: false
 reviewed_by: claude/opus-5
 created: "2026-09-15T17:15:52-07:00"
 spec: 2026-09-12-single-os-compile/spec.md
-implemented: false
+implemented: true
 description: "Findings from the four spikes raised by the CI Python test-suite review"
 fix: 2026-09-12-single-os-compile/review-4.md
 previous: 2026-09-12-single-os-compile/review-3.md
@@ -231,42 +231,91 @@ reads workflows but does not modify them.
 Per the repository's `CI/CD Test-scope Discipline`, no speculative CI run was
 dispatched to obtain any of the above.
 
-## Human review required
+## Human review — resolved 2026-09-15
 
-Two rulings were deliberately left to a human.
+Both open questions were ruled on by the author the same day, and both rulings
+are implemented in this branch.
 
-1. **Is a nightly nobody watches adequate enforcement for AC15?** Spike 4 named
-   this tension rather than resolving it. The `sniff/**` PR leg is the
-   mitigation, but the honest reading is that blocking enforcement belongs in
-   the sniff area — most cheaply at `sniff-performance.yml:121`, which already
-   builds the binary on three OSes — not in `ci-tooling`. The alternative is
-   adding `sniff/**` to the `ci_tooling` path gate and accepting that a
-   CI-infrastructure gate turns red when a workspace package stops compiling.
-2. **Is `schema.py:802-806` dead code to delete, or a rule whose fixture should
-   be made reachable?** This is a behavior decision, not a cleanup.
+### 1. Area-drift enforcement — ruled: put it on the merge path
+
+The question was whether a nightly nobody watches is adequate enforcement for
+the contract that keeps the planner's area derivation honest. **It is not.** The
+ruling adds an `area_drift` flag to the planner and a job in `ci.yml` that builds
+`sniff-cli`, runs the contract class with the requirement declared, and is folded
+by `ci-gate` like every other blocking job. No second required status context was
+introduced, and no policy was added to the gate — `skipped` already passes the
+fold, so a pull request that cannot cause drift pays nothing.
+
+Two consequences worth recording:
+
+- **The flag follows any `Cargo.toml` at any depth**, not just `sniff/**` and the
+  two planner files. An area is a function of *where* a manifest sits, and the
+  planner's only input is `git diff --name-only` with no add/move/delete status,
+  so "a manifest moved" is not separable from "a dependency was bumped" without
+  a second Git read that `--all` runs have no base for. Over-triggering costs one
+  parallel job the gate folds; the miss it prevents is silent. Fixture manifests
+  are included deliberately — a manifest in an unusual location is precisely the
+  input that separates sniff's rule from the planner's.
+- **`area-drift.yml` lost its `pull_request` trigger** and kept its schedule and
+  dispatch. Running both on one pull request is the duplication the repository's
+  CI/CD test-scope discipline warns against. The nightly remains as the backstop
+  for the gate's one structural gap: the planner schedules the job that validates
+  the planner, so a scope defect could skip its own check.
+
+The rejected alternative, for the record: installing sniff in `ci-tooling` costs
+1m39s warm on a job that already runs ~6 minutes and fires on every `scripts/` or
+`.github/` change, and it reddens the CI-infrastructure gate for a sniff compile
+error.
+
+### 2. The unreachable artifact-collision refusal — ruled: delete
+
+Deleted, with the `artifacts` dict that existed only to feed it (8 lines). The
+property it appeared to protect — one artifact, one build record — is enforced by
+construction: the name is derived from `{package, producer, key}` rather than
+supplied, and key uniqueness is checked upstream. That is a stronger guarantee
+than a runtime check, not a weaker one.
+
+The misnamed test is now
+`test_an_artifact_that_copies_a_sibling_records_name_is_refused` and asserts the
+exact mismatch message it actually exercises, with its deliberate overlap with
+`test_an_artifact_that_is_not_package_keyed_is_refused` named in the comment.
 
 ## Next steps
 
-Highest value first. Items 1 and 2 come from the spikes, not the source review.
+All three follow-ups this review opened are **done**, in this branch.
 
-1. **Pin the 23 unasserted plan-validation rules.** Largest remaining risk to
-   AC1, and the spikes' most valuable byproduct is the inventory that makes it
-   tractable: spike 2's results file lists every rule the validator can emit
-   with the test that pins it — the closest thing to a specification of
-   `validate_resolved_plan` that exists.
-2. **Prove `area-drift.yml` runs**, by dispatch, before trusting AC15 to it.
-   Until then AC15's enforcement is written down but not demonstrated.
-3. **Implement the source review's §1.2 `require_tool()` with per-job scoping**,
-   not as written — see the high finding above.
-4. Resolve the two human rulings.
-5. The source review's remaining "next dedicated pass" items are unaffected by
-   the spikes and can proceed independently: extending `plan_fixtures.py` to own
-   the whole plan document (§3.1, §3.2), extracting `CiLocalSandbox` (§3.4,
-   §4.1), and adding `ruff` (§1.3). Spike 1 removed 115 lines of the
-   duplication §3.3 identified; the §3.1 fixture duplication is untouched.
+1. ~~Pin the unasserted plan-validation rules.~~ **Done — 23 unpinned to zero**,
+   via 23 new tests. Verified by mutation rather than inspection: an AST-tagged
+   copy of `schema.py` suppressed each of the 54 reachable emission sites in turn
+   and confirmed every one fails a named test. That sweep also found **two rules
+   the spike had recorded as pinned but which were not** — `schema.py:696` was
+   satisfied by a build record's message through a `startswith` assertion, and
+   `:677` was pinned only indirectly from another suite. Both now have exact
+   tests. Every new assertion compares full messages rather than substrings, so
+   the coverage fix introduces no new collisions.
+2. ~~Prove the area-drift contract runs.~~ **Superseded by ruling 1**: it is now
+   a merge-path job, so the pull request for this branch exercises it directly.
+   `workflow_dispatch` would not have proven much from a feature branch, since
+   GitHub only surfaces it once the workflow is on the default branch.
+3. ~~Implement `require_tool()` with per-job scoping.~~ **Done** —
+   `scripts/ci/tool_guard.py`, applied to all 13 tool guards. `enforced_by` is
+   keyword-only with no default, so a guard that cannot name where its contract
+   runs will not construct. `ArchiveInventoryClosureTests` now fails on a planner
+   that cannot resolve a full-scope plan instead of reporting the class green.
 
-Nothing in this review blocks AC1–AC9. AC8 remains deferred exactly as Review 3
-and `deferred-performance-measurements.md` record it; no spike produced hosted
+Remaining, unaffected by the spikes and able to proceed independently: extending
+`plan_fixtures.py` to own the whole plan document, extracting `CiLocalSandbox`,
+and adding `ruff`. Spike 1 removed 115 lines of the duplication the source review
+identified in the workflow readers; the plan-fixture duplication is untouched.
+
+Two items were explicitly held back as separate concerns: the `conftest.py` /
+package restructuring that would let a discovery-based runner import all 13
+suites, and the two suites the source review found were executed by nothing
+(both are now wired in, but only through enumerated lists).
+
+Nothing in this review blocks the specification's acceptance criteria. The
+performance comparison remains deferred exactly as Review 3 and
+`deferred-performance-measurements.md` record it; no spike produced hosted
 measurements, and none was chartered to.
 
 ## Verification performed
