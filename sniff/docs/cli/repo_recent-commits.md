@@ -46,7 +46,7 @@ When no period is specified, defaults to `3d` (last 3 days). Output is rendered 
 Notes:
 
 - The header uses the viewer's local timezone so `Today`/`Yesterday` labels match what the reader expects.
-- Commits older than yesterday are labelled with an absolute date (`2026-04-01 at 9:30am`).
+- Commits older than yesterday are labeled with an absolute date (`2026-04-01 at 9:30am`).
 - File paths are rendered as clickable OSC8 hyperlinks (pointing to `file://` URIs) in terminals that support them.
 - The **Description** sub-block is omitted entirely when the commit body has no bullet points.
 
