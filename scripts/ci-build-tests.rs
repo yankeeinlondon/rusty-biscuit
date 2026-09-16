@@ -896,7 +896,35 @@ pub(crate) fn shipped_wrapper() -> PathBuf {
         .expect("building the ci-build binary");
     assert!(status.success(), "ci-build must build before it can be driven");
     assert!(binary.exists(), "expected {} to exist", binary.display());
-    binary
+    private_handle(&profile_dir, &binary)
+}
+
+/// A private path to `binary` that a concurrent rebuild cannot invalidate.
+///
+/// Nextest runs one process per test and every fixture here rebuilds the shipped
+/// binary, so a stale tree has several Cargos replacing `ci-build` at once. A
+/// test that had already handed that path to Cargo as its `RUSTC_WRAPPER` then
+/// execs into the replacement window and fails with a bare `No such file or
+/// directory` — a flake whose message names neither the wrapper nor the race.
+/// A hard link survives it: Cargo writes the new build to a new inode, and this
+/// name keeps resolving to the complete bytes the caller verified.
+fn private_handle(profile_dir: &Path, binary: &Path) -> PathBuf {
+    let links = profile_dir.join(".ci-build-wrappers");
+    if fs::create_dir_all(&links).is_err() {
+        return binary.to_path_buf();
+    }
+    let private = links.join(format!(
+        "ci-build-{}{}",
+        std::process::id(),
+        env::consts::EXE_SUFFIX
+    ));
+    let _ = fs::remove_file(&private);
+    // Copy is the fallback rather than the failure: a filesystem without hard
+    // links still gets an exec target of its own, just at the cost of the copy.
+    if fs::hard_link(binary, &private).is_err() && fs::copy(binary, &private).is_err() {
+        return binary.to_path_buf();
+    }
+    private
 }
 
 /// A dependency-free package with a build script, so the fixture exercises the

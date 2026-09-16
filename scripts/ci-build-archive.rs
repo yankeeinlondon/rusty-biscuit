@@ -913,6 +913,17 @@ fn measurement_env(
     env: &mut Vec<(String, OsString)>,
 ) -> Result<Option<PathBuf>> {
     let Some(counter_dir) = options.counter_dir.as_deref() else {
+        // An unmeasured producer compiles through no wrapper at all. A host
+        // `[build] rustc-wrapper` would otherwise reach this Cargo, and a
+        // content-addressed cache serves an artifact compiled in some other
+        // directory: the archive's runtime-dependency inventory then names a
+        // path that does not exist here, which the consumer reports as a
+        // missing dynamic library rather than as a cache hit. Both spellings
+        // are needed — Cargo reads an empty `RUSTC_WRAPPER` as unset and falls
+        // through to the config value, which only the `CARGO_BUILD_` form
+        // overrides.
+        env.push(("RUSTC_WRAPPER".to_owned(), OsString::new()));
+        env.push(("CARGO_BUILD_RUSTC_WRAPPER".to_owned(), OsString::new()));
         return Ok(None);
     };
     let dir = measurement_dir(counter_dir, &record.artifact);
