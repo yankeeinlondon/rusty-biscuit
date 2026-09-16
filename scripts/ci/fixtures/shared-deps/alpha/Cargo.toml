@@ -1,0 +1,17 @@
+[package]
+name = "shared-deps-alpha"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "shared_deps_alpha"
+path = "src/lib.rs"
+
+[dependencies]
+shared-deps-common = { path = "../common" }
+shared-deps-divergent = { path = "../divergent", features = ["extra"] }
+
+[[test]]
+name = "l1"
+path = "tests/l1.rs"

@@ -1,0 +1,10 @@
+# Deliberately its own workspace, like `archive-portability`: the fixture is
+# compiled by the `ci-build` integration suite into a throwaway target tree and
+# must never join the monorepo's member list or share its lockfile.
+#
+# Two packages under test (`alpha`, `beta`) over two dependencies: `common` is
+# configured identically by both, `divergent` is not. One owner target tree,
+# one archive invocation per package — the arrangement Task 6.1 measures.
+[workspace]
+resolver = "2"
+members = ["common", "divergent", "alpha", "beta"]

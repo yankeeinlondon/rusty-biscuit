@@ -1,0 +1,15 @@
+[package]
+name = "shared-deps-divergent"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "shared_deps_divergent"
+path = "src/lib.rs"
+
+# `alpha` enables this and `beta` does not, which makes the two packages resolve
+# two different units of this crate. Feature unification would erase that
+# difference and hand `beta` a library it never asked for.
+[features]
+extra = []
