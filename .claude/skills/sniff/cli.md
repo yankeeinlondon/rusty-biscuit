@@ -10,6 +10,27 @@ Use this reference for command discovery and output-mode behavior.
   supported.
 - `--plain` disables styled output.
 
+## `--perf` output
+
+`--perf` renders a hierarchical timing tree rooted at `Total` and, when the
+report holds counters, a separate `Counters` tree below it. Rich terminal
+commands emit it to stdout; scriptable text commands and `--json` emit it to
+stderr so stdout stays machine-readable.
+
+Three traps when asserting against it:
+
+- Bare `sniff --perf` shows help and emits **no** performance section. Name a
+  subcommand or pass `--json`.
+- Rows are labelled by the **last dotted segment**, so a full key such as
+  `filesystem.shared_walk.docs` never appears. Match a row by segment, and read
+  its value as the cell immediately after the label — the last cell is the
+  share, which folds from `—` to `-` without Unicode.
+- `--plain` strips ANSI but does not force ASCII. Connector and marker glyphs
+  follow the detected terminal's locale-derived Unicode capability, so a CLI
+  test must never assert one.
+
+The structured `performance` field in `--json` is unaffected by any of this.
+
 ## Common host commands
 
 ```text
