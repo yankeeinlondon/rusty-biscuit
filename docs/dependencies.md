@@ -2,6 +2,26 @@
 
 ## Recent Dependency Notes
 
+- `scripts/` (Cargo package `repo-deps`, its own workspace) gains a path
+  dependency on `biscuit-hash`. The `ci-build` compiler-work counter names its
+  event files by an xxHash digest of the rustc command line, and
+  `scripts/ci/affected_scope.py` computes every planned build key through the
+  same boundary — two hashing implementations in one contract is how digests
+  silently diverge. No crate was added for this; `biscuit-hash` and
+  `biscuit-terminal` moved into a new `build-tools` feature that `local-tools`
+  now includes. The split exists because the planner calls `ci-build` on every
+  scope calculation, including the pre-push hook's: gating it at `local-tools`
+  would make resolving a plan compile sniff's duckdb and gix closure to answer
+  a hash. `ci-rollup`, the always-runs merge-gate binary, still links none of
+  the monorepo's crates: it is built `--no-default-features`, which deselects
+  both features. That `biscuit-hash` dependency now enables its `blake3`
+  feature as well: `ci-build produce` checksums the archives and sidecars it
+  emits with BLAKE3 (a cryptographic digest, for artifacts crossing a machine
+  boundary) while xxHash stays the fast identity hash for plan keys and counter
+  events. `biscuit-hash` gained `blake3_hash_reader` for it, so a
+  multi-hundred-megabyte archive is streamed rather than read into memory, and
+  no second hashing boundary enters the contract. `blake3` was already an
+  optional `biscuit-hash` dependency; no crate was added.
 - `tools/test-audit` is a TypeScript pnpm-workspace member (registered in the
   root `pnpm-workspace.yaml`, pinned through the root `pnpm-lock.yaml`), not a
   Cargo package. It depends on `fast-xml-parser` (JUnit reports),
@@ -1327,3 +1347,12 @@ This is a Rust workspace with the following modules:
     _Helper macros for testing tracing output with automatic subscriber initialization and log assertions._
 
     _Tags: testing, tracing, logging_
+
+## Single-owner review corrections (2026-09-15)
+
+- `repo-deps`'s `build-tools` feature adds `object` 0.37 for native Windows PE
+  import inspection and `find-msvc-tools` 0.1 for locating the actual MSVC linker.
+  Neither enters the no-default-features rollup binary.
+- `scripts/ci/artifacts/` pins `@actions/artifact` 2.3.2 and its transitive Node
+  dependencies with `package-lock.json`. Hosted owners use it to upload multiple
+  package-keyed artifacts from a shared compilation job.

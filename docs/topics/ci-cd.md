@@ -228,6 +228,35 @@ so a declared `name:` containing `${{ matrix.… }}` reaches the Checks tab as r
 `job-id (matrix values)` when it runs. `lint` has no matrix, so it keeps a static
 `lint (ubuntu-latest)` — its environment has to be visible.
 
+### One native owner compiles, every tier consumes
+
+Every executing L1, L2, and browser cell names exactly one **build record** in the resolved plan,
+and one job compiles it. `ci.yml`'s `build` job is a `fail-fast: false` matrix over the plan's own
+owner projection — one leg per producer environment — that installs the union of build prerequisites, produces
+each package’s Nextest archive in a shared target tree with its manifest and declared sidecars, includes the verifier, and
+uploads `build-<package>-<producer>-<key>` with run-scoped retention.
+
+A consumer downloads that artifact, runs `ci-build verify` — plan key, realized digest, source
+identity, producer/execution compatibility, archive and sidecar checksums, expected binaries, and
+the host's own runtime ABI and observed external library identities — before tests run. Inventory and
+runtime inspection extract the verified archive; the consumer then runs the canonical tier recipe
+in archive mode. A rejection is a stable infrastructure verdict that stops the cell; nothing
+compiles a replacement, and a consumer that finds no build record for its cell refuses rather than
+compiling in place. Linux and WSL2 share one Linux archive and publish two separate result cells;
+native Windows and WSL2 are structurally incompatible and can never pair. Clippy and the
+check-only example/bench targets stay their own compile configurations, in their own jobs, with
+their own caches.
+
+A build record is **plumbing, never a result cell**: no `{package, environment, tier}` identity, no
+JUnit, no baseline entry. A failed, cancelled, or unuploadable owner makes each dependent cell
+`MISSING — blocked by build <key>`, which blocks; unaffected areas and environments proceed.
+
+Seven stages are reported separately — producer queue, compile+archive, and upload; consumer
+download, verify, extract, and execute — so no transfer or setup cost hides inside test time. Each
+executing cell displays the planned key, realized digest, and producer it ran, under **Build
+provenance** in its area's summary. See
+[.github/ci/README.md](../../.github/ci/README.md#what-each-stage-cost).
+
 ### Each area audits its planned coverage
 
 `_area-ci.yml`'s `coverage-audit` job runs `if: always()` behind that area's producers and always
@@ -310,11 +339,15 @@ is selected from affected scope and gated on preflight:
 
 Messenger and all three Rendezvous crates are owned by their ordinary
 package-keyed L1 cells on Ubuntu, Windows, macOS, and WSL2. Messenger declares
-all-feature coverage and the closed `messenger-desktop-stubs` runner tool. The
-native workflow builds and verifies all six helpers once before L1 and exports
-`MESSENGER_STUB_BIN_DIR`; the WSL2 archive workflow ships Linux helpers as a
-sidecar to its toolchain-free guest. JUnit and producer-status artifacts retain
-the package/environment/tier identity consumed by their area's coverage audit.
+all-feature coverage and the six desktop-notifier helpers as a
+`messenger-desktop-stubs` build **sidecar**: its producer compiles them, the
+manifest records each one's size and digest, and every consumer takes them
+verified from `<artifact>-sidecars/` with `MESSENGER_STUB_BIN_DIR` exported from
+that directory. The old `runner-tools` prebuild that compiled them on the test
+runner is gone. The same path carries them to the toolchain-free WSL2 guest, and
+on native Windows they arrive under their `.exe` names. JUnit and producer-status
+artifacts retain the package/environment/tier identity consumed by their area's
+coverage audit.
 `sniff-performance.yml`
 stays independent because its PR leg is artifact-only and its scheduled leg measures work counts,
 not correctness. `build-integrations.yml` stays release-triggered.
@@ -408,11 +441,12 @@ Releases are automated end-to-end by `release-plz.yml` in the public repository.
 ## Caching and Performance
 
 Every Rust workflow uses `Swatinem/rust-cache@v2` with `workspaces: ". -> target"` and a workflow-
-or matrix-scoped `shared-key`. The package gates key **per package and per job kind**:
-`package-ci-<package>-check-<os>`, `package-ci-<package>-lint-ubuntu-latest`, and
-`package-ci-<package>-test-<environment>`. The L2, browser, and WSL-archive jobs deliberately
-reuse the `test` key for their environment — they compile the same crates as the L1 leg, so one
-warm cache serves every tier instead of three cold ones. Other examples: `coverage-affected`,
+or matrix-scoped `shared-key`. The package gates key **per package and per job kind**, and only
+where something still compiles: `package-ci-<package>-check-<os>`,
+`package-ci-<package>-lint-ubuntu-latest`, and `build-<package>-<producer>` for the native
+build owner. **No test tier has a cache key at all.** L1, L2, browser, and the WSL2 guest
+consume that owner's archive: they restore no cache, install no toolchain, and compile nothing —
+and a restored cache is the one thing that can make a silent rebuild look fast. Other examples: `coverage-affected`,
 `coverage`, `bench-nightly-darkmatter`, and `sniff-bench`. Cache keys are intentionally scoped
 rather than global — this trades hit rate for protection against a poisoned target directory
 taking down the entire pipeline.

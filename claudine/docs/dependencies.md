@@ -8,6 +8,10 @@
 - The `claudine` library and `claudine-cli` reach Playa's worker and queue locks
   through `test-toolkit`'s `LockedAudioSpool` fixture while device-free tests
   inspect durable queued audio. Neither crate declares `fs4` itself.
+- All three crates take `biscuit-test-harness` as a dev dependency for
+  `manifest_dir!`, which resolves the crate directory at run time. A fixture
+  path baked in at compile time names the *building* host's checkout, which is
+  the wrong directory when a `cargo nextest archive` is executed elsewhere.
 
 ## Audio Handoff
 

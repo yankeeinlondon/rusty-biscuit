@@ -48,6 +48,20 @@
   context since 2026-09-13, replacing `ci-verdict`. Load the `rust-devops`
   skill before changing CI scope, evidence reuse, or the gate.
 
+## CI/CD Test-scope Discipline
+
+- **This is a CI/CD rule. It does not extend to local testing**, where runs are
+  cheap and catch things early; over-testing locally has not been a problem
+  here.
+- Before adding a CI run, matrix cell, fixture, or gate, ask what question it
+  answers and whether something cheaper answers the same question.
+- Never trigger a full-scope run to learn UI behavior or ruleset semantics that
+  could be read or reasoned out. CI turnaround here runs to hours, so a
+  speculative cell is not a small cost.
+- This is the upstream question — should the cell exist at all. "Evidence Reuse
+  and Execution Constraints" below is the downstream one — must an existing
+  cell re-run.
+
 ## Evidence Reuse and Execution Constraints
 
 - Reuse qualifying passing evidence for each required cell on every OS. When
@@ -135,7 +149,19 @@ Update alongside code changes:
     - features/fixes which have been identified but not scheduled (aka, lower urgency) will be found in `_unscheduled` with non-dated filename
     - features/fixes as direct subdirectories are "active" features/fixes and should always follow the format `YYYY-MM-DD-{name}`
         - the files in a feature/fix can vary but almost always will be the `spec.md` file
-    - when a feature/fix is completed it is moved to `_completed`
+    - the **author** moves a feature/fix into `_completed`, and only after the
+      review cycle closes
+        - an agent never makes that move and never runs `just complete`; an
+          agent's terminal state is "implementation complete, ready for review"
+- **reference a feature/fix by its `{date}-{name}` directory alone**, never by a
+  path that carries a lifecycle directory
+    - write `2026-09-13-cicd-redundancies`, not
+      `fixes/_completed/2026-09-13-cicd-redundancies/spec.md`
+    - the lifecycle directory records where a spec is in its life, not what it
+      is; closing a spec moves it, and every reference that spelled out the old
+      location goes stale in the same commit
+    - this applies to `related:`/`depends-on:` frontmatter and to prose
+      cross-references alike
 
 <!-- gitnexus:start -->
 

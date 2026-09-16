@@ -110,9 +110,13 @@
 
 - [biscuit-test-harness](../../biscuit-test-harness) _v0.1.0_
 
-    _Optional behind `schematic-gen/terminal-tests`; `terminal_capture.rs` uses
-    its `bin_exe!` macro to locate the generator in the L2 tmux tier. Local L1
-    omits the target and dependency, while CI and `just test-l2` enable them._
+    _Declared twice on purpose: an unconditional `[dev-dependencies]` entry every
+    test target can use, plus an optional `[dependencies]` entry behind
+    `schematic-gen/terminal-tests` that carries it into the L2 tmux tier.
+    `terminal_capture.rs` uses its `bin_exe!` macro to locate the generator; the
+    L1 artifact and Postman tests use `manifest_dir!()` to resolve committed
+    artifacts through the run-time manifest directory, so an archived run reads
+    the executing checkout rather than the builder's._
 
     _Tags: workspace, testing_
 
