@@ -300,14 +300,29 @@ ci-local *args="":
         # compiles on demand: a pre-trigger review must not start a build.
         # Without the prebuilt binary the same cells render as plain lines.
         echo "Constraint store: ${constraints_dir}"
-        plan_bin="${BISCUIT_CI_PLAN_BIN:-scripts/target/release/ci-plan}"
+        plan_bin="${BISCUIT_CI_PLAN_BIN:-target/release/ci-plan}"
         if [[ -x "${plan_bin}" ]] && "${plan_bin}" "${plan_view}"; then
             :
         else
+            # The same change inventory the renderer and `ci-reporting` show,
+            # read from the same plan field so the three cannot disagree about
+            # what changed (spec section 7).
+            echo
+            jq -r '.change_inventory as $i
+                | if ($i.diff_available // false) | not then
+                    "Change inventory: no diff was consulted — \($i.reason // "the plan recorded no reason")"
+                  else
+                    "Change inventory: \($i.counts.total // 0) changed path(s)",
+                    ($i.paths // {} | to_entries[] | select(.value | length > 0)
+                      | "  \(.key) (\(.value | length)) — \(.value | join(", "))")
+                  end' "${plan_view}"
             echo
             echo "Resolved plan (cell / execution / origin / state)"
             echo "------------------------------------------------"
             jq -r '.cells[] | "  \(.package)/\(.environment)/\(.gate)  \(.execution)  \(.origin)  \(.state)  — \(.selection_reason)"' "${plan_view}"
+            if [[ "$(jq -r '.cells | length' "${plan_view}")" == "0" ]]; then
+                echo "  No package test is required: the resolved plan schedules no package cell."
+            fi
             if [[ "$(jq -r '(.evidence_rejections // []) | length' "${plan_view}")" != "0" ]]; then
                 echo
                 echo "Rejected evidence"
@@ -328,6 +343,14 @@ ci-local *args="":
     fi
 
     echo "CI scope: ${count} package(s) (class=${change_class}, full_scope=${full_scope}${full_gates:+ for ${full_gates}})"
+    # An affirmative scheduling decision, never a warning: the change reached no
+    # gating package, so the run names what it did change and says the gates it
+    # is not running are the ones nothing required (spec section 7).
+    if (( count == 0 )) && [[ -s "${plan_view}" ]]; then
+        jq -r '(.change_inventory.paths // {}) | to_entries[] | select(.value | length > 0)
+            | "Changed  : \(.key) (\(.value | length)) — \(.value | join(", "))"' "${plan_view}"
+        echo "No package test is required: the resolved plan schedules no package cell."
+    fi
     echo "Gates   : $([[ ${run_lint} == 1 ]] && printf 'lint ')$([[ ${run_check} == 1 ]] && printf 'check ')$([[ ${run_test} == 1 ]] && printf 'L1 ')$([[ ${run_l2} == 1 ]] && printf 'L2')"
     echo "------------------------------------------------"
     if (( dry_run == 1 )); then

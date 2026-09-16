@@ -456,7 +456,7 @@ started=\$(date +%s)
 #    split that keeps sniff, duckdb, and gix out of a hashing helper.
 cargo build --release --manifest-path scripts/Cargo.toml \\
     --no-default-features --features build-tools --bin ci-build
-tool="\$repo/scripts/target/release/ci-build"
+tool="\$repo/target/release/ci-build"
 
 # 2. One record, named by the plan. \`produce\` refuses a key this toolchain is
 #    not the planned host for, before it compiles anything.

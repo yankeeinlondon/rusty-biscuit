@@ -63,14 +63,71 @@ when investigating changes to external dependencies or hosted runners.
 
 On reuse, `scope`, `preflight`, the whole `area-ci` fan-out (which needs
 `scope`), and every rollup are skipped; `ci-gate` folds those skipped results
-and passes, and the advisory summary links the original PR run. The `ci`
+and passes, and advisory `ci-reporting` links the original PR run. The `ci`
 workflow still completes on `main`, preserving Release-plz's existing
 successful-CI trigger. Runs predating receipt publication cannot be reused.
 
 Validate this boundary with `python3 scripts/ci/test_reuse_validation.py`,
 `actionlint .github/workflows/ci.yml`, and the `ci_workflow_contracts` nextest
-suite. The Python suite also runs in preflight on every selected OS and in
-the CI-tooling job, which runs the `ci_workflow_contracts` suite as well.
+suite. Both are ordinary package suites — the Python one belongs to `repo-deps`
+and the Rust one to `test-toolkit` — so they run in their owners' own cells and
+nowhere else.
+
+## `ci.yml`'s jobs
+
+`ci.yml` defines exactly six top-level jobs, and a contract test pins the set:
+
+| job | blocks the merge? | what it is for |
+|---|---|---|
+| `validation` | yes | on a `main` push, decides whether successful PR validation covers this tree |
+| `scope` | yes | sources the resolved plan — a matching scope receipt or one selection run — and publishes it |
+| `preflight` | yes | bootstrap prerequisites only, per selected OS. Runs no test suite |
+| `area-ci` | yes | one caller identity per selected package area; every package gate lives under it |
+| `ci-gate` | yes — **the required check** | a policy-free fold of the four above |
+| `ci-reporting` | no (`continue-on-error: true`) | renders one reader-facing report of the run |
+
+There is no job that owns a test suite on CI's behalf. Every suite belongs to a
+package (see [CI's own tooling](#cis-own-tooling)) and runs in that package's
+own cell, so the plan places it once and one owner answers for it.
+
+`preflight` and `area-ci` are both matrix jobs guarded by a **scalar** plan
+output read before matrix expansion — `preflight_os != '[]'` and
+`has_packages == 'true'`. A run that schedules no OS and no area therefore
+resolves both to `skipped` immediately after `scope`, which is a decision rather
+than a property of GitHub's empty-matrix handling.
+
+### `ci-reporting`
+
+Advisory, `if: always()`, `continue-on-error: true`, and `needs` the whole run
+including `ci-gate` — so the report is written after the decision it declines to
+make. It never claims mergeability; `ci-gate` alone does that. It applies no
+baseline, accepted-gap, missing-cell, or merge policy.
+
+It has three modes, selected from its `needs` results:
+
+1. **Reused PR validation** — `validation` succeeded with `reuse == true`. It
+   links the authoritative prior run and states that this run executed no
+   package cell.
+2. **Successful scope** — it downloads the resolved plan and this run's
+   `ci-results-<slug>` area slices and renders them through
+   `ci-rollup summarize`, the same typed model the areas wrote. It does **not**
+   parse raw JUnit here: a second result model could disagree with the area that
+   produced it.
+3. **Failed or cancelled bootstrap** — it names the first actionable
+   infrastructure failure in dependency order (`validation`, then `scope`).
+   `area-ci` is deliberately absent: every package gate is a cell in its own
+   area's coverage audit.
+
+Mode 2 renders the plan's change inventory, the direct and reverse dependency
+sets, per-environment test counts and durations including machine-recorded
+companion counts, the Linux-only `ci` lint command duration explicitly labeled
+as such, and each cell's literal `ci` / `local` / `prior-local` origin. A
+measurement it does not have renders as `not recorded` with the reason — never
+as `0`. There is no `cicd` origin, and `check` and `lint` remain CI-origin.
+
+Because every area uploads its result slice under `always()`, an area whose
+cells were all reused still produces one; a missing slice means that area never
+started.
 
 ## `environment` is not `os`
 
@@ -290,7 +347,14 @@ native-package installer, a `build` compile contract (below), and a
 | `tmux` | whether a headless L2 terminal backend can be provisioned here |
 | `headless_browser` | whether a headless browser can be hosted here |
 | `node_pnpm` | whether Node 22 + pnpm 10 are provisioned here |
+| `cargo_toolchain` | whether a runnable `cargo`/`rustc` is present, for suites that shell out to one |
 | `archive_only` | whether this environment runs from a prebuilt nextest archive (no Cargo) |
+
+`cargo_toolchain` and `archive_only` are distinct questions that happen to
+share an answer today. `archive_only` says *how* a cell executes;
+`cargo_toolchain` says *what the guest holds*. A test binary runs perfectly
+well from an archive — until it shells out to `cargo metadata` or a `just`
+recipe, which is what `cargo_toolchain` governs.
 
 A capability value is either a boolean or, for a **governed unavailability**, an
 object carrying `available: false` plus `reason`, `owner`, `expiry`, and
@@ -446,9 +510,16 @@ would silently exempt a package and miss its first test.
 | `all-features` | bool | `false` | run with `--all-features`. Conflicts with `features` |
 | `l1-include-slow` | bool | `false` | keep `slow_` tests inside the L1 selection (darkmatter's contract) |
 | `runner-tools` | string[] | `[]` | closed vocabulary of RUNTIME facilities the consumer provisions: `ai-provider-stubs`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn`, `neovim`, `zed-extension` |
-| `companion-suites` | string[] | `[]` | non-Cargo suites this package owns; closed vocabulary: `homelab-frontend` |
+| `companion-suites` | string[] | `[]` | non-Cargo suites this package owns; the closed vocabulary is `SUITE_REGISTRY`'s companion half in `affected_scope.py` |
 | `archive-includes` | string[] | `[]` | build outputs the producer must add to this package's archive, relative to the profile output directory |
 | `sidecars` | string[] | `[]` | named build sidecars from [`sidecars.json`](sidecars.json) — another package's binaries, compiled by the producer |
+| `requires-toolchain` | bool | `false` | this package's L1 shells out to `cargo` or `just`, so an environment without `cargo_toolchain` renders a governed `ACCEPTED GAP` rather than a red cell |
+
+`requires-toolchain` is for the minority of suites that test the repository's
+own tooling — they open the workspace with `cargo metadata` or drive real
+`just` recipes in a scratch tree. Declaring it is not a way to opt out of an
+environment: the cell still appears, still names the capability it lacks, and
+still carries an owner and expiry.
 
 `[package.metadata.ci.native]`: a map of runner OS (`ubuntu-latest`,
 `windows-latest`, `macos-latest`) → system packages needed to build/test. The
@@ -558,15 +629,29 @@ for a package result.
 
 ### Companion suites
 
-`companion-suites` names non-Cargo test suites this package owns, from a
-closed vocabulary. `homelab-frontend` invokes the existing non-focusing
-frontend recipe (`homelab/justfile::test-frontend`) and attributes its
-producer status to `homelab-server`/L1. A companion suite must emit
-machine-readable evidence or a producer failure: a green Rust JUnit report
-must never hide a failed OR SKIPPED companion suite
-(the producer-status `failure` downgrades the cell in the rollup, and a
-companion outcome other than `success` — or none at all — downgrades it the
-same way).
+`companion-suites` names non-Cargo test suites this package owns, from the
+closed vocabulary `SUITE_REGISTRY` declares. Each registered suite has one
+owner, one canonical recipe, one declared environment, and one machine-readable
+outcome; the registry — never the workflow — decides which recipe runs where:
+
+| registry field | meaning |
+|---|---|
+| `recipe` | the command the owner's **test** job runs |
+| `lint_recipe` | the command the owner's **lint** job runs, when the suite has a lint half. A suite without one is absent from the lint cell rather than expected there and never run |
+| `environment` | the ONE environment that runs it. Only that cell loses its reuse (R7); the owner's other L1 cells stay reusable |
+| `counts` / `counts_args` | how `companion_suites.py` obtains machine-readable counts: `json` (this repository's own document, written by `suite_runner.py`) or `vitest` (`--reporter=json`) |
+| `counts_reason` | why a suite reports no counts, for a gate with no test cardinality (`tsc --noEmit`). Rendered as `not recorded` with this reason — never `0` |
+| `node` | the suite needs the Node + pnpm toolchain, which is what `node-environments` is derived from |
+
+`_package-ci.yml` runs one step per job that invokes
+`scripts/ci/companion_suites.py` for that cell's `{environment, gate}`; the
+runner resolves the package's declared names against the registry, runs each
+attached suite once, and records **one** outcome, count, and command duration
+per suite. A green Rust JUnit report must never hide a failed OR SKIPPED
+companion suite, and one suite's success can never cover another's: every
+declared suite is answered for separately, an unreported suite fails its cell,
+and an outcome for a suite the cell never declared fails it as a mis-wired
+producer.
 
 ### Exclusions must be owned and time-bounded
 
@@ -811,15 +896,15 @@ removed its execution from the environment lists the area hands each package.
 
 `ci.yml`'s `ci-gate` job is the **only** check branch protection should
 require. It applies no policy: it `needs` every blocking top-level job
-(`validation`, `scope`, `preflight`, `area-ci`, `biscuit-tui-captured-stdout`,
-`ci-tooling`), runs `if: always()`, and its one step folds `needs.*.result`,
+(`validation`, `scope`, `preflight`, `area-ci`), runs `if: always()`, and its
+one step folds `needs.*.result`,
 passing only when every result is `success` or `skipped`. `skipped` is
 accepted by design — an unselected area's job is skipped through its `if:`,
 and on a reused validation every downstream job is — while `failure` and
 `cancelled` block. Because `needs` names static job ids, a cell the plan
 scheduled and no job produced (`MISSING`) is invisible to the fold; each
 area's own coverage audit catches it. `continue-on-error` turns a failed job's result
-into `success` for the fold, so it is reserved for the advisory summary and no
+into `success` for the fold, so it is reserved for advisory `ci-reporting` and no
 blocking job may carry it. All of this was measured in a scratch repository:
 `fixes/2026-09-11-cicd-cleanup/fixtures/scratch-2026-09-12.md`.
 
@@ -844,16 +929,19 @@ slices (there is no whole-run `ci-results` artifact any more) and
 
 ### The result document
 
-`ci-results.json` and the skip-only baseline are independently versioned; both
-currently use `schema_version: 3`. Identity is still
+`ci-results.json` and the skip-only baseline are independently versioned:
+the result document is at `schema_version: 4` and the baseline at 3. Identity is still
 `{package, environment, tier}`; each cell also
 carries its derived `area`, its `origin` (`ci`, `local`, `prior-local`, or
 `none`), the `evidence` behind a reused result, its measured `duration_s`, and
-the `target_kinds` and `compile_coverage_from` the plan assigned it. The
-document carries `accepted_evidence`, one entry per reused cell — the same set
-that was accepted for *scheduling*, so the scheduler and the report cannot
-disagree. A document from an earlier generation is refused with a migration
-error rather than partly read.
+the `target_kinds` and `compile_coverage_from` the plan assigned it. Version 4
+made `counts` optional alongside `duration_s`, so a cell nobody measured omits
+the field rather than reporting a zero that reads as a suite which found
+nothing. The document carries `accepted_evidence`, one entry per reused cell —
+the same set that was accepted for *scheduling*, so the scheduler and the
+report cannot disagree. A document from an earlier generation is refused by its
+version, before any cell is interpreted, with the migration that applies named;
+the fix is to re-run the rollup that produced it.
 
 `rollup` and `verdict` both take `--area`, which narrows the document, its
 scope, its scheduled set, and its accepted evidence together: an area then
@@ -871,8 +959,8 @@ junit-<package>-<tier>-<environment>/
     <tier>/<package>.xml      that invocation's verbatim JUnit document
 
 status-<package>-<job>[-<environment>]/
-    status.json               {"package","job","environment","result"
-                               [,"detail"][,"companion"][,"build"][,"timings"]}
+    status.json               {"package","job","environment","result"[,"detail"]
+                               [,"duration_s"][,"companions"][,"build"][,"timings"]}
 
 build-status-<package>-<producer>-<key>/
     build-status.json         {"key","package","producer","artifact","result","stage",
@@ -903,11 +991,17 @@ with no covering manifest record has no trustworthy identity and is dropped.
 producer job visibly; the status document preserves the exact cell identity
 and diagnosis. The status step and its upload carry `if: ${{ always() }}`, so
 a job that failed in setup or was cancelled still reports itself; a job that reports nothing at all is
-`MISSING`, never a pass. A package that
-declares a companion suite also records the companion step's `companion`
-outcome on every run — not only on failure — because a *skipped* companion
-leaves no other evidence, and the rollup downgrades a green cell whose
-declared companion produced no success evidence (R12).
+`MISSING`, never a pass. A package that declares companion suites records one
+`companions` entry per suite on every run — not only on failure — because a
+*skipped* companion leaves no other evidence, and the rollup downgrades a green
+cell whose declared companion produced no success evidence (R12). Each entry
+carries that suite's own `outcome`, its `counts` or the `reason` it has none,
+and its command `duration_s`.
+
+A gate with no JUnit report to carry its duration records it here instead:
+`lint` times the `just _lint` invocation itself, not the job, which also
+includes checkout, toolchain setup, cache restore, and provisioning (R14). An
+unmeasured duration is **absent**, never `0`.
 
 ### `job` is read as a tier
 
@@ -1000,25 +1094,65 @@ The resolved plan and the validation receipt are defined and validated in
 `schemas/contract.json` is the field contract dumped from that module for Rust
 tooling; regenerate it with `python3 scripts/ci/schema.py`.
 
+### `change_inventory`
+
+Plan schema version 3 added the required `change_inventory`: the changed paths
+the calculator already received, normalized to one repository-relative spelling,
+sorted, de-duplicated, and bucketed exhaustively into `configuration`,
+`documentation`, `source`, and `other` with per-bucket and total counts. A
+rename contributes one logical path. A full-scope request (`--all`,
+`workflow_dispatch`) has no diff, so it records that explicitly rather than an
+empty list that would read as "nothing changed".
+
+It is a sibling of `change_class`, not a replacement: `classify_preflight()`
+still returns `change_class` and that is still what sets preflight breadth.
+
+Both readers consume that one field and neither re-derives it — `ci-plan`
+renders it in the terminal through the `TerminalRenderable` components, and
+`ci-reporting` renders it as GitHub Markdown. A scope receipt written against
+version 2 is refused once with the existing `scope-schema` reason and one fresh
+calculation follows; it is never upgraded in place.
+
 ## CI's own tooling
 
-The merge-gate binary (`scripts/ci-rollup*.rs`), the scope calculator
-(`scripts/ci/`), and the policy store (`.github/ci/`) are not Cargo packages,
-so a change to them selects nothing. `affected_scope.py` maps those paths to a
-`ci_tooling` flag and `ci.yml` runs their own suites (the scope tests and the
-rollup's nextest suite) on a dedicated `ci-tooling` leg, classified in the
-advisory summary like the specialized workflows. The same leg runs the R11
-workflow-contract suite (`cargo nextest run -p test-toolkit --test
-ci_workflow_contracts`), and a change to any `.github/workflows/` file or to
-that suite's source also sets the flag, because `test-toolkit` is
-`gates = false` (promotion-pending, expiry 2026-10-31) and no area job
-schedules it. The durable fix remains its promotion to a gating package.
+CI's own suites are owned by two ordinary workspace members. `repo-deps`
+(`scripts/`) owns the merge-gate and plan binaries' Nextest suites and the
+`scripts/ci/test_*.py` contracts; `test-toolkit` (`tools/test-toolkit/`) owns
+`ci_workflow_contracts` and the `tools/test-audit` typecheck/Vitest pair. Both
+gate, so a change to CI's own tooling reaches CI as an ordinary package job.
 
-The leg is also the only runner for the two suites that are neither Cargo
-packages nor selected by one: the shared test-suite audit tool
-(`pnpm --dir tools/test-audit check`) and the build owner's artifact publisher
+`SUITE_REGISTRY` in `affected_scope.py` is the one declaration site: suite name
+→ owner, canonical recipe, environment, kind (`cargo` or `companion`), and how
+that suite reports counts. `validate_suite_registry` rejects an unknown,
+unowned, doubly-owned, recipe-less, or undeclared suite, and a companion that
+neither reports counts nor says why it cannot.
+
+Selection follows ownership. `scripts/**` and `tools/test-toolkit/**` are their
+owners' package directories, so ordinary source ownership already selects them.
+`SUITE_OWNER_PREFIXES` / `SUITE_OWNER_PATHS` carry only what lies outside a
+member directory, plus the two owners' own manifests:
+
+| changed input | selects |
+|---|---|
+| `.github/ci/**` | `repo-deps` |
+| `scripts/Cargo.toml` | `repo-deps` |
+| `.github/workflows/**` | `test-toolkit` |
+| `tools/test-audit/**`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` | `test-toolkit` |
+| `tools/test-toolkit/Cargo.toml` | `test-toolkit` |
+
+A trigger selection is narrower than a source change: the changed path says
+nothing about the owner's public API, so it contributes no reverse
+dependencies and no dependent seam, and the owner's area reports
+`changed suite input owned by package(s) …` rather than a source change.
+No path selects the full workspace; `workflow_dispatch` / `--all` remains the
+only full-scope route.
+
+One suite is not yet in that table: the build owner's artifact publisher
 (`node --test 'scripts/ci/artifacts/*.test.cjs'`, the owner aggregate AC8 is
-read from). Both run on the Node the leg pins with `actions/setup-node`.
+read from). It is a Node module under `scripts/`, so a change to it already
+selects `repo-deps` by ordinary source ownership; it still needs a
+`SUITE_REGISTRY` entry — with the Node toolchain the `tools/test-audit` suites
+declare — before that selection schedules it.
 
 ### CI helper runtime floors
 

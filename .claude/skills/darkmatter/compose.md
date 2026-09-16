@@ -233,6 +233,10 @@ the `$()` ternary condition/branch) is local-only, so a remote URL argument
 fails loudly there; only body interpolation carries a remote runtime. See
 `darkmatter/docs/topics/darkmatter-expressions.md`.
 
+How text becomes an AST — scanning, lexing, the grammar ladder, and which
+surfaces treat a malformed expression as fatal rather than a warning — is in
+`darkmatter/docs/topics/parsing/`.
+
 ### Context Values (`ctx.*`)
 
 Context is captured once per compose run and reused across the full document

@@ -6,6 +6,7 @@
       "base": true,
       "head": true,
       "change_class": true,
+      "change_inventory": true,
       "full_scope": true,
       "full_scope_gates": true,
       "areas": true,
@@ -65,6 +66,7 @@
       "gap": false,
       "prohibition": false,
       "dependents": false,
+      "companions": false,
       "build": false
     },
     "build": {
@@ -99,6 +101,12 @@
       "native": true,
       "archive_includes": true,
       "sidecars": true
+    },
+    "change_inventory": {
+      "diff_available": true,
+      "paths": false,
+      "counts": false,
+      "reason": false
     }
   },
   "receipt": {
@@ -233,6 +241,12 @@
       "reused",
       "accepted-gap",
       "prohibited"
+    ],
+    "change_buckets": [
+      "configuration",
+      "documentation",
+      "source",
+      "other"
     ],
     "accepted_gap_state": "ACCEPTED GAP",
     "completions": [

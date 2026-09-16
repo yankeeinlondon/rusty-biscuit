@@ -6,8 +6,10 @@ and work-count evidence. One implementation, driven by a validated per-area
 configuration file; no product behavior lives here.
 
 It is a TypeScript member of the root pnpm workspace (`pnpm-workspace.yaml`),
-pinned through the root `pnpm-lock.yaml`. Rust test runs never depend on it;
-only the `ci-tooling` CI leg provisions Node for its own checks.
+pinned through the root `pnpm-lock.yaml`. Rust test runs never depend on it.
+Its typecheck and Vitest suites are `test-toolkit`'s two companion suites, so
+Node is provisioned only for that package's `ubuntu-latest` cells — the one
+environment `SUITE_REGISTRY` declares for them.
 
 ## Install and verify
 

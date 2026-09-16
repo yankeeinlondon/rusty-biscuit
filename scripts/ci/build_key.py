@@ -58,7 +58,10 @@ _COMMAND: list[str] | None = None
 
 def _candidates() -> list[Path]:
     suffix = ".exe" if os.name == "nt" else ""
-    target = ROOT / "scripts" / "target"
+    # `scripts` is a member of the root workspace, so its binaries land in the
+    # root target directory. A build under `scripts/target` is pre-consolidation
+    # residue: stale, gitignored, and never what the planner should digest with.
+    target = ROOT / "target"
     return [target / profile / f"ci-build{suffix}" for profile in ("release", "debug")]
 
 

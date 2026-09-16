@@ -18,8 +18,11 @@ just run <command> [options]                # or: pnpm exec tsx src/cli.ts <comm
 
 Node 22 or later and pnpm 10. The package is a root pnpm-workspace member
 pinned through the root `pnpm-lock.yaml`. Ordinary Rust test runs never touch
-it; CI's `ci-tooling` leg runs `just check` when `tools/test-audit/**` or the
-root pnpm files change (`scripts/ci/affected_scope.py`, `CI_TOOLING_PREFIXES`).
+it; its `test-audit-typecheck` and `test-audit-vitest` suites are owned by the
+`test-toolkit` package and run as companion suites in that package's
+`ubuntu-latest` cell. A change under `tools/test-audit/**`, `pnpm-lock.yaml`,
+or `pnpm-workspace.yaml` selects that owner
+(`scripts/ci/affected_scope.py`, `SUITE_OWNER_PREFIXES` / `SUITE_REGISTRY`).
 Exit codes everywhere: 0 clean, 1 violations or malformed evidence, 2 usage.
 Every report is stamped with the tool version; reports from different
 versions are not silently comparable.

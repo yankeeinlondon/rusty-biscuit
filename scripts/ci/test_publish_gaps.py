@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import publish_gaps  # noqa: E402
+import schema  # noqa: E402
 
 
 TODAY = date(2026, 9, 12)
@@ -94,7 +95,7 @@ def cell(package: str, area: str, environment: str, gate: str = "L2", **override
 
 
 def plan(*cells: dict) -> dict:
-    return {"schema_version": 2, "cells": list(cells)}
+    return {"schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION, "cells": list(cells)}
 
 
 #: Two accepted gaps in `pkg`, one in `other`, and a pending cell in `pkg`
@@ -323,7 +324,10 @@ class CommandTests(CommandFixture):
         self.assertEqual(1, result.returncode)
         self.assertIn("cannot read the resolved plan", result.stderr)
 
-        self.plan_path.write_text(json.dumps({"schema_version": 2}), encoding="utf-8")
+        self.plan_path.write_text(
+            json.dumps({"schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION}),
+            encoding="utf-8",
+        )
         result = self.run_publisher("--dry-run", env={"PATH": ""})
         self.assertEqual(1, result.returncode)
         self.assertIn("no 'cells' list", result.stderr)

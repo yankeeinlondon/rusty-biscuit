@@ -99,7 +99,7 @@ The prompt at `.ai/prompts/performance-review.md` drives an evidence-based code 
 
 ### Current State
 
-The `sniff-performance.yml` GitHub Actions workflow runs a narrow Criterion subset on PRs that touch `sniff/**`, the workspace `Cargo.toml`, or the workflow file itself. It uploads Criterion HTML reports as 14-day artifacts and does **not** fail the build on regressions — this is intentional while the runner noise profile is being characterized.
+The `sniff-performance.yml` GitHub Actions workflow runs a narrow Criterion subset on PRs that touch `sniff/**` or the workflow file itself. It uploads Criterion HTML reports as 14-day artifacts and does **not** fail the build on regressions — this is intentional while the runner noise profile is being characterized.
 
 ### Recommended Workflow Integration
 

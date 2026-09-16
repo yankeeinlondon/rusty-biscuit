@@ -147,6 +147,19 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(claudine-cli) & test(/level2_/)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# `slow_`-prefixed `ci-build` tests drive the real archive producer end to end:
+# each one runs `cargo nextest archive` over a real package, so its duration is
+# a compile, not a test harness. Measured on a 16-core M4 with the host
+# compiler wrapper bypassed: 73s warm, 107s cold — above the default 5s×6 = 30s
+# ceiling and above the `ci` profile's 90s, so without this override the test
+# cannot pass on either profile regardless of cache state. A hosted runner is
+# slower still. The ceiling is deliberately far above the measured worst case:
+# what it is protecting against is a producer that never returns, not one that
+# is merely compiling.
+[[profile.default.overrides]]
+filter = 'package(repo-deps) & test(/slow_/)'
+slow-timeout = { period = "60s", terminate-after = 8 }
+
 [profile.local-evidence]
 # Evidence needs Nextest's machine-readable report without CI's runner-specific
 # concurrency caps. Test selection and failure policy inherit from the local
@@ -219,6 +232,16 @@ threads-required = "num-cpus"
 [[profile.ci.overrides]]
 filter = 'test(/browser_/)'
 retries = 0
+
+# The twin of the default-profile override: a `slow_` `ci-build` test spends its
+# time inside `cargo nextest archive` over a real package, which measured 73s
+# warm and 107s cold on a 16-core M4 — past this profile's own 90s ceiling, and
+# a hosted runner is slower again. This is one of the overrides the note above
+# calls earned: it expresses a contract that must survive a change to the
+# profile default, because the thing being bounded is a compile.
+[[profile.ci.overrides]]
+filter = 'package(repo-deps) & test(/slow_/)'
+slow-timeout = { period = "60s", terminate-after = 8 }
 
 # See the default-profile note: the pause this test waits out is its contract.
 # The period matches this profile's own default, so the entry buys nothing

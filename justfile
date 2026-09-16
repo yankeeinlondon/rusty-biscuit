@@ -312,7 +312,7 @@ sniff *args="":
 
 # show workspace package dependencies
 repo-deps:
-    @cargo run --manifest-path scripts/Cargo.toml --bin repo-deps
+    @cargo run -p repo-deps --bin repo-deps
 
 lint:
     @just _orchestrate lint

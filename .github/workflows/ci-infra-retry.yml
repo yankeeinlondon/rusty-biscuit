@@ -22,7 +22,7 @@ name: ci-infra-retry
 # `runner_loss.parse_job_name` reads the composite
 # `area-ci (<area>) / <package> / <gate> (<environment>)` label from the tail,
 # and every job that judges rather than produces (each area's `rollup`, the
-# advisory summary, and the `ci-gate` fold) is excluded, because its failure
+# advisory `ci-reporting`, and the `ci-gate` fold) is excluded, because its failure
 # follows from the lost producer's and would otherwise veto this retry.
 #
 # `workflow_run` executes this file from the default branch, so a change here

@@ -23,11 +23,20 @@ use biscuit_terminal::prelude::{
 };
 use serde::Deserialize;
 
+#[path = "ci-change-inventory.rs"]
+mod change_inventory;
+
+use change_inventory::{ChangeInventory, NO_PACKAGE_TESTS};
+
 #[derive(Debug, Deserialize)]
 struct Plan {
     base: String,
     head: String,
     change_class: String,
+    /// What changed, from the plan's own classification. Defaulted so a plan
+    /// written before schema 3 still renders the cells it does carry.
+    #[serde(default)]
+    change_inventory: ChangeInventory,
     #[serde(default)]
     areas: Vec<Area>,
     #[serde(default)]
@@ -248,6 +257,21 @@ fn render(plan: &Plan, term: &Terminal) -> String {
         .render(term),
     );
     out.push('\n');
+
+    out.push_str(&Prose::new(plan.change_inventory.headline()).render(term));
+    out.push('\n');
+    let inventory = plan.change_inventory.plain_entries();
+    if !inventory.is_empty() {
+        out.push_str(&UnorderedList::new(inventory).render(term));
+        out.push('\n');
+    }
+
+    // Spec section 7: the absence of scheduled work is a decision a reviewer
+    // has to see stated, not infer from an empty table.
+    if plan.cells.is_empty() {
+        out.push_str(&Prose::new(NO_PACKAGE_TESTS).render(term));
+        out.push('\n');
+    }
 
     if !plan.areas.is_empty() {
         out.push_str(

@@ -51,6 +51,15 @@ executing test cell can say which immutable compile it consumes instead of
 compiling its own. A version-2 receipt carries no build records at all, so it
 misses as `scope-schema` and CI resolves the plan itself rather than being
 partially upgraded into a document whose builds nothing derived.
+
+Version 3 also adds the required `change_inventory`: the changed paths,
+normalized and bucketed once by the calculator so every reader — the plan
+renderer, the local pre-push report, `ci-reporting` — states the same thing
+about what changed. It is computed from the paths alone and is deliberately
+allowed to disagree with `change_class`, which is derived from the gating
+packages a change selects. A version-2 scope receipt therefore misses once as
+`scope-schema` and is never upgraded in place; validation receipts are
+untouched, so `RECEIPT_SCHEMA_VERSION` does not move.
 """
 
 from __future__ import annotations
@@ -109,6 +118,11 @@ ORIGINS = ("ci", "local", "prior-local", "none")
 
 #: The plan-time state of a cell, before any result exists.
 CELL_STATES = ("pending", "reused", "accepted-gap", "prohibited")
+
+#: Buckets of the plan's change inventory, in report order. Exhaustive and
+#: disjoint over the changed paths: `other` is the declared home for a path no
+#: rule claims, so a reader never has to wonder whether a path was dropped.
+CHANGE_BUCKETS = ("configuration", "documentation", "source", "other")
 
 #: The machine-readable result state for a governed, unexpired policy gap.
 #: Design Decision 10: never inferred from a GitHub conclusion, so retry and
@@ -207,6 +221,11 @@ RESOLVED_PLAN_FIELDS: dict[str, bool] = {
     "base": True,
     "head": True,
     "change_class": True,
+    #: What changed, bucketed once from the changed paths. A sibling of
+    #: `change_class`, never a summary of it: `change_class` is derived from the
+    #: gating packages a change selects, so the two are allowed to disagree and
+    #: a reader is seeing the truth when they do.
+    "change_inventory": True,
     "full_scope": True,
     "full_scope_gates": True,
     "areas": True,
@@ -241,6 +260,17 @@ RESOLVED_PLAN_FIELDS: dict[str, bool] = {
     "preflight_os": True,
     "preflight_reason": True,
     "flags": True,
+}
+
+#: `paths` and `counts` are present exactly when `diff_available` is true, and
+#: `reason` exactly when it is false. A manual full-scope run consulted no diff;
+#: recording empty buckets would read as "nothing changed", which is a different
+#: and false claim.
+CHANGE_INVENTORY_FIELDS: dict[str, bool] = {
+    "diff_available": True,
+    "paths": False,
+    "counts": False,
+    "reason": False,
 }
 
 AREA_FIELDS: dict[str, bool] = {
@@ -312,6 +342,11 @@ CELL_FIELDS: dict[str, bool] = {
     #: On a `check` cell only: the package record's `dependent_seam.dependents`,
     #: carried so a reader of the cell alone sees what it also compiled.
     "dependents": False,
+    #: The registered companion suites THIS cell must run: name, canonical
+    #: recipe, declared environment, and whether counts are expected. Present
+    #: only on a cell a companion attaches to, which is the same cell R7 makes
+    #: non-reusable.
+    "companions": False,
     #: The planned build key this cell executes. Present exactly on an
     #: executing [`BUILD_GATES`] cell: a reused, governed, or prohibited cell
     #: consumes no build, and lint and check compile their own configurations.
@@ -472,6 +507,7 @@ def contract() -> dict[str, Any]:
             "build": BUILD_FIELDS,
             "build_consumer": BUILD_CONSUMER_FIELDS,
             "build_identity": BUILD_IDENTITY_FIELDS,
+            "change_inventory": CHANGE_INVENTORY_FIELDS,
         },
         "receipt": {
             "schema_version": RECEIPT_SCHEMA_VERSION,
@@ -498,6 +534,7 @@ def contract() -> dict[str, Any]:
             "executions": list(EXECUTIONS),
             "origins": list(ORIGINS),
             "cell_states": list(CELL_STATES),
+            "change_buckets": list(CHANGE_BUCKETS),
             "accepted_gap_state": ACCEPTED_GAP_STATE,
             "completions": list(COMPLETIONS),
             "outcomes": list(OUTCOMES),
@@ -573,6 +610,96 @@ def _str_list(where: str, value: Any, allowed: tuple[str, ...] | None = None) ->
     ]
 
 
+def _change_inventory(value: Any) -> list[str]:
+    """Every reason `value` is not a valid change inventory, or an empty list.
+
+    The invariants a reader depends on: one normalized spelling per path, one
+    bucket per path, sorted buckets, and counts that were derived from the
+    lists rather than reported alongside them.
+    """
+    where = "resolved plan change_inventory"
+    problems = _keys(where, value, CHANGE_INVENTORY_FIELDS)
+    if problems:
+        return problems
+
+    available = value["diff_available"]
+    if not isinstance(available, bool):
+        return [f"malformed-receipt: {where} diff_available must be a boolean"]
+
+    if not available:
+        problems = [
+            f"malformed-receipt: {where} reports no diff and must not carry {name!r}"
+            for name in ("paths", "counts")
+            if name in value
+        ]
+        if not isinstance(value.get("reason"), str) or not value.get("reason"):
+            problems.append(
+                f"malformed-receipt: {where} reports no diff and must state why"
+            )
+        return problems
+
+    if "reason" in value:
+        problems.append(
+            f"malformed-receipt: {where} carries a diff inventory and must not "
+            "also carry an absence reason"
+        )
+    for name in ("paths", "counts"):
+        if name not in value:
+            problems.append(
+                f"malformed-receipt: {where} carries a diff and is missing {name!r}"
+            )
+    if problems:
+        return problems
+
+    paths, counts = value["paths"], value["counts"]
+    if not isinstance(paths, dict) or sorted(paths) != sorted(CHANGE_BUCKETS):
+        return [
+            f"malformed-receipt: {where} paths must name exactly "
+            f"{list(CHANGE_BUCKETS)}"
+        ]
+    if not isinstance(counts, dict) or sorted(counts) != sorted(
+        (*CHANGE_BUCKETS, "total")
+    ):
+        return [
+            f"malformed-receipt: {where} counts must name exactly "
+            f"{[*CHANGE_BUCKETS, 'total']}"
+        ]
+
+    seen: set[str] = set()
+    for bucket in CHANGE_BUCKETS:
+        entries = paths[bucket]
+        problems += _str_list(f"{where} paths {bucket}", entries)
+        if not isinstance(entries, list) or not all(
+            isinstance(entry, str) for entry in entries
+        ):
+            continue
+        if list(entries) != sorted(entries):
+            problems.append(f"malformed-receipt: {where} {bucket} is not sorted")
+        problems += [
+            f"malformed-receipt: {where} {bucket} carries {entry!r}, which is "
+            "not a normalized repository-relative path"
+            for entry in entries
+            if "\\" in entry or entry.startswith("./") or entry != entry.strip()
+        ]
+        problems += [
+            f"malformed-receipt: {where} places {entry!r} in more than one bucket"
+            for entry in entries
+            if entry in seen or entries.count(entry) > 1
+        ]
+        seen.update(entries)
+        if counts[bucket] != len(entries):
+            problems.append(
+                f"malformed-receipt: {where} counts {bucket} is "
+                f"{counts[bucket]!r} but the bucket holds {len(entries)}"
+            )
+    if counts["total"] != len(seen):
+        problems.append(
+            f"malformed-receipt: {where} counts total is {counts['total']!r} "
+            f"but the buckets hold {len(seen)} paths"
+        )
+    return problems
+
+
 def validate_resolved_plan(document: Any) -> list[str]:
     """Every reason `document` is not a valid resolved plan, or an empty list.
 
@@ -600,6 +727,7 @@ def validate_resolved_plan(document: Any) -> list[str]:
         ("full", "package", "documentation"),
         "malformed-receipt",
     )
+    problems += _change_inventory(document["change_inventory"])
 
     areas = {}
     for entry in document["areas"]:

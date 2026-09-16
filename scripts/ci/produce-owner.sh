@@ -8,7 +8,7 @@ fi
 # entry point is also exercised by the real-Cargo shared-dependency fixture.
 start=$(date +%s)
 status=0
-"${CI_BUILD_BIN:-./scripts/target/release/ci-build}" produce \
+"${CI_BUILD_BIN:-./target/release/ci-build}" produce \
     --plan "${CI_BUILD_PLAN:-ci-artifacts/ci-resolved-plan/resolved-plan.json}" \
     --producer "$PRODUCER" \
     --out-dir "$RUNNER_TEMP/build" \

@@ -70,13 +70,22 @@ helper that resolves it is named so it is not re-derived.
    `_native_path` itself can be handed a native spelling; an array literal is
    not. `_archive_file_check` refuses an unreadable `--archive-file` and names
    this hazard rather than letting the mangled value reach nextest.
+8. **A `file://` URI must carry neither the verbatim prefix nor a `\`.**
+   Percent-encoding a canonicalized Windows path yields
+   `file://%5C%5C%3F%5CC:/…`, which no terminal opens, and a drive-absolute
+   path still needs the extra leading `/` that makes `file:///C:/…`. Normalize
+   separators to `/`, strip `\\?\` (mapping `\\?\UNC\server\share` to the URI
+   authority `server/share`), then prefix. Test the spellings as string
+   literals so the macOS and Linux cells cover them too — `fs::canonicalize`
+   only produces the verbatim form on Windows, so a fixture built from it is
+   dead code everywhere else. Found 2026-09-14 in `scripts/drift.rs::file_uri`.
 
 Contract to test against: `ctx.repo_root`, `package_root`,
 `package_area_root`, and `area_root` are portable `/`-separated strings
 without verbatim prefixes on every OS (`biscuit_file::to_portable_string`).
 Compare against that, never against `to_string_lossy()`.
 
-8. **A user-typed path fragment never matches walker output by raw text.**
+9. **A user-typed path fragment never matches walker output by raw text.**
    `ignore::Walk` yields native `\` paths; the fragment is whatever was typed,
    `/` on every platform. Claudine's partial-file and operation-file
    autocomplete compared them raw and found zero candidates on Windows for
@@ -129,6 +138,16 @@ Compare against that, never against `to_string_lossy()`.
   `HANDLE_FLAG_INHERIT` on the current process's stdio before setting the
   detached creation flags (needs `windows-sys` features `Win32_Foundation`
   and `Win32_System_Console`). Unix never sees this; fds are close-on-exec.
+- **`python3` is an App Execution Alias, not an interpreter.** Windows ships a
+  stub at `python3.exe` that *spawns successfully* and then exits non-zero with
+  "Python was not found; run without arguments to install from the Microsoft
+  Store". `Command::new("python3").output()` returning `Ok` is therefore not
+  evidence an interpreter exists, and every "skip where python3 is missing"
+  guard written against `Err` fails on Windows instead of skipping. Probe
+  `--version` and require `status.success()`, and try `python` as well — the
+  hosted `windows-latest` image installs the real interpreter under that name.
+  Found 2026-09-14 by the first native-Windows run of `repo-deps`
+  (`scripts/ci-rollup-tests.rs::python_interpreter`).
 - **A `.cmd`/`.bat` cannot receive an argument containing a newline** ("batch
   file arguments are invalid"). A fake provider that receives a multi-line
   prompt must be a compiled `.exe`; see the rustc-built fixture in claudine's
@@ -167,6 +186,47 @@ Compare against that, never against `to_string_lossy()`.
   cross-platform Ctrl+C acceptance criterion as met until a
   `SetConsoleCtrlHandler` path exists; see the claudine skill's
   `signal-handling.md`, "Windows parity".
+
+## Attaching a console inside a nextest process
+
+`biscuit-tui/cli/tests/windows_captured_stdout.rs` is ordinary `windows-latest`
+**L1** evidence inside `biscuit-tui-cli`'s own cell — not an `#[ignore]`d test
+behind a hand-invoked recipe or workflow. Everything below was measured on
+`build-win-native` at the CI thread count (`--test-threads 4`), 2026-09-14.
+
+- **Process-wide handle rewiring is safe only because nextest gives each test
+  its own process.** `AllocConsole` + `SetStdHandle` mutate process state; under
+  `cargo test`'s shared harness they would corrupt every sibling test in the
+  binary. Say so in the test's `//!` docs — it is the reason the tier is L1
+  rather than a serialized L3.
+- **`AllocConsole` returning `ERROR_ACCESS_DENIED` (0x80070005) is the normal
+  path, not a failure.** A console is usually already present, and the API
+  reports that as access denied. Treat "already present or failed" as one state
+  and assert the *precondition you actually need* — `stderr.is_terminal()` and
+  `CONOUT$` openable — instead of the call's return value.
+- **Redirecting a std handle to `CONOUT$` makes everything printed afterwards
+  invisible to nextest.** The line goes to the attached console, not to the
+  harness pipe. Two consequences, both found the hard way: a success diagnostic
+  printed after the redirect never reaches the log (`grep -c` returns 0), and —
+  worse — an assertion that panics *after* the redirect leaves nextest reporting
+  `FAIL` with an empty message. Redirect only the handle the contract requires
+  (stderr here; the stdout redirect was deleted as unnecessary), capture the
+  original handle before redirecting, and restore it the moment the child exits
+  so later failures are reported through the pipe.
+- **The console input buffer queues injected records**, so a written input
+  record survives the child not having started its event loop yet. The 750 ms /
+  250 ms fixed sleeps this test shipped with were covering a measured
+  requirement of **0 ms**: the test's real work is ~45 ms and the sleep *was*
+  its 0.78 s runtime. A bounded readiness loop — 2 s deadline, 25 ms poll,
+  re-inject at 500 ms — replaced them; no passing run has needed the second
+  injection. Keep the loop anyway: it converts a timing assumption into an
+  assertion that fails loudly at its own deadline rather than at nextest's 90 s
+  `ci` termination ceiling, and it kills and reaps the child so the cell reports
+  `FAIL` rather than `LEAK`.
+- Six consecutive clean runs, zero flakes (392 run / 392 passed / 7 skipped).
+  Runs that died in `git fetch` with `ssh: connect to host github.com port 22`
+  are a build-host network fault, not a test result — exclude them rather than
+  counting them as failures.
 
 ## The `windows-latest` leg
 

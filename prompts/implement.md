@@ -1,7 +1,7 @@
 ---
 $schema:
-    - spec: file(required;eager;match(**/*spec*.md))
-    - review: file(required;eager;match(**/*review*.md))
+    - spec: file(required;eager;match(**/*spec*.md)) -> the specification file as reference
+    - review: file(required;eager;match(**/*review*.md)) -> the review file
     - plan: file(required;eager;match(**/*plan*.md))
 name: Implementation Router
 description: |-
@@ -16,26 +16,40 @@ description: |-
         - if there is no associated spec then we will look for an associated review
         - if neither spec or review's are found nearby we'll implement the plan without linked/associated content
 
-pending_review: "{{ spec ? replace(spec, basename(spec), 'review-' + (frontmatter(spec, 'review_iterations') || 1) + '.md') : null }}"
+pending_review: |-
+    {{ 
+        spec 
+            ? replace(spec, basename(spec), 'review-' + (frontmatter(spec, 'review_iterations') || 1) + '.md') 
+            : null 
+    }}
 
 initialize: 
     stack:
         - when: "spec && pending_review && file_exists(pending_review) && !frontmatter(pending_review, 'implemented')"
           action:
-            - info: an _unimplemented review_ was found beside the specification and will be routed to **implement-suggestions** before the original plan is considered again.
+            - info: |-
+                found the specification review that needs implementation: {{link(pending_review)}}. Will route to the **implement-suggestions** prompt for completion
+            - ensure_file: "{{ dirname(spec) + '/implementation-log.md' }}"
             - action: proxy
               target: ./_implement/implement-suggestions.md
               with:
                   review: "{{ pending_review }}"
                   iteration: "{{ file_index(pending_review) }}"
-        - when: "spec && frontmatter(spec, 'implemented')"
-          action: 
-            - info: an _implemented_ spec file was passed into the **implementation** router and will be routed to **implement-suggestions** with the assumption that we are in a _review-to-implement_ looping cycle currently.
-            - proxy: ./_implement/implement-suggestions.md
+                  log: "{{ dirname(spec) + '/implementation-log.md' }}"
+        # - when: "spec && frontmatter(spec, 'implemented')"
+        #   action: 
+        #     - info: |-
+        #         an _implemented_ spec file was passed into the **implementation** router and will be routed to **implement-suggestions** with the assumption that we are in a _review-to-implement_ looping cycle currently.
+        #     - proxy: ./_implement/implement-suggestions.md
         - when: "spec && !frontmatter(spec, 'implemented')"
           action:
-              - info: a _specification file_ was pass in that has **not** been implemented yet; it will be routed to **implement-plan** so that the spec get's implemented
-              - proxy: ./_implement/implement-plan.md
+              - info: |-
+                    a _specification file_ was passed in that has not been implemented yet; it will be routed to **implement-plan** so that the spec get's implemented
+              - ensure_file: "{{ dirname(spec) + '/implementation-log.md' }}"
+              - action: proxy
+                target: ./_implement/implement-plan.md
+                with:
+                    log: "{{ dirname(spec) + '/implementation-log.md' }}"
         - when: review
           action:
               - info: "a _review_ was passed into the implementation router and will be routed to **implement-review**"

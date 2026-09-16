@@ -1,5 +1,3 @@
-[workspace]
-
 [package]
 name = "repo-deps"
 version = "0.1.0"
@@ -13,14 +11,14 @@ publish = false
 # `ci-rollup` links none of the monorepo's crates: it is the fast, always-runs
 # merge-gate binary and must never pay for gix, duckdb, or the terminal
 # renderer. CI builds it as:
-#     cargo run --manifest-path scripts/Cargo.toml --no-default-features --bin ci-rollup
+#     cargo run -p repo-deps --no-default-features --bin ci-rollup
 #
 # `build-tools` is the middle level, for the two binaries the *planner* depends
 # on. `affected_scope.py` computes every planned build key through `ci-build`,
 # so that binary is now on the critical path of every scope calculation —
 # including the pre-push hook's. Putting it behind `local-tools` would make
 # resolving a plan compile sniff's duckdb and gix closure to answer a hash:
-#     cargo run --manifest-path scripts/Cargo.toml \
+#     cargo run -p repo-deps \
 #       --no-default-features --features build-tools --bin ci-build
 #
 # `local-tools` adds the workspace-inspecting crates only `repo-deps` and
@@ -81,3 +79,34 @@ find-msvc-tools = { version = "0.1.12", optional = true }
 
 [dev-dependencies]
 rstest = "0.23"
+
+# The L1 suite covers `ci-rollup`, `ci-plan`, `ci-build`, and `drift`, all of
+# which need the default `local-tools` feature; declaring no `features` here is
+# what selects it.
+#
+# The planner's Python contracts are this package's companion suites: they test
+# `scripts/ci/`, they are not reachable through `cargo nextest`, and every one
+# is registered to `repo-deps` in `scripts/ci/affected_scope.py`'s
+# `SUITE_REGISTRY`. They run on the one environment that registry declares.
+[package.metadata.ci.tests]
+tiers = ["L1"]
+companion-suites = [
+    "artifact-publisher",
+    "test_affected_scope.py",
+    "test_build_baseline_revision.py",
+    "test_build_key.py",
+    "test_ci_local.py",
+    "test_constraints.py",
+    "test_cross_check.py",
+    "test_evidence_reuse.py",
+    "test_local_evidence.py",
+    "test_publish_gaps.py",
+    "test_resolved_plan.py",
+    "test_reuse_validation.py",
+    "test_runner_loss.py",
+    "test_schema.py",
+]
+# `ci-rollup`'s round-trip test runs the real planner, and the planner opens the
+# workspace with `cargo metadata`. Environments without a toolchain render a
+# governed ACCEPTED GAP instead of a red cell.
+requires-toolchain = true

@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import local_evidence  # noqa: E402
 import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
+from affected_scope import change_inventory  # noqa: E402
 from local_evidence import NOTES_PREFIX, verified_environment  # noqa: E402
 
 
@@ -165,6 +166,11 @@ class EvidenceFixture(unittest.TestCase):
             "base": self.base,
             "head": self.head,
             "change_class": "package",
+            # The real producer, so a fixture plan cannot describe a shape the
+            # planner no longer emits.
+            "change_inventory": change_inventory(
+                ["alpha/src/lib.rs", "beta/src/lib.rs"], False
+            ),
             "full_scope": False,
             "full_scope_gates": [],
             "areas": [
@@ -219,7 +225,7 @@ class EvidenceFixture(unittest.TestCase):
             "job_estimate": len(cells),
             "preflight_os": ["ubuntu-latest"],
             "preflight_reason": "package-local change",
-            "flags": {"ci_tooling": False},
+            "flags": {},
         }
         return plan_fixtures.attach_builds(document)
 

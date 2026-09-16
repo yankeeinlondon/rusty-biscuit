@@ -136,7 +136,7 @@ drift *args="":
     @echo "- step 3: review CLAUDE.md for needed updates"
     @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
     @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- queue {{ DOCS }} {{ args }}
+    @cargo run -p repo-deps --bin drift -- queue {{ DOCS }} {{ args }}
     @_speak "the drift recipe for the queue package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
 
 # No-op recipe: reference color vars so linters won't report them as unused.

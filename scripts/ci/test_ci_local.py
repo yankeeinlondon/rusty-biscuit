@@ -19,7 +19,7 @@ import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
 import tool_guard  # noqa: E402
 from tool_guard import require_tools, requires_tools  # noqa: E402
-from affected_scope import legacy_scope_document  # noqa: E402
+from affected_scope import change_inventory, legacy_scope_document  # noqa: E402
 from workflow_reading import (  # noqa: E402
     WorkflowLayoutError,
     job_names,
@@ -421,6 +421,58 @@ class L1ThreadForwardingTests(unittest.TestCase):
 class PlanSurfaceTests(unittest.TestCase):
     """AC17: the reviewable plan shown before a push or other trigger."""
 
+    @staticmethod
+    def environment_records() -> list[dict]:
+        return [
+            {
+                "name": name,
+                "runner": "windows-latest" if name == "wsl2-ubuntu" else name,
+                "native_key": "ubuntu-latest" if name == "wsl2-ubuntu" else name,
+                "capabilities": {
+                    "tmux": name in ("ubuntu-latest", "macos-latest"),
+                    "headless_browser": name == "ubuntu-latest",
+                    "node_pnpm": name == "ubuntu-latest",
+                    "archive_only": name == "wsl2-ubuntu",
+                },
+            }
+            for name in schema.ENVIRONMENTS
+        ]
+
+    def documentation_plan(self) -> dict:
+        """A documentation-only change's plan: an inventory and no cell at all.
+
+        Spec section 7's local half. The recipe must name the documents and
+        state that no package test is required, as an affirmative scheduling
+        decision rather than a warning.
+        """
+        return {
+            "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            "base": "a" * 40,
+            "head": "b" * 40,
+            "change_class": "documentation",
+            "change_inventory": change_inventory(
+                ["docs/topics/ci-cd.md", "alpha/README.md"], False
+            ),
+            "full_scope": False,
+            "full_scope_gates": [],
+            "areas": [],
+            "packages": [],
+            "source_packages": [],
+            "reverse_dependencies": [],
+            "environments": self.environment_records(),
+            "cells": [],
+            "accepted_evidence": [],
+            "policy_gaps": [],
+            # No cell means no consumer, and an unconsumed build record is
+            # removed rather than left in the plan.
+            "builds": [],
+            "prohibited_cells": [],
+            "job_estimate": 0,
+            "preflight_os": [],
+            "preflight_reason": "no gating package; preflight establishes nothing",
+            "flags": {},
+        }
+
     def resolved_plan(self, prohibited_is_covered: bool) -> dict:
         cells = [
             {
@@ -502,6 +554,9 @@ class PlanSurfaceTests(unittest.TestCase):
             "base": "a" * 40,
             "head": "b" * 40,
             "change_class": "package",
+            # The real producer, so a fixture plan cannot describe a shape the
+            # planner no longer emits.
+            "change_inventory": change_inventory(["alpha/src/lib.rs"], False),
             "full_scope": False,
             "full_scope_gates": [],
             "areas": [
@@ -528,20 +583,7 @@ class PlanSurfaceTests(unittest.TestCase):
             ],
             "source_packages": ["alpha"],
             "reverse_dependencies": [],
-            "environments": [
-                {
-                    "name": name,
-                    "runner": "windows-latest" if name == "wsl2-ubuntu" else name,
-                    "native_key": "ubuntu-latest" if name == "wsl2-ubuntu" else name,
-                    "capabilities": {
-                        "tmux": name in ("ubuntu-latest", "macos-latest"),
-                        "headless_browser": name == "ubuntu-latest",
-                        "node_pnpm": name == "ubuntu-latest",
-                        "archive_only": name == "wsl2-ubuntu",
-                    },
-                }
-                for name in schema.ENVIRONMENTS
-            ],
+            "environments": self.environment_records(),
             "cells": cells,
             "accepted_evidence": [],
             "policy_gaps": [],
@@ -550,7 +592,7 @@ class PlanSurfaceTests(unittest.TestCase):
             "job_estimate": len(cells),
             "preflight_os": ["ubuntu-latest"],
             "preflight_reason": "package-local change",
-            "flags": {"ci_tooling": False},
+            "flags": {},
         })
 
     def run_plan_with_output(self) -> tuple[str, dict]:
@@ -594,14 +636,16 @@ class PlanSurfaceTests(unittest.TestCase):
         capture: dict | None = None,
         origin: str = "",
         records: Mapping[str, dict] | None = None,
+        document: dict | None = None,
     ) -> subprocess.CompletedProcess:
         """Run `just ci-local --all --plan` in a temp root with a relocated home.
 
         `records` maps a store-relative path to a record written under the
         relocated home's default store; `origin` becomes the root's `origin`
-        remote so the recipe derives the store directory from it.
+        remote so the recipe derives the store directory from it. `document`
+        replaces the default package-change plan.
         """
-        document = self.resolved_plan(prohibited_is_covered)
+        document = document or self.resolved_plan(prohibited_is_covered)
         self.assertEqual(
             [],
             schema.validate_resolved_plan(document),
@@ -735,6 +779,45 @@ class PlanSurfaceTests(unittest.TestCase):
         result = self.run_plan(origin="git@github.com:acme/other.git", records=records)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
+    def test_plan_renders_the_change_inventory_it_was_given(self) -> None:
+        # Spec section 7: the local surface reads the plan's own inventory
+        # field, so it cannot describe a different change than `ci-reporting`.
+        rendered, document = self.run_plan_with_output()
+        self.assertIn("Change inventory: 1 changed path(s)", rendered)
+        self.assertIn("source (1) — alpha/src/lib.rs", rendered)
+        self.assertEqual(
+            ["alpha/src/lib.rs"],
+            document["change_inventory"]["paths"]["source"],
+            "the rendered inventory must be the written plan's, not a second one",
+        )
+
+    def test_a_documentation_only_plan_names_its_documents_and_requires_no_test(
+        self,
+    ) -> None:
+        result = self.run_plan(document=self.documentation_plan())
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Change inventory: 2 changed path(s)", result.stdout)
+        for named in ("alpha/README.md", "docs/topics/ci-cd.md"):
+            self.assertIn(named, result.stdout, f"the plan never names {named}")
+        self.assertIn(
+            "No package test is required: the resolved plan schedules no package cell.",
+            result.stdout,
+        )
+
+    def test_a_documentation_only_plan_is_an_affirmative_decision(self) -> None:
+        # Never a warning, failure, accepted gap, or fabricated passing result.
+        result = self.run_plan(document=self.documentation_plan())
+        combined = result.stdout + result.stderr
+        for forbidden in ("WARN", "warning", "accepted-gap", "prohibited", "✗", "⛔"):
+            self.assertNotIn(forbidden, combined, f"{forbidden!r} in:\n{combined}")
+
+    def test_a_full_scope_plan_reports_that_no_diff_was_consulted(self) -> None:
+        document = self.documentation_plan()
+        document["change_inventory"] = change_inventory([], True)
+        result = self.run_plan(document=document)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Change inventory: no diff was consulted", result.stdout)
+
     def test_plan_writes_the_same_cells_it_rendered(self) -> None:
         # The rendered table is a projection; the canonical JSON is the machine
         # interface. AC17 needs them to describe one plan, not two.
@@ -841,6 +924,11 @@ class PlanFedRunTests(unittest.TestCase):
             "base": "a" * 40,
             "head": "b" * 40,
             "change_class": "package",
+            # The real producer, so a fixture plan cannot describe a shape the
+            # planner no longer emits.
+            "change_inventory": change_inventory(
+                ["alpha/src/lib.rs", "beta/src/lib.rs"], False
+            ),
             "full_scope": False,
             "full_scope_gates": [],
             "areas": [
@@ -871,7 +959,7 @@ class PlanFedRunTests(unittest.TestCase):
             "job_estimate": 4,
             "preflight_os": ["ubuntu-latest"],
             "preflight_reason": "package-local change",
-            "flags": {"ci_tooling": False},
+            "flags": {},
         })
 
     def run_fed(self, alpha_reused_outcome: str = "pass", through_env: bool = False) -> dict:
@@ -1768,8 +1856,8 @@ class WorkflowScopeStepTests(unittest.TestCase):
     #: them would lose the run's package work, which is the defect.
     MATRIX_OUTPUTS = (
         "scheduled_areas", "area_matrix", "area_slugs", "gap_areas", "packages",
-        "package_names", "has_packages", "full_scope", "sniff", "biscuit_tui",
-        "ci_tooling", "job_estimate", "preflight_os", "preflight_reason", "change_class",
+        "package_names", "has_packages", "full_scope", "sniff",
+        "job_estimate", "preflight_os", "preflight_reason", "change_class",
     )
 
     def assert_unmodified_plan_and_nothing_reused(self, run: StepRun, carried_receipt: str) -> None:
@@ -1868,7 +1956,7 @@ class WorkflowGateStepTests(unittest.TestCase):
     def all_success() -> dict[str, str]:
         return {
             job: "success"
-            for job in ("validation", "scope", "preflight", "area-ci", "biscuit-tui-captured-stdout", "ci-tooling")
+            for job in ("validation", "scope", "preflight", "area-ci")
         }
 
     def test_every_job_succeeded_passes(self) -> None:
@@ -1877,16 +1965,17 @@ class WorkflowGateStepTests(unittest.TestCase):
         self.assertIn("every blocking job succeeded or was skipped", run.stdout)
 
     def test_a_skipped_job_is_accepted(self) -> None:
-        # An unselected area (or every downstream job on a reused validation).
-        results = {**self.all_success(), "area-ci": "skipped", "biscuit-tui-captured-stdout": "skipped"}
+        # An unselected area, and the documentation-class preflight that now
+        # expands no job at all (R10).
+        results = {**self.all_success(), "area-ci": "skipped", "preflight": "skipped"}
         run = self.fold(results)
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
 
     def test_a_failed_job_blocks_and_is_named(self) -> None:
-        run = self.fold({**self.all_success(), "ci-tooling": "failure"})
+        run = self.fold({**self.all_success(), "area-ci": "failure"})
         self.assertEqual(1, run.returncode, run.stdout + run.stderr)
-        self.assertIn("ci-gate: blocked by ci-tooling", run.stderr)
-        self.assertIn("ci-tooling: failure (blocks)", run.stdout)
+        self.assertIn("ci-gate: blocked by area-ci", run.stderr)
+        self.assertIn("area-ci: failure (blocks)", run.stdout)
 
     def test_a_cancelled_job_blocks(self) -> None:
         run = self.fold({**self.all_success(), "area-ci": "cancelled"})
@@ -1903,7 +1992,7 @@ class WorkflowGateStepTests(unittest.TestCase):
         # `failure` exit 0, so the blocking assertions above are load-bearing.
         widened = self.script.replace("success|skipped)", "success|skipped|failure)")
         self.assertNotEqual(widened, self.script, "the accept clause must be where the tests expect it")
-        run = self.fold({**self.all_success(), "ci-tooling": "failure"}, script=widened)
+        run = self.fold({**self.all_success(), "area-ci": "failure"}, script=widened)
         self.assertEqual(0, run.returncode, "a widened fold lets a failed job through")
 
 
@@ -2282,6 +2371,221 @@ class WorkflowReadingCorpusTests(unittest.TestCase):
         for probe in PROBES:
             with self.subTest(probe=probe):
                 self.assertTrue(PROBES[probe](base))
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 pending contracts — fixes/2026-09-13-cicd-redundancies
+# ---------------------------------------------------------------------------
+
+
+def workflow_job_block(workflow: Path, job: str) -> list[str]:
+    """One job's raw lines, from its `  <id>:` header to the next job's.
+
+    Same fixed-layout reading as `job_run_steps`, but the whole block
+    rather than only its `run:` steps: the guards these fixtures assert on are
+    job keys (`if:`, `name:`, `strategy:`), not step scripts.
+    """
+    lines = workflow.read_text(encoding="utf-8").splitlines()
+    start = lines.index(f"  {job}:")
+    end = next(
+        (
+            index
+            for index in range(start + 1, len(lines))
+            if lines[index][:2] == "  " and lines[index][2:3] not in (" ", "")
+        ),
+        len(lines),
+    )
+    return lines[start:end]
+
+
+def job_key(block: list[str], key: str) -> str | None:
+    """A job-level key's value, with a `>-` folded scalar joined onto one line."""
+    for index, line in enumerate(block):
+        if not line.startswith(f"    {key}:"):
+            continue
+        value = line[len(f"    {key}:") :].strip()
+        if value not in (">-", ">", "|"):
+            return value
+        folded = []
+        for following in block[index + 1 :]:
+            if following.strip() and len(following) - len(following.lstrip()) <= 4:
+                break
+            folded.append(following.strip())
+        return " ".join(folded)
+    return None
+
+
+class PreflightPrerequisiteTests(unittest.TestCase):
+    """AC1/spec section 3: preflight establishes prerequisites and runs no suite."""
+
+    def test_preflight_runs_no_test_suite(self) -> None:
+        offenders = [
+            step.name
+            for step in job_run_steps(WORKFLOW, "preflight")
+            # `cargo nextest run`, not `cargo nextest`: the retained tooling
+            # check runs `cargo nextest --version`, which is a prerequisite
+            # probe rather than a suite.
+            if "python3 scripts/ci/test_" in step.script
+            or "cargo nextest run" in step.script
+            or "pnpm " in step.script
+        ]
+        if offenders:
+            raise AssertionError(
+                "preflight must run no test suite; it still runs "
+                f"{len(offenders)}: {offenders}"
+            )
+
+    def test_preflight_retains_its_prerequisite_steps(self) -> None:
+        # NOT pending, and the non-vacuity guard for the fixture above: the
+        # suites must be REMOVED, not the whole job emptied. Slimming preflight
+        # by deleting its toolchain and canonical-recipe checks would satisfy
+        # AC1 while deleting the bootstrap gate the fan-out depends on.
+        names = {step.name for step in job_run_steps(WORKFLOW, "preflight")}
+        for required in (
+            "Verify toolchain and required tooling",
+            "Cargo metadata without build acceleration",
+            "Validate canonical area recipes",
+        ):
+            self.assertIn(required, names)
+
+
+class EmptyMatrixGuardTests(unittest.TestCase):
+    """AC14/R12: a matrix job is guarded by a scalar plan output, before expansion.
+
+    The two halves are asserted separately on purpose. The static half reads
+    `ci.yml`; the plan half computes the scalar outputs `ci.yml` reads for each
+    of the three plan shapes the specification names, so a guard cannot be
+    declared against an output the planner never produces.
+    """
+
+    MATRIX_JOBS = ("preflight", "area-ci")
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.blocks = {job: workflow_job_block(WORKFLOW, job) for job in cls.MATRIX_JOBS}
+
+    def test_neither_matrix_job_is_labelled_with_a_matrix_expression(self) -> None:
+        # NOT pending: both jobs already omit `name:`, and the comments above
+        # them explain why. Pinned so adding the scalar guard cannot come with
+        # a display name that reaches the Checks tab as raw expression text.
+        for job, block in self.blocks.items():
+            with self.subTest(job=job):
+                name = job_key(block, "name")
+                self.assertIsNone(
+                    name,
+                    f"{job} is skippable as a whole, so a declared name would "
+                    f"render unevaluated; got {name!r}",
+                )
+
+    def test_both_matrix_jobs_carry_a_scalar_guard(self) -> None:
+        for job, block in self.blocks.items():
+            guard = job_key(block, "if")
+            if not guard or "needs.scope.outputs." not in guard:
+                raise AssertionError(
+                    f"{job} must be guarded by a scalar plan output before "
+                    f"matrix expansion; its `if:` is {guard!r}"
+                )
+            self.assertNotIn(
+                "matrix.", guard, f"{job}'s guard must not read the matrix it gates"
+            )
+
+    @classmethod
+    def plans(cls) -> dict[str, dict]:
+        """The three plan shapes spec section 8 names, from the real planner.
+
+        Cached on the class: `load_metadata` shells out to `cargo metadata`.
+        """
+        if getattr(cls, "_plans", None) is None:
+            from affected_scope import (  # noqa: PLC0415
+                ENVIRONMENTS_CONFIG,
+                apply_accepted_cells,
+                calculate_scope,
+                load_environments,
+                load_metadata,
+                package_ci_policy,
+                workspace_packages,
+            )
+
+            metadata = load_metadata(ROOT)
+            environments = load_environments(ENVIRONMENTS_CONFIG)
+            policy = package_ci_policy(
+                workspace_packages(metadata),
+                runner_labels={entry["runner"] for entry in environments},
+                root=ROOT,
+            )
+
+            def plan_for(files: list[str]) -> dict:
+                return calculate_scope(files, ROOT, metadata, environments, policy)
+
+            scheduled = plan_for([SOURCE_FILE])
+            reused = apply_accepted_cells(
+                scheduled,
+                [
+                    {
+                        "package": cell["package"],
+                        "environment": cell["environment"],
+                        "gate": cell["gate"],
+                        "outcome": "pass",
+                        "evidence": {"origin": "prior-local"},
+                    }
+                    for cell in scheduled["cells"]
+                ],
+                None,
+                None,
+            )
+            cls._plans = {
+                "documentation-only": plan_for(["docs/topics/ci-cd.md"]),
+                "scheduled": scheduled,
+                "all-cells-reused": reused,
+            }
+        return cls._plans
+
+    def test_a_documentation_only_plan_skips_both_matrix_jobs(self) -> None:
+        plan = self.plans()["documentation-only"]
+        # `has_packages` already resolves to false; the guard `preflight` is
+        # gaining reads `preflight_os`, emitted through `jq -c` (ci.yml:267),
+        # so `'[]'` is an exact comparison against an empty list.
+        self.assertEqual([], [entry for entry in plan["packages"] if entry["gates"]])
+        if plan["preflight_os"] != []:
+            raise AssertionError(
+                "a documentation-only plan must publish an empty preflight "
+                f"matrix, got {plan['preflight_os']}"
+            )
+
+    def test_a_plan_with_no_executing_test_cell_still_fans_out_its_area(self) -> None:
+        # NOT pending, and the counterweight to the fixture above (AC16): an
+        # all-reused plan must NOT empty its matrices. `ci-reporting` reads the
+        # area slices, so an area whose test cells are all reused still has to
+        # fan out far enough to publish one.
+        #
+        # `lint` and `check` stay CI-origin by design — a local receipt carries
+        # no JUnit evidence for them — so "every cell reused" is unreachable and
+        # "every TEST cell reused" is the real shape.
+        plan = self.plans()["all-cells-reused"]
+        self.assertEqual(
+            [],
+            [
+                cell
+                for cell in plan["cells"]
+                if cell["execution"] == "execute" and cell["gate"] not in ("lint", "check")
+            ],
+            "the fixture must present a plan with no test cell left to execute",
+        )
+        self.assertNotEqual(
+            [],
+            [entry for entry in plan["packages"] if entry["gates"]],
+            "reuse resolves cells; it never unselects a package",
+        )
+        self.assertNotEqual(
+            [], plan["preflight_os"], "reuse is not the documentation class"
+        )
+
+    def test_a_scheduled_plan_publishes_both_matrices(self) -> None:
+        # NOT pending: the non-vacuity guard for the whole class. A planner
+        # that emptied every matrix would satisfy the pending fixture above.
+        plan = self.plans()["scheduled"]
+        self.assertNotEqual([], plan["preflight_os"])
+        self.assertNotEqual([], [entry for entry in plan["packages"] if entry["gates"]])
 
 
 if __name__ == "__main__":

@@ -73,20 +73,6 @@ test-l2 *args="":
 test-l3 *args="":
     @just _test_l3 {{CLI}} --features terminal-tests {{args}}
 
-# Windows-host runtime gate for F2 captured-stdout parity. Runs the ignored,
-# deterministic console-boundary integration test by exact name; it must execute
-# on a Windows host with an attached console (the test injects Enter via
-# `WriteConsoleInputW`). The CI counterpart is
-# `.github/workflows/biscuit-tui-windows-captured-stdout.yml`.
-test-windows-captured-stdout:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ "${OS:-}" != "Windows_NT" ]; then
-        echo "test-windows-captured-stdout must run on a Windows host with an attached console" >&2
-        exit 1
-    fi
-    cargo test -p {{CLI}} --features terminal-tests --test windows_captured_stdout -- --ignored captured_stdout_receives_only_value_no_tui_bytes
-
 # Not applicable: biscuit-tui has no browser-target tests.
 test-browser:
     @echo "test-browser: not applicable for biscuit-tui"

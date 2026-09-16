@@ -386,7 +386,7 @@ plan_trigger_scope() {
 # The same cells `just ci-local --plan` prints, from the same renderer when it
 # is built; the refusal itself comes from constraints.py, not from here.
 render_trigger_plan() {
-    PLAN_BIN="${BISCUIT_CI_PLAN_BIN:-$REPO_ROOT/scripts/target/release/ci-plan}"
+    PLAN_BIN="${BISCUIT_CI_PLAN_BIN:-$REPO_ROOT/target/release/ci-plan}"
     if [ -x "$PLAN_BIN" ] && "$PLAN_BIN" "$PLAN_REVIEW_FILE"; then
         return 0
     fi

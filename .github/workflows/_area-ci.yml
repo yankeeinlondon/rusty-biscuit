@@ -105,6 +105,7 @@ jobs:
       backends: ${{ toJSON(matrix.l2_backends) }}
       runner-tools: ${{ toJSON(matrix.runner_tools) }}
       companion-suites: ${{ toJSON(matrix.companion_suites) }}
+      companion-environments: ${{ toJSON(matrix.companion_environments) }}
       native: ${{ toJSON(matrix.native) }}
       wsl: ${{ matrix.wsl }}
       # The build records this package's executing cells consume, narrowed by
@@ -274,7 +275,7 @@ jobs:
       - name: Build ci-rollup
         run: |
           cargo build --release \
-            --manifest-path scripts/Cargo.toml \
+            -p repo-deps \
             --no-default-features --bin ci-rollup
       # Renders this area's grid — including its reused cells and its accepted
       # policy gaps, with the evidence, counts, duration, and host each receipt
@@ -291,7 +292,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ci-artifacts
-          ./scripts/target/release/ci-rollup rollup \
+          ./target/release/ci-rollup rollup \
             --artifacts ci-artifacts \
             --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
             --policy ci-artifacts/ci-scope/scope.json \
@@ -321,7 +322,7 @@ jobs:
         env:
           AREA: ${{ inputs.area }}
         run: |
-          ./scripts/target/release/ci-rollup verdict \
+          ./target/release/ci-rollup verdict \
             --results "ci-results-${{ inputs.slug }}.json" \
             --area "$AREA" \
             --baseline .github/ci/ci-baseline.toml

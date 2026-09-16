@@ -73,6 +73,7 @@ members = [
     "schematic/gen",
     "schematic/oauth",
     "agent-sandbox/cli",
+    "scripts",
 ]
 exclude = ["schematic/schema", "darkmatter/dmls/zed-dmls"]
 

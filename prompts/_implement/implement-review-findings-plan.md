@@ -31,8 +31,6 @@ loop:
     until: "phase >= total_phases"
     action: "increment(phase)"
 ---
-::file "../_no_formatting.md"
-
 ::block when="total_phases"
 # Implement Phase {{phase}} of {{total_phases}}
 ::end-block
@@ -51,6 +49,8 @@ conducted to determine how well the current implementation meets the requirement
 ::block when="design && file_exists(design)"
 - Design File: {{design}}
 ::end-block
+
+::file "../_no_formatting.md"
 
 ## Task
 

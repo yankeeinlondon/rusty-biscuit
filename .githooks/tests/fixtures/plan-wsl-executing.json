@@ -92,6 +92,24 @@
     }
   ],
   "change_class": "package",
+  "change_inventory": {
+    "counts": {
+      "configuration": 0,
+      "documentation": 0,
+      "other": 0,
+      "source": 1,
+      "total": 1
+    },
+    "diff_available": true,
+    "paths": {
+      "configuration": [],
+      "documentation": [],
+      "other": [],
+      "source": [
+        "alpha/src/lib.rs"
+      ]
+    }
+  },
   "environments": [
     {
       "capabilities": {
