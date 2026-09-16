@@ -209,11 +209,18 @@ model the live run would launch with, and the warning renders in dry-run too.
 2. With no explicit model, in non-interactive mode, and only when the catalog
    says `model_required_in_non_tty`, Claudine looks for one on the provider's
    behalf: the catalog's `model_env_vars`, in order, then
-   `profile.configured_default_model()`. An env var hit is applied exactly
-   like step 1 (the provider may read that variable itself, but the argv is
-   then explicit and `MODEL` is right). A configured default sets only the
-   `MODEL` env and reports its source; the provider already reads it. Nothing
-   found is the existing no-model error.
+   `profile.configured_default_model()`. Every source, a discovered default
+   included, is applied exactly like step 1: the provider may read the same
+   variable or file itself, but the argv is then explicit and `MODEL` is right.
+   Nothing found is the existing no-model error.
+
+   A discovered default is *not* left for the provider to rediscover. Claudine
+   resolves it in its own environment and launches the child in a rewritten one
+   — `--repo` replaces `HOME` with the shadow home, MCP modes redirect provider
+   config — so the file the value came from need not be reachable from the
+   child at all. Leaving delivery to the provider reproduces the failure this
+   fix exists to remove: Claudine reports one model and the child runs another,
+   or none. (Review 1, finding 1.)
 3. `profile.validate_non_interactive_requirements` runs for every provider
    in non-interactive mode (OpenCode's is the default no-op, so this is not a
    behavior change).
@@ -223,9 +230,20 @@ defaults to `None`. OpenCode's override reads its global config the way
 OpenCode does: `opencode.jsonc`, `opencode.json`, then the legacy
 `config.json`, under `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`,
 parsed JSONC-tolerant through `biscuit_file::Json5`. The project-level
-`opencode.json` layer is deliberately not read: it changes nothing about the
-launch (no flag is pushed for a configured default), and reading it would
-need the child CWD inside a stage that is otherwise CWD-free.
+`opencode.json` layer is deliberately not read: it would need the child CWD
+inside a stage that is otherwise CWD-free, and the layer stack above it
+(`.opencode` directories, `OPENCODE_CONFIG`, remote `.well-known/opencode`,
+managed settings) cannot be reproduced faithfully — a partial reproduction
+would trade one wrong answer for a less predictable one.
+
+Since the discovered default now arrives as `--model`, which outranks every
+config layer in OpenCode's own precedence, this is a deliberate narrowing:
+a non-interactive OpenCode launch with no model from any higher source, in a
+directory whose `opencode.json` names a different model than the global
+config, now launches the global default rather than the project one. What
+Claudine reports and what the child runs agree in every case, which is the
+contract this fix owes; matching OpenCode's full layer stack is separate work
+and is recorded in [Non-goals](#non-goals).
 
 `OpenCodeModelSource` / `OpenCodeEnvSnapshot` / `resolve_opencode_model` /
 `apply_opencode_model_resolution` are replaced by a provider-neutral
@@ -256,6 +274,9 @@ records the change and the Phase F origin.
   `output/error_report.rs`.
 - New L1 test `claudine/cli/tests/compose_frontmatter_model.rs` (compose,
   `--silent`, `--dry-run`, and sequence rows).
+- `claudine/cli/tests/wrap_opencode.rs` (the two configured-default delivery
+  rows under `--repo`) and `claudine/cli/tests/wrap_inline_compose.rs`
+  (`config_file_model_resolves_successfully`).
 - Docs listed in D4.
 
 ## Acceptance criteria
@@ -290,6 +311,14 @@ records the change and the Phase F origin.
    dispatch-inventory guard is untouched (no new `match Provider`);
    `claudine-gen -- check` is clean.
 9. Docs in D4 updated in the same change.
+10. A configured default survives child-environment rewriting: with only a
+    `model` in the fixture's `~/.config/opencode/opencode.jsonc`, no
+    `OPENCODE_MODEL` and no `MODEL`, `claudine opencode --repo …` launches
+    with `--model <configured>` and `MODEL=<configured>`, and the same holds
+    for `claudine compose --opencode --repo …`, which builds its child
+    environment independently. Both rows record the child's `HOME` and whether
+    the config is reachable from it, and both refuse to pass on the degraded
+    null-home fallback. L1 through `CliProcessFixture`. (Review 1, finding 1.)
 
 ## Verification record (2026-09-08, macOS host, worktree `fix/cli-slow-tests`)
 
@@ -338,7 +367,9 @@ records the change and the Phase F origin.
   populates `GitInfo::repo` on the launch entry).
 - Making the `opencode models` listing feed validation again, or changing
   the compiled baseline.
-- Reading a project-level `opencode.json` for the reported default.
+- Reading a project-level `opencode.json`, or any other OpenCode config layer
+  above the global file, when discovering a default. See D3 for the narrowing
+  this accepts.
 
 ## Reproduction notes
 
