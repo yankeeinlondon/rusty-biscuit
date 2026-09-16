@@ -28,16 +28,21 @@ initialize:
         - when: "spec && ( frontmatter(spec, 'reviewed') == true || frontmatter(spec, 'implemented') == true )"
           action:
               - proxy: "./_reviews/feature-review.md"
-        - when: "spec"
+        # Each route below tests a single optional input, and only one of the
+        # three is ever supplied. `|| false` is the guarded-optional form: a
+        # bare `when: "plan"` is a hard error when no plan was passed in, so
+        # the `review` and `plan` routes would crash on the `spec` guard above
+        # them instead of reaching their own.
+        - when: "spec || false"
           action:
               - proxy: "./_reviews/review-spec-inline.md"
         - when: "plan && file_exists(dirname(plan) + '/' + replace(basename(plan),'plan','spec'))"
           action:
               - proxy: "./_reviews/feature-review.md"
-        - when: "plan"
+        - when: "plan || false"
           action:
               - proxy: "./_reviews/review-implementation.md"
-        - when: "review"
+        - when: "review || false"
           action:
               - proxy: "./_reviews/suggestion-review.md"
         - action:

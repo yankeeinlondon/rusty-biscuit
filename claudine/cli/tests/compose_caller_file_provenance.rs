@@ -323,6 +323,63 @@ fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_p
     );
 }
 
+/// An archived case — an implemented spec whose reviews are all implemented —
+/// matches no route. The router must reach its own routing error rather than
+/// raising on the `review` guard, which is an optional input nobody supplied.
+#[test]
+fn shipped_implement_router_refuses_an_archived_case_through_its_own_error() {
+    let fixture = CliProcessFixture::named("implement-router-archived-case");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    install_goose(&fixture);
+
+    let package = fixture.cwd().join("packages/example");
+    let case = package.join("fixes/case");
+    write(
+        &case.join("spec.md"),
+        "---\nimplemented: true\nreview_iterations: 4\n---\nCase.\n",
+    );
+    write(
+        &case.join("review-4.md"),
+        "---\nimplemented: true\n---\n# Review 4\n",
+    );
+
+    let router = fixture.cwd().join("prompts/implement.md");
+    write(&router, include_str!("../../../prompts/implement.md"));
+
+    // Not `run_compose_failure`: an authored `error:` action is a routing
+    // decision, not a typed diagnostic facet, so it writes no snapshot.
+    // Escape: caller-relative references must resolve from this fixture directory.
+    let mut command = fixture.command_builder().ambient_context(&package).build();
+    let audio_spool = fixture.cwd().join("provenance-audio-spool");
+    let assertion = command
+        .env("PLAYA_DRY_RUN", "1")
+        .env("PLAYA_SPOOL_DIR", &audio_spool)
+        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        .args(["compose", "--goose", router.to_str().unwrap()])
+        .args(["spec=fixes/case/spec.md"])
+        .assert()
+        .failure();
+    assert!(
+        !audio_spool.exists(),
+        "provenance tests must not publish audio"
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
+
+    assert!(
+        stderr.contains("Unable to route the implementation to an appropriate prompt"),
+        "an archived case must fail through the router's own error; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("references undefined variable"),
+        "an unsupplied optional input must not crash a routing guard; stderr:\n{stderr}"
+    );
+    assert!(
+        !fixture.home().join("provider-prompt").exists(),
+        "an unroutable case must not launch a provider"
+    );
+}
+
 #[test]
 fn direct_and_proxy_targets_agree_and_caller_values_outrank_proxy_with() {
     let fixture = CliProcessFixture::named("caller-file-direct-proxy-equivalence");
@@ -1146,4 +1203,38 @@ fn shipped_review_router_literal_does_not_collect_absent_route_inputs() {
     assert!(prompt.contains("SELECTED=caller-spec"), "{prompt}");
     assert!(!stderr.contains("Use this file"), "{stderr}");
     assert!(!stderr.contains("did not match a file directly"), "{stderr}");
+}
+
+/// The review router's `review` entry point sits below two guards that test
+/// inputs this route never supplies. Those guards must evaluate falsy and fall
+/// through rather than raising on an optional input nobody passed.
+#[test]
+fn shipped_review_router_reaches_the_review_route_past_the_absent_spec_guard() {
+    let fixture = CliProcessFixture::named("review-router-review-route");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    install_goose(&fixture);
+    let package = fixture.cwd().join("packages/example");
+    write(
+        &package.join("fixes/case/review-1.md"),
+        "---\nimplemented: true\nmarker: caller-review\n---\n# Review 1\n",
+    );
+    let router = fixture.cwd().join("prompts/review.md");
+    write(&router, include_str!("../../../prompts/review.md"));
+    write(
+        &fixture.cwd().join("prompts/_reviews/suggestion-review.md"),
+        "---\n$schema:\n  review: file(required;eager;match(**/*review*.md))\nselected: \"{{ frontmatter(review, 'marker') }}\"\n---\nSELECTED={{ selected }}\n",
+    );
+
+    let stderr = run_compose(&fixture, &package, &router, &["review=fixes/case/review-1.md"]);
+
+    let prompt = std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
+    assert!(
+        prompt.contains("SELECTED=caller-review"),
+        "the review route must reach suggestion-review; prompt:\n{prompt}"
+    );
+    assert!(
+        !stderr.contains("references undefined variable"),
+        "an unsupplied optional input must not crash a routing guard; stderr:\n{stderr}"
+    );
 }

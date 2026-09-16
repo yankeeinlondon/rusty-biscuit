@@ -25,7 +25,7 @@ Your job is to produce a review that is:
 - aligned with idiomatic Rust
 - useful to an experienced engineer who wants actionable findings, not generic praise
 
-Assume the audience is comfortable with Rust, Cargo, Clippy, testing, ownership, traits, async, and unsafe code.
+Assume the audience is comfortable with Rust, Cargo, Clippy, testing (in Rust but any specifics for this repo), ownership, traits, async, and unsafe code.
 
 ## Review Goals
 

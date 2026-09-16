@@ -50,6 +50,9 @@ initialize:
                 target: ./_implement/implement-plan.md
                 with:
                     log: "{{ dirname(spec) + '/implementation-log.md' }}"
+        # `|| false` is the guarded-optional form: a bare `when: review` is a
+        # hard error when no review was passed in, which would crash the router
+        # instead of falling through to its own routing error below.
         - when: "review || false"
           action:
               - info: "a _review_ was passed into the implementation router and will be routed to **implement-review**"

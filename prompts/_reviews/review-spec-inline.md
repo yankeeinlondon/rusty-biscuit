@@ -16,6 +16,7 @@ success:
             : "The review of the draft specification file in the " + ctx.repo + " repo has completed"
         }}
     message: "✅  review of the draft specification `{{ link(spec) }}` has completed"
+    info: the {{link(spec)}} _specification_ has been reviewed and updated inline
 failure:
     say: |-
         {{
@@ -27,13 +28,19 @@ failure:
 ---
 ## Context
 
+### Spec Review
+
 You are expected to review a draft specification document located at: 
 
 - {{spec}}
 
 This will be an "inline review" meaning your task is to directly update the specification document with your changes (versus creating a sidecar review document).
 
+::file _writing_clearly.md 
+
 ::block when='frontmatter(spec, "parent") || frontmatter(spec, "depends-on") || frontmatter(spec, "peers")'
+### Spec Frontmatter
+
 > **Important:** 
 > 
 ::block when="parent"
@@ -54,6 +61,8 @@ It's important to note that Frontmatter references to other specs are likely not
 
 ::end-block
 
+## Task
+
 Look for how this spec file could be improved:
 
 - what feels like a gap in the scope of this specification
@@ -73,9 +82,14 @@ Look for how this spec file could be improved:
             - and explain the change as a readers note to indicates the design solution to a reader so they understand why the changes was made
 - update with better wording if you think ideas are expressed unclearly
 
+### Update Spec Frontmatter
 
-Update the spec file at "{{spec}}" and set the following frontmatter on the spec file:
+Update the spec file's ({{spec}}) Frontmatter (keep any other properties that were set unchanged):
 
-- set the spec file's `reviewed` Frontmatter property to 'true'
+
+::file ./_set_spec_schema.md
+- set the spec file's `reviewed` Frontmatter property to `true`
 - set the spec file's `reviewed_by` Frontmatter property to "{{ctx.agent}}/{{ctx.model}}"
 - set the spec file's `reviewed_on` Frontmatter property to "{{ctx.today}}"
+- set the spec file's `review_iterations` to `0`
+- set the `
