@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "environments": [
     {
       "name": "ubuntu-latest",
@@ -27,6 +27,26 @@
           "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
           "owner": "@yankeeinlondon",
           "expiry": "2027-01-31"
+        }
+      },
+      "build": {
+        "host": "x86_64-unknown-linux-gnu",
+        "target": "x86_64-unknown-linux-gnu",
+        "profile": "test",
+        "rustflags": "",
+        "cargo_config": [],
+        "linker": "cc",
+        "archive_format": "tar.zst",
+        "nextest": "latest",
+        "executes": [
+          "ubuntu-latest",
+          "wsl2-ubuntu"
+        ],
+        "runtime": {
+          "arch": "x86_64",
+          "abi": "gnu",
+          "libc": "glibc",
+          "native_libraries": []
         }
       }
     },
@@ -71,6 +91,25 @@
           "expiry": "2027-01-31",
           "closes": "features/_unscheduled/windows-l2-ci-leg"
         }
+      },
+      "build": {
+        "host": "x86_64-pc-windows-msvc",
+        "target": "x86_64-pc-windows-msvc",
+        "profile": "test",
+        "rustflags": "",
+        "cargo_config": [],
+        "linker": "link.exe",
+        "archive_format": "tar.zst",
+        "nextest": "latest",
+        "executes": [
+          "windows-latest"
+        ],
+        "runtime": {
+          "arch": "x86_64",
+          "abi": "msvc",
+          "libc": "msvc",
+          "native_libraries": []
+        }
       }
     },
     {
@@ -105,6 +144,25 @@
           "owner": "@yankeeinlondon",
           "expiry": "2027-01-31"
         }
+      },
+      "build": {
+        "host": "aarch64-apple-darwin",
+        "target": "aarch64-apple-darwin",
+        "profile": "test",
+        "rustflags": "",
+        "cargo_config": [],
+        "linker": "cc",
+        "archive_format": "tar.zst",
+        "nextest": "latest",
+        "executes": [
+          "macos-latest"
+        ],
+        "runtime": {
+          "arch": "aarch64",
+          "abi": "darwin",
+          "libc": "libSystem",
+          "native_libraries": []
+        }
       }
     },
     {
@@ -114,7 +172,7 @@
       "capabilities": {
         "tmux": {
           "available": false,
-          "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests — the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
+          "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests \u2014 the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
           "owner": "@yankeeinlondon",
           "expiry": "2026-12-31",
           "closes": "features/_unscheduled/wsl2-l2-ci-leg"
@@ -147,6 +205,15 @@
           "owner": "@yankeeinlondon",
           "expiry": "2026-12-31",
           "closes": "features/_unscheduled/wsl2-l2-ci-leg"
+        }
+      },
+      "build": {
+        "nextest": "latest",
+        "runtime": {
+          "arch": "x86_64",
+          "abi": "gnu",
+          "libc": "glibc",
+          "native_libraries": []
         }
       }
     }

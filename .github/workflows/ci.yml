@@ -25,7 +25,19 @@ on:
   pull_request:
   push:
     branches: [main]
-  workflow_dispatch: {}
+  # `measure-compiler-work` is the Phase 1 baseline switch of
+  # `fixes/2026-09-12-single-os-compile/plan.md`. It is OFF for every ordinary
+  # run — pull request, push, and an unattended dispatch alike — because it
+  # builds one extra tool in each measured job and this repository tracks no
+  # rustc wrapper. On, it sets `RUSTC_WRAPPER` on the measured Cargo/Nextest
+  # command ALONE and publishes the compiler-work counts beside that cell's
+  # existing status. It changes no cell, no artifact name, and no gate.
+  workflow_dispatch:
+    inputs:
+      measure-compiler-work:
+        description: "Count actual rustc invocations around each measured test command. Baseline collection only."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -33,6 +45,26 @@ permissions:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+# THE tested revision, for the two jobs that run before a plan exists.
+#
+# `pull_request` checks out GitHub's MERGE branch by default — a commit GitHub
+# recreates and never guarantees to be stable — while the plan is labelled with
+# `github.event.pull_request.head.sha`. `ci-build` binds an archive to
+# `plan.head` and refuses any other checkout (`build-source-mismatch`), so the
+# default merge checkout left the owner unable to produce and every consumer
+# unable to verify, and scope read `cargo metadata` from a revision the plan
+# did not name. The PR head is immutable and is the revision the plan already
+# names, so that is the one this run tests end to end. `github.sha` covers
+# `push` and `workflow_dispatch`, which carry no pull-request payload;
+# `_area-ci.yml` resolves its check-run SHA the same way.
+#
+# Once the plan exists this expression is not evaluated again: every later job
+# checks out `needs.scope.outputs.head`, and every reusable workflow receives
+# it as `tested-revision`. The document decides which checkout may produce and
+# verify its archives, so the document is what downstream jobs read.
+env:
+  TESTED_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   validation:
@@ -48,6 +80,8 @@ jobs:
       run_id: ${{ steps.reuse.outputs.run_id }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TESTED_REVISION }}
       - name: Verify prior PR validation
         id: reuse
         continue-on-error: true
@@ -78,9 +112,24 @@ jobs:
       change_class: ${{ steps.scope.outputs.change_class }}
       job_estimate: ${{ steps.scope.outputs.job_estimate }}
       ci_tooling: ${{ steps.scope.outputs.ci_tooling }}
+      has_builds: ${{ steps.scope.outputs.has_builds }}
+      build_artifacts: ${{ steps.scope.outputs.build_artifacts }}
+      build_producers: ${{ steps.scope.outputs.build_producers }}
+      build_owner_runners: ${{ steps.scope.outputs.build_owner_runners }}
+      build_runners: ${{ steps.scope.outputs.build_runners }}
+      # The plan's own `head`. Every job downstream of this one checks this
+      # revision out, so a consumer's tree is the tree its archive was bound
+      # to and `ci-build` has nothing to refuse.
+      head: ${{ steps.scope.outputs.head }}
+      # When the plan became available. Every owner leg's queue time is measured
+      # against it: an owner cannot start before the plan that names it exists,
+      # so this — not the run's own creation — is the moment it became
+      # schedulable.
+      plan_epoch: ${{ steps.plan_published.outputs.epoch }}
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ env.TESTED_REVISION }}
           fetch-depth: 0
       - name: Fetch local test evidence
         continue-on-error: true
@@ -267,6 +316,16 @@ jobs:
             echo "preflight_os=$(jq -c '.preflight_os' <<<"$scope_json")"
             echo "preflight_reason=$(jq -r '.preflight_reason' <<<"$scope_json")"
             echo "change_class=$(jq -r '.change_class' <<<"$scope_json")"
+            # Scheduling is a projection of the plan's producer owners.
+            echo "has_builds=$(jq -r '.build_artifacts | length > 0' <<<"$scope_json")"
+            echo "build_producers=$(jq -c '[.build_owners[].environment]' <<<"$scope_json")"
+            echo "build_owner_runners=$(jq -c '[.build_owners[] | {key: .environment, value: .runner}] | from_entries' <<<"$scope_json")"
+            echo "build_artifacts=$(jq -c '.build_artifacts' <<<"$scope_json")"
+            echo "build_runners=$(jq -c '.build_runners' <<<"$scope_json")"
+            # Read back from the WRITTEN plan, not from `$head`: every later
+            # checkout in this run is this value, and `ci-build` refuses any
+            # checkout that is not `plan.head`.
+            echo "head=$(jq -r '.head' resolved-plan.json)"
           } >>"$GITHUB_OUTPUT"
 
           # Evidence provenance, read from the WRITTEN plan (the authority on
@@ -354,6 +413,11 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
+      - name: Mark the plan as published
+        id: plan_published
+        shell: bash
+        run: echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
+
       - name: Record the tested PR merge
         id: receipt
         if: github.event_name == 'pull_request'
@@ -391,6 +455,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ needs.scope.outputs.head }}
           fetch-depth: 0
       - name: Set up the pinned Rust toolchain
         run: rustup show
@@ -435,6 +500,146 @@ jobs:
       - name: Test runner-loss attribution and retry decision
         run: python3 scripts/ci/test_runner_loss.py
 
+  # One runner per producer, with separate package invocations sharing its
+  # target tree. Artifact publication retains the plan's per-package names.
+  build:
+    needs: [scope, preflight]
+    # A boolean, exactly as `area-ci` reads `has_packages`. A skipped scope job
+    # (the reuse path) leaves every output EMPTY, and an emptiness test against
+    # `'[]'` would read as "there are builds" and fan out over `fromJSON('')`.
+    if: >-
+      !cancelled() &&
+      needs.scope.outputs.has_builds == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJSON(needs.scope.outputs.build_producers) }}
+    runs-on: ${{ fromJSON(needs.scope.outputs.build_owner_runners)[matrix.build] }}
+    timeout-minutes: 60
+    env:
+      # The repository tracks no rustc wrapper. The producer is the one job in
+      # the run that compiles the package under test, so a stray value here
+      # would reach every consumer's binaries at once.
+      RUSTC_WRAPPER: ""
+      NEXTEST_PROFILE: ci
+      COLORTERM: truecolor
+    steps:
+      # Queue clock. `plan_epoch` is when this leg became schedulable; the
+      # difference is the time it spent waiting for a runner, which the
+      # reporting contract requires apart from compile and upload.
+      - name: Mark the owner's start
+        id: job_start
+        shell: bash
+        run: echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.scope.outputs.head }}
+      - name: Download the resolved package policy
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-scope
+          path: ci-artifacts/ci-scope
+      - name: Download the resolved execution plan
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-resolved-plan
+          path: ci-artifacts/ci-resolved-plan
+      - name: Resolve this owner's build records
+        id: slice
+        shell: bash
+        env:
+          PRODUCER: ${{ matrix.build }}
+        run: |
+          set -euo pipefail
+          owner="$(jq -ce --arg producer "$PRODUCER" \
+            '.build_owners[] | select(.environment == $producer)' \
+            ci-artifacts/ci-scope/scope.json)"
+          {
+            echo "producer=$PRODUCER"
+            echo "native=$(jq -c '.native' <<<"$owner")"
+          } >>"$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install artifact transport
+        run: npm ci --prefix scripts/ci/artifacts --ignore-scripts --no-audit --no-fund
+      - name: Install just
+        uses: extractions/setup-just@v4
+      # The union of `[package.metadata.ci.native]` across this record's build
+      # closure, as the planner computed it for THIS producer's runner label. A
+      # consumer installs its own runtime requirements separately: what the
+      # archive needs to LINK and what its tests need to RUN are not the same
+      # list.
+      - name: Install native prerequisites
+        shell: bash
+        env:
+          NATIVE: ${{ steps.slice.outputs.native }}
+        run: |
+          set -euo pipefail
+          native_args=()
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then native_args+=("$package"); fi
+          done < <(jq -r '.[]' <<<"$NATIVE")
+          if [ ${#native_args[@]} -gt 0 ]; then
+            just _ensure-native-libs "${native_args[@]}"
+          fi
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      # The producer cache. Both workspaces in one entry: `scripts/` builds the
+      # producer tool itself and has no cache of its own anywhere else in this
+      # workflow, and a second `rust-cache` step would install a second post-job
+      # save racing the first.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            scripts -> target
+          shared-key: build-owner-${{ steps.slice.outputs.producer }}
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      # `--no-default-features --features build-tools` keeps `sniff` — and so
+      # duckdb and gix — out of the producer tool. Same shape as the coverage
+      # audit's `ci-rollup` build.
+      - name: Build the producer tool
+        run: |
+          cargo build --release \
+            --manifest-path scripts/Cargo.toml \
+            --no-default-features --features build-tools --bin ci-build
+      - name: Produce the archives
+        id: produce
+        shell: bash
+        env:
+          MEASURE: ${{ inputs.measure-compiler-work && 'true' || 'false' }}
+          PRODUCER: ${{ matrix.build }}
+        run: bash scripts/ci/produce-owner.sh
+      - name: Publish package builds and statuses
+        if: ${{ always() }}
+        uses: actions/github-script@v8
+        env:
+          PRODUCER: ${{ matrix.build }}
+          JOB_STATUS: ${{ job.status }}
+          PLAN_EPOCH: ${{ needs.scope.outputs.plan_epoch }}
+          JOB_EPOCH: ${{ steps.job_start.outputs.epoch }}
+        with:
+          script: |
+            const path = require('node:path');
+            const fs = require('node:fs');
+            const root = process.env.GITHUB_WORKSPACE;
+            const {DefaultArtifactClient} = require(path.join(root, 'scripts/ci/artifacts/node_modules/@actions/artifact'));
+            const {publish} = require(path.join(root, 'scripts/ci/artifacts/publish.cjs'));
+            const client = new DefaultArtifactClient();
+            const ok = await publish({
+              plan: JSON.parse(fs.readFileSync('ci-artifacts/ci-resolved-plan/resolved-plan.json', 'utf8')),
+              producer: process.env.PRODUCER,
+              out: path.join(process.env.RUNNER_TEMP, 'build'),
+              verifier: path.join(root, 'scripts/target/release/ci-build' + (process.platform === 'win32' ? '.exe' : '')),
+              jobStatus: process.env.JOB_STATUS,
+              queueSeconds: process.env.PLAN_EPOCH && process.env.JOB_EPOCH
+                ? Number(process.env.JOB_EPOCH) - Number(process.env.PLAN_EPOCH) : undefined,
+              upload: (...args) => client.uploadArtifact(...args),
+            });
+            if (!ok) core.setFailed('One or more package builds could not be published');
+
   # One caller identity per selected AREA — the top-level entry a reader sees
   # for the tested half of the run (AC2). The area's packages, their gates, and
   # its own rollup all live inside `_area-ci.yml` and render underneath it.
@@ -451,7 +656,12 @@ jobs:
   # own tests on its own compile check, inside `_package-ci.yml`, where the
   # predictor is exact and cannot block anything it is unrelated to.
   area-ci:
-    needs: [scope, preflight]
+    # `build` is a WAIT, not a gate: a consumer must not start before its
+    # archive exists, and `!cancelled()` is what keeps one failed owner leg from
+    # skipping every area. A cell whose build failed reports the named build
+    # record through its own verification step and its area's rollup; an area
+    # whose packages are unrelated to the failed key proceeds untouched.
+    needs: [scope, preflight, build]
     if: >-
       !cancelled() &&
       needs.scope.outputs.has_packages == 'true'
@@ -476,10 +686,15 @@ jobs:
         area: ${{ fromJSON(needs.scope.outputs.scheduled_areas) }}
     uses: ./.github/workflows/_area-ci.yml
     with:
+      tested-revision: ${{ needs.scope.outputs.head }}
       area: ${{ matrix.area }}
       slug: ${{ fromJSON(needs.scope.outputs.area_slugs)[matrix.area] }}
       packages: ${{ toJSON(fromJSON(needs.scope.outputs.area_matrix)[matrix.area]) }}
       accepted-gaps: ${{ contains(fromJSON(needs.scope.outputs.gap_areas), matrix.area) }}
+      # `inputs` is null on every event but `workflow_dispatch`, and
+      # `null == true` is false — so this is `false` for a pull request and a
+      # push without needing an event-name guard.
+      measure-compiler-work: ${{ inputs.measure-compiler-work == true }}
     secrets: inherit
 
   # Specialized runtime contract (D12): orchestrated by the primary workflow,
@@ -493,6 +708,8 @@ jobs:
       !cancelled() &&
       needs.scope.outputs.biscuit_tui == 'true'
     uses: ./.github/workflows/biscuit-tui-windows-captured-stdout.yml
+    with:
+      tested-revision: ${{ needs.scope.outputs.head }}
     secrets: inherit
 
   # CI's own tooling — the merge-gate binary (`scripts/ci-rollup*.rs`), the
@@ -510,6 +727,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.scope.outputs.head }}
+          # `test_build_baseline_revision.py` reads blobs out of the
+          # pre-cutover revision `build_baseline_revision.BASE_REVISION` names
+          # and skips 8 of its 11 tests when that commit is absent. At the
+          # default depth of 1 it always is (measured against a `--depth 1`
+          # clone), so the suite would run green having checked nothing.
+          fetch-depth: 0
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - uses: taiki-e/install-action@nextest
@@ -520,10 +745,19 @@ jobs:
         run: python3 scripts/ci/test_schema.py
       - name: Test the scope calculator
         run: python3 scripts/ci/test_affected_scope.py
+      # Three of this suite's tests SKIP here, and deliberately: AC15's
+      # area-drift contract needs the real `sniff`, which costs a 4m25s cold
+      # release build of a workspace package. `area-drift.yml` provisions it
+      # and fails rather than skips; the skip message names that job.
       - name: Test the resolved execution plan
         run: python3 scripts/ci/test_resolved_plan.py
       - name: Test concurrency policy and local L2 routing
         run: python3 scripts/ci/test_ci_local.py
+      # `cross-check` reaches build hosts CI has none of, so its suite asserts
+      # the remote scripts it SHIPS. That is the half a hosted runner can check,
+      # and it is the half that drifts from the producer/consumer contract.
+      - name: Test the cross-host orchestration
+        run: python3 scripts/ci/test_cross_check.py
       - name: Test local validation evidence
         run: python3 scripts/ci/test_local_evidence.py
       - name: Test multi-environment evidence reuse
@@ -532,6 +766,11 @@ jobs:
         run: python3 scripts/ci/test_constraints.py
       - name: Test the accepted-gap publisher
         run: python3 scripts/ci/test_publish_gaps.py
+      # Reads Git blobs and builds temp repositories; it links no Cargo target,
+      # so it belongs with the other pure-Python suites rather than after the
+      # builds below.
+      - name: Test the measurement baseline constructor
+        run: python3 scripts/ci/test_build_baseline_revision.py
       # The workflow-contract suite is the evidence behind the workflow
       # invariants, but `test-toolkit` is `gates = false` (promotion pending),
       # so no area job schedules it. Run exactly that binary here; the flag
@@ -552,7 +791,8 @@ jobs:
       # The shared test-suite audit tool (`tools/test-audit`) is TypeScript and
       # resolves through the root pnpm workspace; its typecheck and vitest suite
       # are the only automated checks it has. Ordinary Rust test legs never
-      # provision Node for it — only this tooling leg does.
+      # provision Node — only this tooling leg does, and the publisher suite
+      # below shares the version pinned here.
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -565,6 +805,14 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm --dir tools/test-audit check
+      # No Cargo package and no pnpm workspace entry selects the build owner's
+      # artifact publisher, so this leg is the only one that runs its suite. The
+      # suite loads `publish.cjs` and a fixture and never `@actions/artifact`, so
+      # unlike the `build` job it needs no `npm ci`. Keep the glob quoted: given a
+      # bare directory `node --test` resolves it as a module and fails (measured
+      # on Node 22.20) without having run a test.
+      - name: Test the owner measurement publisher
+        run: node --test 'scripts/ci/artifacts/*.test.cjs'
       # The plan renderer is `local-tools`-gated, so this one DOES link
       # biscuit-terminal and sniff. It runs here, in the leg that only fires
       # when CI tooling changed, and never in the always-runs rollup build.
@@ -572,6 +820,26 @@ jobs:
         run: |
           export NEXTEST_TEST_THREADS="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
           cargo nextest run --manifest-path scripts/Cargo.toml --bin ci-plan
+      # `local-tools`-gated too. Its end-to-end fixtures drive the shipped
+      # binary as a real `RUSTC_WRAPPER` around a scratch package that declares
+      # no dependencies, so this step needs no registry access and touches no
+      # workspace target directory.
+      - name: Test the compiler-work counter
+        run: |
+          export NEXTEST_TEST_THREADS="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
+          cargo nextest run --manifest-path scripts/Cargo.toml --bin ci-build
+      # LAST DELIBERATELY, and with the helper named rather than probed.
+      # `build_key.helper_command()` falls back to `cargo run` when no
+      # `ci-build` binary exists, so run from the top of this job the suite
+      # compiles the `build-tools` closure inside what presents as a 0.1s unit
+      # suite (14s measured on a 16-core host, 26s at four jobs with a cold
+      # registry). The step above leaves `scripts/target/debug/ci-build` behind,
+      # so placed here the suite costs nothing; `BISCUIT_CI_BUILD_BIN` makes a
+      # reorder that breaks that fail loudly instead of quietly rebuilding.
+      - name: Test the build-key hashing boundary
+        env:
+          BISCUIT_CI_BUILD_BIN: ${{ github.workspace }}/scripts/target/debug/ci-build
+        run: python3 scripts/ci/test_build_key.py
 
   # THE single required branch-protection check: a policy-free fold.
   #
@@ -620,6 +888,14 @@ jobs:
       - validation
       - scope
       - preflight
+      # INFRASTRUCTURE, not a cell. A build that failed to COMPILE is already
+      # visible where cell outcomes live: the rollup renders every dependent
+      # cell MISSING and names the record. What no cell can show is an owner
+      # that never reached a compile — a lost runner, a cancellation, an
+      # archive that could not be uploaded — so the owner's own result is
+      # folded here. It publishes no `status-`/JUnit artifact of its own, and
+      # `continue-on-error` (which would hide it) is forbidden on it.
+      - build
       - area-ci
       - biscuit-tui-captured-stdout
       - ci-tooling
@@ -634,6 +910,7 @@ jobs:
             validation:${{ needs.validation.result }}
             scope:${{ needs.scope.result }}
             preflight:${{ needs.preflight.result }}
+            build:${{ needs.build.result }}
             area-ci:${{ needs.area-ci.result }}
             biscuit-tui-captured-stdout:${{ needs.biscuit-tui-captured-stdout.result }}
             ci-tooling:${{ needs.ci-tooling.result }}

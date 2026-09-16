@@ -16,7 +16,13 @@ name: biscuit-tui-windows-captured-stdout
 # no longer self-triggers on pushes/PRs. Also dispatchable manually.
 
 on:
-  workflow_call: {}
+  workflow_call:
+    inputs:
+      tested-revision:
+        description: "The resolved plan's `head`: the one revision the calling run tests. Empty selects the event's default checkout, which is what a standalone `workflow_dispatch` wants — see the `env:` comment in `ci.yml`."
+        type: string
+        required: false
+        default: ""
   workflow_dispatch: {}
 
 env:
@@ -34,6 +40,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tested-revision }}
 
       - name: Install just
         uses: extractions/setup-just@v4

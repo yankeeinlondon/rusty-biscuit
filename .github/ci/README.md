@@ -280,9 +280,10 @@ membership.
 
 ## `environments.json`
 
-One versioned, schema-validated capability table. It defines, for each
-environment: the `runner` that hosts it, the `native_key` that maps it to a
-native-package installer, and a `capabilities` map over a closed vocabulary:
+One versioned, schema-validated table (`schema_version: 2`). It defines, for
+each environment: the `runner` that hosts it, the `native_key` that maps it to a
+native-package installer, a `build` compile contract (below), and a
+`capabilities` map over a closed vocabulary:
 
 | capability | meaning |
 |---|---|
@@ -336,6 +337,52 @@ cap; `_area-ci.yml` then confines it — `package-ci` declares `contents: read`
 and `coverage-audit` stays at `checks: read`. The workflow-contract suite pins all of
 that.
 
+### Build contracts
+
+Each environment also declares a `build` contract — what it compiles, or what
+it is checked against (`fixes/2026-09-12-single-os-compile/spec.md`).
+
+A **native producer** (`ubuntu-latest`, `windows-latest`, `macos-latest`)
+declares the compile-affecting inputs that enter every planned build key it
+owns — `host`, `target`, `profile`, `rustflags`, `cargo_config`, `linker`,
+`archive_format`, `nextest` — plus `executes`, the environments its archive may
+run in, and `runtime`, the predicates that claim is checked against. The pinned
+Rust toolchain is deliberately *not* here: `rust-toolchain.toml` is the one
+place it lives, and a second copy could disagree with what CI installs.
+
+Declaring `executes` is what makes an environment a producer, and every producer
+owns the archive its consumers run. There is no held-back state: Task 6.5 of
+`fixes/2026-09-12-single-os-compile/plan.md` removed the `archive_cutover`
+migration switch together with the compile-in-place paths it guarded, and the
+field is now refused by the closed contract vocabulary. A test cell that reaches
+a tier without a build record refuses rather than compiling a replacement.
+
+The runner label that selects an owner leg is never the authority on what it may
+compile. `ci-build produce` asks the toolchain itself: a record whose `host` is
+not this machine's `rustc -vV` host, or whose `target` this toolchain has no
+standard library for, is refused at the `preflight` stage before anything is
+compiled. A key names the toolchain it was computed for, so an archive built by
+the wrong one would still *verify* — the consumer compares against the planned
+key — while carrying binaries of a machine the plan never promised.
+
+An **archive-only** environment (`wsl2-ubuntu`) compiles nothing, so it declares
+only `nextest` and `runtime`.
+
+Compatibility is declared, never inferred from an OS name. A producer may name
+itself in `executes` and, beyond that, only an archive-only environment it is
+already the `native_key` of — so `ubuntu-latest -> wsl2-ubuntu` is the only
+cross-environment edge this table can express, and native Windows cannot be
+paired with the WSL2 guest at all. Each such edge is additionally checked for
+equal `arch`, `abi`, and `libc`, a `native_libraries` superset on the consumer,
+and an equal `nextest` specifier; any mismatch fails the scope calculation
+rather than moving compilation into a toolchain-free guest.
+
+`nextest` is a version *specifier* both sides of an edge must share. It reads
+`latest` today, matching what the workflows install and what the WSL2 guest
+downloads from `get.nexte.st/latest/linux`; pinning an exact release is still
+deferred, and a producer/consumer skew now shows up as a verification rejection
+rather than a silent mismatch.
+
 An L2 tier is hostable where ANY of its declared backends is: each backend is
 looked up as a capability under its own name (`tmux` today; `wezterm`,
 `kitty`, and `apple-terminal` get the same axis if they ever become
@@ -369,8 +416,10 @@ l2-backends = ["tmux", "wezterm"]
 features = ["playa"]
 all-features = false
 l1-include-slow = false
-runner-tools = ["ai-provider-stubs", "darkmatter-md-fixture"]
+runner-tools = ["ai-provider-stubs"]
 companion-suites = ["homelab-frontend"]
+archive-includes = ["examples/discovery_probe"]
+sidecars = ["darkmatter-md-fixture"]
 ```
 
 A package with no CI metadata defaults to `gates = true` and the L1 tier —
@@ -396,8 +445,10 @@ would silently exempt a package and miss its first test.
 | `features` | string[] | `[]` | forwarded to check, archive, and the canonical recipe consistently. Conflicts with `all-features` |
 | `all-features` | bool | `false` | run with `--all-features`. Conflicts with `features` |
 | `l1-include-slow` | bool | `false` | keep `slow_` tests inside the L1 selection (darkmatter's contract) |
-| `runner-tools` | string[] | `[]` | closed vocabulary: `ai-provider-stubs`, `darkmatter-md-fixture`, `messenger-desktop-stubs`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn`, `neovim`, `zed-extension` |
+| `runner-tools` | string[] | `[]` | closed vocabulary of RUNTIME facilities the consumer provisions: `ai-provider-stubs`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn`, `neovim`, `zed-extension` |
 | `companion-suites` | string[] | `[]` | non-Cargo suites this package owns; closed vocabulary: `homelab-frontend` |
+| `archive-includes` | string[] | `[]` | build outputs the producer must add to this package's archive, relative to the profile output directory |
+| `sidecars` | string[] | `[]` | named build sidecars from [`sidecars.json`](sidecars.json) — another package's binaries, compiled by the producer |
 
 `[package.metadata.ci.native]`: a map of runner OS (`ubuntu-latest`,
 `windows-latest`, `macos-latest`) → system packages needed to build/test. The
@@ -407,9 +458,73 @@ compiles `playa` needs ALSA even though it is not testing `playa` (R5).
 
 Validation (`affected_scope.py::validate_package_ci`) rejects unknown fields,
 invalid tier or tool names, conflicting `features`/`all-features`, expired
-exclusions, an L2 tier without backends, l2-backends without L2, and a
-companion suite whose canonical recipe does not exist in its owning directory's
-justfile.
+exclusions, an L2 tier without backends, l2-backends without L2, a companion
+suite whose canonical recipe does not exist in its owning directory's justfile,
+a sidecar outside the closed table, and a malformed archive include.
+
+### `archive-includes` — build outputs the archive must carry
+
+`cargo nextest archive` carries test binaries, non-test `bin` targets, build
+script output directories, and linked paths. It does **not** carry a workspace
+`dylib` or an example. Anything else a test needs at run time is declared here,
+by the package that breaks without it.
+
+Entries are relative to the **profile output directory**, so a package writes
+`examples/discovery_probe` and `ci-build produce` supplies the
+`<triple>/<profile>` prefix its own invocation created. Three placeholders cover
+the producers' different spellings of one file: `{DLL_PREFIX}`, `{DLL_SUFFIX}`,
+and `{EXE_SUFFIX}`.
+
+An entry naming a direct child of `examples/` is a special case the producer
+recognizes: an include only *copies* what the build produced, and `cargo nextest
+archive` never builds an example, so `ci-build produce` builds each declared one
+before archiving. A declaration naming no example target fails the record at
+its `compile` stage rather than shipping an archive without it.
+
+```toml
+[package.metadata.ci.tests]
+archive-includes = ["examples/discovery_probe", "{DLL_PREFIX}mylib{DLL_SUFFIX}"]
+```
+
+Validation refuses an absolute path, a `..` segment, a backslash spelling (one
+path has to travel from a Windows producer to a Linux consumer's manifest
+reader), an unknown placeholder, and an entry that names its own profile
+directory. It is checked at scheduling time because a malformed include
+otherwise surfaces as a failed producer minutes into a fan-out.
+
+The producer implements these through a generated nextest **tool config**
+declaring `[profile.ci-build-archive] archive.include`, merged with — never
+replacing — the repository's own `profile.default.archive.include`.
+
+### `sidecars` — binaries the producer compiles for the consumer
+
+A sidecar is another package's compile-time tool that this package's tests
+spawn: it is not in the archive, and a consumer with no Cargo cannot build one.
+[`sidecars.json`](sidecars.json) is the closed vocabulary, mapping each name to
+the package, features, and binaries that produce it, plus the reason it exists.
+A package names a sidecar; it never says how to build one, and there is no
+arbitrary shell-command field.
+
+`ci-build produce` emits them into `<artifact>-sidecars/` and lists every file
+in the manifest with its size and BLAKE3 digest; `ci-build verify` refuses a
+missing or altered one before a consumer extracts anything.
+
+An archive consumer takes every sidecar from `<artifact>-sidecars/`: the
+directory goes on `PATH`, and the two tools with their own binding —
+`MESSENGER_STUB_BIN_DIR` and `BISCUIT_HARNESS_BROKER_BIN` — are exported from
+it. Nothing is built on the consumer.
+
+`darkmatter-md-fixture` and `messenger-desktop-stubs` are sidecars, not runner
+tools. Until Task 6.5 the planner also projected those two names back into the
+plan's `runner_tools` list so the reusable workflow's legacy `cargo build` steps
+kept firing for an environment that still compiled in place. Both the steps and
+the projection are gone.
+
+A package whose L2 tier runs on a CI runner — `tiers` includes `L2` and
+`l2-backends` includes `tmux` — must declare `backend-proof` and
+`harness-broker`. `just _test_l2` spawns both, they were recipe-time `cargo`
+invocations before the cutover, and a consumer has no Cargo to rebuild them
+with. The whole-workspace audit in `test_affected_scope.py` is what enforces it.
 
 ### `runner-tools` is a closed vocabulary
 
@@ -418,15 +533,6 @@ command surface:
 
 - **`ai-provider-stubs`** — inert AI-provider CLI stubs for tests that require
   provider discovery (claudine-cli).
-- **`darkmatter-md-fixture`** — builds darkmatter's `md` binary into the
-  workspace target dir, preserving Claudine's clean-checkout fixture that a
-  direct `_test claudine-cli` would otherwise lose.
-- **`messenger-desktop-stubs`** — builds and verifies Messenger's six desktop
-  helper fixtures once before each native L1 suite, then exports their directory
-  through `MESSENGER_STUB_BIN_DIR`. The WSL2 archive job builds a Linux sidecar;
-  the WSL job copies it onto ext4 with executable permissions and unprivileged
-  ownership. The guest verifies that Cargo and rustc are absent before running
-  the archive, proving helper execution depends only on the delivered sidecar.
 - **`node-22` / `pnpm-10`** — the JavaScript toolchain a companion suite runs
   under (homelab-frontend, owned by homelab-server).
 - **`l2-parallel-self-spawn`** — run the L2 tier in `_test_l2`'s parallel
@@ -507,6 +613,150 @@ unmeasured guess would defeat the mechanism.
 An entry is applied by the area that owns its `package` and by no other.
 Policy gaps are **not** baselined here — they are governed once in
 `environments.json`.
+
+## Native build owners and archive consumers
+
+Every executing L1, L2, and browser cell names one **build record** in the
+resolved plan. The `build` matrix has one leg per native producer environment,
+derived from `build_owners`; its runner and union of native prerequisites come
+from that projection. An all-reused plan schedules no owner.
+
+Each owner invokes `scripts/ci/produce-owner.sh` once, without `--key`. Separate,
+deterministically ordered package invocations share one Cargo target directory.
+The artifact publisher uses the pinned `@actions/artifact` client to upload each
+`build-<package>-<producer>-<key>` independently, including that package's
+manifest, archive, sidecars, and verifier. A failed record or upload does not
+stop publication of unrelated records. No owner bundle replaces package keys.
+
+With `measure-compiler-work: true`, the owner script enables the counter for
+package compiles. Each package artifact carries its own compiler-work report
+and an owner aggregate, including measured record count and owner wall time.
+Ordinary CI does not enable the counter. Hosted cold/warm comparisons and the
+15% architecture decision remain required before rollout acceptance.
+
+Manifest generation 3 requires a clean tracked producer checkout at the planned
+commit, checks it again after production, and compares its Git tree with the
+consumer checkout before tests. `--source-tree` is an assertion, never an
+identity override. Dirty local trees cannot publish or consume these archives;
+use an explicitly requested native diagnostic run for uncommitted changes.
+
+**One revision, end to end.** Because `plan.head` decides which checkout may
+produce or verify, every `actions/checkout` in `ci.yml`, `_area-ci.yml`,
+`_package-ci.yml`, and `_wsl-ci.yml` is pinned. `pull_request` otherwise checks
+out GitHub's merge branch, which is neither stable nor the commit the plan
+names. `ci.yml` resolves the revision once, as
+`github.event.pull_request.head.sha || github.sha`, for the two jobs that run
+before a plan exists; the scope job then publishes the plan's own `head` and
+every later job — and every called workflow, through its required
+`tested-revision` input — checks that out.
+
+`scripts/cross-check.sh` satisfies the same contract locally. It commits the
+working tree (tracked edits and untracked, non-ignored files) as one throwaway
+commit over the base each host can fetch, ships that commit as a `git bundle`,
+and names it as the plan's head. Every host checks out that exact revision,
+clean; nothing is applied on top. The developer's branch, index, and stash
+stack are untouched, nothing is signed, and the temporary ref the bundle is cut
+from is deleted when the run ends.
+
+Runtime requirements come from the emitted binaries and sidecars: Linux uses
+`ldd -v`, macOS uses `otool` and `dyld_info` (including shared-cache libraries),
+and Windows inspects PE imports and the API-set schema. External library builds
+are identified by their content hashes or Mach-O UUIDs. Consumers inspect their
+own resolved libraries and require identical identities. This is deliberately
+more restrictive than a general ABI-version compatibility test: an upgraded
+library can require rebuilding even when it would have been compatible.
+Linker provenance records the probed linker version and pins the compiler's
+linker selection; GNU targets disable implicit bundled LLD selection.
+
+**A build is never a result cell.** It has no `{package, environment, tier}`
+identity, publishes no JUnit and no `status-…` artifact, and is never
+baselined. What it publishes is
+`build-status-<package>-<producer>-<key>/build-status.json`, under `always()`,
+for success, compile failure, upload failure, and cancellation alike — with the
+realized digest and stage timings when the producer got far enough to have
+them. A runner-lost owner leaves none, and `runner_loss.py attribute --plan`
+synthesizes it from the plan's own record. `ci-rollup` reads those documents
+and renders a dependent cell as `MISSING — blocked by build <key> …`, which
+blocks and which the skip baseline (test identities only) can never excuse. An
+unrelated area or environment proceeds untouched, and a real test result
+outranks the plumbing diagnostic.
+
+**Consumers verify, then run.** A tier whose `{environment, gate}` appears in a
+record's `consumers` installs no toolchain, restores no Cargo cache, downloads
+the artifact, and runs `ci-build verify` — plan key, realized digest, source
+identity, producer/execution compatibility, archive and sidecar checksums,
+expected binaries, and the host's own runtime ABI — *before* anything is
+extracted. A rejection is a stable infrastructure verdict and stops the cell;
+nothing compiles a replacement. The tier then runs the canonical recipe in
+archive mode (`--archive-file`, `--workspace-remap`), and its status records the
+planned key, producer, and realized digest it executed.
+
+**One Linux build, two environments.** `wsl2-ubuntu` downloads the same
+artifact, checksum, and realized digest as native Linux and keeps its own JUnit
+and status cell. `_wsl-ci.yml` owns no producer job any more. Verification runs
+*in the guest*, because the predicates that matter are the guest's — a verifier
+run on the Windows host would report `msvc` and prove nothing. The guest clones
+to its own `GUEST_ROOT`, a path no producer uses. It used to recreate the
+manifest's `producer_workspace`, because `--workspace-remap` rewrites only the
+run-time `CARGO_MANIFEST_DIR` while ~160 test sites read the compile-time
+`env!("CARGO_MANIFEST_DIR")`. Those sites now resolve through
+`biscuit_test_harness::manifest_dir!()`;
+`tools/test-toolkit/tests/archive_path_guard.rs` fails the run if a new one
+appears, and the `slow_` relocation fixtures in
+`scripts/ci-build-archive-tests.rs` prove a real package's archive runs with the
+producer's checkout deleted and its target directory renamed away.
+`producer_workspace` remains in the manifest as provenance — it is inside the
+realized digest — and no consumer executes by it.
+
+### What each stage cost
+
+Seven windows are reported, never folded into one another, so no measurement
+can hide transfer or setup inside test time.
+
+| Stage | Where it is measured | Field |
+|---|---|---|
+| queue | owner job, against the plan's publication | `stage_seconds.queue_seconds` |
+| compile + archive | `ci-build produce` | `timings.compile_archive_ms` |
+| upload | owner job, around `upload-artifact` | `stage_seconds.upload_seconds` |
+| download | consumer, around `download-artifact` | `timings.download_seconds` |
+| verify | consumer, around `ci-build verify` | `timings.verify_seconds` |
+| extract | `ci-build verify`, its own `--extract-to` | `timings.extract_ms` |
+| execute | consumer, around the gate command | `timings.execute_seconds` |
+
+Three of those are windows no tool can see from inside itself. Queueing closes
+before `ci-build` starts and the upload opens after it exits, so the owner job
+observes both and merges `stage_seconds` into the status document; an artifact
+download is an action rather than a command, so a marker step opens the window
+and the verifier closes it.
+
+**Compile and archive are one number on purpose.** `cargo nextest archive`
+compiles and archives in a single command and the two are not separable from
+outside it, so the field is named for what it measures.
+
+**Extraction is the verifier's.** `cargo nextest run --archive-file` extracts
+inside the run, so a consumer cannot time that extraction apart from its tests.
+The verifier already performs a full `--extract-to` of the same archive on the
+same host — listing the inventory requires it — and that window is what
+`extract_ms` reports: the stage has a measured cost instead of an invisible one.
+
+**Seconds or milliseconds, spelled in the name.** A workflow's only portable
+clock is `date +%s` (macOS and Git Bash have no `%3N`), so workflow-observed
+windows are whole seconds and tool-measured ones are milliseconds. An
+**absent** measurement is absent: the summary renders `—`, never `0s`, because
+a guest that died before its numbers crossed the 9p mount did not have an
+instant transfer.
+
+The WSL2 guest cannot write `$GITHUB_OUTPUT`, so it leaves `wsl-timing/` in the
+9p workspace — `verify.seconds`, `l1.seconds`, and a copy of the verdict — and
+the host's status step reads them.
+
+`ci-rollup` renders both halves under **Build provenance** (one row per
+executing cell: planned key, realized digest, producer, and its four consumer
+stages) and **Build records** (one row per planned key: producer, result,
+queue, compile+archive, upload). Neither is an identity. Result artifacts,
+receipts, baselines, and JUnit records stay keyed on
+`{package, environment, tier}`, and no gate outcome is derived from either
+table.
 
 ## The area fan-out
 
@@ -621,8 +871,27 @@ junit-<package>-<tier>-<environment>/
     <tier>/<package>.xml      that invocation's verbatim JUnit document
 
 status-<package>-<job>[-<environment>]/
-    status.json               {"package","job","environment","result"[,"detail"][,"companion"]}
+    status.json               {"package","job","environment","result"
+                               [,"detail"][,"companion"][,"build"][,"timings"]}
+
+build-status-<package>-<producer>-<key>/
+    build-status.json         {"key","package","producer","artifact","result","stage",
+                               "consumers"[,"digest"][,"detail"][,"timings"]
+                               [,"stage_seconds"]}
 ```
+
+`timings` on a consumer is `{download_seconds, verify_seconds, extract_ms,
+execute_seconds}`; on a build status it is `ci-build produce`'s own
+millisecond stages, and `stage_seconds` is the pair the owner *job* observed
+(`{queue_seconds, upload_seconds}`). All are optional and all are reporting
+only — see [What each stage cost](#what-each-stage-cost). A job that measured
+nothing omits the object rather than publishing zeros.
+
+The third family is the build plumbing, not a result: it carries no
+`{package, environment, tier}` identity, creates no cell, and is never
+baselined. `ci-rollup` reads it only to explain a cell that could not run, and
+a cell's own `build` field records the key, producer, and realized digest it
+executed.
 
 Every test job uploads the whole `target/nextest/ci-reports` **staging
 directory**, not `target/nextest/ci/test-results.xml` — that single path is
@@ -652,18 +921,24 @@ failure twice.
 
 `Swatinem/rust-cache` is keyed per package and per job kind:
 `package-ci-<package>-check-<os>`, `package-ci-<package>-lint-ubuntu-latest`,
-and `package-ci-<package>-test-<environment>`. The L2, browser, and WSL
-archive jobs deliberately REUSE the `test` key for their environment: they
-compile the same crates as the L1 leg, so one warm cache serves every tier
-instead of three cold ones.
+and `build-<package>-<producer>` for the native build owner. The owner's entry
+covers both the workspace and `scripts/` in one action invocation, because
+`scripts/` has no cache anywhere else in the workflow and a second `rust-cache`
+step would race the first's post-job save.
 
-The L1 job prepares both nested test-cache directories before the cache action's
-post-job cleanup when `target/tests` exists. `trybuild` creates only
-`target/tests/trybuild`, but rust-cache v2 also opens `target/tests/target`
-without awaiting the resulting rejection. This produced ENOENT annotations
-after passing `model_id` tests on all three platforms in run 34510204615.
-The workaround preserves artifacts and runs even after a failed test; remove it
-when the action handles absent nested targets ([upstream cleanup implementation](https://github.com/Swatinem/rust-cache/blob/6323deb102c322ba6fcbdcafc7e3dddab59af2b6/src/cleanup.ts)).
+**No test tier has a cache key at all.** A cell that consumes an archive
+restores no Cargo cache and installs no toolchain: it has nothing to compile,
+and a restored cache is the one thing that can make a silent rebuild look fast.
+Task 6.5 deleted the `package-ci-<package>-test-<environment>` key with the
+toolchain setup it accompanied; check and lint keep theirs, because they are
+deliberately separate compile configurations.
+
+The L1 job used to prepare both nested test-cache directories before the cache
+action's post-job cleanup, because rust-cache v2 opens `target/tests/target`
+even where only `target/tests/trybuild` exists (ENOENT annotations on all three
+platforms, run 34510204615). That workaround went with the tier's cache: with no
+cache action in the job there is no post-job cleanup to appease. Should a test
+tier ever restore a cache again, the workaround comes back with it.
 
 The per-package unit made the old per-directory key wrong, and the choice is
 the single biggest influence on whether this work reduces runtime at all:
@@ -671,8 +946,7 @@ compilation is ~85% of a test job. **The package-scoped key has not been
 measured against a real run yet** — doing so needs an authorized full trigger.
 The known pressure is the cache quota: ~5 keys × 63 packages against GitHub's
 10 GB repository limit means one full run saves more caches than the quota holds
-and evicts its own predecessors, so only intra-run reuse is reliable today (the
-L2, browser, and WSL-archive jobs restore the key their own run saved). Do not
+and evicts its own predecessors, so only intra-run reuse is reliable today. Do not
 diagnose a cold build as a cache-key bug until that measurement exists.
 
 ## Compile-check
@@ -739,3 +1013,16 @@ ci_workflow_contracts`), and a change to any `.github/workflows/` file or to
 that suite's source also sets the flag, because `test-toolkit` is
 `gates = false` (promotion-pending, expiry 2026-10-31) and no area job
 schedules it. The durable fix remains its promotion to a gating package.
+
+The leg is also the only runner for the two suites that are neither Cargo
+packages nor selected by one: the shared test-suite audit tool
+(`pnpm --dir tools/test-audit check`) and the build owner's artifact publisher
+(`node --test 'scripts/ci/artifacts/*.test.cjs'`, the owner aggregate AC8 is
+read from). Both run on the Node the leg pins with `actions/setup-node`.
+
+### CI helper runtime floors
+
+The Python CI helper suite supports Python 3.9 and later. macOS cross-host
+orchestration supports `/bin/bash` 3.2, including empty argument lists under
+`set -u`. Native Windows script generation quotes arguments for PowerShell;
+Unix script generation quotes them for Bash.
