@@ -1,6 +1,8 @@
 ---
 created: 2026-09-13
-reviewed: false
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-09-15
 implemented: false
 clarified: true
 needs_rulings: false
@@ -87,6 +89,19 @@ renderings on JSON — is specified separately in
 It changes rendered output rather than diagnostics, and it reverses a
 shipped decision, so it gets its own revert boundary. D1 below records the
 one place the two fixes touch.
+
+> **Reader's note (2026-09-15 review):** This revision separates the
+> syntactic whole-value shape from the semantic single-pass contract. An
+> ordinary frontmatter key can receive a second interpolation pass after
+> frontmatter shell expansion; a lifecycle field cannot. Therefore the hard
+> diagnostic is limited to surfaces whose owning contract guarantees one
+> evaluation pass. The review also makes schema-directed suggestion filtering
+> an explicit lint API, defines lossless YAML-style projection for DMLS fixes,
+> gives sequence-item arena entries an explicit role, and specifies odd/even
+> backslash handling. Those details prevent the implementation from making
+> correctness depend on an unrelated shell expansion, corrupting YAML while
+> applying a quick fix, inventing a mapping key for a list item, or treating a
+> literal backslash as an escape marker.
 
 The original defect's outcome is unchanged and remains the motivating case.
 An author who writes a `{{ … }}` span inside a quoted string literal of a
@@ -227,7 +242,8 @@ No production call site exists for it in `composition/prepare/` or in the
 CLI, yet `claudine/docs/topics/lifecycle.md` states that it "still runs" for
 non-lifecycle surfaces. Green tests over an uncalled function read as
 coverage and are why this surface looked guarded. Its disposition is a
-Required Planning Determination.
+Resolved Implementation Determination: fold its valid cases into the new
+raw-aware validator and runtime guard, then delete the dead entry point.
 
 ### Why DMLS missed it
 
@@ -251,18 +267,25 @@ could not have found a nested span even if the rule existed.
 - **Nested span.** A `{{ … }}` span, as recognized by
   `ExpressionFinder::find_all_plain`, that lies inside an authored literal.
 - **Expression surface.** Any place Claudine or Darkmatter parses text as an
-  expression. Surfaces fall into two tiers, and the whole of this fix turns
+  expression. Surfaces fall into three tiers, and the whole of this fix turns
   on the division:
     - **Rescanning surfaces** are evaluated through `interpolate_text`, which
       loops to a fixpoint over its own output: a document body
       interpolation, and a mixed frontmatter string such as
       `"a {{ … }} b"`. A nested span on one of these is resolved by the next
       depth pass.
-    - **Non-rescanning surfaces** are evaluated exactly once, with no rescan:
-      a whole-value frontmatter scalar (trimmed content is exactly one span,
-      routed to the `whole_value_span` branch of `interpolate_value`), every
-      lifecycle communication field, every `when` / `until` / `while`
-      predicate, every stack action operand, and every `proxy … with` value.
+    - **Conditionally rescanned surfaces** use the one-pass
+      `whole_value_span` branch for each call but can be revisited by an owning
+      pipeline. Ordinary frontmatter is the important case: a key may receive
+      a second interpolation pass after frontmatter shell expansion. The
+      second pass is conditional on shell replacement, so authors must not
+      rely on it, but its existence means the construct is not truthfully a
+      “will never work” error on an arbitrary frontmatter key.
+    - **Non-rescanning surfaces** are contractually evaluated exactly once:
+      a whole-value lifecycle communication field, every lifecycle `when` /
+      `until` / `while` predicate, every stack action operand, and every
+      `proxy … with` value. These are the only surfaces on which this fix emits
+      the hard nested-span diagnostic.
 
 ## Required Invariants
 
@@ -279,12 +302,19 @@ could not have found a nested span even if the rule existed.
    `darkmatter/features/2026-07-15-performance-followup/benchmarks/fixtures/compose_interpolation_heavy.md:61`.
    Flagging a body interpolation would be a false positive against green
    tests.
-2. **One recognizer, and one surface classifier.** The static rule and
-   `reject_surviving_spans` decide "is this a span" with the same function.
-   Darkmatter also exports exactly one predicate answering "is this surface
-   evaluated once" — the whole-value-span shape `interpolate_value` already
-   branches on — and Claudine, DMLS, and the lint all call it. Two things
-   can desync here, not one, and both get the same treatment.
+2. **One recognizer; do not mistake syntax for execution policy.** The static
+   rule and `reject_surviving_spans` decide “is this a span” with the same
+   function. Darkmatter exports `is_whole_value_span` as the sole authority
+   for the syntactic shape that `interpolate_value` branches on. It does
+   **not** claim that the owning pipeline makes only one call: ordinary
+   frontmatter disproves that when shell expansion triggers pass 2. Claudine's
+   canonical lifecycle-surface iterator owns the single-pass inventory. DMLS
+   mirrors only the lifecycle-key portion of that inventory until schema
+   triggers replace its documented static key list (D3). Claudine and DMLS
+   each test their inventory against the authored
+   `darkmatter/docs/schemas/claudine.yaml` event keys, so a new lifecycle event
+   cannot silently become editor-dark without introducing a crate dependency
+   in either direction.
 3. **Source text, not the tree.** The rule runs on `SpannedExpr` parsed from
    authored expression text. It never inspects a synthesized literal, so no
    positional action body is ever flagged.
@@ -308,14 +338,15 @@ could not have found a nested span even if the rule existed.
       or an agent editing frontmatter mid-run. A defect introduced that way
       passes the preflight and is caught at the step's own turn. This is not
       fixable here.
-5. **Editor and CLI agree.** The DMLS diagnostic range is the inner `{{`
+5. **Editor and CLI agree.** On every lifecycle surface both understand, the
+   DMLS diagnostic range is the inner `{{`
    through its `}}`, and the Claudine error highlights the same frontmatter
    value and quotes the same literal. The suggestion is the **bare
    expression text** — no `{{ }}` wrapper, no YAML quoting — so the two
    consumers can assert byte equality on it; each is responsible for its own
-   wrapping. Precise inner-brace ranges are promised for flow scalars and
-   literal `|` block scalars; a folded `>` scalar is ranged on the whole
-   scalar (D3).
+   wrapping. Precise inner-brace ranges are promised for untagged plain,
+   single-quoted, and double-quoted scalars plus literal `|` blocks; a folded
+   `>` scalar is ranged on the whole scalar (D3).
 
 ## Design
 
@@ -343,10 +374,28 @@ pub enum ExpressionLintKind {
 pub fn lint_expression(source: &str, mode: ParseMode) -> Vec<ExpressionLint>;
 pub fn lint_spanned(source: &str, expr: &SpannedExpr) -> Vec<ExpressionLint>;
 
+pub enum DeclaredExpressionValueKind {
+    Scalar,
+    Array,
+    Object,
+    Unknown,
+}
+
+pub fn lint_expression_with_types(
+    source: &str,
+    mode: ParseMode,
+    classify: impl FnMut(&SpannedExpr) -> DeclaredExpressionValueKind,
+) -> Vec<ExpressionLint>;
+
+pub fn lint_spanned_with_types(
+    source: &str,
+    expr: &SpannedExpr,
+    classify: impl FnMut(&SpannedExpr) -> DeclaredExpressionValueKind,
+) -> Vec<ExpressionLint>;
+
 /// True when the trimmed text is exactly one `{{ … }}` span: the shape
-/// `interpolate_value` routes to `whole_value_span`, and therefore the
-/// shape that is evaluated once. The sole authority for Invariant 2's
-/// surface classification.
+/// `interpolate_value` routes to `whole_value_span`. This classifies syntax
+/// only; it does not claim how many times an owning pipeline invokes it.
 pub fn is_whole_value_span(text: &str) -> bool;
 ```
 
@@ -362,9 +411,18 @@ keys included, matching `visit_string_literals`) and runs
 recognizer is the same function the runtime guard calls, which satisfies
 Invariant 2.
 
-Callers decide *whether* to run the lint. `lint_spanned` does not know what
-surface it is on; the surface classification is Invariant 2's second
-predicate, applied by Claudine and DMLS before they call in.
+The untyped entries apply the documented default that an unknown value is
+treated as scalar for suggestion purposes. The `_with_types` entries are the
+required path for Claudine and DMLS: the generator parses each lifted nested
+span, passes that AST to `classify`, and applies the suppression policy below.
+This API boundary is necessary. A `lint_spanned(source, expr)` function with no
+schema or catalog input cannot truthfully promise schema-directed filtering,
+and duplicating the filter in each consumer would violate the editor/CLI
+agreement invariant.
+
+Callers decide *whether* to run the lint. The lint does not know what surface
+it is on; Claudine applies its lifecycle inventory and DMLS applies the
+schema/lifecycle inventory described in D3 before calling it.
 
 #### The rewrite generator
 
@@ -462,8 +520,10 @@ integer }` — the catalog is generated from the schema rather than
 hand-declared, so the two cannot drift. Frontmatter variables carry their
 type the same way, through the document's own `$schema`. The rule:
 
-- **Declared array or object** — suppress. `is_array`, or a `base` of
-  `object`, is the whole test.
+- **Declared array** — suppress. `is_array` is the whole test.
+- **Declared object** — offer the suggestion. Both existing rendering paths
+  already serialize objects as JSON, so suppressing objects would withhold a
+  correct fix without protecting semantics.
 - **Declared scalar** — offer the suggestion.
 - **Untyped** — offer the suggestion. A user-defined variable *can* be typed
   if the author wants it checked; anything untyped is effectively `any`, and
@@ -482,8 +542,10 @@ receive an imperfect suggestion until the array-rendering fix lands. A typed
 one cannot. The window closes entirely when
 [`darkmatter/fixes/2026-09-13-unify-array-rendering/spec.md`](../../../darkmatter/fixes/2026-09-13-unify-array-rendering/spec.md)
 makes both paths render arrays as JSON and **lifts this suppression as part
-of its own scope**. Neither fix blocks the other, and they may land in
-either order.
+of its own scope**. If that fix lands first, callers classify arrays normally
+and the `_with_types` entries can be omitted if no other lint needs them; do
+not add type plumbing solely to delete it in the same landing sequence.
+Neither fix blocks the other.
 
 **Not flagged.** A `{{{ … }}}` literal escape inside a quoted string is not
 a nested span, because `find_all_plain` does not recognize it as one. A
@@ -516,10 +578,9 @@ prepare-time pass as `validate_no_undefined_lifecycle_variables` and takes
 the same `raw_frontmatter`, because it needs source text. It covers the
 non-rescanning surfaces:
 
-- whole-value frontmatter scalars, identified with `is_whole_value_span`;
-- the seven events' communication fields (`LIFECYCLE_COMM_FIELDS`), by
-  finding each `{{ … }}` span in the raw string and linting its inner text
-  with `ParseMode::Interpolation`;
+- the seven events' whole-value communication fields
+  (`LIFECYCLE_COMM_FIELDS`), first classified with
+  `is_whole_value_span`, then linted with `ParseMode::Interpolation`;
 - every `when` / `until` / `while` predicate, linted whole with
   `ParseMode::Condition`;
 - every stack action operand and `proxy … with` value that
@@ -527,18 +588,20 @@ non-rescanning surfaces:
   rather than the parsed `Expr`, so that only authored literals are examined
   (Invariant 3).
 
-A mixed frontmatter string (`"a {{ … }} b"`) is not covered: it rescans and
-resolves correctly.
+A mixed lifecycle string (`"a {{ … }} b"`) is not covered: it rescans and
+resolves correctly. Neither is an arbitrary whole-value frontmatter key. The
+latter is a conditionally rescanned surface, not part of the lifecycle
+single-pass inventory, and rejecting it as an `ERROR` would overstate what the
+runtime guarantees.
 
 **Raw-source dependency.** `iter_stack_expression_surfaces` yields a
 `LifecycleExpressionSurface` holding `expr: &'a Expr` — parsed trees, with
 no raw YAML text attached. Reading raw source from those surfaces is
-therefore not free. The implementation plan must choose between extending
-that iterator to carry the raw source alongside the tree, and adding a
-parallel raw-text walker over the same surfaces; the second desyncs more
-easily and the first touches existing callers. This spec does not settle it
-but requires the plan to say which, because the choice determines whether
-the two walks can drift apart.
+therefore not free. Build one `LifecycleSourceMap` from raw frontmatter and
+extend the canonical iterator's records with the matching authored
+scalar/span. Do not add a parallel surface walker. A configured parsed
+surface with no source-map record is an internal validation error rather
+than a silent skip (Resolved Implementation Determination 2).
 
 The first lint in `LifecycleSignal::ALL` order aborts composition, matching
 the other validators. The error renders through the existing
@@ -576,12 +639,18 @@ step. A step that references a separate prompt document (`task:
 some-prompt.md`) composes that file only at its own turn
 (`StepComposeContext::for_referenced_document`; the loop-step equivalents in
 `iterate.rs`), and Phase 1c never opens those files. Close it with an
-up-front **text-only** pre-scan in `phase1c.rs`: for each step whose
-executable names a document, resolve the file reference where it resolves
-without runtime state, read it, and run only this text lint over its raw
-frontmatter. A step reference whose own text contains `{{ … }}` cannot be
-resolved up front and falls through to being caught at its own turn, which
-is Invariant 4's first exception.
+up-front **passive, validation-only** pre-scan in `phase1c.rs`: for each step
+whose executable names a document, resolve the authored reference through
+`biscuit_file::FileReference` using the same captured
+`FileResolutionContext` and `for_source` derivation as execution, read it, and
+run only the YAML-aware lifecycle lint over its raw frontmatter. This pass does
+not compose values, execute shell, fetch remotes, prompt for schema values, or
+mutate the document. Calling it “text-only” is insufficient because the lint
+must distinguish whole-value from mixed scalars and lifecycle paths from
+ordinary keys. A step reference whose own text contains `{{ … }}` cannot be
+resolved up front and falls through to being caught at its own turn, which is
+Invariant 4's first exception. No prefix checks, ambient `resolve()`, or second
+file-reference grammar is permitted on this path.
 
 If a sequence step or proxy target reaches launch without having passed this
 validator, and it is not one of Invariant 4's two exceptions, that is a
@@ -591,7 +660,7 @@ defect in this fix, not an accepted gap.
 
 **Scan frontmatter strings.** Add a frontmatter interpolation inventory to
 `dmls/src/overlay/expressions.rs`, alongside the body `interpolations`
-helper: every `{{ … }}` span inside a plain string scalar of the
+helper: every `{{ … }}` span inside a string-valued scalar of the
 `FrontmatterAst`, with the span projected into document byte offsets. This
 is the gap that made the editor blind to every lifecycle expression, and it
 is a prerequisite for D3, not an optional extra. Unknown-identifier and
@@ -611,12 +680,18 @@ avoids — and that list will drift as lifecycle keys change. The drift is the
 accepted cost of scoping the roots correctly until the mechanism that
 removes the need exists; see the architectural note at the end of D3.
 
-**Where the diagnostic fires.** Only on whole-value frontmatter scalars,
-classified with `is_whole_value_span` (Invariant 2), and on schema-typed
-predicate values, which are condition text rather than a span and so reach
-the lint by the other route below. A document body interpolation and a mixed
-frontmatter string are rescanning surfaces and are never flagged, however
-the inventory reaches them.
+**Where the diagnostic fires.** Only on whole-value scalars underneath the
+static lifecycle-key inventory, classified with `is_whole_value_span`, and on
+schema-typed lifecycle predicate values, which are condition text rather than
+a span and so reach the lint by the other route below. An arbitrary
+whole-value frontmatter key is not enough: its owning pipeline may invoke a
+second pass after shell expansion. A document body interpolation, a mixed
+frontmatter string, and a non-lifecycle whole-value key are never flagged,
+although the inventory reaches them for the existing lower-severity
+diagnostics. The path matcher is tested against the authored Claudine schema's
+event keys and representative stack paths; Claudine separately tests
+`LifecycleSignal::ALL` against that same schema authority, so the stopgap list
+cannot drift silently.
 
 **What the editor could not reach before D6.** The frontmatter AST is built
 by `lower_mapping` (`dmls/src/overlay/frontmatter.rs`), which recurses into
@@ -642,18 +717,34 @@ for; and D6's array-element step in `nested_shape` is what lets a path like
 `initialize.stack[0].when` resolve at all. The schema carries the knowledge;
 the editor learns no Claudine layout.
 
-**Working in raw coordinates.** The editor scans the raw document slice and
-stays in raw coordinates end to end. It never decodes the scalar and never
-needs a decoded-to-raw offset map. Concretely: run the span recognizer over
-`&document[value_span]` and add `value_span.start` to every offset. This is
-correct by construction, because stripping per-line indentation shifts
-braces and quotes without creating or destroying any, so the set of spans
-found in raw text equals the set found in decoded text — Invariant 2 holds
-set-wise with no extra machinery, and the *n*-th nested span in document
-order is the same span in both coordinate systems. The lint itself still
-runs on the parsed `SpannedExpr` (only the tree can say which text is inside
-an authored literal); its results are aligned to raw ranges by that
-ordinal correspondence.
+**Projection is scalar-style aware.** There is no correct single rule that
+stays in raw coordinates for every YAML scalar. Flow quotes and escapes must
+be decoded before expression parsing; literal blocks retain raw line breaks
+but add a YAML header and indentation; folded blocks change the expression
+text itself. The inventory therefore carries both semantic expression text
+and a projection policy:
+
+- **Untagged plain scalars:** parse the authored expression text directly and add
+  `value_span.start` to lint spans.
+- **Untagged single- and double-quoted scalars:** use the existing
+  `DecodedScalar` map. Parse decoded text, project diagnostic spans back to
+  authored bytes, and YAML-escape a replacement fragment for the original
+  scalar style before constructing a code action.
+- **Literal `|` blocks:** find each outer `{{ … }}` in the raw value slice and
+  parse that raw inner expression. YAML indentation is ordinary expression
+  whitespace, so the lint and its complete suggestion stay in authored
+  coordinates and preserve every untouched byte.
+- **Folded `>` blocks:** parse `FmEntry.scalar`, which is the parser-decoded
+  value, but range the whole scalar and offer no code action because no
+  decoded-to-authored map exists.
+- **Tagged scalars:** analyze the decoded `FmEntry.scalar` only when needed
+  for a diagnostic, range the whole scalar, and offer no action. **Aliases are
+  not scalar entries and do not produce expression diagnostics at the alias
+  site.** Their target remains the schema validator's responsibility.
+
+Ordinal matching between a decoded tree and a separately scanned raw scalar
+is not an accepted projection mechanism: repeated spans, YAML escapes, and
+folding make “the nth span” too weak a source-position contract.
 
 This is deliberately not a general block-scalar decoder, and the background
 explains why:
@@ -680,21 +771,22 @@ explains why:
   logic with drift risk; if it is ever genuinely needed it belongs upstream
   in the YAML parser, not hand-rolled in Darkmatter.
 
-Two facts make raw-coordinate scanning cheap: `value_span` already covers
-`|-` through the end of the block, and the correctly decoded value is
-already on `FmEntry.scalar`.
+The correctly decoded value is already on `FmEntry.scalar`; the new work is
+choosing the safe projection policy, not implementing another YAML decoder.
 
-**Capture `ScalarStyle` on `FmEntry`.** `classify()`
-(`dmls/src/overlay/frontmatter.rs`) computes the scalar style and discards
-it; retaining it is roughly five lines. This is the enabling change, because
-it is what lets the editor tell a literal `|` block from a folded `>` block.
+**Capture `ScalarStyle` and tag presence on `FmEntry`.** `classify()`
+(`dmls/src/overlay/frontmatter.rs`) matches a `Node::Scalar` that already
+carries both and currently discards them; retaining the style plus
+`tagged: bool` is the enabling change. It lets the editor distinguish literal
+from folded blocks and prevents a tagged scalar from entering an offset map
+that assumes the first byte is the scalar itself.
 
 **Folded scalars.** A folded `>` scalar rewrites line breaks into spaces, so
 raw and decoded content genuinely diverge and a range or an edit computed in
 raw coordinates could describe text the evaluator never sees. Folded scalars
 are therefore ranged on the whole scalar and get no quick fix. Precision is
-promised for flow scalars and literal `|` blocks, which is the incident's
-exact shape and effectively all lifecycle authoring.
+promised for untagged plain/single/double scalars and literal `|` blocks,
+which is the incident's exact shape and effectively all lifecycle authoring.
 
 **Suppress the suggestion when a flagged literal's raw slice contains a
 newline.** A quoted string literal spanning a line break inside a block
@@ -712,24 +804,35 @@ interpolated here; concatenate with `+` instead
 ```
 
 The frontmatter producer (`diagnostics/frontmatter.rs::expression_diagnostics`)
-calls `lint_spanned` on the `SpannedExpr` it already parses, so the rule runs
-once per span with no second parse.
+calls `lint_spanned_with_types` on the `SpannedExpr` it already parses when the
+schema-driven path and interpolation inventory refer to the same projected
+source. Literal-block outer spans are parsed once from their raw inner text;
+folded/tagged values are parsed once from `FmEntry.scalar`. No diagnostic path
+parses the same expression twice merely to obtain a lint.
 
 **Fix the unguarded decode.** `dmls/src/providers/frontmatter.rs` calls
-`decode_scalar(raw)` with no block-scalar guard, unlike `source.rs`. An
-`Expression`-typed schema property authored as `|-` therefore hands
-`|-\n        {{…` straight to the expression parser today and produces a
-spurious `EXPRESSION_MALFORMED` warning; offsets stay correct, the text does
-not. Adding the guard is in scope here because this fix is what puts block
-scalars on the editor's expression path in earnest.
+`decode_scalar(raw)` on styles it does not decode. The existing malformed-
+expression producer is limited to untagged plain, single-quoted, and
+double-quoted scalars, where `DecodedScalar` provides an exact map. Literal,
+folded, tagged, and alias values retain the schema validator's generic error
+instead of receiving a more specific diagnostic with a fabricated message or
+range. This is the safe branch of the parser-agreement spike's C1 ruling; a
+general block/tag/alias projection layer remains out of scope.
 
 **Code action.** In `providers/code_actions.rs`, a `quickfix` titled
 `Rewrite with + concatenation` for every diagnostic carrying this code whose
-lint produced a suggestion. The edit replaces the offending `{{ … }}` span's
-inner text with the suggestion. The `|-` indicator and the per-line
-indentation survive untouched because the edit is computed in raw
-coordinates and never reconstructs the scalar — not because the edit takes
-care to preserve them.
+lint produced a suggestion. The diagnostic's typed `data` payload carries a
+versioned action discriminator, the analyzed document version, the authored
+replacement range, and the already YAML-style-encoded replacement; the
+code-action provider never parses the human message and declines stale data
+rather than applying it to a newer document snapshot. The
+edit replaces the offending `{{ … }}` span's inner text with the suggestion.
+For literal blocks this is an authored-range
+replacement and therefore preserves the `|-` indicator and all bytes outside
+the expression. For single- and double-quoted flow scalars the replacement is
+encoded as a fragment of that YAML style before insertion; a bare expression
+string must never be inserted into a quoted YAML scalar unchanged. Folded and
+tagged scalars receive no action.
 
 **Hover.** No change. The existing hover on a string literal already shows
 its value; that value will visibly contain the braces, which is a hint on
@@ -785,7 +888,8 @@ template text that no static pass can see. Its report changes:
   sentence under "Action Forms" stating that braces inside a quoted
   expression literal are inert on a lifecycle surface. The claim that
   `validate_no_interpolation_leaks` "still runs" for non-lifecycle surfaces
-  is corrected to match the Required Planning Determination on it.
+  is corrected to match its deletion in Resolved Implementation
+  Determination 1.
 - `darkmatter/docs/inline/interpolation.md`: a "Braces inside string
   literals" rule next to the `{{{ … }}}` recognition rules, stating which
   surfaces rescan and which do not, that a quoted literal is never
@@ -800,9 +904,9 @@ template text that no static pass can see. Its report changes:
   descends into list items (D6).
 - `darkmatter/docs/inline/interpolation.md` also gains: a sentence on why a
   rewrite suggestion is withheld for a span whose declared type is an array
-  or object, pointing at the array-rendering fix as the change that removes
-  the restriction; and **the backslash escape rule (D8) alongside the
-  `{{{ … }}}` rules**, giving both spellings, stating that compose preserves
+  (objects are already safe), pointing at the array-rendering fix as the
+  change that removes the restriction; and **the backslash escape rule (D8)
+  alongside the `{{{ … }}}` rules**, giving both spellings, stating that compose preserves
   the backslash and the Markdown renderer resolves it, and showing the case
   it exists for — prose that quotes another template language.
 - `.claude/skills/claudine/` and `.claude/skills/darkmatter/` lifecycle and
@@ -829,14 +933,44 @@ rejected: it reaches expressions inside `- item` lines just as well, but it
 cannot range a schema problem at the failing array element, which is a
 user-visible improvement this fix should not leave behind.
 
+An item is not a mapping key, so it must not be forced through `FmEntry`'s
+current “authored key/value entry” fiction. Extend the arena model explicitly:
+
+```rust
+pub enum FmEntryRole {
+    MappingProperty,
+    SequenceItem { index: usize },
+}
+
+pub struct FmEntry {
+    // existing identity/value fields
+    pub role: FmEntryRole,
+    pub key_span: Option<SourceSpan>,
+}
+```
+
+`key` remains the decoded path segment for compatibility; on an item it is the
+decimal index. `key_span` is `Some` only for an authored mapping key. Callers
+that render or range key-specific behavior operate only on
+`MappingProperty`; value diagnostics and `entry_at_offset` use `value_span`
+for an item. This avoids inventing a zero-width “key,” underlining the item
+value as though it were a key, or firing key completion/navigation on a
+synthetic index. Existing mapping entries preserve byte-identical fields and
+behavior.
+
 Two changes:
 
 - **`lower_mapping` descends into `Node::Sequence`**, emitting an entry per
   item and per key within it, with correct pointers, spans, parents, and
-  depth.
+  depth. The lowering helper may be renamed now that it walks both collection
+  kinds.
 - **`nested_shape` gains an array-element step**, so a schema path that
-  crosses a sequence — `initialize.stack[0].when` — resolves to the item
-  shape rather than failing at the sequence key.
+  crosses a sequence — `initialize.stack[0].when` — consumes the decimal
+  segment against an `is_array` atom and continues with that atom's item type
+  rather than looking for a property literally named `0`. A numeric segment
+  under a non-array, or a nonnumeric segment where an array item is required,
+  fails closed. Union selection applies before the array step and keeps the
+  existing merged-arm fallback when no single arm is selected.
 
 **Cost is settled and the arena needs no index.** From
 [`spikes/entry-arena-cost.md`](spikes/entry-arena-cost.md), measured over
@@ -900,12 +1034,11 @@ in mind:
   produces the same output on mapping-nested surfaces as it does today.
   This is the primary safety property and is asserted directly, not
   inferred from a green suite.
-- **Each capability is decided explicitly.** For hover, completion, and
-  navigation inside list items the outcome is either "works correctly, with
-  a test" or "suppressed inside sequence items, with a test proving the
-  suppression". Silence by accident is not an acceptable third option, and
-  which capabilities land in which bucket is a Required Planning
-  Determination.
+- **Each capability is decided explicitly.** Hover, completion, and
+  navigation work at real keys and scalar values inside list items and are
+  suppressed only on the synthetic item marker/index. Positive value-position
+  and negative marker-position tests pin the boundary; silence by accident is
+  not an acceptable third outcome.
 - **The incidental widening is tested, not just the new rule.**
   `EXPRESSION_MALFORMED` and `EXPRESSION_UNKNOWN_IDENTIFIER` will start
   firing inside list items. Combined with D7's severity moves, that is a
@@ -928,7 +1061,7 @@ its own:
 
 | Code | Today | Under the ladder | Why |
 | --- | --- | --- | --- |
-| `dm.expression.malformed`, schema-typed frontmatter value | `WARNING` | **`ERROR`** | The schema declares the value *is* an expression. A parse failure will never evaluate. |
+| `dm.expression.malformed`, schema-typed frontmatter value with exact scalar projection | `WARNING` | **`ERROR`** | The schema declares the value *is* an expression. A parse failure will never evaluate. Styles without exact projection retain the schema diagnostic instead. |
 | `dm.expression.malformed`, document-body span | `WARNING` | **`WARNING`** | A body `{{ … }}` is *inferred* to be an expression. The inference might be wrong. |
 | `dm.expression.unknown_identifier` | `INFORMATION` | **`WARNING`** | The identifier might be supplied at runtime by a late-binding global, so it might be wrong rather than certainly wrong. |
 | `dm.expression.nested_span_in_literal` | — | **`ERROR`** | On a non-rescanning surface the construct can never work, and compose refuses it. |
@@ -939,8 +1072,10 @@ audited here and keep their severities.
 
 **The frontmatter/body split applies the policy; it does not except it.**
 The policy keys on certainty, and the two surfaces differ in exactly that.
-For a schema-typed value the document has declared what the value is, so a
-parse failure is a certainty. For a body span the classification is an
+For a schema-typed value whose expression text and source range can be
+projected exactly, the document has declared what the value is, so a parse
+failure is a certainty. Other scalar styles remain schema errors without a
+more specific expression code. For a body span the classification is an
 inference from two braces, and that inference is frequently wrong in this
 very repository: **36 files contain foreign or historical brace syntax in
 their bodies.** The bulk of it is Darkmatter's and Claudine's own
@@ -968,22 +1103,24 @@ accept identical strings, and Claudine extends the namespace rather than the
 grammar — but attached conditions that are now requirements:
 
 - **Widen the decode guard beyond block scalars.** D3's guard as originally
-  written is necessary but not sufficient. `decode_scalar` mis-decodes
-  `|`, `|-`, `|+`, `>`, `>-`, `|2-`, `!!tag`-prefixed scalars, **and
-  `*alias` references** — every style whose first byte is neither `'` nor
-  `"` falls through to `plain_scalar`. Either decode all of them, or have
-  the producer skip any value whose authored first byte is not `'`, `"`, or
-  a plain-scalar start. Skipping is the safe direction, because the schema
-  layer still reports the failure generically.
+  written is necessary but not sufficient. `decode_scalar` mis-decoded
+  literal/folded blocks and tagged scalars when handed their complete raw
+  spelling; aliases are not scalar entries at all. This specification chooses
+  the safe branch: the dedicated malformed-expression producer handles only
+  untagged plain, single-quoted, and double-quoted scalars with an exact
+  `DecodedScalar` map. Every other style keeps the schema validator's generic
+  error until an authoritative projection exists.
 - **The damage is a wrong message and range on a *true* positive, not a
   false positive.** This corrects what D3 originally claimed. The
   `union_rejected` guard already prevents a spurious report on a valid
   value. What actually breaks is that `when: |-` holding `1 +` reports
   ``Unexpected '|'. Use '||' for logical OR.`` pointed at the block
   indicator rather than at the `1 +`. Cosmetic at `WARNING`; actively
-  misleading at `ERROR`, which is why the guard is a **precondition** for
-  the raise rather than a tidy-up beside it. Regression tests must assert
-  the range and message, not only the diagnostic count.
+  misleading at `ERROR`, which is why the style gate is a **precondition** for
+  the raise rather than a tidy-up beside it. Regression tests assert that the
+  misleading dedicated diagnostic is absent and that the schema diagnostic
+  remains; exact message/range tests stay on the three safely projected
+  styles.
 - **Preserve the `union_rejected` guard explicitly, and fix its comment.**
   It is the single reason the frontmatter producer cannot outrank
   Darkmatter's own validation. It reads as a union-arm special case; the
@@ -1009,15 +1146,28 @@ files in this repository carry brace syntax the composer will try to parse,
 and it is the other half of D7's answer to the body-span question.
 
 **Mechanism.** The span scanner declines to treat `{{` as an expression
-start when it is immediately preceded by a backslash, and **preserves the
-backslash in its output**. Compose does not resolve the escape. The
+start when it is preceded by an **odd-length run** of consecutive
+backslashes, and **preserves every backslash in its output**. An even-length
+run leaves the opener active: in `\\{{ x }}` the first backslash escapes the
+second under Markdown rules, so neither one escapes the brace. Counting parity
+avoids turning a literal backslash before a real expression into an accidental
+opt-out. Compose does not resolve the escape. The
 downstream Markdown renderer does, under CommonMark's rule that a backslash
 before ASCII punctuation is a literal escape, so `\{{` renders as `{{`.
 
-**Spelling: both `\{{` and `\{\{` are recognized.** `\{{` is what an
-author will naturally type and is the form worth optimizing for. `\{\{` is
-the strictly CommonMark-correct spelling, since it escapes both braces.
-Accepting only one would make the feature a trivia question.
+**Spelling: both `\{{` and `\{\{` work.** `\{{` is the only spelling that
+needs an explicit scanner rule. `\{\{` contains no contiguous `{{` opener and
+is already ignored by the scanner; its regression test prevents a future
+normalization pass from joining the braces. `\{{` is what an author will
+naturally type, while `\{\{` escapes both braces explicitly under CommonMark.
+
+Parity is defined on the text passed to `ExpressionFinder`, after any owning
+format has decoded it. YAML syntax still applies: inside a double-quoted YAML
+scalar an author must escape the backslash for YAML so the decoded value handed
+to the scanner contains the intended single backslash. DMLS tests cover both
+authored YAML spellings and compare their decision with compose's decoded
+input, rather than counting raw source backslashes and disagreeing with the
+runtime.
 
 #### Reconciliation with the backslash-preservation fix
 
@@ -1045,11 +1195,12 @@ In scope:
 **Strand 1 — the nested-span rule (D1–D5).**
 
 - D1 through D5 above.
-- The DMLS frontmatter-string scan and the `ScalarStyle` capture on
-  `FmEntry` (D3), because without them the editor half of the outcome is
-  unreachable.
-- The missing block-scalar guard on `decode_scalar` in
-  `dmls/src/providers/frontmatter.rs` (D3).
+- The DMLS frontmatter-string scan plus `ScalarStyle` and tag-presence capture
+  on `FmEntry` (D3), because without them the editor half of the outcome is
+  unreachable or can be ranged against the wrong authored bytes.
+- The scalar-style gate around `decode_scalar` in
+  `dmls/src/providers/frontmatter.rs`, including exact projection for the
+  three supported styles and generic-schema fallback for the rest (D3/D7).
 - Correcting both live instances. This is an outstanding task, not a
   completed one:
     - `prompts/_reviews/review-spec-inline.md` was partially edited by hand
@@ -1070,22 +1221,25 @@ In scope:
   span. The working tree of `commit.md` already holds a hand-written `+`
   rewrite and is not the fixture.
 
-**Strand 2 — full frontmatter coverage (D6).** Sequence descent in
-`lower_mapping`, the array-element step in `nested_shape`, `when` / `until`
-/ `while` declared expression-typed in the schema, and the regression and
-per-capability work the descent obliges.
+**Strand 2 — full frontmatter coverage (D6).** Sequence descent in the
+frontmatter lowering walk, explicit `SequenceItem` arena roles, the
+array-element step in `nested_shape`, `when` / `until` / `while` declared
+expression-typed in the schema, and the regression and per-capability work the
+descent obliges.
 
 **Strand 3 — the severity ladder (D7).** The written policy, the new
 diagnostic at `ERROR`, `EXPRESSION_MALFORMED` raised to `ERROR` on
-schema-typed frontmatter values and left at `WARNING` on body spans,
+schema-typed frontmatter values with exact scalar projection and left at
+`WARNING` on body spans,
 `EXPRESSION_UNKNOWN_IDENTIFIER` raised to `WARNING`, and the three
-preconditions the parser-agreement spike attached to the raise — the widened
-decode guard, range-and-message regression tests, and the preserved
+preconditions the parser-agreement spike attached to the raise — the safe
+scalar-style gate, projection/fallback regression tests, and the preserved
 `union_rejected` invariant with a corrected comment.
 
-**Strand 4 — the backslash escape (D8).** Both spellings recognized by the
-span scanner, the backslash preserved in compose output, and the
-round-trip verified against the merged backslash-preservation fix.
+**Strand 4 — the backslash escape (D8).** Odd/even backslash-run handling for
+`\{{`, the already-inert `\{\{` spelling pinned by regression, every
+backslash preserved in compose output, and the round-trip verified against the
+merged backslash-preservation fix.
 
 Out of scope:
 
@@ -1147,12 +1301,12 @@ record must say how that was shown.
     - single-quoted literals keep single quotes, and an embedded `\n` escape
       survives byte-identically (the `commit.md` fixture).
 - **Suppression is type-directed.** A span whose declared type is an array
-  (`ctx.dirty_package_areas`) or an object is diagnosed with
-  `suggestion: None`; a span whose declared type is a scalar
-  (`ctx.repo_name`) is offered a suggestion; an untyped span is offered a
-  suggestion. Each test names the array-rendering fix as the change that
-  will flip the first expectation, so whoever re-cuts it knows it was
-  deliberate rather than a gap.
+  (`ctx.dirty_package_areas`) is diagnosed with `suggestion: None`; a declared
+  object, declared scalar (`ctx.repo_name`), and untyped span are each offered
+  a suggestion. The array test names the array-rendering fix as the change
+  that will flip its expectation, so whoever re-cuts it knows it was
+  deliberate rather than a gap. Tests also prove the untyped lint entry and
+  the `_with_types` entry agree for `Unknown`.
 
 ### Darkmatter L1 — backslash escape (D8)
 
@@ -1161,6 +1315,8 @@ record must say how that was shown.
   survive compose with the backslash intact.
 - `{{ x }}` with no backslash still interpolates, so the escape did not
   disable the feature.
+- `\\{{ x }}` is still an active expression opener, while `\\\{{ x }}` is
+  escaped; all backslashes survive compose. These cases pin odd/even parity.
 - A backslash elsewhere in body text is untouched, which is the merged
   backslash-preservation fix's invariant and is asserted here rather than
   assumed.
@@ -1186,7 +1342,9 @@ record must say how that was shown.
   `info: "running {{agent}}"`, a key/value `message: "Deployed {{version}}"`,
   a `set_frontmatter: ["s.md", "k", "{{ payload }}"]`, or a mixed
   frontmatter string `"a {{ x ? 'in {{x}}' : 'y' }} b"`. The first three are
-  synthesized literals; the last is a rescanning surface.
+  synthesized literals; the last is a rescanning surface. It also does not
+  reject the same whole-value expression under a non-lifecycle frontmatter
+  key, because that surface is not in Claudine's single-pass inventory.
 - CLI process test in `wrap_compose_validation.rs`, using the stub-provider
   pattern already there: composing the incident prompt exits non-zero, names
   `success.say` and the literal on stderr, prints the rewrite, and the stub
@@ -1199,9 +1357,11 @@ record must say how that was shown.
   the first launch.
 - The Phase 1c pre-scan opens a step's **referenced** prompt document and
   rejects it before step one launches, where the reference is a literal
-  path. Where the reference is itself interpolated, the run starts and the
-  defect is caught at that step's turn, still before that step's provider is
-  spawned.
+  path. Explicit-relative, implicit-relative, `@`, `&`, and `^` fixtures prove
+  it uses the same captured `FileResolutionContext` and source-relative
+  derivation as execution on every OS. Where the reference is itself
+  interpolated, the run starts and the defect is caught at that step's turn,
+  still before that step's provider is spawned.
 - D4: a frontmatter value holding raw template text reaches the runtime
   guard, and the stderr names the lifecycle key and carries the new reason
   and hint. The old hint text must not appear.
@@ -1217,6 +1377,11 @@ record must say how that was shown.
 - The code action rewrites the block scalar's expression text and leaves
   the `|-` indicator and indentation untouched; the resulting document
   produces zero diagnostics of this code.
+- Single- and double-quoted flow scalars project the nested-span range through
+  `DecodedScalar`; their code actions YAML-escape the replacement fragment,
+  preserve the surrounding scalar quotes, and leave a parseable document.
+- The code action reads only its typed diagnostic payload, is absent when the
+  lint has no suggestion, and is declined after the document version changes.
 - A folded (`>`) scalar carrying the defect is ranged on the whole scalar
   and offers no quick fix.
 - An `Expression`-typed schema property authored as a `|-` block no longer
@@ -1230,8 +1395,10 @@ record must say how that was shown.
 
 ### DMLS L1 — sequence descent (D6)
 
-- A scalar inside a `- item` line gets an `FmEntry` with the correct
-  pointer, key path, value span, parent, and depth.
+- A scalar inside a `- item` line gets an `FmEntry` with
+  `role == SequenceItem`, `key_span == None`, and the correct decimal path
+  segment, pointer, key path, value span, parent, and depth. Mapping entries
+  retain `role == MappingProperty` and their exact key spans.
 - `nested_shape` resolves a path that crosses a sequence, such as
   `initialize.stack[0].when`.
 - A `when` predicate inside a stack item, declared expression-typed in the
@@ -1243,10 +1410,9 @@ record must say how that was shown.
 - **No regression on mapping-nested surfaces.** Every existing diagnostic
   produces byte-identical output on a corpus of mapping-only documents
   before and after the descent. Asserted directly.
-- For each of hover, completion, and navigation inside a list item, either a
-  test that it behaves correctly or a test that it is suppressed —
-  whichever the Required Planning Determination selects. No capability is
-  left untested there.
+- Hover, completion, and navigation each have a positive test at a real key
+  or scalar value inside a list item and a negative test at the synthetic
+  item marker/index. No capability is left untested there.
 - `test_entry_or_ancestor_falls_back_for_array_index` is re-cut for
   item-entries: `/tags/1` is an exact hit with `kind == Scalar`. The
   verification record names it as the deliberate design switch it is.
@@ -1261,15 +1427,21 @@ record must say how that was shown.
 
 ### DMLS L1 — severity ladder (D7)
 
-- `dm.expression.malformed` is reported at `ERROR` on a schema-typed
-  frontmatter value and at `WARNING` on a document-body span;
+- `dm.expression.malformed` is reported at `ERROR` on a safely projected,
+  schema-typed frontmatter value and at `WARNING` on a document-body span;
   `dm.expression.unknown_identifier` is `WARNING` in both producers.
-- A `|-` block holding `1 +` ranges and describes the `1 +`, not the `|-`
-  indicator. The same for `>-`, `|+`, `|2-`, a `!!str`-tagged scalar, and an
-  `*alias`. These assert range and message, not diagnostic counts.
+- Untagged plain, single-quoted, and double-quoted scalars holding `1 +`
+  produce the dedicated malformed-expression `ERROR` with an exact projected
+  range and parser message. Literal/folded blocks (`|`, `|-`, `|+`, `>`, `>-`,
+  `|2-`), tagged scalars, and aliases produce no
+  `EXPRESSION_MALFORMED`; the schema diagnostic remains, proving the style
+  gate removes a misleading diagnostic rather than hiding invalid input.
 - The `union_rejected` invariant has a test: no malformed report is emitted
   for a value the schema validation accepted, including
   `when: '{{ ctx.area }}'` and `when: "$(git branch) == 'main'"`.
+- The same two pending values are deferred explicitly by Darkmatter's exported
+  `is_pending_expression_value` authority in both schema validation and DMLS;
+  the test would still pass if the `union_rejected` guard were refactored.
 - A body containing Handlebars, Liquid, or Jinja syntax produces at most
   `WARNING`, never `ERROR`.
 - Existing suites that assert on these severities are re-cut, and the
@@ -1306,31 +1478,35 @@ proof for each new test group.
    nested span today still resolves it. The claudine L1 suite and the two
    `rewrite.rs` rescan tests are unchanged and green.
 5. `lint_expression` and `reject_surviving_spans` share one span
-   recognizer; Claudine, DMLS, and the lint share one surface classifier;
-   and both property tests in the Darkmatter L1 suite pass.
+   recognizer; `is_whole_value_span` is the shared syntactic classifier; the
+   Claudine lifecycle inventory and DMLS stopgap list each pass their parity
+   test against `darkmatter/docs/schemas/claudine.yaml`; and both Darkmatter
+   property tests pass.
 6. DMLS emits `dm.expression.nested_span_in_literal` for whole-value
-   frontmatter scalars with the ranges and source in D3, emits nothing for
-   body spans or mixed frontmatter strings, and the quick fix produces a
-   document with zero such diagnostics.
+   lifecycle scalars with the style-specific ranges and source in D3, emits
+   nothing for body spans, mixed frontmatter strings, or arbitrary
+   non-lifecycle whole-value keys, and each offered quick fix produces a
+   parseable document with zero such diagnostics.
 7. The event-time guard's message names the lifecycle key and the new
    reason, selected from a typed reason rather than by message matching;
    the "resolve the missing path or variable" hint no longer appears for a
    surviving span.
-8. A span whose declared type is an array or object is diagnosed with no
-   rewrite suggestion; a declared scalar and an untyped span are both
-   offered one. Nothing in this fix depends on the array-rendering fix
-   having landed.
+8. A span whose declared type is an array is diagnosed with no rewrite
+   suggestion; a declared object, declared scalar, and untyped span are all
+   offered one. Nothing in this fix depends on the array-rendering fix having
+   landed.
 
 **Strand 2 — full frontmatter coverage.**
 
-9. Scalars inside list items carry `FmEntry` nodes, `nested_shape` resolves
-   a path crossing a sequence, and the nested-span rule reaches `when` /
+9. Scalars inside list items carry explicit `SequenceItem` `FmEntry` nodes
+   without fabricated key spans, `nested_shape` resolves a path crossing a
+   sequence, and the nested-span rule reaches `when` /
    `until` / `while` predicates, stack action operands, and `proxy … with`
    values in the editor.
 10. Every existing diagnostic produces identical output on mapping-nested
-    surfaces before and after the descent, and hover, completion, and
-    navigation inside list items each either work correctly or are
-    suppressed — decided explicitly, and tested either way.
+    surfaces before and after the descent; hover, completion, and navigation
+    work at real keys/values inside list items and are suppressed on the
+    synthetic item marker/index, with both directions tested.
 11. A schema problem inside an array ranges the failing element rather than
     the whole sequence.
 12. The `nested_shape_for_completion` memo is in place, and no production
@@ -1338,23 +1514,26 @@ proof for each new test group.
 
 **Strand 3 — the severity ladder.**
 
-13. `dm.expression.malformed` reports at `ERROR` on schema-typed frontmatter
-    values and `WARNING` on body spans,
+13. `dm.expression.malformed` reports at `ERROR` on safely projected,
+    schema-typed frontmatter values and `WARNING` on body spans,
     `dm.expression.unknown_identifier` at `WARNING`, and
     `dm.expression.nested_span_in_literal` at `ERROR`; the ladder is written
     down where a future diagnostic author will find it.
-14. The decode guard covers every mis-decoded scalar style — `|`, `|-`,
-    `|+`, `>`, `>-`, `|2-`, `!!tag` and `*alias` — and a malformed
-    expression in any of them ranges and describes the expression rather
-    than the scalar indicator. This lands before or with the
-    `EXPRESSION_MALFORMED` raise.
+14. The style gate limits the dedicated malformed-expression producer to
+    untagged plain, single-quoted, and double-quoted scalars with exact
+    projection. Literal/folded blocks, tagged scalars, and aliases retain the
+    schema diagnostic and never receive a fabricated expression message or
+    range. This lands before or with the `EXPRESSION_MALFORMED` raise.
 15. The `union_rejected` invariant is preserved, its comment states the real
-    rule, and a test pins it.
+    rule, and a test pins it. Pending-value deferral is also explicit through
+    one exported Darkmatter predicate used by validation and DMLS rather than
+    depending on that guard incidentally.
 
 **Strand 4 — the backslash escape.**
 
-16. `\{{` and `\{\{` both opt a span out of scanning, the backslash
-    survives compose unchanged, and unescaped `{{ … }}` still interpolates.
+16. `\{{` and `\{\{` both opt a span out of scanning, every backslash
+    survives compose unchanged, odd/even backslash runs are distinguished,
+    and unescaped `{{ … }}` still interpolates.
 
 **All strands.**
 
@@ -1410,14 +1589,26 @@ reasoning so a future reader does not reopen them without the context.
    an explicit way to opt out. Neither a per-code severity override in
    `DmlsConfig` nor restricting the body producer to recognizably Darkmatter
    documents is needed.
+6. **Is every whole-value frontmatter scalar a single-pass surface?**
+   **Ruled: no.** `is_whole_value_span` selects the typed one-call branch, but
+   the frontmatter pipeline can invoke interpolation again after shell
+   expansion. The hard nested-span diagnostic therefore requires both the
+   whole-value shape and membership in Claudine's lifecycle single-pass
+   inventory. Arbitrary frontmatter keys are inventoried for existing
+   diagnostics but do not receive this `ERROR`.
+7. **Should DMLS build source maps for block, tagged, and alias values merely
+   to support the severity raise?** **Ruled: no.** The dedicated malformed-
+   expression diagnostic is gated to the three scalar styles with an exact
+   existing `DecodedScalar` projection. Other styles retain the schema
+   validator's generic error. The new nested-span rule still gives literal
+   blocks precise ranges by parsing each raw outer span; folded and tagged
+   values use a whole-scalar range, and aliases have no expression diagnostic
+   at the alias site.
 
-No questions remain open. The items below are determinations the plan must
-make, not decisions still owed by a human.
+No questions remain open. The implementation determinations below were gaps
+in the earlier draft and are now part of the design.
 
-## Required Planning Determinations
-
-These are not open design questions. Each has a defined procedure and must
-be resolved during planning, with the answer recorded in the plan.
+## Resolved Implementation Determinations
 
 1. **The disposition of `validate_no_interpolation_leaks`.** It exists in
    `claudine/lib/src/composition/lifecycle/validate.rs`, walks
@@ -1428,20 +1619,25 @@ be resolved during planning, with the answer recorded in the plan.
    `composition/prepare/` or in `claudine/cli/src/`. The new validator
    overlaps it heavily.
 
-   Procedure: first confirm whether it is genuinely unreachable from any
-   production path. Then either fold its coverage into
-   `validate_no_nested_spans_in_literals` and delete it together with its
-   tests, or wire it up if it covers something the new validator does not.
-   Leaving a second uncalled validator with green tests behind is not an
-   acceptable outcome — that is the state that made this surface look
-   guarded. Either way,
+   **Decision: fold and delete.** Repository call-site inspection confirms the
+   function has no production caller. Its authored-source coverage moves to
+   `validate_no_nested_spans_in_literals`; its surviving-runtime-value coverage
+   remains with `reject_surviving_spans`, where dynamic template text can be
+   classified honestly at event time. The old function and tests that exercise
+   only the dead entry point are deleted; useful cases are recut through the
+   new validator or runtime guard. Wiring the old tree-only scan would preserve
+   the authored-vs-synthesized ambiguity that caused this defect. In all cases,
    `claudine/docs/topics/lifecycle.md`'s claim that it "still runs" for
    non-lifecycle surfaces is corrected in the same change.
 2. **The raw-source route for stack surfaces.** D2 requires raw YAML text
    for surfaces that `iter_stack_expression_surfaces` reports as parsed
-   trees. Decide between extending that iterator to carry raw source and
-   adding a parallel raw-text walker, and record which, because the choice
-   determines whether the two walks can drift apart.
+   trees. **Decision: extend the canonical iterator.** Build one
+   `LifecycleSourceMap` from raw frontmatter, keyed by the iterator's canonical
+   property path, and attach the authored scalar/span to each
+   `LifecycleExpressionSurface`. A configured parsed surface with no matching
+   source record is an internal validation error, not a silent skip. There is
+   no second surface walker; every existing validator continues to consume the
+   same iterator, and only validators needing source text read the added field.
 3. **The dotted-path array spelling.** `entry_by_dotted` matches by exact
    string, and the descent must produce a spelling that agrees with
    Darkmatter's own dotted-path producers. If the overlay emits
@@ -1449,7 +1645,11 @@ be resolved during planning, with the answer recorded in the plan.
    `initialize.stack.0.when`, the lookup misses and the caller `continue`s —
    a silently dropped diagnostic. `style_diagnostics`
    (`diagnostics/frontmatter.rs`) is the live instance of that pattern.
-   Determine the spelling both sides use and pin it with a test. This is a
+   **Decision: bracketed indices** (`initialize.stack[0].when`). A shared
+   formatter consumes typed path segments (`Key(&str)` versus `Index(usize)`),
+   so a mapping key literally named `0` remains `.0` while a sequence item is
+   `[0]`. Lowering and every producer that emits an address use that formatter;
+   a round-trip test covers numeric mapping keys and nested arrays. This is a
    spelling decision, not a structural one, but getting it wrong fails
    silently.
 4. **The pending-value deferral.** Darkmatter's `expression` format
@@ -1457,15 +1657,19 @@ be resolved during planning, with the answer recorded in the plan.
    deferring on values that are not yet resolved. DMLS has no equivalent,
    and the `union_rejected` guard hides the difference **coincidentally**
    rather than by design. The descent adds new callers into that producer.
-   Determine whether to replicate the deferral in DMLS now or to rely on the
-   guard and pin it with the test required in D7. Relying on the guard is
-   defensible; relying on it without knowing that is what you are doing is
-   not.
+   **Decision: single-source and apply it explicitly.** Export Darkmatter's
+   passive `is_pending_expression_value` predicate from the schema-format
+   layer and call it from both validation and DMLS before parsing. Preserve the
+   `union_rejected` guard as a second invariant, not as the accidental source
+   of deferral semantics. The helper only classifies text; it performs no I/O
+   or evaluation.
 5. **Per-capability behavior inside list items (D6).** The sequence descent
    makes hover, completion, and navigation fire where they never fired
    before. For each, decide "works correctly" or "suppressed inside sequence
    items", and record which, with the test that holds it. The decision is
-   per capability, not one blanket ruling: completion inside a stack item is
-   a plausible feature, while navigation may have no sensible target there.
-   What is not acceptable is discovering the behavior after the fact from a
-   user report.
+   **Decision:** hover, completion, and navigation all operate at real mapping
+   keys and scalar values inside sequence items, using the array item schema.
+   All three are suppressed on the synthetic item index/sequence marker itself,
+   which has no authored key and no independent schema declaration. Each
+   direction has a positive value-position test and a negative marker-position
+   test; silence by accident is not an acceptable third outcome.
