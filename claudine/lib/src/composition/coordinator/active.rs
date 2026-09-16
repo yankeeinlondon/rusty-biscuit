@@ -52,6 +52,10 @@ pub struct SessionCompatibilityKey {
     pub system_prompt: String,
     /// Effective MCP server set, sorted for order-independent comparison.
     pub mcp_servers: Vec<String>,
+    /// The provider overlay the child reads its configuration through: reason
+    /// set, provider-owned environment patch, provider-visible root, and the
+    /// excluded resources. `"none"` when the launch has no overlay.
+    pub overlay: String,
     /// Provider-specific identity facets a provider adapter contributes. Empty
     /// until an adapter populates it; the generic facets above are always set.
     pub extra: BTreeMap<String, String>,
@@ -95,6 +99,9 @@ impl SessionCompatibilityKey {
         }
         if self.mcp_servers != other.mcp_servers {
             facets.push("MCP server set".to_string());
+        }
+        if self.overlay != other.overlay {
+            facets.push("provider overlay".to_string());
         }
         let mut seen = BTreeSet::new();
         for key in self.extra.keys().chain(other.extra.keys()) {

@@ -2,6 +2,8 @@
 //! install-detection binding, and the `PathTemplate` list forms (from
 //! research string arrays and from the facts `{raw, segments}` records).
 
+use strum::VariantNames;
+
 use super::*;
 
 pub(crate) fn provider_expr(ctx: &mut EmitCtx) -> String {
@@ -72,6 +74,150 @@ pub(crate) fn path_list_from_records(
     path_list_from_strings(field, &Value::Array(raws), level, ctx)
 }
 
+/// Checks a member against a catalog-types variant list and returns the
+/// Rust variant name. An unknown member is the "new variant needed" moment
+/// and fails loudly rather than being dropped.
+fn variant_of(
+    field: &'static str,
+    value: &Value,
+    what: &str,
+    variants: &[&str],
+) -> Result<String, GenError> {
+    let member = expect_str(field, value, what)?;
+    if !variants.contains(&member) {
+        return Err(unmappable(
+            field,
+            format!("`{member}` is not one of {variants:?}"),
+        ));
+    }
+    Ok(pascal(member))
+}
+
+/// `Some(&OverlaySelectorSpec { ... })` — or `None` for a provider with no
+/// provider-scoped redirection surface.
+///
+/// `source_root` must be home-relative (`~/...`): an overlay's source root
+/// is resolved against the launch baseline's home on every OS, so an
+/// absolute or drive-qualified root would not be portable.
+pub(crate) fn overlay_selector(
+    field: &'static str,
+    value: &Value,
+    level: usize,
+    ctx: &mut EmitCtx,
+) -> Result<String, GenError> {
+    if value.is_null() {
+        return Ok("None".to_string());
+    }
+    ctx.import("crate::provider::overlay::OverlaySelectorSpec");
+    let env_var = expect_str(field, get(field, value, "env_var")?, "`env_var`")?;
+    if env_var.is_empty()
+        || !env_var
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+    {
+        return Err(unmappable(
+            field,
+            format!("`{env_var}` is not a plausible environment-variable name"),
+        ));
+    }
+
+    ctx.import("crate::provider::overlay::OverlaySelectorShape");
+    let (member, payload) = enum_shape(field, get(field, value, "shape")?)?;
+    let shape = match variant_of(
+        field,
+        &Value::String(member.clone()),
+        "`shape`",
+        claudine_catalog_types::OverlaySelectorShape::VARIANTS,
+    )?
+    .as_str()
+    {
+        "ParentOfProviderDir" => {
+            let child = expect_str(field, get(field, &payload, "child")?, "`shape.child`")?;
+            if child.is_empty() || child.contains(['/', '\\']) {
+                return Err(unmappable(
+                    field,
+                    format!("`{child}` is not a single path segment"),
+                ));
+            }
+            format!("OverlaySelectorShape::ParentOfProviderDir {{ child: {child:?} }}")
+        }
+        unit if payload.is_null() => format!("OverlaySelectorShape::{unit}"),
+        unit => {
+            return Err(unmappable(
+                field,
+                format!("`{unit}` carries no data — author it as a bare member string"),
+            ));
+        }
+    };
+
+    let classes = expect_array(field, get(field, value, "relocates")?, "`relocates`")?;
+    let mut elements = Vec::with_capacity(classes.len());
+    for class in classes {
+        ctx.import("crate::provider::overlay::OverlayResourceClass");
+        let variant = variant_of(
+            field,
+            class,
+            "a relocated resource class",
+            claudine_catalog_types::OverlayResourceClass::VARIANTS,
+        )?;
+        elements.push(format!("OverlayResourceClass::{variant}"));
+    }
+    let relocates = render_slice(&elements, level + 1);
+
+    let additive = expect_bool(field, get(field, value, "additive")?, "`additive`")?;
+
+    let source_root = match get(field, value, "source_root")? {
+        Value::Null => "None".to_string(),
+        raw => {
+            let path = expect_str(field, raw, "`source_root`")?;
+            if !path.starts_with("~/") {
+                return Err(unmappable(
+                    field,
+                    format!("source_root `{path}` must be home-relative (`~/...`)"),
+                ));
+            }
+            ctx.import("crate::provider::path_template::PathTemplate");
+            format!("Some(PathTemplate::Static({path:?}))")
+        }
+    };
+
+    let inner = indent(level + 1);
+    Ok(format!(
+        "Some(&OverlaySelectorSpec {{\n\
+         {inner}env_var: {env_var:?},\n\
+         {inner}shape: {shape},\n\
+         {inner}relocates: {relocates},\n\
+         {inner}additive: {additive},\n\
+         {inner}source_root: {source_root},\n\
+         {}}})",
+        indent(level)
+    ))
+}
+
+/// `OverlayCapabilities { ... }` — one verdict per `OverlayReason` member.
+pub(crate) fn overlay_capabilities(
+    field: &'static str,
+    value: &Value,
+    level: usize,
+    ctx: &mut EmitCtx,
+) -> Result<String, GenError> {
+    ctx.import("crate::provider::overlay::OverlayCapabilities");
+    ctx.import("crate::provider::overlay::OverlayCapability");
+    let inner = indent(level + 1);
+    let mut out = String::from("OverlayCapabilities {\n");
+    for reason in claudine_catalog_types::OverlayReason::VARIANTS {
+        let verdict = variant_of(
+            field,
+            get(field, value, reason)?,
+            "a capability verdict",
+            claudine_catalog_types::OverlayCapability::VARIANTS,
+        )?;
+        out.push_str(&format!("{inner}{reason}: OverlayCapability::{verdict},\n"));
+    }
+    out.push_str(&format!("{}}}", indent(level)));
+    Ok(out)
+}
+
 pub(crate) fn emission_fragment(
     values: &ResolvedValues<'_>,
     memory_const: &str,
@@ -111,5 +257,15 @@ pub(crate) fn emission_fragment(
          /// `system_prompt.memory_files`.\n\
          const {memory_const}: &[PathTemplate] = {memory_files};\n"
     ));
+    fragment.field(
+        47,
+        "overlay_selector",
+        overlay_selector("overlay_selector", values.get("overlay_selector")?, 1, ctx)?,
+    );
+    fragment.field(
+        48,
+        "overlay_capabilities",
+        overlay_capabilities("overlay_capabilities", values.get("overlay_capabilities")?, 1, ctx)?,
+    );
     Ok(fragment)
 }

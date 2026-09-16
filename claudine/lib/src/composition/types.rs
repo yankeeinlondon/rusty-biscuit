@@ -821,7 +821,7 @@ pub struct CompositionExecutionRequest {
     pub operation: Option<String>,
     /// Enable provider-specific sandboxing.
     pub sandbox: bool,
-    /// Use only repo-scoped resources via a shadow HOME.
+    /// Use only repo-scoped resources via a provider overlay.
     pub repo: bool,
     /// Show what would be executed without launching the child.
     pub dry_run: bool,

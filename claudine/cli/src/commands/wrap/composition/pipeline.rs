@@ -115,8 +115,9 @@ struct SelectionPhase {
 
 struct EnvironmentPhase {
     env_plan: env::EnvPlan,
-    /// The native Codex SQLite directory captured before shadowing `HOME`.
-    codex_sqlite_home: Option<std::ffi::OsString>,
+    /// What a per-attempt rebuild that moves provider plans the target's
+    /// overlay from.
+    overlay_rebuild: crate::commands::wrap::launch_plan::OverlayRebuildInputs,
     effective_prompt: String,
     mcp_extra_args: Vec<String>,
     /// R8 — the MCP inputs a per-attempt rebuild recomputes injection from,
@@ -222,8 +223,8 @@ pub(super) fn execute_composition_request_inner_with_guard<'guard, 'runtime>(
     let prepare_span = tracing::info_span!("composition_prepare").entered();
     // --dry-run seam. Composition, shell expansion, body/frontmatter
     // finalization, and provider/model selection have all happened in
-    // `prepare`. Stop here — before provider executable discovery, MCP
-    // shadow-HOME materialization, argv and system-prompt overlay construction,
+    // `prepare`. Stop here — before provider executable discovery, provider
+    // overlay materialization, argv and system-prompt overlay construction,
     // the child-CWD switch, and every lifecycle event — and emit the composed
     // artifacts.
     //
@@ -448,9 +449,7 @@ fn prepare_environment_and_mcp(
         let profile = *profile;
         let effective_non_interactive = *effective_non_interactive;
         let silent = request.silent;
-        let needs_mcp_shadow_home = (request.mcp || !request.mcp_use.is_empty())
-            && matches!(provider, Provider::Codex | Provider::Gemini);
-        let needs_repo_shadow_home = request.repo;
+        let mcp_requested = request.mcp || !request.mcp_use.is_empty();
         let raw_agent_params: Vec<String> = std::env::args().skip(1).collect();
         let yolo_enabled = request.yolo;
         // Taken before the allow-list runs: once `build_child_env_with_launch`
@@ -461,6 +460,23 @@ fn prepare_environment_and_mcp(
             ambient: env::ambient_sensitive_env(),
             explicit_include: env::validate_include_names(&request.include)?,
         };
+        // A composition run may reach here without an invocation owner (a
+        // synthesized request in tests and the ambient-fallback path); capturing
+        // here is then the same environment the owner would have recorded.
+        let env_baseline = match request.invocation_context.as_ref() {
+            Some(invocation) => invocation.env_baseline().clone(),
+            None => claudine::invocation_context::EnvBaseline::capture(),
+        };
+        let home_baseline = match request.invocation_context.as_ref() {
+            Some(invocation) => invocation.home_baseline().clone(),
+            None => claudine::invocation_context::HomeBaseline::capture(),
+        };
+        let overlay_reasons = crate::commands::wrap::provider_overlay::overlay_reasons(
+            provider,
+            request.repo,
+            mcp_requested,
+            &launch_workspace.child_cwd,
+        );
         let mut env_plan = env::build_child_env_with_launch(
             profile,
             provider,
@@ -469,8 +485,9 @@ fn prepare_environment_and_mcp(
             request.session_interactive,
             &raw_agent_params,
             &[],
-            needs_repo_shadow_home,
-            needs_mcp_shadow_home || needs_repo_shadow_home,
+            overlay_reasons,
+            &home_baseline,
+            &env_baseline,
             launch_workspace.clone(),
             perf_enabled,
         )?;
@@ -491,10 +508,10 @@ fn prepare_environment_and_mcp(
                 .insert(key.clone().into(), value.clone().into());
         }
 
-        // `child env build` carries a measured breakdown (env sanitize / shadow
-        // home sync → repo root detect) so the substage's cost is itemized rather
+        // `child env build` carries a measured breakdown (env sanitize / provider
+        // overlay → repo root detect) so the substage's cost is itemized rather
         // than opaque. The launch-child root is threaded through, so `repo root
-        // detect` is microsecond-scale local work and the shadow sync's filesystem
+        // detect` is microsecond-scale local work and the overlay's filesystem
         // linking is what remains; only the fallback (no supplied root) still pays
         // the sniff git walk. The children are `Breakdown`, so they do not enter
         // the substage's reconciliation (TR-1).
@@ -513,31 +530,15 @@ fn prepare_environment_and_mcp(
         // everything that follows (MCP injection, YOLO, model, system-prompt
         // delivery) is provider-shaped, and a refreshed document that lands on a
         // different provider must not inherit those writes.
+        // The overlay patch is provider-shaped too: `--repo` is invocation
+        // intent, but the selector that carries it belongs to one provider, so
+        // every rebuild re-applies its own provider's plan over this base.
         let mut pre_provider_env = env_plan.env.clone();
-        let codex_sqlite_home = if env_plan.shadow_home_path.is_some() {
-            Some(crate::commands::wrap::repo_home::codex_sqlite_home()?.into_os_string())
-        } else {
-            None
-        };
-        if provider == Provider::Codex && codex_sqlite_home.is_some() {
-            // The derived value belongs to Codex, not to invocation-wide repo
-            // isolation. Record the ambient baseline so a provider transition
-            // removes it or restores an explicit user value.
-            match std::env::var_os("CODEX_SQLITE_HOME") {
-                Some(value) => pre_provider_env.insert("CODEX_SQLITE_HOME".into(), value),
-                None => pre_provider_env.remove(std::ffi::OsStr::new("CODEX_SQLITE_HOME")),
-            };
-        }
-        if needs_mcp_shadow_home && !needs_repo_shadow_home {
-            // `HOME` is the one provider-shaped key written before this point:
-            // `build_child_env_with_launch` materializes the MCP shadow home for
-            // the providers whose injector needs one. Under `--repo` the shadow
-            // home is invocation intent instead, and stays put.
-            match std::env::var_os("HOME") {
-                Some(home) => pre_provider_env.insert("HOME".into(), home),
-                None => pre_provider_env.remove(std::ffi::OsStr::new("HOME")),
-            };
-        }
+        crate::commands::wrap::provider_overlay::restore_overlay_selectors(
+            &mut pre_provider_env,
+            env_plan.overlay.as_ref(),
+            &env_baseline,
+        );
 
         let mut effective_prompt = request.prepared.prompt.clone();
         let mut mcp_extra_args = Vec::new();
@@ -631,34 +632,37 @@ fn prepare_environment_and_mcp(
 
             effective_prompt = session.cleaned_prompt.unwrap_or(cleaned_prompt);
 
-            // Materialized whenever MCP is in play, not only when *this*
-            // provider's injector needs one: a refreshed document can move the
-            // provider to a shadow-HOME injector at a retry boundary, and the
-            // rebuild must find one already on disk rather than create it.
+            // Builds this provider's overlay when servers resolved and its
+            // injector needs a config root; a no-op otherwise. A rebuild that
+            // moves onto such a provider builds that provider's overlay itself
+            // (`launch_plan::rebuild_overlay`).
             let mcp_repo_root = repo_root_ref.map(std::path::Path::to_path_buf);
-            crate::commands::exec_prep::ensure_shadow_home(
+            crate::commands::exec_prep::ensure_provider_overlay(
                 provider,
                 !session.servers.is_empty(),
                 &mut env_plan,
+                &home_baseline,
+                &env_baseline,
             )?;
             mcp_rebuild = Some(crate::commands::wrap::launch_plan::McpRebuildInputs {
                 explicit_use: request.mcp_use.clone(),
                 repo_root: mcp_repo_root,
-                shadow_home: env_plan.shadow_home_path.clone(),
                 ambiguity_resolutions,
             });
 
             if let Some(injector) = injector_for_provider(provider) {
                 if !session.servers.is_empty() {
-                    crate::commands::exec_prep::ensure_shadow_home(
+                    crate::commands::exec_prep::ensure_provider_overlay(
                         provider,
-                        needs_mcp_shadow_home,
+                        true,
                         &mut env_plan,
+                        &home_baseline,
+                        &env_baseline,
                     )?;
-                    let shadow = env_plan.shadow_home_path.as_deref();
+                    let config_root = env_plan.overlay_visible_root();
                     let mut string_env = std::collections::HashMap::new();
                     let result = injector
-                        .inject(&session.servers, &mut string_env, shadow)
+                        .inject(&session.servers, &mut string_env, config_root)
                         .wrap_err("MCP injection failed")?;
 
                     // The OpenCode inline config is shared with the system-prompt
@@ -688,7 +692,12 @@ fn prepare_environment_and_mcp(
 
         Ok(EnvironmentPhase {
             env_plan,
-            codex_sqlite_home,
+            overlay_rebuild: crate::commands::wrap::launch_plan::OverlayRebuildInputs {
+                repo_resources: request.repo,
+                mcp_requested,
+                home: home_baseline,
+                env: env_baseline,
+            },
             effective_prompt,
             mcp_extra_args,
             mcp_rebuild,
@@ -725,7 +734,7 @@ fn construct_argv_and_system_prompt(
         let effective_non_interactive = *effective_non_interactive;
         let EnvironmentPhase {
             env_plan,
-            codex_sqlite_home,
+            overlay_rebuild,
             effective_prompt,
             mcp_extra_args,
             mcp_rebuild,
@@ -1090,7 +1099,7 @@ fn construct_argv_and_system_prompt(
 
         // R8 — record the inputs and the resulting plan so a per-attempt rebuild
         // can re-derive one for a refreshed document without repeating any of the
-        // effects above (temp-file writes, shadow-HOME materialization, warnings,
+        // effects above (temp-file writes, provider-overlay materialization, warnings,
         // the ambiguity prompt). An unchanged document's facets compare equal and
         // get `args_before_prompt` back verbatim.
         let launch_plan_inputs = {
@@ -1141,7 +1150,7 @@ fn construct_argv_and_system_prompt(
                 system_prompt_scoped_tmp: scoped_tmp.clone(),
                 sandbox_requested: request.sandbox,
                 provider_env_baseline,
-                codex_sqlite_home: codex_sqlite_home.clone(),
+                overlay: Some(overlay_rebuild.clone()),
                 credential_policy: credential_policy.clone(),
                 workspace_cwd: env_plan.child_cwd.clone(),
                 write_grant_env: ["GOOSE_MODE", "OPENCODE_PERMISSION"]
@@ -1181,6 +1190,7 @@ fn construct_argv_and_system_prompt(
                     env_overlay,
                     structured_codex: structured_codex_output.is_some(),
                     write_posture: write_posture.clone(),
+                    overlay: env_plan.overlay.clone(),
                 },
                 replay_supported: true,
             }

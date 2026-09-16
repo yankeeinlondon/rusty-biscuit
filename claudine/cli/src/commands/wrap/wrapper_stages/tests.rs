@@ -283,6 +283,7 @@ fn passthrough_launch_intent_mcp_tracks_wrapper_switches() {
             &args,
             &[],
             None,
+            None,
         );
         assert_eq!(
             intent.mcp_enabled, expected,

@@ -241,3 +241,29 @@ supports_interactive_inline_closure: false
 model_required_in_non_tty: false
 platform_kind: agent_aggregator
 unmapped_native_events: []
+# Provider-overlay redirection surface (fixes/2026-09-12-shadow-home audit).
+# `GOOSE_PATH_ROOT` is a verified, exclusive override, but Goose has no single
+# pre-overlay source root to build an overlay FROM: the three roots it collapses
+# are separate directories that differ per OS (macOS `~/Library/Application
+# Support/Block/goose/`, Linux `~/.config/goose` + `~/.local/share/goose` +
+# `~/.local/state/goose`, Windows `%APPDATA%\Block\goose\`). A null
+# `source_root` forbids a native_root verdict for `repo_resources`.
+overlay_selector:
+  env_var: GOOSE_PATH_ROOT
+  shape:
+    parent_of_provider_dir:
+      child: config
+  relocates:
+  - config
+  - auth
+  - sessions
+  - cache
+  - state
+  additive: false
+  source_root: null
+# Goose has no Claudine MCP injector; its native runtime injection is
+# repeatable `--with-extension` argv needing no config root.
+overlay_capabilities:
+  repo_resources: unsupported
+  repo_prompt: unsupported
+  mcp: unsupported

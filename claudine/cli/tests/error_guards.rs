@@ -909,6 +909,7 @@ mod corpus {
     use claudine::harness::error::{HarnessError, PathResolutionFailure};
     use claudine::hook_adapters::AdapterError;
     use claudine::provider_id::Provider;
+    use claudine::provider_overlay::{OverlayReason, OverlayStage};
     use darkmatter::markdown::compose::expression::ExpressionError;
     use darkmatter::markdown::{MarkdownError, SourceRef};
 
@@ -949,6 +950,27 @@ mod corpus {
                 Box::new(ClaudineError::McpProviderNotSupported {
                     provider: Provider::Goose,
                     reason: "no MCP".to_string(),
+                }),
+            ),
+            (
+                "ClaudineError::ProviderOverlayUnsupported",
+                Box::new(ClaudineError::ProviderOverlayUnsupported {
+                    provider: Provider::Antigravity,
+                    reason: OverlayReason::RepoResources,
+                    selector: None,
+                    next_action: "run antigravity without --repo".to_string(),
+                }),
+            ),
+            (
+                "ClaudineError::ProviderOverlayFailed",
+                Box::new(ClaudineError::ProviderOverlayFailed {
+                    provider: Provider::Codex,
+                    reason: OverlayReason::Mcp,
+                    stage: OverlayStage::Materialization,
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "denied",
+                    ),
                 }),
             ),
             (

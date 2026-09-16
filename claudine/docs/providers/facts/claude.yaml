@@ -363,3 +363,24 @@ unmapped_native_events: []
 # from lib/src/stream/providers/claude.rs::ERROR_KEYWORDS). Sequence order IS
 # the cascade order (first substring hit wins). Owned by the dedicated
 # vocabulary loader, not the general mapping registry.
+# Provider-overlay redirection surface (fixes/2026-09-12-shadow-home audit).
+# `CLAUDE_CONFIG_DIR` relocates the whole `~/.claude` tree but NOT
+# `~/.claude.json` (a sibling at the home root) and NOT the macOS Keychain
+# account, which is why `auth` is absent from `relocates`: leaving credential
+# lookup on the real user identity is the outcome this overlay wants.
+overlay_selector:
+  env_var: CLAUDE_CONFIG_DIR
+  shape: provider_dir
+  relocates:
+  - config
+  - sessions
+  - cache
+  additive: false
+  source_root: "~/.claude"
+# `repo_prompt` is a Codex-only reason and Claude has no file-backed MCP
+# injector (its `--mcp-config` is a per-invocation flag needing no root), so
+# neither reason is ever raised for Claude — both verdicts are inert.
+overlay_capabilities:
+  repo_resources: native_root
+  repo_prompt: unsupported
+  mcp: unsupported

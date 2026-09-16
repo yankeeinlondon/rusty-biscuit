@@ -257,3 +257,19 @@ unmapped_native_events: []
 # from lib/src/stream/providers/qwen.rs::ERROR_KEYWORDS). Sequence order IS the
 # cascade order; the repeated api_remote bucket is the "late ApiRemote" second
 # pass after Interrupted.
+# Provider-overlay redirection surface (fixes/2026-09-12-shadow-home audit).
+# `QWEN_HOME` overrides the global Qwen config directory (`$QWEN_HOME/agents/`).
+# `QWEN_RUNTIME_DIR` relocates runtime output only, never definitions, so it is
+# an external-state selector and is deliberately not recorded here.
+overlay_selector:
+  env_var: QWEN_HOME
+  shape: provider_dir
+  relocates:
+  - config
+  additive: false
+  source_root: "~/.qwen"
+# Qwen exposes no documented one-run MCP injection flag.
+overlay_capabilities:
+  repo_resources: native_root
+  repo_prompt: unsupported
+  mcp: unsupported

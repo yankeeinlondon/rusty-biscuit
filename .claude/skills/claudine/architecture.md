@@ -44,6 +44,7 @@ claudine/lib/src/
 ├── harness/      → Shell audit, timeouts, attempt classification, and recovery infrastructure
 ├── hook_adapters/ → Native hook request/response adapters (ProviderAdapter trait) — parse provider hook payloads; distinct from stream/providers (stdout NDJSON parsers)
 ├── interrupt.rs  → Process-scoped user-interrupt state
+├── invocation_context.rs → Immutable launch baseline (`HomeBaseline`, raw-`OsString` `EnvBaseline`) every attempt and provider transition plans from
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── messaging/    → Outbound messaging route resolution and delivery
@@ -53,6 +54,7 @@ claudine/lib/src/
 │   └── providers/common.rs → Format-agnostic helpers shared across provider backends (first_source_id, one_shot_plan constructor)
 ├── protect/      → Regex deny catalog for commands, paths, and MCP responses
 ├── provider/     → Generated metadata registry plus hand-written provider behavior
+├── provider_overlay/ → `OverlayPlanner` → `OverlayPlan` (reasons, verdicts, source root, per-launch storage, provider-owned `OverlaySelector`, state pins, `OverlayLease`) or a pre-spawn `OverlayRefusal`
 ├── render/       → Functional render components (FinalMessage, AgentPrompt/SystemPrompt, EventRenderer + DISPATCH table, MetricsReport, StreamRenderable/AssistantStream); consume data + policy (DisplayPolicy), never `match provider`
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── runaway/      → Content-guard detection and configuration
@@ -67,7 +69,7 @@ claudine/lib/src/
 
 The per-provider modules under `lib/src/provider/<slug>/` split into two halves: `data.rs` is **generated** by `claudine-gen` (crate `claudine/gen`, sharing vocab enums with the leaf `claudine/catalog-types` crate) from roster + facts + research + overrides (regenerate with `claudine providers generate`; drift-checked in CI by the gen crate's drift test / `claudine-gen check`, which also verify the committed `docs/providers/catalog.json` superset), while `behavior.rs` is hand-written. Never edit a `data.rs` by hand — change the owning input file and regenerate.
 
-**Dispatch drift guard (Phase I).** Decentralized `match Provider` / `matches!` / `==` / `!=` dispatch is prevented from regrowing by one site-level guard in `claudine-cli/tests/dispatch_inventory.rs`, covering **both** `lib/src` and `cli/src` (it retired the lib crate's earlier regex `no_unauthorized_match_provider_in_lib` guard). Every conditional, non-exempt dispatch site must be grandfathered in `GUARD_ALLOWLIST` with a tag + reason (the current sites are all `keep` — genuinely behavioral wire/shadow-HOME/stderr-bridge quirks and Claude's canonical linking role); a new one fails until migrated to a `ProviderInfo` field/trait or consciously listed. The live count is the allowlist length printed by the guard; the committed census is `docs/providers/dispatch-inventory.json`.
+**Dispatch drift guard (Phase I).** Decentralized `match Provider` / `matches!` / `==` / `!=` dispatch is prevented from regrowing by one site-level guard in `claudine-cli/tests/dispatch_inventory.rs`, covering **both** `lib/src` and `cli/src` (it retired the lib crate's earlier regex `no_unauthorized_match_provider_in_lib` guard). Every conditional, non-exempt dispatch site must be grandfathered in `GUARD_ALLOWLIST` with a tag + reason (the current sites are all `keep` — genuinely behavioral wire/stderr-bridge quirks and Claude's canonical linking role); a new one fails until migrated to a `ProviderInfo` field/trait or consciously listed. The live count is the allowlist length printed by the guard; the committed census is `docs/providers/dispatch-inventory.json`.
 
 **Child-process environment guard.** `child_environment` captures one absolute
 process-entry launch directory. Ordinary invocations ignore inherited
@@ -82,6 +84,29 @@ compiler-resolved, not a source scan: `std::process::Command::new`,
 default via each crate's `[lints.clippy]` and denied at the crate root under
 `cfg(not(test))`, so tests keep the plain constructors while an ungoverned
 production spawn fails `just lint`.
+
+**Provider overlays never move the home.** `--repo`, Codex/Gemini `--mcp`,
+and Codex repository prompts redirect only the provider, through a
+provider-owned selector (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `GEMINI_CLI_HOME`,
+…) recorded in generated `overlay_selector`/`overlay_capabilities` metadata.
+`HOME`, `USERPROFILE`, `HOMEDRIVE`, and `HOMEPATH` reach the child exactly as
+captured, so nested `git`/`gpg`/`gh` keep the user's identity. An `Unsupported`
+verdict or a build failure is a typed pre-spawn error
+(`provider.overlay_unsupported` / `provider.overlay_failed`); there is no
+fallback launch. The CLI materializes the plan in
+`wrap/provider_overlay.rs` (links on Unix, recursive copies on native Windows,
+live state never mirrored) into a fresh per-launch root under
+`~/.claudine/overlays/<slug>/`, owned by an `OverlayLease` the plan holds: the
+root is removed when the last plan clone drops — after the lease's guarded
+`WriteBack` copies changed top-level mirrored files (rotated tokens) back over
+sources that did not change meanwhile; injected MCP config
+(`record_claudine_write`), materializations, excluded and new entries never
+qualify — and a root whose sibling `.lock` is free is swept by the next launch
+without write-back. Legacy `~/.claudine/<agent-offset>`
+storage is never touched. Every debug spawn re-checks the home variables
+in `exec/spawn/setup.rs::debug_assert_child_env`. Proxy, retry, and resume
+rebuilds restore the baseline's selector values before applying the target's
+plan. See `claudine/docs/topics/repo-isolation.md`.
 
 ## Event Support Matrix
 

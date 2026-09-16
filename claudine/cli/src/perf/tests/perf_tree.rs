@@ -781,8 +781,8 @@ fn perf_tree_env_setup_substages_carve_parent() {
 
 #[test]
 fn perf_tree_child_env_build_breakdown_nests_without_breaking_reconciliation() {
-    // `child env build` carries a nested breakdown (env sanitize / shadow
-    // home sync → repo root detect). The substage stays Structural and
+    // `child env build` carries a nested breakdown (env sanitize / provider
+    // overlay → repo root detect). The substage stays Structural and
     // reconciles against `environment setup`; its whole breakdown subtree is
     // Breakdown at every depth, so a near-100% `repo root detect` child can
     // never make the substage exceed its parent (TR-1).
@@ -794,7 +794,7 @@ fn perf_tree_child_env_build_breakdown_nests_without_breaking_reconciliation() {
             children: vec![
                 SubstageTiming::new("env sanitize", Duration::from_micros(300)),
                 SubstageTiming {
-                    name: "shadow home sync",
+                    name: "provider overlay",
                     elapsed: Duration::from_millis(699),
                     children: vec![SubstageTiming::new(
                         "repo root detect",
@@ -824,9 +824,9 @@ fn perf_tree_child_env_build_breakdown_nests_without_breaking_reconciliation() {
     let ceb = child(env, "child env build").unwrap();
     assert_eq!(ceb.role, NodeRole::Structural);
 
-    let shadow = child(ceb, "shadow home sync").unwrap();
-    assert_eq!(shadow.role, NodeRole::Breakdown);
-    let detect = child(shadow, "repo root detect").unwrap();
+    let overlay = child(ceb, "provider overlay").unwrap();
+    assert_eq!(overlay.role, NodeRole::Breakdown);
+    let detect = child(overlay, "repo root detect").unwrap();
     assert_eq!(detect.role, NodeRole::Breakdown);
     assert_eq!(detect.total, Duration::from_millis(698));
 }

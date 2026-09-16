@@ -1029,29 +1029,13 @@ const ALLOWED_TAGS: &[&str] = &[KEEP, TAG_WS0, TAG_WS3, TAG_RENDER];
 
 /// The grandfather-with-burn-down allow-list. Seeded from the mechanical
 /// inventory at Phase I guard-landing. All entries are genuinely behavioral
-/// (wire-protocol quirks, shadow-HOME mechanics, stderr bridging, Claude's
+/// (wire-protocol quirks, stderr bridging, Claude's
 /// canonical role as the native resource home) and were ruled `keep` at
 /// Checkpoint I (2026-07-08). A new conditional, non-exempt site not listed
 /// here fails [`cli_dispatch_guard_holds_the_line`]; migrate it to a
 /// `ProviderInfo` catalog field / behavior trait, or add a `keep` entry with a
 /// reason if it is truly behavioral.
 const GUARD_ALLOWLIST: &[GuardEntry] = &[
-    // --- CLI: Codex/Gemini shadow-HOME MCP injection need (dup pair; kept per
-    //     Checkpoint I — consolidating reopens Phase-D catalog-data discipline).
-    GuardEntry {
-        path: "claudine/cli/src/commands/wrap/composition/pipeline.rs",
-        form: FORM_MATCHES,
-        providers: &["Codex", "Gemini"],
-        tag: KEEP,
-        reason: "MCP shadow-HOME is needed only for the shadow-HOME MCP injectors (Codex, Gemini).",
-    },
-    GuardEntry {
-        path: "claudine/cli/src/commands/wrap/mod.rs",
-        form: FORM_MATCHES,
-        providers: &["Codex", "Gemini"],
-        tag: KEEP,
-        reason: "MCP shadow-HOME need (direct wrapper twin of the composition-path predicate).",
-    },
     // --- CLI: Codex structured-output final-message emission (dup pair).
     GuardEntry {
         path: "claudine/cli/src/commands/wrap/harness_orch/attempt.rs",
@@ -1066,22 +1050,6 @@ const GUARD_ALLOWLIST: &[GuardEntry] = &[
         providers: &["Codex"],
         tag: KEEP,
         reason: "Codex final-message stdout emission (direct wrapper twin).",
-    },
-    // --- CLI: `CODEX_SQLITE_HOME` shadow-home derivation (two stages of one
-    //     feature: baseline capture, then overlay push).
-    GuardEntry {
-        path: "claudine/cli/src/commands/wrap/composition/pipeline.rs",
-        form: FORM_EQ,
-        providers: &["Codex"],
-        tag: KEEP,
-        reason: "CODEX_SQLITE_HOME is Codex-owned vocabulary; records the ambient baseline so a provider transition undoes it.",
-    },
-    GuardEntry {
-        path: "claudine/cli/src/commands/wrap/launch_plan.rs",
-        form: FORM_EQ,
-        providers: &["Codex"],
-        tag: KEEP,
-        reason: "CODEX_SQLITE_HOME is Codex-owned vocabulary; pushes the derived value into the child env overlay.",
     },
     // --- CLI: other behavioral wire/prep quirks.
     GuardEntry {
@@ -1118,20 +1086,6 @@ const GUARD_ALLOWLIST: &[GuardEntry] = &[
         providers: &["Codex"],
         tag: KEEP,
         reason: "Codex stderr tracing-subscriber bridge (render inline vs leak raw).",
-    },
-    GuardEntry {
-        path: "claudine/cli/src/commands/wrap/repo_home.rs",
-        form: FORM_MATCHES,
-        providers: &["Codex"],
-        tag: KEEP,
-        reason: "Codex shadow-HOME repo-root preservation predicate.",
-    },
-    GuardEntry {
-        path: "claudine/cli/src/commands/wrap/repo_home.rs",
-        form: FORM_EQ,
-        providers: &["Codex"],
-        tag: KEEP,
-        reason: "Codex prompt materialization into the shadow HOME.",
     },
     GuardEntry {
         path: "claudine/cli/src/commands/wrap/wrapper_stages.rs",

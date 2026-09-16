@@ -401,8 +401,9 @@ fn build_child_env_overrides_pwd_to_match_child_cwd() {
         &[],
         cwd.path(),
         &[],
-        false,
-        false,
+        OverlayReasons::none(),
+        &HomeBaseline::capture(),
+        &EnvBaseline::capture(),
         None,
     )
     .unwrap();
@@ -439,8 +440,9 @@ fn build_child_env_overwrites_stale_agent_cwd_with_process_launch_directory() {
         &[],
         cwd.path(),
         &[("AGENT_CWD".to_string(), "stale/value".to_string())],
-        false,
-        false,
+        OverlayReasons::none(),
+        &HomeBaseline::capture(),
+        &EnvBaseline::capture(),
         None,
     )
     .unwrap();
@@ -477,8 +479,9 @@ fn build_child_env_stamps_interactive_gates_for_child_and_hook() {
         &[],
         cwd.path(),
         &[],
-        false,
-        false,
+        OverlayReasons::none(),
+        &HomeBaseline::capture(),
+        &EnvBaseline::capture(),
         None,
     )
     .unwrap();
@@ -496,8 +499,9 @@ fn build_child_env_stamps_interactive_gates_for_child_and_hook() {
         &[],
         cwd.path(),
         &[],
-        false,
-        false,
+        OverlayReasons::none(),
+        &HomeBaseline::capture(),
+        &EnvBaseline::capture(),
         None,
     )
     .unwrap();
@@ -524,8 +528,9 @@ fn build_child_env_includes_claudine_pid_for_interactive_wrapper() {
         &[],
         cwd.path(),
         &[],
-        false,
-        false,
+        OverlayReasons::none(),
+        &HomeBaseline::capture(),
+        &EnvBaseline::capture(),
         None,
     )
     .unwrap();
@@ -565,8 +570,9 @@ fn build_child_env_includes_claudine_pid_for_non_interactive_wrapper() {
         &[],
         cwd.path(),
         &[],
-        false,
-        false,
+        OverlayReasons::none(),
+        &HomeBaseline::capture(),
+        &EnvBaseline::capture(),
         None,
     )
     .unwrap();
@@ -582,16 +588,15 @@ fn build_child_env_includes_claudine_pid_for_non_interactive_wrapper() {
 /// Regression for the source-repo vs launch-repo split through the real
 /// env wiring. When a composed source document lives in one repo (its
 /// enclosing git root becomes `repo_root`, the metadata anchor) but the
-/// user launched from a different repo (`child_cwd`), Codex shadow-HOME
+/// user launched from a different repo (`child_cwd`), Codex overlay
 /// prompt materialization must follow `child_cwd`, NOT the source
 /// metadata root. This exercises `build_child_env_with_launch` ->
-/// `needs_shadow_home` -> `build_repo_home_env`, so a future change that
-/// accidentally threads `repo_root`/source metadata into the shadow-HOME
-/// call is caught here even if the low-level `repo_home` tests stay green.
+/// `provider_overlay::build_overlay`, so a future change that accidentally
+/// threads `repo_root`/source metadata into the overlay call is caught here
+/// even if the low-level `provider_overlay` tests stay green.
 #[cfg(unix)]
 #[test]
-#[serial_test::serial]
-fn build_child_env_codex_shadow_home_uses_child_cwd_not_source_repo_root() {
+fn build_child_env_codex_overlay_uses_child_cwd_not_source_repo_root() {
     let tmp = tempfile::tempdir().unwrap();
     let fake_home = tmp.path().join("home");
     let launch_repo = tmp.path().join("launch-repo");
@@ -613,9 +618,20 @@ fn build_child_env_codex_shadow_home_uses_child_cwd_not_source_repo_root() {
         package_context: None,
         warnings: Vec::new(),
     };
-
-    let old_home = std::env::var_os("HOME");
-    unsafe { std::env::set_var("HOME", &fake_home) };
+    let home_baseline = HomeBaseline::from_parts(
+        Some(fake_home.clone()),
+        [Some(fake_home.clone().into_os_string()), None, None, None],
+    );
+    let env_baseline = EnvBaseline::from_entries([
+        ("HOME", fake_home.as_os_str()),
+        ("PATH", std::ffi::OsStr::new("/usr/bin")),
+    ]);
+    let reasons = crate::commands::wrap::provider_overlay::overlay_reasons(
+        claudine::provider::Provider::Codex,
+        false,
+        false,
+        &launch_ctx.child_cwd,
+    );
 
     let plan = build_child_env_with_launch(
         profile,
@@ -625,31 +641,181 @@ fn build_child_env_codex_shadow_home_uses_child_cwd_not_source_repo_root() {
         false,
         &[],
         &[],
-        false,
-        false,
+        reasons,
+        &home_baseline,
+        &env_baseline,
         launch_ctx,
         false,
-    );
+    )
+    .unwrap();
 
-    match old_home {
-        Some(v) => unsafe { std::env::set_var("HOME", v) },
-        None => unsafe { std::env::remove_var("HOME") },
-    }
-
-    let plan = plan.unwrap();
-    let shadow_path = plan
-        .shadow_home_path
-        .expect("Codex repo-local prompts must trigger a shadow home");
-    let prompts_dir = shadow_path.join("prompts");
+    let overlay_root = plan
+        .overlay_visible_root()
+        .expect("Codex repo-local prompts must trigger an overlay")
+        .to_path_buf();
+    let prompts_dir = overlay_root.join("prompts");
 
     assert!(
         fs::symlink_metadata(prompts_dir.join("launch.md")).is_ok(),
-        "shadow prompts must come from child_cwd (launch repo)"
+        "overlay prompts must come from child_cwd (launch repo)"
     );
     assert!(
         fs::symlink_metadata(prompts_dir.join("source.md")).is_err(),
-        "shadow prompts must NOT come from the source metadata repo_root"
+        "overlay prompts must NOT come from the source metadata repo_root"
     );
+    assert_eq!(
+        plan.env.get(std::ffi::OsStr::new("HOME")),
+        Some(&fake_home.clone().into_os_string()),
+        "the prompt overlay leaves HOME at the launch value"
+    );
+    assert_eq!(
+        plan.env.get(std::ffi::OsStr::new("CODEX_HOME")),
+        Some(&overlay_root.into_os_string()),
+        "Codex is pointed at the overlay through its own selector"
+    );
+}
+
+/// The child inherits the environment Claudine *launched* with. A wrapper stage
+/// that mutates its own process after capture — or another test doing the same
+/// on a neighboring thread — must not reach the spawned provider.
+#[test]
+#[serial_test::serial]
+fn sanitize_process_env_reads_the_supplied_baseline_not_the_ambient_process() {
+    const CAPTURED: &str = "CLAUDINE_ENV_BASELINE_TEST";
+    const LATE: &str = "CLAUDINE_ENV_BASELINE_TEST_LATE";
+
+    let captured = test_toolkit::EnvGuard::set_safe(CAPTURED, "captured");
+    let cleared = test_toolkit::EnvGuard::remove_safe(LATE);
+    let baseline = EnvBaseline::capture();
+
+    let mutated = test_toolkit::EnvGuard::set_safe(CAPTURED, "mutated");
+    let late = test_toolkit::EnvGuard::set_safe(LATE, "late");
+
+    let (kept, _, _, _) =
+        sanitize_process_env(&baseline, &HashSet::new(), &HashSet::new());
+
+    assert_eq!(
+        kept.get(std::ffi::OsStr::new(CAPTURED)).map(|v| v.to_string_lossy().into_owned()),
+        Some("captured".to_string()),
+        "the post-capture value leaked into the child environment"
+    );
+    assert!(
+        !kept.contains_key(std::ffi::OsStr::new(LATE)),
+        "a variable set after capture must not reach the child"
+    );
+
+    // Anti-vacuity: both mutations really landed, so the assertions above are
+    // about the baseline rather than about an environment that never moved.
+    let ambient = EnvBaseline::capture();
+    assert_eq!(ambient.get(CAPTURED), Some(std::ffi::OsStr::new("mutated")));
+    assert_eq!(ambient.get(LATE), Some(std::ffi::OsStr::new("late")));
+
+    drop(late);
+    drop(mutated);
+    drop(cleared);
+    drop(captured);
+}
+
+/// Sanitation verdicts are computed over the supplied snapshot: a sensitive key
+/// is stripped, `--include` and the provider allow-list readmit it, and an
+/// `--include` naming a variable the *baseline* never had is warned about.
+#[test]
+fn sanitize_process_env_classifies_the_baselines_keys() {
+    let baseline = EnvBaseline::from_entries([
+        ("OPENAI_API_KEY", "explicitly-included"),
+        ("PROVIDER_TOKEN", "profile-included"),
+        ("SVC_TOKEN", "stripped"),
+        ("NORMAL_VAR", "ok"),
+    ]);
+    let include_set = HashSet::from(["OPENAI_API_KEY".to_string(), "NEVER_SET".to_string()]);
+    let auto_include = HashSet::from(["PROVIDER_TOKEN".to_string()]);
+
+    let (kept, removed, included, warnings) =
+        sanitize_process_env(&baseline, &include_set, &auto_include);
+
+    let kept_names: BTreeSet<_> = kept
+        .keys()
+        .map(|key| key.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        kept_names,
+        BTreeSet::from([
+            "OPENAI_API_KEY".to_string(),
+            "PROVIDER_TOKEN".to_string(),
+            "NORMAL_VAR".to_string(),
+        ])
+    );
+    assert_eq!(removed, vec!["SVC_TOKEN".to_string()]);
+    assert_eq!(
+        included,
+        vec!["OPENAI_API_KEY".to_string(), "PROVIDER_TOKEN".to_string()]
+    );
+    assert_eq!(warnings.len(), 1, "unexpected warnings: {warnings:?}");
+    assert!(warnings[0].contains("NEVER_SET"), "got: {}", warnings[0]);
+}
+
+/// A Unix environment value need not be UTF-8, and sanitation must hand the
+/// child the original bytes rather than a lossy reconstruction.
+#[cfg(unix)]
+#[test]
+fn sanitize_process_env_preserves_non_utf8_values() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let value = std::ffi::OsString::from_vec(vec![b'v', 0xff, 0xfe]);
+    let baseline = EnvBaseline::from_entries([(
+        std::ffi::OsString::from("CLAUDINE_NON_UTF8"),
+        value.clone(),
+    )]);
+
+    let (kept, _, _, _) =
+        sanitize_process_env(&baseline, &HashSet::new(), &HashSet::new());
+
+    assert_eq!(
+        kept.get(std::ffi::OsStr::new("CLAUDINE_NON_UTF8")),
+        Some(&value)
+    );
+}
+
+/// The whole-plan consequence of the two above: what a child process receives
+/// is derived from the supplied baseline, not from the wrapper's own process.
+#[test]
+#[serial_test::serial]
+fn build_child_env_inherits_the_supplied_baseline() {
+    const AMBIENT_ONLY: &str = "CLAUDINE_ENV_BASELINE_PLAN_AMBIENT";
+
+    let ambient = test_toolkit::EnvGuard::set_safe(AMBIENT_ONLY, "leaked");
+    let baseline = EnvBaseline::from_entries([("CLAUDINE_ENV_BASELINE_PLAN_MARKER", "captured")]);
+    let profile = profile_for_provider(claudine::provider::Provider::Claude).unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+
+    let plan = build_child_env(
+        profile,
+        claudine::provider::Provider::Claude,
+        &[],
+        false,
+        false,
+        &[],
+        cwd.path(),
+        &[],
+        OverlayReasons::none(),
+        &HomeBaseline::capture(),
+        &baseline,
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        plan.env
+            .get(std::ffi::OsStr::new("CLAUDINE_ENV_BASELINE_PLAN_MARKER"))
+            .map(|v| v.to_string_lossy().into_owned()),
+        Some("captured".to_string())
+    );
+    assert!(
+        !plan.env.contains_key(std::ffi::OsStr::new(AMBIENT_ONLY)),
+        "an ambient variable outside the baseline reached the child env plan"
+    );
+
+    drop(ambient);
 }
 
 fn sanitize_env_for_test(
@@ -742,8 +908,9 @@ fn repo_root_hint_sets_metadata_but_not_child_cwd() {
         &[],
         cwd.path(),
         &[],
-        false,
-        false,
+        OverlayReasons::none(),
+        &HomeBaseline::capture(),
+        &EnvBaseline::capture(),
         Some(hint_dir.path()),
     )
     .unwrap();
@@ -766,8 +933,9 @@ fn repo_root_hint_none_falls_back_to_cwd_detection() {
         &[],
         cwd.path(),
         &[],
-        false,
-        false,
+        OverlayReasons::none(),
+        &HomeBaseline::capture(),
+        &EnvBaseline::capture(),
         None,
     )
     .unwrap();
@@ -838,4 +1006,70 @@ edition = "2024"
         "expected package-context warning, got: {:?}",
         ctx.warnings
     );
+}
+
+/// Native Windows home forms survive an overlay launch byte for byte (spec L1
+/// edge matrix): a drive-letter `USERPROFILE` and a UNC one, each with a space,
+/// a split `HOMEDRIVE`/`HOMEPATH`, and an absent `HOME` that must not be
+/// synthesized from any of them. The overlay still reaches Codex only through
+/// `CODEX_HOME`. Platform-neutral: the values are carried, never parsed.
+#[test]
+fn build_child_env_carries_native_windows_home_forms_through_an_overlay_launch() {
+    use crate::commands::wrap::provider_overlay::home_identity_violation;
+    use claudine::provider_overlay::{OverlayReason, OverlayReasons};
+    use std::ffi::{OsStr, OsString};
+
+    for (profile_value, drive, path) in [
+        (r"C:\Users\Ada Lovelace", "C:", r"\Users\Ada Lovelace"),
+        (r"\\fileserver\homes\Ada Lovelace", r"\\fileserver\homes", r"\Ada Lovelace"),
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        let resolved_home = tmp.path().join("home with space");
+        fs::create_dir_all(resolved_home.join(".codex")).unwrap();
+        let child_cwd = tmp.path().join("repo");
+        fs::create_dir_all(&child_cwd).unwrap();
+
+        let home_baseline = HomeBaseline::from_parts(
+            Some(resolved_home.clone()),
+            [None, Some(profile_value.into()), Some(drive.into()), Some(path.into())],
+        );
+        let env_baseline = EnvBaseline::from_entries([
+            ("USERPROFILE", profile_value),
+            ("HOMEDRIVE", drive),
+            ("HOMEPATH", path),
+        ]);
+        let launch_ctx = LaunchWorkspaceContext {
+            launch_cwd: child_cwd.clone(),
+            repo_root: Some(child_cwd.clone()),
+            child_cwd,
+            package_context: None,
+            warnings: Vec::new(),
+        };
+
+        let plan = build_child_env_with_launch(
+            profile_for_provider(claudine::provider::Provider::Codex).unwrap(),
+            claudine::provider::Provider::Codex,
+            &[],
+            false,
+            false,
+            &[],
+            &[],
+            OverlayReasons::single(OverlayReason::RepoResources),
+            &home_baseline,
+            &env_baseline,
+            launch_ctx,
+            false,
+        )
+        .unwrap();
+
+        let get = |name: &str| plan.env.get(OsStr::new(name));
+        assert_eq!(get("USERPROFILE"), Some(&OsString::from(profile_value)));
+        assert_eq!(get("HOMEDRIVE"), Some(&OsString::from(drive)));
+        assert_eq!(get("HOMEPATH"), Some(&OsString::from(path)));
+        assert_eq!(get("HOME"), None, "HOME was synthesized for {profile_value}");
+        let overlay = plan.overlay.as_ref().and_then(|overlay| overlay.storage_root()).unwrap();
+        assert!(overlay.starts_with(resolved_home.join(".claudine").join("overlays")));
+        assert_eq!(get("CODEX_HOME"), Some(&overlay.as_os_str().to_owned()));
+        assert_eq!(home_identity_violation(&plan.env), None);
+    }
 }

@@ -502,3 +502,229 @@ fn bare_shell_command_override_fails_loudly() {
         "expected UnmappableValue for bare shell_command"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Provider-overlay facts: shape gates
+//
+// These two records are the only catalog data a launch is refused on, and a
+// wrong path shape points a provider at nothing while looking isolated. Each
+// malformed authoring form below therefore has to fail generation rather than
+// emit a plausible-looking expression.
+// ---------------------------------------------------------------------------
+
+/// The committed claude facts emit the `ProviderDir` shape with a
+/// home-relative source root and the verdict record, in field order.
+#[test]
+fn overlay_facts_emit_the_selector_and_capability_records() {
+    let fixture = Fixture::new();
+    let generation = fixture.generate().unwrap();
+    assert!(
+        generation.data_rs.contains(
+            "    overlay_selector: Some(&OverlaySelectorSpec {\n        \
+             env_var: \"CLAUDE_CONFIG_DIR\",\n        \
+             shape: OverlaySelectorShape::ProviderDir,\n"
+        ),
+        "selector expression missing from:\n{}",
+        generation.data_rs
+    );
+    assert!(
+        generation
+            .data_rs
+            .contains("        source_root: Some(PathTemplate::Static(\"~/.claude\")),\n    }),\n"),
+        "source root expression missing from:\n{}",
+        generation.data_rs
+    );
+    assert!(
+        generation.data_rs.contains(
+            "    overlay_capabilities: OverlayCapabilities {\n        \
+             repo_resources: OverlayCapability::NativeRoot,\n        \
+             repo_prompt: OverlayCapability::Unsupported,\n        \
+             mcp: OverlayCapability::Unsupported,\n    },\n"
+        ),
+        "capability expression missing from:\n{}",
+        generation.data_rs
+    );
+}
+
+/// `parent_of_provider_dir` carries the appended segment, so the shape is
+/// authored as the externally tagged object and the segment reaches data.rs.
+#[test]
+fn parent_of_provider_dir_shape_carries_the_child_segment() {
+    let fixture = Fixture::new();
+    fixture.replace(
+        "docs/providers/facts/claude.yaml",
+        "  shape: provider_dir",
+        "  shape:\n    parent_of_provider_dir:\n      child: .claude",
+    );
+    let generation = fixture.generate().unwrap();
+    assert!(
+        generation.data_rs.contains(
+            "        shape: OverlaySelectorShape::ParentOfProviderDir { child: \".claude\" },\n"
+        ),
+        "child segment missing from:\n{}",
+        generation.data_rs
+    );
+}
+
+/// A multi-segment child would make the appended offset ambiguous.
+#[test]
+fn multi_segment_child_is_rejected() {
+    let fixture = Fixture::new();
+    fixture.replace(
+        "docs/providers/facts/claude.yaml",
+        "  shape: provider_dir",
+        "  shape:\n    parent_of_provider_dir:\n      child: config/goose",
+    );
+    let err = fixture.generate().unwrap_err();
+    assert!(
+        matches!(err, GenError::UnmappableValue { field, .. } if field == "overlay_selector"),
+        "expected UnmappableValue for a multi-segment child, got: {err}"
+    );
+}
+
+/// `parent_of_provider_dir` without its payload is the exact authoring slip
+/// that produces a silently doubly nested config path.
+#[test]
+fn parent_of_provider_dir_without_a_child_is_rejected() {
+    let fixture = Fixture::new();
+    fixture.replace(
+        "docs/providers/facts/claude.yaml",
+        "  shape: provider_dir",
+        "  shape: parent_of_provider_dir",
+    );
+    let err = fixture.generate().unwrap_err();
+    assert!(
+        matches!(err, GenError::UnmappableValue { field, .. } if field == "overlay_selector"),
+        "expected UnmappableValue for a payload-less parent shape, got: {err}"
+    );
+}
+
+#[test]
+fn unknown_selector_shape_is_rejected() {
+    let fixture = Fixture::new();
+    fixture.replace(
+        "docs/providers/facts/claude.yaml",
+        "  shape: provider_dir",
+        "  shape: sibling_of_provider_dir",
+    );
+    let err = fixture.generate().unwrap_err();
+    assert!(
+        matches!(err, GenError::UnmappableValue { field, .. } if field == "overlay_selector"),
+        "expected UnmappableValue for an unknown shape, got: {err}"
+    );
+}
+
+/// A source root is resolved against the launch baseline's home on every OS,
+/// so an absolute root would not be portable.
+#[test]
+fn absolute_source_root_is_rejected() {
+    let fixture = Fixture::new();
+    fixture.replace(
+        "docs/providers/facts/claude.yaml",
+        "  source_root: \"~/.claude\"",
+        "  source_root: \"/Users/ken/.claude\"",
+    );
+    let err = fixture.generate().unwrap_err();
+    assert!(
+        matches!(err, GenError::UnmappableValue { field, .. } if field == "overlay_selector"),
+        "expected UnmappableValue for an absolute source root, got: {err}"
+    );
+}
+
+/// A null source root is legal — it records that no single pre-overlay root
+/// exists (Goose) or that no overlay is ever materialized (OpenCode, Kilo).
+#[test]
+fn null_source_root_emits_none() {
+    let fixture = Fixture::new();
+    fixture.replace(
+        "docs/providers/facts/claude.yaml",
+        "  source_root: \"~/.claude\"",
+        "  source_root: null",
+    );
+    let generation = fixture.generate().unwrap();
+    assert!(
+        generation.data_rs.contains("        source_root: None,\n    }),\n"),
+        "expected a None source root in:\n{}",
+        generation.data_rs
+    );
+}
+
+/// A provider with no provider-scoped redirection surface at all
+/// (Antigravity) records a null selector; the field is optional, not absent.
+#[test]
+fn null_overlay_selector_emits_none() {
+    let fixture = Fixture::new();
+    fixture.replace(
+        "docs/providers/facts/claude.yaml",
+        "overlay_selector:\n  env_var: CLAUDE_CONFIG_DIR\n  shape: provider_dir\n  \
+         relocates:\n  - config\n  - sessions\n  - cache\n  additive: false\n  \
+         source_root: \"~/.claude\"\n",
+        "overlay_selector: null\n",
+    );
+    let generation = fixture.generate().unwrap();
+    assert!(
+        generation.data_rs.contains("    overlay_selector: None,\n"),
+        "expected a None selector in:\n{}",
+        generation.data_rs
+    );
+}
+
+#[test]
+fn unknown_relocated_resource_class_is_rejected() {
+    let fixture = Fixture::new();
+    fixture.replace(
+        "docs/providers/facts/claude.yaml",
+        "  relocates:\n  - config",
+        "  relocates:\n  - keychain",
+    );
+    let err = fixture.generate().unwrap_err();
+    assert!(
+        matches!(err, GenError::UnmappableValue { field, .. } if field == "overlay_selector"),
+        "expected UnmappableValue for an unknown resource class, got: {err}"
+    );
+}
+
+#[test]
+fn unknown_capability_verdict_is_rejected() {
+    let fixture = Fixture::new();
+    fixture.replace(
+        "docs/providers/facts/claude.yaml",
+        "  repo_resources: native_root",
+        "  repo_resources: best_effort",
+    );
+    let err = fixture.generate().unwrap_err();
+    assert!(
+        matches!(err, GenError::UnmappableValue { field, .. } if field == "overlay_capabilities"),
+        "expected UnmappableValue for an unknown verdict, got: {err}"
+    );
+}
+
+/// A missing reason key must fail rather than default to a permissive
+/// verdict: silence here would authorize a launch nobody ruled on.
+#[test]
+fn missing_capability_reason_is_rejected() {
+    let fixture = Fixture::new();
+    fixture.replace("docs/providers/facts/claude.yaml", "  mcp: unsupported\n", "");
+    let err = fixture.generate().unwrap_err();
+    assert!(
+        matches!(err, GenError::UnmappableValue { field, .. } if field == "overlay_capabilities"),
+        "expected UnmappableValue for a missing reason key, got: {err}"
+    );
+}
+
+/// The capability record is required outright — a facts file without it
+/// cannot generate.
+#[test]
+fn absent_overlay_capabilities_is_rejected() {
+    let fixture = Fixture::new();
+    fixture.replace(
+        "docs/providers/facts/claude.yaml",
+        "overlay_capabilities:\n  repo_resources: native_root\n  repo_prompt: unsupported\n  mcp: unsupported\n",
+        "",
+    );
+    let err = fixture.generate().unwrap_err();
+    assert!(
+        matches!(err, GenError::MissingValue { field, .. } if field == "overlay_capabilities"),
+        "expected MissingValue for absent overlay_capabilities, got: {err}"
+    );
+}

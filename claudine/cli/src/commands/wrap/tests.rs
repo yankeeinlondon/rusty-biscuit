@@ -149,7 +149,7 @@ fn package_name_display_shows_resolved_package_and_area() {
             candidates: vec!["claudine-cli".to_string()],
         }),
         warnings: Vec::new(),
-        shadow_home_path: None,
+        overlay: None,
         perf_substages: Vec::new(),
     };
 
@@ -173,9 +173,86 @@ fn package_name_display_is_hidden_when_package_is_ambiguous() {
             candidates: vec!["claudine".to_string(), "claudine-cli".to_string()],
         }),
         warnings: Vec::new(),
-        shadow_home_path: None,
+        overlay: None,
         perf_substages: Vec::new(),
     };
 
     assert!(crate::output::package_name_display(&env_plan).is_none());
+}
+
+/// Plain, unwrapped text of the `--repo` info line for `overlay`.
+fn repo_info_text(overlay: Option<&claudine::provider_overlay::OverlayPlan>) -> String {
+    let mut term = biscuit_terminal::terminal::Terminal::new_optimistic(400);
+    term.is_nerd_font = Some(false);
+    let rendered = crate::output::repo_flag_info_message(&term, overlay);
+    biscuit_terminal::discovery::eval::strip_ansi_codes(&rendered)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Pure plans (no filesystem) under a home whose path contains a space.
+fn info_line_plan(
+    provider: claudine::provider::Provider,
+    reason: claudine::provider_overlay::OverlayReason,
+) -> claudine::provider_overlay::OverlayPlan {
+    let home = claudine::invocation_context::HomeBaseline::from_parts(
+        Some(PathBuf::from("/home/user name")),
+        Default::default(),
+    );
+    let env = claudine::invocation_context::EnvBaseline::default();
+    claudine::provider_overlay::OverlayPlanner::new(&home, &env)
+        .with_launch_id("launch")
+        .plan(provider, [reason].into_iter().collect())
+        .expect("the fixture requests a supported reason")
+}
+
+/// The `--repo` info line names the provider-owned selector and the directory
+/// the provider reads from. For a parent-shaped selector (Gemini) that is the
+/// visible root beneath the selector's value, not the value itself. It never
+/// calls the overlay a home or mentions authentication.
+#[test]
+fn repo_flag_info_message_names_the_selector_and_the_provider_visible_root() {
+    use claudine::provider::Provider;
+    use claudine::provider_overlay::OverlayReason;
+
+    let cases = [
+        (Provider::Codex, OverlayReason::RepoResources, "CODEX_HOME", "/home/user name/.claudine/overlays/codex/launch"),
+        (Provider::Gemini, OverlayReason::Mcp, "GEMINI_CLI_HOME", "/home/user name/.claudine/overlays/gemini/launch/.gemini"),
+    ];
+    for (provider, reason, selector, visible_root) in cases {
+        let plan = info_line_plan(provider, reason);
+        let text = repo_info_text(Some(&plan));
+        assert!(
+            text.ends_with(&format!(
+                "{selector} points the provider at its overlay in {visible_root}; your home directory is unchanged."
+            )),
+            "{provider}: {text}"
+        );
+        let lower = text.to_lowercase();
+        for stale in ["shadow", "authentication", "credential"] {
+            assert!(!lower.contains(stale), "{provider}: {stale:?} in {text}");
+        }
+    }
+}
+
+/// With no filesystem overlay, either because none was planned or because the
+/// plan is satisfied inline (OpenCode MCP), the line states the `--repo`
+/// constraint alone and names no selector or directory.
+#[test]
+fn repo_flag_info_message_omits_the_overlay_clause_without_a_filesystem_overlay() {
+    use claudine::provider::Provider;
+    use claudine::provider_overlay::OverlayReason;
+
+    let inline = info_line_plan(Provider::OpenCode, OverlayReason::Mcp);
+    assert!(!inline.requires_materialization());
+    for (label, overlay) in [("none", None), ("inline", Some(&inline))] {
+        let text = repo_info_text(overlay);
+        assert!(
+            text.ends_with("constrains skills, commands, and subagent definitions to those in the repo."),
+            "{label}: {text}"
+        );
+        assert!(!text.contains("overlay"), "{label}: {text}");
+        assert!(!text.contains("OPENCODE_CONFIG"), "{label}: {text}");
+    }
 }

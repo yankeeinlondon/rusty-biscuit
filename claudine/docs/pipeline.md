@@ -167,8 +167,8 @@ the `composition_prepare` span.
 
 | # | Step | Notes |
 |---|------|-------|
-| C3.1 | **Decide MCP shadow-HOME need** [M] | Codex/Gemini + (`--mcp` or `--use`). |
-| C3.2 | **Decide repo shadow-HOME need** [O-flag] | `--repo`. |
+| C3.1 | **Decide overlay reasons (`provider_overlay::overlay_reasons`)** [M] | `--repo` → `repo_resources`; `--mcp`/`--use` → `mcp` only for a provider with an MCP verdict (Codex, Gemini, OpenCode inline); repository prompts → `repo_prompt` (Codex). |
+| C3.2 | **Plan the provider overlay** [O-flag] | Inside C3.3. An `Unsupported` verdict stops the launch with `provider.overlay_unsupported`; a build failure with `provider.overlay_failed`. Both are pre-spawn and have no fallback. Home variables are never written. |
 | C3.3 | **Build child env (`env::build_child_env_with_launch`)** [M] | Uses the pre-computed `LaunchWorkspaceContext` from `request.prep_launch_workspace` (W0). No redundant `resolve_launch_workspace_context` call. |
 | C3.4 | **Apply `--operation` env override** [O-flag] | |
 | C3.5 | **Apply request-level env overrides** [M] | E.g., `FAIL_FAST` from sequence. |
@@ -425,7 +425,7 @@ combos:
 - No `loop:` frontmatter: skips F5 entirely; B6 runs once.
 - No `lifecycle:` frontmatter: skips D4 (`load_claudine_config` for runtime config).
 - No `--mcp` / `--use`: skips C3.6-C3.11.
-- No `--repo` and no MCP: skips shadow-HOME setup in C3.3.
+- No overlay reason (no `--repo`, no root-requiring MCP injection, no Codex repository prompts): skips provider-overlay planning and materialization in C3.3.
 - No harness frontmatter: skips D6.harness/preflight shell-approval differences; still runs through E1.1 with the bare plan.
 - TTY + explicit `--<provider>`: skips picker in B3.2.tty.
 - `--<provider>` flag: skips all picker UI.

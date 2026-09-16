@@ -5,8 +5,8 @@ description: |-
   test design, fixture isolation, `require_level!` / `expect_level!` gating,
   nextest filtersets, suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 61d07be7e22c9f45-6f2ea54170be340f
-last_updated: 2026-09-15
+hash: 61d07be7e22c9f45-585d42d315b87712
+last_updated: 2026-09-16
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -359,6 +359,14 @@ list when the pass runs at CI-shaped or multi-package scope, because a truncated
 list looks exactly like a narrow blast radius, which is the opposite of what the
 proof is for. Against a single package locally, fail-fast is correct and faster.
 
+**Restore corrupted sources with a fresh mtime.** Cargo rebuilds only when a
+source is newer than its build output. A restore that keeps the backup's older
+mtime (`cp -p`, Python's `shutil.copy2`) leaves the *last corruption's* binary
+in place. A byte-exact `cmp` then passes, and every later run silently tests
+broken code. Restore with a plain write or `touch` the files afterward. In
+`fixes/2026-09-12-shadow-home` Phase 11 this turned a passing L2 test red 40
+times out of 40 and made two full `just test-l2` runs unusable as evidence.
+
 ## Scope Verification Gates by Blast Radius
 
 Before running any final build, test, or lint gate:
@@ -653,8 +661,11 @@ so ancestor discovery cannot silently undo isolation.
 
 The builder must also control inherited application variables, Git plumbing
 such as `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`, and rendering inputs such as
-width and forced color. Scrub inherited values before applying intentional
-test overrides. Keep cache roots and platform home variables inside the
+width and forced color. That includes selectors for third-party tools the
+application launches (claudine: every provider overlay selector such as
+`CODEX_HOME`, read from provider metadata, plus profile-owned state such as
+`CODEX_SQLITE_HOME`) — a suite run from a wrapped agent session exports them.
+Scrub inherited values before applying intentional test overrides. Keep cache roots and platform home variables inside the
 fixture where the application uses them. Choose a documented deny list or a
 cleared environment based on actual runtime needs; Windows command stubs may
 need `SystemRoot`, `COMSPEC`, and `PATHEXT` restored.

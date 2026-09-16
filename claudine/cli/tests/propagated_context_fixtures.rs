@@ -140,8 +140,8 @@ fn isolated_fixture_can_opt_in_to_provider_memory_discovery() {
 
 #[cfg(unix)]
 #[test]
-fn isolated_fixture_can_opt_in_to_shadow_home_repo_resources() {
-    let fixture = CliProcessFixture::named("context-shadow-home");
+fn isolated_fixture_can_opt_in_to_provider_overlay_repo_resources() {
+    let fixture = CliProcessFixture::named("context-provider-overlay");
     fixture.initialize_repository();
     fixture.seed_user_config();
     fs::create_dir_all(fixture.home().join(".codex")).unwrap();
@@ -149,13 +149,13 @@ fn isolated_fixture_can_opt_in_to_shadow_home_repo_resources() {
         &fixture.cwd().join(".claude/commands/review.md"),
         "---\ndescription: review\n---\n",
     );
-    let capture = fixture.cwd().join("shadow-home.txt");
+    let capture = fixture.cwd().join("provider-overlay.txt");
     write_executable(
         &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 {
   printf 'HOME=%s\n' "$HOME"
-  if [ -e "$HOME/.codex/prompts/review.md" ]; then
+  if [ -e "$CODEX_HOME/prompts/review.md" ]; then
     printf 'HAS_REPO_PROMPT=1\n'
   else
     printf 'HAS_REPO_PROMPT=0\n'
@@ -173,7 +173,7 @@ fn isolated_fixture_can_opt_in_to_shadow_home_repo_resources() {
 
     let captured = fs::read_to_string(capture).unwrap();
     assert!(
-        captured.contains(&format!("HOME={}", fixture.home().join(".claudine").display())),
+        captured.contains(&format!("HOME={}\n", fixture.home().display())),
         "{captured}"
     );
     assert!(captured.contains("HAS_REPO_PROMPT=1"), "{captured}");

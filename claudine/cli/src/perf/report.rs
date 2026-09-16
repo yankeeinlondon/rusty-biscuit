@@ -273,7 +273,7 @@ impl CommandPerfCollector {
     }
 
     /// Record a named sub-stage timing carrying a `Breakdown` of where its own
-    /// measured time went (e.g. `child env build` → `shadow home sync` → `repo
+    /// measured time went (e.g. `child env build` → `provider overlay` → `repo
     /// root detect`). The children are projected as nested `Breakdown` nodes, so
     /// they itemize the substage without entering reconciliation (TR-1).
     #[allow(dead_code)]

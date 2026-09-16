@@ -4,7 +4,9 @@ status: draft
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-09-12
-implemented: false
+implemented: true
+implemented_by: claude/opus
+review_iterations: 2
 area: claudine
 packages:
     - claudine

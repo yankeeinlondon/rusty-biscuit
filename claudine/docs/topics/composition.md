@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-4a742b9e5ebc8378
+hash: ef46db3751d8e999-c186a38f12e644fb
 last_updated: 2026-09-12
 ---
 # Claudine Composition
@@ -500,7 +500,7 @@ Model selection follows a single chain independent of TTY mode:
 
 ### Providers That Require a Model in Non-Interactive Mode
 
-A provider whose catalog sets `model_required_in_non_tty` (OpenCode today) cannot launch non-interactively without a model. When nothing in the chain above resolves one, the shared prep stage (`exec_prep::resolve_model_and_validate`, the same function for every provider and for the direct wrapper) looks for one on the provider's behalf through two data sources: the catalog's `model_env_vars` (`OPENCODE_MODEL`), applied exactly like an explicit `--model`, then the provider's own configured default through the `WrapperProfile::configured_default_model` hook. For OpenCode that is the `model` key of `opencode.jsonc` / `opencode.json` (then the legacy `config.json`) under `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`, parsed JSONC-tolerant; a configured default is exported as `MODEL` and reported in the preflight preamble without pushing a flag, because OpenCode reads it itself. Only when neither names a model does Claudine fail before launch:
+A provider whose catalog sets `model_required_in_non_tty` (OpenCode today) cannot launch non-interactively without a model. When nothing in the chain above resolves one, the shared prep stage (`exec_prep::resolve_model_and_validate`, the same function for every provider and for the direct wrapper) looks for one on the provider's behalf through two data sources: the catalog's `model_env_vars` (`OPENCODE_MODEL`), applied exactly like an explicit `--model`, then the provider's own configured default through the `WrapperProfile::configured_default_model` hook. For OpenCode that is the `model` key of `opencode.jsonc` / `opencode.json` (then the legacy `config.json`) under `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`, parsed JSONC-tolerant. A discovered default is delivered exactly like an explicit `--model` — pushed on argv and exported as `MODEL` — and reported in the preflight preamble: Claudine reads the file in its own environment but launches the child in a rewritten one, so a provider left to rediscover its default can run a model Claudine did not report. Only when neither names a model does Claudine fail before launch:
 
 ```
 No model specified! OpenCode requires a model in non-interactive mode.
@@ -544,7 +544,7 @@ Everything up to the seam runs normally:
 - Selected-executable availability validation and path resolution are skipped;
   the selected agent does not need to be installed or present on `PATH`.
 
-The seam sits in `wrap::composition::pipeline::execute_composition_request_inner_with_guard`, immediately after provider/model selection resolves. Everything past it is skipped: selected-executable validation/path resolution, MCP shadow-HOME materialization, argv and system-prompt overlay construction, the child-CWD switch, the lifecycle runtime, and the provider spawn. Installed-provider inventory may still run when agent selection or the rendered resolution breakdown needs it; that inventory never makes the selected executable a dry-run prerequisite.
+The seam sits in `wrap::composition::pipeline::execute_composition_request_inner_with_guard`, immediately after provider/model selection resolves. Everything past it is skipped: selected-executable validation/path resolution, provider-overlay planning and materialization, argv and system-prompt overlay construction, the child-CWD switch, the lifecycle runtime, and the provider spawn. Installed-provider inventory may still run when agent selection or the rendered resolution breakdown needs it; that inventory never makes the selected executable a dry-run prerequisite.
 
 **Dry run fires no lifecycle events and has no filesystem side effects of its own.** Because the seam is ahead of lifecycle dispatch, `initialize`/`blocked`/`finalize` never fire, so a stack carrying `append_line`, `set_frontmatter`, or `shell` cannot touch the workspace during a run the user asked to be a rehearsal, and no dynamic `proxy` route can be traversed. For `inline-compose` the source file is likewise **never mutated** (`last_updated` is untouched).
 
@@ -865,7 +865,7 @@ Retry and resume replace only the **provider-attempt slice** of the active docum
 
 **Launch identity is rebuilt at the fresh-read boundary, not snapshotted at adoption.** Every retry/resume re-materializes the active document from disk and recomputes the whole launch bundle against *that* read — provider, the profile and binary it selects, the resume protocol that profile supports, model, interactivity, the permission mode `--yolo` actually achieves for that pair, the structured-output shape it implies, the MCP tag set lexed from the refreshed body, the provider argv, and the environment overlay (`harness_orch/loop_control/target_launch.rs::rebuild_launch_identity`, called at every fresh-read boundary). An attempt therefore launches with the identity the document it is about to run resolves to now, not with an adoption-time snapshot.
 
-**One rebuild per attempt, and it *is* the launch.** The rebuilt bundle is both what the child is spawned with and what the compatibility key below is computed from, so the key can never describe a plan the child did not receive. Argv and MCP injection come from `wrap/launch_plan.rs::build_launch_plan`, a re-entrant, side-effect-free builder the invocation feeds once with the results of every effect it performed (temp files, shadow HOME, MCP tag ambiguity resolutions — which is why a retry never re-prompts for an ambiguous tag). A rebuild whose facets match the invocation's gets that recorded plan back verbatim, so an unchanged document is byte-identical to the invocation by construction. System-prompt *delivery* is re-applied per provider and so moves with the provider; its *content* is composed once at invocation.
+**One rebuild per attempt, and it *is* the launch.** The rebuilt bundle is both what the child is spawned with and what the compatibility key below is computed from, so the key can never describe a plan the child did not receive. Argv and MCP injection come from `wrap/launch_plan.rs::build_launch_plan`, a re-entrant, side-effect-free builder the invocation feeds once with the results of every effect it performed (temp files, the provider overlay plan, MCP tag ambiguity resolutions — which is why a retry never re-prompts for an ambiguous tag). A rebuild whose facets match the invocation's gets that recorded plan back verbatim, so an unchanged document is byte-identical to the invocation by construction. System-prompt *delivery* is re-applied per provider and so moves with the provider; its *content* is composed once at invocation.
 
 Retry and resume want opposite things from that rebuild. A **retry** opens a fresh session, so there is nothing to conflict with: it simply launches under the refreshed plan, and a document that changed `agent:`, `interactive:`, its permission mode, or its MCP `#tag`s before the retry gets a child spawned from the refreshed plan rather than the invocation's. A **resume** reuses a session the old plan opened, so a moved facet is a genuine conflict and refuses.
 
@@ -1152,7 +1152,7 @@ Performance                         384.0ms  100%
 │  │  └─ delivery                       5.0ms    1%
 │  ├─ child env build                 15.0ms    4%
 │  │  ├─ env sanitize                   1.0ms   <1%
-│  │  └─ shadow home sync              13.0ms    3%
+│  │  └─ provider overlay              13.0ms    3%
 │  │     └─ repo root detect            1.0ms   <1%
 │  ├─ mcp composition                  5.0ms    1%
 │  ├─ harness eligibility              3.0ms   <1%
@@ -1167,7 +1167,7 @@ The model and its invariants:
 - **Headline is true wall-clock.** The `Performance` total is sampled once at report-build from a single process-start baseline, so it can never disagree with the body the way a mid-flight timer could.
 - **Structural buckets reconcile.** Every `Structural` node's children (plus a synthetic `unattributed` remainder) sum back to the node's own total. The top-level buckets (`pre-dispatch`, `prep phase`, `environment setup`, `agent execution`) therefore sum back to the headline. A debug assertion enforces this at runtime; a unit test (TR-4) enforces it for every command shape.
 - **Breakdown rows itemize without double-counting.** Darkmatter composition stages, system-prompt internals, child-environment internals, and the `pre-dispatch`/agent sub-rows are `Breakdown` children — shown and percentaged, but excluded from the reconciliation sum so no cost appears twice. Single-shot `compose`/`inline-compose` nest the `composition` subtree under `prep phase`; sequence composition appears under the step where it ran.
-- **Direct-wrapper setup is attributed.** `environment setup` structurally separates launch discovery, system prompt, child environment, MCP composition, harness eligibility, and enabled-harness materialization. System prompt expands into `lookup`, `runtime capture`, `primary compose`, `appendix compose`, and provider `delivery`; child environment may expand into `env sanitize` and `shadow home sync → repo root detect`. Harness materialization is omitted when eligibility finds no enabled harness.
+- **Direct-wrapper setup is attributed.** `environment setup` structurally separates launch discovery, system prompt, child environment, MCP composition, harness eligibility, and enabled-harness materialization. System prompt expands into `lookup`, `runtime capture`, `primary compose`, `appendix compose`, and provider `delivery`; child environment may expand into `env sanitize` and `provider overlay → repo root detect`. Harness materialization is omitted when eligibility finds no enabled harness.
 - **Percent column** shows each row's share of wall-clock (`100%` at the root, `<1%` for sub-one-percent slivers).
 - **`HOT` marker** flags the single dominant leaf when it clears the materiality floor (≥20% of wall-clock).
 - **Run counts** (`×N`) appear on a composition stage that ran more than once.

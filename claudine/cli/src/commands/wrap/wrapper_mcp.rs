@@ -201,11 +201,11 @@ pub(crate) fn compose_mcp_session(
 
         if let Some(injector) = injector_for_provider(provider) {
             if !session.servers.is_empty() {
-                let shadow = env_plan.shadow_home_path.as_deref();
+                let config_root = env_plan.overlay_visible_root();
                 // Injector works with String env; bridge to OsString env plan
                 let mut string_env = std::collections::HashMap::new();
                 let result = injector
-                    .inject(&session.servers, &mut string_env, shadow)
+                    .inject(&session.servers, &mut string_env, config_root)
                     .wrap_err("MCP injection failed")?;
 
                 // Merge injected env vars into the OsString env plan. The

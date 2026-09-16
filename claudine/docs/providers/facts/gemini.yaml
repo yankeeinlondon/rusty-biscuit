@@ -292,3 +292,25 @@ unmapped_native_events:
 # from lib/src/stream/providers/gemini.rs::ERROR_KEYWORDS). Sequence order IS
 # the cascade order; Gemini checks Configuration before ApiRemote in the kind
 # branch, and runs a "late ApiRemote" second pass after Interrupted.
+# Provider-overlay redirection surface (fixes/2026-09-12-shadow-home audit).
+# The fleet's only true parent-of-provider-dir selector: the CLI creates or
+# uses a `.gemini` folder INSIDE `GEMINI_CLI_HOME`. Recording the segment here
+# is what keeps it from being hard-coded at each injection site.
+overlay_selector:
+  env_var: GEMINI_CLI_HOME
+  shape:
+    parent_of_provider_dir:
+      child: .gemini
+  relocates:
+  - config
+  - auth
+  - sessions
+  - cache
+  - state
+  additive: false
+  source_root: "~/.gemini"
+# `repo_prompt` is a Codex-only reason, so that verdict is inert.
+overlay_capabilities:
+  repo_resources: native_root
+  repo_prompt: unsupported
+  mcp: native_root

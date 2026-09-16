@@ -1828,6 +1828,7 @@ fn execute_attempt_phase(
         &rebuilt.mcp_tags,
         &launch,
         rebuilt.write_posture.as_deref(),
+        rebuilt.overlay.as_ref(),
     );
     // A resume carries the key of the session-producing attempt forward with the
     // live session. If the canonical refresh changed a launch property the

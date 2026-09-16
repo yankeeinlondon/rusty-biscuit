@@ -48,7 +48,7 @@ Per-variant data attached directly to `Provider`:
 - `sniff_ai_cli()` — bridge to the `sniff` crate's install detector (`InstalledAiClients`). The `sniff` enum is the source of truth for "is this binary on PATH"; if the variant is missing there it must be added in `sniff` first.
 - `detect_from_payload()` — payload-shape heuristic used when an inbound hook event lacks an explicit provider hint.
 - `as_slug()` — snake_case identifier used for filenames, JSON keys, and config sections.
-- `agent_offset()` — relative directory used when constructing shadow `HOME` overrides for repo-scoped MCP injection (e.g. `.claude`, `.codex`, `.opencode`).
+- `agent_offset()` — keys the provider's `--repo` isolation set (e.g. `.claude`, `.codex`, `.opencode`). It is not necessarily the provider's config root, and overlay launch roots are grouped by slug instead; see [Repo Isolation](./repo-isolation.md).
 - `docs_url()` and `usage_dashboard_url()` — strings consumed by status badges and stream summaries.
 - `supports_skills()` — quick boolean used by the linker.
 
@@ -273,7 +273,7 @@ Every wrapper has its own answer to "where does the system prompt live?":
 - Claude: `--append-system-prompt` (interactive) vs `--append-system-prompt-file` (non-interactive); plus `--system-prompt` / `--system-prompt-file` for full replacement.
 - Codex: `model_instructions_file` setting plus `AGENTS.override.md` precedence.
 - Gemini (replace mode): write a temp file and set `GEMINI_SYSTEM_MD` env var.
-- Gemini (append mode): build a shadow `HOME` containing a `.gemini/GEMINI.md` and override `HOME=`.
+- Gemini (append mode): also a temp file through `GEMINI_SYSTEM_MD`, prefixed with the user's `~/.gemini/GEMINI.md` when present. Claudine never overrides `HOME` to place a `.gemini/GEMINI.md`.
 - Kimi: replace mode requires writing a temp prompt file *and* a temp agent YAML pointing at it via `--agent-file`. Append mode is unsupported.
 - OpenCode: full replacement is unsupported; only `AGENTS.md`-style supplementation works.
 

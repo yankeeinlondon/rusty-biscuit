@@ -1,4 +1,6 @@
-use claudine::provider::Provider;
+use claudine::invocation_context::EnvBaseline;
+use claudine::provider::{OverlayResourceClass, Provider};
+use claudine::provider_overlay::{OverlayMaterialization, OverlayPlan};
 use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail};
 use std::path::Path;
@@ -55,6 +57,32 @@ impl WrapperProfile for GeminiWrapper {
                  Claudine uses this CLI convention for all agents it provides a wrapper to."
             );
         }
+        Ok(())
+    }
+
+    fn overlay_strategy(&self, plan: &mut OverlayPlan, _env: &EnvBaseline) -> Result<()> {
+        let (Some(source_root), Some(visible_root)) =
+            (plan.source_root(), plan.provider_visible_root())
+        else {
+            return Ok(());
+        };
+        let (source_root, visible_root) = (source_root.to_path_buf(), visible_root.to_path_buf());
+
+        // `GEMINI_CLI_HOME` relocates OAuth tokens and server enablement along
+        // with settings, so both sidecars have to exist as real files beside
+        // the overlay's `settings.json` — under the `.gemini` child of the
+        // selector's value, not beside it.
+        for (name, class) in [
+            ("mcp-server-enablement.json", OverlayResourceClass::Config),
+            ("mcp-oauth-tokens.json", OverlayResourceClass::Auth),
+        ] {
+            plan.materialize(OverlayMaterialization::file(
+                source_root.join(name),
+                visible_root.join(name),
+                class,
+            ));
+        }
+
         Ok(())
     }
 

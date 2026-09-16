@@ -1,4 +1,6 @@
+use claudine::invocation_context::EnvBaseline;
 use claudine::provider::Provider;
+use claudine::provider_overlay::OverlayPlan;
 use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::Result;
 use std::path::Path;
@@ -7,9 +9,32 @@ use super::{PromptDelivery, WrapperProfile, prompt_delivery_stdin_or_append};
 
 pub(crate) struct ClaudeWrapper;
 
+/// Claude Code's selector for its credential store, independent of
+/// `CLAUDE_CONFIG_DIR`.
+const SECURE_STORAGE_SELECTOR: &str = "CLAUDE_SECURESTORAGE_CONFIG_DIR";
+
 impl WrapperProfile for ClaudeWrapper {
     fn provider(&self) -> Provider {
         Provider::Claude
+    }
+
+    fn overlay_strategy(&self, plan: &mut OverlayPlan, env: &EnvBaseline) -> Result<()> {
+        if plan.provider_visible_root().is_none() {
+            return Ok(());
+        }
+        // Setting `CLAUDE_CONFIG_DIR` also renames Claude's secure-storage entry
+        // (the macOS keychain service gains a hash of the directory) and moves
+        // its credentials file, so an overlay alone would look signed out.
+        // `CLAUDE_SECURESTORAGE_CONFIG_DIR` keeps both at the pre-overlay
+        // location; an empty value selects the default, unsuffixed entry.
+        // Observed in Claude Code 2.1.273; see the Phase 6 implementation log.
+        let secure_storage = env
+            .get(SECURE_STORAGE_SELECTOR)
+            .or_else(|| env.get("CLAUDE_CONFIG_DIR").filter(|value| !value.is_empty()))
+            .map(ToOwned::to_owned)
+            .unwrap_or_default();
+        plan.pin_external_state(SECURE_STORAGE_SELECTOR, secure_storage);
+        Ok(())
     }
 
     fn apply_system_prompt(

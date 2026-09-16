@@ -238,7 +238,7 @@ See [`./docs/topics/`](./docs/topics/) for the full topic index. Key topics incl
 - [Log Reporting](./docs/topics/log-reporting.md) and [Traces and Logging](./docs/topics/traces-and-logging.md) - JSONL-to-SQLite reporting and diagnostics
 - [Wrapped Execution Switches](./docs/topics/wrapped-execution-switches.md) - CLI switch translation per provider
 - [Non-Interactive Sessions](./docs/topics/non-interactive-sessions.md) and [Mixing Events into Non-Interactive Sessions](./docs/topics/mixing-events-into-non-interactive-sessions.md)
-- [Repo Isolation](./docs/topics/repo-isolation.md) - Shadow HOME behavior for `--repo`
+- [Repo Isolation](./docs/topics/repo-isolation.md) - Provider-overlay behavior for `--repo`, and what it never changes
 - [Stream Parsing](./docs/topics/stream-parsing.md) - Provider-native structured stream handling
 
 ## Monorepo Dependencies

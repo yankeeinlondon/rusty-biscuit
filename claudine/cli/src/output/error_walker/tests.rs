@@ -414,3 +414,49 @@ fn fence_mismatch_non_tty_has_no_ansi_and_no_appendix() {
     // offending fence line so the user can act on it.
     assert!(rendered.contains("> 1 │ ----"), "missing fence highlight: {rendered}");
 }
+
+/// Both pre-spawn overlay diagnostics render as their own block through the
+/// effective-diagnostic walk, even under an eyre context the wrapper adds. The
+/// selection and the snapshot agree on the code. Nothing in the block reads as
+/// a credential verdict.
+#[test]
+fn provider_overlay_diagnostics_render_through_the_effective_walk() {
+    use claudine::diagnostics::{DiagnosticSnapshot, select_effective_diagnostic};
+    use claudine::error::ClaudineError;
+    use claudine::provider::Provider;
+    use claudine::provider_overlay::{OverlayReason, OverlayStage};
+
+    let unsupported = || ClaudineError::ProviderOverlayUnsupported {
+        provider: Provider::Antigravity,
+        reason: OverlayReason::RepoResources,
+        selector: None,
+        next_action: "run Antigravity without --repo".to_string(),
+    };
+    let failed = || ClaudineError::ProviderOverlayFailed {
+        provider: Provider::Claude,
+        reason: OverlayReason::RepoResources,
+        stage: OverlayStage::StorageRoot,
+        source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied"),
+    };
+
+    for (code, make) in [
+        ("provider.overlay_unsupported", &unsupported as &dyn Fn() -> ClaudineError),
+        ("provider.overlay_failed", &failed),
+    ] {
+        let err = make();
+        let selected = select_effective_diagnostic(&err)
+            .and_then(|s| s.diagnostic())
+            .expect("a diagnostic is selected");
+        assert_eq!(selected.code(), code);
+        assert_eq!(DiagnosticSnapshot::from_diagnostic(selected).code, code);
+
+        let report: Report = eyre!(make()).wrap_err("failed to prepare the child environment");
+        let rendered = try_render_block_report(&report, &width80()).expect("block error found");
+        let plain = strip_escape_codes(&rendered);
+        assert!(plain.contains(code), "{code} missing:\n{plain}");
+        let lower = plain.to_lowercase();
+        for misleading in ["credential", "authenticat", "login", "invalid token", "shadow"] {
+            assert!(!lower.contains(misleading), "{misleading:?} in:\n{plain}");
+        }
+    }
+}

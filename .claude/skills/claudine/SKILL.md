@@ -211,7 +211,7 @@ Provider rollout:
 - **Runtime wrapper injection:** Codex, Gemini, OpenCode
 - **No MCP support yet:** Goose, Kimi, Qwen
 
-Wrapper behavior: `--mcp` launches with effective defaults; `--use id-or-alias[,...]` adds explicit servers and enables MCP mode. Codex/Gemini inject via a shadow HOME under `~/.claudine`; Codex keeps SQLite state at its pre-shadow native `sqlite_home`/`CODEX_SQLITE_HOME`/`CODEX_HOME` destination so database and WAL/SHM files are never linked into the overlay. OpenCode uses `OPENCODE_CONFIG_CONTENT`. Claude, Goose, Kimi, and Qwen wrappers direct users to `claudine mcp export <provider> --apply` instead. Read [MCP Catalog](mcp-catalog.md) and [MCP Mode](mcp-mode.md) before changing MCP behavior.
+Wrapper behavior: `--mcp` launches with effective defaults; `--use id-or-alias[,...]` adds explicit servers and enables MCP mode. Codex/Gemini inject into a per-launch provider overlay under `~/.claudine/overlays`, selected through `CODEX_HOME`/`GEMINI_CLI_HOME` — never by changing `HOME`, so nested tools keep the user's identity; Codex keeps SQLite state at its pre-overlay native `sqlite_home`/`CODEX_SQLITE_HOME`/`CODEX_HOME` destination so database and WAL/SHM files are never linked into the overlay. OpenCode uses `OPENCODE_CONFIG_CONTENT`. Claude, Goose, Kimi, and Qwen wrappers direct users to `claudine mcp export <provider> --apply` instead. Read [MCP Catalog](mcp-catalog.md) and [MCP Mode](mcp-mode.md) before changing MCP behavior.
 
 ## Reference Documents
 

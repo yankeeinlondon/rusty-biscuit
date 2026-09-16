@@ -314,7 +314,13 @@ fn codex_wrapper_mcp_dry_run_shows_cleaned_prompt_and_shadow_file() {
     assert!(stderr.contains("cleaned_prompt"));
     assert!(stderr.contains("fix bugs"));
     assert!(stderr.contains("calendar"));
-    assert!(stderr.contains(".codex/config.toml"));
+    // The injected file lives in this launch's own overlay root; the report
+    // word-wraps the path, so it is matched with whitespace removed.
+    let unwrapped: String = stderr.split_whitespace().collect();
+    assert!(
+        unwrapped.contains(".claudine/overlays/codex/") && unwrapped.contains("/config.toml"),
+        "{stderr}"
+    );
 }
 
 #[cfg(unix)]

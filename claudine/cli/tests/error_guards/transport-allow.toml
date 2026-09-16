@@ -149,14 +149,6 @@ Per-provider hook-removal failure is rendered with `log::error` while the later 
 
 [[allow]]
 shape = "format_context"
-file = "cli/src/commands/wrap/env/mod.rs"
-symbol = "build_child_env_with_launch"
-tag = "retained"
-reason = """
-The sink is `EnvPlan.warnings`, a deferred-warning display buffer drained only for rendering. The shadow-HOME fallback is chosen by the `Err` arm itself, never by the string, so nothing downstream reads this text as data."""
-
-[[allow]]
-shape = "format_context"
 file = "cli/src/commands/wrap/exec/wiring/dispatch.rs"
 symbol = "dispatch_hook_request"
 tag = "retained"

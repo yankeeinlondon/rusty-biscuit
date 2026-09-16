@@ -195,6 +195,10 @@ name = "level2_provided_partial_file_capture"
 required-features = ["terminal-tests"]
 
 [[test]]
+name = "level2_provider_overlay_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
 name = "level2_windows_provided_partial_file_capture"
 required-features = ["terminal-tests"]
 

@@ -231,6 +231,8 @@ fn serialized_field_list_matches_catalog() {
         "model_required_in_non_tty",
         "platform_kind",
         "unmapped_native_events",
+        "overlay_selector",
+        "overlay_capabilities",
     ];
     // serde_json without `preserve_order` sorts map keys, so membership
     // (not order) is asserted here; the gen-side twin pins the order
@@ -1196,4 +1198,298 @@ fn detect_from_payload_has_no_provider_specific_branches() {
         "detect_from_payload body must not contain literal \"method\"; \
          per-provider dispatch belongs behind `ProviderBehavior::detect_from_payload`. Body:\n{body}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Provider-overlay metadata invariants
+//
+// The overlay facts are policy, not description: the planner refuses a launch
+// on the strength of these verdicts, so a wrong or silently edited value is a
+// behavior change. Every invariant below has a live positive and negative case
+// across the ten shipped providers. Evidence:
+// `fixes/2026-09-12-shadow-home/audit.md`.
+// ---------------------------------------------------------------------------
+
+use super::overlay::{OverlayCapability, OverlayReason, OverlaySelectorShape};
+
+const OVERLAY_REASONS: [OverlayReason; 3] = [
+    OverlayReason::RepoResources,
+    OverlayReason::RepoPrompt,
+    OverlayReason::Mcp,
+];
+
+/// Resolves a facts-file slug to its provider. The pinned tables below are
+/// keyed the way `docs/providers/facts/<slug>.yaml` is, so a reader can put
+/// a row and its source file side by side — and so the tables do not become
+/// counted provider-dispatch sites in the inventory guard.
+fn provider_by_slug(slug: &str) -> Provider {
+    PROVIDERS_DISPLAY_ORDER
+        .into_iter()
+        .find(|provider| provider_info(*provider).slug == slug)
+        .unwrap_or_else(|| panic!("no provider is wired for slug `{slug}`"))
+}
+
+/// A `NativeRoot` verdict promises a filesystem overlay reached through a
+/// provider-owned root. Without a selector there is no such root, so the
+/// promise cannot be kept.
+#[test]
+fn native_root_verdicts_require_a_selector() {
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        for reason in OVERLAY_REASONS {
+            if info.overlay_capabilities.for_reason(reason) == OverlayCapability::NativeRoot {
+                assert!(
+                    info.overlay_selector.is_some(),
+                    "{provider:?}: {reason:?} is NativeRoot but no overlay_selector is recorded"
+                );
+            }
+        }
+    }
+}
+
+/// An additive selector is loaded *alongside* the user's own discovery
+/// paths, so it can override settings but never mask user resources — which
+/// is exactly what `--repo` isolation promises.
+#[test]
+fn additive_selectors_cannot_claim_repo_resource_isolation() {
+    let mut additive_seen = false;
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let Some(selector) = info.overlay_selector else {
+            continue;
+        };
+        if !selector.additive {
+            continue;
+        }
+        additive_seen = true;
+        assert_ne!(
+            info.overlay_capabilities.repo_resources,
+            OverlayCapability::NativeRoot,
+            "{provider:?}: `{}` is additive and cannot isolate repo resources",
+            selector.env_var
+        );
+    }
+    assert!(
+        additive_seen,
+        "no additive selector is recorded — this invariant would pass vacuously"
+    );
+}
+
+/// An overlay is built FROM the provider's pre-overlay root. With no single
+/// such root there is nothing to materialize, whatever the selector proves.
+/// This is what holds Goose at `Unsupported` for `repo_resources`.
+#[test]
+fn repo_resource_isolation_requires_a_single_source_root() {
+    let mut without_source_root = 0usize;
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let has_source_root = info
+            .overlay_selector
+            .is_some_and(|selector| selector.source_root.is_some());
+        if !has_source_root {
+            without_source_root += 1;
+            assert_ne!(
+                info.overlay_capabilities.repo_resources,
+                OverlayCapability::NativeRoot,
+                "{provider:?}: repo_resources is NativeRoot with no pre-overlay source root"
+            );
+        }
+    }
+    assert!(
+        without_source_root > 0,
+        "every provider records a source root — this invariant would pass vacuously"
+    );
+}
+
+/// `Unsupported` is legal with or without a selector: a provider can lack
+/// any redirection surface (Antigravity), or own a verified selector that
+/// still cannot satisfy the reason (OpenCode's additive config dir).
+#[test]
+fn unsupported_verdicts_are_legal_with_and_without_a_selector() {
+    let selectorless = provider_info(Provider::Antigravity);
+    assert!(selectorless.overlay_selector.is_none());
+    assert_eq!(
+        selectorless.overlay_capabilities.repo_resources,
+        OverlayCapability::Unsupported
+    );
+
+    let with_selector = provider_info(Provider::OpenCode);
+    assert!(with_selector.overlay_selector.is_some());
+    assert_eq!(
+        with_selector.overlay_capabilities.repo_resources,
+        OverlayCapability::Unsupported
+    );
+}
+
+/// Shape and source-root spellings that the path layer relies on: a child
+/// segment is one non-empty component, and a source root is home-relative so
+/// it resolves against the launch baseline on every OS.
+#[test]
+fn selector_shapes_and_source_roots_are_well_formed() {
+    let mut parent_shapes = 0usize;
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let Some(selector) = provider_info(provider).overlay_selector else {
+            continue;
+        };
+        assert!(
+            !selector.env_var.is_empty(),
+            "{provider:?}: selector has no env var"
+        );
+        if let OverlaySelectorShape::ParentOfProviderDir { child } = selector.shape {
+            parent_shapes += 1;
+            assert!(
+                !child.is_empty() && !child.contains(['/', '\\']),
+                "{provider:?}: `{child}` is not a single path segment"
+            );
+            assert_eq!(selector.child_segment(), Some(child));
+        } else {
+            assert_eq!(selector.child_segment(), None);
+        }
+        if let Some(source_root) = selector.source_root {
+            assert!(
+                source_root.raw().starts_with("~/"),
+                "{provider:?}: source root `{}` is not home-relative",
+                source_root.raw()
+            );
+        }
+    }
+    assert!(
+        parent_shapes > 0,
+        "no parent-of-provider-dir selector is recorded — the shape distinction \
+         would be untested"
+    );
+}
+
+/// The published verdict matrix, pinned. A change here is a change to which
+/// `claudine <provider> --repo` invocations are refused before spawn, so it
+/// must be a deliberate edit that updates the audit alongside the facts.
+#[test]
+fn overlay_capability_matrix_matches_the_audit() {
+    use OverlayCapability::{ComposableInjection, NativeRoot, Unsupported};
+
+    // (slug, repo_resources, repo_prompt, mcp)
+    let expected = [
+        ("claude", NativeRoot, Unsupported, Unsupported),
+        ("codex", NativeRoot, NativeRoot, NativeRoot),
+        ("gemini", NativeRoot, Unsupported, NativeRoot),
+        ("goose", Unsupported, Unsupported, Unsupported),
+        ("kilo", Unsupported, Unsupported, ComposableInjection),
+        ("kimi", NativeRoot, Unsupported, Unsupported),
+        ("opencode", Unsupported, Unsupported, ComposableInjection),
+        ("pi", NativeRoot, Unsupported, Unsupported),
+        ("qwen", NativeRoot, Unsupported, Unsupported),
+        ("antigravity", Unsupported, Unsupported, Unsupported),
+    ];
+    assert_eq!(
+        expected.len(),
+        PROVIDERS_DISPLAY_ORDER.len(),
+        "every compiled provider needs a verdict row"
+    );
+    for (slug, repo_resources, repo_prompt, mcp) in expected {
+        let provider = provider_by_slug(slug);
+        let capabilities = provider_info(provider).overlay_capabilities;
+        assert_eq!(
+            (
+                capabilities.repo_resources,
+                capabilities.repo_prompt,
+                capabilities.mcp
+            ),
+            (repo_resources, repo_prompt, mcp),
+            "{provider:?}: overlay verdicts drifted from the audit matrix"
+        );
+    }
+}
+
+/// The selector spellings the runtime writes into a child environment. A
+/// typo here points a provider at nothing and silently leaves it on the
+/// user's real configuration.
+#[test]
+fn recorded_selectors_match_the_audit() {
+    let expected = [
+        ("claude", Some("CLAUDE_CONFIG_DIR")),
+        ("codex", Some("CODEX_HOME")),
+        ("gemini", Some("GEMINI_CLI_HOME")),
+        ("goose", Some("GOOSE_PATH_ROOT")),
+        ("kilo", Some("KILO_CONFIG_DIR")),
+        ("kimi", Some("KIMI_CODE_HOME")),
+        ("opencode", Some("OPENCODE_CONFIG_DIR")),
+        ("pi", Some("PI_CODING_AGENT_DIR")),
+        ("qwen", Some("QWEN_HOME")),
+        ("antigravity", None),
+    ];
+    for (slug, env_var) in expected {
+        let provider = provider_by_slug(slug);
+        assert_eq!(
+            provider.overlay_selector().map(|s| s.env_var),
+            env_var,
+            "{provider:?}: overlay selector env var drifted"
+        );
+    }
+}
+
+/// `agent_offset` is NOT the overlay source root: for five providers the
+/// two genuinely differ, which is why the source root is its own fact.
+#[test]
+fn source_roots_are_independent_of_the_agent_offset() {
+    let divergent = [
+        ("kimi", ".kimi", "~/.kimi-code"),
+        ("pi", ".pi", "~/.pi/agent"),
+    ];
+    for (slug, agent_offset, source_root) in divergent {
+        let provider = provider_by_slug(slug);
+        assert_eq!(provider.agent_offset(), agent_offset);
+        assert_eq!(
+            provider
+                .overlay_selector()
+                .and_then(|s| s.source_root)
+                .map(|root| root.raw()),
+            Some(source_root),
+            "{provider:?}: source root must not be derived from the agent offset"
+        );
+    }
+}
+
+/// The `Provider` accessors read the same generated data the struct exposes.
+#[test]
+fn provider_overlay_accessors_read_generated_metadata() {
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        assert_eq!(
+            provider.overlay_selector().map(|s| s.env_var),
+            info.overlay_selector.map(|s| s.env_var)
+        );
+        for reason in OVERLAY_REASONS {
+            assert_eq!(
+                provider.overlay_capability(reason),
+                info.overlay_capabilities.for_reason(reason),
+                "{provider:?}: accessor disagrees with the catalog for {reason:?}"
+            );
+        }
+    }
+}
+
+/// Gemini's relocated classes drive the sidecar copies the MCP injector
+/// makes; Claude's deliberately exclude `auth` because the macOS Keychain
+/// account does not follow `CLAUDE_CONFIG_DIR`.
+#[test]
+fn relocated_resource_classes_match_the_audit() {
+    use super::overlay::OverlayResourceClass::{Auth, Cache, Config, Sessions, State};
+
+    let gemini = provider_info(Provider::Gemini)
+        .overlay_selector
+        .expect("Gemini records a selector");
+    assert_eq!(
+        gemini.relocates,
+        &[Config, Auth, Sessions, Cache, State],
+        "Gemini's selector relocates all CLI state for the process"
+    );
+
+    let claude = provider_info(Provider::Claude)
+        .overlay_selector
+        .expect("Claude records a selector");
+    assert!(
+        !claude.relocates(Auth),
+        "CLAUDE_CONFIG_DIR does not relocate the macOS Keychain account"
+    );
+    assert!(claude.relocates(Config));
 }

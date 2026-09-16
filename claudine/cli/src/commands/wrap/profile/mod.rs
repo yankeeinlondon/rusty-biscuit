@@ -1,10 +1,12 @@
 use std::path::Path;
 
+use claudine::invocation_context::EnvBaseline;
 use claudine::provider::Provider;
 use claudine::provider::SystemPromptSpec;
 use claudine::provider::{
     PROVIDER_COUNT, PromptArgConventions, ResumeSupport, YoloSupport, provider_info,
 };
+use claudine::provider_overlay::OverlayPlan;
 use claudine::stream::StreamProtocol;
 use claudine::system_prompt::PreparedSystemPrompt;
 use color_eyre::eyre::{Result, bail};
@@ -32,6 +34,8 @@ mod resolve;
 pub(crate) use self::antigravity::AntigravityWrapper;
 pub(crate) use self::claude::ClaudeWrapper;
 pub(crate) use self::codex::CodexWrapper;
+#[cfg(test)]
+pub(crate) use self::codex::launch_sqlite_home as codex_launch_sqlite_home;
 pub(crate) use self::gemini::GeminiWrapper;
 pub(crate) use self::goose::GooseWrapper;
 pub(crate) use self::kilo::KiloWrapper;
@@ -507,6 +511,28 @@ pub(crate) trait WrapperProfile: Send + Sync {
         provider_info(self.provider()).suppress_structured_stderr_on_success
     }
 
+    // -- Provider overlay -----------------------------------------------------
+
+    /// Complete a provider overlay plan with this provider's own path
+    /// construction and side effects.
+    ///
+    /// Whether an overlay is possible at all is policy and lives in generated
+    /// metadata; this hook is only for what a provider's own layout requires —
+    /// content that must be a real copy rather than a mirror link, and live
+    /// state that must be pinned outside the overlay through a provider-native
+    /// state selector.
+    ///
+    /// `env` is the invocation's launch baseline. Resolve a pre-overlay
+    /// location from it rather than from the assembled child environment: once
+    /// the plan's selector is applied, the child's copy of that variable names
+    /// the overlay, and reading it back would recurse the provider's state into
+    /// the overlay it was meant to stay out of.
+    ///
+    /// Default: no-op.
+    fn overlay_strategy(&self, _plan: &mut OverlayPlan, _env: &EnvBaseline) -> Result<()> {
+        Ok(())
+    }
+
     // -- Prompt-file delivery -------------------------------------------------
 
     /// Build a prompt delivery plan for the provider.
@@ -752,5 +778,6 @@ mod tests {
     mod apply_output_format;
     mod apply_yolo;
     mod native_output;
+    mod overlay_strategy;
     mod positional;
 }

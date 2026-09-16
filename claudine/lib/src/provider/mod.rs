@@ -55,6 +55,7 @@ mod model_catalog_source;
 mod offering;
 mod opencode;
 mod output_format;
+mod overlay;
 mod path_template;
 mod pi;
 mod platform_kind;
@@ -85,6 +86,10 @@ pub use known_gap::{KnownGap, KnownGapArea};
 pub use model_catalog_source::ModelCatalogSource;
 pub use offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
 pub use output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
+pub use overlay::{
+    OverlayCapabilities, OverlayCapability, OverlayReason, OverlayResourceClass,
+    OverlaySelectorShape, OverlaySelectorSpec,
+};
 // Temporary shim: Provider, OutputFormatSelector and friends now live in
 // `crate::provider_id`.  These re-exports keep existing importers working
 // during the migration.
@@ -153,7 +158,10 @@ pub struct ProviderInfo {
     /// Provider binary name on `$PATH` (e.g. "claude", "codex").
     pub binary: &'static str,
 
-    /// Agent offset directory used for shadow-HOME isolation (e.g. ".claude").
+    /// Agent offset directory (e.g. ".claude"). Names the provider's overlay
+    /// storage under `~/.claudine` and keys its `--repo` isolation set; it is
+    /// not necessarily the provider's own config root, which is
+    /// `overlay_selector.source_root`.
     pub agent_offset: &'static str,
 
     /// CLI alias forms accepted on the command line.
@@ -296,8 +304,10 @@ pub struct ProviderInfo {
     /// flag results that may flip due to provider CLI flag overrides.
     pub cli_sensitive_axes: CliSensitiveAxes,
 
-    /// Root-level files in the repo home that must be preserved during
-    /// shadow-HOME isolation. Empty for providers without such files.
+    /// Home-root files a default-rooted provider overlay places inside the
+    /// provider-visible root, because the provider reads them from beside its
+    /// selector once the selector is set. Empty for providers without such
+    /// files.
     pub repo_home_root_files: &'static [&'static str],
 
     /// Overall resume support level for session continuation.
@@ -359,6 +369,19 @@ pub struct ProviderInfo {
     /// cannot represent. Claudine cannot dispatch these; each entry carries
     /// how to configure the event directly in the provider.
     pub unmapped_native_events: &'static [UnmappedNativeEvent],
+
+    /// The provider-owned environment variable Claudine points at an
+    /// overlay, or `None` when the provider exposes no provider-scoped
+    /// redirection surface at all.
+    ///
+    /// Recorded from observed evidence, never inferred from the variable's
+    /// name — see `fixes/2026-09-12-shadow-home/audit.md`.
+    pub overlay_selector: Option<&'static OverlaySelectorSpec>,
+
+    /// Per-reason verdicts for whether Claudine can satisfy an overlay
+    /// request for this provider. An `Unsupported` verdict is refused
+    /// before the provider is spawned.
+    pub overlay_capabilities: OverlayCapabilities,
 }
 
 impl ProviderInfo {

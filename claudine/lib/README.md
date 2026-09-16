@@ -195,7 +195,7 @@ Provider-agnostic MCP storage and provider-specific import/export/runtime integr
 - `import` - scans Claude, Codex, Gemini, and OpenCode native configs into the catalog with fingerprint dedupe
 - `export` - dry-run/apply sync back to native configs with backups and managed-entry tracking
 - `session` - computes runtime server sets from defaults, explicit `--use`, and non-interactive prompt `#tags`
-- `inject` - runtime injection for OpenCode (env var) and Codex/Gemini (shadow-home config files)
+- `inject` - runtime injection for OpenCode (env var) and Codex/Gemini (config files in the provider overlay's config root)
 
 Current runtime injection is intentionally narrower than import/export: Claude, Goose, Kimi, and Qwen do not have injectors yet. See [mcp-support.md](../docs/mcp-support.md) for the exact CLI-facing behavior and limits.
 

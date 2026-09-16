@@ -8,6 +8,7 @@ use super::types::{McpServer, McpTransport};
 use crate::config::atomic::atomic_write;
 use crate::error::{ClaudineError, Result};
 use crate::provider::Provider;
+use crate::provider_overlay::{OverlayReason, OverlayStage};
 
 // ---------------------------------------------------------------------------
 // Injection result
@@ -32,11 +33,18 @@ pub trait McpInjector {
     fn provider(&self) -> Provider;
     fn supports_runtime(&self) -> bool;
 
+    /// Inject `servers` for one launch.
+    ///
+    /// `config_root` is the directory that directly contains the provider's
+    /// config file — the overlay plan's provider-visible root, never a home
+    /// directory the injector joins the agent offset onto. A file-backed
+    /// injector refuses `None` with `ProviderOverlayFailed`; an inline one
+    /// ignores it.
     fn inject(
         &self,
         servers: &[McpServer],
         env: &mut HashMap<String, String>,
-        shadow_home: Option<&Path>,
+        config_root: Option<&Path>,
     ) -> Result<InjectionResult>;
 
     fn cleanup(&self, result: &InjectionResult) -> Result<()>;
@@ -61,7 +69,7 @@ impl McpInjector for OpenCodeInjector {
         &self,
         servers: &[McpServer],
         env: &mut HashMap<String, String>,
-        _shadow_home: Option<&Path>,
+        _config_root: Option<&Path>,
     ) -> Result<InjectionResult> {
         let mut mcp_config = serde_json::Map::new();
 
@@ -127,7 +135,7 @@ impl McpInjector for OpenCodeInjector {
 }
 
 // ---------------------------------------------------------------------------
-// Codex injector — shadow home TOML
+// Codex injector — overlay `config.toml`
 // ---------------------------------------------------------------------------
 
 pub struct CodexInjector;
@@ -145,15 +153,9 @@ impl McpInjector for CodexInjector {
         &self,
         servers: &[McpServer],
         _env: &mut HashMap<String, String>,
-        shadow_home: Option<&Path>,
+        config_root: Option<&Path>,
     ) -> Result<InjectionResult> {
-        let home = shadow_home.ok_or_else(|| {
-            ClaudineError::ConfigValidation(
-                "Codex runtime MCP injection requires a shadow HOME".into(),
-            )
-        })?;
-        let config_dir = home.join(".codex");
-        let config_path = config_dir.join("config.toml");
+        let config_path = require_config_root(Provider::Codex, config_root)?.join("config.toml");
 
         let mut doc = if config_path.exists() {
             fs::read_to_string(&config_path)?
@@ -245,6 +247,7 @@ impl McpInjector for CodexInjector {
         }
 
         atomic_write(&config_path, doc.to_string().as_bytes())?;
+        crate::provider_overlay::record_claudine_write(&config_path);
 
         Ok(InjectionResult {
             provider: Provider::Codex,
@@ -264,7 +267,7 @@ impl McpInjector for CodexInjector {
 }
 
 // ---------------------------------------------------------------------------
-// Gemini injector — shadow home JSON
+// Gemini injector — overlay `settings.json`
 // ---------------------------------------------------------------------------
 
 pub struct GeminiInjector;
@@ -282,14 +285,9 @@ impl McpInjector for GeminiInjector {
         &self,
         servers: &[McpServer],
         _env: &mut HashMap<String, String>,
-        shadow_home: Option<&Path>,
+        config_root: Option<&Path>,
     ) -> Result<InjectionResult> {
-        let home = shadow_home.ok_or_else(|| {
-            ClaudineError::ConfigValidation(
-                "Gemini runtime MCP injection requires a shadow HOME".into(),
-            )
-        })?;
-        let config_dir = home.join(".gemini");
+        let config_dir = require_config_root(Provider::Gemini, config_root)?;
         let config_path = config_dir.join("settings.json");
 
         materialize_json_copy_if_exists(&config_dir.join("mcp-server-enablement.json"))?;
@@ -334,6 +332,7 @@ impl McpInjector for GeminiInjector {
         root.insert("mcpServers".into(), serde_json::Value::Object(mcp_servers));
         let content = serde_json::to_string_pretty(&doc)?;
         atomic_write(&config_path, content.as_bytes())?;
+        crate::provider_overlay::record_claudine_write(&config_path);
 
         // Build extra args for allowed server names
         let mut extra_args = Vec::new();
@@ -429,6 +428,20 @@ fn provider_override_string_map(
     })
 }
 
+/// A file-backed injector writes only into a provider overlay; without one it
+/// would have to write the user's own config, so it stops the launch instead.
+fn require_config_root(provider: Provider, config_root: Option<&Path>) -> Result<&Path> {
+    config_root.ok_or_else(|| ClaudineError::ProviderOverlayFailed {
+        provider,
+        reason: OverlayReason::Mcp,
+        stage: OverlayStage::McpInjection,
+        source: std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no provider overlay config root was planned for runtime MCP injection",
+        ),
+    })
+}
+
 fn materialize_json_copy_if_exists(path: &Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
@@ -456,6 +469,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::diagnostics::Diagnostic;
     use crate::mcp::types::{McpServerMetadata, McpTransport};
 
     fn make_server(id: &str) -> McpServer {
@@ -560,18 +574,21 @@ mod tests {
     }
 
     #[test]
-    fn codex_creates_toml_in_shadow_home() {
+    fn codex_writes_config_toml_directly_in_the_config_root() {
         let tmp = TempDir::new().unwrap();
+        let config_root = tmp.path().join(".claudine").join(".codex");
         let injector = CodexInjector;
         let servers = vec![make_server("slack")];
         let mut env = HashMap::new();
 
         let result = injector
-            .inject(&servers, &mut env, Some(tmp.path()))
+            .inject(&servers, &mut env, Some(&config_root))
             .unwrap();
 
-        let config_path = tmp.path().join(".codex").join("config.toml");
+        // `$CODEX_HOME/config.toml`, not a `.codex` joined on again (audit F1).
+        let config_path = config_root.join("config.toml");
         assert!(config_path.exists());
+        assert!(!config_root.join(".codex").exists());
 
         let content = fs::read_to_string(&config_path).unwrap();
         let doc: toml_edit::DocumentMut = content.parse().unwrap();
@@ -591,7 +608,7 @@ mod tests {
         let servers = vec![make_server("slack")];
         let mut env = HashMap::new();
         injector
-            .inject(&servers, &mut env, Some(tmp.path()))
+            .inject(&servers, &mut env, Some(&config_dir))
             .unwrap();
 
         let content = fs::read_to_string(config_dir.join("config.toml")).unwrap();
@@ -601,18 +618,21 @@ mod tests {
     }
 
     #[test]
-    fn gemini_creates_json_in_shadow_home() {
+    fn gemini_writes_settings_json_directly_in_the_config_root() {
         let tmp = TempDir::new().unwrap();
+        // `GEMINI_CLI_HOME` names the parent; the injector receives `.gemini`.
+        let config_root = tmp.path().join(".claudine").join(".gemini");
         let injector = GeminiInjector;
         let servers = vec![make_server("linear")];
         let mut env = HashMap::new();
 
         let result = injector
-            .inject(&servers, &mut env, Some(tmp.path()))
+            .inject(&servers, &mut env, Some(&config_root))
             .unwrap();
 
-        let config_path = tmp.path().join(".gemini").join("settings.json");
+        let config_path = config_root.join("settings.json");
         assert!(config_path.exists());
+        assert!(!config_root.join(".gemini").exists());
 
         let content: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
@@ -646,7 +666,7 @@ mod tests {
         let servers = vec![make_server("linear")];
         let mut env = HashMap::new();
         injector
-            .inject(&servers, &mut env, Some(tmp.path()))
+            .inject(&servers, &mut env, Some(&config_dir))
             .unwrap();
 
         let settings: serde_json::Value =
@@ -663,12 +683,50 @@ mod tests {
     }
 
     #[test]
-    fn file_backed_injectors_require_shadow_home() {
-        let mut env = HashMap::new();
-        let servers = vec![make_server("linear")];
+    fn file_backed_injectors_refuse_a_missing_config_root_with_a_typed_overlay_failure() {
+        let injectors = [(&CodexInjector as &dyn McpInjector, Provider::Codex), (&GeminiInjector, Provider::Gemini)];
+        for (injector, expected) in injectors {
+            let mut env = HashMap::new();
+            let error = injector.inject(&[make_server("linear")], &mut env, None).expect_err("needs a config root");
 
-        assert!(CodexInjector.inject(&servers, &mut env, None).is_err());
-        assert!(GeminiInjector.inject(&servers, &mut env, None).is_err());
+            assert_eq!(error.code(), "provider.overlay_failed", "{expected}");
+            let detail = error.detail();
+            assert_eq!(detail["provider"], json!(expected.to_string()));
+            assert_eq!(detail["reason"], json!("mcp"));
+            assert_eq!(detail["stage"], json!("mcp_injection"));
+            let message = error.to_string();
+            assert!(!message.contains("shadow HOME"), "{message}");
+            assert!(!message.to_lowercase().contains("credential"), "{message}");
+            assert!(env.is_empty(), "{expected} wrote env before refusing");
+        }
+    }
+
+    #[test]
+    fn gemini_sidecars_become_private_copies_in_the_config_root() {
+        let tmp = TempDir::new().unwrap();
+        let (user_root, config_root) = (tmp.path().join("user"), tmp.path().join("overlay"));
+        let sidecars = [("mcp-server-enablement.json", r#"{"old":false}"#), ("mcp-oauth-tokens.json", "[]")];
+        fs::create_dir_all(&user_root).unwrap();
+        fs::create_dir_all(&config_root).unwrap();
+        for (name, content) in sidecars {
+            fs::write(user_root.join(name), content).unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(user_root.join(name), config_root.join(name)).unwrap();
+            #[cfg(not(unix))]
+            fs::copy(user_root.join(name), config_root.join(name)).unwrap();
+        }
+
+        GeminiInjector
+            .inject(&[make_server("linear")], &mut HashMap::new(), Some(&config_root))
+            .unwrap();
+
+        for (name, content) in sidecars {
+            let copy = config_root.join(name);
+            assert!(fs::symlink_metadata(&copy).unwrap().is_file(), "{name} is still a link");
+            let copied: serde_json::Value = serde_json::from_str(&fs::read_to_string(&copy).unwrap()).unwrap();
+            assert_eq!(copied, serde_json::from_str::<serde_json::Value>(content).unwrap());
+            assert_eq!(fs::read_to_string(user_root.join(name)).unwrap(), content);
+        }
     }
 
     #[test]

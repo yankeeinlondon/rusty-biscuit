@@ -3,7 +3,7 @@
 //! The invocation's command phase
 //! (`composition::pipeline::construct_argv_and_system_prompt`) assembles the
 //! provider argv and the child environment exactly once, interleaving pure
-//! producers with side effects: system-prompt temp-file writes, MCP shadow-HOME
+//! producers with side effects: system-prompt temp-file writes, provider-overlay
 //! materialization, warning emission, an interactive `Select` for ambiguous MCP
 //! tags, and `switch_process_cwd`. A retry needs the *plan* again — against a
 //! refreshed document — but must not repeat any of those effects, and above all
@@ -68,6 +68,20 @@
 //! unsanitized ambient values so a rebuilt provider can re-run the same
 //! allow-list for itself, in both directions.
 //!
+//! ## Provider overlays
+//!
+//! An overlay's selector (`CODEX_HOME`, `GEMINI_CLI_HOME`, …) and any state it
+//! pins belong to one provider, even when `--repo` is what asked for the
+//! overlay. The invocation's baseline therefore records every overlay variable
+//! at its launch-baseline value, and each replay applies the plan of the
+//! provider it rebuilt for: the invocation's own plan while the provider holds
+//! still, or a plan built for the target when it moves. Building that plan
+//! materializes the target's overlay, the one filesystem effect a provider move
+//! repeats, because no recorded overlay could hold another provider's
+//! configuration. Every other provider's selector falls back to its baseline
+//! (Invariant 7 of `fixes/2026-09-12-shadow-home/spec.md`), and MCP injection
+//! writes into the rebuilt plan's root, never the invocation provider's.
+//!
 //! ## Capability warnings are data, not output
 //!
 //! The capability stages a replay re-runs — model validation, `--output`,
@@ -108,10 +122,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use claudine::diagnostics::{DiagnosticSnapshot, RestoredDiagnostic};
+use claudine::invocation_context::{EnvBaseline, HomeBaseline};
 use claudine::provider::Provider;
+use claudine::provider_overlay::OverlayPlan;
 use claudine::system_prompt::ResolvedSystemPrompt;
 
 use super::profile::{OutputFormat, WrapperProfile, profile_for_provider};
@@ -335,11 +351,11 @@ pub(crate) struct LaunchPlanInputs {
     /// plan does not set again is restored to its pre-provider value, or removed
     /// when it had none. Without it the overlay could only ever add, so an
     /// attempt that dropped `model:` or moved provider inherited the opening
-    /// document's `MODEL`, `OPENCODE_CONFIG_CONTENT`, and shadow `HOME`.
+    /// document's `MODEL`, `OPENCODE_CONFIG_CONTENT`, and overlay selector.
     pub(crate) provider_env_baseline: HashMap<OsString, Option<OsString>>,
-    /// Codex's pre-shadow SQLite directory when this invocation materialized a
-    /// shadow home. Replayed only when an attempt selects Codex.
-    pub(crate) codex_sqlite_home: Option<OsString>,
+    /// What a provider move plans the target's overlay from. `None` only for
+    /// [`Self::recorded_only`], which never replays.
+    pub(crate) overlay: Option<OverlayRebuildInputs>,
     /// The unsanitized ambient credential environment plus explicit `--include`
     /// intent. See [`CredentialPolicyInputs`].
     pub(crate) credential_policy: CredentialPolicyInputs,
@@ -382,6 +398,8 @@ impl LaunchPlanInputs {
         // the real path (not a bool) so the per-attempt rebuilt bundle can
         // hand the attempt a working artifact for the recorded argv.
         codex_last_message: Option<PathBuf>,
+        // The overlay the invocation launched under, for the session key.
+        overlay: Option<OverlayPlan>,
     ) -> Self {
         let structured_codex = codex_last_message.is_some();
         Self {
@@ -398,7 +416,7 @@ impl LaunchPlanInputs {
             opencode_config_base: None,
             codex_last_message_path: codex_last_message.unwrap_or_default(),
             provider_env_baseline: HashMap::new(),
-            codex_sqlite_home: None,
+            overlay: None,
             credential_policy: CredentialPolicyInputs::default(),
             workspace_cwd: PathBuf::new(),
             write_grant_env: HashMap::new(),
@@ -408,6 +426,7 @@ impl LaunchPlanInputs {
                 env_overlay: Vec::new(),
                 structured_codex,
                 write_posture: None,
+                overlay,
             },
             replay_supported: false,
         }
@@ -476,14 +495,21 @@ pub(crate) struct McpRebuildInputs {
     /// `--mcp-use` ids, invocation intent.
     pub(crate) explicit_use: Vec<String>,
     pub(crate) repo_root: Option<PathBuf>,
-    /// The shadow HOME, materialized at invocation whenever MCP is in play —
-    /// including for providers whose injector does not need one — precisely so a
-    /// rebuild that lands on a shadow-HOME provider finds one already on disk
-    /// instead of having to create it.
-    pub(crate) shadow_home: Option<PathBuf>,
     /// `#tag` → chosen server id, resolved once at invocation. A rebuild reads
     /// this map and never prompts; an unlisted ambiguous tag is dropped.
     pub(crate) ambiguity_resolutions: HashMap<String, String>,
+}
+
+/// The invocation-fixed inputs a provider move plans the target's overlay
+/// from, so the target is planned exactly as a direct launch of it would be.
+#[derive(Clone)]
+pub(crate) struct OverlayRebuildInputs {
+    /// `--repo`.
+    pub(crate) repo_resources: bool,
+    /// `--mcp`/`--use`.
+    pub(crate) mcp_requested: bool,
+    pub(crate) home: HomeBaseline,
+    pub(crate) env: EnvBaseline,
 }
 
 /// The invocation's own resolved facets and the plan they produced.
@@ -496,6 +522,8 @@ pub(crate) struct RecordedLaunch {
     /// The write-grant posture the invocation launched under; `None` when it
     /// prepared no inline document.
     pub(crate) write_posture: Option<String>,
+    /// The overlay the invocation's base child environment carries.
+    pub(crate) overlay: Option<OverlayPlan>,
 }
 
 /// The document-dependent half of a launch plan.
@@ -570,6 +598,10 @@ pub(crate) struct LaunchPlan {
     /// the session-compatibility permission facet. `None` when the facets name
     /// no writable document.
     pub(crate) write_posture: Option<String>,
+    /// The overlay the child launches under, part of the session-compatibility
+    /// overlay facet. The recorded plan while the provider holds still; the
+    /// target's plan after a provider move; `None` when neither needs one.
+    pub(crate) overlay: Option<OverlayPlan>,
 }
 
 /// Re-derive the launch plan for one set of document facets.
@@ -604,6 +636,7 @@ pub(crate) fn build_launch_plan(
             system_prompt_artifacts: Vec::new(),
             warnings: Vec::new(),
             write_posture: inputs.invocation.write_posture.clone(),
+            overlay: inputs.invocation.overlay.clone(),
         });
     }
     replay(inputs, facets)
@@ -656,6 +689,16 @@ fn replay(
         Vec::new()
     };
 
+    // -- provider overlay ---------------------------------------------------
+    // Re-applied on every replay: the baseline restores each overlay variable,
+    // so a selector this plan does not set again reaches the child at its
+    // launch-baseline value. See the module docs' `Provider overlays`.
+    let overlay = if provider_moved {
+        rebuild_overlay(inputs, facets.provider)?
+    } else {
+        inputs.invocation.overlay.clone()
+    };
+
     // -- permission mode ----------------------------------------------------
     let mut yolo_applied = false;
     if facets.yolo_requested {
@@ -672,10 +715,8 @@ fn replay(
         "YOLO".into(),
         if yolo_applied { "true" } else { "false" }.into(),
     ));
-    if facets.provider == Provider::Codex
-        && let Some(sqlite_home) = inputs.codex_sqlite_home.as_ref()
-    {
-        env_overlay.push(("CODEX_SQLITE_HOME".into(), sqlite_home.clone()));
+    if let Some(plan) = overlay.as_ref() {
+        env_overlay.extend(super::provider_overlay::overlay_env_entries(plan));
     }
 
     // -- entrypoint and session mode ---------------------------------------
@@ -779,9 +820,9 @@ fn replay(
             if key == OsStr::new(OPENCODE_CONFIG) {
                 system_prompt_opencode_config = Some(value.to_string_lossy().into_owned());
             } else if key != OsStr::new("HOME") {
-                // `HOME` belongs to the invocation's shadow-home plan, which the
-                // base child environment already carries; a re-application must
-                // not repoint it.
+                // `HOME` is the launch baseline's, which the base child
+                // environment already carries; a re-application must not
+                // repoint it.
                 env_overlay.push((key, value));
             }
         }
@@ -802,7 +843,8 @@ fn replay(
     }
 
     // -- MCP runtime injection ---------------------------------------------
-    let mcp_env = rebuild_mcp(inputs, facets, &mut args)?;
+    let config_root = overlay.as_ref().and_then(OverlayPlan::provider_visible_root);
+    let mcp_env = rebuild_mcp(inputs, facets, config_root, &mut args)?;
 
     // -- structured output --------------------------------------------------
     let use_structured = facets.use_structured();
@@ -863,6 +905,7 @@ fn replay(
         system_prompt_artifacts: artifacts,
         warnings,
         write_posture,
+        overlay,
     })
 }
 
@@ -872,8 +915,8 @@ fn replay(
 /// Every provider-shaped key the invocation wrote that this rebuild did *not*
 /// write again is stale by definition, so it is returned to its pre-provider
 /// value — or removed, when it had none. `MODEL` on a document that dropped
-/// `model:`, `OPENCODE_CONFIG_CONTENT` on a retry that left OpenCode, and a
-/// shadow `HOME` on a retry that left the provider that needed one all land
+/// `model:`, `OPENCODE_CONFIG_CONTENT` on a retry that left OpenCode, and the
+/// overlay selector and pinned state of a provider a retry left all land
 /// here.
 ///
 /// Restores are appended after the sets and sorted by key so the patch is
@@ -906,11 +949,51 @@ fn patch_with_baseline_restores(
     patch
 }
 
+/// Plan and materialize the overlay a direct launch of `provider` under this
+/// invocation's `--repo` and `--mcp` intent would use.
+///
+/// ## Errors
+///
+/// A refusal or materialization failure keeps its typed diagnostic
+/// (`provider.overlay_unsupported` / `provider.overlay_failed`), so a retry
+/// onto a provider that cannot honor `--repo` refuses before spawn, exactly as
+/// the direct launch does.
+fn rebuild_overlay(
+    inputs: &LaunchPlanInputs,
+    provider: Provider,
+) -> Result<Option<OverlayPlan>, LaunchPlanError> {
+    let overlay = inputs.overlay.as_ref().ok_or(LaunchPlanError::ReplayUnavailable)?;
+    let cwd: &Path = &inputs.workspace_cwd;
+    let reasons = super::provider_overlay::overlay_reasons(
+        provider,
+        overlay.repo_resources,
+        overlay.mcp_requested,
+        cwd,
+    );
+    if reasons.is_empty() {
+        return Ok(None);
+    }
+    let (plan, _) = super::provider_overlay::build_overlay(
+        provider,
+        reasons,
+        cwd,
+        false,
+        Some(cwd),
+        &overlay.home,
+        &overlay.env,
+    )
+    .map_err(|e| LaunchPlanError::producer_report("provider overlay rebuild failed", e))?;
+    Ok(Some(plan))
+}
+
 /// Recompute MCP runtime injection for the refreshed document's tag set,
 /// appending the injector's `extra_args` and returning its environment.
+///
+/// `config_root` is the rebuilt plan's provider-visible root.
 fn rebuild_mcp(
     inputs: &LaunchPlanInputs,
     facets: &DocumentLaunchFacets,
+    config_root: Option<&Path>,
     args: &mut Vec<String>,
 ) -> Result<HashMap<String, String>, LaunchPlanError> {
     let Some(mcp) = inputs.mcp.as_ref() else {
@@ -940,7 +1023,7 @@ fn rebuild_mcp(
     }
     let mut env: HashMap<String, String> = HashMap::new();
     let result = injector
-        .inject(&session.servers, &mut env, mcp.shadow_home.as_deref())
+        .inject(&session.servers, &mut env, config_root)
         .map_err(|e| LaunchPlanError::producer_error("MCP injection failed", e))?;
     args.extend(result.extra_args);
     Ok(env)

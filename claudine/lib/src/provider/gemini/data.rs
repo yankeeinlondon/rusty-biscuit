@@ -27,6 +27,7 @@ use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
 use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource, ResolvesVia};
 use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
+use crate::provider::overlay::{OverlayCapabilities, OverlayCapability, OverlayResourceClass, OverlaySelectorShape, OverlaySelectorSpec};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
 use crate::provider::prompt_args::PromptArgConventions;
@@ -348,6 +349,24 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
             remediation: "Register a command hook for BeforeToolSelection directly in Gemini settings (hooksConfig); Claudine cannot dispatch this phase.",
         },
     ],
+    overlay_selector: Some(&OverlaySelectorSpec {
+        env_var: "GEMINI_CLI_HOME",
+        shape: OverlaySelectorShape::ParentOfProviderDir { child: ".gemini" },
+        relocates: &[
+            OverlayResourceClass::Config,
+            OverlayResourceClass::Auth,
+            OverlayResourceClass::Sessions,
+            OverlayResourceClass::Cache,
+            OverlayResourceClass::State,
+        ],
+        additive: false,
+        source_root: Some(PathTemplate::Static("~/.gemini")),
+    }),
+    overlay_capabilities: OverlayCapabilities {
+        repo_resources: OverlayCapability::NativeRoot,
+        repo_prompt: OverlayCapability::Unsupported,
+        mcp: OverlayCapability::NativeRoot,
+    },
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).

@@ -4,7 +4,7 @@ pub(crate) mod env;
 pub(crate) mod exec;
 pub(crate) mod live_semantic_sink;
 pub(crate) mod profile;
-pub(crate) mod repo_home;
+pub(crate) mod provider_overlay;
 pub(crate) mod runaway_guard;
 pub(crate) mod section;
 pub(crate) mod session_report;
@@ -548,8 +548,12 @@ fn run_provider_wrapper_inner(
         deferred_warnings.push(warn);
     }
 
-    let needs_mcp_shadow_home = (args.mcp || !args.mcp_use.is_empty())
-        && matches!(provider, Provider::Codex | Provider::Gemini);
+    let overlay_reasons = provider_overlay::overlay_reasons(
+        provider,
+        repo_requested,
+        args.mcp || !args.mcp_use.is_empty(),
+        &launch_workspace.child_cwd,
+    );
 
     let child_env_started = std::time::Instant::now();
     let mut env_plan_result = env::build_child_env_with_launch(
@@ -560,8 +564,9 @@ fn run_provider_wrapper_inner(
         !non_interactive_requested,
         &raw_agent_params,
         &env_overrides,
-        repo_requested,
-        needs_mcp_shadow_home,
+        overlay_reasons,
+        invocation.home_baseline(),
+        invocation.env_baseline(),
         launch_workspace,
         perf_enabled,
     );

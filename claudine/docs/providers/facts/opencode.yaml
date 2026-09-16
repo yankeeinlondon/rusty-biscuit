@@ -287,3 +287,21 @@ unmapped_native_events:
 # the cascade order; the message bucket's `providermodelnotfound` needle was
 # empirically hardened. The repeated api_remote bucket is the "late ApiRemote"
 # second pass after Interrupted.
+# Provider-overlay redirection surface (fixes/2026-09-12-shadow-home audit).
+# `OPENCODE_CONFIG_DIR` is ADDITIVE — loaded after the global config and
+# `.opencode` directories, so it overrides settings without masking the user's
+# agents, commands, and plugins. No `OPENCODE_DISABLE_*` variable closes the
+# global config directory.
+overlay_selector:
+  env_var: OPENCODE_CONFIG_DIR
+  shape: provider_dir
+  relocates:
+  - config
+  additive: true
+  source_root: null
+# MCP arrives inline through `OPENCODE_CONFIG_CONTENT`: no storage root and no
+# home override, deliberately.
+overlay_capabilities:
+  repo_resources: unsupported
+  repo_prompt: unsupported
+  mcp: composable_injection
