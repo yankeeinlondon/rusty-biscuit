@@ -53,7 +53,6 @@ There are three top-level report levels:
 2. Normal
 3. Verbose
 
-
 > **Note:** the reporting verbosity is irrelevant when choosing the JSON output option as JSON always reports all available data.
 
 ### Normal
@@ -68,9 +67,13 @@ Let's start with how a "normal" report looks:
   - ... 
 ```
 
+The normal verbosity level provides basic metadata, the _heading_ description, and a summary of the files impacted but leaves off the remaining commentary and bullet points describing the commit.
+
 - the `{hash}` is a 7 character short hash
     - if the commit has been pushed to it's remote then it will be rendered as a link so a user clicking the link will be brought to the remote's webpage for the commit
 - the `{heading}` is the first sentence of the 
+
+### Compact
 
 The compact variant shows only the first line as the normal report:
 
@@ -117,3 +120,57 @@ types:
 
 
 ## CLI Callers
+
+The base CLI command for recent commits is:
+
+```sh
+sniff repo recent-commits [scope] <switches>
+```
+
+**Scope** can be any of the following patterns:
+
+- Duration: `3d`, `1w`, `2mo`, `6h` (commits going back the specified duration to latest)
+- Named Day: `today`, `yesterday` (commits starting on named day to latest)
+- Specific Date: `2026-09-12`
+- Hash Start: `ab2c3d` (from this has to latest)
+- Count: `10`, `25`, etc.
+
+### Duration Units
+
+| Unit   | Aliases                                |
+|--------|----------------------------------------|
+| Hours  | `h`, `hour`, `hours` |
+| Days   | `d`, `day`, `days` |
+| Weeks  | `w`, `wk`, `week`, `weeks` |
+| Months | `mo`, `m`, `month`, `months` (30 days) |
+| Years  | `y`, `yr`, `year`, `years` (365 days) |
+
+### CLI Switches
+
+#### Filters
+
+- `--package <pkg>` - commits that impacted the specified _package_ in a monorepo
+- `--package-area <area>` - commits that impacted the specified _package area_ in a monorepo
+- `--operation <op>` - commits which use conventional commits and have the specified option
+- `--scope <scope>` - commits which use conventional commits and have a given scope
+- `--author <name | email>` - commits provided by a particular author
+- `--branch <branch>` - commits on a specified branch
+- `--source-code` - commits which have source code changes
+- `--documentation` - commits which have documentation changes
+- `--images` - commits which have images
+- `--configuration` - commits which have config changes
+- `--cicd` - commits which have CICD changes
+- `--web` - commits which have web asset changes
+
+#### Reporting Verbosity
+
+- `--verbose` / `-v` - switches to verbose reporting
+- `--compact` / `-c` - switches to compact reporting
+- `--author` - adds the author who made the commit to the commit message
+
+#### Formatting
+
+- `--json` - no formatting, just data
+- `--plain` - all formatting removed
+- `--terminal` - this is the default formatting that will be used
+- `--prose` - formatting prose but plain text
