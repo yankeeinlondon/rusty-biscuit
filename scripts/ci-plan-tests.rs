@@ -22,7 +22,7 @@ fn plan_json(prohibited: bool) -> String {
     };
     format!(
         r#"{{
-        "schema_version":2,"base":"{a}","head":"{b}","change_class":"package",
+        "schema_version":3,"base":"{a}","head":"{b}","change_class":"package",
         "full_scope":false,"full_scope_gates":[],
         "areas":[{{"area":"pkg","selection_reason":"source change","packages":["alpha"]}}],
         "packages":[],"source_packages":["alpha"],"reverse_dependencies":[],
@@ -34,13 +34,22 @@ fn plan_json(prohibited: bool) -> String {
             "evidence":{{"ref":"refs/notes/ci-local/macos-latest"}}}}}},
           {{"package":"alpha","area":"pkg","environment":"ubuntu-latest","gate":"L1",
             "execution":"execute","origin":"ci","state":"pending","target_kinds":["lib"],
-            "compile_coverage_from":"L1","selection_reason":"no evidence here"}},
+            "compile_coverage_from":"L1","selection_reason":"no evidence here",
+            "build":"0123456789abcdef"}},
           {{"package":"alpha","area":"pkg","environment":"windows-latest","gate":"L2",
             "execution":"omit","origin":"none","state":"accepted-gap","target_kinds":[],
             "compile_coverage_from":"","selection_reason":"no backend",
             "gap":{{"owner":"@yankeeinlondon","reason":"no L2 backend on Windows",
             "expiry":"2027-01-31"}}}},
           {wsl}
+        ],
+        "builds":[
+          {{"key":"0123456789abcdef","package":"alpha","producer":"ubuntu-latest",
+            "artifact":"build-alpha-ubuntu-latest-0123456789abcdef",
+            "compatible_environments":["ubuntu-latest","wsl2-ubuntu"],
+            "compatibility_reason":"x86_64-unknown-linux-gnu archive produced on ubuntu-latest (x86_64/gnu/glibc); wsl2-ubuntu declares the same architecture, ABI, and libc",
+            "consumers":[{{"environment":"ubuntu-latest","gate":"L1"}}],
+            "identity":{{"package":"alpha"}}}}
         ],
         "accepted_evidence":[],"evidence_rejections":["gate-inputs-changed: alpha/macos-latest/L1"],
         "policy_gaps":[],"prohibited_cells":{prohibited_cells},
@@ -155,6 +164,50 @@ fn rejected_evidence_is_reported_rather_than_dropped() {
     // receipt from a rejected one.
     let output = render(&parsed(false), &Terminal::new());
     assert!(output.contains("gate-inputs-changed"), "{output}");
+}
+
+#[test]
+fn every_build_shows_its_key_producer_and_consumers() {
+    let projected = build_rows(&parsed(false));
+    assert_eq!(1, projected.len(), "{projected:?}");
+    assert_eq!("0123456789abcdef", projected[0][0]);
+    assert_eq!("alpha", projected[0][1]);
+    assert_eq!("ubuntu-latest", projected[0][2]);
+    assert_eq!("ubuntu-latest/L1", projected[0][3]);
+}
+
+#[test]
+fn a_build_states_why_its_consumers_are_compatible() {
+    let detail = build_details(&parsed(false))
+        .into_iter()
+        .find(|line| line.starts_with("`0123456789abcdef`"))
+        .expect("a compatibility reason");
+    assert!(detail.contains("x86_64-unknown-linux-gnu"), "{detail}");
+    assert!(detail.contains("wsl2-ubuntu"), "{detail}");
+}
+
+#[test]
+fn the_build_table_is_rendered_beside_the_cells_not_inside_them() {
+    // Build plumbing is never a result cell: a reviewer must be able to see
+    // that the owner produces no gate outcome of its own.
+    let output = render(&parsed(false), &Terminal::new());
+    assert!(output.contains("Build records"), "{output}");
+    assert!(output.contains("0123456789abcdef"), "{output}");
+    assert_eq!(
+        4,
+        rows(&parsed(false)).len(),
+        "the cell table must still hold exactly the plan's cells"
+    );
+}
+
+#[test]
+fn a_plan_that_schedules_no_owner_says_nothing_about_builds() {
+    // An all-reused plan derives no build. Rendering an empty table would
+    // suggest an owner ran and produced nothing.
+    let mut plan = parsed(false);
+    plan.builds.clear();
+    let output = render(&plan, &Terminal::new());
+    assert!(!output.contains("Build records"), "{output}");
 }
 
 #[test]

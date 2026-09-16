@@ -67,7 +67,12 @@ const EXPECTED_MANIFEST_SCHEMA_VERSION: u32 = 1;
 
 /// Version of the resolved execution plan this tool reads
 /// (`scripts/ci/schema.py::RESOLVED_PLAN_SCHEMA_VERSION`).
-const PLAN_SCHEMA_VERSION: u32 = 2;
+const PLAN_SCHEMA_VERSION: u32 = 3;
+
+/// Version of `.github/ci/environments.json`
+/// (`scripts/ci/affected_scope.py::ENVIRONMENTS_SCHEMA_VERSION`). Version 2
+/// added the per-environment build contract.
+const ENVIRONMENTS_SCHEMA_VERSION: u32 = 2;
 
 /// Process exit codes. A verdict gates merging — per area, through each
 /// `_area-ci.yml` rollup; `ci.yml`'s `ci-gate` only folds job results — so a
@@ -513,9 +518,50 @@ struct Cell {
     dependents: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     reasons: Vec<String>,
+    /// The build this cell executed and what its stages cost. Reporting only;
+    /// the cell's identity is [`CellKey`] and nothing is keyed on a build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    build: Option<CellBuild>,
     /// Indices into [`Rollup::records`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     records: Vec<usize>,
+}
+
+/// What one executing cell ran, and what reaching it cost.
+///
+/// The planned key, realized digest, and producer are the provenance every
+/// executing test cell has to display; the stage windows are the consumer half
+/// of the reporting contract's transfer/setup/execute split.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct CellBuild {
+    key: String,
+    producer: String,
+    digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    timings: Option<ConsumerTimings>,
+}
+
+/// One consumer's stages, as its own job measured them.
+///
+/// Seconds where a portable `date +%s` is the only clock every consumer OS
+/// spells the same way, milliseconds where the verifier measured itself.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct ConsumerTimings {
+    /// Downloading the build artifact.
+    #[serde(default)]
+    download_seconds: u64,
+    /// Strict verification, which includes the extraction below.
+    #[serde(default)]
+    verify_seconds: u64,
+    /// Extracting the archive. `cargo nextest run --archive-file` extracts
+    /// inside the run, so this is the verifier's own full extraction of the
+    /// same archive on the same host — the stage cost, not folded into test
+    /// time.
+    #[serde(default)]
+    extract_ms: u64,
+    /// The gate command: the tier recipe, start to finish.
+    #[serde(default)]
+    execute_seconds: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -552,8 +598,63 @@ struct Rollup {
     /// document written before the field existed: unknown, so fail closed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     scheduled: Option<Vec<CellKey>>,
+    /// The build records whose owners reported, and what each stage cost.
+    /// Plumbing, never a result cell: no gate is derived from an entry here,
+    /// nothing is baselined on one, and a cell that could not run reports the
+    /// block through its own `{package, environment, tier}` identity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    builds: Vec<BuildReport>,
     records: Vec<RunRecord>,
     cells: Vec<Cell>,
+}
+
+/// One planned build key's owner leg, as the summary renders it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct BuildReport {
+    key: String,
+    #[serde(default)]
+    package: String,
+    #[serde(default)]
+    producer: String,
+    result: String,
+    #[serde(default)]
+    stage: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    digest: String,
+    /// Queue and upload: the two windows the producer tool cannot see, because
+    /// one closes before it starts and the other opens after it exits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stage_seconds: Option<ProducerStageSeconds>,
+    /// `ci-build`'s own account of what it did, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    timings: Option<ProducerTimings>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct ProducerStageSeconds {
+    #[serde(default)]
+    queue_seconds: u64,
+    #[serde(default)]
+    upload_seconds: u64,
+}
+
+/// The producer's internal stages. `cargo nextest archive` compiles and
+/// archives in one command, so those two are one window, named for what it
+/// measures.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct ProducerTimings {
+    #[serde(default)]
+    setup_ms: u64,
+    #[serde(default)]
+    compile_archive_ms: u64,
+    #[serde(default)]
+    sidecars_ms: u64,
+    #[serde(default)]
+    inventory_ms: u64,
+    #[serde(default)]
+    checksum_ms: u64,
+    #[serde(default)]
+    total_ms: u64,
 }
 
 impl Rollup {
@@ -597,6 +698,15 @@ impl Rollup {
                     .cloned()
                     .collect()
             }),
+            // Narrowed with the cells, for the same reason `scope` is: a build
+            // owned for another area's package is that area's plumbing to
+            // explain, and this document applies nobody else's policy.
+            builds: self
+                .builds
+                .iter()
+                .filter(|build| packages.contains(&build.package))
+                .cloned()
+                .collect(),
             records: self.records.clone(),
             cells,
         }
@@ -686,6 +796,84 @@ struct ProducerStatus {
     /// saying so, because the cell — not a consumer's — owns the outcome.
     #[serde(default)]
     dependents: Vec<String>,
+    /// The build this consumer downloaded, verified, and ran, when it ran one.
+    /// Absent on a cell that compiled in place.
+    #[serde(default)]
+    build: Option<ExecutedBuild>,
+    /// What this consumer's transfer, verification, extraction, and gate
+    /// command cost. Absent on a job that reports no build, and on a guest that
+    /// died before its measurements crossed back.
+    #[serde(default)]
+    timings: Option<ConsumerTimings>,
+}
+
+/// What one planned build record's owner leg concluded.
+///
+/// Uploaded as `build-status-<package>-<producer>-<key>/build-status.json` by
+/// `ci.yml`'s owner job, whether or not an archive was produced. A build record
+/// is never a result cell — it has no `{package, environment, gate}` identity,
+/// it is never baselined, and nothing here creates a cell from one. It exists
+/// so a cell that could not run says *which named build* stopped it instead of
+/// rendering the same blank MISSING a never-scheduled leg gets.
+#[derive(Clone, Debug, Deserialize)]
+struct BuildStatus {
+    key: String,
+    #[serde(default)]
+    package: String,
+    #[serde(default)]
+    producer: String,
+    /// `success`, `failure`, or `cancelled`.
+    result: String,
+    /// Where the owner stopped: `produce`, `compile`, or `upload`.
+    #[serde(default)]
+    stage: String,
+    #[serde(default)]
+    digest: Option<String>,
+    #[serde(default)]
+    detail: Option<String>,
+    /// The workflow-observed queue and upload windows, merged into the document
+    /// by the owner job: the producer tool is not running for either.
+    #[serde(default)]
+    stage_seconds: Option<ProducerStageSeconds>,
+    /// `ci-build produce`'s own stages, present when it got far enough to have
+    /// them.
+    #[serde(default)]
+    timings: Option<ProducerTimings>,
+}
+
+impl BuildStatus {
+    /// The one-line account a blocked cell renders.
+    fn describe(&self) -> String {
+        let mut text = format!(
+            "build {} ({} on {}) concluded `{}` at the {} stage",
+            self.key,
+            if self.package.is_empty() { "unnamed package" } else { &self.package },
+            if self.producer.is_empty() { "an unnamed producer" } else { &self.producer },
+            self.result,
+            if self.stage.is_empty() { "unknown" } else { &self.stage },
+        );
+        if let Some(digest) = self.digest.as_deref().filter(|value| !value.is_empty()) {
+            text.push_str(&format!(" (realized {digest})"));
+        }
+        if let Some(detail) = self.detail.as_deref().filter(|value| !value.is_empty()) {
+            text.push_str(&format!(": {detail}"));
+        }
+        text
+    }
+}
+
+/// The build one consumer reports having executed.
+///
+/// Reporting only. The cell's identity remains `{package, environment, gate}`;
+/// nothing is keyed, baselined, or compared on a build.
+#[derive(Clone, Debug, Deserialize)]
+struct ExecutedBuild {
+    #[serde(default)]
+    key: String,
+    #[serde(default)]
+    producer: String,
+    #[serde(default)]
+    digest: String,
 }
 
 /// Tests the target environment actually compiled, generated *on* that
@@ -895,6 +1083,10 @@ struct ExpectedCell {
     target_kinds: Vec<String>,
     /// Where the cell's compile coverage came from, from the plan.
     compile_coverage_from: String,
+    /// The planned build key this cell executes, when it executes one. A build
+    /// record is plumbing, never a cell: this is here so a cell whose archive
+    /// never arrived can name what blocked it.
+    build: Option<String>,
 }
 
 impl ExpectedCell {
@@ -912,6 +1104,7 @@ impl ExpectedCell {
             prohibition: None,
             target_kinds: Vec::new(),
             compile_coverage_from: String::new(),
+            build: None,
         }
     }
 }
@@ -1114,6 +1307,11 @@ struct PlanCell {
     target_kinds: Vec<String>,
     #[serde(default)]
     compile_coverage_from: String,
+    /// The planned build key this cell executes. Present exactly on an
+    /// executing L1, L2, or browser cell of a producer whose consumers read an
+    /// archive.
+    #[serde(default)]
+    build: Option<String>,
     #[serde(default)]
     evidence: Option<PlanEvidence>,
     #[serde(default)]
@@ -1271,6 +1469,13 @@ fn plan_expected_cells(plan: &ResolvedPlan) -> Result<Vec<ExpectedCell>> {
         let mut expectation = ExpectedCell::new(key, cell.area.clone());
         expectation.target_kinds = cell.target_kinds.clone();
         expectation.compile_coverage_from = cell.compile_coverage_from.clone();
+        // Only an EXECUTING cell consumes a build. A reused cell keeps its
+        // reference pruned by the overlay, and a governed omission never had
+        // one; reading it here regardless would let a failed owner block a cell
+        // that was never going to run.
+        if cell.execution == "execute" {
+            expectation.build = cell.build.clone();
+        }
 
         if let Some(gap) = &cell.gap {
             let declared = DeclaredGap {
@@ -1681,6 +1886,37 @@ fn non_empty(value: &str) -> Option<String> {
     }
 }
 
+/// Every build-record outcome this run published, by planned key.
+///
+/// A duplicate key is possible on a rerun, where the run-wide overlay can bring
+/// both attempts' artifacts in. A failure wins: an owner leg that concluded
+/// `failure` on either attempt did not deliver the archive the current attempt's
+/// consumers were told to download, and the cell must say so rather than be
+/// silently upgraded by a stale success.
+fn read_build_statuses(root: &Path) -> Result<BTreeMap<String, BuildStatus>> {
+    let mut statuses: BTreeMap<String, BuildStatus> = BTreeMap::new();
+    for dir in list_artifact_dirs(root)? {
+        if !dir.name.starts_with("build-status-") {
+            continue;
+        }
+        let path = dir.path.join("build-status.json");
+        if !path.is_file() {
+            continue;
+        }
+        let text = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let status: BuildStatus = serde_json::from_str(&text)
+            .with_context(|| format!("malformed build status {}", path.display()))?;
+        match statuses.get(&status.key) {
+            Some(existing) if existing.result != "success" => {}
+            _ => {
+                statuses.insert(status.key.clone(), status);
+            }
+        }
+    }
+    Ok(statuses)
+}
+
 fn read_producer_statuses(root: &Path) -> Result<Vec<ProducerStatus>> {
     let mut statuses = Vec::new();
     for dir in list_artifact_dirs(root)? {
@@ -1708,6 +1944,8 @@ struct ClassifyInputs<'a> {
     expected: &'a [ExpectedCell],
     records: &'a [RunRecord],
     statuses: &'a [ProducerStatus],
+    /// Build-record outcomes, by planned key.
+    builds: &'a BTreeMap<String, BuildStatus>,
     /// (environment, tier) → package → expected test identities.
     expected_tests: &'a BTreeMap<(String, Tier), BTreeMap<String, Vec<String>>>,
 }
@@ -1894,6 +2132,21 @@ fn classify_one(
         })
         .cloned();
 
+    // The build this cell was told to execute, when its owner did not deliver
+    // it. A cell whose named build failed, was cancelled, or could not be
+    // uploaded has no archive to run and no licence to compile a replacement,
+    // so it is MISSING and blocking — never PASS, and never eligible for a
+    // skip baseline, which only judges skipped test identities.
+    //
+    // A build with no status at all is deliberately NOT treated as blocking:
+    // the producers whose consumers have not been cut over still compile in
+    // place, their cells reference a record no owner job was scheduled for, and
+    // inferring a block from an absence would fail every one of them.
+    let blocking_build = expectation
+        .and_then(|cell| cell.build.as_deref())
+        .and_then(|key| inputs.builds.get(key))
+        .filter(|status| status.result != "success");
+
     // The producer's own word for this cell, when it has one: a producer
     // status naming THIS package, tier, and environment. A `failure` here with
     // a clean JUnit report is the companion-suite case — a green Rust report
@@ -1984,6 +2237,32 @@ fn classify_one(
         )
     };
 
+    // What this cell actually executed, as the consumer reported it. One line,
+    // so a reader can confirm that the L1, L2, browser, and WSL2 cells of one
+    // package really did run one planned key and one realized digest.
+    if let Some(executed) = own_status.and_then(|status| status.build.as_ref()) {
+        reasons.push(format!(
+            "ran build {} produced on {} (realized {})",
+            executed.key, executed.producer, executed.digest
+        ));
+    }
+
+    // A real test result outranks plumbing diagnostics: when the cell produced
+    // failing or passing tests, that evidence is what it reports, and the build
+    // note is added as context. Only a cell with nothing to show is *blocked*
+    // by its build.
+    if let Some(build) = blocking_build {
+        reasons.push(format!("blocked by {}", build.describe()));
+        if matches!(
+            state,
+            CellState::Missing | CellState::NothingToRun | CellState::Skip | CellState::Pass
+        ) && counts.bad() == 0
+            && counts.passed == 0
+        {
+            state = CellState::Missing;
+        }
+    }
+
     // R12: a DECLARED companion suite must leave success evidence. A skipped
     // companion step — or no reported outcome at all — leaves the Rust JUnit
     // report green while the suite never ran, so it downgrades the cell
@@ -2042,6 +2321,14 @@ fn classify_one(
         skip_evidence_degraded,
         declared_gap,
         reasons,
+        build: own_status.and_then(|status| {
+            status.build.as_ref().map(|executed| CellBuild {
+                key: executed.key.clone(),
+                producer: executed.producer.clone(),
+                digest: executed.digest.clone(),
+                timings: status.timings,
+            })
+        }),
         records: indices.to_vec(),
     }
 }
@@ -2366,6 +2653,7 @@ fn blank_cell(key: CellKey) -> Cell {
         declared_gap: None,
         dependents: Vec::new(),
         reasons: Vec::new(),
+        build: None,
         records: Vec::new(),
     }
 }
@@ -2988,6 +3276,8 @@ fn render_grid(rollup: &Rollup) -> String {
         out.push('\n');
     }
 
+    out.push_str(&render_build_provenance(rollup));
+
     let accepted: Vec<&Cell> = rollup
         .cells
         .iter()
@@ -3069,6 +3359,97 @@ fn render_grid(rollup: &Rollup) -> String {
                 cell_text(&cell.key.to_string()),
                 cell.state.label(),
                 cell_text(&why(cell))
+            ));
+        }
+        out.push('\n');
+    }
+
+    out
+}
+
+/// A duration in seconds, or an em dash when nothing measured it.
+///
+/// Zero is a measurement — a stage that finished inside one clock tick — and
+/// renders as `0s`. Only an absent measurement is blank.
+fn seconds_text(value: Option<u64>) -> String {
+    match value {
+        Some(seconds) => format!("{seconds}s"),
+        None => "—".to_owned(),
+    }
+}
+
+/// A millisecond duration rendered in seconds, to one decimal.
+fn ms_text(value: Option<u64>) -> String {
+    match value {
+        Some(ms) => format!("{:.1}s", ms as f64 / 1000.0),
+        None => "—".to_owned(),
+    }
+}
+
+/// Where every executing cell's binaries came from, and what reaching them
+/// cost.
+///
+/// Two tables, because they answer two questions and neither is a result cell.
+/// The first is the consumer's view — the planned key, realized digest, and
+/// producer the reporting contract requires each executing test cell to
+/// display, beside its own transfer, verification, extraction, and execution
+/// windows. The second is the owner's: what its queue, compile-and-archive,
+/// and upload stages cost, and how it concluded.
+fn render_build_provenance(rollup: &Rollup) -> String {
+    let mut out = String::new();
+
+    let executed: Vec<(&Cell, &CellBuild)> = rollup
+        .cells
+        .iter()
+        .filter_map(|cell| cell.build.as_ref().map(|build| (cell, build)))
+        .collect();
+    if !executed.is_empty() {
+        out.push_str(
+            "### Build provenance\n\nEvery cell here ran a producer's archive and compiled \
+             nothing. Transfer, verification, extraction, and execution are reported \
+             apart, so no setup cost is folded into test time.\n\n\
+             | cell | build | realized digest | producer | download | verify | extract | \
+             execute |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n",
+        );
+        for (cell, build) in executed {
+            let timings = build.timings;
+            out.push_str(&format!(
+                "| `{}` | `{}` | `{}` | {} | {} | {} | {} | {} |\n",
+                cell_text(&cell.key.to_string()),
+                cell_text(&build.key),
+                cell_text(&build.digest),
+                cell_text(&build.producer),
+                seconds_text(timings.map(|entry| entry.download_seconds)),
+                seconds_text(timings.map(|entry| entry.verify_seconds)),
+                ms_text(timings.map(|entry| entry.extract_ms)),
+                seconds_text(timings.map(|entry| entry.execute_seconds)),
+            ));
+        }
+        out.push('\n');
+    }
+
+    if !rollup.builds.is_empty() {
+        out.push_str(
+            "### Build records\n\nOne immutable compile per planned key. A record is \
+             plumbing, never a result cell: it is not baselined, and a cell it blocks \
+             reports that under its own identity above.\n\n\
+             | build | package | producer | result | queue | compile+archive | upload |\n\
+             | --- | --- | --- | --- | --- | --- | --- |\n",
+        );
+        for build in &rollup.builds {
+            out.push_str(&format!(
+                "| `{}` | `{}` | {} | {} | {} | {} | {} |\n",
+                cell_text(&build.key),
+                cell_text(&build.package),
+                cell_text(&build.producer),
+                cell_text(&if build.stage.is_empty() {
+                    build.result.clone()
+                } else {
+                    format!("{} ({})", build.result, build.stage)
+                }),
+                seconds_text(build.stage_seconds.map(|entry| entry.queue_seconds)),
+                ms_text(build.timings.map(|entry| entry.compile_archive_ms)),
+                seconds_text(build.stage_seconds.map(|entry| entry.upload_seconds)),
             ));
         }
         out.push('\n');
@@ -3627,9 +4008,9 @@ fn cmd_rollup(args: &Args) -> Result<i32> {
         .with_context(|| format!("failed to read {}", environments_path.display()))?;
     let environments_doc: EnvironmentsDoc = serde_json::from_str(&environments_text)
         .with_context(|| format!("invalid environments {}", environments_path.display()))?;
-    if environments_doc.schema_version != 1 {
+    if environments_doc.schema_version != ENVIRONMENTS_SCHEMA_VERSION {
         bail!(
-            "environments {} has schema_version {}; expected 1",
+            "environments {} has schema_version {}; expected {ENVIRONMENTS_SCHEMA_VERSION}",
             environments_path.display(),
             environments_doc.schema_version
         );
@@ -3643,6 +4024,7 @@ fn cmd_rollup(args: &Args) -> Result<i32> {
         records.extend(records_from_artifact(&dir)?);
     }
     let statuses = read_producer_statuses(&artifacts)?;
+    let build_statuses = read_build_statuses(&artifacts)?;
 
     let explicit_scope = args.list("scope");
     // The plan names every package it selected, so a run with a plan is never
@@ -3694,6 +4076,7 @@ fn cmd_rollup(args: &Args) -> Result<i32> {
         expected: &expected,
         records: &records,
         statuses: &statuses,
+        builds: &build_statuses,
         expected_tests: &expected_tests,
     });
     cells.extend(status_cells(
@@ -3718,6 +4101,7 @@ fn cmd_rollup(args: &Args) -> Result<i32> {
         accepted_evidence,
         scope_degraded,
         scheduled: Some(scheduled),
+        builds: build_reports(&build_statuses),
         records,
         cells,
     };
@@ -3735,6 +4119,27 @@ fn cmd_rollup(args: &Args) -> Result<i32> {
 
     let blocked = rollup.cells.iter().any(|cell| cell.state.blocks());
     Ok(if blocked { EXIT_BLOCKED } else { 0 })
+}
+
+/// Every owner leg that reported, in planned-key order.
+///
+/// A report here never becomes a cell: the gate a build blocks is already
+/// reported through that cell's own `{package, environment, tier}` identity.
+/// This is the producer half of the timing contract and nothing else.
+fn build_reports(statuses: &BTreeMap<String, BuildStatus>) -> Vec<BuildReport> {
+    statuses
+        .values()
+        .map(|status| BuildReport {
+            key: status.key.clone(),
+            package: status.package.clone(),
+            producer: status.producer.clone(),
+            result: status.result.clone(),
+            stage: status.stage.clone(),
+            digest: status.digest.clone().unwrap_or_default(),
+            stage_seconds: status.stage_seconds,
+            timings: status.timings,
+        })
+        .collect()
 }
 
 /// Apply the `--area` narrowing, refusing a narrowing that selects nothing.
