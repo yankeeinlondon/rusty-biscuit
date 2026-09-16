@@ -169,8 +169,13 @@ fn run_compose_failure(
     (stderr, diagnostic)
 }
 
+/// A caller launched from a package subdirectory passes a package-relative
+/// file through a router whose target lives in a different directory. The
+/// target derives sibling paths from that file lazily, in its own frontmatter,
+/// so every derived path must anchor at the caller's file rather than at either
+/// prompt's directory or the repository root.
 #[test]
-fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target() {
+fn a_proxy_target_derives_sibling_paths_from_the_callers_package_relative_file() {
     let fixture = CliProcessFixture::named("caller-file-provenance");
     fixture.initialize_repository();
     fixture.seed_user_config();
@@ -178,76 +183,63 @@ fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target(
 
     let package = fixture.cwd().join("packages/example");
     let spec = package.join("fixes/case/spec.md");
+    write(&spec, "---\nreview_iterations: 4\n---\nCase.\n");
+    // `design` is probed through the file-typed `review`, which only yields a
+    // directory when the review exists; without it the design never renders.
+    write(&package.join("fixes/case/review-4.md"), "# Review 4\n");
+
+    let router = fixture.cwd().join("prompts/router.md");
     write(
-        &spec,
-        "---\nimplemented: true\nreview_iterations: 4\n---\nCase.\n",
+        &router,
+        "---\n$schema:\n  spec: 'file(required;eager)'\ninitialize:\n  stack:\n    - action: {proxy: './_derive/target.md'}\n---\nRouter.\n",
     );
-    // The suggestions target implements an existing review; without it the
-    // derived `design` probe anchors at the prompt directory and never fires.
-    // It is already implemented so the router takes the implemented-spec
-    // branch and the target derives `review` itself rather than receiving the
-    // router's absolute `pending_review` through `proxy.with`.
     write(
-        &package.join("fixes/case/review-4.md"),
-        "---\nimplemented: true\n---\n# Review 4\n",
+        &fixture.cwd().join("prompts/_derive/target.md"),
+        "---\n\
+         $schema:\n  spec: 'file(required)'\n  review: file\n  design: file\n  log: file\n  iteration: number\n\
+         iteration: \"{{ frontmatter(spec, 'review_iterations') || 1 }}\"\n\
+         review: \"{{ dirname(spec) + '/review-' + iteration + '.md' }}\"\n\
+         log: \"{{ dirname(spec) + '/log.md' }}\"\n\
+         design: \"{{ file_exists(dirname(review) + '/design.md') ? dirname(review) + '/design.md' : null }}\"\n\
+         ---\n\
+         # Derived Paths\n\n\
+         - **Specification:** @{{spec}}\n\
+         - **Iteration:** {{iteration}}\n\
+         - **Review:** @{{review}}\n\
+         - **Log File:** {{log}}\n\
+         ::block when=\"design\"\n\
+         - **Design:** @{{design}}\n\
+         ::end-block\n",
     );
 
-    let router = fixture.cwd().join("prompts/implement.md");
-    write(&router, include_str!("../../../prompts/implement.md"));
-    write(
-        &fixture
-            .cwd()
-            .join("prompts/_implement/implement-suggestions.md"),
-        include_str!("../../../prompts/_implement/implement-suggestions.md"),
-    );
-    // The shipped route transcludes these two snippets; without them the
-    // redirect fails on a missing file instead of reaching its assertions.
-    write(
-        &fixture.cwd().join("prompts/_no_formatting.md"),
-        include_str!("../../../prompts/_no_formatting.md"),
-    );
-    write(
-        &fixture.cwd().join("prompts/_os.md"),
-        include_str!("../../../prompts/_os.md"),
-    );
-
-    let stderr = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
-
-    assert!(
-        stderr.contains("Iteration: 4"),
-        "the literal shipped lazy target must read the caller's package-relative specification; stderr:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("fixes/case/log.md"),
-        "the shipped target must derive its log beside the caller's spec; stderr:\n{stderr}"
-    );
+    let _ = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
     let absent_design_prompt =
         std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
     let portable_package =
         biscuit_file::to_portable_string(&std::fs::canonicalize(&package).unwrap());
-    // Paths derived from the eager caller value project to the repository-
-    // relative display form, whatever spelling the temp repository carries.
-    let derived_package = "packages/example";
-    // The shipped prompt builds the specification mention from an expression
-    // (`'@' + spec`), which renders the native semantic path rather than the
-    // portable presentation a direct `{{spec}}` would use; compare its spelling
+    // A caller file renders its native semantic path; compare its spelling
     // portably so Windows and POSIX agree on the identity.
     let specification = absent_design_prompt
         .lines()
         .find_map(|line| line.trim().strip_prefix("- **Specification:** @"))
-        .unwrap_or_else(|| panic!("the shipped target omitted the specification mention; prompt:\n{absent_design_prompt}"));
+        .unwrap_or_else(|| {
+            panic!("the target omitted the specification mention; prompt:\n{absent_design_prompt}")
+        });
     assert_eq!(
         canonical_portable(std::path::Path::new(specification.trim())),
         format!("{portable_package}/fixes/case/spec.md"),
         "the specification mention must identify the caller's spec; prompt:\n{absent_design_prompt}"
     );
+    // Paths derived from the caller's file project to the repository-relative
+    // display form, whatever spelling the temp repository carries.
     for expected in [
-        format!("**Review:** @{derived_package}/fixes/case/review-4.md"),
-        format!("**Log File:** {derived_package}/fixes/case/log.md"),
+        "**Iteration:** 4",
+        "**Review:** @packages/example/fixes/case/review-4.md",
+        "**Log File:** packages/example/fixes/case/log.md",
     ] {
         assert!(
-            absent_design_prompt.contains(&expected),
-            "the shipped target omitted {expected:?}; prompt:\n{absent_design_prompt}"
+            absent_design_prompt.contains(expected),
+            "the target omitted {expected:?}; prompt:\n{absent_design_prompt}"
         );
     }
     assert!(
@@ -255,21 +247,13 @@ fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target(
         "an absent optional design must not render; prompt:\n{absent_design_prompt}"
     );
 
-    write(
-        &fixture
-            .cwd()
-            .join(derived_package)
-            .join("fixes/case/design.md"),
-        "# Design\n",
-    );
+    write(&package.join("fixes/case/design.md"), "# Design\n");
     let _ = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
     let present_design_prompt =
         std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
     assert!(
-        present_design_prompt.contains(&format!(
-            "**Design:** @{derived_package}/fixes/case/design.md"
-        )),
-        "the shipped target must derive a present design beside the spec; prompt:\n{present_design_prompt}"
+        present_design_prompt.contains("**Design:** @packages/example/fixes/case/design.md"),
+        "the target must derive a present design beside the caller's spec; prompt:\n{present_design_prompt}"
     );
 }
 

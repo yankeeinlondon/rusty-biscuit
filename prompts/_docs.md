@@ -31,12 +31,12 @@ There are five _sources_ of knowledge that Agents can draw deep knowledge from (
     - **Claudine** composed prompts allow for the system prompt to be replaced or appended to.
     - this is done by adding a `system-prompt.md` to the root of the repo (or to the root of a package or package-area in a monorepo)
 
-    ::block when="file_exists(^system-prompt.md)"
+    ::block when="file_exists('^system-prompt.md')"
     - this repo DOES take advantage of this
 
     The system prompt is an "automatic" ... when an agent starts they start with this prompt. This means it's very important that it never contradicts other forms of evidence nor is it overly specific about matters which 
     ::end-block
-    ::block when="!file_exists(^system-prompt.md)"
+    ::block when="!file_exists('^system-prompt.md')"
     - this repo DOES NOT take advantage of this feature
     ::end-block
 
