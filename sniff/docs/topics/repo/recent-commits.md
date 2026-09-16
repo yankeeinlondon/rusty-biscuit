@@ -94,6 +94,7 @@ $schema:
     hash: string(required;eager) -> the full hexadecimal git hash for this commit
     remote: boolean -> whether or not the commit has been pushed upstream to a cloud host
     heading: string(required;eager) ->  the first sentence of the commit (terminates on `.` character or `\n`).
+    description: string(required;eager) -> the descriptive content for the commit after the first sentence (see _heading_) and before the bullet-points.
     bullet_points: string[](required;eager) -> the bullet points that detail out the commit message
     file_types:
         source_code: boolean(required;eager) -> boolean flag indicating whether any source code was touched in this commit
@@ -117,6 +118,97 @@ types:
 
 ## Library Callers
 
+The `sniff` library is the primary interface for collecting recent-commit reports. Rust callers should be able to select commits, apply filters, and obtain the payload described above without invoking the CLI or initializing a terminal. The CLI uses the same library contract.
+
+As a simple example, we can collect the last 10 commits and report on a variety of ways:
+
+```rust,ignore
+use sniff::filesystem::git::{
+    GitRepo, RecentCommits, RecentCommitsOptions, ReportVerbosity
+};
+// connect to a git repo
+let repo = GitRepo::discover(".")?;
+// get a collection of the last 10 commits
+let commits = RecentCommits::default().collect(&repo)?;
+// deserialize commits to JSON array
+let json = commits.to_json();
+// define the reporting options you want
+let options = RecentCommitsOptions::default().verbosity(ReportVerbosity::Verbose);
+// and then use those options to report in two 
+// different output styles
+let prose = commits.to_prose(&options)?;
+let plain = commits.to_plain(&options)?;
+```
+
+The `RecentCommits` struct allows us to collect commits from a git repo. We can immediately deserialize these commits to JSON using the built in `.to_json()` method but we also have the ability to produce string based _reports_ with varying verbosity, and style characteristics.
+
+### Selection and Filters
+
+In our first example we used `RecentCommitsOptions` to set the reporting verbosity but there is a lot more we can do with options to choose what our collection actually contains:
+
+```rust,ignore
+let options = RecentCommitsOptions::default()
+    .duration(Duration::days(5))
+    .operation("fix")
+    .verbosity(RecentCommitsVerbosity::Compact);
+let commits = RecentCommits::using(&options)?;
+```
+
+In this example we have assigned `commits` to a collection of commits but instead of just taking the last 10 commits into the collection we have instead asked for all commits over the last 5 days which are conventional commits and use the "fix" operation to describe themselves.
+
+All selection variants are made available through the builder pattern and because only _one_ selection variant is allowed at a time we use Rust's **typestate** pattern to only allow for one selection (any more will result in compile time error).
+
+The selection builders are:
+
+- `duration(dur: chrono::Duration)`, 
+- `named_date(name: NamedDate)`,
+- `since(date: chrono::NaiveDate)`, 
+- `hash<T: Into<String>(hash: T)`, 
+- `count(count: int8)`
+
+> Attempts have been made to push as many invalid inputs for selection to being compile time errors but the real world is messy and some selection types can still generate runtime errors.
+
+All the filters described in this documentation are available to be set in `RecentCommitsOptions` too; including:
+
+- `package(pkg)`, `package_area(area)`
+- `operation(op)`, `scope(scope)`
+- `author(author)`, `branch(branch)`
+- `has_source_code()`, `has_documentation()`, ...
+
+Unlike selection criteria, filtering operations are _additive_ and so all filters will be combined with a logical AND operation to determine which commits are added to the collection.
+
+> **Note**: selection normally establishes the candidate commits before filtering. With count selection, filtering happens during history traversal, which continues until the requested number of matching commits has been collected or the available history is exhausted.
+
+### Library Outputs
+
+The `RecentCommits` struct provides both raw deserialization of it's data to JSON as well as a few text reporting options:
+
+- `to_json()` - deserializes to a JSON array
+- `to_plain()` - provides a pure text (no escape sequences, no Markdown formatting hints, etc.)
+
+The library may provide shared, output-independent report composition. Prose and plain text are useful library outputs because callers can save them to files, embed them in other documents, or pass them to a renderer.
+
+| Responsibility | Owner |
+|----------------|-------|
+| Collect and enrich commit records; apply selection and filters | Library |
+| Expose the complete serializable payload | Library |
+| Compose Compact, Normal, and Verbose Prose or plain-text reports | Library |
+| Parse CLI arguments into the library request and report options | CLI |
+| Render Prose as terminal escapes, including terminal hyperlinks | CLI / terminal renderer |
+| Render for a browser | Consuming application / browser renderer |
+| Write stdout/stderr and choose process exit codes | CLI |
+
+Report options control verbosity and whether authors appear in text. Author display is independent of author filtering. Date/time presentation needs an explicit timezone policy shared by all text projections. Prose can express semantic styling and links, but must not contain terminal escape sequences or browser-specific markup. Plain text contains neither formatting syntax nor links.
+
+### Empty Results and Errors
+
+- A valid query with no matching commits returns a successful report with an empty commit list. 
+- Invalid selection, an unknown requested package or area, repository access failures, and failed required enrichment return typed library errors; callers must not have to parse CLI messages. 
+- Optional enrichment needs a documented unavailable state rather than silently asserting a negative fact.
+
+### Library Users
+
+The library is a resource to any programmatic caller who wants to use it and it is also the foundation of how the Sniff CLI provisions it's data as well.
 
 
 ## CLI Callers
