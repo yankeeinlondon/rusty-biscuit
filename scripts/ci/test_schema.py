@@ -36,25 +36,7 @@ def plan(**overrides: object) -> dict:
                 "packages": ["claudine"],
             }
         ],
-        "packages": [
-            {
-                "package": "claudine",
-                "area": "claudine",
-                "selection_reason": "source change in claudine/lib/src/lib.rs",
-                "gates": ["lint", "check", "L1"],
-                "targets": ["lib", "test"],
-                "tiers": ["L1"],
-                "test_args": "",
-                "check_args": "-p claudine",
-                "l2_backends": [],
-                "runner_tools": [],
-                "archive_includes": [],
-                "sidecars": [],
-                "companion_suites": [],
-                "l1_include_slow": False,
-                "native": {},
-            }
-        ],
+        "packages": [package()],
         "source_packages": ["claudine"],
         "reverse_dependencies": ["claudine-cli"],
         "environments": [
@@ -85,6 +67,28 @@ def plan(**overrides: object) -> dict:
     if document.get("builds") is None:
         document["builds"] = builds_for(document["cells"])
     return document
+
+
+def package(**overrides: object) -> dict:
+    record = {
+        "package": "claudine",
+        "area": "claudine",
+        "selection_reason": "source change in claudine/lib/src/lib.rs",
+        "gates": ["lint", "check", "L1"],
+        "targets": ["lib", "test"],
+        "tiers": ["L1"],
+        "test_args": "",
+        "check_args": "-p claudine",
+        "l2_backends": [],
+        "runner_tools": [],
+        "archive_includes": [],
+        "sidecars": [],
+        "companion_suites": [],
+        "l1_include_slow": False,
+        "native": {},
+    }
+    record.update(overrides)
+    return record
 
 
 def cell(**overrides: object) -> dict:
@@ -305,6 +309,162 @@ class ResolvedPlanValidationTests(unittest.TestCase):
             problems,
         )
 
+    def test_an_area_record_that_is_not_an_object_is_refused(self):
+        # A bare name where a record belongs is the shape a hand-edited plan
+        # drifts into; every field check downstream would read it as a string.
+        self.assertIn(
+            "malformed-receipt: area record must be an object",
+            schema.validate_resolved_plan(plan(areas=["claudine"])),
+        )
+
+    def test_a_base_or_head_that_is_not_a_full_object_id_is_refused(self):
+        # Both ends are checked, because evidence reuse compares the pair and
+        # an abbreviated revision on either side would compare unequal.
+        for field in ("base", "head"):
+            with self.subTest(field=field):
+                self.assertIn(
+                    f"malformed-receipt: resolved plan {field} is not a full Git "
+                    "object ID: 'abc1234'",
+                    schema.validate_resolved_plan(plan(**{field: "abc1234"})),
+                )
+
+    def test_source_packages_must_be_a_list_of_strings(self):
+        self.assertIn(
+            "malformed-receipt: resolved plan source_packages must be a list of strings",
+            schema.validate_resolved_plan(plan(source_packages="claudine")),
+        )
+
+    def test_an_environment_table_without_named_records_is_refused(self):
+        # The table is what the fan-out reads `runs-on` from; a record with no
+        # name would schedule a job nothing could attribute to a cell.
+        self.assertIn(
+            "malformed-receipt: resolved plan environments must be a list of named records",
+            schema.validate_resolved_plan(plan(environments=[{"runner": "ubuntu-latest"}])),
+        )
+
+    def test_a_negative_job_estimate_is_refused(self):
+        self.assertIn(
+            "malformed-receipt: resolved plan job_estimate must be a non-negative integer",
+            schema.validate_resolved_plan(plan(job_estimate=-1)),
+        )
+
+    def test_a_reverse_dependency_that_also_holds_a_package_record_is_refused(self):
+        # AC1: naming a dependent is reporting, never selecting.
+        self.assertIn(
+            "unknown-package: 'claudine' is reported as an unchanged reverse "
+            "dependency and must not also hold a package record",
+            schema.validate_resolved_plan(plan(reverse_dependencies=["claudine"])),
+        )
+
+    def test_a_seam_dependent_that_also_holds_a_package_record_is_refused(self):
+        # The seam compiles a dependent inside the changed package's check cell
+        # precisely because the plan does not select it on its own.
+        document = plan(
+            packages=[
+                package(
+                    dependent_seam={
+                        "dependents": ["claudine-cli"],
+                        "check_args": "-p claudine-cli",
+                        "native": [],
+                    }
+                ),
+                package(package="claudine-cli"),
+            ],
+            reverse_dependencies=[],
+        )
+        self.assertIn(
+            "unknown-package: 'claudine-cli' is compiled as a dependent of 'claudine' "
+            "and must not also hold a package record",
+            schema.validate_resolved_plan(document),
+        )
+
+    def test_a_package_naming_an_unselected_area_is_refused(self):
+        self.assertIn(
+            "unknown-package: package 'claudine' names area 'playa', which the plan "
+            "does not select",
+            schema.validate_resolved_plan(plan(packages=[package(area="playa")])),
+        )
+
+    def test_a_non_boolean_l1_include_slow_is_refused(self):
+        # It is projected into the legacy matrix verbatim, so a truthy string
+        # would reach the test job as the enabled policy.
+        self.assertIn(
+            "malformed-receipt: package claudine l1_include_slow must be a boolean",
+            schema.validate_resolved_plan(plan(packages=[package(l1_include_slow="yes")])),
+        )
+
+    def test_an_exclusion_on_a_package_that_gates_something_is_refused(self):
+        document = plan(
+            packages=[
+                package(
+                    exclusion={
+                        "class": "unsupported",
+                        "owner": "@o",
+                        "reason": "no backend",
+                        "expiry": "2027-01-31",
+                    }
+                )
+            ]
+        )
+        self.assertIn(
+            "malformed-receipt: package claudine carries an exclusion exactly when it "
+            "gates nothing",
+            schema.validate_resolved_plan(document),
+        )
+
+    def test_a_dependent_seam_that_is_not_an_object_is_refused(self):
+        self.assertIn(
+            "malformed-receipt: package claudine dependent_seam must be an object",
+            schema.validate_resolved_plan(
+                plan(packages=[package(dependent_seam="claudine-cli")])
+            ),
+        )
+
+    def test_a_dependent_seam_with_no_dependent_is_refused(self):
+        document = plan(
+            packages=[
+                package(
+                    dependent_seam={
+                        "dependents": [],
+                        "check_args": "-p claudine-cli",
+                        "native": [],
+                    }
+                )
+            ]
+        )
+        self.assertIn(
+            "malformed-receipt: package claudine dependent_seam names no dependent; a "
+            "record with none to compile carries no seam at all",
+            schema.validate_resolved_plan(document),
+        )
+
+    def test_a_dependent_seam_without_check_args_is_refused(self):
+        # The seam exists so the check cell compiles the dependents explicitly;
+        # with no arguments it would compile the changed package a second time.
+        document = plan(
+            packages=[
+                package(
+                    dependent_seam={
+                        "dependents": ["claudine-cli"],
+                        "check_args": "",
+                        "native": [],
+                    }
+                )
+            ]
+        )
+        self.assertIn(
+            "malformed-receipt: package claudine dependent_seam check_args must be a "
+            "non-empty string",
+            schema.validate_resolved_plan(document),
+        )
+
+    def test_a_cell_carrying_dependents_outside_check_is_refused(self):
+        self.assertIn(
+            "malformed-receipt: cell claudine/ubuntu-latest/L1 carries dependents but "
+            "only a check cell compiles them",
+            schema.validate_resolved_plan(plan(cells=[cell(dependents=["claudine-cli"])])),
+        )
+
     def test_area_must_be_derived_from_the_package_record(self):
         problems = schema.validate_resolved_plan(plan(cells=[cell(area="playa")]))
         self.assertTrue(
@@ -313,9 +473,12 @@ class ResolvedPlanValidationTests(unittest.TestCase):
         )
 
     def test_every_cell_carries_a_package_identity(self):
-        problems = schema.validate_resolved_plan(plan(cells=[cell(package="ghost")]))
-        self.assertTrue(
-            any(problem.startswith("unknown-package:") for problem in problems), problems
+        # The build the cell demands is unselected for the same reason, and it
+        # answers to the same code, so only the exact text pins this rule.
+        self.assertIn(
+            "unknown-package: cell ghost/ubuntu-latest/L1 has no package record; "
+            "package is the stored identity and every cell must carry one",
+            schema.validate_resolved_plan(plan(cells=[cell(package="ghost")])),
         )
 
     def test_every_area_package_and_cell_states_a_selection_reason(self):
@@ -386,6 +549,57 @@ class ResolvedPlanValidationTests(unittest.TestCase):
         )
         self.assertTrue(
             any("prohibited yet scheduled to execute" in p for p in problems), problems
+        )
+
+    def test_a_non_boolean_reusable_is_refused(self):
+        # Reusability is decided once at resolution time and read later without
+        # policy, so a string here would be read as permission to reuse.
+        self.assertIn(
+            "malformed-receipt: cell claudine/ubuntu-latest/L1 reusable must be a boolean",
+            schema.validate_resolved_plan(plan(cells=[cell(reusable="yes")])),
+        )
+
+    def test_a_reused_cell_that_no_evidence_may_satisfy_is_refused(self):
+        document = plan(
+            cells=[
+                cell(
+                    execution="reuse",
+                    origin="local",
+                    state="reused",
+                    reusable=False,
+                    evidence={"ref": "refs/notes/ci-local/ubuntu-latest"},
+                )
+            ]
+        )
+        self.assertIn(
+            "malformed-receipt: cell claudine/ubuntu-latest/L1 is reused although no "
+            "evidence may satisfy it",
+            schema.validate_resolved_plan(document),
+        )
+
+    def test_an_executing_cell_with_a_non_ci_origin_is_refused(self):
+        # The mirror of the reuse rule: what CI runs, CI owns.
+        self.assertIn(
+            "malformed-receipt: cell claudine/ubuntu-latest/L1 will execute but its "
+            "origin is 'local'",
+            schema.validate_resolved_plan(plan(cells=[cell(origin="local")])),
+        )
+
+    def test_a_prohibited_cell_without_a_constraint_is_refused(self):
+        document = plan(cells=[cell(execution="omit", origin="none", state="prohibited")])
+        self.assertIn(
+            "malformed-receipt: cell claudine/ubuntu-latest/L1 is prohibited but names "
+            "no constraint",
+            schema.validate_resolved_plan(document),
+        )
+
+    def test_a_reused_state_without_a_reuse_execution_is_refused(self):
+        # State and execution are separate axes, so nothing but this rule keeps
+        # a cell from reporting reuse while it is scheduled to run.
+        self.assertIn(
+            "malformed-receipt: cell claudine/ubuntu-latest/L1 is in state 'reused' but "
+            "its execution is 'execute'",
+            schema.validate_resolved_plan(plan(cells=[cell(state="reused")])),
         )
 
     def test_unknown_environment_and_gate_use_their_own_codes(self):
@@ -518,15 +732,22 @@ class BuildRecordValidationTests(unittest.TestCase):
         problems = schema.validate_resolved_plan(document)
         self.assertTrue(any("has two owners" in p for p in problems), problems)
 
-    def test_an_artifact_name_collision_is_refused(self):
-        # Two records that agree on `{package, producer, key}` except for the
-        # key would still collide if either spelled its artifact by hand.
+    def test_an_artifact_that_copies_a_sibling_records_name_is_refused(self):
+        # The two artifact cases deliberately reach one rule from opposite
+        # sides: here the name is well formed but belongs to another key, and
+        # in the test below it is not derived from `{package, producer, key}`
+        # at all. A hand-spelled name is what makes both reachable.
         document = plan(
             cells=[cell()],
             builds=[build(), build(key="fedcba9876543210", artifact=build()["artifact"])],
         )
         problems = schema.validate_resolved_plan(document)
-        self.assertTrue(any("artifact is" in p for p in problems), problems)
+        self.assertIn(
+            "malformed-receipt: build claudine/ubuntu-latest/fedcba9876543210 artifact "
+            f"is 'build-claudine-ubuntu-latest-{BUILD_KEY}', expected "
+            "'build-claudine-ubuntu-latest-fedcba9876543210'",
+            problems,
+        )
 
     def test_an_artifact_that_is_not_package_keyed_is_refused(self):
         document = plan(builds=[build(artifact="build-claudine-L1")])
@@ -648,6 +869,25 @@ class BuildRecordValidationTests(unittest.TestCase):
             any(p.startswith("unknown-package:") for p in problems), problems
         )
 
+    def test_unsorted_compatible_environments_are_refused(self):
+        # The list is part of what a reader compares between plan and manifest,
+        # so one order is one contract.
+        document = plan(
+            builds=[build(compatible_environments=["wsl2-ubuntu", "ubuntu-latest"])]
+        )
+        self.assertIn(
+            f"malformed-receipt: build claudine/ubuntu-latest/{BUILD_KEY} "
+            "compatible_environments must be sorted and free of duplicates",
+            schema.validate_resolved_plan(document),
+        )
+
+    def test_a_build_without_a_compatibility_reason_is_refused(self):
+        self.assertIn(
+            f"malformed-receipt: build claudine/ubuntu-latest/{BUILD_KEY} has no "
+            "compatibility reason",
+            schema.validate_resolved_plan(plan(builds=[build(compatibility_reason="")])),
+        )
+
     def test_a_producer_outside_the_plans_environment_table_is_refused(self):
         document = plan(
             builds=[
@@ -692,6 +932,26 @@ class BuildRecordValidationTests(unittest.TestCase):
         document = plan(builds=[build(identity=build_identity(package="playa"))])
         problems = schema.validate_resolved_plan(document)
         self.assertTrue(any("identity names package 'playa'" in p for p in problems), problems)
+
+    def test_an_empty_identity_field_is_refused(self):
+        # Present-but-empty is the drift `_keys` cannot catch: the field is
+        # there, so the key is computed over a configuration nobody declared.
+        document = plan(builds=[build(identity=build_identity(profile=""))])
+        self.assertIn(
+            f"malformed-receipt: build claudine/ubuntu-latest/{BUILD_KEY} identity "
+            "profile must be a non-empty string",
+            schema.validate_resolved_plan(document),
+        )
+
+    def test_identity_rustflags_and_features_must_be_strings(self):
+        # These two are the fields an absent value is spelled `""` for, so
+        # `None` would hash differently from the empty configuration it means.
+        document = plan(builds=[build(identity=build_identity(rustflags=None))])
+        self.assertIn(
+            f"malformed-receipt: build claudine/ubuntu-latest/{BUILD_KEY} identity "
+            "rustflags and features must be strings; an absent value is the empty string",
+            schema.validate_resolved_plan(document),
+        )
 
     def test_identity_lists_must_be_sorted_so_one_configuration_is_one_key(self):
         document = plan(

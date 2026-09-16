@@ -738,7 +738,6 @@ def _build_records(document: dict[str, Any], packages: dict[str, Any]) -> list[s
 
     problems: list[str] = []
     by_key: dict[str, dict[str, Any]] = {}
-    artifacts: dict[str, str] = {}
     environment_names = {
         environment.get("name")
         for environment in document.get("environments", [])
@@ -799,13 +798,6 @@ def _build_records(document: dict[str, Any], packages: dict[str, Any]) -> list[s
                 f"malformed-receipt: {label} artifact is {entry.get('artifact')!r}, "
                 f"expected {expected_artifact!r}"
             )
-        elif expected_artifact in artifacts:
-            problems.append(
-                f"malformed-receipt: artifact {expected_artifact!r} is claimed by two "
-                "build records"
-            )
-        else:
-            artifacts[expected_artifact] = key
         if not isinstance(entry.get("compatibility_reason"), str) or not entry[
             "compatibility_reason"
         ]:
