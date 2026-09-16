@@ -56,8 +56,9 @@ SCOPE_NOTES_REF = f"{NOTES_PREFIX}/scope"
 assert "scope" not in ENVIRONMENTS
 
 #: Tiers the JUnit staging manifest records, and therefore the gates a local
-#: run can publish a measured outcome for. `lint` and `check` produce no report
-#: and are never reusable from a local receipt.
+#: run can publish a measured outcome for. `lint` and `check` produce no report;
+#: a `check` cell is satisfied only through its package's L1 receipt
+#: (`affected_scope.check_evidence`).
 RECORDABLE_GATES = ("L1", "L2", "browser")
 
 
