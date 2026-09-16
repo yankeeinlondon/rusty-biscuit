@@ -58,7 +58,7 @@ start:
                                   action:
                                       - stderr: |-
 
-                                        Ok, no action taken.
+                                          Ok, no action taken.
                                       - stop
           - else:
               - error: |-
