@@ -76,6 +76,6 @@ fn notification_recipes_keep_their_background_cli_contract() {
         .expect("package area should be nested in the workspace");
     let notify = fs::read_to_string(root.join("just/notify.just"))
         .expect("notification recipes should be readable");
-    assert!(notify.contains("so-you-say \"{{args}}\" --background"));
-    assert!(notify.contains("playa effect \"{{effect}}\" --background"));
+    assert!(notify.contains("so-you-say \"{{ args }}\" --background"));
+    assert!(notify.contains("playa effect \"{{ effect }}\" --background"));
 }
