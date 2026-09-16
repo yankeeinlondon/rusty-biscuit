@@ -289,8 +289,17 @@ belong here.
   explicitly: one invocation with all paths positional, or
   `--pathspec-from-file`, never a per-path loop.
 - Recovery from N agent-authored stacked commits: `git update-ref HEAD <new>
-  <old>` (ref, new, old) is a CAS soft-reset; index and working tree are kept
-  and the paths reappear staged for a single recommit.
+    <old>` (ref, new, old) is a CAS soft-reset; index and working tree are kept
+    and the paths reappear staged for a single recommit.
+- Multi-agent batch + `update-ref` chain loss. When agents A and B commit in
+    parallel (B on top of A) and you `update-ref` from B back to A's parent to
+    recover from a bad B, A is severed from HEAD too — A is still reachable
+    from the reflog and from B, but `git log` no longer does. Capture A's SHA
+    before the `update-ref`, fix B's commit (now first), then `git
+    cherry-pick <A-sha>` to restore A on top of the corrected B. Verify the
+    final chain with `git verify-commit` on every recovered commit; the
+    cherry-picked A re-signs with the current author/key, so its hash differs
+    from the original.
 - Active-file race: a path the developer is editing drifts between `add`,
   `status`, and `commit`; re-dispatching never catches a stable snapshot.
   Detect via mtime / repeated `MM`, then commit it directly from the
