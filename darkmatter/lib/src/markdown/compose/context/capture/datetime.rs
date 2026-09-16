@@ -247,7 +247,8 @@ pub(super) fn populate_datetime_aliases(values: &mut Map<String, Value>) {
 ///
 /// List-valued `ctx.*` variables are captured as first-class arrays (spec D6);
 /// callers pick a rendering with the D4 formatting functions (`as_csv`,
-/// `as_unordered_list`, …). A bare `{{ ctx.some_list }}` renders line-separated.
+/// `as_unordered_list`, …). A bare `{{ ctx.some_list }}` embedded in text
+/// renders compact JSON.
 pub(super) fn string_array(items: Vec<String>) -> Value {
     Value::Array(items.into_iter().map(Value::String).collect())
 }

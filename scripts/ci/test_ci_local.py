@@ -1634,7 +1634,8 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertEqual(1, len(run.planner_calls), run.planner_calls)
         self.assertIn("--apply-to", run.planner_calls[0])
         self.assertEqual("consulted: macos-latest; matched: macos-latest", run.summary_row("validation environments"))
-        self.assertEqual("1: biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
+        # The check cell rides on the same L1 pass (`check_evidence`).
+        self.assertEqual("2: biscuit-hash/macos-latest/check, biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
         self.assertEqual("none", run.summary_row("cells retained (evidence incomplete or rejected)"))
 
     # -- the summary's evidence provenance (2026-09-10 spec R9, AC15) --------
@@ -1673,7 +1674,8 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertEqual({("macos-latest", "pass")}, reused)
         self.assertEqual("consulted: macos-latest, ubuntu-latest; matched: macos-latest",
                          run.summary_row("validation environments"))
-        self.assertEqual("1: biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
+        # The check cell rides on the same L1 pass (`check_evidence`).
+        self.assertEqual("2: biscuit-hash/macos-latest/check, biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
         self.assertEqual("1 rejection(s): failed-cell (1)", run.summary_row("cells retained (evidence incomplete or rejected)"))
         self.assertEqual([], run.rustup_calls)
 

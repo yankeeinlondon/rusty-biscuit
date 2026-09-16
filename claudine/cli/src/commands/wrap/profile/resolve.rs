@@ -32,8 +32,8 @@ pub(crate) enum ModelSource {
     CliSwitch(String),
     /// One of the provider's catalog `model_env_vars`.
     ProviderEnv { var: &'static str, model: String },
-    /// The provider's own configured default; nothing is pushed on argv
-    /// because the provider reads it itself.
+    /// The provider's own configured default, read by
+    /// [`WrapperProfile::configured_default_model`].
     ConfigDefault(ConfiguredModel),
 }
 

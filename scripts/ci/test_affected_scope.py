@@ -2379,9 +2379,7 @@ class CheckCellTests(unittest.TestCase):
         )
         self.assertEqual("-p a", record["check_args"])
 
-    def test_a_reused_macos_l1_leaves_the_macos_check_executing(self) -> None:
-        # A receipt records L1, L2, and browser only, so neither a per-cell nor
-        # a whole-environment acceptance can satisfy a check cell.
+    def test_a_reused_macos_l1_reuses_the_macos_check_and_no_other(self) -> None:
         evidence = {"origin": "local", "evidence": "refs/notes/ci-local/macos-latest"}
         cells = package_cells(
             self.ARGUMENTS,
@@ -2389,11 +2387,50 @@ class CheckCellTests(unittest.TestCase):
             ["lib", "example"],
             environments_for_tests(),
             {("a", "macos-latest", "L1"): evidence},
+        )
+        by_key = {(cell["environment"], cell["gate"]): cell for cell in cells}
+        self.assertEqual("reuse", by_key[("macos-latest", "L1")]["execution"])
+        check = by_key[("macos-latest", "check")]
+        self.assertEqual("reuse", check["execution"])
+        self.assertEqual("local", check["origin"])
+        self.assertEqual("L1", check["evidence"]["covered_by"])
+        self.assertEqual("refs/notes/ci-local/macos-latest", check["evidence"]["evidence"])
+        self.assertNotIn("counts", check["evidence"], "test counts are not a check measurement")
+        self.assertEqual("execute", by_key[("ubuntu-latest", "check")]["execution"])
+        self.assertEqual("execute", by_key[("windows-latest", "check")]["execution"])
+
+    def test_a_whole_environment_acceptance_does_not_satisfy_a_check(self) -> None:
+        # A version-1 note proves no particular package was built.
+        evidence = {"origin": "local", "evidence": "refs/notes/ci-local/macos-latest"}
+        cells = package_cells(
+            self.ARGUMENTS,
+            "a",
+            ["lib", "example"],
+            environments_for_tests(),
+            {},
             accepted_environments={"macos-latest": evidence},
         )
         states = {(cell["environment"], cell["gate"]): cell["execution"] for cell in cells}
         self.assertEqual("reuse", states[("macos-latest", "L1")])
         self.assertEqual("execute", states[("macos-latest", "check")])
+
+    def test_a_check_that_compiles_dependents_is_never_reused(self) -> None:
+        evidence = {"origin": "local", "evidence": "refs/notes/ci-local/ubuntu-latest"}
+        cells = package_cells(
+            self.ARGUMENTS,
+            "a",
+            ["lib", "example"],
+            environments_for_tests(),
+            {("a", "ubuntu-latest", "L1"): evidence},
+            dependents=["b"],
+        )
+        check = next(
+            cell for cell in cells
+            if cell["environment"] == "ubuntu-latest" and cell["gate"] == "check"
+        )
+        self.assertFalse(check["reusable"])
+        self.assertEqual("execute", check["execution"])
+        self.assertEqual(["b"], check["dependents"])
 
     def test_a_prohibited_environment_turns_its_check_cell_prohibited(self) -> None:
         checks = self.check_cells(
@@ -2829,7 +2866,7 @@ class DependentSeamFixtureTests(unittest.TestCase):
 class ApplyFixture(unittest.TestCase):
     """A workspace holding every evidence-eligibility case, plus evidence for each.
 
-    A `check` cell (never reusable), a companion-suite L1 on the Node host
+    A `check` cell satisfied only by its package's L1 pass, a companion-suite L1 on the Node host
     (never reusable), a governed gap (never reusable), a prohibited cell that
     evidence satisfies, and one that nothing satisfies.
     """
@@ -2893,7 +2930,8 @@ class ApplyFixture(unittest.TestCase):
              "origin": "local", "outcome": "pass", "evidence": {"ref": "refs/notes/ci-local/macos-latest"}},
             {"package": "alpha-core", "environment": "wsl2-ubuntu", "gate": "L1",
              "origin": "prior-local", "outcome": "pass", "evidence": {"ref": "refs/notes/ci-local/wsl2-ubuntu"}},
-            # Never reusable, whatever a receipt claims:
+            # Never accepted as themselves, whatever a receipt claims (a check
+            # is satisfied only through its package's L1 pass):
             {"package": "alpha-core", "environment": "macos-latest", "gate": "check", "origin": "local"},
             {"package": "web-server", "environment": "ubuntu-latest", "gate": "L1", "origin": "local"},
             {"package": "alpha-core", "environment": "windows-latest", "gate": "L2", "origin": "local"},
@@ -2946,14 +2984,16 @@ class ApplyAcceptedCellsTests(ApplyFixture):
         self.assertEqual(("reuse", "reused"), states["alpha-core/macos-latest/L1"])
         self.assertEqual(("execute", "pending"), states["web-server/macos-latest/L1"])
         self.assertEqual(("reuse", "reused"), states["alpha-core/wsl2-ubuntu/L1"], "evidence satisfies the prohibition")
-        self.assertEqual(("execute", "pending"), states["alpha-core/macos-latest/check"])
+        self.assertEqual(("reuse", "reused"), states["alpha-core/macos-latest/check"], "the host's L1 pass covers it")
+        self.assertEqual(("execute", "pending"), states["alpha-core/windows-latest/check"])
         self.assertEqual(("execute", "pending"), states["web-server/ubuntu-latest/L1"], "companion host")
         self.assertEqual(("omit", "accepted-gap"), states["alpha-core/windows-latest/L2"])
         self.assertEqual(("omit", "accepted-gap"), states["alpha-core/wsl2-ubuntu/L2"])
         self.assertEqual(("omit", "prohibited"), states["web-server/wsl2-ubuntu/L1"], "no evidence, still prohibited")
         self.assertEqual(["web-server/wsl2-ubuntu/L1"], applied["prohibited_cells"])
         self.assertEqual(self.rejections, applied["evidence_rejections"])
-        self.assertEqual(2, len(applied["accepted_evidence"]))
+        # Two L1 passes, plus the macOS check that rides on one of them.
+        self.assertEqual(3, len(applied["accepted_evidence"]))
         self.assertNotIn("prohibition", next(
             cell for cell in applied["cells"]  # type: ignore[union-attr]
             if cell["environment"] == "wsl2-ubuntu" and cell["gate"] == "L1"
@@ -3001,7 +3041,7 @@ class ApplyAcceptedCellsTests(ApplyFixture):
         projection = legacy_scope_document(plan)
         matrix = {entry["package"]: entry for entry in projection["matrix"]}
         self.assertNotIn("macos-latest", matrix["alpha-core"]["native_environments"])
-        self.assertEqual(["ubuntu-latest", "windows-latest", "macos-latest"], matrix["alpha-core"]["check_os"])
+        self.assertEqual(["ubuntu-latest", "windows-latest"], matrix["alpha-core"]["check_os"])
         self.assertEqual(["ubuntu-latest"], matrix["web-server"]["node_environments"])
         policy = {entry["package"]: entry for entry in projection["policy"]}
         self.assertFalse(policy["excluded"]["gates"])

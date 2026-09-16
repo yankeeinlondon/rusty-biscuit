@@ -32,7 +32,9 @@
   `check` cell exists where `example` or `bench` targets are declared, and on
   `ubuntu-latest` for a package with unchanged direct reverse dependencies,
   which it compiles inside that cell. An unchanged reverse dependency is
-  reported by name and scheduled nowhere.
+  reported by name and scheduled nowhere. The package's passing local L1 on
+  an environment satisfies its check cell there, so the pushing host's OS is
+  not compile-checked again; a check cell that compiles dependents always runs.
 - **Each area audits its planned coverage.** Its `coverage-audit` renders every
   result and, when producers are green, enforces exact skips, governed gaps,
   and missing-cell rules for that area alone. Producer failures reach the gate

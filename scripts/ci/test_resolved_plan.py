@@ -580,7 +580,7 @@ class TargetCoverageTests(PlannerFixture):
             {(), ("--examples",), ("--benches",), ("--examples", "--benches")}, shapes_seen
         )
 
-    def test_a_reused_macos_l1_keeps_the_macos_check_cell_executing(self) -> None:
+    def test_a_reused_macos_l1_reuses_the_macos_check_cell(self) -> None:
         accepted = [
             {
                 "package": "biscuit-speaks",
@@ -597,11 +597,13 @@ class TargetCoverageTests(PlannerFixture):
             if cell["package"] == "biscuit-speaks"
         }
         self.assertEqual("reuse", states[("macos-latest", "L1")], "fixture: macOS L1 reused")
-        self.assertEqual("execute", states[("macos-latest", "check")])
+        self.assertEqual("reuse", states[("macos-latest", "check")])
         scheduled = legacy_scope_document(plan)
         matrix = scheduled["area_matrix"]["biscuit-speaks"]["include"]
         entry = next(item for item in matrix if item["package"] == "biscuit-speaks")
-        self.assertEqual(self.NATIVE, entry["check_os"])
+        self.assertEqual(
+            [name for name in self.NATIVE if name != "macos-latest"], entry["check_os"]
+        )
         self.assertNotIn("macos-latest", entry["native_environments"])
 
     def test_the_workflow_command_joined_with_check_args_selects_only_the_declared_kinds(self) -> None:

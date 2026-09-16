@@ -17,8 +17,10 @@
 # package with unchanged direct reverse dependencies (compiled inside that
 # cell; Open Question 1, Option B), and this recipe executes neither, so an
 # examples-only compile break or a broken unchanged consumer surfaces in CI
-# rather than pre-push. Widening the condition would add a compile pass to
-# every push, which is a cost decision, not a drift fix.
+# rather than pre-push. On this host's own OS the package's passing L1 receipt
+# satisfies the check cell, so such a break surfaces only on the other OSes.
+# Widening the condition would add a compile pass to every push, which is a
+# cost decision, not a drift fix.
 #
 # The lint gate deliberately builds without features: that is CI's invocation,
 # and it is where incomplete `terminal-tests`/`daemon-tests`-style gating

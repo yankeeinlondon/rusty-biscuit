@@ -266,8 +266,10 @@ calculator applies that set to the plan in hand (`--apply-to` with
 `--accepted-cells`); an accepted cell has its *execution* omitted and stays a
 *cell* with local origin, so the rollup expects a local-origin result for it
 rather than reporting MISSING — the PR #76 regression. A cell records whether
-a receipt may ever satisfy it (`reusable`): `check` cells and the L1 host a
-companion suite needs are never reused, whatever a receipt claims.
+a receipt may ever satisfy it (`reusable`): the L1 host a companion suite
+needs, and a `check` cell that compiles unchanged dependents, are never reused,
+whatever a receipt claims. Any other `check` cell has no receipt of its own and
+is satisfied only by the package's passing L1 on the same environment.
 
 A receipt from an **older head** is accepted only when the cell's *gate-input
 identity* is unchanged: the `git ls-tree` entries of the tested package's build

@@ -190,7 +190,7 @@ pub(super) fn populate_monorepo_area(cap: &ContextCapture, values: &mut Map<Stri
 /// Each scoped package becomes `{ package: <name>, <list_field>: [<edges>] }`.
 /// `list_field` is `dependencies` for `depends_on` and `users` for `used_by`,
 /// matching the base schema's documented object shape. Rendering (nested bullets
-/// via `as_unordered_list`, line-separated by default) is the caller's choice;
+/// via `as_unordered_list`, compact JSON by default) is the caller's choice;
 /// the composed verb wording of the old pre-rendered form is dropped (spec).
 fn render_dependency_objects(
     scope: &[&Package],

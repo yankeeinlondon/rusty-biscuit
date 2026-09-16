@@ -2208,11 +2208,49 @@ def cell_evidence(
     """The verified evidence that satisfies `cell`, or None.
 
     A per-cell acceptance wins over the version-1 whole-environment form so a
-    reused cell always carries the most specific measurement available.
+    reused cell always carries the most specific measurement available. A
+    `check` cell has no receipt of its own; see `check_evidence`.
     """
+    if cell["gate"] == "check":
+        return check_evidence(cell, accepted)
     return accepted.get((cell["package"], cell["environment"], cell["gate"])) or (
         accepted_environments or {}
     ).get(cell["environment"])
+
+
+def check_evidence(
+    cell: dict[str, Any],
+    accepted: dict[tuple[str, str, str], dict[str, Any]],
+) -> dict[str, Any] | None:
+    """The package's passing L1 on the same environment, standing in for its check.
+
+    A receipt records no `check` gate, and the L1 run it does record never
+    compiled the `example`/`bench` targets a check cell exists for. The ruling
+    that replaced "check cells are never reusable" accepts that gap on the host
+    that just ran the package's L1: a compile-only rerun there answers nothing
+    the host's own build did not. Only a per-cell L1 acceptance qualifies — a
+    version-1 whole-environment note proves no package was built.
+
+    ## Returns
+
+    Evidence that links the L1 receipt but carries none of its counts, so the
+    rollup cannot present test counts as a check measurement.
+    """
+    l1 = accepted.get((cell["package"], cell["environment"], "L1"))
+    if l1 is None:
+        return None
+    evidence = {
+        "package": cell["package"],
+        "environment": cell["environment"],
+        "gate": "check",
+        "origin": l1.get("origin", "local"),
+        "outcome": "pass",
+        "covered_by": "L1",
+        "measurements": f"compile-only; covered by the passing L1 on {cell['environment']}",
+    }
+    if l1.get("evidence") is not None:
+        evidence["evidence"] = l1["evidence"]
+    return evidence
 
 
 def mark_reused(cell: dict[str, Any], evidence: dict[str, Any]) -> None:
@@ -2411,10 +2449,10 @@ def package_cells(
                     else ""
                 )
                 + (f"; {seam_reason}" if hosts_seam else ""),
-                # A local receipt records L1, L2, and browser only (see
-                # `local_evidence.RECORDABLE_GATES`), so no evidence — per-cell
-                # or whole-environment — can ever stand in for a check.
-                reusable=False,
+                # The package's passing L1 on this environment stands in for
+                # the check (`check_evidence`) — except where the cell also
+                # compiles unchanged dependents, which no local run builds.
+                reusable=not hosts_seam,
                 compiled_dependents=seam if hosts_seam else (),
             )
     elif seam:

@@ -50,7 +50,7 @@ initialize:
                 target: ./_implement/implement-plan.md
                 with:
                     log: "{{ dirname(spec) + '/implementation-log.md' }}"
-        - when: review
+        - when: "review || false"
           action:
               - info: "a _review_ was passed into the implementation router and will be routed to **implement-review**"
               - proxy: ./_implement/implement-review.md

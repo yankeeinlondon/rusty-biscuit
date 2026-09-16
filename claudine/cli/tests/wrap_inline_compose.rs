@@ -788,11 +788,16 @@ exit 0
         let env_lines = fs::read_to_string(&env_path).unwrap();
         assert!(env_lines.contains("MODEL=config-default-model"));
 
-        let args = fs::read_to_string(&args_path).unwrap();
-        assert!(
-            !args.lines().any(|line| line == "--model"),
-            "ConfigDefault should NOT push --model to child args"
-        );
+        let args: Vec<String> = fs::read_to_string(&args_path)
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        let model_index = args
+            .iter()
+            .position(|arg| arg == "--model")
+            .expect("a configured default must be delivered on argv, not left to rediscovery");
+        assert_eq!(args.get(model_index + 1).map(String::as_str), Some("config-default-model"));
     }
 }
 

@@ -988,10 +988,12 @@ mod typed_signature_tests {
         }
     }
 
-    /// The six D4 list formatters are all present, take a single `any[]`, and
-    /// return `string | error`.
+    /// The eight list formatters are all present, take a single `any[]`, and
+    /// return `string | error`. The two serializers carry executable examples;
+    /// the multi-line renderers are verified through their example files.
     #[test]
     fn list_formatting_functions_are_typed() {
+        use crate::catalog::ExampleVerification;
         let expected = [
             "as_line_separated(list)",
             "as_csv(list)",
@@ -999,6 +1001,8 @@ mod typed_signature_tests {
             "as_space_separated(list)",
             "as_unordered_list(list)",
             "as_ordered_list(list)",
+            "as_json(list)",
+            "as_json5(list)",
         ];
         for signature in expected {
             let d = expression_function_descriptors()
@@ -1011,6 +1015,14 @@ mod typed_signature_tests {
             assert!(d.parameters[0].array, "list parameter must be an array");
             assert_eq!(d.returns.value, ReturnValueType::Data(DataType::String));
             assert!(d.returns.fallible, "list formatters are fallible");
+        }
+        for signature in ["as_json(list)", "as_json5(list)"] {
+            let example = expression_function_descriptors()
+                .iter()
+                .find(|d| d.signature == signature)
+                .and_then(|d| d.example())
+                .unwrap_or_else(|| panic!("{signature} must carry an example"));
+            assert_eq!(example.verification, ExampleVerification::Executable);
         }
         let csv = expression_function_descriptors()
             .iter()

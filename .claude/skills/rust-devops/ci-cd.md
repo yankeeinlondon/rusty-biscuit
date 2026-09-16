@@ -40,7 +40,12 @@ local and hosted runs. Its package policy is deliberately narrow:
   `lib`, `bin`, and `test` kinds, so a separate compile job exists for the
   kinds no test gate produces: one check cell per native environment, running
   `cargo check -p <pkg>` with explicit `--examples`/`--benches` selectors
-  (`check_args`), never `--all-targets`.
+  (`check_args`), never `--all-targets`. A check cell is satisfied by the
+  package's passing per-cell L1 receipt on the same environment
+  (`check_evidence`), so the host that just built and tested the package is
+  not compile-checked again. The reused cell links that receipt with no test
+  counts; a version-1 whole-environment note never satisfies it, and the
+  `ubuntu-latest` cell that compiles unchanged dependents is never reusable.
   `_wsl-ci.yml` declares no archive selector at all — the guest is handed the
   plan's build records and downloads one — so a check selector has nowhere to
   leak into. Every cell records `target_kinds` and `compile_coverage_from`, and

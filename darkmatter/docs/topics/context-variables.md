@@ -57,13 +57,27 @@ failure message prints the up-to-date block to paste back.
 
 > **List-valued variables.** Variables typed `string[]` (e.g. `packages`,
 > `dirty_files`) or `object[]` (`depends_on`, `used_by`) are captured as real
-> arrays. A bare `{{ ctx.foo }}` renders an array **line-separated** (one element
-> per line). To render other shapes use the list-formatting expression functions:
-> `as_csv`, `as_tsv`, `as_space_separated`, `as_line_separated`,
-> `as_unordered_list`, and `as_ordered_list`. The Markdown-list renderers
+> arrays. A bare `{{ ctx.foo }}` embedded in text renders an array as **compact
+> JSON** — `["a","b","c"]`, and `[]` for an empty array. `as_json(ctx.foo)` is
+> the explicit spelling of that default. To render other shapes use the
+> list-formatting expression functions: `as_csv`, `as_tsv`,
+> `as_space_separated`, `as_line_separated`, `as_unordered_list`,
+> `as_ordered_list`, `as_json`, and `as_json5`. The Markdown-list renderers
 > auto-nest nested arrays and the `depends_on` / `used_by` object shape. The
 > former pre-rendered `_list` twin variables have been removed — replace
 > `{{ ctx.dirty_files_list }}` with `{{ as_unordered_list(ctx.dirty_files) }}`.
+>
+> Only a value embedded in _surrounding text_ is stringified. A frontmatter
+> value whose entire content is `"{{ ctx.foo }}"` still resolves to a real
+> array — see the
+> [whole-value exception](../inline/fm-interpolation.md#whole-value-exception-strict).
+>
+> **Migration.** A bare `{{ ctx.foo }}` previously rendered newline-joined. A
+> document that relied on that output moves to
+> `{{ as_line_separated(ctx.foo) }}`, which is unchanged, or to whichever
+> explicit function matches the intent — `as_unordered_list` for Markdown
+> bullets, `as_csv` for a prose list, `as_json` / `as_json5` when the structure
+> is the point.
 
 > **Note:** the `ctx.*` Repository, File Changes, Languages, and Documents groups
 > derive from the directory that _executed_ the `md compose` command (most discovery
