@@ -30,10 +30,7 @@ spec: |-
             : null
     }}
 # The implementation's log file
-log: |-
-    {{
-        parent_dir(spec) + "/implementation-log.md"
-    }}    
+log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
 initialize:
     stack:
         - action:

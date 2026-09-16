@@ -176,6 +176,103 @@ exit 0
     assert!(env_lines.contains("MODEL=cli-selected"));
 }
 
+/// The OpenCode stub used by the configured-default rows: it records argv plus
+/// the three facts that decide whether a discovered model actually arrives —
+/// `MODEL`, the child's `HOME`, and whether the config the model was read from
+/// is reachable from that home.
+#[cfg(unix)]
+const RECORD_MODEL_DELIVERY: &str = r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+{
+  printf 'MODEL=%s\n' "$MODEL"
+  printf 'HOME=%s\n' "$HOME"
+  if [ -f "$HOME/.config/opencode/opencode.jsonc" ]; then
+    printf 'CONFIG_VISIBLE=yes\n'
+  else
+    printf 'CONFIG_VISIBLE=no\n'
+  fi
+} > "$CLAUDINE_ENV_FILE"
+exit 0
+"#;
+
+/// Assert the configured default was delivered to the child, reporting the
+/// child's home and config visibility when it was not — those are the two
+/// facts that explain a failure here.
+#[cfg(unix)]
+fn assert_configured_model_delivered(args_path: &Path, env_path: &Path, model: &str) {
+    let recorded_env = fs::read_to_string(env_path).unwrap();
+    let args: Vec<String> = fs::read_to_string(args_path)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+
+    // Guard the row's own premise: a child that degraded to the null-home
+    // fallback is not the isolated launch these rows mean to cover.
+    assert!(
+        !recorded_env.contains("HOME=/dev/null"),
+        "the launch degraded to the null-home fallback; child env was:\n{recorded_env}"
+    );
+
+    let model_index = args.iter().position(|arg| arg == "--model").unwrap_or_else(|| {
+        panic!("the configured default must reach child argv; child env was:\n{recorded_env}")
+    });
+    assert_eq!(
+        args.get(model_index + 1).map(String::as_str),
+        Some(model),
+        "child env was:\n{recorded_env}"
+    );
+    assert!(
+        recorded_env.contains(&format!("MODEL={model}")),
+        "child env was:\n{recorded_env}"
+    );
+}
+
+/// Regression for the 2026-09-08 frontmatter fix, review 1 finding 1.
+///
+/// `--repo` launches the child under a shadow HOME that carries no
+/// `.config/opencode`, and OpenCode does not read the generic `MODEL` variable
+/// for selection. A default discovered from the user's global config in
+/// Claudine's own environment therefore has to be delivered on argv, or the
+/// provider runs a model Claudine did not report.
+///
+/// The child's home and config visibility are recorded but not asserted: they
+/// are how the environment is rewritten today, not the contract under test.
+#[cfg(unix)]
+#[test]
+fn opencode_repo_isolation_delivers_the_configured_default_model() {
+    let fixture = CliProcessFixture::named("opencode-repo-config-model");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
+    let env_path = fixture.cwd().join("env.txt");
+
+    // The shadow-home build refuses when the provider's own home is absent, and
+    // the wrapper then degrades to `HOME=/dev/null`. Create it so the launch
+    // takes the shadow-home branch this row is about.
+    fs::create_dir_all(fixture.home().join(".opencode")).unwrap();
+
+    let config_dir = fixture.home().join(".config").join("opencode");
+    fs::create_dir_all(&config_dir).unwrap();
+    write(
+        &config_dir.join("opencode.jsonc"),
+        "{\n  // the user's global default\n  \"model\": \"minimax/MiniMax-M3\",\n}\n",
+    );
+
+    write_executable(&fixture.bin_dir().join("opencode"), RECORD_MODEL_DELIVERY);
+
+    fixture
+        .command()
+        .env_remove("OPENCODE_MODEL")
+        .env_remove("MODEL")
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env("CLAUDINE_ENV_FILE", &env_path)
+        .args(["opencode", "--repo", "summarize"])
+        .assert()
+        .success();
+
+    assert_configured_model_delivered(&args_path, &env_path, "minimax/MiniMax-M3");
+}
+
 #[cfg(unix)]
 #[test]
 fn opencode_post_summary_messages_are_logged_after_summary_block() {
@@ -275,6 +372,53 @@ exit 0
         json_index < prompt_index,
         "OpenCode flags must precede the positional prompt so structured output is enabled; args: {args}"
     );
+}
+
+/// The composition counterpart of
+/// [`opencode_repo_isolation_delivers_the_configured_default_model`]. Composition
+/// builds its child environment through its own pipeline, so the delivery
+/// contract is proven on both routes rather than inferred from the shared stage.
+#[cfg(unix)]
+#[test]
+fn compose_opencode_repo_isolation_delivers_the_configured_default_model() {
+    let fixture = CliProcessFixture::named("compose-opencode-repo-config-model");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
+    let env_path = fixture.cwd().join("env.txt");
+
+    // The shadow-home build refuses when the provider's own home is absent, and
+    // the wrapper then degrades to `HOME=/dev/null`. Create it so the launch
+    // takes the shadow-home branch this row is about.
+    fs::create_dir_all(fixture.home().join(".opencode")).unwrap();
+
+    let config_dir = fixture.home().join(".config").join("opencode");
+    fs::create_dir_all(&config_dir).unwrap();
+    write(
+        &config_dir.join("opencode.jsonc"),
+        "{\n  // the user's global default\n  \"model\": \"minimax/MiniMax-M3\",\n}\n",
+    );
+
+    let md_file = fixture.cwd().join("test.md");
+    write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
+
+    write_executable(&fixture.bin_dir().join("opencode"), RECORD_MODEL_DELIVERY);
+
+    fixture
+        .command()
+        .env_remove("OPENCODE_MODEL")
+        .env_remove("MODEL")
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env("CLAUDINE_ENV_FILE", &env_path)
+        .args([
+            "compose",
+            "--opencode",
+            "--repo",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    assert_configured_model_delivered(&args_path, &env_path, "minimax/MiniMax-M3");
 }
 
 #[cfg(unix)]

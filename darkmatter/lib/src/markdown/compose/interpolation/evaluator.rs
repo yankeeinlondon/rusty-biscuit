@@ -75,7 +75,7 @@ use crate::catalog::{describe_for_error, suggest};
 use crate::markdown::compose::ComposeWarning;
 use crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
 use crate::markdown::compose::expression::{
-    EvaluationLookup, Expr, ExpressionError, evaluate, interpolation_output_string,
+    EvaluationLookup, Expr, ExpressionError, evaluate, scalar_string,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -248,17 +248,16 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
         trace!(expr = ?expr, "interpolation: evaluating expression");
 
         if let Some(value) = self.presentation_value(expr) {
-            return EvalResult::Value(interpolation_output_string(&value));
+            return EvalResult::Value(scalar_string(&value));
         }
 
         // Preserve debug/trace logging for variable resolution
         if let Expr::Variable(name) = expr {
-            // Bare array interpolation renders line-separated (spec D4).
             // Objects must pass through the lookup's string hook because some
             // production lookups apply configured name coercion there. Scalars
             // stay on the single-lookup fast path.
             let value = match self.state.get(name) {
-                Some(array @ Value::Array(_)) => interpolation_output_string(&array),
+                Some(array @ Value::Array(_)) => scalar_string(&array),
                 Some(Value::Object(_)) => self.state.get_string(name),
                 None | Some(Value::Null) => String::new(),
                 Some(Value::String(s)) => s,
@@ -274,7 +273,7 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
         }
 
         match evaluate(expr, self.state) {
-            Ok(value) => EvalResult::Value(interpolation_output_string(&value)),
+            Ok(value) => EvalResult::Value(scalar_string(&value)),
             Err(error) => EvalResult::Error {
                 error,
                 original: expr.to_string(),
@@ -884,28 +883,28 @@ mod tests {
     mod eval_array_interpolation {
         use super::*;
 
-        /// Bare array interpolation renders line-separated (spec D4 default),
-        /// so `{{ items }}` ≡ `{{ as_line_separated(items) }}`.
+        /// Bare array interpolation renders compact JSON, so `{{ items }}` ≡
+        /// `{{ as_json(items) }}` and agrees with the `+` operator.
         #[test]
-        fn bare_array_renders_line_separated() {
+        fn bare_array_renders_compact_json() {
             let state = create_test_state(json!({"items": ["a", "b", "c"]}));
             let evaluator = Evaluator::new(&state);
             let expr = parse("items").unwrap();
 
             match evaluator.eval(&expr) {
-                EvalResult::Value(s) => assert_eq!(s, "a\nb\nc"),
+                EvalResult::Value(s) => assert_eq!(s, r#"["a","b","c"]"#),
                 EvalResult::Error { error, .. } => panic!("Expected Value, got error: {error}"),
             }
         }
 
         #[test]
-        fn empty_array_renders_empty() {
+        fn empty_array_renders_empty_json_array() {
             let state = create_test_state(json!({"items": []}));
             let evaluator = Evaluator::new(&state);
             let expr = parse("items").unwrap();
 
             match evaluator.eval(&expr) {
-                EvalResult::Value(s) => assert_eq!(s, ""),
+                EvalResult::Value(s) => assert_eq!(s, "[]"),
                 _ => panic!("Expected Value"),
             }
         }

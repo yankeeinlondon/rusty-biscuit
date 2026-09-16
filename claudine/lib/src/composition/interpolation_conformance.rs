@@ -142,6 +142,18 @@ fn overlap_cases() -> Vec<OverlapCase> {
             expected: json!("iter-3"),
         },
         OverlapCase {
+            name: "mixed text + array becomes compact JSON",
+            input: json!("items: {{items}}"),
+            frontmatter: obj(json!({ "items": [1, 2] })),
+            expected: json!("items: [1,2]"),
+        },
+        OverlapCase {
+            name: "mixed text + empty array keeps the empty container",
+            input: json!("items: {{items}}"),
+            frontmatter: obj(json!({ "items": [] })),
+            expected: json!("items: []"),
+        },
+        OverlapCase {
             name: "two templates joined by literal text becomes string",
             input: json!("{{a}}+{{b}}"),
             frontmatter: obj(json!({ "a": 1, "b": 2 })),

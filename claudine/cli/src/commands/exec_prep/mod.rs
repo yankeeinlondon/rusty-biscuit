@@ -47,10 +47,9 @@ impl ModelStageError {
 ///    `--model` mapping plus the `MODEL` env export.
 /// 2. With no explicit model, in non-interactive mode, and only when the
 ///    catalog says `model_required_in_non_tty`, Claudine finds one on the
-///    provider's behalf: the catalog's `model_env_vars` in order (applied
-///    exactly like step 1), then `profile.configured_default_model()` (which
-///    sets only `MODEL`; the provider reads its own default). Nothing found
-///    is [`ModelStageError::NoModel`], unless the caller's env plan or the
+///    provider's behalf: the catalog's `model_env_vars` in order, then
+///    `profile.configured_default_model()`. Nothing found is
+///    [`ModelStageError::NoModel`], unless the caller's env plan or the
 ///    passthrough argv already carries a model.
 /// 3. `profile.validate_non_interactive_requirements` in non-interactive
 ///    mode.
@@ -88,17 +87,21 @@ pub(crate) fn resolve_model_and_validate(
     };
 
     match &source {
-        Some(ModelSource::CliSwitch(model) | ModelSource::ProviderEnv { model, .. }) => {
+        // Every source is delivered explicitly, a value read from the
+        // provider's own configuration included. Claudine resolves the model in
+        // its own environment but launches the child in a rewritten one (repo
+        // isolation replaces `HOME`; MCP modes redirect provider config), so a
+        // provider asked to rediscover its default can silently run a different
+        // model — or none — than the one Claudine reports.
+        Some(resolved) => {
             let mut env_overrides = Vec::new();
-            if let Some(warn) = profile.apply_model(child_args, &mut env_overrides, model) {
+            if let Some(warn) = profile.apply_model(child_args, &mut env_overrides, resolved.model())
+            {
                 warn_sink(warn);
             }
             for (key, value) in env_overrides {
                 env_sink(key, value);
             }
-        }
-        Some(ModelSource::ConfigDefault(configured)) => {
-            env_sink("MODEL".to_string(), configured.model.clone());
         }
         None => {
             let has_model_arg = child_args
@@ -364,8 +367,10 @@ mod tests {
         assert!(env.contains(&("MODEL".to_string(), "env/model".to_string())));
     }
 
+    /// A configured default is delivered on argv, not left for the provider to
+    /// rediscover: the child's environment is not the one the file was read in.
     #[test]
-    fn required_model_falls_back_to_the_configured_default_without_a_flag() {
+    fn required_model_falls_back_to_the_configured_default_on_argv() {
         let (_xdg, _env_guard, xdg) =
             isolated_opencode_sources(Some("{\n  // default\n  \"model\": \"cfg/model\",\n}\n"));
         let mut args = vec!["run".to_string()];
@@ -388,7 +393,7 @@ mod tests {
                 path: xdg.path().join("opencode").join("opencode.jsonc"),
             }))
         );
-        assert!(!args.iter().any(|a| a == "--model"));
+        assert!(args.windows(2).any(|w| w == ["--model", "cfg/model"]));
         assert_eq!(env, vec![("MODEL".to_string(), "cfg/model".to_string())]);
     }
 
