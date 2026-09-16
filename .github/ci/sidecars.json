@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "sidecars": {
+    "backend-proof": {
+      "package": "test-toolkit",
+      "features": [
+        "backend-proof"
+      ],
+      "bins": [
+        "backend-proof"
+      ],
+      "reason": "the L2 tier's execution proof reads the run's backend-execution records and fails a tier whose required backend ran no test. `just _backend_proof` builds it with `cargo run` today, which an archive consumer with no Cargo cannot do."
+    },
+    "darkmatter-md-fixture": {
+      "package": "darkmatter-cli",
+      "features": [],
+      "bins": [
+        "md"
+      ],
+      "reason": "claudine-cli's inline_compose_hash tests spawn the darkmatter `md` binary. It is a compile-time tool of another package, so an archive consumer cannot build one for itself."
+    },
+    "harness-broker": {
+      "package": "biscuit-test-harness",
+      "features": [],
+      "bins": [
+        "biscuit-harness-broker"
+      ],
+      "reason": "the L2 tier spawns one shared terminal pane per backend through the broker. `just _test_l2` builds it at recipe time today, which an archive consumer with no Cargo cannot do."
+    },
+    "messenger-desktop-stubs": {
+      "package": "messenger",
+      "features": [
+        "desktop"
+      ],
+      "bins": [
+        "stub_alerter",
+        "stub_burnttoast",
+        "stub_dunstify",
+        "stub_notify_send",
+        "stub_snoretoast",
+        "stub_terminal_notifier"
+      ],
+      "reason": "messenger's desktop-notification tests spawn inert stubs standing in for the host notifier. They are `required-features = [\"desktop\"]` bin targets that nextest does not archive with the test binaries."
+    }
+  }
+}
