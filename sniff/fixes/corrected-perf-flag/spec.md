@@ -1,292 +1,231 @@
 ---
 date: 2026-06-08
 agent: "${env.AGENT}"
+status: active
+reviewed_on: 2026-09-14
 ---
 
 ## Problem Statement
 
-The `sniff --perf` flag is supposed to decompose a command into the individual
-computations that produced the answer, so a developer can see *which part* was
-slow. In practice it reports a single useless line:
+`sniff --perf` now collects a useful request-wide set of stages and work
+counters, but its human-readable report renders them as two flat bullet lists.
+On a full detection the output can contain thousands of repeated stage calls
+and dozens of dotted names such as:
 
 ```text
-## Performance
-
-Total: 1256.49 ms
-
-Stages:
-- detect.total: 1256.49 ms total (1 call, max 1256.49 ms, last 1256.49 ms)
+- detect.filesystem: 643.14 ms total (1 call, ...)
+- filesystem.shared_walk.docs: 1669.36 ms total (4238 calls, ...)
+- filesystem.file_inventory.classify.extension: 12.33 ms total (8156 calls, ...)
 ```
 
-There is no decomposition. The flag is effectively a wall-clock stopwatch with
-extra ceremony.
+The data is present, but the flat presentation obscures the relationships
+encoded by those dotted names and makes a large report hard to scan. Counters
+are likewise useful but visually mixed into a long unstructured list.
 
-## Root Cause
+## Current State
 
-There are **two independent defects**, both of which must be fixed.
+The original version of this specification described two defects. One has
+already been fixed:
 
-### 1. Worker-thread metrics are silently dropped (data loss)
+- `performance::with_current_collector` flushes the calling thread's buffered
+  stages and counters into the installed collector before normal return.
+- `WorkerCollector` and `pooled_worker` carry and flush request attribution for
+  parallel walkers and Rayon workers.
+- Regression coverage in `sniff/lib/tests/integration.rs` and
+  `sniff/lib/src/performance.rs` verifies worker survival, request isolation,
+  and pooled-worker attribution.
+- A current full `--json --perf` run contains `detect.total`, all four domain
+  stages, nested stages, and stable work counters. Worker data is no longer
+  missing.
 
-`detect_with_plan` (`sniff/lib/src/lib.rs`) runs the four domains in scoped
-threads and records a stage per domain inside each worker:
+The remaining defect is entirely in
+`sniff/cli/src/output/render.rs::render_performance_section`, which still sorts
+and prints flat lists. This refreshed fix must not reopen the CRITICAL-risk
+collector seam without new failing evidence.
 
-- `detect.os`, `detect.hardware`, `detect.network`, `detect.filesystem`
-- nested stages recorded deeper in each domain, e.g. `os.identity`,
-  `os.locale`, `os.time`, `os.path_dirs`, `filesystem.repo`,
-  `filesystem.shared_walk`, `filesystem.shared_walk.docs`, `hardware.core`
+## Outcome
 
-Stage recording writes to a **thread-local** `STAGE_BUFFER`
-(`sniff/lib/src/performance.rs`). Buffers are only drained into the shared
-`PerformanceCollector` by `merge_thread_local_buffers()`, which merges **the
-calling thread's** buffer. The collector exposes `flush_thread_local()` for
-exactly this purpose — but **the scoped worker threads never call it before they
-exit.** When a worker thread terminates, its thread-local buffer is dropped,
-unmerged.
+Human-readable `--perf` output presents timings as a hierarchical,
+unit-aligned [`MetricsTree`](../../../biscuit-terminal/lib/src/components/metrics_tree.rs)
+and presents work counters in a separate count tree. The existing structured
+`PerformanceReport`, collection behavior, JSON payload, and command routing
+remain intact.
 
-Only `detect.total` is recorded on the **main** thread (inside the outer
-`with_current_collector` closure), so it is the only stage `snapshot()` ever
-sees. Every domain stage and every nested stage is lost. This is why the report
-contains nothing but `detect.total`.
+## Non-Goals
 
-### 2. The report is rendered flat, not hierarchically
-
-`render_performance_section` (`sniff/cli/src/output/render.rs`) emits a flat,
-duration-sorted bullet list. Even if all stages survived, the parent/child
-structure encoded in the dotted stage names would not be visible.
-
-## Goals
-
-1. Preserve every stage and counter recorded under an active collector,
-   regardless of which thread recorded it.
-2. Render the surviving timing data as a hierarchical, unit-aligned
-   [`MetricsTree`](../../../biscuit-terminal/lib/src/components/metrics_tree.rs)
-   that decomposes total time into its constituent stages.
-3. Render counters as a separate `Count` block.
-
-## Non-Goals (Out of Scope)
-
-- **Non-detect command paths.** Commands that bypass the detection pipeline
-  (`repo *`, `programs`, `just`, `docs`, …) call `perf.emit_*(None)` and emit
-  only total wall-clock time. They are unchanged by this fix; most have little
-  to instrument. A later effort may instrument them.
-- **JSON output shape.** The `PerformanceReport` JSON serialization
-  (`--json --perf`) is unchanged. Only the human-readable text rendering and the
-  underlying data completeness change. (The richer stage set will naturally
-  appear in the JSON too, because it is the same `PerformanceReport`; no schema
-  change.)
-- **New instrumentation.** No new `record_stage` call sites are added. This fix
-  makes the *existing* instrumentation visible and correctly aggregated.
-
----
+- Changing performance collection, worker propagation, counter names, or stage
+  instrumentation.
+- Making stage totals reconcile to wall-clock time. Concurrent domains,
+  inclusive parent/child timings, and repeated per-item stages legitimately
+  overlap.
+- Changing the `PerformanceReport` serialization schema.
+- Adding process-global caches or using wall-clock thresholds as optimization
+  evidence.
+- Instrumenting commands that do not yet expose useful substages. The renderer
+  must still handle their total-only reports cleanly.
 
 ## Requirements
 
-### R1 — No recorded metric may be lost when its recording thread exits
+### R1 — Preserve the current collection contract
 
-Any stage or counter recorded while a `PerformanceCollector` is the current
-collector for a thread MUST be merged into that collector before the thread
-exits.
+No production change is required in `sniff/lib/src/performance.rs` or
+`sniff/lib/src/lib.rs`. Existing tests that prove worker stages and counters
+survive normal completion must remain green.
 
-**Required behavior**, with implementation latitude left to the plan. The
-preferred mechanism is to make `with_current_collector`
-(`sniff/lib/src/performance.rs`) flush the calling thread's buffers into the
-collector being removed, on closure exit, before restoring the previous
-collector:
+If implementation uncovers a distinct collection failure, stop and revise the
+scope before changing `with_current_collector`: GitNexus reports 21 direct
+callers and CRITICAL upstream impact across Sniff and Claudine.
 
-- Drain is idempotent (`merge_thread_local_buffers` uses `buf.drain()`), so the
-  subsequent `collector.snapshot()` merge on the main thread sees an empty
-  buffer and does not double-count `detect.total`.
-- The fix is general: it closes this class of bug for **any** future scoped /
-  Rayon worker that records under a collector, not just the four domains in
-  `detect_with_plan`.
+### R2 — Render timing stages as a `MetricsTree`
 
-A per-worker explicit `collector.flush_thread_local()` call inside each scoped
-thread is an acceptable alternative, but the centralized fix is preferred for
-durability.
+`render_performance_section` MUST replace the flat timing bullet list with a
+`MetricsTree` rendered through `TerminalRenderable` and `Terminal::default()`.
+Sniff owns the report-to-tree projection; `biscuit-terminal` owns width,
+styling, connectors, unit alignment, glyph fallback, and terminal capability
+degradation.
 
-**Ordering note.** `std::thread::scope` joins all workers before the outer
-`with_current_collector` closure returns, so by snapshot time every worker has
-already flushed. No additional synchronization is required.
+#### R2.1 — Root and hierarchy construction
 
-### R2 — Render timing as a hierarchical MetricsTree
+1. Build a synthetic root labeled `Total` from
+   `PerformanceReport::total_duration_ms`. It uses
+   `MetricValue::Duration`, `MetricShare::Full`, and `.emphasized()`.
+2. Do not render `detect.total` as a duplicate child of the synthetic root.
+3. Parse all other stage names by `.` so new instrumentation appears without a
+   maintained stage catalog.
+4. Re-parent `<domain>.<rest>` below an existing `detect.<domain>` branch for
+   the four detection domains `os`, `hardware`, `network`, and `filesystem`.
+   This alias set is the only detection-specific mapping.
+5. Reports without a `detect.total` stage, including focused command reports,
+   use the same generic dotted-name parsing from the synthetic root.
+6. A measured node uses its stage's `total_duration_ms`. A synthetic
+   intermediate node uses the sum of its immediate children.
+7. A measured stage with `calls > 1` uses `.with_calls(n)`.
+8. Sort siblings by duration descending and label ascending.
 
-`render_performance_section` MUST build a `MetricNode` tree from the report's
-`stages` and render it with `MetricsTree`, replacing the flat bullet list.
+The projection should be a small pure helper over `PerformanceReport`; it must
+not move report interpretation into `biscuit-terminal`.
 
-#### R2.1 — Hierarchy construction (auto-parse dotted names)
+#### R2.2 — Shares and overlap note
 
-The tree is derived from the dotted stage names, not from a hand-maintained
-mapping, so newly instrumented stages appear automatically.
+Every non-root timing node uses its share of the report wall-clock total, not
+its share of its parent. A zero-duration report uses `MetricShare::Unknown` for
+children and must not divide by zero.
 
-Construction rules:
+Repeated and concurrent stages may accumulate more duration than wall-clock,
+so a node or a set of siblings may exceed its parent. Attach this italic note
+with `MetricsTree::with_notes`:
 
-1. **Root.** `detect.total` is the synthetic root, labeled `Total`, rendered
-   bold (`.emphasized()`) with `MetricShare::Full`.
-2. **Domain re-parenting (the one curated piece).** The domain prefixes
-   `os`, `hardware`, `network`, `filesystem` are aliased under their
-   `detect.<domain>` branch. Concretely:
-   - `detect.os` / `detect.hardware` / `detect.network` / `detect.filesystem`
-     are the first-level branches under the root.
-   - A stage named `<domain>.<rest>` (e.g. `filesystem.shared_walk.docs`,
-     `os.identity`) is re-parented under `detect.<domain>` with the leading
-     `<domain>.` stripped for display (→ `shared_walk.docs`, `identity`).
+> Concurrent, nested, and repeated stages may overlap; their durations do not
+> sum to wall-clock time.
 
-   This four-entry alias map is the only domain-specific knowledge; the domain
-   set is stable.
-3. **Remaining segments nest by `.`.** After re-parenting, each remaining stage
-   name is split on `.` and nested. Intermediate path segments that have no
-   stage of their own become synthetic branch nodes.
-4. **Node value.**
-   - A node backed by a measured stage uses that stage's `total_duration_ms`
-     as `MetricValue::Duration`.
-   - A synthetic intermediate node (no own measurement) uses the **sum of its
-     children's durations**.
-5. **Calls.** A node backed by a stage with `calls > 1` sets `.with_calls(n)`
-   so the tree surfaces `×N` (e.g. repeated per-file classification stages).
-6. **Ordering.** Siblings are sorted by duration descending, then by label
-   ascending (matching the current flat-list tiebreak).
-
-Target rendering (illustrative — connectors, alignment, and the `▇ HOT` marker
-are owned by `MetricsTree`):
-
-```text
-Total                1256.49ms  100%
-├─ detect.filesystem  640.3ms   51%
-│  └─ shared_walk     590.1ms   47%
-│     └─ docs          12.4ms    1%
-├─ detect.os          412.0ms   33%
-│  ├─ path            301.2ms   24%  ▇ HOT
-│  └─ identity         88.1ms    7%
-└─ detect.hardware    180.0ms   14%
-```
-
-#### R2.2 — Share semantics
-
-Every node's `MetricShare::Of(fraction)` is computed as
-`node_duration / detect.total_duration` (the grand total), **not** relative to
-its parent. The root is `MetricShare::Full`.
-
-Because the four domains execute concurrently in scoped threads, sibling
-durations can sum to **more** than their parent's wall-clock time. To prevent
-this from reading as a bug, attach an italic trailing note via
-`MetricsTree::with_notes`:
-
-> *Domains run concurrently; sibling shares may exceed their parent's wall-clock
-> time.*
-
-`MetricsTree`'s existing share rendering handles the edge cases: sub-1% slivers
-render `<1%`, measured shares cap at `99%`, and `100%` is reserved for the root.
+`MetricsTree` retains responsibility for its display rules, including
+sub-one-percent shares and reserving `100%` for the root.
 
 #### R2.3 — HOT marker
 
-Exactly one node carries `MetricMarker::Highlight`: the non-root node with the
-greatest `total_duration_ms`. (`MetricsTree` enforces a single marker visually;
-the builder must set it on a single node.)
+Exactly one measured, non-root timing stage carries
+`MetricMarker::Highlight`: the stage with the greatest total duration. Break
+equal-duration ties by stage name so selection is deterministic. Synthetic
+intermediate nodes are not candidates.
 
-### R3 — Render counters as a separate Count block
+If the report has no non-root measured stages, render only the `Total` root and
+do not add a marker.
 
-Counters (`cache_hits`, `cache_misses`, `files_scanned`, `files_classified`,
-…) are not durations and MUST NOT appear in the timing tree.
+### R3 — Render counters as a separate count tree
 
-When `report.counters` is non-empty, render a **second** `MetricsTree` below the
+When `report.counters` is non-empty, render a second `MetricsTree` below the
 timing tree:
 
-- Root labeled `Counters`, `.emphasized()`.
-- Counter names auto-parse by `.` into a tree the same way stages do
-  (e.g. `network.wan_ip.cache_hits` → `network` › `wan_ip` › `cache_hits`).
-- Each node uses `MetricValue::Count`. A synthetic intermediate node's count is
-  the sum of its children.
-- `MetricShare::Unknown` for every counter row (percentages across
-  heterogeneous counters are meaningless; the share column renders an em dash).
-- No HOT marker.
+- a bold synthetic root labeled `Counters`;
+- dotted counter names parsed into a generic hierarchy;
+- measured leaves represented by `MetricValue::Count`;
+- synthetic intermediate values equal to the sum of their immediate children;
+- `MetricShare::Unknown` on every row because heterogeneous work counters do
+  not have a meaningful common denominator;
+- siblings ordered by count descending and label ascending; and
+- no HOT marker.
 
-If `report.counters` is empty, the counters block is omitted entirely.
+Omit the counter tree when the report has no counters.
 
-### R4 — Output plumbing unchanged
+### R4 — Preserve output and JSON contracts
 
-`render_performance_section` continues to return a `String` and is still emitted
-through the existing `emit_text` / `emit_stderr` / `emit_for_json` seam
-(`sniff/cli/src/perf.rs`). Render with the established sniff CLI pattern:
+The leading `## Performance` heading remains for continuity. The rendered tree
+continues through the existing `CliPerf` emit seams:
 
-```rust
-MetricsTree::new(root).render(&Terminal::default())
-```
+- rich terminal commands emit their human-readable report to stdout;
+- scriptable text commands emit it to stderr so their stdout data stays clean;
+- `--json --perf` keeps one valid JSON document on stdout with the structured
+  `performance` field attached, and the current human-readable copy on stderr;
+  and
+- `--plain` strips ANSI styling but does not itself force ASCII. Connector and
+  glyph fallback follows the detected terminal's Unicode capability.
 
-`Terminal::default()` supplies real detected width and capabilities. The
-existing `plain` handling in `emit_text` / `emit_stderr`
-(`strip_escape_codes`) continues to strip ANSI for `--plain`, and `MetricsTree`
-already folds Unicode connectors/glyphs to ASCII on non-Unicode terminals.
-Stdout-vs-stderr routing (rich → stdout, scriptable → stderr) is unchanged.
-
-The leading `\n## Performance\n` header is preserved for continuity with
-existing output and snapshot expectations.
-
----
+Do not hand-author ANSI escapes or duplicate `MetricsTree`'s width and glyph
+logic in Sniff.
 
 ## Affected Code
 
 | File | Change |
-|------|--------|
-| `sniff/lib/src/performance.rs` | R1: flush the calling thread's buffers into the collector on `with_current_collector` exit (preferred), or document the per-worker flush requirement. |
-| `sniff/lib/src/lib.rs` | If per-worker flush is chosen instead of R1's centralized fix, each scoped thread calls `collector.flush_thread_local()` before returning. No change if R1 centralizes. |
-| `sniff/cli/src/output/render.rs` | R2/R3: replace the flat bullet rendering in `render_performance_section` with `MetricsTree` builders for timing and counters. |
+|---|---|
+| `sniff/cli/src/output/render.rs` | Add the pure timing/counter tree projection and render both trees with `MetricsTree`. |
+| `sniff/cli/src/output/render.rs` tests | Cover hierarchy, ordering, markers, calls, zero totals, counters, and rendering modes. |
+| `sniff/cli/tests/cli.rs` | Pin end-to-end routing and JSON/stdout validity where current coverage is insufficient. |
 
-No dependency change is required: `biscuit-terminal` is already a path
-dependency of `sniff/cli` and `components::metrics_tree` is a public module.
-
----
+No dependency change is required: `sniff-cli` already depends on
+`biscuit-terminal`, and `components::metrics_tree` is public.
 
 ## Testing
 
-### Library (`sniff/lib`)
+### Projection and rendering tests
 
-- **Worker-thread metrics survive (regression test for the real bug).** With a
-  collector installed, spawn a scoped/std thread that records a stage, let it
-  exit, then `snapshot()` on the main thread. Assert the worker's stage is
-  present. This test FAILS on the current code and PASSES after R1.
-- **No double-count.** A stage recorded on the main thread (e.g. `detect.total`)
-  appears with `calls == 1` after both the on-exit flush and the snapshot merge.
-- **End-to-end `detect_with_plan(... .performance(true))`** on the repo returns
-  a report whose `stages` contains `detect.os`, `detect.hardware`,
-  `detect.filesystem`, and at least one nested domain stage — not just
-  `detect.total`.
+- `detect.total` supplies no duplicate child below `Total`.
+- `filesystem.shared_walk.docs` nests below `detect.filesystem` then
+  `shared_walk` then `docs`.
+- Non-detection dotted names form an equivalent generic hierarchy.
+- Measured parents retain their measured duration; synthetic parents sum their
+  immediate children.
+- Siblings sort by duration/count descending and label ascending.
+- The maximum measured non-root timing stage is the sole HOT node, with a
+  deterministic tie case.
+- Calls render for `calls > 1` and stay absent for one call.
+- A zero-duration report renders without non-finite shares.
+- Counters use count values and unknown shares, and an empty counter map omits
+  the second tree.
 
-### CLI (`sniff/cli`)
+### CLI contract tests
 
-- **Hierarchy builder unit tests** (pure function over a synthetic
-  `PerformanceReport`):
-  - `detect.total` becomes the bold root with `100%`.
-  - `filesystem.shared_walk.docs` nests under `detect.filesystem` › `shared_walk`
-    › `docs`.
-  - `os.identity` nests under `detect.os` › `identity`.
-  - Siblings are duration-sorted descending.
-  - Exactly one node carries the HOT marker, and it is the max-duration
-    non-root node.
-  - A stage with `calls > 1` renders `×N`.
-- **Counters block**: present only when counters are non-empty; counter rows
-  render em-dash shares; empty counters omit the block.
-- **Plain mode**: `--perf --plain` output contains no ANSI escape sequences and
-  no Unicode box-drawing/marker glyphs (ASCII connectors `+-`, `# HOT`).
+- A representative `--perf --plain` command is ANSI-free and contains the
+  timing hierarchy.
+- A non-Unicode terminal projection uses the component's ASCII connectors and
+  marker fallback. This is a component/projection test, not an assumption about
+  `--plain`.
+- A scriptable text command keeps its data on stdout and performance text on
+  stderr.
+- `--json --perf` stdout parses as exactly one JSON value containing
+  `performance`; any stderr text does not contaminate stdout.
 
-### Manual verification
+### Verification
+
+Run the Sniff package-area gates:
 
 ```bash
-sniff --perf                     # rich tree on stdout
-sniff repo git-status --perf     # tree on stderr (scriptable), clean stdout
-sniff --perf --plain             # ASCII-folded, no ANSI
-sniff --json --perf              # JSON on stdout, perf text on stderr
+cd sniff
+just test
+just lint
 ```
 
----
+The projection is platform-independent. Existing macOS, Linux, native Windows,
+and WSL2 CI compile/test coverage remains required; do not introduce
+platform-specific rendering code.
 
 ## Success Criteria
 
-1. `sniff --perf` shows a decomposed tree with the four domains and their nested
-   stages — not a single `detect.total` line.
-2. The slowest stage is flagged with the `▇ HOT` marker.
-3. Removing the R1 flush fix makes the library regression test fail (the fix is
-   load-bearing, not cosmetic).
-4. `--plain` output is ANSI-free and ASCII-folded; `--json` stdout stays
-   machine-parseable with perf on stderr.
-5. Counters render in their own block (or are omitted when empty) and never
-   pollute the timing tree.
+1. Human-readable `--perf` output is a scan-friendly timing tree rather than a
+   flat stage list.
+2. Counters appear in a separate count tree and never enter the timing tree.
+3. One deterministic measured stage is marked HOT when stage data exists.
+4. Current collection-completeness tests remain green without modifications to
+   the collector seam.
+5. Plain output is ANSI-free, terminal capability fallback remains owned by
+   `biscuit-terminal`, and JSON stdout remains a single valid document with its
+   structured performance field.
