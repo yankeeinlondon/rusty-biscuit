@@ -217,6 +217,18 @@ belong here.
   relationship between old and new IS the consolidation — commit both
   sides together. See `4616e9aec` for a 5-file example (3 M supersede +
   ratification, 2 A new spec + design annex).
+- `planning(<area>): close <fix> as invalidated` is distinct from
+  `close <fix>` (completed/implemented) or `close <fix> with <deferral>`
+  (`773bbac93`). The diff adds `status: invalidated` + `reviewed_on:
+  <date>` to the frontmatter and prepends a viability-review section
+  that names the upstream work that pre-empted the fix and the
+  contracts the proposed boundary would have violated. The original
+  investigation is retained as historical evidence; requirements and
+  success criteria are explicitly marked superseded by the review. Do
+  not confuse with supersession (consolidation entry above): invalidation
+  has no successor spec and no `superseded_by:` pointer — the proposed
+  work is simply no longer needed. Example: `planning(sniff): close
+  2026-07-22-inefficient-calling fix as invalidated` (`1881b7919`).
 
 - A brief that says "write the message body to a temp file" yields a file
   with no subject line, and `git commit -F` then collapses every bullet into
