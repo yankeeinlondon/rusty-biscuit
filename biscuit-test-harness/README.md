@@ -75,11 +75,11 @@ let output = Command::new(bin_exe!("so-you-say")).arg("--help").output()?;
 ```
 
 The `env!` form bakes in an absolute path under the *build* host's target
-directory. That is fine wherever the runner built the binary, and wrong for the
-`wsl2-ubuntu` CI leg, which executes a `cargo nextest archive` built elsewhere
-and extracted into a temp directory — every spawn there fails with
-`NotFound`. `bin_exe!` reads nextest's run-time republication of the path first
-and keeps the compile-time value as the fallback.
+directory. **Every** hosted CI cell now executes a `cargo nextest archive` built
+by another job and extracted into a temp directory — not just the `wsl2-ubuntu`
+leg — so every spawn through `env!` fails there with `NotFound`. `bin_exe!`
+reads nextest's run-time republication of the path first and keeps the
+compile-time value as the fallback.
 
 ## The `TerminalHarness` trait
 
