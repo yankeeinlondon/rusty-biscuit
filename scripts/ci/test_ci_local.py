@@ -10,13 +10,15 @@ import subprocess
 import tempfile
 import sys
 import unittest
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
+import tool_guard  # noqa: E402
+from tool_guard import require_tools, requires_tools  # noqa: E402
 from affected_scope import legacy_scope_document  # noqa: E402
 from workflow_reading import (  # noqa: E402
     WorkflowLayoutError,
@@ -33,6 +35,16 @@ DEVOPS = ROOT / "just" / "devops.just"
 CONSTRAINTS = ROOT / "scripts" / "ci" / "constraints.py"
 PRE_PUSH = ROOT / ".githooks" / "pre-push"
 JUST = shutil.which("just")
+
+#: The only job that runs this suite. `preflight` does not, so the tools below
+#: are declared required in exactly one place and a developer host without them
+#: still skips. It installs `just`; `jq` and a Bash >= 4.4 are in the
+#: ubuntu-latest runner image.
+CI_TOOLING = (
+    "`ci.yml`'s `ci-tooling` job, the only one that runs this suite, which "
+    "installs just and sets BISCUIT_REQUIRE_JUST, BISCUIT_REQUIRE_JQ, and "
+    "BISCUIT_REQUIRE_BASH"
+)
 
 
 def relocate_home(environment: dict[str, str], home: Path) -> None:
@@ -81,7 +93,7 @@ class PrePushEvidenceContractTests(unittest.TestCase):
         self.assertIn('--prior-receipt "$PRIOR_RECEIPT_FILE"', hook)
 
 
-@unittest.skipUnless(JUST and shutil.which("jq"), "requires just and jq")
+@requires_tools("just", "jq", enforced_by=CI_TOOLING)
 class CiLocalTests(unittest.TestCase):
     def run_recipe(
         self, threads: str | None = None, cores: int = 16, reports: dict | None = None
@@ -262,7 +274,7 @@ class CiLocalTests(unittest.TestCase):
         self.assertEqual(["1", "1"], [call["threads"] for call in l2])
 
 
-@unittest.skipUnless(JUST and shutil.which("jq"), "requires just and jq")
+@requires_tools("just", "jq", enforced_by=CI_TOOLING)
 class ThreadPolicyTests(unittest.TestCase):
     def run_policy(self, cores: int, markers: dict[str, str] | None = None, sniff_fails: bool = False) -> str:
         with tempfile.TemporaryDirectory(prefix="test-thread-policy-") as temporary:
@@ -326,7 +338,7 @@ class ThreadPolicyTests(unittest.TestCase):
         self.assertEqual("4", self.run_policy(4, {"CI": "true"}, sniff_fails=True))
 
 
-@unittest.skipUnless(JUST and shutil.which("jq"), "requires just and jq")
+@requires_tools("just", "jq", enforced_by=CI_TOOLING)
 class L1ThreadForwardingTests(unittest.TestCase):
     def test_canonical_l1_forwards_default_and_preserves_explicit_override(self) -> None:
         lines = DEVOPS.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -405,7 +417,7 @@ class L1ThreadForwardingTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-@unittest.skipUnless(JUST and shutil.which("jq"), "requires just and jq")
+@requires_tools("just", "jq", enforced_by=CI_TOOLING)
 class PlanSurfaceTests(unittest.TestCase):
     """AC17: the reviewable plan shown before a push or other trigger."""
 
@@ -736,7 +748,7 @@ class PlanSurfaceTests(unittest.TestCase):
 PLANNER = ROOT / "scripts" / "ci" / "affected_scope.py"
 
 
-@unittest.skipUnless(JUST and shutil.which("jq"), "requires just and jq")
+@requires_tools("just", "jq", enforced_by=CI_TOOLING)
 class PlanFedRunTests(unittest.TestCase):
     """The hook's path (ruling D2, audit W14): gates run FROM a resolved plan.
 
@@ -1178,18 +1190,20 @@ class WorkflowScopeStepTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        if STEP_BASH is None or not shutil.which("jq"):
-            message = (
-                f"requires {STEP_BASH_REQUIREMENT}; set {BASH_OVERRIDE} to point at one "
-                f"(tried: {', '.join(bash_candidates(os.environ))})"
-            )
-            # A developer host may lack a modern Bash, and skipping there is
-            # honest. The hosted `ci-tooling` job is the only place these
-            # contracts are guaranteed to execute, so a skip there would be a
-            # green cell that verified nothing.
-            if os.environ.get("CI"):
-                raise AssertionError(message)
-            raise unittest.SkipTest(message)
+        # A developer host may lack a modern Bash, and skipping there is
+        # honest. The hosted `ci-tooling` job is the only place these contracts
+        # are guaranteed to execute, so a skip there would be a green cell that
+        # verified nothing — which is what BISCUIT_REQUIRE_BASH rules out.
+        require_tools(
+            "bash",
+            "jq",
+            enforced_by=CI_TOOLING,
+            detail=(
+                f"This class needs {STEP_BASH_REQUIREMENT}; set {BASH_OVERRIDE} to "
+                f"point at one (tried: {', '.join(bash_candidates(os.environ))})."
+            ),
+            locate=lambda tool: STEP_BASH if tool == "bash" else shutil.which(tool),
+        )
         steps = job_run_steps(WORKFLOW, "scope")
         names = [step.name for step in steps]
         if SCOPE_STEP not in names:
@@ -1833,9 +1847,12 @@ class WorkflowGateStepTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.script = step_script(WORKFLOW, GATE_STEP)
+        require_tools(
+            "bash",
+            enforced_by=CI_TOOLING,
+            locate=lambda tool: STEP_BASH or shutil.which(tool),
+        )
         cls.bash = STEP_BASH or shutil.which("bash")
-        if cls.bash is None:
-            raise unittest.SkipTest("requires a Bash")
 
     def fold(self, results: dict[str, str], script: str | None = None) -> subprocess.CompletedProcess:
         env_block = "".join(f"{job}:{result}\n" for job, result in results.items())
@@ -1966,7 +1983,115 @@ class StepBashResolverTests(unittest.TestCase):
         self.assertLess(first_p1, first_p2)
 
 
-@unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "requires Bash and jq")
+ABSENT: Callable[[str], object] = lambda tool: None
+PRESENT: Callable[[str], object] = lambda tool: f"/fake/bin/{tool}"
+
+
+class ToolGuardTests(unittest.TestCase):
+    """`tool_guard`, in all three directions a host-tool guard can go.
+
+    Presence and environment are injected rather than reached for: a test that
+    mutated PATH or `os.environ` to prove a guard would leak that mutation into
+    every other class in this file.
+    """
+
+    def test_a_present_tool_runs_the_contract(self) -> None:
+        tool_guard.require_tools(
+            "just", "jq", enforced_by=CI_TOOLING, locate=PRESENT, environment={}
+        )
+
+    def test_an_absent_undeclared_tool_skips_and_names_where_it_is_enforced(self) -> None:
+        with self.assertRaises(unittest.SkipTest) as raised:
+            tool_guard.require_tools(
+                "jq", enforced_by=CI_TOOLING, locate=ABSENT, environment={}
+            )
+        message = str(raised.exception)
+        self.assertIn("jq is absent", message)
+        self.assertIn("ci-tooling", message)
+        self.assertIn("BISCUIT_REQUIRE_JQ", message)
+
+    def test_an_absent_tool_the_job_declared_fails_instead_of_skipping(self) -> None:
+        with self.assertRaises(AssertionError) as raised:
+            tool_guard.require_tools(
+                "jq",
+                enforced_by=CI_TOOLING,
+                locate=ABSENT,
+                environment={"BISCUIT_REQUIRE_JQ": "1"},
+            )
+        message = str(raised.exception)
+        self.assertIn("BISCUIT_REQUIRE_JQ declared jq provisioned", message)
+        self.assertIn("ci-tooling", message)
+
+    def test_only_the_absent_tool_decides_and_only_its_own_variable(self) -> None:
+        # `just` present, `jq` absent, and only `just` declared: the declaration
+        # that matters is the missing tool's, so this still skips.
+        with self.assertRaises(unittest.SkipTest):
+            tool_guard.require_tools(
+                "just",
+                "jq",
+                enforced_by=CI_TOOLING,
+                locate=lambda tool: None if tool == "jq" else "/fake/bin/just",
+                environment={"BISCUIT_REQUIRE_JUST": "1"},
+            )
+
+    def test_a_multi_tool_guard_names_every_missing_tool(self) -> None:
+        with self.assertRaises(unittest.SkipTest) as raised:
+            tool_guard.require_tools(
+                "just", "jq", enforced_by=CI_TOOLING, locate=ABSENT, environment={}
+            )
+        self.assertIn("just, jq are absent", str(raised.exception))
+
+    def test_the_detail_reaches_the_message(self) -> None:
+        with self.assertRaises(unittest.SkipTest) as raised:
+            tool_guard.require_tools(
+                "jq",
+                enforced_by=CI_TOOLING,
+                detail="Set BISCUIT_TEST_BASH to point at one.",
+                locate=ABSENT,
+                environment={},
+            )
+        self.assertTrue(str(raised.exception).endswith("Set BISCUIT_TEST_BASH to point at one."))
+
+    def test_a_guard_cannot_be_written_without_naming_its_enforcing_job(self) -> None:
+        # The defect this module replaces, made unrepresentable: `enforced_by`
+        # is keyword-only with no default.
+        with self.assertRaises(TypeError):
+            tool_guard.require_tools("jq")  # type: ignore[call-arg]
+
+    def test_the_declaring_variable_is_derived_from_the_tool_name(self) -> None:
+        self.assertEqual("BISCUIT_REQUIRE_SNIFF", tool_guard.declaring_variable("sniff"))
+        self.assertEqual(
+            "BISCUIT_REQUIRE_CARGO_NEXTEST", tool_guard.declaring_variable("cargo-nextest")
+        )
+
+    def test_the_class_decorator_skips_fails_and_runs_the_same_three_ways(self) -> None:
+        for variables, expected in (
+            ({}, unittest.SkipTest),
+            ({"BISCUIT_REQUIRE_JQ": "1"}, AssertionError),
+        ):
+            with self.subTest(environment=variables):
+                @tool_guard.requires_tools(
+                    "jq", enforced_by=CI_TOOLING, locate=ABSENT, environment=variables
+                )
+                class Guarded(unittest.TestCase):
+                    pass
+
+                with self.assertRaises(expected):
+                    Guarded.setUpClass()
+
+        ran: list[str] = []
+
+        @tool_guard.requires_tools("jq", enforced_by=CI_TOOLING, locate=PRESENT, environment={})
+        class Present(unittest.TestCase):
+            @classmethod
+            def setUpClass(cls) -> None:
+                ran.append(cls.__name__)
+
+        Present.setUpClass()
+        self.assertEqual(["Present"], ran)
+
+
+@requires_tools("bash", "jq", enforced_by=CI_TOOLING)
 class NativeProvisioningTests(unittest.TestCase):
     def provision(self, workflow: str, job: str, runner: str, native: dict, dependents: list) -> list[str]:
         step = next(
