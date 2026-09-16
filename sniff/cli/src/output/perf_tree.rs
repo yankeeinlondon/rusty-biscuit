@@ -175,15 +175,10 @@ fn timing_node(path: &PathNode<StageFacts>, wall_clock: Duration) -> MetricNode 
         None => children.iter().map(node_duration).sum(),
     };
 
-    // Labels are passed through unescaped. Escaping `_` here would remove the
-    // italics `MetricsTree` can inject when `truncate_to_width` cuts a label
-    // immediately after an underscore, but the component measures and pads the
-    // label *before* Prose consumes the backslash, so every escape would steal a
-    // visible column and misalign the value column at every width. The working
-    // fix escapes the already-padded label inside `build_markup`, which is
-    // `biscuit-terminal`'s to make; it is deliberately deferred pending a scope
-    // ruling. Corruption is confined to terminals narrower than 49 columns —
-    // evidence and the minimal repro are in `sniff/fixes/corrected-perf-flag/`.
+    // Labels reach `MetricsTree` unescaped on purpose: the component measures
+    // and pads them before handing them to Prose, so escaping here would steal
+    // a visible column from every row's width accounting. `build_markup`
+    // escapes the already-padded label instead.
     let mut node = MetricNode::branch(
         path.segment.clone(),
         MetricValue::Duration(duration),
@@ -887,6 +882,66 @@ mod tests {
         assert!(unicode.contains("└─ "), "elbow connector missing:\n{unicode}");
         assert!(unicode.contains("▇ HOT"), "marker missing:\n{unicode}");
         assert!(unicode.contains("×4286"), "call count missing:\n{unicode}");
+    }
+
+    #[test]
+    fn the_production_key_set_renders_clean_on_narrow_terminals() {
+        // Sniff's own counter names (`classified_embedded_language_hint` and
+        // friends) are long and underscore-heavy, so a narrow terminal cuts
+        // them mid-identifier. Before `MetricsTree::build_markup` escaped the
+        // padded label, the stranded underscore opened a Prose italic span that
+        // ate visible columns and misaligned the value column on widths 27
+        // through 48.
+        let counters = counter_metrics_tree(&counter_report(&baseline_counters()))
+            .expect("counters present");
+        let timings = timing_metrics_tree(&report(722.70, &baseline_stages()));
+
+        let mut saw_underscore_cut = false;
+        for unicode in [true, false] {
+            for width in 20u32..=140 {
+                let terminal = Terminal::builder()
+                    .supports_unicode(unicode)
+                    .width(width)
+                    .build();
+
+                let rendered = counters.render(&terminal);
+                assert!(
+                    !rendered.contains("\u{1b}[3m"),
+                    "counter label leaked italics (unicode={unicode}, width={width}):\n{rendered}"
+                );
+                let rows: Vec<String> = strip_escape_codes(rendered)
+                    .lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .map(str::to_string)
+                    .collect();
+                // Counter rows carry no marker, call count, or note, so the
+                // padded label / count / share grid makes every row exactly as
+                // wide as every other. A swallowed underscore shortens only the
+                // rows that carry one.
+                let widths: Vec<usize> = rows.iter().map(|l| l.chars().count()).collect();
+                assert!(
+                    widths.iter().all(|w| *w == widths[0]),
+                    "counter rows lost columns to markup (unicode={unicode}, width={width}): {widths:?}"
+                );
+                let cut = if unicode { "_…" } else { "_..." };
+                saw_underscore_cut |= rows.iter().any(|l| l.contains(cut));
+
+                // The timing tree does carry decorations, so assert only that
+                // its rows stay markup-clean; the trailing overlap note is
+                // legitimately italic and is excluded.
+                let timing = timings.render(&terminal);
+                let body = timing.split("\n\n").next().unwrap_or_default();
+                assert!(
+                    !body.contains("\u{1b}[3m"),
+                    "timing label leaked italics (unicode={unicode}, width={width}):\n{timing}"
+                );
+            }
+        }
+        assert!(
+            saw_underscore_cut,
+            "the sweep never truncated a label immediately after an underscore, \
+             so it does not exercise the regression"
+        );
     }
 
     // ---- counters (R3, R-1) ------------------------------------------------
