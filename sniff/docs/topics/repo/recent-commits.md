@@ -81,39 +81,26 @@ The compact variant shows only the first line as the normal report:
 - [{hash}] {operation}({scope}) at {time} {date}: {heading}
 ```
 
+### Verbose
+
+The verbose style looks similar to normal but it adds in all comments (prose and bullet points):
+
+```txt
+- [{hash}] {operation}({scope}) at {time} {date}: {heading}
+  {{description}}
+
+  **Details:**
+  
+  {{bullet-points}}
+    
+  **Files Impacted:**
+  - {mutation-type}: {filepath}
+  - ... 
+```
+
 ## Payload Schema
 
-Each commit captures the following data:
-
-```yaml
-# Simplified Schema
-$schema:
-    datetime: datetime(required;eager) -> the date and time of the commit
-    operation: string(suggest(fix,feat,doc,cicd,config,test)) -> if this follows the _conventional commits_ convention then the commit's operation will be listed
-    scope: string -> if the commit follows the _conventional commits_ convention and uses a "scope" typically associated to a monorepo, then that will be found in the "scope" property
-    hash: string(required;eager) -> the full hexadecimal git hash for this commit
-    remote: boolean -> whether or not the commit has been pushed upstream to a cloud host
-    heading: string(required;eager) ->  the first sentence of the commit (terminates on `.` character or `\n`).
-    description: string(required;eager) -> the descriptive content for the commit after the first sentence (see _heading_) and before the bullet-points.
-    bullet_points: string[](required;eager) -> the bullet points that detail out the commit message
-    file_types:
-        source_code: boolean(required;eager) -> boolean flag indicating whether any source code was touched in this commit
-        web_assets: boolean(required;eager) -> boolean flag indicating whether any web assets (HTML, CSS, Font files, etc.) was touched in this commit
-        images: boolean(required;eager) -> boolean flag indicating whether any images (including vectors like SVG) were touched in this commit
-        documentation: boolean(required;eager) -> boolean flag indicating whether any documentation was touched in this commit
-        configuration: boolean(required;eager) -> boolean flag indicating whether any configuration files were touched in this commit
-        cicd: boolean(required;eager)
-    
-    packages: string[] -> the packages which were effected by the commit (**note:** this is only available when run in a monorepo)
-    package_areas: string[](required;eager) -> the package areas which were effected by the commit (**note:** this is only available when run in a monorepo)
-types:
-    file: 
-        kind: enum(modified,added,deleted,moved;required;eager)
-        path: string(required;eager) -> the filepath to the mutated file
-        added: number -> the number of lines added (_only set when `kind` is **modified**_)
-        removed: number -> the number of lines removed (_only set when `kind` is **modified**_)
-        symbols: string[] -> future reporting which list exported symbols in the file which were impacted; currently not populated
-```
+Each commit's payload is defined as a schema here: [Recent Commits Schema](./recent-commits-schema.md)
 
 
 ## Library Callers
@@ -128,12 +115,12 @@ use sniff::filesystem::git::{
 };
 // connect to a git repo
 let repo = GitRepo::discover(".")?;
-// get a collection of the last 10 commits
-let commits = RecentCommits::default().collect(&repo)?;
-// deserialize commits to JSON array
-let json = commits.to_json();
 // define the reporting options you want
 let options = RecentCommitsOptions::default().verbosity(ReportVerbosity::Verbose);
+// get a collection of the last 10 commits
+let commits = RecentCommits::collect(&repo, &options)?;
+// deserialize commits to JSON array
+let json = commits.to_json();
 // and then use those options to report in two 
 // different output styles
 let prose = commits.to_prose(&options)?;
@@ -147,11 +134,12 @@ The `RecentCommits` struct allows us to collect commits from a git repo. We can 
 In our first example we used `RecentCommitsOptions` to set the reporting verbosity but there is a lot more we can do with options to choose what our collection actually contains:
 
 ```rust,ignore
+let repo = GitRepo::discover(".")?;
 let options = RecentCommitsOptions::default()
     .duration(Duration::days(5))
     .operation("fix")
     .verbosity(RecentCommitsVerbosity::Compact);
-let commits = RecentCommits::using(&options)?;
+let commits = RecentCommits::collect(&repo, &options)?;
 ```
 
 In this example we have assigned `commits` to a collection of commits but instead of just taking the last 10 commits into the collection we have instead asked for all commits over the last 5 days which are conventional commits and use the "fix" operation to describe themselves.
@@ -184,21 +172,25 @@ Unlike selection criteria, filtering operations are _additive_ and so all filter
 The `RecentCommits` struct provides both raw deserialization of it's data to JSON as well as a few text reporting options:
 
 - `to_json()` - deserializes to a JSON array
-- `to_plain()` - provides a pure text (no escape sequences, no Markdown formatting hints, etc.)
+- `to_prose()` - provides a **Prose** text output; this is mainly Markdown content but with a few extra formatting options that include colorization tags like `foo<blue>bar</blue>`
+- `to_markdown()` - nearly identical to the output produced by `to_prose()` but all formatting found in the report is valid Markdown
+- `to_plain()` - provides a pure text (no escape sequences, no Markdown formatting hints, no Prose formatting, etc.); it also removes all links that may have been in the formatted variants
 
-The library may provide shared, output-independent report composition. Prose and plain text are useful library outputs because callers can save them to files, embed them in other documents, or pass them to a renderer.
+> **Note:** the library _does not_ provide an output style specifically for the terminal but anyone who wants that can take the prose output and use the `Prose` component from **biscuit-terminal** to render it to the terminal. This supports all formatting and linking functionality found in Prose content.
 
-| Responsibility | Owner |
-|----------------|-------|
-| Collect and enrich commit records; apply selection and filters | Library |
-| Expose the complete serializable payload | Library |
-| Compose Compact, Normal, and Verbose Prose or plain-text reports | Library |
-| Parse CLI arguments into the library request and report options | CLI |
-| Render Prose as terminal escapes, including terminal hyperlinks | CLI / terminal renderer |
-| Render for a browser | Consuming application / browser renderer |
-| Write stdout/stderr and choose process exit codes | CLI |
+### Links
 
-Report options control verbosity and whether authors appear in text. Author display is independent of author filtering. Date/time presentation needs an explicit timezone policy shared by all text projections. Prose can express semantic styling and links, but must not contain terminal escape sequences or browser-specific markup. Plain text contains neither formatting syntax nor links.
+The hyperlinks which the recent commits functionality relies on are to link a commit's hash to the URL that the remote host provides for that commit. To do this you need:
+
+- to understand which provider (Github, GitLab, Bitbucket, Gitea, etc.) is hosting the remote and what URL scheme that provider uses to get to a commit page
+    - this metadata is found in Sniff and is abstracted for you
+- A commit is linked only when it is reachable from a locally recorded remote-tracking branch.
+    - This check uses local Git data and does not contact the remote or trigger a fetch.
+    - The result reflects locally known remote state. Changes made elsewhere may not be reflected until those references are refreshed.
+    - The link must point to a remote whose tracked history contains the commit. If several qualify, the library applies a documented preference order.
+    - If containment cannot be established, or the library cannot construct a browser URL for that provider, the hash remains unlinked.
+- The library determines containment, selects the remote, and constructs the commit URL. Callers receive that URL and decide how to render it.
+
 
 ### Empty Results and Errors
 
