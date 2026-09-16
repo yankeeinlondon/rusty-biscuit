@@ -308,9 +308,7 @@ functions:
     - name: as_line_separated
       category: List Formatting
       order: 82
-      description:
-          Joins a list into a newline-separated string (the default bare-array
-          rendering).
+      description: Joins a list into a newline-separated string, one element per line.
       overloads:
           - parameters:
                 - name: list
@@ -420,6 +418,43 @@ functions:
                     3. 3
                 verification: display-only
                 reason: multi-line Markdown list; verified via example file
+    - name: as_json
+      category: List Formatting
+      order: 97
+      description:
+          Renders a list as compact JSON — the explicit spelling of how a bare
+          array renders in text. An empty list renders as `[]`.
+      overloads:
+          - parameters:
+                - name: list
+                  type: any
+                  array: true
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: as_json(["a", 1])
+                result: '["a",1]'
+                verification: executable
+    - name: as_json5
+      category: List Formatting
+      order: 98
+      description:
+          Renders a list as compact single-line JSON5, with single-quoted
+          strings and unquoted object keys where they are valid identifiers. An
+          empty list renders as `[]`.
+      overloads:
+          - parameters:
+                - name: list
+                  type: any
+                  array: true
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: as_json5(["a", 1])
+                result: "['a', 1]"
+                verification: executable
     - name: starts_with
       category: String Predicates
       order: 14

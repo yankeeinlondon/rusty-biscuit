@@ -21,10 +21,10 @@ information or to mutate a document's Frontmatter.
 Currently this repo has _dirty_ files which have not yet been committed to **git** and the context variable `ctx.dirty_files` makes those
 files very accessible as a CSV list: 
 
-> {{ctx.dirty_files}}
+> {{ as_csv(ctx.dirty_files) }}
 
-Sometimes, however, the CSV presentation is not what you're looking for and the Darkmatter expression engine provides several functions which
-can change the output format of this list:
+A bare interpolation of `ctx.dirty_files` embedded in text renders as compact JSON instead, so say which shape you want. The Darkmatter
+expression engine provides several functions which can change the output format of this list:
 
 1. `as_line_separated(ctx.dirty_files)`:
 
@@ -41,6 +41,14 @@ can change the output format of this list:
 4. `as_ordered_list(ctx.dirty_files)`:
 
     {{ as_ordered_list(ctx.dirty_files) }}
+
+5. `as_json(ctx.dirty_files)` — the explicit spelling of the default:
+
+    {{ as_json(ctx.dirty_files) }}
+
+6. `as_json5(ctx.dirty_files)`:
+
+    {{ as_json5(ctx.dirty_files) }}
 
 ::end-block
 
