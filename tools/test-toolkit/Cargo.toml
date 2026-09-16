@@ -16,6 +16,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # crate's own tests.
 fs4 = "0.13"
 
+# `manifest_dir!` — the run-time checkout lookup an archived consumer needs.
+# A regular rather than dev dependency because `evidence::workspace_root` is
+# library code this crate's dependents call. Its own graph is libc, serde_json,
+# tempfile, and unicode-width, all of which every dev-dependent already builds.
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+
 # Pulled in only for the `leak-sweep` binary (feature-gated) so the many crates
 # that depend on this crate as a dev-dependency do not inherit them.
 clap = { version = "4", features = ["derive"], optional = true }
