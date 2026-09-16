@@ -891,14 +891,16 @@ mod tests {
         // them mid-identifier. Before `MetricsTree::build_markup` escaped the
         // padded label, the stranded underscore opened a Prose italic span that
         // ate visible columns and misaligned the value column on widths 27
-        // through 48.
+        // through 48. The sweep covers that band plus the narrowest supported
+        // width (20) and the first clean width (49), which pin its two edges;
+        // wider terminals only repeat the clean case.
         let counters = counter_metrics_tree(&counter_report(&baseline_counters()))
             .expect("counters present");
         let timings = timing_metrics_tree(&report(722.70, &baseline_stages()));
 
         let mut saw_underscore_cut = false;
         for unicode in [true, false] {
-            for width in 20u32..=140 {
+            for width in std::iter::once(20u32).chain(27..=49) {
                 let terminal = Terminal::builder()
                     .supports_unicode(unicode)
                     .width(width)
