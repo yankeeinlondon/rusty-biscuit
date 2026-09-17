@@ -1565,3 +1565,25 @@ lands.
   OS facts.
 - **Human review is requested** for acceptance 19, the unavailable cross-OS
   evidence.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-16T20:02:17-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis/claudine/fixes/2026-09-13-better-static-analysis/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- starting the work on 'Expression-literal decoding reverses escaped-opener parity after the hard lint' at 20:03:29
+        - confirmed the shared `flag_literal` boundary has LOW upstream graph risk: one direct caller (`collect_flagged`), five total impacted symbols, and no indexed execution process; text and graph searches identified Claudine prepare-time validation and DMLS diagnostics as the downstream consumers of `lint_expression`
+        - found that the lint scans authored literal bytes while the lexer classifies the decoded `StringLiteral`; runs of two or three authored backslashes therefore both shrink during decoding but produce opposite escaped-opener parity
+        - implemented decoded-value escape classification with a byte-boundary map back to the authored literal, preserving authored diagnostic ranges and rewrite slices
+        - added Level 1 odd/even regression matrices at the shared Darkmatter lint, Claudine prepare-time validator, and DMLS diagnostic boundaries
+        - the first targeted Darkmatter recipe could not write the shared `target/` artifacts; verification was moved to a fresh writable `CARGO_TARGET_DIR` as in the review evidence
+        - the full Darkmatter gate exposed a stale property-test oracle that still compared the lint to raw-literal scanning; it now derives its authority set from lexer-decoded token values and retains the generated two-backslash regression seed
+        - the corrected full Darkmatter Level 1 gate passed all 7,924 selected tests with 7 tier-filtered skips
+        - the first full Claudine Level 1 run reached 5,713 tests before seven unrelated spawn tests rejected the session wrapper's inherited `HOME=/Users/ken/.claudine`; the gate is being rerun with the native user home so provider-overlay isolation is evaluated under its intended host invariant
+        - the corrected full Claudine Level 1 gate passed all 7,200 selected tests with 9 tier-filtered skips when run with the native user home
+        - `just lint` passed in both directly affected package areas; Darkmatter also completed its Zed WASM check, and Claudine completed its guard tests plus all crate-specific Clippy phases
+        - audited the changed module documentation and comments so the decoding and authored-range contract is explicit without changing public policy documentation
+        - final GitNexus change detection reported LOW risk across the shared worktree, 5 changed files, 13 changed symbols, no affected execution processes, and no partial or truncated result
+- work completed for 'Expression-literal decoding reverses escaped-opener parity after the hard lint' at 20:31:33
+- starting the work on 'Ambiguous proxy overlay paths can bypass prepare-time validation' at 20:32:24
