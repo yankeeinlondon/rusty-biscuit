@@ -14,7 +14,7 @@ packages:
 
 Turn Messenger's platform research into a repeatable, evidence-backed source of typed provider knowledge. Message length constraints are the first consumer, but the contract must also describe formatting, attachments, delivery capabilities, API errors, and operational restrictions that affect portable outbound messages, together with inbound and interactive capabilities needed for future conversations.
 
-Adopt the pattern described in [Agentic Research as a Typed Knowledge Pipeline](../../../../docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md): a shared roster, reusable fleet prompt, schema-validated research documents, deterministic consumers, reviewed refreshes, and a compact publication into the Messenger agent skill.
+Adopt the pattern described in [Agentic Research as a Typed Knowledge Pipeline](docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md): a shared roster, reusable fleet prompt, schema-validated research documents, deterministic consumers, reviewed refreshes, and a compact publication into the Messenger agent skill.
 
 “Self-learning” means that refreshed evidence exposes changed facts, schema gaps, and implementation gaps, which feed subsequent research and reviewed changes. It does not mean that a research agent can silently change delivery behavior or promote its own claims into runtime policy.
 
@@ -52,6 +52,7 @@ Deliver:
 7. A formatting and image-support matrix separating grammar, payload bindings, image roles, and transport, with canonical role mappings and explicit portability gaps.
 8. An attribution and context matrix covering author identity/control, location semantics, and API-addressable expressive effects, including explicit unsupported and unknown results.
 9. An interactivity matrix covering inbound text, structured questions/replies, and forms, scoped to integration interfaces and recipient-client conditions, with transport and lifecycle prerequisites for future implementation.
+10. API-version findings and a known release chronology per interface, plus a delta phase that examines metadata changes and produces a report suitable for the CHANGELOG.
 
 This feature does not implement truncation, splitting, attachment fallback, new provider capabilities, rate limiting, retries, runtime error translation, inbound listeners, interactive sessions, form execution, or delivery-policy changes. It does not run live message probes as part of ordinary research or tests. It does not introduce a generic research framework or copy Claudine's entire code-generation architecture.
 
@@ -76,13 +77,15 @@ Proposed artifacts, relative to `messenger/`:
 
 | Artifact | Authority and purpose |
 |---|---|
-| `docs/platforms.yaml` | Stable platform roster, interface identities, output filenames, source entry points, research status, refresh interval |
+| `docs/platforms.yaml` | Stable platform roster, interface identities, output filenames, provider identification URLs, curated research-source URLs, research status, refresh interval |
 | `docs/research/platforms/_fleet.md` | Shared research instructions and Claudine sequence lifecycle |
 | `docs/research/platforms/_schema.yaml` | Metadata shape and vocabulary, using Darkmatter SimplifiedSchema |
 | `docs/research/platforms/{platform}.md` | Durable source artifact: evidence, typed facts, explanatory prose, changes, and gaps |
 | `docs/research/platforms/_overrides.yaml` | Optional reviewed corrections; create only when a concrete correction needs one |
 | `docs/research/platforms/catalog.json` | Deterministic generated snapshot of validated facts, including unknowns and provenance |
 | `docs/research/summary/platforms.md` | Cross-provider comparison and implementation guidance derived from accepted research |
+| `docs/research/CHANGELOG.md` | Concise accepted research changes, affected platforms/facts, evidence, uncertainty, and review conclusions |
+| Separate review artifacts; paths to be defined | Full deterministic comparisons and structured independent evidence reviews; candidate and rejected results remain separate from accepted history |
 | `.claude/skills/messenger/platform-metadata.md` at repository root | Published summary with links back to detailed research |
 
 The roster owns identity and coverage; research owns external facts; Rust adapters own implemented behavior. Generated artifacts must identify their inputs and must not be edited manually.
@@ -113,6 +116,14 @@ Unsupported is a known capability value, not a synonym for unknown. An undocumen
 Source records contain a stable source ID, URL or repository-relative evidence location, source kind (`official_docs`, `source_code`, `sdk_validator`, `observed_fixture`, or `secondary`), locator within the source, retrieval/observation date, and version or revision when available. Facts reference these IDs. Record source kind separately from confidence (`high`, `medium`, `low`); official documentation can still leave counting semantics ambiguous.
 
 Prefer official documentation and versioned source. For Signal bridge behavior, the bridge project's source is primary evidence for that bridge. Existing research, generated summaries, and AI output are never independent corroboration. Secondary-only or inferred claims remain visible but cannot become executable constraints without additional evidence and review.
+
+### API versions and known release chronology
+
+For each interface, research the latest published stable API version and separately identify publicly documented preview versions. Keep provider API versions distinct from SDK and bridge releases, including signal-cli releases. A bridge release must not stand in for an underlying service API version.
+
+Maintain a non-exhaustive chronology of known API versions using authoritative sources. Record version identifiers, release dates when available, supporting evidence, and other identifying information those sources establish. Missing dates remain explicitly unknown; a source retrieval date is not a release date. Distinguish an API established to be unversioned from one whose versioning has not yet been established by research.
+
+Preserve previously recorded versions during refresh. Reconcile corrections against evidence rather than replacing the chronology with only the releases found in the latest run. Full historical backfilling is not required. Version identifiers and dates help interpret changes during the delta phase, but a new release does not by itself prove that a constraint or capability changed.
 
 ### Message constraints: more than a truncation length
 
@@ -181,6 +192,10 @@ Formatting rules and provider prerequisites should use typed categories plus pro
 Capability values use `supported`, `conditional`, and `unsupported`, wrapped in the knowledge state above. Keep native support distinct from Messenger's text fallback. Research must not set implementation booleans merely because a platform supports a feature.
 
 Implementation coverage is a separate projection from the checked-out adapter code, tests, and explicit mappings. Report `implemented`, `partial`, `missing`, or `unassessed`, along with the inspected revision and code/test references. A conditional or uncertain external capability cannot automatically rewrite `CapabilitySet`. Emit `requires_messenger_update` with structured gap records naming the affected adapter, fact IDs, reason, and proposed follow-up.
+
+Store explicit reviewed mappings for each adapter from researched capabilities to implementing code and relevant tests. Humans or agents may propose these assessments; accepted mappings require human review. Record fingerprints of the relevant assessed inputs and reuse the assessment while they remain unchanged. When a relevant fingerprint changes, mark the affected assessment `unassessed` until reviewed again. The checkout revision provides provenance; an unrelated commit alone does not invalidate an assessment.
+
+These mappings support reporting, not runtime capability changes. Their reliability depends on identifying the relevant inputs: an omitted dependency can leave an assessment stale. This feature does not promise complete static dependency analysis or automatic proof of implementation correctness.
 
 ### Formatting grammar and API representation
 
@@ -379,6 +394,7 @@ Schema validation proves structure. A separate deterministic semantic pass must 
 - Exact active-roster coverage, unique identities and fact IDs, valid adapter mappings, and no duplicate scoped facts.
 - Required surface/category coverage for each interface; known absence or a recorded gap instead of silent omissions.
 - Resolved source references, dates, version applicability, and evidence requirements for individual claims.
+- Per-interface API-version coverage, stable versus preview classification, separation from SDK/bridge versions, and explicit unknown release dates. Version findings and chronology entries retain their evidence references.
 - State/value consistency, sensible bounds, compatible aggregate units, valid members, and unambiguous applicability.
 - Unknown top-level property rejection except an explicit allowlist for composition metadata such as `prompt`, `$schema`, and `hash`.
 - Unknown enums, unsupported executable mappings, and unresolved conditions surfaced as errors or named gaps, never ignored.
@@ -397,14 +413,76 @@ Derive enforcement eligibility deterministically. Only known constraints with re
 Reuse Claudine's [fleet pattern](../../../../claudine/docs/research/skills/_fleet.md) and [schema sidecar pattern](../../../../claudine/docs/research/skills/_schema.yaml). Preserve single-document inline-compose usability by having its prompt delegate to the same research instructions and schema as the fleet. Do not maintain five independent copies of the contract.
 
 1. **Select.** Read the roster and choose missing, expired, explicitly requested, or schema-invalid documents. Start with a configurable 30-day refresh interval. A changed prompt/schema or relevant API/bridge version invalidates the skip decision even when `last_updated` is recent.
-2. **Research.** Read existing prose to preserve coverage and explain changes. Re-establish facts from current sources. For the initial migration, classify old numeric claims as unverified until this occurs.
+2. **Research in three passes.** Use independent discovery, reconciliation with curated sources, and selective source-list maintenance as defined below. Existing prose enters reconciliation, not discovery. For the initial migration, classify old numeric claims as unverified until re-established from current sources.
 3. **Write candidates.** Use isolated per-platform working documents so failed inline composition cannot overwrite the accepted baseline. Preserve stable IDs and `created`; record what evidence was actually checked. A timestamp bump alone is not a successful refresh.
-4. **Validate.** Run schema and semantic checks, confirm the expected artifact and platform identity, and compare facts against the accepted baseline. A zero agent exit code is insufficient.
-5. **Challenge.** Flag removed constraints, raised limits, support reversals, changed units, conflicting evidence, and new unmappable values. Ask for independent corroboration or preserve uncertainty. At most two recovery attempts per platform; stop that item with diagnostics when the budget is exhausted.
-6. **Review and promote.** Present the prose and typed diff together. Successful validation makes a candidate reviewable, not automatically authoritative. Promote accepted documents and regenerate projections as one consistent change; preserve the previous catalog if any required input fails.
-7. **Publish.** Regenerate the comparison summary, review it against the catalog, and publish the compact skill projection. Link every comparison back to source facts and retain visible gaps.
+4. **Validate.** Run schema and semantic checks and confirm the expected artifact and platform identity. A zero agent exit code is insufficient.
+5. **Delta and challenge.** Compare the validated candidate with the accepted baseline and run the independent evidence review described below. Flag removed constraints, raised limits, support reversals, changed units, conflicting evidence, and new unmappable values. Ask for independent corroboration or preserve uncertainty. At most two recovery attempts per platform; stop that item with diagnostics when the budget is exhausted.
+6. **Review and promote.** Present the prose, typed diff, and independent evidence review together. A human maintainer approves substantive changes; verified unchanged renewals may be accepted automatically under the rule below. Validation alone does not authorize accepting changed research. Accept platforms independently, using still-valid prior accepted documents for failed refreshes as described below.
+7. **Publish.** Generate the complete catalog and comparison summary from the selected accepted documents, check their agreement, and publish the compact skill projection and accepted change summaries. Link every comparison back to source facts and retain visible gaps. Consistency checks for unchanged renewals may be deterministic and do not introduce an additional human approval requirement.
 
 An unchanged factual result can be a successful refresh if the run records newly checked evidence. A revised document must not refresh the observation dates of sources it did not recheck. Failed items remain independently retryable; already accepted, current items can be skipped. No automatic scheduled job is required by this feature.
+
+### Three research passes
+
+1. **Independent discovery.** Start a fresh worker with the provider's main website, an optional API URL, the interface identification, and the shared research questions and schema. Do not provide previous prose or curated research links. The researcher must discover the sources needed to answer the questions, including developer discussions on social platforms. End this pass with suggested valuable source URLs and an explanation of what each contributed. Discovery suggestions are research leads, not automatically accepted evidence or curated sources.
+2. **Curated-source review and reconciliation.** Provide the discovery output, the curated source URLs, and previous research. Review each curated source thoroughly and iteratively fill out and validate the prose and final metadata. Reconcile findings with prior history and stable identities, preserving useful explanations and recording evidence-backed changes or unresolved conflicts. The curated list is a research base, not a restriction on finding further sources or citing evidence.
+3. **Source-list maintenance.** Evaluate the suggested URLs and propose selective changes to the curated list stored as an attribute of each platform's YAML roster entry. Use a configurable maximum of 10 URLs initially per platform, shared across its interfaces. This cap applies only to the Pass 2 starting list, not discovery or evidence citations. Every retained URL includes an explanation of its contribution. A human maintainer approves changes to the list.
+
+Judge curated URLs qualitatively by source authority, relevance to the researched interfaces and versions, currency, accessibility, and distinct coverage. Community sources may be valuable leads, subject to the existing evidence restrictions. At capacity, adding a source requires replacing another and explaining the coverage gained and lost. Broken, obsolete, and redundant links are removal candidates; retaining a link requires a useful contribution, not merely its presence in an earlier roster.
+
+The evidence rules apply in every pass. Developer discussions can identify gaps and changing behavior without turning secondary claims into authoritative API contracts. The orchestration must keep the inputs to independent discovery separate even when a refresh starts from an existing inline-compose document.
+
+### Initial research completion
+
+The initial baseline must cover all required categories and interfaces, complete the three-pass workflow, and deliver the required handoffs. Each required entry must contain an evidenced finding or an investigated gap. A gap records the question, searches performed, sources inspected, why the question remains unresolved, the decision it blocks, and the next useful investigation. A placeholder such as “unknown” without this investigation record does not satisfy completion.
+
+An investigated unknown may pass research acceptance. Acceptance does not guarantee that every constraint is enforceable or that every downstream implementation decision can proceed. Keep blocked decisions and non-executable facts visible in the handoffs and reports.
+
+### Approval and unchanged renewals
+
+A human maintainer must approve substantive changes to facts, gaps, applicability, supporting evidence, evidence-source membership, schema, curated URLs, and explanatory prose. The initial baseline requires this approval. Passing validation is necessary but insufficient to accept such changes. An unchanged metadata value or source URL does not make changed supporting evidence or substantive prose eligible for automatic acceptance.
+
+Automatic acceptance is preauthorized only for a verified unchanged renewal: all of those substantive elements remain unchanged, validation passes, and the same sources have been successfully rechecked with the checks documented. Observation dates and check records may change to reflect that work. A timestamp bump alone is insufficient, and unsuccessful source checks cannot qualify as an unchanged renewal. Adding or removing an evidence source requires human approval even if the reported fact value is unchanged.
+
+Preserve accepted prose during an unchanged renewal. Proposed rewrites, substantive changes, and changes whose significance is uncertain follow human review; do not introduce an automatic editorial exception.
+
+### Preparatory authorization and research access
+
+For future implementation and operation within the configured limits, preauthorized work includes reading unauthenticated public sources, including public developer discussions; using existing configured agents; creating local candidates and sanitized fixtures; running validation; and installing necessary documented project dependencies. These authorizations do not initiate live research during specification clarification.
+
+Authenticated source access, live probes, posting messages, creating accounts or credentials, adding external services, global installations, and purchases require separate approval. Source discovery must not silently cross those boundaries. Publication follows the approval and unchanged-renewal rules above.
+
+### Research operating limits
+
+Before live research starts, require configured per-platform limits for elapsed time and agent invocations. Count an invocation as an agent launch, not each internal model request. All three research passes, the independent evidence reviewer, and recovery attempts share the same platform budget. Process one platform at a time initially. The existing maximum of two recovery attempts remains in force and does not provide extra budget.
+
+No numeric time or invocation defaults are established by this specification; values must be supplied before a live run. Optional token or spending limits may be used where the configured tooling can enforce them. Agent-invocation and elapsed-time limits do not guarantee a dollar ceiling. At exhaustion, stop dispatching further work and attempt to stop in-flight work; report any cancellation limitations or continuing charges rather than claiming that cancellation necessarily stops remote processing or billing.
+
+Record the incomplete stage, consumed budget, and stop reason. Preserve the previous accepted baseline and a resumable candidate. Exhausted work cannot be relabeled as an acceptable investigated unknown, and resumption must not silently receive a new budget.
+
+`messenger-cli` validates and reports run configuration; Claudine orchestrates the workers and enforces the shared execution limits. The `messenger` library independently validates completeness and eligibility for acceptance, without trusting an agent exit code. The feasibility of enforcing these controls with the existing orchestration tooling still needs verification during risk assessment and implementation planning.
+
+### Independent platform publication
+
+Successful platform updates can be published independently of failed refreshes. Build a complete catalog from newly accepted successful documents together with prior accepted documents for failed platforms, but only when those prior documents satisfy the current schema and required coverage. Preserve their actual freshness and observation dates; a failed attempt must not make old research appear newly verified.
+
+Initial publication requires valid accepted documents for every required platform. If a required platform has neither a valid accepted update nor a prior accepted document compatible with the current schema and coverage, preserve the previous usable catalog instead of publishing an incomplete or incompatible mixture. Do not mix incompatible schema versions. Publication must preserve a usable, internally consistent accepted snapshot of documents, catalog, summary, skill publication, and accepted change history across failures and interruptions. Implementation planning selects the mechanism for satisfying this requirement.
+
+### Delta phase
+
+Run the delta phase after validation and before promotion. Produce a deterministic full before/after comparison and a fixed set of suspicious-change flags covering removed constraints, raised limits, support reversals, changed units, conflicting evidence, and new unmappable values. Retain the previous and candidate facts and evidence references. For an initial baseline, explicitly report that there is no previous accepted baseline rather than inventing one from unverified legacy prose.
+
+Mechanical flags operate on validated structured metadata and mappings, including explicitly recorded conflicts. Detecting contradictions in arbitrary source prose belongs to the independent evidence reviewer, not an implied deterministic language-understanding algorithm.
+
+A separate independent evidence-review agent checks changed claims against their supporting evidence and explains which changes are supported or unresolved. Keep mechanical comparisons and flags separate from the agent's assessment. Review changed supporting evidence even when its URL is unchanged, and meaningful changes in prose even when typed values are unchanged. API-version findings and the known release chronology provide context, but a new release cannot validate a changed fact by itself. Unexplained changes remain unresolved; the reviewer must not invent certainty.
+
+The independent agent's assessment is evidence for review, not approval authority. Substantive changes still require human approval, while verified unchanged renewals retain their automatic-acceptance authorization.
+
+### Accepted change history and review artifacts
+
+Publish concise summaries of accepted research changes to `messenger/docs/research/CHANGELOG.md`, identifying affected platforms and facts, supporting evidence, remaining uncertainty, and review conclusions. Keep full machine comparisons and complete structured evidence reviews in separate review artifacts, with references from summaries where useful. Candidate and rejected results remain separate from the accepted change history.
+
+Retain safe structured findings and evidence references rather than raw agent transcripts. Verified unchanged renewals update observation dates and maintenance records but do not add no-change entries to the CHANGELOG. Review-artifact paths and retention periods remain open.
 
 Corrections should normally update the prompt, schema, or research with stronger evidence. When a durable override is necessary, key it to a fact and scope, include evidence, reason, author, and an expiration/review date. Apply overrides explicitly after validation, expose both researched and effective values, and fail on expired, orphaned, or incompatible overrides. Never hide a correction in generated output.
 
@@ -478,5 +556,25 @@ The implementation must work on macOS, Linux, native Windows, and WSL2. Use port
 21. Structured-question fixtures cover affirmative/negative versus cancellation, single versus multiple selections, unknown/stale option IDs, responder/correlation fields, anonymous aggregate results, and callbacks versus link buttons. Text interpretation cannot be projected as a native structured reply.
 22. Form fixtures distinguish one multi-field submission, independent controls in one message, sequential questions, and external forms. They preserve absent/empty/canceled distinctions, field types, lifecycle deadlines, user-action prerequisites, and research-only implementation gaps. Lifecycle replay uses sanitized local fixtures and fake transports, with no live listener or recipient interaction.
 23. Run `just test` and `just lint` in `messenger/` for implementation changes, plus checks enabling the maintenance feature and all affected chat providers because ordinary local recipes do not cover every feature combination. Use nextest through the repository recipes. Tests must not focus terminal/browser windows. This spec-only change does not require Rust tests.
+24. Fake-worker lifecycle tests verify that independent discovery receives identification and shared questions/schema without previous prose or curated links; reconciliation receives discovery output, curated sources, and previous research. Discovery suggestions include what each source contributed, and their presence alone cannot make a claim authoritative or add the URL to the curated roster.
+25. Version fixtures distinguish current stable and public preview versions, provider API and SDK/bridge releases, unknown dates, and established unversioned APIs versus unresearched versioning. Refresh fixtures preserve earlier chronology entries and require evidence for corrections without requiring exhaustive historical backfill.
+26. Lifecycle fixtures place the delta phase after validation and before promotion. Before/after fixtures cover the fixed suspicious-change flags, initial research with no accepted baseline, changed supporting evidence at the same URL, and substantive prose changes with unchanged typed values. Mechanical comparisons and independent-agent conclusions remain distinguishable; a new API version alone cannot validate a changed constraint or capability, and unresolved evidence cannot become an approval.
+27. Curated-list fixtures enforce the configured per-platform cap across shared interfaces, initially 10, without limiting discovery or citations. Retained sources explain their contributions; replacement proposals at capacity explain gained and lost coverage, and list changes require human approval.
+28. Initial-baseline fixtures reject missing required categories/interfaces, incomplete handoffs, and placeholder unknowns. An investigated gap includes its question, searches, inspected sources, unresolved reason, blocked decision, and next investigation; accepting it does not make its facts executable. Lifecycle checks verify completion of all three research passes.
+29. Approval fixtures allow automatic acceptance only when facts, gaps, applicability, supporting evidence, evidence-source membership, schema, curated URLs, and substantive prose are unchanged, validation passes, and the same sources were successfully rechecked with documented results. Substantive changes require human approval. Failed checks and timestamp-only renewals cannot qualify; deterministic publication consistency checks do not require new human approval for a qualifying unchanged renewal.
+30. Partial-refresh fixtures publish successful accepted platform updates alongside compatible prior accepted documents for failed platforms, preserving the latter's actual freshness dates. Missing initial baselines, insufficient coverage, and incompatible schemas prevent publication of an incomplete catalog and preserve the previous usable snapshot where one exists.
+31. Publication fixtures place accepted concise summaries in the dedicated research CHANGELOG and keep full comparisons and structured evidence reviews in separate review artifacts. Candidate/rejected outcomes cannot appear as accepted changes, and unchanged renewals produce maintenance records without no-change CHANGELOG entries. Stored review output contains safe findings and references, not raw agent transcripts.
+32. Implementation-assessment fixtures reuse reviewed per-adapter mappings when relevant input fingerprints match, retain revision provenance without invalidating on unrelated commits, and mark affected mappings `unassessed` when assessed inputs change. Proposed assessments cannot become accepted implementation claims without review or change runtime capability values.
+33. Run-configuration fixtures reject missing elapsed-time or invocation limits. Fake-agent lifecycle tests count every pass, reviewer, and recovery invocation against one per-platform budget, process only one platform at a time, and stop further dispatch at exhaustion. They preserve incomplete-stage diagnostics and resumable candidates without refreshing accepted data, treating incomplete work as a completed unknown, or silently resetting the budget.
+34. Access-policy fixtures distinguish public unauthenticated research and documented project dependencies from actions requiring separate approval. Unchanged-renewal fixtures preserve accepted prose; proposed rewrites do not bypass review. Interrupted-publication checks demonstrate that a usable, internally consistent accepted snapshot remains available.
 
 Keep deterministic research checks within existing test coverage unless a distinct CI question justifies a new cell. Live fleet research is an explicit maintenance operation, not a CI dependency. Implementation ends ready for review; the author owns moving this feature to `_completed`.
+
+## Pending Clarifications
+
+The decisions confirmed during clarification do not close the following questions:
+
+- **Source availability and privacy:** Define how inaccessible sources affect completion and renewal, and storage/privacy expectations beyond the existing prohibitions on secrets and private message contents. Public access and separate-approval boundaries are established above.
+- **Review-artifact retention:** Choose review-artifact paths, maintenance-record storage, and retention periods for accepted, candidate, and rejected structured findings.
+
+These are pending human decisions, not implementation defaults. Further review may identify additional clarifications before the document is finalized.
