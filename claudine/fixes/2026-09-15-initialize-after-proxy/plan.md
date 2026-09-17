@@ -1,14 +1,132 @@
 ---
 created: 2026-09-15
 total_phases: 8
-phase: 1
+phase: 3
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: true
 area: claudine
-packages:
-    - claudine
-    - claudine-cli
 spec: ./spec.md
+packages:
+    - claudine-cli
+source_files_during_phase_1:
+    - claudine/cli/tests/level2_initialize_generated_transclusion.rs
+    - claudine/cli/Cargo.toml
+docs_updated_during_phase_1:
+    - claudine/fixes/2026-09-15-initialize-after-proxy/spec.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/plan.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/implementation-log.md
+docs_created_during_phase_1:
+    - claudine/fixes/2026-09-15-initialize-after-proxy/design.md
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/tests/frontmatter_surface_projection.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/inline/preflight-checks.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/plan.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/implementation-log.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/compose.md
+source_files_during_phase_3:
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/bootstrap.rs
+    - claudine/lib/src/composition/prepare/bootstrap/tests.rs
+    - claudine/lib/src/composition/prepare/service.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/cli/tests/composition_seams.rs
+docs_updated_during_phase_3:
+    - claudine/fixes/2026-09-15-initialize-after-proxy/plan.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/architecture.md
+source_files_during_phase_4:
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/tests/compose_initialize_staged_boot.rs
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/lib/src/composition/looping/seed.rs
+    - claudine/lib/src/composition/mod.rs
+docs_updated_during_phase_4:
+    - claudine/fixes/2026-09-15-initialize-after-proxy/plan.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/implementation-log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/architecture.md
+source_files_during_phase_5:
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/tests.rs
+    - claudine/cli/tests/sequence_initialize_include_preflight.rs
+    - claudine/cli/tests/level2_initialize_generated_transclusion.rs
+docs_updated_during_phase_5:
+    - claudine/fixes/2026-09-15-initialize-after-proxy/plan.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/implementation-log.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/architecture.md
+source_files_during_phase_6:
+    - prompts/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/shipped_prompt_contract.rs
+    - claudine/cli/tests/shipped_prompt_route_drift.rs
+docs_updated_during_phase_6:
+    - claudine/fixes/2026-09-15-initialize-after-proxy/plan.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/implementation-log.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+human_review: false
+message_to_agent: |-
+    Phase 6+ notes from Phase 5 (sequence static-preflight boundary; see implementation-log.md ## Phase 5).
+    (1) OQ1 Option A is implemented as guidance only: `approve_preflight_graph` (cli/src/commands/wrap/sequence/mod.rs) emits a
+    stderr Prose `note:` ahead of the UNCHANGED typed error when static preflight fails with
+    `PreFlightDiscoveryFailed(Transclusion(Io(NotFound)))` (`is_missing_include`). The code stays `composition.failed`; nothing
+    about staging, approval, or dry run changed.
+    (2) Plan deviation: the note does NOT suggest "add a prior task that creates it". A probe showed static preflight composes
+    every prompt document before step 1, so an earlier `shell:` step cannot satisfy the include. Phase 8 docs must say "create
+    the file before starting the sequence", not "add a prior task".
+    (3) Pre-existing behaviors observed, not changed, worth a reviewer's eye (and accurate wording in Phase 8 docs):
+    (a) a sequence step's prompt is composed BEFORE that step's `initialize` runs, so content `initialize` appends to an
+    existing include is absent from that step's prompt (pinned in
+    `sequence_initialize_include_preflight::existing_include::a_sequence_whose_include_exists_runs_unchanged`);
+    (b) `sequence --dry-run --yolo` executed a `shell:` step (created its marker file); composition.md's Dry Run section only
+    carves out `::shell` spans. Not pinned by any test.
+    (4) Phase 7's AC coverage can cite `cli/tests/sequence_initialize_include_preflight.rs` (L1) and
+    `level2_initialize_generated_transclusion::level2_sequence_preflight_note_renders_for_an_include_initialize_would_create` (L2)
+    for the sequence boundary. That L2 file's header no longer says the tests are expected to fail (drift fixed).
+    (5) Cross-OS: see the Phase 5 log (build-win-native still out of disk).
+    Phase 6 notes (shipped prompt repair; see implementation-log.md ## Phase 6).
+    (6) The planned `parent_dir(spec)` -> `dirname(spec)` log repair was ALREADY on the branch (commit 47e9259ab, as
+    `dirname(spec || plan)`); Phase 6 made no expression change there.
+    (7) The real Phase 6 defect was the logging blocks in `prompts/_implement/implement-plan.md`: `initialize` runs
+    `ensure_file: log` before the body composes, so `!file_exists(log)` could never be true and a fresh run was told
+    "the log file already exists". The blocks now key on an UNSTARTED log:
+    `!file_exists(log) || (markdown_body_empty(log) && is_empty(frontmatter(log)))` and its complement. Phase 8 docs describing
+    the prompt should use that wording.
+    (8) For AC10 (Phase 7) the L1 e2e `shipped_prompt_contract::shipped_implement_plan_logging_instructions_follow_log_content`
+    drives the side-effect-free fixture through `claudine compose --goose` and asserts `ensure_file` creates an empty log
+    on first run and preserves existing bytes afterwards (useful AC4 evidence). New guard
+    `shipped_prompt_route_drift::fixture_body_matches_the_shipped_body` makes the fixture a faithful stand-in for the shipped body.
+    It does NOT use the router or preserve an original spec spelling; Phase 7 still owns the router e2e.
+    (9) Unrelated flake seen once under load (concurrent `just lint`): LEAK-FAIL in
+    `claudine composition::sequence::task::tests::shell_tasks::an_early_wait_error_still_reaps_the_whole_tree` (32s); passed
+    3/3 in isolation and in a clean `just test` rerun.
 ---
 
 # Execution Plan — Run Initialization Before Body Discovery
@@ -160,7 +278,7 @@ as it is confirmed.
    root document and resolved target (including the proxy-handoff
    announcement) is not body discovery and stays where it is (R3).
 
-- [ ] **Reproduction test (red)**
+- [x] **Reproduction test (red)**
       - Add a hermetic L2 reproduction in `claudine/cli/tests/` (new file, e.g.
         `initialize_generated_transclusion.rs`) using `CliProcessFixture`: a
         router prompt whose `initialize` proxies to a target whose
@@ -176,7 +294,7 @@ as it is confirmed.
         `#[ignore]`-free and let it fail red now — it is the Phase 7 AC2/AC10
         regression once green.
       - Record the exact observed failure text in `design.md`.
-- [ ] **‖ wg-a** **Darkmatter projection spike**
+- [x] **‖ wg-a** **Darkmatter projection spike**
       - Enumerate `ComposeOperation` variants and the existing `only(&ops)`
         prior art in `darkmatter/lib/src/markdown/compose/preflight/collect.rs`
         to determine the exact projection that composes effective frontmatter
@@ -189,7 +307,7 @@ as it is confirmed.
         option assembly in `prep.rs` and `prepare.rs`.
       - Write findings (chosen API shape, operation set, invariants) into
         `design.md` as the Phase 2 contract.
-- [ ] **‖ wg-a** **Loop-path ordering trace**
+- [x] **‖ wg-a** **Loop-path ordering trace**
       - Trace the loop route end to end: `build_and_run_loop`
         (`prep.rs:834`) → `build_loop_seed_with_lifecycle` → the engine's
         `initialize` transition → iteration-1 `kind.prepare_staged` closure
@@ -199,7 +317,7 @@ as it is confirmed.
         reread must land so iteration 1 composes post-`initialize` disk
         state. Record the decision in `design.md` (this drives Phase 4's
         loop task).
-- [ ] **‖ wg-a** **Regression archaeology (timeboxed, optional)**
+- [x] **‖ wg-a** **Regression archaeology (timeboxed, optional)**
       - Timebox: one hour of `git log`/`git bisect` on
         `claudine/cli/src/commands/compose/prep.rs` and
         `claudine/lib/src/composition/preflight.rs` to identify the first
@@ -220,7 +338,7 @@ behavior changed: `just test` still passes in `claudine/`.
 Adds the shared-boundary projection the bootstrap composes through. Touches
 only `darkmatter/`.
 
-- [ ] **Projection API**
+- [x] **Projection API**
       - Implement the frontmatter/lifecycle-only projection decided in
         Phase 1 (e.g. `ComposeOptions::only_frontmatter_surface()` or an
         equivalent method on the compose pipeline) in
@@ -231,7 +349,7 @@ only `darkmatter/`.
       - Guarantee, structurally where possible: no `::file` transclusion
         resolution, no `::shell`/`::shell-block` body discovery, no page-block
         evaluation, no remote fetch, no body-dependent I/O or effects.
-- [ ] **Projection unit tests**
+- [x] **Projection unit tests**
       - A document whose body includes a missing file composes successfully
         through the projection (the include is not dereferenced).
       - Frontmatter interpolation (including `dirname`, `file_exists`, and
@@ -243,7 +361,7 @@ only `darkmatter/`.
         discovery still resolves every transclusion and still fails on a
         missing target (regression guard for R2's "do not fix by ignoring
         missing-file errors").
-- [ ] **API documentation**
+- [x] **API documentation**
       - Document the projection on the compose module (`//!` level): what it
         projects, what it never does, and that it exists for staged
         initialization ordering (link the concept, not this fix's path).
@@ -258,7 +376,7 @@ guards.
 
 Extends Claudine's canonical preparation service. Touches only `claudine/lib/`.
 
-- [ ] **BootstrapPreparation type**
+- [x] **BootstrapPreparation type**
       - Add `BootstrapPreparation` under `claudine/lib/src/composition/prepare/`
         containing exactly: resolved root identity (`resolved_path`,
         `source_repo_root`), retained input/provenance state (the
@@ -270,7 +388,7 @@ Extends Claudine's canonical preparation service. Touches only `claudine/lib/`.
         equal executed bytes).
       - It must **not** hold a composed prompt, a `CompositionClosurePlan`,
         or any body-derived state; it is not a `PreparedComposition` variant.
-- [ ] **prepare_bootstrap service entry**
+- [x] **prepare_bootstrap service entry**
       - Add `prepare_bootstrap` to
         `claudine/lib/src/composition/prepare/service.rs` alongside
         `prepare_document`: same source resolution, same option assembly and
@@ -280,14 +398,14 @@ Extends Claudine's canonical preparation service. Touches only `claudine/lib/`.
       - Both `CompositionMode::ChainedDocument` and
         `CompositionMode::InlineFrontmatterPrompt` must be supported (R4:
         parity across `compose` and `inline-compose`).
-- [ ] **Narrow-gate integration**
+- [x] **Narrow-gate integration**
       - Expose from the bootstrap result everything
         `resolve_lifecycle_shell_approvals(&bootstrap.lifecycle, path,
         &[LifecycleSignal::Initialize], …)` needs
         (`preflight.rs:180` — already exists); approvals continue to land in
         the shared invocation cache so the post-stabilization full audit
         reuses them without a second prompt (R2).
-- [ ] **Lib unit tests**
+- [x] **Lib unit tests**
       - `prepare_bootstrap` on a document whose body includes a missing file
         succeeds and returns a lifecycle surface; the same document through
         `prepare_document` still fails (ordering, not error suppression).
@@ -309,7 +427,7 @@ The core fix. Moves the premature template audit and pre-initialize full
 preparation behind the staged boot for live initialize-declaring documents,
 across direct entry, proxy adoption, and the loop route.
 
-- [ ] **Stage the command-level audit**
+- [x] **Stage the command-level audit**
       - In `claudine/cli/src/commands/compose/prep.rs`
         (`prepare_and_run_active_document`): when the staged boot applies
         (ruling 2 — `first && defers_schema_verdict_to_initialize(&source)`,
@@ -325,7 +443,7 @@ across direct entry, proxy adoption, and the loop route.
         `SchemaStage::Validate`.
       - Documents without `initialize` keep the current eager path byte for
         byte (R6/AC11).
-- [ ] **Restructure the pipeline boundary**
+- [x] **Restructure the pipeline boundary**
       - Adjust `claudine/cli/src/commands/wrap/composition/pipeline.rs`
         (`route_initialize`, `execute_initialize_catch`) and the request
         construction in `execute_loop_or_single` so initialize routing is
@@ -334,14 +452,14 @@ across direct entry, proxy adoption, and the loop route.
         stabilized post-`initialize` read. Do **not** add a second lifecycle
         engine, a second composer, or a placeholder
         `PreparedComposition` (R4).
-- [ ] **Adopted-target unification**
+- [x] **Adopted-target unification**
       - Align `bootstrap_adopted_document_phase` /
         `run_initialize_stages` (`loop_control.rs:941`/`:827`) so a newly
         adopted proxy target's bootstrap read is the Phase 3 bootstrap
         (lifecycle surface only) rather than a full composition — the same
         ordering at every hop of a proxy chain (R3/AC7). Direct documents
         still enter at stage 4 without re-emitting `initialize`.
-- [ ] **Loop-route ordering**
+- [x] **Loop-route ordering**
       - Apply the Phase 1 loop-path decision: for a looping,
         initialize-declaring document, the seed's lifecycle parse and the
         engine's `initialize` transition use the bootstrap surface;
@@ -350,7 +468,7 @@ across direct entry, proxy adoption, and the loop route.
         file-resolution context reapplied), not the pre-`initialize`
         in-memory snapshot. Later iterations and retry/resume keep the
         existing stage matrix — no duplicate `initialize` (R6/AC7).
-- [ ] **Stabilized-reread state discipline**
+- [x] **Stabilized-reread state discipline**
       - The reread re-reads from disk and reapplies the same caller inputs,
         origins, proxy overlay, `FileResolutionContext`, and document epoch;
         it extends the retained context snapshot for newly demanded groups
@@ -360,13 +478,13 @@ across direct entry, proxy adoption, and the loop route.
         `FileResolutionContext` — no prefix checks, no ambient resolution
         (R4). `ensure_file` and a later include of that file must agree on
         one resolved identity across macOS/Linux/Windows/WSL2.
-- [ ] **Failure fidelity**
+- [x] **Failure fidelity**
       - A file still missing after `initialize` fails through the existing
         typed diagnostic exactly once via the active target's ordinary
         `blocked`/`finalize` routing, and no provider launches (R5/AC8). A
         bootstrap-gate failure (denied initialize shell command) keeps its
         pre-ownership routing and produces no command effects (R2/AC5).
-- [ ] **Entry-path smoke parity**
+- [x] **Entry-path smoke parity**
       - Extend existing L1/L2 seams (`wrap_compose_preflight.rs`,
         `composition_seams.rs`, `level2_lifecycle_control.rs` families) to
         cover: direct `compose` staged boot, `inline-compose` staged boot,
@@ -386,21 +504,21 @@ identical error text recorded in Phase 1.
 
 Implements OQ1 Option A exactly. Small, deliberately bounded.
 
-- [ ] **Characterization test**
+- [x] **Characterization test**
       - In the sequence test surface (`claudine/cli/tests/sequence_cli.rs` or
         lib sequence preflight tests as appropriate): a sequence task whose
         prompt document declares an `initialize` that would create an
         included file fails static preflight with the typed missing-file
         error before any step starts. Assert no side effects and no step
         execution.
-- [ ] **Actionable diagnostic**
+- [x] **Actionable diagnostic**
       - Where the sequence static preflight surfaces the missing-transclusion
         failure, add a bounded note directing authors to create the artifact
         (or add a prior task that creates it) before starting the sequence —
         generated transclusions in sequences are intentionally unsupported by
         this fix. No contract change, no relaxation, no new approval prompt
         mid-sequence.
-- [ ] **Negative coverage**
+- [x] **Negative coverage**
       - A sequence referencing a prompt whose transclusion *exists* still
         runs unchanged; sequence `--dry-run` behavior is untouched.
 
@@ -415,19 +533,22 @@ the characterization green; the diagnostic renders in the captured output
 Independent of Phases 2–5; **may run concurrently as work-group wg-prompt**
 with any of them since it touches only prompt artifacts and their manifests.
 
-- [ ] **‖ wg-prompt** **Fix the log expression**
+- [x] **‖ wg-prompt** **Fix the log expression**
       - In `prompts/_implement/implement-plan.md` line 35: change
         `parent_dir(spec) + "/implementation-log.md"` to
         `dirname(spec) + "/implementation-log.md"`. Leave every other
         `parent_dir(...)` use (display strings in messages) untouched, and do
         not change `parent_dir`'s meaning anywhere.
-- [ ] **‖ wg-prompt** **Review logging instructions**
+      - *Phase 6 note:* already present before this phase — commit `47e9259ab`
+        landed it as `dirname(spec || plan)` (covers plan-only invocations).
+        Verified in both the shipped prompt and its fixture; no edit needed.
+- [x] **‖ wg-prompt** **Review logging instructions**
       - Re-read the body's logging guidance (the "start by creating the log
         file" block around lines 126–132) so it stays accurate when
         `initialize`'s `ensure_file` has already created an empty file:
         the instruction must read as "ensure it exists, then append" rather
         than assuming creation is the agent's job.
-- [ ] **‖ wg-prompt** **Update fixture and hashes**
+- [x] **‖ wg-prompt** **Update fixture and hashes**
       - Mirror the repair into
         `claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md`
         if it carries the same expression, and refresh the shipped-prompt
