@@ -105,7 +105,8 @@ pub use lifecycle_executor::{
 };
 pub use looping::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
-    LoopIterationOutput, LoopSeed, build_loop_seed, build_loop_seed_with_lifecycle, execute_loop,
+    LoopIterationOutput, LoopSeed, build_loop_seed, build_loop_seed_from_bootstrap,
+    build_loop_seed_with_lifecycle, execute_loop,
     execute_loop_with_config, execute_loop_with_lifecycle,
 };
 pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
@@ -119,8 +120,9 @@ pub use preflight::{
     resolve_shell_approvals,
 };
 pub use prepare::{
-    DocumentEntryReason, DocumentPreparation, LoopOwnership, PreparationStages, PrepareOptions,
-    PromptSource, SchemaStage, SourceBasis, bind_agent_workspace, preflight_document_shell,
+    BootstrapPreparation, BootstrapRequest, DocumentEntryReason, DocumentPreparation,
+    LoopOwnership, PreparationStages, PrepareOptions, PromptSource, SchemaStage, SourceBasis,
+    bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell, prepare_bootstrap,
     prepare_direct, prepare_document, prepare_inline,
 };
 #[cfg(test)]

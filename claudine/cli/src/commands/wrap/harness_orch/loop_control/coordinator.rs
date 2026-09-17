@@ -43,6 +43,9 @@ use super::super::HarnessPromptState;
 pub(super) enum BootstrapStage {
     /// Narrow initialize-shell gate → `initialize` → stabilized reread → audit.
     Full,
+    /// Stabilized reread → audit → launch rebuild, for an adopted target that
+    /// authors `initialize` and has already run it against its bootstrap read.
+    TargetInitialized,
     /// Stabilized reread → audit, for a document whose `initialize` already ran.
     StabilizeOnly,
 }
@@ -98,6 +101,20 @@ impl ActiveDocumentCoordinator {
     /// Consume the pending stage, returning which one was owed.
     pub(super) fn take_bootstrap_pending(&mut self) -> Option<BootstrapStage> {
         self.bootstrap_pending.take()
+    }
+
+    /// Whether a newly adopted target still owes the whole boot, `initialize`
+    /// included.
+    pub(super) fn owes_full_bootstrap(&self) -> bool {
+        self.bootstrap_pending == Some(BootstrapStage::Full)
+    }
+
+    /// Record that an adopted target ran its gate and `initialize` against its
+    /// bootstrap read, leaving the stabilized tail of the boot owed.
+    pub(super) fn mark_target_initialized(&mut self) {
+        if self.owes_full_bootstrap() {
+            self.bootstrap_pending = Some(BootstrapStage::TargetInitialized);
+        }
     }
 
     /// Arm the tail of the staged boot for a directly-invoked document.

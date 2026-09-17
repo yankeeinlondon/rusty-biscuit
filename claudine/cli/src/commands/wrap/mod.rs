@@ -44,7 +44,8 @@ pub(crate) use harness_orch::{
     build_harness_shell_options, build_harness_shell_options_for_source,
     build_harness_shell_options_for_source_with_cache, build_harness_shell_options_with_cache,
     execute_harness_attempt, find_wrapper_harness_source, harness_policy_root,
-    harness_prompt_mode_label, materialize_harness_prompt, materialize_passthrough_harness_seed,
+    harness_prompt_mode_label, load_overlaid_document, materialize_harness_prompt,
+    materialize_passthrough_harness_seed,
     materialized_harness_prompt_from_prepared, run_harness_loop,
 };
 pub(crate) use inline::{

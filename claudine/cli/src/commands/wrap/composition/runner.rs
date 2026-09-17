@@ -152,11 +152,12 @@ pub(super) fn run_composition_body(
     let adopting = request.adopted_handoff.is_some();
 
     // Whether this document's canonical preparation withheld its schema verdict
-    // because the document declares an `initialize` of its own (R4). The setup
-    // pipeline routes that event below; the harness loop then owes the stabilized
-    // reread that sees any initialize-time mutation and reaches the verdict. An
-    // adopted target is excluded — its full staged bootstrap already covers both,
-    // and a document that hands off never reaches a verdict at all.
+    // (R4), so the harness loop owes the stabilized reread that sees any
+    // lifecycle-time mutation and reaches the verdict. A live document that
+    // authors `initialize` never arrives deferred: the command coordinator's
+    // staged boot already judged its post-`initialize` read. An adopted target
+    // is excluded — its full staged bootstrap already covers both — and a
+    // document that hands off never reaches a verdict at all.
     let stabilize_after_initialize =
         request.prepared.schema_verdict_deferred && !adopting && !hands_off;
 

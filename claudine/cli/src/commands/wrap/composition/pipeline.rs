@@ -13,7 +13,7 @@ use claudine::composition::{
     commit_proxy, commit_proxy_in_context, decide_lifecycle_transition,
 };
 
-enum CompositionPhaseResult<T> {
+pub(super) enum CompositionPhaseResult<T> {
     Proceed(T),
     Completed(Box<SingleCompositionOutcome>),
     Blocked(color_eyre::Report),
@@ -1459,7 +1459,7 @@ fn execute_initialize_catch(
 /// This route decides *what* should happen; it never commits it. A `Proxy`
 /// control leaves here as an unresolved request, so the target is resolved and
 /// hop-checked in the one place that owns the invocation-wide chain.
-fn route_initialize(
+pub(super) fn route_initialize(
     guard: &mut LifecycleRunGuard<'_>,
     init_ctx: &StackExecutionContext<'_>,
     source_path: &Path,
@@ -1701,8 +1701,10 @@ fn provider_run_handoff(
     };
 
     // --- Initialize lifecycle event --------------------------------------
-    // Fires after prompt/frontmatter resolution and CLI/frontmatter override
-    // merge, but before $schema validation and shell pre-flight.
+    // Reached only by a document that does not author `initialize` (its event
+    // is empty) or by a caller without a command coordinator (a sequence step);
+    // a live `initialize`-declaring compose document ran the coordinator's
+    // staged boot and enters through the external-guard path above.
     let mut guard = LifecycleRunGuard::new(lifecycle, &lifecycle_ctx, emitter);
     let fm_map = request.prepared.effective_frontmatter.as_object();
     let empty_frontmatter = serde_json::Map::new();
@@ -1759,7 +1761,9 @@ fn provider_run_handoff(
     // coordinator already committed the hop, and the harness loop's staged
     // bootstrap owns the target's narrow initialize-shell gate, its own
     // `initialize`, the stabilized reread, and the full audit — the one
-    // canonical R4 staging shared with an in-harness adoption. Routing
+    // canonical R4 staging shared with an in-harness adoption. (A target that
+    // authors `initialize` never arrives adopted: the coordinator's own staged
+    // boot runs it before any `PreparedComposition` exists.) Routing
     // `initialize` here as well would fire it twice and audit a bootstrap read
     // the target's `initialize` may replace, so hand straight to the body, which
     // adopts the committed handoff into the loop.
@@ -1787,8 +1791,7 @@ fn provider_run_handoff(
     // already-committed handoff. The command coordinator re-prepares the target
     // through the *same* canonical launch pipeline a direct invocation uses —
     // rebuilding the complete launch bundle rather than inheriting the router's —
-    // and adopts it into the harness loop's staged bootstrap for its own
-    // `initialize`/reread/audit. This mirrors the terminal-proxy route's
+    // and boots the target in stages for its own `initialize`/reread/audit. This mirrors the terminal-proxy route's
     // `surface_or_adopt_terminal_proxy`: one commit point, one set of resolution
     // and cycle semantics.
     //
@@ -1813,82 +1816,142 @@ fn provider_run_handoff(
                 .handoff_ledger
                 .as_ref()
                 .expect("handoff_ledger.is_some() checked in the match guard");
-            let commit = match request
-                .prepared
-                .input_layers
-                .file_resolution_context
-                .as_ref()
-            {
-                Some(context) => commit_proxy_in_context(
-                    &mut ledger.lock().expect("run ledger mutex poisoned"),
-                    handoff,
-                    context,
-                ),
-                None => {
-                    if let Some(invocation) = request.invocation_context.as_ref() {
-                        invocation.record_ambient_fallback();
-                    }
-                    commit_proxy(
-                        &mut ledger.lock().expect("run ledger mutex poisoned"),
-                        handoff,
-                        effective_repo_root,
-                    )
-                }
-            };
-            match commit {
-                Ok(committed) => Ok(SingleCompositionOutcome {
-                    exit_code: 0,
-                    provider,
-                    agent_perf: None,
-                    iteration_signals: None,
-                    terminal_signal: None,
-                    final_output: None,
-                    initialize_handoff: Some(SurfacedHandoff::Committed(Box::new(committed))),
-                }),
-                // A refused hop leaves the source active; route the typed commit
-                // failure through its still-live `blocked`/`finalize` stacks with
-                // the concrete cause as `err`, exactly as the terminal route's
-                // `route_handoff_failure` does.
-                Err(commit_error) => {
-                    let info = LifecycleErrorInfo::from_proxy_commit_error(&commit_error);
-                    let outcome = emit_preflight_blocked_and_finalize_in_context(
-                        &mut guard,
-                        lifecycle_effect_engine,
-                        emitter,
-                        lifecycle_settings,
-                        lifecycle_messaging,
-                        term,
-                        &request.prepared.resolved_path,
-                        effective_repo_root,
-                        base_dir,
-                        Some(launch_workspace.launch_cwd.as_path()),
-                        Some(lifecycle_context),
-                        request
-                            .prepared
-                            .input_layers
-                            .file_resolution_context
-                            .as_ref(),
-                        fm_map.unwrap_or(&empty_frontmatter),
-                        document_start,
-                        info,
-                    );
-                    match outcome {
-                        // A raise inside the catch stacks supersedes the hand-off
-                        // failure.
-                        PreflightBlockedOutcome::EvaluationError(ce) => Err(ce.into()),
-                        // No flow-control recovery exists for a pre-launch
-                        // `initialize` blocked; surface the typed commit error so
-                        // the renderer walks `source()` to the concrete cause.
-                        PreflightBlockedOutcome::Control(_) => {
-                            Err(color_eyre::eyre::Report::new(commit_error))
-                        }
-                    }
-                }
-            }
+            let committed = commit_initialize_proxy(
+                &mut guard,
+                ledger,
+                handoff,
+                request.invocation_context.as_ref(),
+                &InitializeCatchSurface {
+                    effect_engine: lifecycle_effect_engine,
+                    emitter,
+                    settings: lifecycle_settings,
+                    messaging: lifecycle_messaging,
+                    term,
+                    source_path: &request.prepared.resolved_path,
+                    repo_root: effective_repo_root,
+                    launch_area: launch_workspace.launch_cwd.as_path(),
+                    context: lifecycle_context,
+                    file_resolution_context: request
+                        .prepared
+                        .input_layers
+                        .file_resolution_context
+                        .as_ref(),
+                    frontmatter: fm_map.unwrap_or(&empty_frontmatter),
+                    document_start,
+                },
+            )?;
+            Ok(SingleCompositionOutcome {
+                exit_code: 0,
+                provider,
+                agent_perf: None,
+                iteration_signals: None,
+                terminal_signal: None,
+                final_output: None,
+                initialize_handoff: Some(committed),
+            })
         }
         // Dry-run proxies (and every other transition) stay on the in-harness
         // coordinator.
         other => runner::run_composition_body(&ctx, &mut guard, perf_collector, false, other),
+    }
+}
+
+/// Where a pre-launch `initialize` failure is caught: the document's own
+/// `blocked`/`finalize` stacks, with the bindings its `initialize` ran against.
+pub(super) struct InitializeCatchSurface<'a> {
+    pub effect_engine: &'a EffectEngine,
+    pub emitter: &'a DefaultLifecycleEmitter,
+    pub settings: &'a claudine::events::GlobalSettings,
+    pub messaging: &'a claudine::messaging::RuntimeMessagingSettings,
+    pub term: &'a Terminal,
+    pub source_path: &'a Path,
+    pub repo_root: Option<&'a Path>,
+    pub launch_area: &'a Path,
+    pub context: &'a darkmatter::markdown::compose::ComposeContext,
+    pub file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
+    pub frontmatter: &'a serde_json::Map<String, serde_json::Value>,
+    pub document_start: Instant,
+}
+
+impl InitializeCatchSurface<'_> {
+    /// Route `info` through the document's `blocked`/`finalize`, returning the
+    /// evaluation error a catch stack raised instead, when it raised one.
+    pub(super) fn route_blocked(
+        &self,
+        guard: &mut LifecycleRunGuard<'_>,
+        info: LifecycleErrorInfo,
+    ) -> PreflightBlockedOutcome {
+        emit_preflight_blocked_and_finalize_in_context(
+            guard,
+            self.effect_engine,
+            self.emitter,
+            self.settings,
+            self.messaging,
+            self.term,
+            self.source_path,
+            self.repo_root,
+            self.source_path.parent().or(self.repo_root),
+            Some(self.launch_area),
+            Some(self.context),
+            self.file_resolution_context,
+            self.frontmatter,
+            self.document_start,
+            info,
+        )
+    }
+}
+
+/// Commit an `initialize` proxy against the command-owned ledger while the
+/// source's `initialize` guard is still live.
+///
+/// A clean commit synthesizes no source terminal/`finalize`: the source is
+/// transferred, not completed. A refused hop (missing target, cycle, hop limit)
+/// leaves the source active, so it routes through the source's still-legal
+/// `blocked`/`finalize` with the concrete cause as `err` (AC29).
+///
+/// ## Errors
+///
+/// The typed commit failure, or the evaluation error a catch stack raised
+/// while routing it.
+pub(super) fn commit_initialize_proxy(
+    guard: &mut LifecycleRunGuard<'_>,
+    ledger: &claudine::composition::SharedRunLedger,
+    handoff: EvaluatedProxyRequest,
+    invocation: Option<&claudine::invocation_context::InvocationContext>,
+    surface: &InitializeCatchSurface<'_>,
+) -> Result<SurfacedHandoff> {
+    let commit = match surface.file_resolution_context {
+        Some(context) => commit_proxy_in_context(
+            &mut ledger.lock().expect("run ledger mutex poisoned"),
+            handoff,
+            context,
+        ),
+        None => {
+            if let Some(invocation) = invocation {
+                invocation.record_ambient_fallback();
+            }
+            commit_proxy(
+                &mut ledger.lock().expect("run ledger mutex poisoned"),
+                handoff,
+                surface.repo_root,
+            )
+        }
+    };
+    match commit {
+        Ok(committed) => Ok(SurfacedHandoff::Committed(Box::new(committed))),
+        Err(commit_error) => {
+            let info = LifecycleErrorInfo::from_proxy_commit_error(&commit_error);
+            match surface.route_blocked(guard, info) {
+                // A raise inside the catch stacks supersedes the hand-off failure.
+                PreflightBlockedOutcome::EvaluationError(ce) => Err(ce.into()),
+                // No flow-control recovery exists for a pre-launch `initialize`
+                // blocked; surface the typed commit error so the renderer walks
+                // `source()` to the concrete cause.
+                PreflightBlockedOutcome::Control(_) => {
+                    Err(color_eyre::eyre::Report::new(commit_error))
+                }
+            }
+        }
     }
 }
 

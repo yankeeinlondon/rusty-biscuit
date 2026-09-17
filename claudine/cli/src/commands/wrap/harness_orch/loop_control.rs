@@ -31,8 +31,8 @@ use tracing::info_span;
 
 use super::{
     CachedHarnessLoopContext, HarnessPromptState, MaterializedHarnessPrompt, build_harness_launch,
-    execute_harness_attempt, harness_prompt_mode_label, materialize_harness_prompt,
-    preflight_harness_document, session_compat_key, HarnessPromptMode,
+    bootstrap_harness_prompt, execute_harness_attempt, harness_prompt_mode_label,
+    materialize_harness_prompt, preflight_harness_document, session_compat_key, HarnessPromptMode,
 };
 
 type HarnessLoopResult = (
@@ -557,6 +557,9 @@ fn prepare_attempt_phase(
             .harness_context
             .refresh(&prompt.prompt_state.source_path, prompt.repo_root);
     }
+    if let Some(step) = initialize_adopted_target_phase(&mut prompt, &mut lifecycle, &mut control)? {
+        return Ok(PhaseResult::Transition(Box::new(step)));
+    }
     preflight_fresh_document_phase(
         &mut prompt,
         &mut lifecycle,
@@ -901,12 +904,53 @@ fn run_initialize_stages(
     Ok(None)
 }
 
+/// Stages 1-3 for a newly adopted target that authors `initialize`, against its
+/// bootstrap read.
+///
+/// The target's `initialize` may create a file its body includes, so the read
+/// feeding the gate and `initialize` composes the frontmatter and lifecycle
+/// surface only. The full pre-flight audit and the full read that follow in
+/// [`prepare_attempt_phase`] then see the document `initialize` left behind,
+/// and [`bootstrap_adopted_document_phase`] finishes the boot from stage 4. A
+/// target without `initialize` owes nothing here: its full boot keeps the
+/// eager read.
+///
+/// ## Errors
+///
+/// A bootstrap-read or gate failure surfaces as its own typed diagnostic, as
+/// in [`run_initialize_stages`]: the target's lifecycle is not installed yet.
+fn initialize_adopted_target_phase(
+    prompt: &mut AttemptPromptPreparation<'_>,
+    lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
+    control: &mut AttemptRetryProxyControl<'_>,
+) -> Result<Option<LoopStep>> {
+    if !control.coordinator.owes_full_bootstrap() || prompt.initial_materialized.is_some() {
+        return Ok(None);
+    }
+    let bootstrap = bootstrap_harness_prompt(
+        prompt.prompt_state,
+        prompt.child_cwd,
+        prompt.harness_context.shell_options(),
+    )
+?;
+    let Some(mut materialized) = bootstrap else {
+        return Ok(None);
+    };
+    if let Some(step) = run_initialize_stages(prompt, lifecycle, control, &mut materialized)? {
+        return Ok(Some(step));
+    }
+    control.coordinator.mark_target_initialized();
+    Ok(None)
+}
+
 /// Run a document's staged canonical boot.
 ///
-/// A newly adopted proxy target runs all five stages. A directly-invoked
-/// document that declares its own `initialize` enters at stage 4: the setup
-/// pipeline already ran the equivalent of stages 1-3 for it, and re-running
-/// them here would emit `initialize` twice.
+/// A newly adopted proxy target runs all five stages; one that authors
+/// `initialize` already ran stages 1-3 against its bootstrap read
+/// ([`initialize_adopted_target_phase`]) and enters at stage 4. A
+/// directly-invoked document enters at stage 4 as well: the setup pipeline
+/// already ran the equivalent of stages 1-3 for it, and re-running them here
+/// would emit `initialize` twice.
 ///
 /// The staging exists because of an ordering conflict: `initialize` may mutate
 /// the document, and the full audit has to read the document it will actually
@@ -1027,7 +1071,7 @@ fn bootstrap_adopted_document_phase(
     // its lifecycle context is the prepared snapshot R5 pins; replacing either
     // from here would substitute a second capture for the one the run was
     // planned against. Its prompt was likewise already reported.
-    if stage == BootstrapStage::Full {
+    if stage != BootstrapStage::StabilizeOnly {
         let launch_area = lifecycle
             .guard
             .context()
