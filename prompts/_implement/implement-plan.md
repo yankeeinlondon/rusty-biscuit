@@ -122,9 +122,9 @@ Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan
 
 You will log your implementation progress to: {{log}}
 
-::block when="!file_exists(log)"
-- the log file for this implementation does not exist yet!
-- start by creating the log file ({{log}})
+::block when="!file_exists(log) || (markdown_body_empty(log) && is_empty(frontmatter(log)))"
+- the log file for this implementation has not been started yet
+- make sure the log file ({{log}}) exists -- it may already exist as an empty file -- and then write to it
 - add the following sections:
     - `# Implementation Log for {{parent_dir(spec)}} ({{total_phases}} phases)` for the logs title
     - `## Phase {{phase}}` for the log entries of this phase
@@ -140,9 +140,9 @@ Now we need to update the specification file's frontmatter ({{spec}}):
 - set `implemented` to `true`
 - set `implemented_by` to "{{ctx.agent}}/{{ctx.model}}"
 
-::block when="file_exists(log)"
-- the log file already exists 
-- but you'll need to add a new H2 section `## Phase {{phase}}` to the document for log entries during this phase of the implementation
+::block when="file_exists(log) && (!markdown_body_empty(log) || !is_empty(frontmatter(log)))"
+- the log file already has content from earlier work; keep it and append to it
+- you'll need to add a new H2 section `## Phase {{phase}}` to the document for log entries during this phase of the implementation
 ::block when="phase > 1"
 - since we are implementing phase {{phase}}, we do have the log entries for {{phase - 1}} which you can review at: {{log}}
 ::end-block

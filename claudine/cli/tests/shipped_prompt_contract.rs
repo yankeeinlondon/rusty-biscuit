@@ -628,3 +628,117 @@ fn shipped_commit_prompt_composes_resides_in_and_fires_success_cleanly() {
     );
     assert_clean_lifecycle(&rendered);
 }
+
+/// Composes `implement-plan.md` once through the normal CLI path and returns
+/// the prompt the provider received.
+///
+/// The shipped document's success stack runs `git`/`just`/`gitnexus` and its
+/// lifecycle speaks, so this drives the side-effect-free Level 2 copy, whose
+/// body `shipped_prompt_route_drift` pins byte-identical to the shipped body.
+#[cfg(unix)]
+fn deliver_implement_plan_prompt(
+    fixture: &common::CliProcessFixture,
+    prompts: &Path,
+    case: &Path,
+    phase: u32,
+) -> String {
+    use common::{strip_ansi, write, write_executable};
+
+    write(
+        &prompts.join("_implement/implement-plan.md"),
+        include_str!("fixtures/shipped_implement_route/_implement/implement-plan.md"),
+    );
+    write(&case.join("spec.md"), "---\nstatus: draft\n---\n# Spec\n");
+    write(
+        &case.join("plan.md"),
+        &format!("---\ntotal_phases: {phase}\nphase: {phase}\n---\n# Plan\n"),
+    );
+    let delivered = fixture.cwd().join("delivered.txt");
+    let _ = std::fs::remove_file(&delivered);
+    write_executable(
+        &fixture.bin_dir().join("goose"),
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CLAUDINE_PROMPT_CAPTURE\"\nexit 0\n",
+    );
+
+    let output = fixture
+        .command()
+        .env("CLAUDINE_PROMPT_CAPTURE", &delivered)
+        .arg("compose")
+        .arg(prompts.join("_implement/implement-plan.md"))
+        .arg(format!("spec={}", case.join("spec.md").display()))
+        .args(["--goose", "-y"])
+        .output()
+        .unwrap();
+    let rendered = strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ));
+    assert!(output.status.success(), "implement-plan must succeed:\n{rendered}");
+    assert!(!fixture.audio_spool().exists(), "no audio may be published");
+    std::fs::read_to_string(&delivered)
+        .unwrap_or_else(|_| panic!("the provider must have started:\n{rendered}"))
+}
+
+/// `initialize` runs `ensure_file: log` before the body composes, so the log
+/// always exists by the time the logging blocks are evaluated. The "start the
+/// log" instructions must therefore key on an *unstarted* log (missing, or
+/// present with no frontmatter and a blank body), not on a missing one —
+/// otherwise a fresh implementation is told the log "already exists" and never
+/// learns to write its title and metadata.
+#[cfg(unix)]
+#[test]
+fn shipped_implement_plan_logging_instructions_follow_log_content() {
+    use common::CliProcessFixture;
+
+    const UNSTARTED: &str = "the log file for this implementation has not been started yet";
+    const STARTED: &str = "the log file already has content from earlier work";
+
+    let fixture = CliProcessFixture::named("implement-plan-logging");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    let prompts = fixture.cwd().join("prompts");
+    copy_shipped_prompts(&prompts);
+    let case = fixture.cwd().join("fixes/case");
+    let log = case.join("implementation-log.md");
+
+    // Missing log: initialize creates it empty, and the prompt starts it.
+    assert!(!log.exists());
+    let fresh = deliver_implement_plan_prompt(&fixture, &prompts, &case, 1);
+    assert_eq!(
+        std::fs::read_to_string(&log).expect("initialize must create the log"),
+        "",
+        "ensure_file creates an empty log"
+    );
+    assert!(fresh.contains(UNSTARTED), "a fresh log must be started:\n{fresh}");
+    assert!(fresh.contains("# Implementation Log for"), "title instructions:\n{fresh}");
+    assert!(!fresh.contains(STARTED), "a fresh log has no prior content:\n{fresh}");
+
+    // An empty or whitespace-only log left by an earlier initialize is still unstarted.
+    for unstarted in ["", "\n  \n"] {
+        std::fs::write(&log, unstarted).unwrap();
+        let prompt = deliver_implement_plan_prompt(&fixture, &prompts, &case, 1);
+        assert!(prompt.contains(UNSTARTED), "{unstarted:?} is unstarted:\n{prompt}");
+        assert!(!prompt.contains(STARTED), "{unstarted:?} is unstarted:\n{prompt}");
+    }
+
+    // Frontmatter alone, or a body alone, means an earlier phase started the log;
+    // ensure_file must keep those bytes and the prompt must append to them.
+    for (started, phase) in [
+        ("---\nspec: fixes/case/spec.md\n---\n", 2),
+        ("# Implementation Log\n\n## Phase 1\n\n- did things\n", 2),
+        ("---\nstarted_phase: 1\n---\n# Implementation Log\n\n## Phase 1\n", 1),
+    ] {
+        std::fs::write(&log, started).unwrap();
+        let prompt = deliver_implement_plan_prompt(&fixture, &prompts, &case, phase);
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), started, "log preserved");
+        assert!(prompt.contains(STARTED), "{started:?} is started:\n{prompt}");
+        assert!(!prompt.contains(UNSTARTED), "{started:?} is started:\n{prompt}");
+        assert!(!prompt.contains("# Implementation Log for"), "no re-title:\n{prompt}");
+        assert_eq!(
+            prompt.contains("we do have the log entries for 1"),
+            phase > 1,
+            "prior-phase pointer tracks the phase:\n{prompt}"
+        );
+    }
+}
