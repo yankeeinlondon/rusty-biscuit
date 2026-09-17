@@ -51,7 +51,7 @@ A bold, underlined **Commit** heading is followed by a single-item list containi
 In both cases:
 
 - The 7-character short SHA is shown in bold inside brackets
-- If the commit's origin remote URL maps to a known hosting provider (GitHub, GitLab, Bitbucket, Forgejo, Gitea), the SHA is rendered as an **OSC8 hyperlink** pointing to the commit's browser URL
+- If a locally recorded remote-tracking ref contains the commit, and the preferred containing remote (`origin`, then other remotes alphabetically, then `upstream`) maps to a hosting provider with a known browser URL, the SHA is rendered as an **OSC8 hyperlink** to the commit's page on that remote. Unpushed commits are not linked. Containment uses local refs only (no fetch) under a bounded walk; if that walk cannot decide containment, the SHA is not linked
 - The timestamp is split into a time portion and a date portion; dates from today omit the "on" prefix
 - Refs (local branches, remote tracking branches, tags) are shown as decorations after the date when present
 

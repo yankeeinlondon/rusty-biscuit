@@ -65,7 +65,7 @@ Lists up to `--history` recent commits followed by any working tree changes. Ite
 
 #### Commit Lines
 
-Each commit renders as a one-liner using `format_commit_line`. The SHA (first 7 characters) is shown as an OSC8 hyperlink when the commit has been pushed to `origin`; unpushed commits show the SHA as plain bold text. The "pushed" boundary is derived from the `origin` remote's ahead count.
+Each commit renders as a one-liner using `format_commit_line`. The SHA (first 7 characters) is shown as an OSC8 hyperlink when a locally recorded remote-tracking ref contains the commit and the preferred containing remote has a known browser URL. Other commits show the SHA as plain bold text. Containment is decided per commit by the library (`commit_links_at`) from local refs only, with no fetch.
 
 Conventional commit format (`type(scope): description`) is parsed and displayed with the type and scope styled separately from the description.
 
