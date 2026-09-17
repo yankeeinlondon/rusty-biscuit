@@ -1340,8 +1340,6 @@ pub(crate) fn current_package_area_is_dirty(
     let area = repo.package_area_for_dir(&dir)?;
     let git = fs.git.as_ref()?;
 
-    let area_prefix = if area == "root" { "" } else { area };
-
     // Without computed status (identity-only request) dirtiness is
     // indeterminate, so return `None` like the other missing-data early exits.
     let status = git.status.as_ref()?;
@@ -1361,14 +1359,14 @@ pub(crate) fn current_package_area_is_dirty(
                 .map(|fc| fc.path.to_str().unwrap_or("")),
         )
         .any(|path| {
-            if area_prefix.is_empty() {
+            if area.is_empty() {
                 // Root area: dirty if file is not inside any non-root area
                 !repo.packages.as_ref().is_some_and(|pkgs| {
                     pkgs.iter()
-                        .any(|p| p.package_area != "root" && path.starts_with(&p.package_area))
+                        .any(|p| !p.package_area.is_empty() && path.starts_with(&p.package_area))
                 })
             } else {
-                path.starts_with(area_prefix)
+                path.starts_with(area)
             }
         });
 
@@ -1417,8 +1415,6 @@ pub(crate) fn package_area_source_code_change_count(
     let area = repo.package_area_for_dir(&dir)?;
     let git = fs.git.as_ref()?;
 
-    let area_prefix = if area == "root" { "" } else { area };
-
     // Without computed status (identity-only request) the change count is
     // indeterminate, so return `None` like the other missing-data early exits.
     let status = git.status.as_ref()?;
@@ -1439,13 +1435,13 @@ pub(crate) fn package_area_source_code_change_count(
                 .map(|fc| fc.path.to_str().unwrap_or("")),
         )
         .filter(|path| {
-            let in_area = if area_prefix.is_empty() {
+            let in_area = if area.is_empty() {
                 !repo.packages.as_ref().is_some_and(|pkgs| {
                     pkgs.iter()
-                        .any(|p| p.package_area != "root" && path.starts_with(&p.package_area))
+                        .any(|p| !p.package_area.is_empty() && path.starts_with(&p.package_area))
                 })
             } else {
-                path.starts_with(area_prefix)
+                path.starts_with(area)
             };
             in_area && is_source_code_file(path)
         })
@@ -1566,6 +1562,7 @@ mod tests {
             branches: vec![],
             in_worktree: false,
             base_repo_root: None,
+            current_worktree: None,
             recent: vec![CommitInfo {
                 sha: "1234567890abcdef".to_string(),
                 message: "feat: add status output".to_string(),
@@ -2443,8 +2440,8 @@ mod tests {
         use super::*;
 
         #[test]
-        fn root_sentinel_returns_repo_root() {
-            let mut pkg = make_package("model_id", "root", &[]);
+        fn top_level_area_returns_repo_root() {
+            let mut pkg = make_package("model_id", "", &[]);
             pkg.relative = "model_id".to_string();
             pkg.path = PathBuf::from("/repo/model_id");
 

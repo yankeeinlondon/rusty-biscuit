@@ -1385,12 +1385,12 @@ pub(crate) fn normalize_path(path: &Path) -> PathBuf {
 /// Derives the package area from a relative path.
 ///
 /// The area is the directory path between the repo root and the package directory.
-/// Returns "root" when the package sits directly under the repo root.
+/// Returns `""` when the package sits directly under the repo root.
 fn make_package_area(relative: &str) -> String {
     let path = Path::new(relative);
     match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent.to_string_lossy().to_string(),
-        _ => "root".to_string(),
+        _ => String::new(),
     }
 }
 
@@ -1927,7 +1927,7 @@ mod tests {
             name: name.to_string(),
             path: PathBuf::from(name),
             relative: name.to_string(),
-            package_area: "root".to_string(),
+            package_area: String::new(),
             ecosystem: PackageEcosystem::Unknown,
             standard: MonorepoStandard::Unknown,
             provenance: PackageProvenance::ManifestScan,
@@ -1974,8 +1974,13 @@ mod tests {
     }
 
     #[test]
-    fn make_package_area_returns_root_for_top_level_package() {
-        assert_eq!(make_package_area("model_id"), "root");
+    fn make_package_area_is_empty_for_top_level_package() {
+        assert_eq!(make_package_area("model_id"), "");
+    }
+
+    #[test]
+    fn make_package_area_keeps_a_real_area_named_root() {
+        assert_eq!(make_package_area("root/lib"), "root");
     }
 
     #[test]
@@ -2553,14 +2558,14 @@ mod tests {
                 name: "root".to_string(),
                 path: root.to_path_buf(),
                 relative: "".to_string(),
-                package_area: "root".to_string(),
+                package_area: String::new(),
                 ..Default::default()
             },
             Package {
                 name: "sub".to_string(),
                 path: root.join("sub"),
                 relative: "sub".to_string(),
-                package_area: "root".to_string(),
+                package_area: String::new(),
                 ..Default::default()
             },
         ];
@@ -2596,7 +2601,7 @@ mod tests {
             name: "pkg".to_string(),
             path: root.join("pkg"),
             relative: "pkg".to_string(),
-            package_area: "root".to_string(),
+            package_area: String::new(),
             ..Default::default()
         }];
 

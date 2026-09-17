@@ -200,7 +200,7 @@ pub fn run_compose(
         .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
     let launch_package_area = launch_repo_structure.as_ref().and_then(|repo| {
         repo.package_area_label_for_dir(&launch_dir).map(|area| {
-            if area.as_ref() == "root" {
+            if area.is_empty() {
                 repo.root.clone()
             } else {
                 repo.root.join(area.as_ref())
@@ -262,7 +262,7 @@ pub fn run_compose(
                 let source_package_area = source_repo_structure.as_ref().and_then(|repo| {
                     resolved.parent().and_then(|source_dir| {
                         repo.package_area_label_for_dir(source_dir).map(|area| {
-                            if area.as_ref() == "root" {
+                            if area.is_empty() {
                                 repo.root.clone()
                             } else {
                                 repo.root.join(area.as_ref())

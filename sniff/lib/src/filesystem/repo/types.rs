@@ -155,7 +155,7 @@ pub struct Package {
     /// Path relative to the repo root (e.g., "sniff/lib")
     pub relative: String,
     /// Directory path between repo root and package root (e.g., "sniff" for "sniff/lib",
-    /// "apps/browser" for "apps/browser/my_package", "root" for top-level packages)
+    /// "apps/browser" for "apps/browser/my_package", `""` for top-level packages)
     pub package_area: String,
     /// Native package name from manifest (Cargo.toml `[package]`.name or package.json name)
     pub name: String,
@@ -307,8 +307,8 @@ impl RepoInfo {
     /// otherwise the area is the surrounding package-area string. When no
     /// discovered package names the area — e.g. a freshly scaffolded area whose
     /// crates are not yet listed in `[workspace] members` — the area is taken
-    /// from the directory structure (see [`directory_area_fallback`]). Falls
-    /// back to `"root"` only at the repo root.
+    /// from the directory structure (see [`directory_area_fallback`]). The area
+    /// is `""` at the repo root.
     ///
     /// ## Examples
     ///
@@ -319,14 +319,14 @@ impl RepoInfo {
     /// - CWD at `sniff/` but outside any package → `"sniff"`
     /// - CWD in `reaper/lib` while `reaper/*` is not yet a workspace member →
     ///   `"reaper"` (directory-structure fallback)
-    /// - CWD at repo root → `"root"`
+    /// - CWD at repo root → `""`
     ///
     /// [`directory_area_fallback`]: Self::directory_area_fallback
     pub fn area_for_dir(&self, dir: &Path) -> Cow<'_, str> {
         let Some(packages) = self.packages.as_deref() else {
             return self
                 .directory_area_fallback(dir)
-                .map_or(Cow::Borrowed("root"), Cow::Owned);
+                .map_or(Cow::Borrowed(""), Cow::Owned);
         };
         let ownership_index = PackageOwnershipIndex::from_packages(&self.root, packages);
         let dir = canonicalize_path(dir);
@@ -347,7 +347,7 @@ impl RepoInfo {
             return Cow::Borrowed(area);
         }
         self.directory_area_fallback_with_index(ownership_index, dir)
-            .map_or(Cow::Borrowed("root"), Cow::Owned)
+            .map_or(Cow::Borrowed(""), Cow::Owned)
     }
 
     /// Resolve the package-area label for `dir`, falling back to the directory
@@ -425,7 +425,8 @@ impl RepoInfo {
     ///
     /// First checks if `dir` is inside a specific package, then falls back to
     /// checking whether it sits anywhere within a package area directory.
-    /// Returns `None` when `dir` is outside every known package area.
+    /// Returns `None` when `dir` is outside every known package area, and
+    /// `Some("")` inside a package that sits directly under the repo root.
     pub fn package_area_for_dir(&self, dir: &Path) -> Option<&str> {
         let packages = self.packages.as_deref()?;
         let ownership_index = PackageOwnershipIndex::from_packages(&self.root, packages);
@@ -447,11 +448,12 @@ impl RepoInfo {
             return Some(&pkg.package_area);
         }
 
-        // Fall back to checking package area directories
+        // Fall back to checking package area directories. The top-level `""`
+        // area has no directory of its own; joining it would match every path.
         let areas: HashSet<&str> = packages
             .iter()
             .map(|p| p.package_area.as_str())
-            .filter(|a| *a != "root")
+            .filter(|a| !a.is_empty())
             .collect();
 
         for area in &areas {
@@ -610,7 +612,7 @@ mod tests {
                 Package {
                     path: PathBuf::from("/repo/crates"),
                     relative: "crates".to_string(),
-                    package_area: "root".to_string(),
+                    package_area: String::new(),
                     name: "crates".to_string(),
                     ecosystem: PackageEcosystem::Cargo,
                     ..Package::default()
@@ -763,7 +765,7 @@ mod tests {
                 Package {
                     path: PathBuf::from("/repo/top-pkg"),
                     relative: "top-pkg".to_string(),
-                    package_area: "root".to_string(),
+                    package_area: String::new(),
                     name: "top-pkg".to_string(),
                     ..Package::default()
                 },
@@ -794,9 +796,46 @@ mod tests {
     }
 
     #[test]
-    fn area_for_dir_returns_root_at_repo_root() {
+    fn area_for_dir_is_empty_at_repo_root() {
         let repo = monorepo_with_areas();
-        assert_eq!(repo.area_for_dir(Path::new("/repo")), "root");
+        assert_eq!(repo.area_for_dir(Path::new("/repo")), "");
+        assert_eq!(repo.package_area_for_dir(Path::new("/repo")), None);
+    }
+
+    #[test]
+    fn top_level_package_has_the_empty_area() {
+        let repo = monorepo_with_areas();
+        let dir = Path::new("/repo/top-pkg/src");
+        assert_eq!(repo.package_area_for_dir(dir), Some(""));
+        assert_eq!(repo.package_area_label_for_dir(dir).as_deref(), Some(""));
+        assert_eq!(repo.area_for_dir(dir), "top-pkg");
+    }
+
+    #[test]
+    fn empty_area_does_not_claim_area_directories() {
+        // The top-level package is listed first, so a fallback that joined the
+        // empty area onto the root would claim every directory for it.
+        let mut repo = monorepo_with_areas();
+        repo.packages.as_mut().unwrap().rotate_right(1);
+        assert_eq!(repo.package_area_for_dir(Path::new("/repo/sniff")), Some("sniff"));
+        assert_eq!(repo.area_for_dir(Path::new("/repo/sniff")), "sniff");
+        assert_eq!(repo.package_area_for_dir(Path::new("/repo")), None);
+    }
+
+    #[test]
+    fn a_real_area_named_root_is_an_ordinary_area() {
+        let mut repo = monorepo_with_areas();
+        repo.packages.as_mut().unwrap().push(Package {
+            path: PathBuf::from("/repo/root/lib"),
+            relative: "root/lib".to_string(),
+            package_area: "root".to_string(),
+            name: "root-lib".to_string(),
+            ..Package::default()
+        });
+        assert_eq!(repo.area_for_dir(Path::new("/repo/root/lib/src")), "root-lib");
+        assert_eq!(repo.package_area_for_dir(Path::new("/repo/root")), Some("root"));
+        assert_eq!(repo.area_for_dir(Path::new("/repo/root")), "root");
+        assert_eq!(repo.area_for_dir(Path::new("/repo")), "");
     }
 
     #[test]
@@ -835,8 +874,8 @@ mod tests {
         let mut repo = monorepo_with_areas();
         repo.is_monorepo = false;
         // Without a monorepo the area concept does not apply: no directory-name
-        // fallback, so an unwired path resolves to the "root" sentinel.
-        assert_eq!(repo.area_for_dir(Path::new("/repo/reaper/lib")), "root");
+        // fallback, so an unwired path resolves to the empty area.
+        assert_eq!(repo.area_for_dir(Path::new("/repo/reaper/lib")), "");
         assert_eq!(
             repo.package_area_label_for_dir(Path::new("/repo/reaper/lib")),
             None

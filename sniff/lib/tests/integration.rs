@@ -2815,6 +2815,23 @@ fn test_get_recent_commits_not_a_repo_error() {
 }
 
 #[test]
+fn test_get_recent_commits_by_count_unborn_repo_is_empty_and_outside_errors() {
+    use sniff::filesystem::get_recent_commits_by_count;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    git2::Repository::init(dir.path()).unwrap();
+    let set = get_recent_commits_by_count(dir.path(), 10).expect("an unborn HEAD is not an error");
+    assert!(set.commits.is_empty());
+    assert_eq!(set.describe(true), "");
+
+    let outside = tempfile::TempDir::new().unwrap();
+    assert!(matches!(
+        get_recent_commits_by_count(outside.path(), 10),
+        Err(sniff::SniffError::NotARepository(_))
+    ));
+}
+
+#[test]
 fn test_commit_desc_set_filter_by_package_not_a_monorepo() {
     use sniff::filesystem::get_recent_commits_by_duration;
 

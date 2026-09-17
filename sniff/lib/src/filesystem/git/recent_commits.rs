@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Utc};
 use gix::bstr::ByteSlice;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -180,6 +180,29 @@ pub struct CommitDesc {
     pub files: Vec<CommitFileChange>,
     pub description: String,
     pub bullet_points: Vec<String>,
+}
+
+impl CommitDesc {
+    /// Render this commit as one plain commit-centric block.
+    ///
+    /// This is the per-commit unit of [`CommitDescSet::describe`] with
+    /// `plain = true` (and so of `sniff repo recent-commits --plain`):
+    /// concatenating the blocks of a set's commits, rendered with the same
+    /// `today`, reproduces that output byte for byte. `today` is the viewer's
+    /// local date and selects the `Today` / `Yesterday` labels; commit times
+    /// render in the local time zone.
+    ///
+    /// Returns `None` for a commit that touched no files, which
+    /// [`CommitDescSet::describe`] omits.
+    pub fn describe_plain(&self, today: NaiveDate) -> Option<String> {
+        if self.files.is_empty() {
+            return None;
+        }
+        let files: Vec<&CommitFileChange> = self.files.iter().collect();
+        let mut out = String::new();
+        render_commit_block(&mut out, self, &files, None, today, &Local);
+        Some(out)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -718,7 +741,8 @@ impl CommitDescSet {
                 continue;
             }
 
-            render_commit_block(&mut out, commit, &files, &self.repo_root, today, plain);
+            let link_root = (!plain).then_some(self.repo_root.as_path());
+            render_commit_block(&mut out, commit, &files, link_root, today, &Local);
             emitted += 1;
         }
 
@@ -757,16 +781,21 @@ fn file_matches_kind(path: &str, kind: ChangeKind) -> bool {
 ///
 ///     - modified: [path](file://...)
 /// ```
-fn render_commit_block(
+///
+/// `link_root` is the repository root that file links resolve against; `None`
+/// renders plain paths.
+fn render_commit_block<Tz: TimeZone>(
     out: &mut String,
     commit: &CommitDesc,
     files: &[&CommitFileChange],
-    repo_root: &Path,
+    link_root: Option<&Path>,
     today: NaiveDate,
-    plain: bool,
-) {
+    zone: &Tz,
+) where
+    Tz::Offset: std::fmt::Display,
+{
     let short_hash = &commit.hash[..commit.hash.len().min(7)];
-    let time_label = commit_time_label(&commit.datetime, today);
+    let time_label = commit_time_label(&commit.datetime, today, zone);
     let (prefix, message) = split_conventional(&commit.description);
 
     let header = match (prefix, message) {
@@ -798,11 +827,11 @@ fn render_commit_block(
     out.push_str("    **Files Impacted:**\n\n");
     for file in files {
         let label = file.kind.to_string();
-        if plain {
-            out.push_str(&format!("    - {}: {}\n", label, file.path));
-        } else {
+        if let Some(repo_root) = link_root {
             let url = file_url(&repo_root.join(&file.path));
             out.push_str(&format!("    - {}: [{}]({})\n", label, file.path, url));
+        } else {
+            out.push_str(&format!("    - {}: {}\n", label, file.path));
         }
     }
     out.push('\n');
@@ -826,14 +855,18 @@ fn split_conventional(description: &str) -> (Option<String>, String) {
 }
 
 /// Format a commit timestamp like `1:01pm Today` / `12:32pm Yesterday` /
-/// `2026-04-01 at 9:30am`, converted to the viewer's local timezone so that
-/// "Today"/"Yesterday" labels line up with what the reader expects.
-fn commit_time_label(datetime_rfc3339: &str, today_local: NaiveDate) -> String {
+/// `2026-04-01 at 9:30am`, converted to the viewer's time `zone` (the local
+/// zone outside tests) so that "Today"/"Yesterday" labels line up with what the
+/// reader expects.
+fn commit_time_label<Tz: TimeZone>(datetime_rfc3339: &str, today_local: NaiveDate, zone: &Tz) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
     let Ok(dt) = DateTime::parse_from_rfc3339(datetime_rfc3339) else {
         return datetime_rfc3339.to_string();
     };
 
-    let local = dt.with_timezone(&Local);
+    let local = dt.with_timezone(zone);
     let time_str = local.format("%-I:%M%P").to_string();
     let commit_date = local.date_naive();
     let yesterday = today_local - Duration::days(1);
@@ -1409,12 +1442,103 @@ mod tests {
         fn commit_time_label_absolute_for_old_commit() {
             // Date well in the past to avoid "Today"/"Yesterday" flakiness.
             let today = NaiveDate::from_ymd_opt(2026, 4, 9).unwrap();
-            let label = commit_time_label("2024-01-15T09:05:00+00:00", today);
+            let label = commit_time_label("2024-01-15T09:05:00+00:00", today, &Local);
             assert!(
                 label.starts_with("2024-01-15 at "),
                 "expected absolute-date label, got: {}",
                 label
             );
+        }
+
+        fn zone(hours: i32) -> chrono::FixedOffset {
+            chrono::FixedOffset::east_opt(hours * 3600).unwrap()
+        }
+
+        #[test]
+        fn commit_time_label_renders_in_the_viewer_zone() {
+            let today = NaiveDate::from_ymd_opt(2026, 4, 9).unwrap();
+            // 23:30 UTC on the 8th is 01:30 on the 9th two hours east.
+            let stamp = "2026-04-08T23:30:00+00:00";
+            assert_eq!(commit_time_label(stamp, today, &zone(0)), "11:30pm Yesterday");
+            assert_eq!(commit_time_label(stamp, today, &zone(2)), "1:30am Today");
+            assert_eq!(
+                commit_time_label("2026-04-08T01:00:00+00:00", today, &zone(-2)),
+                "2026-04-07 at 11:00pm"
+            );
+            assert_eq!(
+                commit_time_label("2026-04-01T09:30:00+00:00", today, &zone(0)),
+                "2026-04-01 at 9:30am"
+            );
+            assert_eq!(commit_time_label("not a date", today, &zone(0)), "not a date");
+        }
+
+        fn old_commit(hash: &str, description: &str, bullets: &[&str], files: Vec<CommitFileChange>) -> CommitDesc {
+            CommitDesc {
+                hash: hash.to_string(),
+                datetime: "2020-02-03T10:04:00+00:00".to_string(),
+                packages: None,
+                package_areas: None,
+                files,
+                description: description.to_string(),
+                bullet_points: bullets.iter().map(|b| (*b).to_string()).collect(),
+            }
+        }
+
+        #[test]
+        fn describe_plain_renders_one_exact_block() {
+            let today = NaiveDate::from_ymd_opt(2026, 4, 9).unwrap();
+            let commit = sample_set().commits.remove(0);
+            let block = commit.describe_plain(today).expect("commit touched files");
+            let time = commit_time_label(&commit.datetime, today, &Local);
+            assert_eq!(
+                block,
+                format!(
+                    "- [a1b2c3d] feat(sniff) at {time}: add recent commits\n\n    **Description:**\n\n    - added period parsing\n    - added CommitDesc struct\n\n    **Files Impacted:**\n\n    - modified: sniff/lib/src/lib.rs\n    - added: sniff/lib/README.md\n    - modified: sniff/lib/Cargo.toml\n\n"
+                )
+            );
+        }
+
+        #[test]
+        fn describe_plain_omits_prefix_and_description_for_plain_messages() {
+            let today = NaiveDate::from_ymd_opt(2026, 4, 9).unwrap();
+            let commit = old_commit(
+                "0123456789",
+                "ship it",
+                &[],
+                vec![fc("gone.rs", DeltaKind::Deleted), fc("new.rs", DeltaKind::Renamed)],
+            );
+            let time = commit_time_label(&commit.datetime, today, &Local);
+            assert_eq!(
+                commit.describe_plain(today).unwrap(),
+                format!(
+                    "- [0123456] at {time}: ship it\n\n    **Files Impacted:**\n\n    - deleted: gone.rs\n    - renamed: new.rs\n\n"
+                )
+            );
+        }
+
+        #[test]
+        fn describe_plain_is_none_for_a_commit_without_files() {
+            let today = NaiveDate::from_ymd_opt(2026, 4, 9).unwrap();
+            let empty = old_commit("feedface", "chore: empty", &[], Vec::new());
+            assert_eq!(empty.describe_plain(today), None);
+        }
+
+        #[test]
+        fn describe_plain_blocks_concatenate_to_the_plain_set_rendering() {
+            let mut set = sample_set();
+            set.commits.push(old_commit("feedface00", "chore: empty", &[], Vec::new()));
+            set.commits.push(old_commit(
+                "cafebabe00",
+                "fix(repo): drop the sentinel",
+                &["top-level area is empty"],
+                vec![fc("sniff/lib/src/filesystem/repo/types.rs", DeltaKind::Modified)],
+            ));
+            let today = Local::now().date_naive();
+            let blocks: Vec<String> =
+                set.commits.iter().filter_map(|c| c.describe_plain(today)).collect();
+
+            assert_eq!(blocks.len(), 2, "the empty commit shortens the list");
+            assert_eq!(blocks.concat(), set.describe(true));
         }
     }
 

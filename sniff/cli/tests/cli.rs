@@ -6015,6 +6015,70 @@ fn test_repo_recent_commits_plain_output_exact_structure() {
     );
 }
 
+/// Commit `files` (or, when empty, the parent tree) at a fixed past time so no
+/// `Today` / `Yesterday` label can appear.
+fn commit_at(repo: &git2::Repository, files: &[(&str, &str)], message: &str, epoch: i64) {
+    let root = repo.workdir().unwrap().to_path_buf();
+    let mut index = repo.index().unwrap();
+    for (file, content) in files {
+        let full = root.join(file);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+        index.add_path(Path::new(file)).unwrap();
+    }
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let sig = git2::Signature::new("Test", "test@test.com", &git2::Time::new(epoch, 0)).unwrap();
+    let parent = repo.head().ok().map(|head| head.peel_to_commit().unwrap());
+    let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
+        .unwrap();
+}
+
+#[test]
+fn test_repo_recent_commits_plain_is_the_concatenated_per_commit_blocks() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    // 2020-02-03T12:00:00Z and later, one hour apart.
+    let base = 1_580_731_200;
+    commit_at(&repo, &[("a.txt", "a")], "initial", base);
+    commit_at(
+        &repo,
+        &[("src/lib.rs", "pub fn f() {}"), ("README.md", "# r")],
+        "feat(core): add f\n\n- adds f\n- documents f",
+        base + 3600,
+    );
+    commit_at(&repo, &[], "chore: empty commit", base + 7200);
+    commit_at(&repo, &[("a.txt", "b")], "tweak a", base + 10_800);
+
+    let assert = common::owned_sniff_command()
+        .args([
+            "--base",
+            dir.path().to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "4",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+
+    let set = sniff::filesystem::get_recent_commits_by_count(dir.path(), 4).unwrap();
+    assert_eq!(set.commits.len(), 4);
+    let today = chrono::Local::now().date_naive();
+    let blocks: Vec<String> = set
+        .commits
+        .iter()
+        .filter_map(|commit| commit.describe_plain(today))
+        .collect();
+    assert_eq!(blocks.len(), 3, "the empty commit renders no block");
+    assert!(blocks[0].starts_with("- [") && blocks[0].contains(" at 2020-02-03 at "));
+    assert!(blocks[1].contains("] feat(core) at 2020-02-03 at "), "{}", blocks[1]);
+    assert!(blocks[1].contains("    **Description:**\n\n    - adds f\n    - documents f\n"));
+    assert_eq!(stdout, blocks.concat());
+}
+
 // ============================================================================
 // repo packages Subcommand Tests
 // ============================================================================
@@ -6454,11 +6518,11 @@ fn test_repo_package_areas_root_area_verbose_renders_dot_slash() {
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     assert!(
-        stdout.contains("root (./)"),
+        stdout.contains("(root) (./)"),
         "Root package area should render as the repo root, got:\n{stdout}"
     );
     assert!(
-        !stdout.contains("root (./root)"),
+        !stdout.contains("(./root)"),
         "Root package area should not render a non-existent root directory, got:\n{stdout}"
     );
 }
@@ -8856,7 +8920,7 @@ fn test_repo_git_status_package_with_area_name_errors() {
 //
 // `sniff repo area` returns a single "area" name combining the notions of
 // "package" and "package-area": package name when inside a package, else the
-// surrounding area string (or "root").
+// surrounding area string (or "" at the repo root).
 
 #[test]
 fn test_repo_area_inside_package_returns_package_name() {
@@ -8883,14 +8947,120 @@ fn test_repo_area_at_area_dir_returns_area_name() {
 }
 
 #[test]
-fn test_repo_area_at_repo_root_returns_root() {
+fn test_repo_area_at_repo_root_prints_an_empty_area() {
     let (_dir, path) = create_cli_monorepo();
     let assert = common::owned_sniff_command()
         .args(["--base", path.to_str().unwrap(), "repo", "area"])
         .assert()
         .success();
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert_eq!(stdout.trim(), "root");
+    // The empty area is still a result: an empty line and exit 0, distinct
+    // from the non-monorepo "no results" exit 1.
+    assert_eq!(String::from_utf8_lossy(&assert.get_output().stdout), "\n");
+
+    let assert = common::owned_sniff_command()
+        .args(["--base", path.to_str().unwrap(), "--json", "repo", "area"])
+        .assert()
+        .success();
+    let value: Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(value["name"], Value::String(String::new()));
+}
+
+/// A monorepo with a top-level package (`top`), a package inside a real area
+/// named `root` (`root/lib`), and an ordinary area (`pkg-a/lib`).
+fn create_cli_monorepo_with_top_level_and_root_named_area() -> (tempfile::TempDir, PathBuf) {
+    let (dir, path) = create_cli_monorepo();
+    std::fs::write(
+        path.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"pkg-a/lib\", \"pkg-b/lib\", \"root/lib\", \"top\"]\n",
+    )
+    .unwrap();
+    for (dir_name, name) in [("root/lib", "root-lib"), ("top", "top")] {
+        let pkg = path.join(dir_name);
+        std::fs::create_dir_all(pkg.join("src")).unwrap();
+        std::fs::write(
+            pkg.join("Cargo.toml"),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+        )
+        .unwrap();
+        std::fs::write(pkg.join("src/lib.rs"), "pub fn f() {}").unwrap();
+    }
+    (dir, path)
+}
+
+fn sniff_stdout(base: &Path, args: &[&str]) -> (String, Option<i32>) {
+    let output = common::owned_sniff_command()
+        .args(["--base", base.to_str().unwrap()])
+        .args(args)
+        .output()
+        .expect("failed to run sniff");
+    (
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        output.status.code(),
+    )
+}
+
+#[test]
+fn test_repo_scope_projections_use_the_empty_top_level_area() {
+    let (_dir, path) = create_cli_monorepo_with_top_level_and_root_named_area();
+
+    // Inside a top-level package: the area is the package, the package area is
+    // empty (a no-result), and no synthetic `root` appears anywhere.
+    let top = path.join("top/src");
+    assert_eq!(sniff_stdout(&top, &["repo", "area"]), ("top\n".to_string(), Some(0)));
+    let (stdout, code) = sniff_stdout(&top, &["repo", "package-area"]);
+    assert_eq!(code, Some(1), "an empty package area is no result: {stdout}");
+    assert!(!stdout.contains("root"), "{stdout}");
+    let (stdout, _) = sniff_stdout(&top, &["--json", "repo", "package-area"]);
+    let value: Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(value["name"], Value::String(String::new()));
+    let (stdout, _) = sniff_stdout(&top, &["--json", "repo", "package-area-root"]);
+    let value: Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(value["root"], Value::String(String::new()));
+
+    // The aggregate projection carries the semantic empty strings.
+    let (stdout, code) = sniff_stdout(&top, &["--json", "repo"]);
+    assert_eq!(code, Some(0), "{stdout}");
+    let value: Value = serde_json::from_str(stdout.trim()).unwrap();
+    let context = value
+        .as_object()
+        .and_then(|root| root.values().find_map(|v| v.get("package_area_root").map(|_| v)))
+        .unwrap_or_else(|| panic!("aggregate context missing:\n{stdout}"));
+    assert_eq!(context["area"], "top");
+    assert_eq!(context["package_area"], "");
+    assert_eq!(context["package_area_root"], "");
+
+    // A real area named `root` is an ordinary area.
+    let root_area = path.join("root");
+    assert_eq!(
+        sniff_stdout(&root_area, &["repo", "area"]),
+        ("root\n".to_string(), Some(0))
+    );
+    assert_eq!(
+        sniff_stdout(&path.join("root/lib/src"), &["repo", "package-area"]),
+        ("root\n".to_string(), Some(0))
+    );
+    let (stdout, _) = sniff_stdout(&root_area, &["--json", "repo", "package-area-root"]);
+    let value: Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert!(
+        value["root"].as_str().unwrap().replace('\\', "/").ends_with("/root"),
+        "{stdout}"
+    );
+
+    // Listings label the empty area at render time only; JSON keeps it empty.
+    let (stdout, _) = sniff_stdout(&path, &["repo", "package-areas", "--list", "--plain"]);
+    let mut listed: Vec<&str> = stdout.lines().collect();
+    listed.sort_unstable();
+    assert_eq!(listed, vec!["(root)", "pkg-a", "pkg-b", "root"]);
+    let (stdout, _) = sniff_stdout(&path, &["--json", "repo", "package-areas"]);
+    let value: Value = serde_json::from_str(stdout.trim()).unwrap();
+    let mut areas: Vec<&str> = value
+        .as_array()
+        .unwrap_or_else(|| panic!("package-areas array missing:\n{stdout}"))
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    areas.sort_unstable();
+    assert_eq!(areas, vec!["", "pkg-a", "pkg-b", "root"]);
 }
 
 #[test]

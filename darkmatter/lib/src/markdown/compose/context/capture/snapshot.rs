@@ -749,8 +749,11 @@ fn current_package_context(
         .map(|package| package.package_area.clone())
         .or_else(|| {
             repo.packages.as_ref().and_then(|packages| {
+                // A top-level package's `""` area has no directory; joining it
+                // would match every path under the root.
                 packages
                     .iter()
+                    .filter(|package| !package.package_area.is_empty())
                     .find(|package| base_dir.starts_with(repo.root.join(&package.package_area)))
                     .map(|package| package.package_area.clone())
             })

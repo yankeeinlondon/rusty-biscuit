@@ -211,6 +211,10 @@ Returns a `CommitDescSet` object:
 
 Adding `--plain` strips all ANSI escape codes and OSC8 hyperlinks from the text output. File paths are rendered as plain text instead of clickable links.
 
+The plain output is the concatenation of one block per commit, each rendered by
+the library's `CommitDesc::describe_plain`. A commit that touched no files has
+no block and is omitted.
+
 ## No-Result Behavior
 
 When no commits match the period (or after filtering), the default is to exit with code 1. This can be customized:

@@ -19,7 +19,7 @@ expression: stable
     "source_code_changes": null
   },
   "context": {
-    "area": "root",
+    "area": "",
     "is_current_package_area_dirty": false,
     "package": "",
     "package_area": "",

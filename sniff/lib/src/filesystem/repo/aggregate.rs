@@ -639,7 +639,11 @@ fn resolve_named_package(info: &RepoInfo, name: &str) -> Result<AggregateScope> 
 
 fn resolve_named_package_area(info: &RepoInfo, area: &str) -> Result<AggregateScope> {
     let packages = info.packages.as_deref().unwrap_or(&[]);
-    let mut valid: Vec<&str> = packages.iter().map(|p| p.package_area.as_str()).collect();
+    let mut valid: Vec<&str> = packages
+        .iter()
+        .map(|p| p.package_area.as_str())
+        .filter(|area| !area.is_empty())
+        .collect();
     valid.sort();
     valid.dedup();
     if !valid.contains(&area) {
@@ -909,7 +913,7 @@ mod tests {
 
     #[test]
     fn singular_scope_returns_one_value() {
-        let packages = vec![pkg("a", "root", &["cargo"])];
+        let packages = vec![pkg("a", "", &["cargo"])];
         let scope = AggregateScope::Package("a".to_string());
         let result = aggregate_package_values(
             &packages,
@@ -968,7 +972,7 @@ mod tests {
 
     #[test]
     fn collapse_dedupes_within_a_package() {
-        let packages = vec![pkg("a", "root", &["cargo", "cargo"])];
+        let packages = vec![pkg("a", "", &["cargo", "cargo"])];
         let scope = AggregateScope::Repo;
         let result = aggregate_package_values(
             &packages,
@@ -998,7 +1002,7 @@ mod tests {
         let info = RepoInfo {
             is_monorepo: false,
             root: PathBuf::from("/repo"),
-            packages: Some(vec![pkg("only", "root", &["cargo"])]),
+            packages: Some(vec![pkg("only", "", &["cargo"])]),
             ..RepoInfo::default()
         };
         assert_eq!(
@@ -1072,8 +1076,8 @@ mod tests {
         write_cargo_toml(&b, "[package]\nname = \"b\"\nversion = \"0.1.0\"\n");
 
         let packages = vec![
-            pkg_with_path("a", "root", a.clone()),
-            pkg_with_path("b", "root", b.clone()),
+            pkg_with_path("a", "", a.clone()),
+            pkg_with_path("b", "", b.clone()),
         ];
         let entries = aggregate_versions(&packages, &AggregateScope::Repo, root);
         assert_eq!(entries.len(), 1, "uniform should collapse, got {entries:?}");
@@ -1114,9 +1118,9 @@ mod tests {
         write_cargo_toml(&c, "[package]\nname = \"c\"\nversion = \"1.0.0\"\n");
 
         let packages = vec![
-            pkg_with_path("a", "root", a),
-            pkg_with_path("b", "root", b),
-            pkg_with_path("c", "root", c),
+            pkg_with_path("a", "", a),
+            pkg_with_path("b", "", b),
+            pkg_with_path("c", "", c),
         ];
         let entries = aggregate_versions(&packages, &AggregateScope::Repo, root);
         assert_eq!(entries.len(), 2);
@@ -1134,7 +1138,7 @@ mod tests {
         std::fs::create_dir_all(&a).unwrap();
         write_cargo_toml(&a, "[package]\nname = \"a\"\nversion = \"0.3.1\"\n");
 
-        let packages = vec![pkg_with_path("a", "root", a)];
+        let packages = vec![pkg_with_path("a", "", a)];
         let entries = aggregate_versions(&packages, &AggregateScope::Repo, root);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].version, "0.3.1");
@@ -1155,7 +1159,7 @@ mod tests {
         std::fs::create_dir_all(&a).unwrap();
         // No manifest at all under `a`.
 
-        let packages = vec![pkg_with_path("a", "root", a)];
+        let packages = vec![pkg_with_path("a", "", a)];
         let entries = aggregate_versions(&packages, &AggregateScope::Repo, root);
         assert!(
             entries.is_empty(),
@@ -1182,7 +1186,7 @@ mod tests {
         write_package_json(&b, r#"{"name":"b"}"#);
         write_package_json(root, r#"{"name":"root","version":"0.1.0"}"#);
 
-        let packages = vec![pkg_with_path("a", "root", a), pkg_with_path("b", "root", b)];
+        let packages = vec![pkg_with_path("a", "", a), pkg_with_path("b", "", b)];
         let entries = aggregate_versions(&packages, &AggregateScope::Repo, root);
         assert_eq!(entries.len(), 1, "same version collapses to one entry");
         assert_eq!(entries[0].version, "0.1.0");
@@ -1234,7 +1238,7 @@ mod tests {
         write_cargo_toml(&a, "[package]\nname = \"a\"\nversion.workspace = true\n");
         write_cargo_toml(&b, "[package]\nname = \"b\"\nversion.workspace = true\n");
 
-        let packages = vec![pkg_with_path("a", "root", a), pkg_with_path("b", "root", b)];
+        let packages = vec![pkg_with_path("a", "", a), pkg_with_path("b", "", b)];
         let entries = aggregate_versions(&packages, &AggregateScope::Repo, root);
         assert_eq!(
             entries.len(),
@@ -1267,7 +1271,7 @@ mod tests {
         write_cargo_toml(root, "[workspace]\nmembers = [\"a\"]\n");
         write_cargo_toml(&a, "[package]\nname = \"a\"\nversion.workspace = true\n");
 
-        let packages = vec![pkg_with_path("a", "root", a)];
+        let packages = vec![pkg_with_path("a", "", a)];
         let entries = aggregate_versions(&packages, &AggregateScope::Repo, root);
         assert!(
             entries.is_empty(),
@@ -1287,7 +1291,7 @@ mod tests {
         write_package_json(&pkg_dir, r#"{"name":"web"}"#);
         write_package_json(root, r#"{"name":"app","version":"0.9.3"}"#);
 
-        let packages = vec![pkg_with_path("web", "root", pkg_dir)];
+        let packages = vec![pkg_with_path("web", "", pkg_dir)];
         let entries = aggregate_versions(&packages, &AggregateScope::Repo, root);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].version, "0.9.3");
@@ -1335,7 +1339,7 @@ mod tests {
     fn info_with_areas(area_names: &[&str]) -> RepoInfo {
         let packages: Vec<Package> = area_names
             .iter()
-            .map(|name| pkg(name, "root", &["cargo"]))
+            .map(|name| pkg(name, "", &["cargo"]))
             .collect();
         RepoInfo {
             is_monorepo: true,
@@ -1413,17 +1417,27 @@ mod tests {
 
     #[test]
     fn resolve_scope_overrides_unknown_package_area_errors() {
-        let info = info_with_areas(&["a"]);
+        let mut info = info_with_areas(&["a", "b"]);
+        info.packages.as_mut().unwrap()[1].package_area = "sniff".to_string();
         let err =
             resolve_scope_with_overrides(&info, Path::new("/repo"), false, None, Some("ghost"))
                 .expect_err("unknown area should error");
         match err {
             crate::SniffError::UnknownPackageArea { area, valid } => {
                 assert_eq!(area, "ghost");
-                assert!(valid.contains("root"));
+                // The top-level `""` area is not a nameable area.
+                assert_eq!(valid, "sniff");
             }
             other => panic!("expected UnknownPackageArea, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn resolve_scope_overrides_rejects_the_empty_area_name() {
+        let info = info_with_areas(&["a"]);
+        let err = resolve_scope_with_overrides(&info, Path::new("/repo"), false, None, Some(""))
+            .expect_err("the top-level area has no name to select");
+        assert!(matches!(err, crate::SniffError::UnknownPackageArea { .. }));
     }
 
     #[test]
@@ -1456,7 +1470,7 @@ mod tests {
         write_cargo_toml(&a, "[package]\nname = \"a\"\nversion = \"0.1.0\"\n");
         write_cargo_toml(&b, "[package]\nname = \"b\"\nversion = \"0.1.0\"\n");
 
-        let packages = vec![pkg_with_path("a", "root", a), pkg_with_path("b", "root", b)];
+        let packages = vec![pkg_with_path("a", "", a), pkg_with_path("b", "", b)];
         assert_eq!(
             bare_aggregate_version(&packages, root),
             Some("0.1.0".to_string())
@@ -1481,7 +1495,7 @@ mod tests {
         write_cargo_toml(&a, "[package]\nname = \"a\"\nversion = \"1.0.0\"\n");
         write_cargo_toml(&b, "[package]\nname = \"b\"\nversion = \"2.0.0\"\n");
 
-        let packages = vec![pkg_with_path("a", "root", a), pkg_with_path("b", "root", b)];
+        let packages = vec![pkg_with_path("a", "", a), pkg_with_path("b", "", b)];
         assert!(
             bare_aggregate_version(&packages, root).is_none(),
             "variance must collapse to `None`"
@@ -1503,7 +1517,7 @@ mod tests {
         std::fs::create_dir_all(&a).unwrap();
         write_cargo_toml(&a, "[package]\nname = \"a\"\nversion.workspace = true\n");
 
-        let packages = vec![pkg_with_path("a", "root", a)];
+        let packages = vec![pkg_with_path("a", "", a)];
         assert_eq!(
             bare_aggregate_version(&packages, root),
             Some("0.1.0".to_string())

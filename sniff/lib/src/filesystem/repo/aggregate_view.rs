@@ -100,8 +100,8 @@ pub struct AggregateCwdContext {
     pub area: String,
     /// Root directory of the package containing the invoking directory.
     pub package_root: String,
-    /// Root directory of the containing package area; empty for the `"root"`
-    /// area, which has no real directory of its own.
+    /// Root directory of the containing package area; empty for the top-level
+    /// `""` area, which has no real directory of its own.
     pub package_area_root: String,
     /// Whether the invoking directory's package area has uncommitted changes.
     pub is_current_package_area_dirty: bool,
@@ -291,7 +291,7 @@ fn observe_cwd_context(
             .into_owned();
     }
     if let Some(area) = repo.package_area_for_dir_with_index(&ownership_index, &dir) {
-        if area != "root" {
+        if !area.is_empty() {
             context.package_area_root = repo.root.join(area).display().to_string();
         }
         let (dirty, has_source_changes) = area_change_facts(repo, area, git);
@@ -305,7 +305,7 @@ fn observe_cwd_context(
 /// area, projected from the already-observed status and file changes.
 ///
 /// A path counts when its components place it under the area path — or, for
-/// the `"root"` area, when it sits under no other area. Without a computed
+/// the top-level `""` area, when it sits under no other area. Without a computed
 /// status (an identity-only request) both facts are indeterminate and report
 /// `false`, mirroring the focused commands.
 fn area_change_facts(repo: &RepoInfo, area: &str, git: Option<&GitInfo>) -> (bool, bool) {
@@ -316,14 +316,14 @@ fn area_change_facts(repo: &RepoInfo, area: &str, git: Option<&GitInfo>) -> (boo
         return (false, false);
     };
 
-    let area_path = (area != "root").then(|| Path::new(area));
+    let area_path = (!area.is_empty()).then(|| Path::new(area));
     let in_area = |path: &Path| {
         if let Some(area_path) = area_path {
             path.starts_with(area_path)
         } else {
             !repo.packages.as_ref().is_some_and(|packages| {
                 packages.iter().any(|p| {
-                    p.package_area != "root" && path.starts_with(Path::new(&p.package_area))
+                    !p.package_area.is_empty() && path.starts_with(Path::new(&p.package_area))
                 })
             })
         }
@@ -428,6 +428,7 @@ mod tests {
             branches: Vec::new(),
             in_worktree: false,
             base_repo_root: None,
+            current_worktree: None,
             recent: Vec::new(),
             status: Some(RepoStatus {
                 is_dirty,
@@ -970,7 +971,7 @@ mod tests {
             std::fs::write(root.join("alpha/pkg-a/src/lib.rs"), "pub fn f() { }\n").unwrap();
             let (_, at_root_pkg) = detect(&root.join("rootpkg"));
             assert_eq!(at_root_pkg.context.package, "rootpkg");
-            assert_eq!(at_root_pkg.context.package_area, "root");
+            assert_eq!(at_root_pkg.context.package_area, "");
             assert!(!at_root_pkg.context.is_current_package_area_dirty);
         }
 
@@ -1040,7 +1041,7 @@ mod tests {
                 packages: Some(vec![Package {
                     path: root.to_path_buf(),
                     relative: String::new(),
-                    package_area: "root".to_string(),
+                    package_area: String::new(),
                     name: "solo".to_string(),
                     ..Package::default()
                 }]),
@@ -1053,7 +1054,7 @@ mod tests {
             let context = &aggregate.context;
 
             assert_eq!(context.package, "solo");
-            assert_eq!(context.package_area, "root");
+            assert_eq!(context.package_area, "");
             assert_eq!(context.area, "");
             assert_eq!(context.package_root, root.display().to_string());
             assert_eq!(context.package_area_root, "");

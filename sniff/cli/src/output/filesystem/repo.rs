@@ -58,7 +58,7 @@ pub fn render_repo_default_verbose(identity: &RepoIdentity) -> String {
 }
 
 fn area_parent(area: &str) -> Option<String> {
-    if area == "root" {
+    if area.is_empty() {
         return None;
     }
 
@@ -112,7 +112,11 @@ fn append_area_section(
     area_children: &std::collections::HashMap<String, Vec<String>>,
     verbose: u8,
 ) {
-    let label = Prose::new(format!("<blue><b>{}</b></blue>", area)).render_optimistic(None);
+    let label = Prose::new(format!(
+        "<blue><b>{}</b></blue>",
+        super::package_areas::area_display_label(area)
+    ))
+    .render_optimistic(None);
     output.push(RenderableTerminalContent::String(label));
 
     let mut inner_items: Vec<RenderableTerminalContent> = Vec::new();

@@ -8,6 +8,7 @@ conflicts, and provider queries.
 - [Topology model](#topology-model)
 - [Aggregate projection](#aggregate-projection)
 - [Worktrees](#worktrees)
+- [Recent commits](#recent-commits)
 - [Conflicts and branches](#conflicts-and-branches)
 - [Remote snapshots](#remote-snapshots)
 - [Focused providers](#focused-providers)
@@ -21,6 +22,19 @@ canonical `RepoInfo.packages` catalog.
 
 The removed `MonorepoTool`, `workspace_tools`, and `discovery_sources` surfaces
 must not return. CLI labels use each standard's stable `spec().label`.
+
+### The empty top-level area
+
+`Package.package_area` is `""` for a package directly under the repository
+root, and `area_for_dir` is `""` at the root. There is no `"root"` sentinel; a
+real directory named `root` is an ordinary area. Two consequences:
+
+- Never `root.join(package_area)` without skipping `""` first: the join yields
+  the root itself, so an area-containment scan claims every path for the
+  first top-level package. `package_area_for_dir` already skips it.
+- The `(root)` label exists only at CLI render time (`area_display_label`);
+  JSON and library values stay `""`. `sniff repo area` prints an empty line and
+  exits 0 at the root; `package-area` treats `""` as no result.
 
 ## Aggregate projection
 
@@ -38,6 +52,11 @@ no network request.
 
 ## Worktrees
 
+`GitInfo.current_worktree` names the observed linked worktree (directory
+basename; `None` in the main checkout) for every `GitRequest` preset, from the
+open handle and without enumerating worktrees. Evidence builders use it rather
+than widening a summary request with `include_worktrees`.
+
 Ordinary aggregate projection reuses worktree metadata and opens zero linked
 repositories. Focused inspection may open a registered target to validate it:
 
@@ -48,6 +67,14 @@ repositories. Focused inspection may open a registered target to validate it:
   corrupt and is an error.
 - Ahead/behind work follows the focused detail request and does not widen the
   aggregate path.
+
+## Recent commits
+
+`CommitDesc::describe_plain(today)` owns the per-commit plain block. The
+set-level `CommitDescSet::describe(true)` and `sniff repo recent-commits
+--plain` are the concatenation of those blocks; a commit with no files has no
+block (`None`). Consumers render array elements from `describe_plain` instead
+of splitting the set output.
 
 ## Conflicts and branches
 
