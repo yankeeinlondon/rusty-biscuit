@@ -399,6 +399,7 @@ implementation_2: "2026-09-16T15:30:56-07:00"
 implementation_3: "2026-09-16T19:38:20-07:00"
 implementation_4: "2026-09-16T20:16:31-07:00"
 implementation_5: "2026-09-16T20:39:38-07:00"
+implementation_6: "2026-09-17T00:29:07-07:00"
 ---
 
 # Implementation Log — Preserve Provider Overlays Without Replacing the User Home
@@ -2969,3 +2970,37 @@ The implementation of review cycle 5 has completed successfully in 14m 36s (20:3
 - the files changed by this cycle:
         - CLI tests: `claudine/cli/tests/level2_lifecycle_control.rs`
 - final gates (macOS, from `claudine/`): the three `seed_mcp_catalog` L2 rows → 3 passed on tmux (`run=3 skip=0`); `just test` → 7204 passed, 9 skipped; `just lint` → clean
+
+## Implementation of Review Findings #6
+
+> **started at:** 2026-09-17T00:29:07-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis/claudine/fixes/2026-09-12-shadow-home/review-6.md'
+- this is iteration 6 of the review-to-implement cycle
+- starting the work on 'Finding 1: Level 2 lifecycle fixtures inherit provider roots from the tmux server' at 00:29:21
+        - discovered: GitNexus has no symbol for `staged_env_prefix` (test-only file, `Target not found`); text search shows 12 callers, all in `cli/tests/level2_lifecycle_control.rs`, each placing the prefix directly before the absolute `claudine` path, so the prefix can become an `env` invocation without touching any caller
+        - discovered: `common::provider_selector_vars()` (registry `overlay_selector` names plus `PROFILE_OWNED_SELECTOR_VARS`) is already `pub` and is the list `CliProcessFixture` scrubs; reused as-is
+        - changed: `staged_env_prefix` now emits `env -u <selector> … NO_COLOR='1' MODEL='' HOME=… PATH=… `; `env` is an executable rather than shell syntax, so the removal is identical under any pane login shell, and `env` applies every `-u` before assignments, so the existing row opt-ins (`ambient` assignments appended after the prefix) still win; its doc comment now states the tmux-inheritance hazard and the opt-in rule
+        - changed: added `level2_lifecycle_staged_invocation_ignores_inherited_provider_selectors` with helpers `write_selector_recording_provider`, `MCP_CODEX_TARGET`, and `run_mcp_compose_in_session_env`; every selector is set to a missing root through `tmux new-session -e` (reaches the pane whether or not the server predates the row), the pane shell first records `CODEX_HOME`/`GEMINI_CLI_HOME` to prove the premise, then Gemini and Codex `compose --mcp` arms must record `provider-ran`, `sig=success`, the expected `mcp-allowed`, and no selector equal to its ambient value
+        - non-vacuity: with the `-u` list removed from the prefix the new row fails on the Gemini arm (`provider.overlay_failed … Gemini failed at source_root (mcp)`, `provider-ran` missing); with only the Codex arm enabled it fails the same way for Codex; source restored with a fresh mtime and verified with `cmp`
+        - gate: `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just _test_l2 claudine-cli --features terminal-tests --test level2_lifecycle_control` (whole binary) → 97 passed, 0 skipped; `backend-proof: tmux run=97 skip=0 panic=0`
+        - gate: the new row plus the three `seed_mcp_catalog` consumers on the restored source → 4 passed; `backend-proof: tmux run=4 skip=0 panic=0`
+        - gate: `just lint` (claudine/) → exit 0; `cargo clippy -p claudine-cli --features terminal-tests --test level2_lifecycle_control -- -D warnings` → clean
+        - gate: `just test --no-fail-fast` (claudine/) → 7251 passed, 1 failed, 12 skipped; the failure is `compose_initialize_acceptance::an_interpolated_repository_root_reference_ensures_and_includes_one_file`, a staged new file from `2026-09-15-initialize-after-proxy` that this change cannot reach (the edit is confined to a `terminal-tests`-gated L2 binary)
+        - residual: `level2_lifecycle_loop.rs`, `level2_lifecycle_action_forms.rs`, and `level2_context_capture.rs` carry their own `HOME`/`PATH` prefixes without selector removal; they launch Goose or `claudine context` only, so no overlay is planned there today, and they were left untouched
+- work completed for 'Finding 1: Level 2 lifecycle fixtures inherit provider roots from the tmux server' at 00:38:03
+        - orchestrator verification: `git diff --stat HEAD` confirms the code change is confined to `claudine/cli/tests/level2_lifecycle_control.rs` (198 insertions, 5 deletions)
+        - orchestrator verification: re-ran `compose_initialize_acceptance::an_interpolated_repository_root_reference_ensures_and_includes_one_file` in isolation; it fails every time with `lifecycle initialize failed`, in a separate test binary this change does not build, so the failure predates this cycle and belongs to the `2026-09-15-initialize-after-proxy` work
+
+### Successful Completion
+
+The implementation of review cycle 6 has completed successfully in 8m 46s (00:29:07 → 00:37:53). During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no finding was deferred
+- residual items recorded against the fixed finding (not deferrals of the finding itself):
+        - `just test` has one failure that was already there and is unrelated (`compose_initialize_acceptance::an_interpolated_repository_root_reference_ensures_and_includes_one_file`, from the staged `2026-09-15-initialize-after-proxy` fix)
+        - `level2_lifecycle_loop.rs`, `level2_lifecycle_action_forms.rs`, and `level2_context_capture.rs` build their own staged prefixes without selector removal; they launch no overlay-planning provider today
+        - the edited L2 file is `#![cfg(unix)]` and tmux-only; `env -u` is supported by both GNU and BSD `env`, so no cross-OS run was made
+- the files changed by this cycle:
+        - CLI tests: `claudine/cli/tests/level2_lifecycle_control.rs`
+- final gates (macOS, from `claudine/`): `level2_lifecycle_control` whole binary on tmux → 97 passed (`run=97 skip=0 panic=0`); `just lint` → clean; `just test` → 7251 passed, 1 failed (above, unrelated), 12 skipped
