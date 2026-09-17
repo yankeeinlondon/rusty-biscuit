@@ -2703,7 +2703,7 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
         .collect();
     assert_eq!(
         git_context.len(),
-        3,
+        4,
         "the shipped Git context descriptor set changed"
     );
     assert_eq!(
@@ -2727,8 +2727,8 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
                     && descriptor.display_type.to_string() == "string[]"
             })
             .count(),
-        1,
-        "Git context must expose one required string array"
+        2,
+        "Git context must expose two required string arrays (merge_conflicts, recent_commits)"
     );
 
     let git_functions: Vec<_> = expressions::function_descriptors()
@@ -2746,6 +2746,7 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
             "branch_exists_on_remote(branch)",
             "branch_exists_on_remote(branch, remote)",
             "remote_vendor([remote])",
+            "recent_commits(count)",
         ],
         "the shipped Git function signature set changed"
     );

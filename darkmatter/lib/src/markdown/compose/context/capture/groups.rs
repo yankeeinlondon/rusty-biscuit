@@ -239,7 +239,18 @@ mod tests {
     fn every_generated_descriptor_maps_to_one_group_or_explicit_alias() {
         use crate::markdown::compose::context::catalog::context_variable_descriptors;
 
+        use crate::markdown::compose::context::catalog::PENDING_CAPTURE_KEYS;
+
         for descriptor in context_variable_descriptors() {
+            if PENDING_CAPTURE_KEYS.contains(&descriptor.name) {
+                assert_eq!(
+                    group_for_key(descriptor.name),
+                    None,
+                    "`{}` has a capture group now; remove it from PENDING_CAPTURE_KEYS",
+                    descriptor.name,
+                );
+                continue;
+            }
             assert!(
                 group_for_key(descriptor.name).is_some(),
                 "descriptor `{}` has no capture group",

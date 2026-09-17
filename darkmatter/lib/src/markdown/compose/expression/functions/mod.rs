@@ -29,6 +29,7 @@ use super::resolve_ctx::{
 use crate::markdown::Markdown;
 use crate::markdown::schemas::DarkmatterSchemas;
 
+pub(in crate::markdown::compose) mod agentic_cli_generated;
 mod args;
 mod cicd;
 mod collections;
@@ -37,6 +38,7 @@ pub(in crate::markdown::compose) mod escape;
 mod git;
 mod markdown_docs;
 mod paths;
+mod pending;
 mod predicates;
 pub(in crate::markdown::compose) mod provider;
 mod pull_requests;
@@ -182,6 +184,7 @@ const BINDING_GROUPS: &[&[FunctionBinding]] = &[
     paths::BINDINGS,
     skills::BINDINGS,
     markdown_docs::BINDINGS,
+    pending::BINDINGS,
     LAZY_BINDINGS,
 ];
 

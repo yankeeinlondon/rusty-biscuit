@@ -79,8 +79,9 @@ pub mod semantics;
 
 pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
 pub use catalog::{
-    expression_function_descriptors, generate_expression_function_table,
-    DataType, ExpressionFunctionDescriptor, ParamType, ReturnType, ReturnValueType,
+    expression_function_descriptors, generate_expression_function_table, reserved_root_descriptors,
+    DataType, ExpressionFunctionDescriptor, ParamRefinement, ParamType, ReservedRootDescriptor,
+    ReturnType, ReturnValueType, RootEvaluation, RootMembers,
 };
 pub use ctx::CtxLookup;
 pub use error::{

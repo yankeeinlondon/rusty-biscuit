@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::context::catalog::context_variable_descriptors;
+use darkmatter::markdown::compose::context::catalog::{PENDING_CAPTURE_KEYS, context_variable_descriptors};
 use darkmatter::markdown::compose::expression::ExpressionError;
 use darkmatter::markdown::compose::{
     ComposeContext, ComposeOptions, ContextCaptureEvidence, ContextGroup, ContextRequirements,
@@ -145,9 +145,25 @@ fn ambient_options_resolve_date_time_without_discovery() {
     assert_eq!(compose_ambient(content), compose_full_capture(content));
 }
 
-fn render_every_variable(options: ComposeOptions) -> HashMap<String, String> {
-    let document: String = context_variable_descriptors()
+/// Catalog descriptors whose capture exists. `PENDING_CAPTURE_KEYS` is the
+/// transitional more-context Phase 4 → 5 gap; each pending key must still be
+/// owned by no capture group, so it demands nothing beyond date/time.
+fn captured_descriptors() -> impl Iterator<Item = &'static darkmatter::markdown::compose::context::ContextVariableDescriptor> {
+    let date_time_only = ContextRequirements::for_content("");
+    for pending in PENDING_CAPTURE_KEYS {
+        assert_eq!(
+            ContextRequirements::for_content(&format!("{{{{ ctx.{pending} }}}}")),
+            date_time_only,
+            "`ctx.{pending}` has a capture group now; remove it from PENDING_CAPTURE_KEYS",
+        );
+    }
+    context_variable_descriptors()
         .iter()
+        .filter(|descriptor| !PENDING_CAPTURE_KEYS.contains(&descriptor.name))
+}
+
+fn render_every_variable(options: ComposeOptions) -> HashMap<String, String> {
+    let document: String = captured_descriptors()
         .map(|descriptor| format!("<{0}={{{{ ctx.{0} }}}}>", descriptor.name))
         .collect::<Vec<_>>()
         .join(" ");
@@ -189,8 +205,7 @@ fn every_catalog_variable_survives_ambient_options() {
     // The fixture must give the comparison something to compare: every catalog
     // category needs at least one variable the full capture rendered non-empty,
     // or a blanked group could hide behind an empty-equals-empty pass.
-    let mut categories: Vec<&str> = context_variable_descriptors()
-        .iter()
+    let mut categories: Vec<&str> = captured_descriptors()
         .map(|descriptor| descriptor.category)
         .collect();
     categories.sort_unstable();
@@ -198,8 +213,7 @@ fn every_catalog_variable_survives_ambient_options() {
     let silent: Vec<&str> = categories
         .into_iter()
         .filter(|category| {
-            !context_variable_descriptors()
-                .iter()
+            !captured_descriptors()
                 .filter(|descriptor| descriptor.category == *category)
                 .any(|descriptor| expected.get(descriptor.name).is_some_and(|v| !v.is_empty()))
         })
@@ -209,8 +223,7 @@ fn every_catalog_variable_survives_ambient_options() {
         "the fixture rendered no value for any variable in these categories: {silent:?}"
     );
 
-    let blanked: Vec<&str> = context_variable_descriptors()
-        .iter()
+    let blanked: Vec<&str> = captured_descriptors()
         .map(|descriptor| descriptor.name)
         .filter(|name| match (expected.get(*name), ambient.get(*name)) {
             (Some(want), Some(got)) => !want.is_empty() && got.is_empty(),
@@ -348,7 +361,7 @@ fn ambient_child_first_reference_renders_the_full_capture_value() {
 /// implies, so each group is captured once with all of its keys referenced.
 fn descriptors_by_requirements() -> Vec<(ContextRequirements, Vec<&'static str>)> {
     let mut sets: Vec<(ContextRequirements, Vec<&'static str>)> = Vec::new();
-    for descriptor in context_variable_descriptors() {
+    for descriptor in captured_descriptors() {
         let requirements =
             ContextRequirements::for_content(&format!("{{{{ ctx.{} }}}}", descriptor.name));
         match sets.iter_mut().find(|(existing, _)| *existing == requirements) {

@@ -112,6 +112,10 @@
   and side-effect `http_post` host-policy enforcement.
 - `claudine-gen` uses `biscuit-file`'s `file-reference` feature to resolve
   schema-constrained empirical research fixtures relative to their topic.
+- `darkmatter/lib` enables `biscuit-hash`'s `blake3` feature for the `ctx.sid`
+  digest, and takes direct `ipnet` (CIDR filters and ICMP grants, already
+  resolved through `sniff`) and `getrandom` (the `ctx.id`/`ctx.sid` execution
+  nonce) dependencies.
 - `darkmatter/lib` takes a direct `fancy-regex` dependency (already in the tree
   transitively via `jsonschema`) so SimplifiedSchema pattern-key literal
   precedence (Feature C) can emit negative-lookahead `patternProperties`: such
@@ -952,6 +956,12 @@ This is a Rust workspace with the following modules:
 
 ### Random
 
+- [getrandom](https://github.com/rust-random/getrandom) _v0.4_ [📄](https://docs.rs/getrandom)
+
+    _Operating-system CSPRNG access with a typed error. Draws `darkmatter`'s per-execution `ctx.id`/`ctx.sid` nonce._
+
+    _Tags: random, csprng, system_
+
 - [rand](https://github.com/rust-random/rand) _v0.8_ [📄](https://docs.rs/rand)
 
     _Random number generators with fast implementations and broad distribution support._
@@ -1259,6 +1269,18 @@ This is a Rust workspace with the following modules:
 - [getifaddrs](https://github.com/mmastrac/getifaddrs) _v0.6.0_ [📄](https://docs.rs/getifaddrs)
 
     _Cross-platform library for retrieving network interface addresses and indices._
+
+    _Tags: network, system_
+
+- [ipnet](https://github.com/krisprice/ipnet) _v2_ [📄](https://docs.rs/ipnet)
+
+    _IPv4 and IPv6 network (CIDR) types with containment checks._
+
+    _Tags: network, parsing_
+
+- [socket2](https://github.com/rust-lang/socket2) _v0.6_ [📄](https://docs.rs/socket2)
+
+    _Low-level socket construction beyond `std::net`, used for unprivileged datagram ICMP sockets (Unix)._
 
     _Tags: network, system_
 

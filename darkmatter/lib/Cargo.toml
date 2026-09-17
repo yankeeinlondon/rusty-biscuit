@@ -96,8 +96,17 @@ quick-xml = "0.39"
 # Terminal image rendering and mermaid diagrams (via biscuit-terminal)
 biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
 
-# Hashing (for Mermaid diagram caching and markdown TOC)
-biscuit-hash = { path = "../../biscuit-hash/lib" }
+# Hashing (for Mermaid diagram caching and markdown TOC). `blake3` backs the
+# cryptographic `ctx.sid` digest (more-context R2).
+biscuit-hash = { path = "../../biscuit-hash/lib", features = ["blake3"] }
+
+# CIDR parsing and matching for `ipv4`/`ipv6` filters and ICMP grants
+# (more-context R14). Already resolved through sniff.
+ipnet = "2"
+
+# The per-execution `ctx.id`/`ctx.sid` nonce drawn from the OS CSPRNG, with a
+# typed failure (more-context Q1). Already resolved transitively.
+getrandom = "0.4"
 
 # System detection (OS, hardware, repo, docs)
 sniff = { path = "../../sniff/lib", features = ["remote"] }

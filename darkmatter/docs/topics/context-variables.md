@@ -120,6 +120,14 @@ failure message prints the up-to-date block to paste back.
 
 - **ctx.cwd** — `string` _(optional)_ — Absolute launch directory captured when the composition request began, or null when ambient capture failed.
 
+**Document**
+
+- **ctx.self** — `string` _(optional)_ — Absolute canonical native path of the root document, or null for URL and in-memory roots.
+- **ctx.last\_updated** — `datetime` _(optional)_ — Filesystem modification time of the root document, or null when unavailable or for URL and in-memory roots.
+- **ctx.hash** — `string` _(optional)_ — The root document's '<frontmatter>-<body>' xxHash of its source as loaded, matching `md hash`, or null for URL and in-memory roots.
+- **ctx.id** — `string` — xxHash identifying this execution of the root document: its source, ctx.timestamp_ms, host name, repository name, and a per-execution random nonce.
+- **ctx.sid** — `string` — Full hexadecimal BLAKE3 digest of the same inputs as ctx.id. A cryptographic digest, not a secret.
+
 **Date and Time**
 
 - **ctx.now** — `datetime` — Local date and time in ISO-8601 format.
@@ -171,6 +179,7 @@ failure message prints the up-to-date block to paste back.
 - _Git_
   - **ctx.branch** — `string` _(optional)_ — Current local Git branch name, or null outside a repository or at detached HEAD.
   - **ctx.worktree** — `string` _(optional)_ — Current linked Git worktree name, or null in the main worktree or outside a repository.
+  - **ctx.recent\_commits** — `string[]` — Recent commits of the captured repository, newest first. Each element is one commit rendered exactly as `sniff repo recent-commits --plain` renders it (a multi-line block). `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Empty outside a repository.
 - **ctx.is\_monorepo** — `boolean` — Whether the current repository is a monorepo.
 - _Packages_
   - **ctx.package\_root** — `string` _(optional)_ — Absolute current package root path, or null when unavailable.
@@ -222,6 +231,7 @@ failure message prints the up-to-date block to paste back.
 **Operating System**
 
 - **ctx.os** — `string` _(optional)_ — Operating system name, or null when unavailable.
+- **ctx.hostname** — `string` _(optional)_ — Host name reported by the operating system, or null when unavailable.
 - **ctx.os\_distro** — `string` — Linux distribution name, empty on macOS and Windows.
 - **ctx.os\_package\_manager** — `string` _(optional)_ — Primary system package manager, or null when unavailable.
 - **ctx.os\_version** — `string` — Operating system version.
@@ -234,6 +244,12 @@ failure message prints the up-to-date block to paste back.
 - **ctx.cpu\_cores** — `number(integer)` _(optional)_ — Number of logical CPU cores, or null when unavailable.
 - **ctx.cpu\_arch** — `string` _(optional)_ — CPU architecture, or null when unavailable.
 - **ctx.gpu** — `string` _(optional)_ — GPU device names, or null when unavailable.
+
+**Network**
+
+- **ctx.tailnet** — `boolean` — Whether any host interface has an address in the CGNAT range 100.64.0.0/10 (Tailscale). Other VPNs and CGNAT ISPs using that range also report true.
+- **ctx.gateway** — `string` _(optional)_ — Primary IPv4 gateway address, or null without a default route or when the default route has no gateway address.
+- **ctx.gateway\_v6** — `string` _(optional)_ — Primary IPv6 gateway address, with a %scope suffix for link-local gateways, or null without a default route or when the default route has no gateway address.
 
 **Agent**
 

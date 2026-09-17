@@ -486,6 +486,20 @@ refresh it after changing the catalog.
 | CI/CD | `cicd_list(count)` | Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
 | List Formatting | `as_json(list)` | Renders a list as compact JSON — the explicit spelling of how a bare array renders in text. An empty list renders as `[]`. | `as_json(["a", 1])` ⇒ `["a",1]` |
 | List Formatting | `as_json5(list)` | Renders a list as compact single-line JSON5, with single-quoted strings and unquoted object keys where they are valid identifiers. An empty list renders as `[]`. | `as_json5(["a", 1])` ⇒ `['a', 1]` |
+| Filesystem | `has_binary(name_or_path)` | Returns true when the command is found on PATH or is an existing executable absolute path. A second name for has_command with the same implementation. |  |
+| Shell | `has_alias(name)` | Returns true when the name is an alias in the login shell ($SHELL, or pwsh then powershell.exe on Windows). Any probe failure returns false; the name is never executed. |  |
+| Shell | `has_builtin_function(name)` | Returns true when the name is a shell builtin (or a PowerShell cmdlet) in the login shell. Any probe failure returns false; the name is never executed. |  |
+| Shell | `has_user_function(name)` | Returns true when the name is a user-defined function in the login shell. Any probe failure returns false; the name is never executed. |  |
+| Shell | `can_execute(name)` | Returns true when the name is an alias, a binary, a shell builtin, or a user function (has_alias \|\| has_binary \|\| has_builtin_function \|\| has_user_function). |  |
+| Agentic CLIs | `has_agentic_cli(agent)` | Returns true when the named agentic CLI is installed on PATH. Names are the Claudine provider roster slugs and their aliases; an unknown name is a compose error. |  |
+| Repository | `package_area(where)` | Returns the name of the package area containing the path, from the captured repository observation. Returns an empty string outside the repository, outside a monorepo, or when no area contains the path. |  |
+| Repository | `package(where)` | Returns the name of the package containing the path, from the captured repository observation. Returns an empty string outside the repository, outside a monorepo, or when no package contains the path. |  |
+| Git | `recent_commits(count)` | Recent commits of the captured repository, newest first. Each element is one commit rendered exactly as `sniff repo recent-commits --plain` renders it (a multi-line block). `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Empty outside a repository. |  |
+| Network | `ipv4([filter])` | Returns the host's IPv4 addresses, excluding loopback and link-local. A valid CIDR filter selects addresses inside that network (and can include loopback or link-local); any other filter is a substring match over the default set. |  |
+| Network | `ipv6([filter])` | Returns the host's IPv6 addresses, excluding loopback and link-local; scoped addresses keep their %scope suffix. Filters behave as in ipv4. |  |
+| Network | `ping(address, [timeout])` | Sends one ICMP echo to an IP address and returns true when it replies within timeout milliseconds (default 100). Returns null with a warning when the address is not granted through --allow-host, false when there is no reply, and a compose error when the host cannot send ICMP. |  |
+| Network | `ping_under(address, timeout, [attempts])` | Sends attempts ICMP echoes (default 3) sequentially, each with a timeout of timeout milliseconds. Returns true when every reply arrives in time, false when none does, and "unstable" otherwise. Consent and error rules match ping. |  |
+| Composition | `as_markdown(content)` | Composes the string as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown text. |  |
 <!-- END GENERATED FUNCTION TABLE -->
 
 ### `date()` format tokens

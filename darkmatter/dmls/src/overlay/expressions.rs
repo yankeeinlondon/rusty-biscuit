@@ -1004,6 +1004,47 @@ mod tests {
         assert!(block.contains(length.description));
     }
 
+    /// More-context plan 4.7: every added `ctx.*` variable and function is
+    /// discoverable by completion and hover from descriptors alone. The
+    /// runtime bindings for most of these functions are still pending and fail
+    /// when called, so hover succeeding with the typed signature and no
+    /// runtime error text shows DMLS never evaluates them.
+    #[test]
+    fn more_context_names_reach_completion_and_hover_without_evaluation() {
+        let candidates = completion_candidates("", &[]);
+        for variable in [
+            "self", "last_updated", "hash", "id", "sid", "hostname", "tailnet", "gateway",
+            "gateway_v6", "recent_commits",
+        ] {
+            let label = format!("ctx.{variable}");
+            assert!(candidates.iter().any(|candidate| candidate.label == label), "missing {label}");
+        }
+
+        for (expression, name, typed) in [
+            ("recent_commits(3)", "recent_commits", "recent_commits(count: number(integer)) -> string[] | error"),
+            (
+                "ping_under(\"10.0.0.1\", 50)",
+                "ping_under",
+                "ping_under(address: ip-address, timeout: number, [attempts: number(integer)]) -> boolean | \"unstable\" | null | error",
+            ),
+            ("has_agentic_cli(\"kimi_code\")", "has_agentic_cli", "\"kimi-code\""),
+            ("as_markdown(\"x\")", "as_markdown", "as_markdown(content: string) -> string | error"),
+            ("has_binary(\"sh\")", "has_binary", "has_binary(name_or_path: string) -> boolean"),
+        ] {
+            assert!(
+                candidates.iter().any(|candidate| candidate.insert_text == name
+                    && candidate.detail.as_deref().is_some_and(|detail| detail.contains(typed))),
+                "completion for {name} must carry `{typed}`"
+            );
+            let hover = hover_markdown(expression, 1, |_| None, |_| None);
+            assert!(hover.contains(typed), "{hover}");
+            assert!(!hover.contains("not implemented"), "hover must not evaluate: {hover}");
+        }
+
+        let recent = ctx_descriptor("recent_commits").unwrap();
+        assert_eq!(function_descriptor("recent_commits").unwrap().description, recent.description);
+    }
+
     #[test]
     fn literals_finds_simple_literal_and_excludes_expressions() {
         let text = "Hello {{{ name }}} and {{ title }}.";
