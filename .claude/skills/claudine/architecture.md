@@ -617,11 +617,12 @@ with Darkmatter's `only_frontmatter_surface()`, returning a
 selection hints, C3-stamped `LifecycleConfig`, context snapshot). It holds
 no prompt, closure plan, or schema verdict, and it never dereferences a body
 transclusion, so a body that includes a file `initialize` will create does not
-fail it. Approve its frontmatter `$(...)` first with
-`preflight_bootstrap_shell`, then gate `initialize` with
-`resolve_lifecycle_shell_approvals(&bootstrap.lifecycle, …, &[Initialize], …)`;
-the shared approval cache lets the post-`initialize` full audit reuse those
-approvals. Only `Direct`/`ProxyTarget` entries take a bootstrap read. The
+fail it. `preflight_bootstrap_shell` rejects frontmatter `$(...)`, and the
+bootstrap composer enforces an empty approved-command set even if caller inputs
+carry approvals. Lifecycle parsing rejects initialization shell actions.
+`LifecycleRunGuard` disables the shell runner until `start`, which follows
+preflight, including all early catch chains; the executor independently rejects
+initialization shells. Only `Direct`/`ProxyTarget` entries take a bootstrap read. The
 post-compose steps (hints, lifecycle parse, C3 stamping, static guards) live in
 one `effective_surface` helper shared by all three reads, and `compose_bootstrap`
 is a reasoned `COMPOSE_WITH_ALLOWLIST` entry in `cli/tests/composition_seams.rs`.
@@ -630,7 +631,7 @@ The command coordinator (`compose/prep.rs`) calls it for every live document
 whose authored frontmatter has an `initialize` key
 (`wrap::composition::staged_boot::authors_initialize`, the one predicate) — the
 caller's own document or an adopted target. `staged_boot` runs the order:
-bootstrap read → narrow gate → `initialize` through the pipeline's own
+shell-free bootstrap read → `initialize` through the pipeline's own
 `route_initialize` (a proxy commits via `pipeline::commit_initialize_proxy`) →
 `reread_and_audit` (fresh disk read + overlay, epoch context extended, full
 body audit) → `prepare_staged(Validate)`. A reread failure fires the document's

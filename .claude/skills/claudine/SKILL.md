@@ -79,6 +79,18 @@ The **local control plane** is platform-native and per stable OS user: a Unix-do
 - For when/why a feature changed → [timeline.md](timeline.md)
 - For a specific subsystem → the deep topic docs under [Reference Documents](#reference-documents)
 
+## Initialization shell boundary
+
+`initialize` runs before preflight and is shell-free. Reject shell actions even
+in dead branches and reject bootstrap frontmatter `$(...)` expansion; approval
+flags, whitelists, caches, and handlers cannot grant an exception. Non-shell
+effects keep their existing restrictions. Early blocked/failure/finalize chains
+cannot execute shells either, including catch evaluation-error routes, and
+`no_error` cannot suppress the prohibition. The shared runtime permits lifecycle
+shells only from `start`, after preflight, and proxy adoption resets that boundary.
+Keep parser rejection and the runtime backstop together. See the binding ruling
+in `claudine/fixes/2026-09-15-initialize-after-proxy/spec.md` (R2).
+
 ## Library Module Map
 
 The primary public modules are below; the shared `error` type and flat

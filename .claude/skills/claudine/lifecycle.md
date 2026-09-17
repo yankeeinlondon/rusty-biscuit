@@ -29,7 +29,7 @@ Seven frontmatter properties control lifecycle behavior. Each accepts an object 
 
 | Property | Emitted when |
 |----------|-------------|
-| `initialize` | After frontmatter bootstrap and its narrow shell approval gate, before body discovery, full shell pre-flight, and the schema verdict for live staged documents |
+| `initialize` | After shell-free frontmatter bootstrap, before body discovery, shell preflight, and the schema verdict for live staged documents |
 | `start` | Pre-flight checks have passed; immediately before provider invocation |
 | `success` | The provider session completed without error **and** the composition satisfied its completion verdict |
 | `blocked` | Composition exited before the provider child was spawned (e.g., pre-flight denial, launch schema validation failure) |
@@ -42,10 +42,18 @@ Legacy prompts that only configure `start`, `success`, `blocked`, and `failure` 
 Live staged preparation runs initialization before reading body dependencies.
 An `ensure_file` action can create a file that the stabilized body then includes;
 existing contents are preserved. Every adopted proxy target follows the same
-ordering, and an abandoned source body is never discovered. Initialization
-shell commands require approval before any initialization action runs. After
-initialization, the fresh body and remaining lifecycle commands receive a full,
-condition-blind audit before launch, reusing the narrow gate's approvals.
+ordering, and an abandoned source body is never discovered. **Initialization
+is shell-free:** shell actions are rejected even behind false conditions, and
+bootstrap frontmatter `$(...)` expansion is forbidden. `-y`, whitelists, cached
+approvals, and interactive approval cannot grant an exception. Move shell work
+to `start` or a later event. After initialization, the fresh body and remaining
+lifecycle commands receive a full, condition-blind audit before launch.
+
+Early `blocked`, `failure`, and `finalize` handlers also cannot execute shell
+commands, including handlers reached through another catch's evaluation error.
+Non-shell catches retain their ordinary routing; `no_error` cannot suppress a
+shell prohibition. The runtime keeps lifecycle shells disabled until `start`,
+which follows successful preflight, and resets that boundary on proxy adoption.
 
 A bootstrap-gate failure precedes target lifecycle ownership. Once installed,
 the target's lifecycle handles failures; a missing include after initialization
@@ -414,12 +422,12 @@ The safety properties that hold regardless:
 
 - the target **reparses and revalidates** every structural value the overlay installs — a malformed control-plane overlay fails as the target's own parse error, pre-launch;
 - an invalid overlay fails the target's schema **before any provider launches**;
-- a shell command installed by an overlay is discovered and approved by the *target's* pre-flight, subject to normal target-side policy — approved bytes equal executed bytes; and
+- an overlay cannot enable initialization shells or bootstrap shell expansion; commands in later events are discovered and approved by the *target's* preflight — approved bytes equal executed bytes; and
 - status output may report that a handoff carries an overlay, and tracing may record property names and counts, but neither prints overlay values.
 
 ### Shell Actions
 
-The `shell` action runs an approved shell command. Commands are collected during pre-flight shell approval alongside `::shell` directives and `$(...)` frontmatter expressions.
+The `shell` action runs an approved shell command from `start` or a later event. It is forbidden in `initialize` and cannot run in early catch handlers before preflight reaches `start`. Commands for permitted events are collected during preflight alongside body `::shell` directives and post-initialization frontmatter expressions. Approval never overrides the initialization prohibition.
 
 ```yaml
 start:
