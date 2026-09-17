@@ -7,6 +7,7 @@
 
 use super::super::*;
 use super::{escape_prose_path, render_file_link};
+use crate::composition::LifecycleExprError;
 
 /// Render the [`StatusBlock`] for a lifecycle-family [`CompositionError`].
 pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
@@ -75,33 +76,42 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 .body(body)
                 .hint(hint)
         }
-        CompositionError::LifecycleInterpolationLeak {
+        CompositionError::LifecycleNestedSpanInLiteral {
             source_path,
             property,
-            expression,
-            reason,
+            literal,
+            nested,
+            suggestion,
         } => {
             let file_link = render_file_link(source_path);
             let mut body = format!(
-                "Interpolation span leaked in lifecycle property \
-                 <cyan>`{property}`</cyan> in {file_link}.\n\n\
-                 <b>Expression:</b> <cyan>`{}`</cyan>",
-                escape_prose_path(expression)
+                "Lifecycle property <cyan>`{property}`</cyan> in {file_link} writes \
+                 <cyan>`{}`</cyan> inside the string literal <cyan>`{}`</cyan>. A \
+                 `{}` inside a quoted string is literal text, and this surface is \
+                 evaluated once, so it is never interpolated.",
+                Prose::escape_text(nested),
+                Prose::escape_text(literal),
+                Prose::escape_text("{{ … }}")
             );
-            if !reason.is_empty() {
-                body.push_str("\n\n<b>Reason:</b> ");
-                body.push_str(&escape_prose_path(reason));
+            if let Some(suggestion) = suggestion {
+                // Bare expression text: it may hold either quote character, so
+                // no single YAML scalar style is safe to present as paste-ready.
+                body.push_str(
+                    "\n\n<b>Concatenate with `+` instead</b> (expression shown without \
+                     its `\\{\\{ }}` wrapper or YAML quoting):\n\n",
+                );
+                body.push_str(&Prose::escape_text(suggestion));
             }
 
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "CompositionError",
-                    "lifecycle interpolation leaked",
+                    "nested interpolation inside a string literal",
                 ))
                 .body(body)
                 .hint(
-                    "Fix the expression grammar or define the referenced variable in the \
-                     lifecycle frontmatter section of your prompt file.",
+                    "Move the span out of the literal and join the pieces with `+`. If the \
+                     braces are meant to appear literally, write `{{{ … }}}`.",
                 )
         }
         CompositionError::LifecycleUndefinedVariable {
@@ -133,27 +143,48 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             event,
             surface,
             message,
+            property,
+            reason,
         } => {
             let file_link = render_file_link(source_path);
-            let surface_label = lifecycle_evaluation_surface_label(surface);
+            let surface_label = match property {
+                Some(property) => format!("<cyan>`{}`</cyan>", Prose::escape_text(property)),
+                None => lifecycle_evaluation_surface_label(surface),
+            };
+            // A surviving span's typed reason renders in full; `message` is the
+            // length-clamped notification-safe copy.
+            let reason_text = match reason.as_ref() {
+                LifecycleEvaluationReason::SurvivingSpan { span } => Prose::escape_text(
+                    &LifecycleExprError::SurvivingSpan { span: span.clone() }.to_string(),
+                ),
+                LifecycleEvaluationReason::Expression => escape_prose_path(message),
+            };
             let body = format!(
                 "A late-binding expression raised while the <cyan>`{event}`</cyan> \
                  lifecycle event was firing, in {surface_label} ({file_link}).\n\n\
-                 <b>Reason:</b> {}",
-                escape_prose_path(message)
+                 <b>Reason:</b> {reason_text}"
             );
+            let hint = match reason.as_ref() {
+                LifecycleEvaluationReason::SurvivingSpan { .. } => {
+                    "A `{{ … }}` inside a quoted string is never interpolated here: \
+                     concatenate with `+` instead (`'in ' + ctx.area`), or write \
+                     `{{{ … }}}` when the braces are meant literally. A frontmatter value \
+                     read at event time must hold resolved text, not template syntax."
+                }
+                LifecycleEvaluationReason::Expression => {
+                    "This is a crashed expression, not a clean `false` guard: the run \
+                     halts and exits non-zero. Fix the expression (resolve the missing \
+                     path or variable, correct the function call) or guard it with a \
+                     fallback so it evaluates instead of raising."
+                }
+            };
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "CompositionError",
                     "lifecycle evaluation error",
                 ))
                 .body(body)
-                .hint(
-                    "This is a crashed expression, not a clean `false` guard: the run \
-                     halts and exits non-zero. Fix the expression (resolve the missing \
-                     path or variable, correct the function call) or guard it with a \
-                     fallback so it evaluates instead of raising.",
-                )
+                .hint(hint)
         }
         CompositionError::RemovedValidationKey {
             source_path,

@@ -674,30 +674,5 @@ pub(super) fn event_stack_field_mut(
     }
 }
 
-/// Validates that no rendered lifecycle string contains a surviving
-/// `{{ … }}` interpolation span.
-///
-/// Walks every configured event in [`LifecycleSignal::ALL`] order and every
-/// communication field on the notification (`say`, `say_first`, `message`,
-/// `stderr`, `notify`, `info`, `warn`). Additionally walks every reachable
-/// stack expression surface (when clauses, action arguments, communication
-/// message bodies, shell commands, side-effect args, control-action
-/// operands) and scans string literals inside those parsed expression trees
-/// for surviving `{{ … }}` spans.
-///
-/// The first field or expression with a non-empty span list aborts with
-/// [`CompositionError::LifecycleInterpolationLeak`].
-///
-/// This runs **after** composition, when expressions should have resolved.
-/// It intentionally does *not* run inside [`parse_lifecycle_config`], which
-/// is also used for raw frontmatter inspection where unresolved templates
-/// are legitimate.
-///
-/// ## Arguments
-///
-/// * `config` — parsed lifecycle configuration.
-/// * `source_path` — composed prompt file, used for the diagnostic.
-/// * `warnings` — compose report warnings, used best-effort to enrich the
-///   leak reason.
 use super::*;
 use super::super::json_util::json_type_name;

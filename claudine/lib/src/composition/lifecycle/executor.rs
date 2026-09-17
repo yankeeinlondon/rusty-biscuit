@@ -222,10 +222,23 @@ pub enum LifecycleExprError {
     Compose(#[from] Box<darkmatter::markdown::MarkdownError>),
 
     /// A failure the expression layer describes itself, with no lower-layer
-    /// error in hand: an undefined-variable rejection, the post-DM2 leak guard,
-    /// or a control argument of the wrong shape.
+    /// error in hand: an undefined-variable rejection or a control argument of
+    /// the wrong shape.
     #[error("{0}")]
     Prose(String),
+
+    /// The post-DM2 leak guard: resolution finished, but a `{{ … }}` span
+    /// survived in the rendered text.
+    #[error(
+        "the rendered text still contains `{span}` after every interpolation pass; a \
+         `{{{{ … }}}}` inside a quoted string literal is text and is never interpolated on \
+         this surface, and a frontmatter value that holds template syntax is not \
+         re-expanded at event time"
+    )]
+    SurvivingSpan {
+        /// The first surviving span, braces included.
+        span: String,
+    },
 }
 
 impl LifecycleExprError {
@@ -882,38 +895,39 @@ impl StackExecutionContext<'_> {
     /// is sent, so no side effect dispatches silently-empty or raw operational
     /// text.
     fn emit_top_level(&self, n: &LifecycleNotification) -> Result<(), ActionFailure> {
-        if let Some(text) = self.resolve_emit(n.stdout.as_deref())? {
+        if let Some(text) = self.resolve_emit("stdout", n.stdout.as_deref())? {
             self.emitter.emit_stdout(&text, self.term);
         }
-        if let Some(text) = self.resolve_emit(n.stderr.as_deref())? {
+        if let Some(text) = self.resolve_emit("stderr", n.stderr.as_deref())? {
             self.emitter.emit_stderr(self.signal, &text, self.term);
         }
-        if let Some(text) = self.resolve_emit(n.info.as_deref())? {
+        if let Some(text) = self.resolve_emit("info", n.info.as_deref())? {
             self.emitter.emit_info(&text, self.term);
         }
-        if let Some(text) = self.resolve_emit(n.warn.as_deref())? {
+        if let Some(text) = self.resolve_emit("warn", n.warn.as_deref())? {
             self.emitter.emit_warn(&text, self.term);
         }
-        if let Some(text) = self.resolve_emit(n.success.as_deref())? {
+        if let Some(text) = self.resolve_emit("success", n.success.as_deref())? {
             self.emitter.emit_success(&text, self.term);
         }
-        if let Some(text) = self.resolve_emit(n.message.as_deref())? {
+        if let Some(text) = self.resolve_emit("message", n.message.as_deref())? {
             self.emitter
                 .emit_message(&text, self.source_path, self.repo_root, self.messaging);
         }
-        if let Some(title) = self.resolve_emit(n.notify.as_deref())? {
+        if let Some(title) = self.resolve_emit("notify", n.notify.as_deref())? {
             self.emitter.emit_notification(&title);
         }
         for phase in audio_phases(n) {
             match phase {
                 super::AudioPhase::Speak(text) => {
-                    if let Some(text) = self.resolve_emit(Some(&text))? {
+                    let field = if n.say.is_some() { "say" } else { "say_first" };
+                    if let Some(text) = self.resolve_emit(field, Some(&text))? {
                         let config = tts_config_from_settings(self.settings.tts.as_ref());
                         self.emitter.emit_speech(&text, config);
                     }
                 }
                 super::AudioPhase::Effect(name) => {
-                    if let Some(name) = self.resolve_emit(Some(&name))? {
+                    if let Some(name) = self.resolve_emit("effect", Some(&name))? {
                         self.validate_effect_name(&name)
                             .map_err(ActionFailure::Dispatch)?;
                         self.emitter.emit_effect(&name);
@@ -931,7 +945,11 @@ impl StackExecutionContext<'_> {
     /// through DM2 (strict) against [`Self::frontmatter`]; a resolution raise is
     /// returned as an [`ActionFailure::Evaluation`] so the caller fails the
     /// event closed rather than dispatching silently-empty or raw template text.
-    fn resolve_emit(&self, text: Option<&str>) -> Result<Option<String>, ActionFailure> {
+    fn resolve_emit(
+        &self,
+        field: &str,
+        text: Option<&str>,
+    ) -> Result<Option<String>, ActionFailure> {
         let Some(text) = text else { return Ok(None) };
         if !text.contains("{{") {
             return Ok(Some(text.to_string()));
@@ -946,10 +964,10 @@ impl StackExecutionContext<'_> {
         self.resolve_string_value(text, fm)
             .map(|value| Some(scalar_string(&value)))
             .map_err(|error| {
-                ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(
-                    "interpolation",
-                    &error,
-                ))
+                ActionFailure::Evaluation(
+                    LifecycleErrorInfo::from_error_or_action("interpolation", &error)
+                        .at_property(format!("{}.{field}", self.signal.property_name())),
+                )
             })
     }
 
@@ -996,8 +1014,10 @@ impl StackExecutionContext<'_> {
                 // A `when:` guard that raised is an expression-layer evaluation
                 // error, not a side-effect dispatch failure.
                 Err(info) => {
+                    let property =
+                        format!("{}.stack[{stack_index}].when", self.signal.property_name());
                     return LifecycleEventOutcome {
-                        evaluation_error: Some(info),
+                        evaluation_error: Some(info.at_property(property)),
                         ..Default::default()
                     };
                 }
@@ -1020,7 +1040,7 @@ impl StackExecutionContext<'_> {
                     }
                     ActionStep::EvaluationErrored(info) => {
                         return LifecycleEventOutcome {
-                            evaluation_error: Some(info),
+                            evaluation_error: Some(info.at_property(location.to_string())),
                             ..Default::default()
                         };
                     }
@@ -1846,10 +1866,10 @@ fn collect_variable_paths(expr: &Expr, paths: &mut Vec<String>) {
 /// messenger/TTS/sound/stderr/stdout/notify dispatch ever sends raw syntax.
 fn reject_surviving_spans(value: Value) -> Result<Value, LifecycleExprError> {
     if let Value::String(s) = &value {
-        if !ExpressionFinder::find_all_plain(s).is_empty() {
-            return Err(LifecycleExprError::prose(format!(
-                "unresolved interpolation survived event-time resolution: `{s}`"
-            )));
+        if let Some(span) = ExpressionFinder::find_all_plain(s).first() {
+            return Err(LifecycleExprError::SurvivingSpan {
+                span: s[span.start..span.end].to_string(),
+            });
         }
     }
     Ok(value)

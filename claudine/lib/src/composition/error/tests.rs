@@ -47,22 +47,23 @@ fn file_link_absolutizes_a_missing_relative_path() {
 }
 
 #[test]
-fn enrich_wraps_lifecycle_leak_with_excerpt() {
+fn enrich_wraps_lifecycle_nested_span_with_excerpt() {
     let source = source_from(
-        "---\nreview_file: x\nsuccess:\n    message: \"at {{review-file}}\"\n---\nbody\n",
+        "---\nreview_file: x\nsuccess:\n    message: \"{{ ok ? 'at {{review_file}}' : 'x' }}\"\n---\nbody\n",
     );
-    let err = CompositionError::LifecycleInterpolationLeak {
+    let err = CompositionError::LifecycleNestedSpanInLiteral {
         source_path: PathBuf::from("review.md"),
         property: "success.message".to_string(),
-        expression: "review-file".to_string(),
-        reason: String::new(),
+        literal: "'at {{review_file}}'".to_string(),
+        nested: "{{review_file}}".to_string(),
+        suggestion: Some("ok ? 'at ' + review_file : 'x'".to_string()),
     }
     .enrich_frontmatter(&source, true);
 
     assert!(matches!(err, CompositionError::WithFrontmatter { .. }));
     assert!(err.frontmatter_excerpt().is_some());
-    // Display still delegates to the inner leak diagnostic.
-    assert!(err.to_string().contains("interpolation leaked"), "got: {err}");
+    // Display still delegates to the inner nested-span diagnostic.
+    assert!(err.to_string().contains("nests `{{review_file}}`"), "got: {err}");
 }
 
 #[test]
@@ -79,6 +80,8 @@ fn already_emitted_wraps_once_and_delegates_display() {
         event: "success".to_string(),
         surface: "when".to_string(),
         message: "boom".to_string(),
+        property: None,
+        reason: Default::default(),
     };
     let display = err.to_string();
     let marked = err.already_emitted();

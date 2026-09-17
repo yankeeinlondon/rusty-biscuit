@@ -36,6 +36,7 @@ use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveSta
 use serde_json::{Map, Value};
 
 use super::super::error::CompositionError;
+use super::super::lifecycle::{parse_lifecycle_config, validate_no_nested_spans_in_literals};
 use super::super::json_util::json_type_name;
 use super::super::types::ResolvedCompositionSource;
 use super::model::{ExecutableField, SequencePlan, StepExecutable};
@@ -91,6 +92,39 @@ impl PreflightGraph {
     /// The prompt document at `path`, if the graph reached one.
     pub fn prompt_document(&self, path: &Path) -> Option<&PromptDocument> {
         self.prompt_documents.iter().find(|d| d.path == path)
+    }
+
+    /// Reject a nested `{{ … }}` span inside a single-pass lifecycle literal in
+    /// any referenced prompt document, before the first step runs.
+    ///
+    /// Passive: it reads each document's authored frontmatter as the graph
+    /// already resolved and parsed it — no compose, shell, remote fetch, or
+    /// prompt. A document whose lifecycle block does not parse is left to its
+    /// own turn, where canonical preparation reports that error and runs this
+    /// same validator. The sequence document itself is covered by Phase 1c,
+    /// which prepares every step through the same validator.
+    ///
+    /// ## Errors
+    ///
+    /// The first [`CompositionError::LifecycleNestedSpanInLiteral`], in
+    /// first-encounter document order.
+    pub fn validate_prompt_lifecycle_literals(&self) -> Result<(), CompositionError> {
+        for document in &self.prompt_documents {
+            let frontmatter = Value::Object(
+                document
+                    .markdown
+                    .frontmatter()
+                    .as_map()
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            );
+            let Ok(lifecycle) = parse_lifecycle_config(&frontmatter, &document.path) else {
+                continue;
+            };
+            validate_no_nested_spans_in_literals(&frontmatter, &lifecycle, &document.path)?;
+        }
+        Ok(())
     }
 }
 

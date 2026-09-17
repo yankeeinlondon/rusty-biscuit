@@ -65,7 +65,8 @@ pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, She
 pub use error::{
     ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource,
     DroppedOptionalStage, FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE,
-    LoopExpressionCause, MarkdownLoadCause, MissingProperty, SequenceExpressionCause,
+    LifecycleEvaluationReason, LoopExpressionCause, MarkdownLoadCause, MissingProperty,
+    SequenceExpressionCause,
     SequenceLoadCause, SequenceMissingPropertiesStep, SequenceSelectionFailure, SequenceShellCause,
     ShellApprovalFailure, TextFormat,
 };

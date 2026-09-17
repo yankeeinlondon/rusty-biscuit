@@ -601,28 +601,33 @@ pub enum CompositionError {
     #[error("lifecycle property `{0}` references unknown sound effect `{1}`")]
     LifecycleUnknownEffect(String, String),
 
-    /// A rendered lifecycle string still contains a recognized `{{ … }}`
-    /// interpolation span after composition.
+    /// A single-pass lifecycle expression authors a `{{ … }}` span inside a
+    /// quoted string literal.
     ///
-    /// This guards against Darkmatter's default lenient behavior
-    /// (`fail_fast = false`), which leaves malformed or unresolvable
-    /// expressions in place instead of failing composition. Catching the
-    /// leak here prevents raw template syntax from reaching user-visible
-    /// side effects (Discord, Slack, TTS, stderr, desktop notifications).
+    /// A whole-value communication field, a `when`/`while`/`until` predicate, a
+    /// stack action operand, and a `proxy … with` value are each evaluated
+    /// exactly once, so the nested span can never interpolate: it would reach
+    /// the side effect as raw text. Raised at prepare time, or for a referenced
+    /// sequence document by the preflight pre-scan before shell approval, so no
+    /// provider process exists yet.
     #[error(
-        "lifecycle interpolation leaked in `{property}`: {expression} ({source_path})",
+        "lifecycle property `{property}` nests `{nested}` inside the string literal {literal} ({source_path})",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
-    LifecycleInterpolationLeak {
-        /// The composed prompt file whose lifecycle frontmatter leaked.
+    LifecycleNestedSpanInLiteral {
+        /// The prompt file whose lifecycle frontmatter holds the literal.
         source_path: PathBuf,
-        /// Dotted lifecycle key path, e.g. `"start.message"`.
+        /// Dotted lifecycle key path, e.g. `success.say` or
+        /// `finalize.stack[0].when`.
         property: String,
-        /// Raw offending span text, e.g. `"{{ parent_dir(review)) }}"`.
-        expression: String,
-        /// Parse/eval failure reason from the compose report's warnings, when
-        /// available. Empty when the span is unrecognized entirely.
-        reason: String,
+        /// The authored literal, quotes included.
+        literal: String,
+        /// The nested span as authored, e.g. `{{ctx.repo_name}}`.
+        nested: String,
+        /// The complete bare-expression rewrite from Darkmatter's lint, when
+        /// one can be proven equivalent. Illustrative: it carries no YAML
+        /// quoting and no `{{ }}` wrapper.
+        suggestion: Option<String>,
     },
 
     /// A lifecycle string references a bare `{{ variable }}` that is undefined
@@ -1402,6 +1407,13 @@ pub enum CompositionError {
         surface: String,
         /// The raised expression's message.
         message: String,
+        /// Dotted lifecycle property that raised (`success.say`,
+        /// `failure.stack[0].when`, `start.stack[1].action[0]`), when the
+        /// executor located it.
+        property: Option<String>,
+        /// Why evaluation failed; selects the remediation hint. Boxed to keep
+        /// `CompositionError` within `clippy::result_large_err`.
+        reason: Box<LifecycleEvaluationReason>,
     },
 
     // -- Sequence errors -------------------------------------------------------
@@ -3002,6 +3014,8 @@ impl CompositionError {
             event: event.into(),
             surface: info.variant.clone(),
             message: info.msg.clone(),
+            property: info.property.clone(),
+            reason: Box::new(info.reason.clone()),
         }
     }
 
@@ -3101,7 +3115,7 @@ impl CompositionError {
                 }
                 _ => Some(FrontmatterHighlight::BlockOnly),
             },
-            CompositionError::LifecycleInterpolationLeak { property, .. }
+            CompositionError::LifecycleNestedSpanInLiteral { property, .. }
             | CompositionError::LifecycleUndefinedVariable { property, .. }
             | CompositionError::LifecycleInvalid { property, .. }
             | CompositionError::LifecycleStackInvalidShape { property, .. }
@@ -3220,6 +3234,22 @@ impl CompositionError {
             _ => None,
         }
     }
+}
+
+/// Why an event-time lifecycle evaluation failed.
+///
+/// Typed so the renderer chooses a remediation without matching message text.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum LifecycleEvaluationReason {
+    /// An expression raised: an unknown root, a malformed span, or a function
+    /// error.
+    #[default]
+    Expression,
+    /// Resolution finished but a `{{ … }}` span survived in the rendered text.
+    SurvivingSpan {
+        /// The first surviving span, braces included.
+        span: String,
+    },
 }
 
 /// How a frontmatter-rooted error should be highlighted in the captured excerpt.

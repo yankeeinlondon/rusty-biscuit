@@ -387,6 +387,7 @@ use super::error::CompositionError;
 use super::guardrails::{load_or_create_guardrails, retired_custom_guardrails_path};
 use super::lifecycle::{
     LIFECYCLE_EVENT_KEYS, parse_lifecycle_config, validate_no_err_in_no_error_events,
+    validate_no_nested_spans_in_literals,
 };
 use super::hints::{ParsedAgentHint, parse_agent_hint_full, parse_interactive_hint, parse_model_hint};
 use super::guardrails::render_guardrails;
@@ -508,6 +509,13 @@ pub(super) fn prepare_direct_with_prompt(
     };
     let mut lifecycle =
         parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
+    // A nested span in a single-pass lifecycle literal can never interpolate;
+    // reject it here, before any provider or lifecycle event runs.
+    validate_no_nested_spans_in_literals(
+        &effective_frontmatter,
+        &lifecycle,
+        &source.resolved_path,
+    )?;
     // Pre-flight shell resolution (C3): resolve each shell command in the
     // deferred lifecycle subtree via DM2 with an early-binding-only lookup
     // and stamp the resolved bytes back so the approved command equals the
@@ -525,11 +533,11 @@ pub(super) fn prepare_direct_with_prompt(
     // keep their `{{ }}` spans through prepare and resolve at event-time via
     // DM2 (C2), where strict mode fails closed on undefined roots and malformed
     // expressions, and the post-DM2 dispatch-time leak guard (C4) backstops a
-    // surviving span before any side effect is sent. The prepare-time leak and
-    // undefined-variable scans therefore no longer run over these deferred
-    // strings — they would flag the authored spans as bugs. The `err`-placement
-    // scan stays: a bare `err` in a no-error event is invalid regardless of
-    // binding time.
+    // surviving span before any side effect is sent. The undefined-variable
+    // scan therefore does not run over these deferred strings — it would flag
+    // the authored spans as bugs. Two static scans stay because their defects
+    // hold regardless of binding time: a nested span inside a single-pass
+    // literal (above) and a bare `err` in a no-error event.
     validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
     // Resolved after a successful compose so a schema that cannot be prepared
@@ -657,6 +665,13 @@ pub fn prepare_inline(
     };
     let mut lifecycle =
         parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
+    // A nested span in a single-pass lifecycle literal can never interpolate;
+    // reject it here, before any provider or lifecycle event runs.
+    validate_no_nested_spans_in_literals(
+        &effective_frontmatter,
+        &lifecycle,
+        &source.resolved_path,
+    )?;
     // Pre-flight shell resolution (C3): see `prepare_direct`.
     super::preflight::resolve_lifecycle_shell_commands(
         &mut lifecycle,
@@ -667,7 +682,7 @@ pub fn prepare_inline(
         options.file_ref_fallback_dir.as_deref(),
     )?;
     // Deferred lifecycle strings resolve at event-time (C2); the prepare-time
-    // leak / undefined-variable scans do not run over them. See `prepare_direct`.
+    // undefined-variable scan does not run over them. See `prepare_direct`.
     validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
     let body = composed.content().to_string();

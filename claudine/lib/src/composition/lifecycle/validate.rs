@@ -1,80 +1,103 @@
-pub fn validate_no_interpolation_leaks(
-    config: &LifecycleConfig,
+/// Rejects a `{{ … }}` span authored inside a quoted string literal on a
+/// single-pass lifecycle surface.
+///
+/// Covers every surface Claudine evaluates exactly once: the whole-value
+/// communication fields of all seven events, `loop.while` / `loop.until`, and
+/// every surface [`iter_stack_expression_surfaces`] yields — stack `when`
+/// predicates, action operands, and `proxy … with` values. A mixed string
+/// (`"a {{ … }} b"`) rescans and resolves, and a positional action body is a
+/// synthesized literal, so neither is examined. Stack surfaces and loop
+/// predicates read authored text from [`LifecycleSourceMap`], never the parsed
+/// `Expr` tree (spec D2, Invariant 3); communication fields are already stored
+/// as authored strings.
+///
+/// Events are walked in [`LifecycleSignal::ALL`] order and the first lint
+/// aborts.
+///
+/// ## Errors
+///
+/// - [`CompositionError::LifecycleNestedSpanInLiteral`] for the first defect.
+/// - [`CompositionError::LifecycleInvalid`] when a parsed stack surface has no
+///   authored source record — an internal inconsistency between the parser and
+///   the source map, never a silent skip.
+pub fn validate_no_nested_spans_in_literals(
+    frontmatter: &serde_json::Value,
+    lifecycle: &LifecycleConfig,
     source_path: &Path,
-    warnings: &[darkmatter::markdown::compose::ComposeWarning],
 ) -> Result<(), CompositionError> {
+    let sources = LifecycleSourceMap::from_frontmatter(frontmatter);
+    let surfaces = iter_stack_expression_surfaces(lifecycle);
     for signal in LifecycleSignal::ALL {
-        let Some(notification) = config.get(signal) else {
-            continue;
-        };
-
-        for (field_name, value) in notification_comm_fields(notification) {
-            let Some(text) = value else { continue };
-            if text.is_empty() {
-                continue;
+        let event = signal.property_name();
+        if let Some(notification) = lifecycle.get(signal) {
+            for (field, value) in notification_comm_fields(notification) {
+                if let Some(text) = value {
+                    reject_nested_span(source_path, &format!("{event}.{field}"), text, false)?;
+                }
             }
-
-            let spans = ExpressionFinder::find_all_plain(text);
-            if let Some(first) = spans.first() {
-                let property = format!("{}.{}", signal.property_name(), field_name);
-                let expression = first.expression.clone();
-                let reason = find_matching_warning_reason(&expression, warnings);
-                return Err(CompositionError::LifecycleInterpolationLeak {
-                    source_path: source_path.to_path_buf(),
-                    property,
-                    expression,
-                    reason,
-                });
+        }
+        if signal == LifecycleSignal::Loop {
+            for predicate in ["while", "until"] {
+                let property = format!("{event}.{predicate}");
+                if let Some(AuthoredValue::Text(text)) = sources.get(&property) {
+                    reject_nested_span(source_path, &property, text, true)?;
+                }
+            }
+        }
+        for surface in surfaces.iter().filter(|surface| surface.signal == signal) {
+            match sources.get(&surface.property) {
+                Some(AuthoredValue::Text(text)) => {
+                    reject_nested_span(source_path, &surface.property, text, surface.predicate)?;
+                }
+                Some(AuthoredValue::NonText) => {}
+                None => {
+                    return Err(CompositionError::LifecycleInvalid {
+                        property: surface.property.clone(),
+                        message: "internal error: no authored source was recorded for this \
+                                  lifecycle surface, so it cannot be checked for nested \
+                                  interpolation"
+                            .to_string(),
+                        source_file: source_path.to_path_buf(),
+                        unknown_field: None,
+                        expected_fields: Vec::new(),
+                    });
+                }
             }
         }
     }
-
-    // Stack expression surfaces: scan string literals inside parsed Expr
-    // trees for surviving `{{ … }}` spans. A string literal in a parsed
-    // expression is passed through verbatim to the evaluated result, so a
-    // literal containing template syntax would leak the raw braces into
-    // user-visible output.
-    for surface in iter_stack_expression_surfaces(config) {
-        let mut found: Option<(String, String)> = None;
-        visit_string_literals(surface.expr, &mut |literal| {
-            if found.is_some() {
-                return;
-            }
-            if let Some(span) = ExpressionFinder::find_all_plain(literal).first() {
-                found = Some((span.expression.clone(), literal.to_string()));
-            }
-        });
-        if let Some((expression, _literal)) = found {
-            let reason = find_matching_warning_reason(&expression, warnings);
-            return Err(CompositionError::LifecycleInterpolationLeak {
-                source_path: source_path.to_path_buf(),
-                property: surface.property,
-                expression,
-                reason,
-            });
-        }
-    }
-
     Ok(())
 }
 
-/// Best-effort extraction of a warning reason mentioning the leaked expression.
-fn find_matching_warning_reason(
-    expression: &str,
-    warnings: &[darkmatter::markdown::compose::ComposeWarning],
-) -> String {
-    let inner = expression
-        .trim_start_matches("{{")
-        .trim_end_matches("}}")
-        .trim();
-
-    for warning in warnings {
-        if warning.message.contains(expression) || warning.message.contains(inner) {
-            return warning.message.clone();
+/// Lint one authored scalar: a predicate is condition text as a whole; any
+/// other surface is examined only when it is exactly one `{{ … }}` span.
+fn reject_nested_span(
+    source_path: &Path,
+    property: &str,
+    text: &str,
+    predicate: bool,
+) -> Result<(), CompositionError> {
+    let (source, mode) = if predicate {
+        (text.to_string(), ParseMode::Condition)
+    } else {
+        if !is_whole_value_span(text) {
+            return Ok(());
         }
-    }
-
-    String::new()
+        let Some(span) = ExpressionFinder::find_all_plain(text).into_iter().next() else {
+            return Ok(());
+        };
+        (span.expression, ParseMode::Interpolation)
+    };
+    let Some(lint) = lint_expression(&source, mode).into_iter().next() else {
+        return Ok(());
+    };
+    let ExpressionLintKind::NestedSpanInStringLiteral { literal, .. } = &lint.kind;
+    Err(CompositionError::LifecycleNestedSpanInLiteral {
+        source_path: source_path.to_path_buf(),
+        property: property.to_string(),
+        literal: source[literal.clone()].to_string(),
+        nested: source[lint.span.clone()].to_string(),
+        suggestion: lint.suggestion,
+    })
 }
 
 /// A single expression surface discovered by [`iter_stack_expression_surfaces`].
@@ -85,6 +108,8 @@ struct LifecycleExpressionSurface<'a> {
     /// The owning event — used by the `err` static scan to decide whether
     /// `err` references are permitted.
     signal: LifecycleSignal,
+    /// A `when` predicate: condition text rather than an action value.
+    predicate: bool,
     /// The parsed expression tree.
     expr: &'a Expr,
 }
@@ -119,6 +144,7 @@ fn iter_stack_expression_surfaces<'a>(
                 surfaces.push(LifecycleExpressionSurface {
                     property: format!("{prefix}.when"),
                     signal,
+                    predicate: true,
                     expr: when,
                 });
             }
@@ -146,6 +172,7 @@ fn iter_action_expressions<'a>(
                     surfaces.push(LifecycleExpressionSurface {
                         property: format!("{prefix}.reason"),
                         signal,
+                        predicate: false,
                         expr: reason,
                     });
                 }
@@ -154,6 +181,7 @@ fn iter_action_expressions<'a>(
                 surfaces.push(LifecycleExpressionSurface {
                     property: format!("{prefix}.target"),
                     signal,
+                    predicate: false,
                     expr: target,
                 });
                 // `with` values resolve at the source handoff against the same
@@ -179,6 +207,7 @@ fn iter_action_expressions<'a>(
                     surfaces.push(LifecycleExpressionSurface {
                         property: format!("{prefix}.max_attempts"),
                         signal,
+                        predicate: false,
                         expr: max_attempts,
                     });
                 }
@@ -186,6 +215,7 @@ fn iter_action_expressions<'a>(
                     surfaces.push(LifecycleExpressionSurface {
                         property: format!("{prefix}.delay"),
                         signal,
+                        predicate: false,
                         expr: delay,
                     });
                 }
@@ -197,12 +227,14 @@ fn iter_action_expressions<'a>(
                 surfaces.push(LifecycleExpressionSurface {
                     property: format!("{prefix}.message"),
                     signal,
+                    predicate: false,
                     expr: message,
                 });
                 if let Some(max_attempts) = max_attempts {
                     surfaces.push(LifecycleExpressionSurface {
                         property: format!("{prefix}.max_attempts"),
                         signal,
+                        predicate: false,
                         expr: max_attempts,
                     });
                 }
@@ -211,12 +243,14 @@ fn iter_action_expressions<'a>(
                 surfaces.push(LifecycleExpressionSurface {
                     property: format!("{prefix}.delay"),
                     signal,
+                    predicate: false,
                     expr: delay,
                 });
                 if let Some(reason) = reason {
                     surfaces.push(LifecycleExpressionSurface {
                         property: format!("{prefix}.reason"),
                         signal,
+                        predicate: false,
                         expr: reason,
                     });
                 }
@@ -227,12 +261,14 @@ fn iter_action_expressions<'a>(
             surfaces.push(LifecycleExpressionSurface {
                 property: format!("{prefix}.message"),
                 signal,
+                predicate: false,
                 expr: &comm.message,
             });
             if let Some(route) = &comm.route {
                 surfaces.push(LifecycleExpressionSurface {
                     property: format!("{prefix}.route"),
                     signal,
+                    predicate: false,
                     expr: route,
                 });
             }
@@ -241,12 +277,14 @@ fn iter_action_expressions<'a>(
             surfaces.push(LifecycleExpressionSurface {
                 property: format!("{prefix}.command"),
                 signal,
+                predicate: false,
                 expr: &shell.command,
             });
             if let Some(on_error) = &shell.on_error {
                 surfaces.push(LifecycleExpressionSurface {
                     property: format!("{prefix}.on_error"),
                     signal,
+                    predicate: false,
                     expr: on_error,
                 });
             }
@@ -256,6 +294,7 @@ fn iter_action_expressions<'a>(
                 surfaces.push(LifecycleExpressionSurface {
                     property: format!("{prefix}.arg[{i}]"),
                     signal,
+                    predicate: false,
                     expr: arg,
                 });
             }
@@ -265,6 +304,7 @@ fn iter_action_expressions<'a>(
                 surfaces.push(LifecycleExpressionSurface {
                     property: format!("{prefix}.arg[{i}]"),
                     signal,
+                    predicate: false,
                     expr: arg,
                 });
             }
@@ -285,6 +325,7 @@ fn iter_with_value_expressions<'a>(
         ProxyWithValue::Scalar(expr) => surfaces.push(LifecycleExpressionSurface {
             property: prefix.to_string(),
             signal,
+            predicate: false,
             expr,
         }),
         ProxyWithValue::Array(items) => {
@@ -303,12 +344,12 @@ fn iter_with_value_expressions<'a>(
 /// Visit every `Expr::StringLiteral` reachable in the expression tree,
 /// depth-first, calling `visitor` with the literal's value.
 ///
-/// Used by the leak scan to detect surviving `{{ … }}` spans inside parsed
-/// expression literals (e.g. `say('leaked {{ expr }}')`).
+/// Used by the `err`-availability scan to find `{{ … }}` spans inside parsed
+/// expression literals (e.g. `say('failed: {{ err.msg }}')`).
 ///
 /// Object-literal *keys* are visited alongside the values. A key is authored
-/// text that reaches the dispatched value verbatim, so a span hiding in
-/// `{ "{{ leaked }}": 1 }` is as much a leak as one in the value position.
+/// text that reaches the dispatched value verbatim, so a `{{ err.msg }}` span
+/// in a key counts the same as one in the value position.
 fn visit_string_literals<F: FnMut(&str)>(expr: &Expr, visitor: &mut F) {
     match expr {
         Expr::StringLiteral(s) => visitor(s),
@@ -364,9 +405,8 @@ fn visit_string_literals<F: FnMut(&str)>(expr: &Expr, visitor: &mut F) {
 /// Darkmatter resolves an unknown bare variable to an empty string with no
 /// warning and no error — even in fail-fast mode (see
 /// `frontmatter_interpolation::missing_variable_resolves_to_empty`). So the
-/// post-compose [`validate_no_interpolation_leaks`] guard, which only scans
-/// the *rendered* string for surviving spans, never sees the collapsed
-/// reference. This guard closes that gap by inspecting the **raw**
+/// event-time leak guard, which only scans the *rendered* string for surviving
+/// spans, never sees the collapsed reference. This guard closes that gap by inspecting the **raw**
 /// (pre-composition) lifecycle strings, where the `{{ … }}` span is still
 /// present, and resolving each bare variable against the composed frontmatter.
 ///
@@ -841,3 +881,7 @@ fn expr_as_string_literal(expr: &Expr) -> Option<String> {
 /// Normalizes empty or whitespace-only strings to `None`.
 use super::*;
 use super::actions::ProxyWithValue;
+use super::source_map::{AuthoredValue, LifecycleSourceMap};
+use darkmatter::markdown::compose::expression::{
+    ExpressionLintKind, ParseMode, is_whole_value_span, lint_expression,
+};
