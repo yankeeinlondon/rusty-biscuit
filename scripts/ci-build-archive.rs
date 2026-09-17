@@ -659,6 +659,13 @@ fn capture(command: &str, args: &[String], cwd: &Path) -> Result<String> {
     let output = Command::new(command)
         .args(args)
         .current_dir(cwd)
+        // A Nextest invocation this tool makes reads the config this tool
+        // generated, so it runs under that config's `default` and never under
+        // the caller's profile. `just ci-local` exports
+        // `NEXTEST_PROFILE=local-evidence` and CI exports `ci`; both name
+        // profiles of THIS repository, so an inherited one fails an archive
+        // listing with "profile not found" before the archive can be read.
+        .env("NEXTEST_PROFILE", "default")
         .output()
         .with_context(|| format!("running `{}`", command_line(command, args)))?;
     if !output.status.success() {
@@ -978,10 +985,17 @@ fn produce_one(
         None => workspace.join("target"),
     };
 
-    let mut env: Vec<(String, OsString)> = vec![(
-        "CARGO_TARGET_DIR".to_owned(),
-        OsString::from(&target_dir),
-    )];
+    let mut env: Vec<(String, OsString)> = vec![
+        ("CARGO_TARGET_DIR".to_owned(), OsString::from(&target_dir)),
+        // The profile this producer's Nextest invocations run under is the one
+        // in the config it just generated, never whatever the caller was using.
+        // `just ci-local` exports `NEXTEST_PROFILE=local-evidence` and CI
+        // exports `ci`; both name profiles that exist in THIS repository's
+        // `.config/nextest.toml` and in no archive tool config, so inheriting
+        // either fails the inner `nextest list` with "profile not found" before
+        // an archive can be inspected.
+        ("NEXTEST_PROFILE".to_owned(), OsString::from("default")),
+    ];
     let observed_linker = runtime::linker(identity, workspace, &mut env)?;
     let events = measurement_env(options, record, &mut env)?;
 

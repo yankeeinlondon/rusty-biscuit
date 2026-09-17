@@ -1386,6 +1386,7 @@ fn the_archive_runs_every_tier_from_another_checkout_with_no_compiler_in_reach()
 
     for (tier, expected) in [("L1", 6_usize), ("L2", 1), ("browser", 1)] {
         let output = Command::new("cargo-nextest")
+            .env("NEXTEST_PROFILE", "default")
             .arg("nextest")
             .arg("run")
             .arg("--archive-file")
@@ -1485,6 +1486,7 @@ fn the_canonical_tier_recipes_run_the_fixture_archive_without_rebuilding_it() {
             .arg("--extract-overwrite")
             // The standalone driver, because the consumer has no Cargo.
             .env("BISCUIT_NEXTEST_BIN", "cargo-nextest nextest")
+            .env("NEXTEST_PROFILE", "default")
             // JUnit staging asks Cargo where the target directory is when it is
             // not told; an archive consumer tells it.
             .env("BISCUIT_JUNIT_TARGET_DIR", &staging)
@@ -1629,6 +1631,7 @@ fn an_archive_file_that_names_nothing_is_refused_before_the_tier_starts() {
             // A real driver: this is the archive path's refusal, not the
             // missing-driver one.
             .env("BISCUIT_NEXTEST_BIN", "cargo-nextest nextest")
+            .env("NEXTEST_PROFILE", "default")
             .output()
             .expect("running the canonical recipe");
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2233,6 +2236,7 @@ fn one_owner_tree_shares_a_dependency_compile_without_unifying_features() {
         let extract = dir.path().join(format!("extract-{package}"));
         fs::create_dir_all(&extract).expect("creating the extraction directory");
         let output = Command::new("cargo-nextest")
+            .env("NEXTEST_PROFILE", "default")
             .arg("nextest")
             .arg("run")
             .arg("--archive-file")
@@ -2275,6 +2279,7 @@ fn one_owner_tree_shares_a_dependency_compile_without_unifying_features() {
 fn a_combined_invocation_unifies_the_feature_graphs_the_producer_keeps_apart() {
     let dir = Scratch::new("shared-deps-combined");
     let output = Command::new("cargo")
+        .env("NEXTEST_PROFILE", "default")
         .arg("nextest")
         .arg("run")
         .arg("--manifest-path")
@@ -2958,6 +2963,7 @@ fn run_relocated(dir: &Path, package: &str, archive: &Path, consumer: &Path) {
     fs::create_dir_all(&extract).expect("creating the extraction directory");
 
     let output = Command::new("cargo-nextest")
+        .env("NEXTEST_PROFILE", "default")
         .arg("nextest")
         .arg("run")
         .arg("--archive-file")

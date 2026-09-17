@@ -5839,7 +5839,7 @@ fn ci_gate_needs_exactly_the_surviving_blocking_jobs() {
         "ci-gate must fold exactly {expected:?}, got {needs:?}"
     );
 
-    for retired in ["biscuit-tui-captured-stdout"] {
+    for retired in ["biscuit-tui-captured-stdout", "ci-tooling"] {
         assert!(
             !executable.contains(retired),
             "ci-gate must fold exactly the surviving jobs; its RESULTS \
