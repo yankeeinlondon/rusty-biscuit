@@ -24,7 +24,7 @@ pub mod collect;
 pub mod lifecycle;
 
 pub use approval::approval_set;
-pub use collect::collect_shell_commands;
+pub use collect::{collect_frontmatter_shell_commands, collect_shell_commands};
 pub use lifecycle::{ComposePreflightApprovals, PreflightApprovalStats};
 
 use crate::markdown::Markdown;
@@ -237,6 +237,12 @@ impl ComposePreflightReport {
 /// here — before the first frontmatter `$(...)` executes — removes the
 /// "execute an earlier command before discovering a later one needs approval"
 /// failure mode.
+///
+/// A frontmatter-surface compose
+/// ([`ComposeOptions::only_frontmatter_surface`]) can execute only the
+/// document's frontmatter `$(...)` commands, so it is checked against those
+/// alone; walking the body graph there would dereference transclusions the
+/// projection exists to leave unread.
 pub(crate) fn validate_pre_approved(
     markdown: &Markdown,
     options: &ComposeOptions,
@@ -246,7 +252,11 @@ pub(crate) fn validate_pre_approved(
     };
 
     let ctx = markdown.source_context_for_errors();
-    let entries = collect::collect_shell_commands(markdown, options)?;
+    let entries = if options.is_frontmatter_surface_only() {
+        collect::collect_frontmatter_shell_commands(markdown, options)?
+    } else {
+        collect::collect_shell_commands(markdown, options)?
+    };
     for entry in &entries {
         if !approved.contains(&entry.normalized) {
             return Err(ShellExpansionError::NotPreApproved {
