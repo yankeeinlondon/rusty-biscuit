@@ -262,6 +262,14 @@ belong here.
   under `git rev-parse --git-dir` and ref locks under `--git-common-dir`.
   With five or more concurrent agents the budget can still run out — expect
   a second dispatch round after re-checking `git status --short`.
+- The "never remove a lock" rule has one carve-out: when a single-agent commit
+  fails fatally before the lock is released (e.g. `fatal: sha1 file
+  .../index.lock write error. Out of diskspace` on a Mac dev volume below
+  ~250 MiB free, where git aborts before its normal lock-cleanup path), the
+  lock is orphaned from your own prior attempt — not a sibling's. Confirm no
+  other git process owns it (`pgrep -f 'git (commit|status)'`), then `rm`
+  the index lock and retry. The multi-agent "never remove" rule still
+  governs every concurrent-agent case.
 - Never `--no-verify`, override `core.hooksPath`, amend, or add fixup commits
   mid-batch. Report and let the orchestrator decide.
 - Run from the inherited worktree root; never push.
