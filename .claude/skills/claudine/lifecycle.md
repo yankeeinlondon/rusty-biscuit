@@ -29,7 +29,7 @@ Seven frontmatter properties control lifecycle behavior. Each accepts an object 
 
 | Property | Emitted when |
 |----------|-------------|
-| `initialize` | Prompt file has been identified and frontmatter has parsed, before schema validation and shell pre-flight |
+| `initialize` | After frontmatter bootstrap and its narrow shell approval gate, before body discovery, full shell pre-flight, and the schema verdict for live staged documents |
 | `start` | Pre-flight checks have passed; immediately before provider invocation |
 | `success` | The provider session completed without error **and** the composition satisfied its completion verdict |
 | `blocked` | Composition exited before the provider child was spawned (e.g., pre-flight denial, launch schema validation failure) |
@@ -38,6 +38,25 @@ Seven frontmatter properties control lifecycle behavior. Each accepts an object 
 | `loop` | Post-`finalize` gate that evaluates the loop's `while`/`until` condition and can run additional lifecycle concerns |
 
 Legacy prompts that only configure `start`, `success`, `blocked`, and `failure` continue to work unchanged.
+
+Live staged preparation runs initialization before reading body dependencies.
+An `ensure_file` action can create a file that the stabilized body then includes;
+existing contents are preserved. Every adopted proxy target follows the same
+ordering, and an abandoned source body is never discovered. Initialization
+shell commands require approval before any initialization action runs. After
+initialization, the fresh body and remaining lifecycle commands receive a full,
+condition-blind audit before launch, reusing the narrow gate's approvals.
+
+A bootstrap-gate failure precedes target lifecycle ownership. Once installed,
+the target's lifecycle handles failures; a missing include after initialization
+routes through `blocked`/`finalize` exactly once and prevents launch. Retry and
+resume reread and audit without initializing again; later loop iterations use
+the already-audited structural plan. Dry runs fire no lifecycle events or
+dynamic proxy handoffs. Sequence static preflight still requires all includes
+to exist before the sequence starts, even when a task's initialization or an
+earlier task would create them. See
+[Composition — Documents That Declare `initialize`](composition.md#documents-that-declare-initialize).
+
 
 ### The completion verdict decides which terminal event fires
 

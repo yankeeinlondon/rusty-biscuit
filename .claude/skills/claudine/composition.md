@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-d0e2555d35c6d7ee
-last_updated: 2026-09-16
+hash: ef46db3751d8e999-ddb3fc0f990ccf1f
+last_updated: 2026-09-17
 ---
 # Claudine Composition
 
@@ -229,7 +229,7 @@ matrix, supported token shapes, and the open-questions list.
 
 ## Direct Composition
 
-Direct composition takes a Markdown file, composes it through Darkmatter, and sends the composed content as a prompt to an agentic CLI. No files are mutated.
+Direct composition takes a Markdown file, composes it through Darkmatter, and sends the composed content as a prompt to an agentic CLI. Composition does not rewrite the source; lifecycle actions and the provider may mutate files.
 
 ```sh
 claudine compose @commit.md
@@ -239,7 +239,7 @@ claudine compose --codex @commit.md
 Steps:
 
 1. **Resolve** — resolve the file reference using `biscuit-file::FileReference`. A bare **implicit** path (`foo.md`, `dir/foo.md`) resolves from the source document's directory first, then the repository root; an **explicit** `./`/`../` path resolves from the source directory only; `@` is a magic-root search, `&` pins to the repository root, `^` searches package root then package-area root then repository root, `~/` is the user's home, `vault:` a configured vault, `%` a recursive modifier, and absolute paths resolve to themselves
-2. **Compose** — run the Markdown through Darkmatter's compose pipeline (transclusion, interpolation, shell commands, conditionals)
+2. **Initialize and compose** — for live staged documents, bootstrap the frontmatter, approve initialization shell commands, run `initialize`, and reread before body discovery; then audit and compose through Darkmatter (see [Documents That Declare `initialize`](#documents-that-declare-initialize))
 3. **Prepare** — extract the effective (composed) frontmatter; this is the single source of truth for all downstream decisions
 4. **Select provider** — choose which agentic CLI to use (see Provider Selection below)
 5. **Execute** — run a non-interactive session (or interactive with `-i`) through the wrapper-grade pipeline
@@ -436,7 +436,7 @@ This behavior is implemented by [`reconcile_inline_artifact`] in the closure
 module, using `inline_hash_options`, `plan_hash_save`, `restore_properties_text`,
 and `apply_hash_save_text`.
 
-[`reconcile_inline_artifact`]: ../../lib/src/composition/closure.rs
+[`reconcile_inline_artifact`]: ../../../claudine/lib/src/composition/closure.rs
 
 ### Inline Conventions
 
@@ -738,7 +738,7 @@ Composition runs execute the full seven-event lifecycle declared in the prompt's
 initialize → start → (success | blocked | failure) → finalize → loop
 ```
 
-- **`initialize`** fires after the prompt file is resolved and frontmatter has parsed, but before schema validation and shell pre-flight. A `skip` control action here opts the whole document out cleanly.
+- **`initialize`** fires after the prompt file is resolved and frontmatter has parsed, but after its narrow shell approval gate and before body discovery, full shell pre-flight, and the schema verdict. A `skip` control action here opts the whole document out cleanly.
 - **`start`** fires after schema validation and the lifecycle shell-audit pass succeed, immediately before provider invocation.
 - **`success`/`blocked`/`failure`** are the terminal events. Schema-validation failures and shell-audit denials produce `blocked`; provider errors produce `failure`. The **completion verdict** sits immediately before them (`… → provider → inline closure → verdict → success | failure → finalize`), so it — not the provider's exit code alone — chooses which one fires. It runs once per composition: once per sequence step and once per loop iteration.
 - **`finalize`** fires once per iteration, immediately after the terminal event.
@@ -858,6 +858,29 @@ The decision to prompt for missing required values depends **only** on the six s
 
 ### Documents That Declare `initialize`
 
+For live `compose` and `inline-compose`, an authored `initialize` key selects
+staged preparation, even when its value is empty or malformed. A newly adopted
+proxy target enters staged initialization too. The bootstrap composes only
+frontmatter and lifecycle inputs through Darkmatter's shared projection; it
+retains document identity, caller provenance, and the captured resolution
+context, but produces no composed prompt and never follows body includes.
+
+The order is: bootstrap → approve initialization shell commands → run
+`initialize` once → reread the stabilized document → discover and approve the
+full body/lifecycle shell surface → finish canonical preparation and the schema
+verdict → launch. Initialization can therefore create an absent file used by
+an unconditional include or by nested `file_exists(log)` / `phase > 1` blocks.
+The full audit remains condition-blind and reuses prior approvals. A surviving
+missing include blocks launch through the existing typed diagnostic.
+
+`--dry-run` does not initialize or follow dynamic proxies, so a dependency that
+only initialization creates can still fail discovery. Sequences retain their
+separate static-preflight boundary: create required includes **before starting
+the sequence**. A prior task in that sequence cannot satisfy preflight. A task's
+prompt is composed before its own initialization; changes to an existing
+include during that initialization do not enter that already-composed prompt.
+
+
 A document declaring an `initialize` lifecycle stack defers the full invocation-boundary verdict and missing-value collection. Explicitly supplied eager file partials are still completed before initialization, as described above. `initialize` runs before schema validation (R4), and it can add or repair the very property a verdict would reject — writing frontmatter with `set_frontmatter`, or producing a file a `file`-typed property points at. Judging first would fail the document for a violation the next stage is about to fix, and prompting the caller would ask a question the document is about to answer itself.
 
 The verdict is instead reached by the **stabilized reread**: canonical preparation re-reads the document after `initialize` returns and validates that read. A violation that survives `initialize` is therefore reported *after* the document's own `initialize` has run and *through* its own `blocked`/`finalize` stacks, as the same typed `CompositionError` a directly-invoked document reports. A proxied target follows the identical order through its staged bootstrap, which is what makes the diagnostic route-independent.
@@ -952,7 +975,7 @@ Every entry into canonical preparation declares **why**, and each reason has exa
 | Resume | a fresh read from disk | no | yes | inherits the active document's |
 | Next loop iteration | the stamped structural plan | no | no | reuses the owning loop's plan |
 
-Direct and proxy-target differ **only** in the read basis — that identity is the equivalence contract in table form. A proxy target reads fresh because the handoff commits to a document the source may never have touched.
+The table describes live entry. Direct documents with an authored `initialize` key and newly adopted proxy targets use staged boot; direct documents without that key retain eager preparation. A proxy target reads fresh because the handoff commits to a document the source may never have touched.
 
 `initialize` fires once per **active document**, not once per attempt: a retry or resume re-enters a document that has already initialized. A loop iteration skips validation because it re-materializes against an already-audited structural plan and therefore cannot introduce command bytes the audit never saw.
 
@@ -1187,17 +1210,17 @@ See Sequences for the complete authoring and execution contract.
 
 ## Architecture
 
-Both commands follow the same six-stage pipeline, with lifecycle events woven around the stages:
+Both commands share canonical preparation. Live staged entry uses this order; direct documents without `initialize` retain eager preparation:
 
 ```
-Resolve → Initialize → Pre-Flight → Prepare → Start → Select Provider → Launch → (Success | Blocked | Failure) → Finalize → Loop
+Resolve → Bootstrap → Narrow approval → Initialize → Stabilized reread → Full audit / Prepare → Start → Launch → (Success | Blocked | Failure) → Finalize → Loop
 ```
 
 - **Resolve**: canonical commands use
   `composition::resolve_composition_source_in_context()` with the invocation's
   launch `FileResolutionContext`, then derive one `SourceContext` from the
   resolved path
-- **Initialize**: `LifecycleRunGuard::emit_initialize_once()` fires the `initialize` lifecycle event; a `skip` control action here exits cleanly before any later stage
+- **Bootstrap and initialize**: `prepare_bootstrap()` produces only the effective frontmatter/lifecycle surface. The coordinator approves initialization shell commands, dispatches `initialize` once, and rereads before full body discovery; `skip` exits before reading the body. Provider selection supplies early-binding context before composition.
 - **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see Pre-Flight Shell Approval)
 - **Prepare**: `composition::prepare::service::prepare_document()` — the canonical preparation service every entry reason routes through (direct, proxy target, retry, resume, loop iteration) — composes through Darkmatter via `prepare_direct()` / `prepare_inline()` with the pre-approved command set, source `FileResolutionContext`, and supplied runtime evidence, and produces a `PreparedComposition` with `effective_frontmatter`. There is exactly one composer per mode; see [Document Handoffs](#document-handoffs-and-the-equivalence-contract)
 - **Start**: `LifecycleRunGuard::emit_start_once()` fires the `start` lifecycle event after schema validation and shell audit pass
