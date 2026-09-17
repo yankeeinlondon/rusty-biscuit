@@ -5,10 +5,13 @@ human_review: false
 reviewed_by: codex/gpt-5.6-sol
 created: 2026-09-16T16:31:12-07:00
 spec: 2026-09-12-shadow-home/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: claudine/fixes/2026-09-12-shadow-home/implementation-log.md
 description: A **fix** review of `2026-09-12-shadow-home/spec.md`
 fix: 2026-09-12-shadow-home/review-3.md
 previous: 2026-09-12-shadow-home/review-2.md
+next: 2026-09-12-shadow-home/review-4.md
 findings:
     - "[high] Recovery still deletes state after metadata, source-read, or marker-write failures"
 ---

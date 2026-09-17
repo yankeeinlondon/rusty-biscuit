@@ -396,6 +396,7 @@ message_to_agent: |
     4. If the Phase 11 missing-default-root behavior is vetoed, update
        repo-isolation.md and mcp-mode.md (docs + skill mirror) with the code.
 implementation_2: "2026-09-16T15:30:56-07:00"
+implementation_3: "2026-09-16T19:38:20-07:00"
 ---
 
 # Implementation Log — Preserve Provider Overlays Without Replacing the User Home
@@ -2853,3 +2854,53 @@ The implementation of review cycle 2 has completed successfully in 59m 45s (15:3
         - discovery: `apply_entry` has three error collapses — `let Ok(..) = symlink_metadata(overlay) else { return Ok(None) }` (every error treated as removal), `fs::read(source).is_ok_and(..)` (a failed read is "different"), and `Fingerprint::of(source).ok()` (a failed fingerprint is a source conflict, so `refused`); each leaves `failed` empty and the root is deleted
         - discovery: the sweep's only keep signal is a successfully created `<root>.retained` file, and `finish` removes `<root>.lock` in every branch; `reclaim` also *creates* a missing lock file and reclaims a lockless root, so a marker-less retained root is always swept. A full disk, the named failure case, blocks the marker's creation as readily as the write-back
         - discovery: the WSL2 CI leg drops to an unprivileged `biscuit` user for tests (`.github/workflows/_wsl-ci.yml` "Create the unprivileged test user") and the hosted Linux/macOS runners are not root, so asserting a Unix permission premise does not turn any configured CI leg red
+        - design (sweep protection): the retained root's protection no longer depends on creating a file. While still holding the lock, `finish` renames `<root>.lock` to `<root>.retained` (a rename allocates no data, so it survives the full disk that may have failed the write-back); if the rename fails it removes the lock file; failing that it creates a fresh marker. The sweep now reclaims a root only when its lock file *exists*, can be locked, and no marker exists, and re-checks both after taking the lock (closing the window where release renames or removes the lock file between the sweep's first check and its lock). The notice is written into the marker afterwards, best effort; it always reaches stderr. The lock is released before that write only once the lock file is gone, because on Windows the held `LockFileEx` lock would reject a write to the renamed file through another handle
+        - design (seam): a crate-private `OverlayIo` trait in `write_back.rs` (default methods over `std::fs` and `atomic_write`; production `HostIo`) carries every call that decides survival — overlay `symlink_metadata`, `read`, source `metadata` (fingerprint), `atomic_write`, and the lease's `rename`/`remove_file`/`write`. `WriteBack::apply` delegates to `apply_with(&HostIo)`; `OverlayLease` holds `Arc<dyn OverlayIo>` with a `#[cfg(test)] set_io`. No new `match Provider` site
+        - changes:
+            - `lib/src/provider_overlay/write_back.rs`: `apply_entry` treats only `NotFound` overlay metadata as removal, propagates source read and fingerprint errors (`?`) into `failed`; module and `apply` docs name the inspection failures
+            - `lib/src/provider_overlay/lease.rs`: rename-first retention with the two fallbacks; `OverlayRelease::Retained` gains `protected: bool` and `marker` now means "holds the notice"; `recovery_notice` says the root is still protected when only the notice write failed, and warns of a later sweep only when `protected` is false; the clean path keeps the lock file when the root cannot be removed (so the sweep can still reclaim it now that lockless roots are kept); `reclaim` no longer creates a missing lock file and re-checks after locking; module and `sweep_abandoned_overlays` docs state the invariant
+            - behavior change noted: a root without a lock file is now kept by the sweep (previously reclaimed as "lost its lock mid-`Drop`"); the only producers were the clean path's failed removal, now fixed to keep the lock file, and retention
+            - docs: `claudine/docs/topics/repo-isolation.md` (sweep rule, inspection failures, rename-first protection and fallbacks, notice wording); `.claude/skills/claudine/architecture.md` mirror paragraph. No `repo-isolation.md` skill mirror exists (the skill's `mcp-mode.md` link to it is pre-existing and was left alone); `test-map.md`/`acceptance.md` list none of these tests, lib/cli READMEs make no retention claim
+        - tests (lib, `provider_overlay::tests::lease`, cross-platform, fault injection through a `Faults` `OverlayIo` keyed by `(operation, path)`), each asserting `Retained`, exactly one `auth.json` failure, the source still holding the old bytes, a notice naming the overlay and canonical source paths without contents, then running `sweep_abandoned_overlays` and asserting the overlay still holds the rotated bytes:
+            - `an_overlay_metadata_error_retains_the_root`
+            - `a_source_read_error_retains_the_root`
+            - `a_source_fingerprint_error_retains_the_root`
+            - `an_atomic_write_error_retains_the_root_with_a_marker_the_sweep_honors` (replaces the Unix-only read-only-directory `a_failed_write_back_retains_the_root_with_a_marker_the_sweep_honors`, which returned as a pass when its premise failed)
+            - `a_marker_write_error_still_protects_the_root_from_the_sweep` (renamed lock file is the marker; notice says the root is still protected)
+            - `a_retained_root_without_any_marker_is_still_never_swept` (rename and marker write both fail; the lockless root survives the sweep)
+            - `an_unprotectable_root_is_reported_as_at_risk` (rename, lock removal, and marker write all fail; `protected == false` and the notice warns, without contents)
+            - updated `a_sweep_removes_only_roots_without_a_live_owner`: the lockless root is now kept (1 removed, was 2)
+        - tests (L1): `level1_provider_overlay_home::a_rotated_token_that_cannot_be_written_back_stays_recoverable` now asserts its 0o555 premise with a message naming a privileged runner as the cause, instead of returning as a pass; it keeps the stderr-notice and next-launch-sweep proof through the real binary. The sibling `an_unwritable_storage_root_stops_the_launch_with_the_typed_diagnostic` still returns on the same premise — outside this finding, left unchanged
+        - non-vacuity (lib lease tests; each mutation restored with a plain write + `touch`, `cmp`-verified identical, then 14/14 re-passed):
+            - M1 overlay metadata errors collapsed to `Ok(None)` → only `an_overlay_metadata_error_retains_the_root` FAILS
+            - M2 source read `.is_ok_and(..)` restored → only `a_source_read_error_retains_the_root` FAILS
+            - M3 fingerprint `.ok()` restored → only `a_source_fingerprint_error_retains_the_root` FAILS
+            - M4 no rename and no lock removal (marker-only protection, the review-2 design) → `a_marker_write_error_still_protects_the_root_from_the_sweep` and `a_retained_root_without_any_marker_is_still_never_swept` FAIL
+            - M5 old sweep (create a missing lock file, no post-lock re-check) → `a_retained_root_without_any_marker_is_still_never_swept` and `a_sweep_removes_only_roots_without_a_live_owner` FAIL
+            - M6 release ignores `failed` → 7 of the retention tests FAIL, including `an_atomic_write_error_...`
+            - M7 L1 premise made unavailable (source left 0o755) → the L1 test FAILS with the "test premise unavailable" message; restored and re-passed
+        - gates (macOS, from `claudine/`):
+            - `just test-library provider_overlay`: 42 passed
+            - `just test-cli --test level1_provider_overlay_home`: 33 passed, 0 skipped
+            - `just lint`: exit 0, 0 warnings
+            - `just test --no-fail-fast`: exit 0 — 7199 passed, 9 skipped; `dispatch_inventory` and `test_placement` green without regeneration
+            - `just check-windows` (`x86_64-pc-windows-gnu`, compile evidence only): exit 0, 0 warnings
+        - cross-OS: not executed natively. No `#[cfg(windows)]` code was touched and the new tests carry no `cfg`, so they run on every CI leg; the Windows-specific assumption — renaming (or removing) the lock file while this process holds its `LockFileEx` lock succeeds because `std` opens files with `FILE_SHARE_DELETE` — is unverified on a native host. If it fails there, retention falls back to creating the marker, which the tests also cover. `just cross-check` was not attempted: this session is barred from ssh, and `build-win-native` reported 53 KB free during review #2
+        - WARNING (commit captured a non-vacuity mutant): commit `57e23751f` ("fix(claudine): keep provider overlays recoverable, …", 19:46:58), made outside this session while the non-vacuity pass was running, captured `write_back.rs` with mutant M1 applied (`Err(_) => return Ok(None),` instead of `Err(error) => return Err(error),` in `apply_entry`). The working tree was restored afterwards and holds the correct code as an unstaged one-line diff against `HEAD`; the gates above ran against the restored tree. That line must be committed before this finding counts as fixed in history — as committed, `an_overlay_metadata_error_retains_the_root` fails at `57e23751f`
+- work completed for 'Finding 1: recovery survives metadata, source-read, and marker-write failures' at 19:56:50
+        - orchestrator verification: `git diff HEAD -- claudine/lib/src/provider_overlay/write_back.rs` confirms the working tree holds the correct `Err(error) => return Err(error)` arm while committed history (`57e23751f`, made outside this session) still carries the `Err(_) => return Ok(None)` mutant; the one-line fix must be included in the next commit
+
+### Successful Completion
+
+The implementation of review cycle 3 has completed successfully in 18m 30s (19:38:20 → 19:56:50). During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no finding was deferred
+- residual items recorded against the fixed finding (not deferrals of the finding itself):
+        - native Windows and Linux were not executed locally; the new fault-injection tests carry no `cfg` and run on every CI leg, and `just check-windows` compiles cleanly; the rename-while-locked assumption on native Windows is backed by the lock-removal and marker-write fallbacks, both covered by tests
+        - `an_unwritable_storage_root_stops_the_launch_with_the_typed_diagnostic` in `cli/tests/level1_provider_overlay_home.rs` still returns early when its permission premise is unavailable; it belongs to a different requirement and was left out of scope
+        - committed history (`57e23751f`) captured a non-vacuity mutant in `write_back.rs`; the corrected line is present only in the working tree
+- the files changed by this cycle:
+        - library: `claudine/lib/src/provider_overlay/{write_back,lease,tests}.rs`
+        - CLI tests: `claudine/cli/tests/level1_provider_overlay_home.rs`
+        - docs and skills: `claudine/docs/topics/repo-isolation.md`, `.claude/skills/claudine/architecture.md`
+- final gates (macOS, from `claudine/`): `just test --no-fail-fast` → 7199 passed, 9 skipped; `just lint` → clean; `just check-windows` → clean
