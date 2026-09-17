@@ -73,7 +73,6 @@ success:
                 {{ as_unordered_list(ctx.dirty_files) }}
             - shell: git add ..
             - shell: just commit
-            - shell: gitnexus analyze --force
         - when: "ctx.dirty_files && commit_message"
           action:
             - message: |-
@@ -82,7 +81,6 @@ success:
                 {{ as_unordered_list(ctx.dirty_files) }}
             - shell: git add ..
             - shell: git commit -m "{{commit_message}}"
-            - shell: gitnexus analyze --force
         - when: "!ctx.dirty_files"
           action:
               - message: phase {{phase}} of the plan made no file changes!
