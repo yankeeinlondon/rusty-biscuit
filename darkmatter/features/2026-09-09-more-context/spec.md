@@ -6,7 +6,7 @@ created: 2026-09-09
 reviewed: true
 reviewed_by: codex/gpt-6-astra
 reviewed_on: "2026-09-11"
-review_iterations: 6
+review_iterations: 7
 clarified: claude/claude-fable-5-1
 rulings: R1-R33 ruled by Ken 2026-09-10/11; folded into body; Q1-Q3 recommendations adopted 2026-09-16 (plan Phase 1, see decisions.md), pending Ken's confirmation
 inputs:

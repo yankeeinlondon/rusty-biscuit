@@ -106,15 +106,62 @@ skills_files_updated_during_phase_3:
   - .claude/skills/sniff/SKILL.md
   - .claude/skills/sniff/network.md
   - .claude/skills/os/macos.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - darkmatter/features/2026-09-09-more-context/plan.md
+  - darkmatter/features/2026-09-09-more-context/implementation-log.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_files_during_phase_7: []
+docs_updated_during_phase_7:
+  - darkmatter/features/2026-09-09-more-context/plan.md
+  - darkmatter/features/2026-09-09-more-context/implementation-log.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+source_files_during_phase_8: []
+docs_updated_during_phase_8:
+  - darkmatter/features/2026-09-09-more-context/plan.md
+  - darkmatter/features/2026-09-09-more-context/implementation-log.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
+source_files_during_phase_9: []
+docs_updated_during_phase_9:
+  - darkmatter/features/2026-09-09-more-context/plan.md
+  - darkmatter/features/2026-09-09-more-context/implementation-log.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9: []
+source_files_during_phase_10: []
+docs_updated_during_phase_10:
+  - darkmatter/features/2026-09-09-more-context/plan.md
+  - darkmatter/features/2026-09-09-more-context/implementation-log.md
+docs_created_during_phase_10: []
+skills_files_updated_during_phase_10: []
+source_files_during_phase_11: []
+docs_updated_during_phase_11:
+  - sniff/README.md
+  - sniff/lib/README.md
+  - darkmatter/features/2026-09-09-more-context/plan.md
+  - darkmatter/features/2026-09-09-more-context/implementation-log.md
+docs_created_during_phase_11: []
+skills_files_updated_during_phase_11: []
 packages:
+  - darkmatter
   - sniff
 human_review: true
 human_review_items:
+  - "Phase 11 was mostly halted (2026-09-17). Only 11.3 (Sniff README and library README additions for the committed Phase 2-3 APIs) was done. Checkpoint 11 requires docs and skills to describe only implemented behavior. Tasks 11.1, 11.2, and 11.4 document ctx/current/current_env, new functions, as_markdown, ICMP consent, and the Claudine LifecycleCurrent replacement, and all of that belongs to the unimplemented Phases 5-10. 11.5 is partly done already (Phase 4 recorded ipnet, getrandom, socket2, and biscuit-hash blake3), but it stays open until later phases stop changing manifests. 11.6 and 11.7 run after 11.1-11.5. /Volumes/coding is down to 1.3 GiB free. HEAD is still 153717fa5, and the 14 modified and 2 untracked Phase 5-looking files are unchanged. Please free disk space and finish Phases 4.7 and 5-10 in order before rerunning Phase 11."
+  - "Phase 10 was halted before any code change (2026-09-17). Phase 10 depends on Phases 5-9, and task 4.7 plus every Phase 5-9 task is still unchecked. The worktree is unchanged since the Phase 6-9 halts, and HEAD is still 153717fa5. 10.1 extends Claudine evidence for the Document/Network groups and eager recent-history demand (Phase 5). 10.2 projects descriptor listings (4.7). 10.3 and 10.4 route lifecycle lookup through Darkmatter's current/current_env roots (Phase 6), and 10.3 also needs the still-pending explicit review of the CRITICAL capture_at_event edit. /Volumes/coding still has only 1.7 GiB free, so neither a Darkmatter nor a Claudine build, test, or lint can finish. Please stop scheduling later phases until someone frees disk space and finishes Phases 4.7 and 5-9 in order."
+  - "Phase 9 was halted before any code change (2026-09-17). Phase 9 depends on Phases 3, 4, and 8. Phase 8 is not implemented, and task 4.7 plus every Phase 5-8 task is still unchecked. The worktree is unchanged since the Phase 6-8 halts, and HEAD is still 153717fa5. 9.1 and 9.2 need the Phase 6.2 effect/requirement planning split and the Phase 8.4 preflight discovery. 9.5 needs as_markdown (Phase 8.1). /Volumes/coding free space fell again, to 1.7 GiB, so a Darkmatter build, test, or lint cannot finish. Please stop scheduling later phases until someone frees disk space and finishes Phases 4.7, 5, 6, 7, and 8 in order."
+  - "Phase 8 was halted before any code change (2026-09-17). Phase 8 depends on Phases 5-7, and task 4.7 plus all Phase 5, 6, and 7 tasks are still unchecked. The worktree is unchanged since the Phase 6 and 7 halts, and HEAD is still 153717fa5. The child pipeline (8.1) needs Phase 5 root identity/ctx and Phase 6 lazy providers. Preflight discovery (8.4) needs Phase 6.2 planning. /Volumes/coding free space fell to 2.1 GiB. Rerunning later phases will keep halting until someone frees disk space and finishes Phases 4.7, 5, 6, and 7 in order."
+  - "Phase 7 was halted before any code change (2026-09-17). It depends on Phases 2-6 (plan dependency table), and Phases 4.7, 5, and 6 are still unchecked; the worktree is unchanged since the Phase 6 halt (same 14 modified + 2 untracked unverified files). Phase 7 needs Phase 5 captured interface data (7.3), the eager recent-history formatter path (7.2), and Phase 6 evaluation-context/function-dependency planning (the plan says the five tracks start only after one owner lands shared dispatch and evaluation-context changes). Layering Phase 7 on an unbuilt, unverified tree would compound unreviewed HIGH-risk work. Also /Volumes/coding still has only 5.0 GiB free, so a Darkmatter build/test/lint cannot be trusted to complete. Next: free disk space, finish and log 4.7, 5, and 6 in order, then rerun Phase 7."
+  - "Phase 6 was halted before any code change. Its prerequisites are incomplete: Phase 4 task 4.7 and Checkpoint 4 are unchecked, and every Phase 5 task is unchecked with no Phase 5 log section. Uncommitted, unverified Phase 5-looking work sits in the worktree (new capture/document.rs and capture/network.rs; edits to capture/{git,host,mod,repo,snapshot}.rs, context/{checked,options,repository_scope,runtime}.rs, expression/error.rs, markdown/mod.rs, claudine/lib/src/invocation_context.rs). Decide whether to finish and log Phases 4.7 and 5 (recommended) before rerunning Phase 6, which depends on Phase 5's retained launch evidence and eager-capture planner."
+  - "Mac dev volume is exhausted. At 00:54 PDT every shell call failed with ENOSPC; afterward the shared APFS container had 5.9 GiB free of 3.6 TiB. Read-only target sizes on /Volumes/coding: fix-cli-slow-tests 206G, feat-unifi 182G, feat-single-os 142G, feat-dark-fixes 93G, feat-better-static-analysis 76G, feat-better-sniff 70G, personal/rusty-biscuit 42G. Nothing was deleted (storage-strategy rule 2). A Darkmatter L1 build and test run will not fit until space is freed."
   - "Build-host storage crisis blocks native Windows and WSL2 evidence (AC14, and Phase 12 generally). W: on build-win-native has 8192 bytes free, so cross-check fails with 'No space left on device' and the WSL guest (VHDX on W:) resets SSH. Read-only inventory: W:\\ci-verification\\rusty-biscuit\\target 95.1 GB (over the 80 GB sweep cap; that standing clone has no .cargo/config.toml target-dir pin), W:\\ci-verification\\rb-pr66 61.4 GB (2026-08-30, another session), W:\\WSL\\Ubuntu-26.04\\ext4.vhdx 130.8 GB. The daily sweep reported success at 04:00. Nothing was deleted because none of it belongs to this session (storage-strategy rule 2). Decide what to remove or compact."
   - "build-linux cross-check lock held since 2026-09-14T18:25Z by purpose=nightly-reward-spike, branch=feat-nightly-perf. It is probably stale, but the script never removes locks. Linux evidence for this phase came from Docker Desktop instead. Remove it if that run is dead."
   - "Confirm three Phase 3 design decisions that later phases build on. (a) Gateways are a separate API, sniff::network::detect_default_gateways(), not a NetworkRequest flag, because detect_network_with_request is GitNexus HIGH. (b) ICMP uses unprivileged datagram sockets with no ping-subprocess fallback, so Linux/WSL2 hosts whose net.ipv4.ping_group_range excludes the process group get IcmpError::NotPermitted, which becomes a compose error per R6. The wsl2-ubuntu CI leg must provide that sysctl for AC14. (c) macOS primary default = first UP default route that is not RTF_IFSCOPE (matches `route get default`); the spec's 'first default route in the dump' did not mention scoped routes."
   - "Carried from Phases 1-2, still unconfirmed: the retroactive HIGH edit to Darkmatter current_package_context; Q1 execution nonce (blocks Phase 5); Q2 per-expression memo scope (blocks Phase 6); the content-policy-no-cache --cache-root scope ruling (Phase 11/12); explicit review before Phase 10.3 edits CRITICAL capture_at_event."
 message_to_agent: >-
+  PHASES 6, 7, 8, 9, 10, AND MOST OF 11 NOT IMPLEMENTED (all halted 2026-09-17; only task 11.3, the Sniff READMEs, is done): finish and log Phase 4.7, then Phases 5-10 in order, then rerun Phase 11 for 11.1, 11.2, 11.4-11.7 before Phase 12; finish and log Phase 4.7 and Phase 5 first, and free disk space on the Mac; see human_review_items and the Phase 6 section of implementation-log.md. Phase 3 notes follow.
   Phase 3 added Sniff network primitives; no Darkmatter/Claudine code changed. APIs for Phase 5/7/9:
   sniff::network::{ScopedIpAddr (strict FromStr/Display/serde string; `ipv6%zone`; is_within(&ipnet::IpNet) ignores the zone,
   is_loopback, is_link_local), host_addresses(&info.interfaces) -> sorted, deduped Vec<ScopedIpAddr> (IPv6 link-local zoned with the
@@ -275,7 +322,7 @@ shared dispatch/descriptor and evaluation-context changes.
 
 - [ ] **11.1 Update Darkmatter documentation.** Revise `darkmatter/docs/topics/darkmatter-expressions.md`, relevant context-variable docs, the Darkmatter README, and `.claude/skills/darkmatter/compose.md` for eager `ctx`, lazy `current`, lazy `current_env`, source-kind identity, function pairs, probes/consent, and new functions.
 - [ ] **11.2 Update Claudine documentation and skills.** Revise lifecycle/composition/context docs and the three Claudine skill files, replace old nesting, add both late-binding roots, remove every “implementation pending” marker, and keep the early-binding shell exception explicit.
-- [ ] **11.3 Update Sniff documentation.** Document gateway/ICMP APIs, stable scoped addresses, worktree/commit formatter additions, and the empty package-area migration in its README and applicable CLI docs.
+- [x] **11.3 Update Sniff documentation.** Document gateway/ICMP APIs, stable scoped addresses, worktree/commit formatter additions, and the empty package-area migration in its README and applicable CLI docs.
 - [ ] **11.4 Update prompts and templates.** Remove sentinel workarounds in `system-prompt.md` and review prompts where classified, retain the implement-plan fallback unchanged, and verify every migrated shipped prompt including `prompts/format.md` composes.
 - [ ] **11.5 Update dependency inventories.** Record all actual direct dependency and feature changes in root and Darkmatter/Sniff/Claudine area `docs/dependencies.md` files; do not document dependencies that were considered but not added.
 - [ ] **11.6 Refresh Markdown hashes through Darkmatter.** For every modified Markdown file with a hash frontmatter property, run `md hash <file>` and write the resulting frontmatter/body hash using the repository's established workflow.
