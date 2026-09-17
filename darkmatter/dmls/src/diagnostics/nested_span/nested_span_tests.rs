@@ -148,6 +148,26 @@ fn the_same_defect_in_a_body_produces_no_diagnostic() {
 }
 
 #[test]
+fn diagnostics_use_decoded_escape_parity_for_literal_openers() {
+    for (authored_backslashes, expected_diagnostics) in
+        [(1, 0), (2, 0), (3, 1), (4, 1), (5, 0), (6, 0)]
+    {
+        let expression = format!(
+            "{{{{ '{}{{{{ name }}}}' }}}}",
+            "\\".repeat(authored_backslashes)
+        );
+        let text = format!("---\nsuccess:\n    say: |-\n        {expression}\n---\n\nbody\n");
+        with_ctx(&text, 1, |ctx| {
+            let found = nested(ctx);
+            assert_eq!(found.len(), expected_diagnostics, "{expression}: {found:#?}");
+            for diagnostic in found {
+                assert_eq!(ranged(ctx, &diagnostic), "{{ name }}", "{expression}");
+            }
+        });
+    }
+}
+
+#[test]
 fn mixed_strings_and_non_lifecycle_whole_values_are_not_flagged() {
     let text = concat!(
         "---\n",
@@ -458,4 +478,3 @@ fn stale_versions_and_foreign_payloads_are_declined() {
         assert!(titles(ctx, &bare).is_empty());
     });
 }
-
