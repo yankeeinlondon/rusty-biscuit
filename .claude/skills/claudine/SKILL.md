@@ -81,6 +81,14 @@ The **local control plane** is platform-native and per stable OS user: a Unix-do
 
 ## Initialization shell boundary
 
+Loop initialization uses the full bootstrap frontmatter separately from the
+control-variable seed. Share its live state with catch handlers and retain
+`set` writes in the invocation RuntimeState for subsequent preparations.
+Mapping `set` destinations absent from the pre-write snapshot are known null
+bindings; this permits copying an optional value before resetting it. Existing
+values still win over those null defaults, and unrelated unknown roots remain
+errors.
+
 `initialize` runs before preflight and is shell-free. Reject shell actions even
 in dead branches and reject bootstrap frontmatter `$(...)` expansion; approval
 flags, whitelists, caches, and handlers cannot grant an exception. Non-shell
