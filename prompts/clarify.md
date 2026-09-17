@@ -7,6 +7,12 @@ $schema:
     - design: file(required; match(**/*design*.md)) -> pass in a design document for clarification
       doc: file
 doc: "{{spec || design}}"
+doc_desc: |-
+    {{
+        spec
+            ? "specification"
+            : "tech design document"
+    }}
 interactive: true
 initialize:
     stack:
@@ -18,8 +24,8 @@ start:
     stderr: "We are starting the clarification process and will need human involvement."
     say: "Please stand by while we prepare a set of clarification questions"
 success:
-    say: "Specification clarification process is now complete in {{ ctx.current_package_area || env.PACKAGE || ctx.repo || env.REPO }}"
-    message: "The specification file `{{doc.doc}}` has been clarified ({{ctx.agent}}/{{ctx.model}})"
+    say: "The {{ title_case( without_date(parent_dir(doc.doc))) }} {{doc_desc}} has completed the clarification process is now complete in {{ ctx.area || ctx.repo }}"
+    message: "The specification file `{{parent_dir(doc.doc) + '/' + basename(doc.doc) }}` has been clarified ({{ctx.agent}}/{{ctx.model}})"
 ---
 
 ## Context
