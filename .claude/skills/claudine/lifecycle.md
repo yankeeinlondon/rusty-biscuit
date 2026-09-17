@@ -119,7 +119,9 @@ Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare st
 
 `shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception. They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, read-side functions). The approved command is byte-identical to the executed command. A late-binding reference (`err`/`timing`/`current`/`current_env`) inside a shell command is rejected at prepare time with a typed error naming the property path — those values do not exist yet at pre-flight.
 
-Mapping-based `set` evaluates every value against one pre-write snapshot. Its
+Lifecycle YAML accepts only `set: {property: value}`; the positional
+`set(key, value)` spelling belongs to the separate capability and loop-control
+API. Mapping-based lifecycle `set` evaluates every value against one pre-write snapshot. Its
 destination keys are declared bindings: an absent destination reads as null,
 while an existing value is retained for evaluation. A whole-value expression
 preserves null; null embedded in text renders empty. Unrelated undeclared roots

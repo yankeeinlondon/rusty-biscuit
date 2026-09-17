@@ -27,6 +27,12 @@ if md.has_frontmatter() {
 
 ## Merge Strategies
 
+Parsing one YAML frontmatter document rejects duplicate keys at every mapping
+depth, including mappings nested in arrays. Duplicate-looking text inside an
+expression string remains scalar content. This replaces YAML last-value-wins
+behavior for authored duplicates; it does not change explicit merging between
+separate documents, which still follows the selected strategy below.
+
 ```rust
 use darkmatter::markdown::frontmatter::MergeStrategy;
 use serde_json::json;
