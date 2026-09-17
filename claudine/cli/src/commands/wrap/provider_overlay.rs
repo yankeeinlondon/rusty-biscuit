@@ -4,7 +4,8 @@
 //! launch builds into a fresh root it owns through an [`OverlayLease`], so the
 //! view is exactly this plan's: nothing an earlier launch excluded, deleted, or
 //! injected can survive into it, and a concurrent launch cannot change it. The
-//! lease removes the root once the plan and every clone of it are dropped; a
+//! lease removes the root once the plan and every clone of it are dropped —
+//! or keeps it, with a recovery notice, when a write-back failed; a
 //! root orphaned by a process that never dropped it is reclaimed by the next
 //! launch's sweep. The source root is classified entry by entry rather than
 //! mirrored wholesale:

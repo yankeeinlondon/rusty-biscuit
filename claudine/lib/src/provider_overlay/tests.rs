@@ -628,12 +628,52 @@ fn every_plan_gets_its_own_launch_root_outside_legacy_storage() {
     }
 }
 
+/// Review 2, finding 2: native Windows ignores `USERPROFILE` when resolving the
+/// home, so a disposable launch needs overlay storage it can name without it.
+#[test]
+fn an_absolute_overlay_dir_override_moves_only_the_launch_roots() {
+    // `HOME` is not absolute on Windows, which needs a drive; nothing is created.
+    let launches = std::env::temp_dir().join("claudine-overlay-override");
+    let launches_value = launches.to_str().unwrap();
+
+    let plan = plan_for(
+        Provider::Codex,
+        OverlayReasons::single(OverlayReason::RepoResources),
+        &[(OVERLAY_DIR_ENV, launches_value)],
+    )
+    .expect("an absolute override is plannable");
+
+    assert_eq!(plan.storage_root(), Some(launches.join("codex").join("launch").as_path()));
+    assert_eq!(
+        plan.source_root(),
+        Some(path(".codex").as_path()),
+        "the override moves storage, never the provider's source root"
+    );
+}
+
+#[test]
+fn a_relative_overlay_dir_override_refuses_instead_of_falling_back_to_the_home() {
+    let refusal = plan_for(
+        Provider::Codex,
+        OverlayReasons::single(OverlayReason::RepoResources),
+        &[(OVERLAY_DIR_ENV, "relative/launches")],
+    )
+    .expect_err("a relative override has no stable location");
+
+    assert_eq!(refusal.reason(), OverlayReason::RepoResources);
+}
+
 mod lease {
     use std::fs;
+    use std::io;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
     use tempfile::TempDir;
 
-    use super::super::{OverlayLease, sweep_abandoned_overlays};
+    use super::super::write_back::{HostIo, OverlayIo};
+    use super::super::{OverlayLease, OverlayRelease, sweep_abandoned_overlays};
+    use crate::provider::Provider;
 
     #[test]
     fn a_lease_creates_its_root_and_dropping_it_removes_root_and_lock() {
@@ -681,7 +721,9 @@ mod lease {
     }
 
     /// A root whose owner ended without dropping its lease (a crash, `_exit`)
-    /// is reclaimed; a root a live lease holds is not, even in this process.
+    /// is reclaimed; a root a live lease holds is not, even in this process. A
+    /// root without a lock file is kept: that absence is how a retained root is
+    /// protected when its marker cannot be created.
     #[test]
     fn a_sweep_removes_only_roots_without_a_live_owner() {
         let tmp = TempDir::new().unwrap();
@@ -694,10 +736,11 @@ mod lease {
         let lockless = launches.join("codex").join("lockless");
         fs::create_dir_all(&lockless).unwrap();
 
-        assert_eq!(sweep_abandoned_overlays(&launches), 2);
+        assert_eq!(sweep_abandoned_overlays(&launches), 1);
 
         assert!(live_root.is_dir(), "a live launch's root was swept");
-        assert!(!abandoned.exists() && !lockless.exists());
+        assert!(lockless.is_dir(), "a root without a lock file was swept");
+        assert!(!abandoned.exists());
         assert!(!launches.join("gemini").join("abandoned.lock").exists());
         drop(live);
         assert_eq!(sweep_abandoned_overlays(&launches), 0);
@@ -707,5 +750,253 @@ mod lease {
     fn a_sweep_of_a_missing_directory_removes_nothing() {
         let tmp = TempDir::new().unwrap();
         assert_eq!(sweep_abandoned_overlays(&tmp.path().join("absent")), 0);
+    }
+
+    /// A lease whose root mirrors `<tmp>/source/auth.json` as a copy the
+    /// provider then rewrote; returns the source, the overlay copy, the lease.
+    fn rotated_copy(tmp: &TempDir) -> (std::path::PathBuf, std::path::PathBuf, OverlayLease) {
+        let source = tmp.path().join("source").join("auth.json");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, "old-secret").unwrap();
+        let root = tmp.path().join("overlays").join("codex").join("launch");
+        let mut lease = OverlayLease::acquire(&root).unwrap();
+        let overlay = root.join("auth.json");
+        fs::copy(&source, &overlay).unwrap();
+        lease.write_back(Provider::Codex).record(&source, &overlay).unwrap();
+        fs::write(&overlay, "rotated-secret").unwrap();
+        (source, overlay, lease)
+    }
+
+    #[test]
+    fn an_explicit_release_that_writes_back_removes_the_root() {
+        let tmp = TempDir::new().unwrap();
+        let (source, _overlay, lease) = rotated_copy(&tmp);
+        let root = lease.root().to_path_buf();
+
+        let release = lease.release();
+
+        let OverlayRelease::Removed(outcome) = &release else {
+            panic!("a persisted change must not retain the root: {release:?}");
+        };
+        assert_eq!(outcome.written, ["auth.json"]);
+        assert!(outcome.failed.is_empty());
+        assert!(release.recovery_notice().is_none());
+        assert_eq!(fs::read_to_string(source).unwrap(), "rotated-secret");
+        assert!(!root.exists());
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Op {
+        SymlinkMetadata,
+        Metadata,
+        Read,
+        AtomicWrite,
+        Rename,
+        RemoveFile,
+        Write,
+    }
+
+    /// Fails each listed operation on its path and performs every other one on
+    /// the real filesystem, so each failure is deterministic on every OS.
+    #[derive(Debug)]
+    struct Faults(Vec<(Op, PathBuf)>);
+
+    impl Faults {
+        fn check(&self, op: Op, path: &Path) -> io::Result<()> {
+            if self.0.iter().any(|(faulted, target)| *faulted == op && target == path) {
+                return Err(io::Error::other(format!("injected {op:?} fault")));
+            }
+            Ok(())
+        }
+    }
+
+    impl OverlayIo for Faults {
+        fn symlink_metadata(&self, path: &Path) -> io::Result<fs::Metadata> {
+            self.check(Op::SymlinkMetadata, path)?;
+            HostIo.symlink_metadata(path)
+        }
+        fn metadata(&self, path: &Path) -> io::Result<fs::Metadata> {
+            self.check(Op::Metadata, path)?;
+            HostIo.metadata(path)
+        }
+        fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+            self.check(Op::Read, path)?;
+            HostIo.read(path)
+        }
+        fn atomic_write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+            self.check(Op::AtomicWrite, path)?;
+            HostIo.atomic_write(path, contents)
+        }
+        fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+            self.check(Op::Rename, from)?;
+            HostIo.rename(from, to)
+        }
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            self.check(Op::RemoveFile, path)?;
+            HostIo.remove_file(path)
+        }
+        fn write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+            self.check(Op::Write, path)?;
+            HostIo.write(path, contents)
+        }
+    }
+
+    /// Paths a fault can name for [`rotated_copy`]'s launch.
+    struct Targets {
+        overlay: PathBuf,
+        /// Canonical, as write-back records it.
+        source: PathBuf,
+        lock: PathBuf,
+        marker: PathBuf,
+    }
+
+    /// Releases [`rotated_copy`]'s lease with the faults `faults_for` names,
+    /// asserts the changed bytes were retained and reported without their
+    /// contents, runs a later launch's sweep, and returns the release.
+    fn release_with_faults(faults_for: impl FnOnce(&Targets) -> Vec<(Op, PathBuf)>) -> (TempDir, OverlayRelease) {
+        let tmp = TempDir::new().unwrap();
+        let (source, overlay, mut lease) = rotated_copy(&tmp);
+        let root = lease.root().to_path_buf();
+        let targets = Targets {
+            overlay: overlay.clone(),
+            source: fs::canonicalize(&source).unwrap(),
+            lock: root.with_file_name("launch.lock"),
+            marker: root.with_file_name("launch.retained"),
+        };
+        lease.set_io(Arc::new(Faults(faults_for(&targets))));
+
+        let release = lease.release();
+
+        let OverlayRelease::Retained { root: kept, outcome, .. } = &release else {
+            panic!("an unpersisted change must retain the root: {release:?}");
+        };
+        assert_eq!(kept, &root);
+        assert!(outcome.written.is_empty() && outcome.refused.is_empty(), "{outcome:?}");
+        let [failure] = outcome.failed.as_slice() else {
+            panic!("expected exactly one failure: {outcome:?}");
+        };
+        assert_eq!((failure.name.as_str(), &failure.overlay), ("auth.json", &overlay));
+        assert_eq!(fs::read_to_string(&source).unwrap(), "old-secret");
+
+        let notice = release.recovery_notice().expect("a retained root has a notice");
+        assert!(notice.contains(&overlay.display().to_string()), "{notice}");
+        assert!(notice.contains(&targets.source.display().to_string()), "{notice}");
+        assert!(!notice.contains("secret"), "the notice leaked file contents: {notice}");
+
+        let launches = root.parent().unwrap().parent().unwrap();
+        sweep_abandoned_overlays(launches);
+        (tmp, release)
+    }
+
+    fn assert_protected_with_marker(release: &OverlayRelease) {
+        let OverlayRelease::Retained { root, marker, protected, .. } = release else {
+            unreachable!("release_with_faults asserts retention");
+        };
+        assert!(protected);
+        let marker = marker.as_ref().expect("the marker holds the notice");
+        assert_eq!(fs::read_to_string(marker).unwrap(), release.recovery_notice().unwrap());
+        assert_eq!(fs::read_to_string(root.join("auth.json")).unwrap(), "rotated-secret", "a sweep removed the retained root");
+    }
+
+    /// Only `NotFound` means the provider removed the overlay entry.
+    #[test]
+    fn an_overlay_metadata_error_retains_the_root() {
+        let (_tmp, release) = release_with_faults(|at| vec![(Op::SymlinkMetadata, at.overlay.clone())]);
+        assert_protected_with_marker(&release);
+    }
+
+    /// An unreadable source is not "different" bytes.
+    #[test]
+    fn a_source_read_error_retains_the_root() {
+        let (_tmp, release) = release_with_faults(|at| vec![(Op::Read, at.source.clone())]);
+        assert_protected_with_marker(&release);
+    }
+
+    /// An unreadable fingerprint is not a source conflict.
+    #[test]
+    fn a_source_fingerprint_error_retains_the_root() {
+        let (_tmp, release) = release_with_faults(|at| vec![(Op::Metadata, at.source.clone())]);
+        assert_protected_with_marker(&release);
+    }
+
+    #[test]
+    fn an_atomic_write_error_retains_the_root_with_a_marker_the_sweep_honors() {
+        let (_tmp, release) = release_with_faults(|at| vec![(Op::AtomicWrite, at.source.clone())]);
+        assert_protected_with_marker(&release);
+    }
+
+    /// The renamed lock file protects the root without the notice's bytes.
+    #[test]
+    fn a_marker_write_error_still_protects_the_root_from_the_sweep() {
+        let (_tmp, release) = release_with_faults(|at| {
+            vec![(Op::AtomicWrite, at.source.clone()), (Op::Write, at.marker.clone())]
+        });
+
+        let OverlayRelease::Retained { root, marker, protected, .. } = &release else {
+            unreachable!("release_with_faults asserts retention");
+        };
+        assert!(*protected && marker.is_none(), "{release:?}");
+        assert!(root.with_file_name("launch.retained").exists(), "the renamed lock file is the marker");
+        assert!(release.recovery_notice().unwrap().contains("later launches will not remove it"));
+        assert_eq!(fs::read_to_string(root.join("auth.json")).unwrap(), "rotated-secret");
+    }
+
+    /// Without a rename or a marker, the lock file's absence protects the root.
+    #[test]
+    fn a_retained_root_without_any_marker_is_still_never_swept() {
+        let (_tmp, release) = release_with_faults(|at| {
+            vec![
+                (Op::AtomicWrite, at.source.clone()),
+                (Op::Rename, at.lock.clone()),
+                (Op::Write, at.marker.clone()),
+            ]
+        });
+
+        let OverlayRelease::Retained { root, marker, protected, .. } = &release else {
+            unreachable!("release_with_faults asserts retention");
+        };
+        assert!(*protected && marker.is_none(), "{release:?}");
+        assert!(!root.with_file_name("launch.retained").exists() && !root.with_file_name("launch.lock").exists());
+        assert_eq!(fs::read_to_string(root.join("auth.json")).unwrap(), "rotated-secret");
+    }
+
+    /// When nothing can protect the root, the notice says so rather than
+    /// promising a later launch will keep it.
+    #[test]
+    fn an_unprotectable_root_is_reported_as_at_risk() {
+        let tmp = TempDir::new().unwrap();
+        let (source, _overlay, mut lease) = rotated_copy(&tmp);
+        let root = lease.root().to_path_buf();
+        let source = fs::canonicalize(source).unwrap();
+        let lock = root.with_file_name("launch.lock");
+        lease.set_io(Arc::new(Faults(vec![
+            (Op::AtomicWrite, source),
+            (Op::Rename, lock.clone()),
+            (Op::RemoveFile, lock),
+            (Op::Write, root.with_file_name("launch.retained")),
+        ])));
+
+        let release = lease.release();
+
+        let OverlayRelease::Retained { protected, marker, .. } = &release else {
+            panic!("an unpersisted change must retain the root: {release:?}");
+        };
+        assert!(!protected && marker.is_none());
+        let notice = release.recovery_notice().unwrap();
+        assert!(notice.contains("a later launch may remove it"), "{notice}");
+        assert!(!notice.contains("secret"), "{notice}");
+    }
+
+    #[test]
+    fn a_sweep_never_reclaims_a_root_marked_retained() {
+        let tmp = TempDir::new().unwrap();
+        let launches = tmp.path().join("overlays");
+        let retained = launches.join("codex").join("retained");
+        fs::create_dir_all(&retained).unwrap();
+        fs::write(retained.join("auth.json"), "kept").unwrap();
+        fs::write(launches.join("codex").join("retained.retained"), "notice").unwrap();
+
+        assert_eq!(sweep_abandoned_overlays(&launches), 0);
+        assert_eq!(fs::read_to_string(retained.join("auth.json")).unwrap(), "kept");
     }
 }

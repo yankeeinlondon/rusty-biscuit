@@ -96,13 +96,17 @@ verdict or a build failure is a typed pre-spawn error
 fallback launch. The CLI materializes the plan in
 `wrap/provider_overlay.rs` (links on Unix, recursive copies on native Windows,
 live state never mirrored) into a fresh per-launch root under
-`~/.claudine/overlays/<slug>/`, owned by an `OverlayLease` the plan holds: the
+`~/.claudine/overlays/<slug>/` (or `<CLAUDINE_OVERLAY_DIR>/<slug>/` when that is absolute,
+read from the launch baseline), owned by an `OverlayLease` the plan holds: the
 root is removed when the last plan clone drops — after the lease's guarded
 `WriteBack` copies changed top-level mirrored files (rotated tokens) back over
 sources that did not change meanwhile; injected MCP config
 (`record_claudine_write`), materializations, excluded and new entries never
 qualify — and a root whose sibling `.lock` is free is swept by the next launch
-without write-back. Legacy `~/.claudine/<agent-offset>`
+without write-back. A write-back that fails (`WriteBackOutcome::failed`) makes
+`OverlayLease::release` return `OverlayRelease::Retained`: the root is kept, a
+sibling `<root>.retained` marker (which the sweep honors) and a stderr notice
+name the recoverable copy's path, never its contents. Legacy `~/.claudine/<agent-offset>`
 storage is never touched. Every debug spawn re-checks the home variables
 in `exec/spawn/setup.rs::debug_assert_child_env`. Proxy, retry, and resume
 rebuilds restore the baseline's selector values before applying the target's

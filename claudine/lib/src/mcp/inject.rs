@@ -51,7 +51,7 @@ pub trait McpInjector {
 }
 
 // ---------------------------------------------------------------------------
-// OpenCode injector — env var only
+// OpenCode and Kilo injectors — inline JSON config env var only
 // ---------------------------------------------------------------------------
 
 pub struct OpenCodeInjector;
@@ -71,67 +71,116 @@ impl McpInjector for OpenCodeInjector {
         env: &mut HashMap<String, String>,
         _config_root: Option<&Path>,
     ) -> Result<InjectionResult> {
-        let mut mcp_config = serde_json::Map::new();
-
-        for server in servers {
-            let mut entry = serde_json::Map::new();
-            match server.transport {
-                McpTransport::Stdio => {
-                    entry.insert("type".into(), json!("local"));
-                    if let Some(ref cmd) = server.command {
-                        let command = std::iter::once(cmd.clone())
-                            .chain(server.args.iter().cloned())
-                            .collect::<Vec<_>>();
-                        entry.insert("command".into(), json!(command));
-                    }
-                }
-                McpTransport::Http | McpTransport::Sse => {
-                    entry.insert("type".into(), json!("remote"));
-                    if let Some(ref url) = server.url {
-                        entry.insert("url".into(), json!(url));
-                    }
-                }
-            }
-            if !server.env.is_empty() {
-                entry.insert("environment".into(), json!(server.env));
-            }
-            if !server.headers.is_empty() {
-                entry.insert("headers".into(), json!(server.headers));
-            }
-            for field in ["enabled", "oauth", "timeout"] {
-                if let Some(value) = provider_override_value(server, "opencode", field) {
-                    entry.insert(field.to_string(), value.clone());
-                }
-            }
-            mcp_config.insert(server.id.clone(), serde_json::Value::Object(entry));
-        }
-
-        // Merge `{"mcp": …}` into any existing inline config rather than
-        // overwriting it: the system-prompt and YOLO producers target the same
-        // `OPENCODE_CONFIG_CONTENT` value, so a blind overwrite would clobber
-        // their `instructions`/`permission` keys.
-        let overlay = json!({ "mcp": mcp_config });
-        // This injector's env map is `String`-valued, so any existing value is
-        // already valid UTF-8; wrap it as an `OsStr` for the shared helper, which
-        // owns the UTF-8 validity decision for the raw-`OsStr` env call sites.
-        let existing = env
-            .get("OPENCODE_CONFIG_CONTENT")
-            .map(std::ffi::OsStr::new);
-        let config_str = crate::opencode_config::merge_overlay(existing, overlay)?;
-        env.insert("OPENCODE_CONFIG_CONTENT".into(), config_str);
-
-        Ok(InjectionResult {
-            provider: Provider::OpenCode,
-            servers_injected: servers.iter().map(|s| s.id.clone()).collect(),
-            temp_files: Vec::new(),
-            env_vars_set: vec!["OPENCODE_CONFIG_CONTENT".into()],
-            extra_args: Vec::new(),
-        })
+        inject_inline_config(
+            Provider::OpenCode,
+            crate::opencode_config::OPENCODE_CONFIG_CONTENT,
+            servers,
+            env,
+        )
     }
 
     fn cleanup(&self, _result: &InjectionResult) -> Result<()> {
         Ok(()) // No temp files
     }
+}
+
+/// Kilo is an OpenCode fork whose `KILO_CONFIG_CONTENT` accepts the same
+/// `mcp` map (`docs/research/mcp/kilo.md` → `server_shape`,
+/// `runtime_injection`).
+pub struct KiloInjector;
+
+impl McpInjector for KiloInjector {
+    fn provider(&self) -> Provider {
+        Provider::Kilo
+    }
+
+    fn supports_runtime(&self) -> bool {
+        true
+    }
+
+    fn inject(
+        &self,
+        servers: &[McpServer],
+        env: &mut HashMap<String, String>,
+        _config_root: Option<&Path>,
+    ) -> Result<InjectionResult> {
+        inject_inline_config(
+            Provider::Kilo,
+            crate::opencode_config::KILO_CONFIG_CONTENT,
+            servers,
+            env,
+        )
+    }
+
+    fn cleanup(&self, _result: &InjectionResult) -> Result<()> {
+        Ok(()) // No temp files
+    }
+}
+
+/// Merge the OpenCode-shaped `{"mcp": …}` map into the inline config `key`.
+///
+/// Per-server overrides are read from the `provider`'s own slug, so an
+/// `opencode` override never leaks into a Kilo launch.
+fn inject_inline_config(
+    provider: Provider,
+    key: &str,
+    servers: &[McpServer],
+    env: &mut HashMap<String, String>,
+) -> Result<InjectionResult> {
+    let override_slug = provider.as_slug();
+    let mut mcp_config = serde_json::Map::new();
+
+    for server in servers {
+        let mut entry = serde_json::Map::new();
+        match server.transport {
+            McpTransport::Stdio => {
+                entry.insert("type".into(), json!("local"));
+                if let Some(ref cmd) = server.command {
+                    let command = std::iter::once(cmd.clone())
+                        .chain(server.args.iter().cloned())
+                        .collect::<Vec<_>>();
+                    entry.insert("command".into(), json!(command));
+                }
+            }
+            McpTransport::Http | McpTransport::Sse => {
+                entry.insert("type".into(), json!("remote"));
+                if let Some(ref url) = server.url {
+                    entry.insert("url".into(), json!(url));
+                }
+            }
+        }
+        if !server.env.is_empty() {
+            entry.insert("environment".into(), json!(server.env));
+        }
+        if !server.headers.is_empty() {
+            entry.insert("headers".into(), json!(server.headers));
+        }
+        for field in ["enabled", "oauth", "timeout"] {
+            if let Some(value) = provider_override_value(server, override_slug, field) {
+                entry.insert(field.to_string(), value.clone());
+            }
+        }
+        mcp_config.insert(server.id.clone(), serde_json::Value::Object(entry));
+    }
+
+    // Merge `{"mcp": …}` into any existing inline config rather than
+    // overwriting it: for OpenCode the system-prompt and YOLO producers target
+    // the same value, and for either provider the user may have exported one.
+    let overlay = json!({ "mcp": mcp_config });
+    // This injector's env map is `String`-valued, so any existing value is
+    // already valid UTF-8; wrap it as an `OsStr` for the shared helper, which
+    // owns the UTF-8 validity decision for the raw-`OsStr` env call sites.
+    let existing = env.get(key).map(std::ffi::OsStr::new);
+    let config_str = crate::opencode_config::merge_named_overlay(key, existing, overlay)?;
+    env.insert(key.into(), config_str);
+
+    Ok(InjectionResult {
+        provider,
+        servers_injected: servers.iter().map(|s| s.id.clone()).collect(),
+        temp_files: Vec::new(),
+        env_vars_set: vec![key.into()],
+        extra_args: Vec::new(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -367,7 +416,7 @@ impl McpInjector for GeminiInjector {
 ///
 /// Returns `None` for providers that don't support runtime injection:
 /// - Claude (import/sync only in v1)
-/// - Qwen, Goose, Kimi (blocked on research)
+/// - Qwen, Goose, Kimi, Pi, Antigravity
 pub fn injector_for_provider(provider: Provider) -> Option<Box<dyn McpInjector>> {
     crate::provider::provider_info(provider)
         .mcp
@@ -462,301 +511,4 @@ fn to_toml_array(values: &[String]) -> toml_edit::Array {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-
-    use chrono::Utc;
-    use tempfile::TempDir;
-
-    use super::*;
-    use crate::diagnostics::Diagnostic;
-    use crate::mcp::types::{McpServerMetadata, McpTransport};
-
-    fn make_server(id: &str) -> McpServer {
-        McpServer {
-            id: id.into(),
-            aliases: Vec::new(),
-            transport: McpTransport::Stdio,
-            command: Some("npx".into()),
-            args: vec!["-y".into(), format!("@test/{id}")],
-            cwd: None,
-            env: HashMap::new(),
-            url: None,
-            headers: HashMap::new(),
-            enabled_tools: Vec::new(),
-            disabled_tools: Vec::new(),
-            required: false,
-            metadata: McpServerMetadata {
-                description: None,
-                created_from: None,
-                fingerprint: String::new(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            },
-            provider_overrides: HashMap::new(),
-        }
-    }
-
-    #[test]
-    fn opencode_injects_env_var() {
-        let injector = OpenCodeInjector;
-        let servers = vec![make_server("calendar")];
-        let mut env = HashMap::new();
-
-        let result = injector.inject(&servers, &mut env, None).unwrap();
-
-        assert!(env.contains_key("OPENCODE_CONFIG_CONTENT"));
-        let content: serde_json::Value =
-            serde_json::from_str(env.get("OPENCODE_CONFIG_CONTENT").unwrap()).unwrap();
-        assert!(content["mcp"]["calendar"].is_object());
-        assert!(result.temp_files.is_empty());
-        assert_eq!(result.servers_injected, vec!["calendar"]);
-    }
-
-    #[test]
-    fn opencode_merge_preserves_prior_config_keys() {
-        // The injector is handed a map that already carries an
-        // OPENCODE_CONFIG_CONTENT object; the merge must keep its keys.
-        let injector = OpenCodeInjector;
-        let servers = vec![make_server("calendar")];
-        let mut env = HashMap::new();
-        env.insert(
-            "OPENCODE_CONFIG_CONTENT".to_string(),
-            json!({ "theme": "dark" }).to_string(),
-        );
-
-        injector.inject(&servers, &mut env, None).unwrap();
-
-        let content: serde_json::Value =
-            serde_json::from_str(env.get("OPENCODE_CONFIG_CONTENT").unwrap()).unwrap();
-        assert_eq!(content["theme"], "dark");
-        assert!(content["mcp"]["calendar"].is_object());
-    }
-
-    #[test]
-    fn opencode_merge_coexists_with_instructions() {
-        // Regression for the MCP ↔ system-prompt clobber: a pre-existing
-        // `instructions` key and the injected `mcp` key must both survive.
-        let injector = OpenCodeInjector;
-        let servers = vec![make_server("calendar")];
-        let mut env = HashMap::new();
-        env.insert(
-            "OPENCODE_CONFIG_CONTENT".to_string(),
-            json!({ "instructions": ["do the thing"] }).to_string(),
-        );
-
-        injector.inject(&servers, &mut env, None).unwrap();
-
-        let content: serde_json::Value =
-            serde_json::from_str(env.get("OPENCODE_CONFIG_CONTENT").unwrap()).unwrap();
-        assert_eq!(content["instructions"], json!(["do the thing"]));
-        assert!(content["mcp"]["calendar"].is_object());
-    }
-
-    #[test]
-    fn opencode_merge_preserves_user_supplied_config() {
-        // A user-supplied non-empty config object is preserved, not replaced,
-        // when MCP is injected.
-        let injector = OpenCodeInjector;
-        let servers = vec![make_server("calendar")];
-        let mut env = HashMap::new();
-        env.insert(
-            "OPENCODE_CONFIG_CONTENT".to_string(),
-            json!({ "provider": { "anthropic": { "model": "claude" } } }).to_string(),
-        );
-
-        injector.inject(&servers, &mut env, None).unwrap();
-
-        let content: serde_json::Value =
-            serde_json::from_str(env.get("OPENCODE_CONFIG_CONTENT").unwrap()).unwrap();
-        assert_eq!(content["provider"]["anthropic"]["model"], "claude");
-        assert!(content["mcp"]["calendar"].is_object());
-    }
-
-    #[test]
-    fn codex_writes_config_toml_directly_in_the_config_root() {
-        let tmp = TempDir::new().unwrap();
-        let config_root = tmp.path().join(".claudine").join(".codex");
-        let injector = CodexInjector;
-        let servers = vec![make_server("slack")];
-        let mut env = HashMap::new();
-
-        let result = injector
-            .inject(&servers, &mut env, Some(&config_root))
-            .unwrap();
-
-        // `$CODEX_HOME/config.toml`, not a `.codex` joined on again (audit F1).
-        let config_path = config_root.join("config.toml");
-        assert!(config_path.exists());
-        assert!(!config_root.join(".codex").exists());
-
-        let content = fs::read_to_string(&config_path).unwrap();
-        let doc: toml_edit::DocumentMut = content.parse().unwrap();
-        assert!(doc["mcp_servers"]["slack"].is_table());
-
-        assert_eq!(result.temp_files, vec![config_path]);
-    }
-
-    #[test]
-    fn codex_preserves_existing_non_mcp_settings() {
-        let tmp = TempDir::new().unwrap();
-        let config_dir = tmp.path().join(".codex");
-        fs::create_dir_all(&config_dir).unwrap();
-        fs::write(config_dir.join("config.toml"), "model = \"gpt-5\"\n").unwrap();
-
-        let injector = CodexInjector;
-        let servers = vec![make_server("slack")];
-        let mut env = HashMap::new();
-        injector
-            .inject(&servers, &mut env, Some(&config_dir))
-            .unwrap();
-
-        let content = fs::read_to_string(config_dir.join("config.toml")).unwrap();
-        let doc: toml_edit::DocumentMut = content.parse().unwrap();
-        assert_eq!(doc["model"].as_str(), Some("gpt-5"));
-        assert!(doc["mcp_servers"]["slack"].is_table());
-    }
-
-    #[test]
-    fn gemini_writes_settings_json_directly_in_the_config_root() {
-        let tmp = TempDir::new().unwrap();
-        // `GEMINI_CLI_HOME` names the parent; the injector receives `.gemini`.
-        let config_root = tmp.path().join(".claudine").join(".gemini");
-        let injector = GeminiInjector;
-        let servers = vec![make_server("linear")];
-        let mut env = HashMap::new();
-
-        let result = injector
-            .inject(&servers, &mut env, Some(&config_root))
-            .unwrap();
-
-        let config_path = config_root.join("settings.json");
-        assert!(config_path.exists());
-        assert!(!config_root.join(".gemini").exists());
-
-        let content: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
-        assert!(content["mcpServers"]["linear"].is_object());
-
-        // Should include extra args for allowed server names
-        assert!(
-            result
-                .extra_args
-                .contains(&"--allowed-mcp-server-names".to_string())
-        );
-    }
-
-    #[test]
-    fn gemini_preserves_existing_settings_and_sidecars() {
-        let tmp = TempDir::new().unwrap();
-        let config_dir = tmp.path().join(".gemini");
-        fs::create_dir_all(&config_dir).unwrap();
-        fs::write(
-            config_dir.join("settings.json"),
-            r#"{"theme":"dark","mcpServers":{"old":{"command":"noop"}}}"#,
-        )
-        .unwrap();
-        fs::write(
-            config_dir.join("mcp-server-enablement.json"),
-            r#"{"old":false}"#,
-        )
-        .unwrap();
-
-        let injector = GeminiInjector;
-        let servers = vec![make_server("linear")];
-        let mut env = HashMap::new();
-        injector
-            .inject(&servers, &mut env, Some(&config_dir))
-            .unwrap();
-
-        let settings: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(config_dir.join("settings.json")).unwrap())
-                .unwrap();
-        assert_eq!(settings["theme"], "dark");
-        assert!(settings["mcpServers"]["linear"].is_object());
-
-        let enablement: serde_json::Value = serde_json::from_str(
-            &fs::read_to_string(config_dir.join("mcp-server-enablement.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(enablement["old"], false);
-    }
-
-    #[test]
-    fn file_backed_injectors_refuse_a_missing_config_root_with_a_typed_overlay_failure() {
-        let injectors = [(&CodexInjector as &dyn McpInjector, Provider::Codex), (&GeminiInjector, Provider::Gemini)];
-        for (injector, expected) in injectors {
-            let mut env = HashMap::new();
-            let error = injector.inject(&[make_server("linear")], &mut env, None).expect_err("needs a config root");
-
-            assert_eq!(error.code(), "provider.overlay_failed", "{expected}");
-            let detail = error.detail();
-            assert_eq!(detail["provider"], json!(expected.to_string()));
-            assert_eq!(detail["reason"], json!("mcp"));
-            assert_eq!(detail["stage"], json!("mcp_injection"));
-            let message = error.to_string();
-            assert!(!message.contains("shadow HOME"), "{message}");
-            assert!(!message.to_lowercase().contains("credential"), "{message}");
-            assert!(env.is_empty(), "{expected} wrote env before refusing");
-        }
-    }
-
-    #[test]
-    fn gemini_sidecars_become_private_copies_in_the_config_root() {
-        let tmp = TempDir::new().unwrap();
-        let (user_root, config_root) = (tmp.path().join("user"), tmp.path().join("overlay"));
-        let sidecars = [("mcp-server-enablement.json", r#"{"old":false}"#), ("mcp-oauth-tokens.json", "[]")];
-        fs::create_dir_all(&user_root).unwrap();
-        fs::create_dir_all(&config_root).unwrap();
-        for (name, content) in sidecars {
-            fs::write(user_root.join(name), content).unwrap();
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(user_root.join(name), config_root.join(name)).unwrap();
-            #[cfg(not(unix))]
-            fs::copy(user_root.join(name), config_root.join(name)).unwrap();
-        }
-
-        GeminiInjector
-            .inject(&[make_server("linear")], &mut HashMap::new(), Some(&config_root))
-            .unwrap();
-
-        for (name, content) in sidecars {
-            let copy = config_root.join(name);
-            assert!(fs::symlink_metadata(&copy).unwrap().is_file(), "{name} is still a link");
-            let copied: serde_json::Value = serde_json::from_str(&fs::read_to_string(&copy).unwrap()).unwrap();
-            assert_eq!(copied, serde_json::from_str::<serde_json::Value>(content).unwrap());
-            assert_eq!(fs::read_to_string(user_root.join(name)).unwrap(), content);
-        }
-    }
-
-    #[test]
-    fn unsupported_providers_return_none() {
-        assert!(injector_for_provider(Provider::Claude).is_none());
-        assert!(injector_for_provider(Provider::QwenCode).is_none());
-        assert!(injector_for_provider(Provider::Goose).is_none());
-        assert!(injector_for_provider(Provider::KimiCode).is_none());
-    }
-
-    #[test]
-    fn supported_providers_return_some() {
-        assert!(injector_for_provider(Provider::OpenCode).is_some());
-        assert!(injector_for_provider(Provider::Codex).is_some());
-        assert!(injector_for_provider(Provider::Gemini).is_some());
-    }
-
-    #[test]
-    fn cleanup_removes_temp_files() {
-        let tmp = TempDir::new().unwrap();
-        let injector = CodexInjector;
-        let servers = vec![make_server("test")];
-        let mut env = HashMap::new();
-
-        let result = injector
-            .inject(&servers, &mut env, Some(tmp.path()))
-            .unwrap();
-        assert!(result.temp_files[0].exists());
-
-        injector.cleanup(&result).unwrap();
-        assert!(!result.temp_files[0].exists());
-    }
-}
+mod tests;

@@ -27,6 +27,12 @@
 //! deeper in a *copied* directory (native Windows) is session data whose
 //! write-back would need new-file and conflict rules this does not attempt.
 //!
+//! A changed file that cannot be written back — a permission error, a sharing
+//! violation, a full disk — is reported in [`WriteBackOutcome::failed`], and the
+//! lease keeps the root rather than delete the only copy of that state. Failing
+//! to *inspect* an entry counts the same: only a `NotFound` overlay entry is
+//! "removed", and an unreadable source is never taken as a conflicting change.
+//!
 //! Only a lease released in-process writes back. A root reclaimed by
 //! [`sweep_abandoned_overlays`](super::sweep_abandoned_overlays) after a crash
 //! is removed without it: after an arbitrary delay the source-unchanged check
@@ -69,6 +75,42 @@ fn is_claudine_write(path: &Path) -> bool {
         .contains(path)
 }
 
+/// The filesystem operations that decide whether a launch's changed state
+/// survives its release.
+///
+/// Every call write-back and lease release make on the overlay, the source, and
+/// the recovery marker goes through this seam, so a test can fail any one of
+/// them deterministically on every OS instead of relying on permission modes.
+pub(super) trait OverlayIo: std::fmt::Debug + Send + Sync {
+    fn symlink_metadata(&self, path: &Path) -> io::Result<fs::Metadata> {
+        fs::symlink_metadata(path)
+    }
+    fn metadata(&self, path: &Path) -> io::Result<fs::Metadata> {
+        fs::metadata(path)
+    }
+    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        fs::read(path)
+    }
+    fn atomic_write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+        atomic_write(path, contents)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        fs::rename(from, to)
+    }
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        fs::remove_file(path)
+    }
+    fn write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+        fs::write(path, contents)
+    }
+}
+
+/// The real filesystem.
+#[derive(Debug)]
+pub(super) struct HostIo;
+
+impl OverlayIo for HostIo {}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Fingerprint {
     len: u64,
@@ -76,8 +118,8 @@ struct Fingerprint {
 }
 
 impl Fingerprint {
-    fn of(path: &Path) -> io::Result<Self> {
-        let metadata = fs::metadata(path)?;
+    fn of(io: &dyn OverlayIo, path: &Path) -> io::Result<Self> {
+        let metadata = io.metadata(path)?;
         Ok(Self {
             len: metadata.len(),
             modified: metadata.modified().ok(),
@@ -98,12 +140,27 @@ struct Entry {
 }
 
 /// What one released launch did with each eligible file.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default)]
 pub struct WriteBackOutcome {
     /// Names written back to the source.
     pub written: Vec<String>,
     /// Names whose overlay change was refused because the source changed.
     pub refused: Vec<String>,
+    /// Changed files that could not be written back. Their overlay copy is the
+    /// only copy of that state.
+    pub failed: Vec<WriteBackFailure>,
+}
+
+/// One changed overlay file that could not be carried back to its source.
+#[derive(Debug)]
+pub struct WriteBackFailure {
+    /// Relative name for diagnostics.
+    pub name: String,
+    /// The source file that still holds the old state.
+    pub source: PathBuf,
+    /// The overlay file holding the changed state.
+    pub overlay: PathBuf,
+    pub error: io::Error,
 }
 
 /// The eligible mirrored files of one launch and their source fingerprints.
@@ -140,7 +197,7 @@ impl WriteBack {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         self.entries.push(Entry {
-            fingerprint: Fingerprint::of(&resolved)?,
+            fingerprint: Fingerprint::of(&HostIo, &resolved)?,
             permissions: fs::metadata(&resolved)?.permissions(),
             source: resolved,
             overlay: overlay.to_path_buf(),
@@ -149,42 +206,63 @@ impl WriteBack {
         Ok(())
     }
 
+    /// The provider whose launch this record belongs to.
+    pub fn provider(&self) -> Provider {
+        self.provider
+    }
+
     /// Copy every changed eligible overlay file back over its unchanged source.
     ///
-    /// Best effort: a file that cannot be read or written is logged and
-    /// skipped, because a launch that already ended cannot be failed.
+    /// A file whose overlay entry, source, or fingerprint cannot be read, or
+    /// that cannot be written, is recorded in [`WriteBackOutcome::failed`] and
+    /// the rest are still applied: a launch that already ended cannot be
+    /// failed, so the caller must keep the overlay copy.
     pub fn apply(&self) -> WriteBackOutcome {
+        self.apply_with(&HostIo)
+    }
+
+    pub(super) fn apply_with(&self, io: &dyn OverlayIo) -> WriteBackOutcome {
         let mut outcome = WriteBackOutcome::default();
         for entry in &self.entries {
-            match self.apply_entry(entry) {
+            match self.apply_entry(io, entry) {
                 Ok(Some(true)) => outcome.written.push(entry.name.clone()),
                 Ok(Some(false)) => outcome.refused.push(entry.name.clone()),
                 Ok(None) => {}
-                Err(error) => tracing::warn!(
-                    provider = %self.provider,
-                    entry = %entry.name,
-                    %error,
-                    "provider state changed in the overlay could not be written back"
-                ),
+                Err(error) => {
+                    tracing::warn!(
+                        provider = %self.provider,
+                        entry = %entry.name,
+                        %error,
+                        "provider state changed in the overlay could not be written back"
+                    );
+                    outcome.failed.push(WriteBackFailure {
+                        name: entry.name.clone(),
+                        source: entry.source.clone(),
+                        overlay: entry.overlay.clone(),
+                        error,
+                    });
+                }
             }
         }
         outcome
     }
 
     /// `Some(true)` written, `Some(false)` refused, `None` nothing to do.
-    fn apply_entry(&self, entry: &Entry) -> io::Result<Option<bool>> {
-        let Ok(overlay) = fs::symlink_metadata(&entry.overlay) else {
+    fn apply_entry(&self, io: &dyn OverlayIo, entry: &Entry) -> io::Result<Option<bool>> {
+        let overlay = match io.symlink_metadata(&entry.overlay) {
+            Ok(overlay) => overlay,
             // A removal inside the overlay is not propagated.
-            return Ok(None);
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Ok(None),
         };
         if !overlay.is_file() || is_claudine_write(&entry.overlay) {
             return Ok(None);
         }
-        let changed = fs::read(&entry.overlay)?;
-        if fs::read(&entry.source).is_ok_and(|current| current == changed) {
+        let changed = io.read(&entry.overlay)?;
+        if io.read(&entry.source)? == changed {
             return Ok(None);
         }
-        if Fingerprint::of(&entry.source).ok().as_ref() != Some(&entry.fingerprint) {
+        if Fingerprint::of(io, &entry.source)? != entry.fingerprint {
             tracing::warn!(
                 provider = %self.provider,
                 entry = %entry.name,
@@ -193,7 +271,7 @@ impl WriteBack {
             return Ok(Some(false));
         }
         // Last rename wins against a writer that slips in after the check.
-        atomic_write(&entry.source, &changed)?;
+        io.atomic_write(&entry.source, &changed)?;
         // The temporary file's mode is private; keep the source's own.
         let _ = fs::set_permissions(&entry.source, entry.permissions.clone());
         tracing::debug!(

@@ -346,7 +346,7 @@ When `--mcp` or `--mcp-use` is active:
 1. Loads MCP catalog from `~/.claudine/mcp/catalog.json`
 2. Extracts `#tags` from the prompt and strips them
 3. Computes session set (resolves tags, handles ambiguous/missing)
-4. Injects provider-specific MCP servers (Codex/Gemini write into a provider overlay selected by `CODEX_HOME`/`GEMINI_CLI_HOME`; OpenCode uses `OPENCODE_CONFIG_CONTENT`)
+4. Injects provider-specific MCP servers (Codex/Gemini write into a provider overlay selected by `CODEX_HOME`/`GEMINI_CLI_HOME`; OpenCode and Kilo use `OPENCODE_CONFIG_CONTENT` and `KILO_CONFIG_CONTENT`)
 
 **Affected by:**
 

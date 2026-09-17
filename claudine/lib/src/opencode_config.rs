@@ -8,6 +8,9 @@
 //! env var, each writer must **merge** into the existing value rather than
 //! overwrite it — overwriting is the latent clobber this module exists to remove.
 //! Every runtime write site routes through [`merge_overlay`].
+//!
+//! Kilo, an OpenCode fork, reads the same shape from `KILO_CONFIG_CONTENT`;
+//! only its MCP injector writes that value, through [`merge_named_overlay`].
 
 use std::ffi::OsStr;
 
@@ -55,8 +58,32 @@ pub fn yolo_permission_block() -> Value {
     Value::Object(root)
 }
 
+/// The OpenCode inline config variable.
+pub const OPENCODE_CONFIG_CONTENT: &str = "OPENCODE_CONFIG_CONTENT";
+
+/// Kilo's inline config variable. Kilo is an OpenCode fork and reads the same
+/// JSON shape from it (`docs/research/mcp/kilo.md` → `runtime_injection`).
+pub const KILO_CONFIG_CONTENT: &str = "KILO_CONFIG_CONTENT";
+
+/// The inline config variables a Claudine producer merges into rather than
+/// sets, so an existing value — the user's own or another producer's — keeps
+/// its unrelated keys.
+pub const INLINE_CONFIG_ENV_VARS: [&str; 2] = [OPENCODE_CONFIG_CONTENT, KILO_CONFIG_CONTENT];
+
 /// Merge `overlay` into the current `OPENCODE_CONFIG_CONTENT` value, returning
 /// the compact JSON string to write back.
+///
+/// Equivalent to [`merge_named_overlay`] with [`OPENCODE_CONFIG_CONTENT`].
+///
+/// ## Errors
+///
+/// See [`merge_named_overlay`].
+pub fn merge_overlay(current: Option<&OsStr>, overlay: Value) -> Result<String> {
+    merge_named_overlay(OPENCODE_CONFIG_CONTENT, current, overlay)
+}
+
+/// Merge `overlay` into the current value of the inline config variable
+/// `name`, returning the compact JSON string to write back.
 ///
 /// `current` is the raw existing env value as an [`OsStr`] (`None` or absent
 /// starts from `{}`), which may carry a user-supplied config. Taking the raw
@@ -69,10 +96,10 @@ pub fn yolo_permission_block() -> Value {
 ///
 /// Returns [`ClaudineError::ConfigValidation`] when `current` is present but is
 /// either not valid UTF-8, does not parse as JSON, or parses to a non-object
-/// JSON value (such as `"42"` or `[1,2]`). Every message names
-/// `OPENCODE_CONFIG_CONTENT` but is **redacted** — it never echoes the raw value
-/// (or its bytes), which may contain secrets.
-pub fn merge_overlay(current: Option<&OsStr>, overlay: Value) -> Result<String> {
+/// JSON value (such as `"42"` or `[1,2]`). Every message names `name` but is
+/// **redacted** — it never echoes the raw value (or its bytes), which may
+/// contain secrets.
+pub fn merge_named_overlay(name: &str, current: Option<&OsStr>, overlay: Value) -> Result<String> {
     let mut base = match current {
         None => Value::Object(Map::new()),
         Some(os) => {
@@ -82,19 +109,15 @@ pub fn merge_overlay(current: Option<&OsStr>, overlay: Value) -> Result<String> 
             // clobbered. UTF-8 is only invalid on Unix-like targets; Windows env
             // values are Unicode.
             let raw = os.to_str().ok_or_else(|| {
-                ClaudineError::ConfigValidation(
-                    "existing OPENCODE_CONFIG_CONTENT is not valid UTF-8".to_string(),
-                )
+                ClaudineError::ConfigValidation(format!("existing {name} is not valid UTF-8"))
             })?;
             let parsed: Value = serde_json::from_str(raw).map_err(|_| {
-                ClaudineError::ConfigValidation(
-                    "existing OPENCODE_CONFIG_CONTENT is not valid JSON".to_string(),
-                )
+                ClaudineError::ConfigValidation(format!("existing {name} is not valid JSON"))
             })?;
             if !parsed.is_object() {
-                return Err(ClaudineError::ConfigValidation(
-                    "existing OPENCODE_CONFIG_CONTENT is not a JSON object".to_string(),
-                ));
+                return Err(ClaudineError::ConfigValidation(format!(
+                    "existing {name} is not a JSON object"
+                )));
             }
             parsed
         }

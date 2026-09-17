@@ -17,10 +17,11 @@
 //!   carries, plus the one place the selector's path shape is applied.
 //!
 //! Each launch owns its overlay root under `~/.claudine/overlays/<provider>/`
-//! through an [`OverlayLease`]: nothing a previous or concurrent launch placed
+//! (or [`OVERLAY_DIR_ENV`]`/<provider>/`) through an [`OverlayLease`]: nothing a previous or concurrent launch placed
 //! there can appear in this launch's view, and the root is removed when the
 //! launch ends, after a guarded [`WriteBack`] carries changed stable provider
-//! files back to the source. Compatible legacy storage (`~/.claudine/<agent_offset>`) is
+//! files back to the source. A root holding a change the write-back could not
+//! persist is kept for recovery instead ([`OverlayRelease::Retained`]). Compatible legacy storage (`~/.claudine/<agent_offset>`) is
 //! left untouched.
 //!
 //! When a provider has no verified mechanism for a requested reason, planning
@@ -43,9 +44,9 @@ pub use plan::{
     OVERLAY_REASONS, OverlayEntryKind, OverlayMaterialization, OverlayPlan, OverlayPlanner, OverlayReasons,
     OverlayRefusal, OverlayStage, repo_isolated_resources,
 };
-pub use lease::{OverlayLease, sweep_abandoned_overlays};
-pub use write_back::{WriteBack, WriteBackOutcome, record_claudine_write};
-pub use selector::{OVERLAY_LAUNCHES_DIR, OverlaySelector, OverlayStorage, provider_visible_root};
+pub use lease::{OverlayLease, OverlayRelease, sweep_abandoned_overlays};
+pub use write_back::{WriteBack, WriteBackFailure, WriteBackOutcome, record_claudine_write};
+pub use selector::{OVERLAY_DIR_ENV, OVERLAY_LAUNCHES_DIR, OverlaySelector, OverlayStorage, provider_visible_root};
 
 // Re-exported so a consumer needs one import path for the whole vocabulary.
 // The enums themselves live in `claudine-catalog-types` because the catalog

@@ -156,17 +156,18 @@ fn renders_transclusion_cycle_chain() {
 }
 
 const LEAK_DOC: &str =
-    "---\nreview_file: computed.md\nsuccess:\n    message: \"at {{review-file}}\"\n---\nbody\n";
+    "---\nreview_file: computed.md\nsuccess:\n    message: \"{{ ok ? 'at {{area}}' : 'x' }}\"\n---\nbody\n";
 
 fn leak_with_frontmatter(stderr_is_tty: bool) -> CompositionError {
     let excerpt = FrontmatterExcerpt::capture(LEAK_DOC, Some("success.message"), stderr_is_tty)
         .expect("frontmatter block");
     CompositionError::WithFrontmatter {
-        inner: Box::new(CompositionError::LifecycleInterpolationLeak {
+        inner: Box::new(CompositionError::LifecycleNestedSpanInLiteral {
             source_path: PathBuf::from("review.md"),
             property: "success.message".to_string(),
-            expression: "review-file".to_string(),
-            reason: String::new(),
+            literal: "'at {{area}}'".to_string(),
+            nested: "{{area}}".to_string(),
+            suggestion: None,
         }),
         excerpt,
     }
@@ -178,7 +179,7 @@ fn appends_frontmatter_yaml_block_for_lifecycle_leak_on_tty() {
     let rendered = try_render_block_report(&report, &width80()).expect("block error found");
     let plain = strip_escape_codes(&rendered);
     // The primary diagnostic still renders from the inner leak error.
-    assert!(plain.contains("interpolation leaked"), "got:\n{plain}");
+    assert!(plain.contains("nested interpolation inside a string literal"), "got:\n{plain}");
     // The frontmatter block is appended, showing the offending YAML lines.
     assert!(plain.contains("review_file"), "yaml block missing:\n{plain}");
     assert!(plain.contains("success:"), "yaml block missing:\n{plain}");
@@ -189,7 +190,7 @@ fn withholds_frontmatter_yaml_block_when_not_tty() {
     let report: Report = eyre!(leak_with_frontmatter(false));
     let rendered = try_render_block_report(&report, &width80()).expect("block error found");
     let plain = strip_escape_codes(&rendered);
-    assert!(plain.contains("interpolation leaked"), "got:\n{plain}");
+    assert!(plain.contains("nested interpolation inside a string literal"), "got:\n{plain}");
     // Non-TTY output must not expose the frontmatter body.
     assert!(!plain.contains("review_file"), "yaml leaked to non-tty:\n{plain}");
 }
@@ -281,6 +282,8 @@ fn renders_lifecycle_evaluation_error_for_success_when() {
         event: "success".to_string(),
         surface: "when".to_string(),
         message: "frontmatter(review_file,'ready') raised: path did not resolve".to_string(),
+        property: None,
+        reason: Default::default(),
     };
     let report: Report = eyre!(err);
     let rendered = try_render_block_report(&report, &width80()).expect("block error found");
@@ -308,6 +311,8 @@ fn renders_lifecycle_evaluation_error_for_finalize() {
         event: "finalize".to_string(),
         surface: "interpolation".to_string(),
         message: "unknown root `missing_root`".to_string(),
+        property: None,
+        reason: Default::default(),
     };
     let report: Report = eyre!(err);
     let rendered = try_render_block_report(&report, &width80()).expect("block error found");
@@ -328,6 +333,8 @@ fn lifecycle_evaluation_error_is_plain_without_color() {
         event: "success".to_string(),
         surface: "when".to_string(),
         message: "boom".to_string(),
+        property: None,
+        reason: Default::default(),
     };
     let report: Report = eyre!(err);
     let mut term = Terminal::new_optimistic(80);

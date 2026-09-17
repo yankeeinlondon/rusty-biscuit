@@ -31,6 +31,7 @@ fn inputs_for(provider: Provider) -> LaunchPlanInputs {
         has_model_env: false,
         mcp: None,
         opencode_config_base: None,
+        kilo_config_base: None,
         codex_last_message_path: PathBuf::from("/tmp/claudine-test-last.txt"),
         provider_env_baseline: HashMap::new(),
         overlay: Some(no_overlay_intent()),

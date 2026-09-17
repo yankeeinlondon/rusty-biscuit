@@ -22,6 +22,10 @@ helper that resolves it is named so it is not re-derived.
    Bash), so a fixture that relocates the home for a Python tool such as
    `scripts/ci/constraints.py` must set both `HOME` and `USERPROFILE`; a
    shell `$HOME` literal is a Unix-only spelling.
+   Claudine's provider overlay still resolves through the known folder, so a
+   Windows launch test names its roots instead: the provider selector (e.g.
+   `CODEX_HOME`) for the source and `CLAUDINE_OVERLAY_DIR` for overlay
+   storage (`level2_provider_overlay_capture.rs`, 2026-09-16).
 3. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); no
    developer machine does.** Short-versus-long spelling bugs reproduce only
    on CI. `current_dir()` reports the spelling it was given; `canonicalize`

@@ -119,7 +119,7 @@ MCP capability is split between three surfaces:
 
 - The normalized catalog itself is provider-agnostic and lives under `~/.claudine/mcp/` (`catalog.json`, `defaults.json`, `provider-state.json`).
 - Per-provider import/sync logic lives in [`claudine/lib/src/mcp/import.rs`](../../lib/src/mcp/import.rs) and [`mcp/state.rs`](../../lib/src/mcp/state.rs) — only the providers wired in actually appear (Claude, Codex, Gemini, OpenCode at the time of writing).
-- Per-provider runtime injection logic lives in [`mcp/inject.rs`](../../lib/src/mcp/inject.rs); only Codex, Gemini, and OpenCode currently implement runtime injection. Other providers print a guidance message pointing at `claudine mcp export <provider> --apply`.
+- Per-provider runtime injection logic lives in [`mcp/inject.rs`](../../lib/src/mcp/inject.rs); only Codex, Gemini, OpenCode, and Kilo currently implement runtime injection. Other providers print a guidance message pointing at `claudine mcp export <provider> --apply`.
 
 ### Logging and reporting
 

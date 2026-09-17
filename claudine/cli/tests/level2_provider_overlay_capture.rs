@@ -37,12 +37,12 @@
 //! the provider writes through the overlay's nested file, and the user's file
 //! must not change.
 //!
-//! Claudine resolves the overlay home through `dirs::home_dir()`, which on
-//! native Windows reads the known-folder profile and ignores `USERPROFILE`.
-//! The overlay would therefore be read from and written to the machine's real
-//! profile, not the fixture. The test checks that premise before launching
-//! anything and fails with that explanation rather than touching the real
-//! profile or skipping silently.
+//! Claudine resolves the default provider source and overlay storage through
+//! `dirs::home_dir()`, which on native Windows reads the known-folder profile
+//! and ignores `USERPROFILE`. The launcher therefore names both roots
+//! explicitly — the user's Codex root through `CODEX_HOME`, overlay storage
+//! through `CLAUDINE_OVERLAY_DIR` — so neither resolves to the runner's real
+//! profile, while the home variables still reach the child unchanged.
 //!
 //! Run via the canonical recipe: `just test-l2 provider_overlay_capture`.
 
@@ -117,8 +117,9 @@ fn assert_no_home_sentinel(who: &str, record: &str) {
     }
 }
 
-/// Everything both platforms assert about one completed launch.
-fn assert_overlay_launch(fixture: &CliProcessFixture, profile: &Path, frame: &str, status: &str) {
+/// Everything both platforms assert about one completed launch whose overlay
+/// roots were created under `launches`.
+fn assert_overlay_launch(fixture: &CliProcessFixture, profile: &Path, launches: &Path, frame: &str, status: &str) {
     assert_eq!(status, "0", "claudine codex --repo failed in the pane:\n{frame}");
     assert!(
         frame.contains(PROVIDER_BANNER),
@@ -154,7 +155,7 @@ fn assert_overlay_launch(fixture: &CliProcessFixture, profile: &Path, frame: &st
         .unwrap_or_else(|| panic!("CODEX_HOME was not recorded:\n{provider}"));
     assert_eq!(
         overlay.parent(),
-        Some(fixture.home().join(".claudine").join("overlays").join("codex").as_path()),
+        Some(launches.join("codex").as_path()),
         "CODEX_HOME must name a launch root of its own:\n{provider}"
     );
     assert!(has_line(&provider, &line("CODEX_SQLITE_HOME", &codex)), "{provider}");
@@ -286,7 +287,8 @@ exit 0
             .expect("send launcher");
         let (frame, status) = wait_for_exit_marker(&mut harness, &marker, Duration::from_secs(30));
 
-        assert_overlay_launch(&fixture, &profile, &frame.plain, &status);
+        let launches = fixture.home().join(".claudine").join("overlays");
+        assert_overlay_launch(&fixture, &profile, &launches, &frame.plain, &status);
 
         // Unix mirrors each top-level entry as a symbolic link to the user's
         // entry, which is what makes the nested rule reachable at depth.
@@ -298,8 +300,9 @@ exit 0
 #[cfg(windows)]
 mod windows {
     use super::*;
+    use std::time::Instant;
+
     use biscuit_test_harness::wezterm::WezTermHarness;
-    use claudine::invocation_context::HomeBaseline;
     use test_toolkit::{Backend, Level, require_level};
 
     /// One recorder for every role, selected by its own file stem: `codex`
@@ -393,7 +396,13 @@ fn main() {
     /// `setlocal` scopes every assignment to the launcher, and each ambient
     /// `CLAUDINE_*` and Codex selector is cleared before the fixture values are
     /// set, so the pane's inherited environment cannot reach the child.
-    fn write_launcher(fixture: &CliProcessFixture, profile: &Path, marker: &str) -> PathBuf {
+    fn write_launcher(
+        fixture: &CliProcessFixture,
+        profile: &Path,
+        codex: &Path,
+        launches: &Path,
+        marker: &str,
+    ) -> PathBuf {
         let recorder = compile_recorder(fixture);
         let nested_bin = fixture.workspace_path().join("nested-bin");
         fs::create_dir_all(&nested_bin).unwrap();
@@ -413,6 +422,9 @@ fn main() {
             ("APPDATA", fixture.home().join("AppData").join("Roaming").display().to_string()),
             ("LOCALAPPDATA", fixture.home().join("AppData").join("Local").display().to_string()),
             ("PATH", path.to_string_lossy().into_owned()),
+            // The known-folder profile would otherwise supply both roots.
+            ("CODEX_HOME", codex.display().to_string()),
+            ("CLAUDINE_OVERLAY_DIR", launches.display().to_string()),
             ("NO_COLOR", "1".to_string()),
             ("CLAUDINE_RENDEZVOUS_REPORT", "false".to_string()),
             ("PLAYA_DRY_RUN", "1".to_string()),
@@ -438,6 +450,24 @@ fn main() {
         launcher
     }
 
+    /// Polls until `cmd.exe` draws its `>` prompt: `spawn_program` returns
+    /// before the shell reads input, and text typed earlier is lost.
+    fn wait_for_cmd_prompt(harness: &mut WezTermHarness, deadline: Duration) {
+        let started = Instant::now();
+        loop {
+            let frame = harness.capture().expect("capture WezTerm pane");
+            if frame.plain.lines().any(|line| line.trim_end().ends_with('>')) {
+                return;
+            }
+            assert!(
+                started.elapsed() < deadline,
+                "cmd.exe drew no prompt within {deadline:?}:\n{}",
+                frame.plain
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
     #[test]
     #[serial(level2_terminal)]
     fn level2_wezterm_windows_codex_repo_overlay_copies_nested_directories_and_keeps_the_user_home() {
@@ -449,32 +479,21 @@ fn main() {
         for folder in ["Local", "Roaming"] {
             fs::create_dir_all(fixture.home().join("AppData").join(folder)).unwrap();
         }
-        let resolved = HomeBaseline::capture().resolved().map(Path::to_path_buf);
-        assert!(
-            resolved.as_deref().is_some_and(|home| home.starts_with(fixture.workspace_path())),
-            "Claudine's overlay home on this host is {resolved:?}, not the fixture home {}. \
-             On native Windows `dirs::home_dir()` reads the known-folder profile and ignores \
-             USERPROFILE, so an end-to-end overlay launch would read and write the machine's real \
-             profile. Nothing was launched. Resolving this needs a decision on Claudine's Windows \
-             home authority (fixes/2026-09-12-shadow-home, Phase 11 human review).",
-            fixture.home().display()
-        );
-
         let codex = seed_codex_home(&fixture);
         let profile = fixture.home().to_path_buf();
+        let launches = fixture.workspace_path().join("overlay-launches");
         let marker = unique_marker();
-        let launcher = write_launcher(&fixture, &profile, &marker);
+        let launcher = write_launcher(&fixture, &profile, &codex, &launches, &marker);
 
         let mut harness = WezTermHarness::new();
         harness.spawn_program("cmd.exe", &[]).expect("spawn WezTerm cmd.exe pane");
-        // `spawn_program` performs no prompt-readiness wait, so settle before typing.
-        std::thread::sleep(Duration::from_secs(1));
+        wait_for_cmd_prompt(&mut harness, Duration::from_secs(30));
         harness
             .send_text(format!("call \"{}\"\r\n", launcher.display()).as_bytes())
             .expect("send launcher");
         let (frame, status) = wait_for_exit_marker(&mut harness, &marker, Duration::from_secs(60));
 
-        assert_overlay_launch(&fixture, &profile, &frame.plain, &status);
+        assert_overlay_launch(&fixture, &profile, &launches, &frame.plain, &status);
 
         let provider = read_record(&fixture.cwd().join("child-env.txt"));
         assert!(

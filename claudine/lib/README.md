@@ -195,7 +195,7 @@ Provider-agnostic MCP storage and provider-specific import/export/runtime integr
 - `import` - scans Claude, Codex, Gemini, and OpenCode native configs into the catalog with fingerprint dedupe
 - `export` - dry-run/apply sync back to native configs with backups and managed-entry tracking
 - `session` - computes runtime server sets from defaults, explicit `--use`, and non-interactive prompt `#tags`
-- `inject` - runtime injection for OpenCode (env var) and Codex/Gemini (config files in the provider overlay's config root)
+- `inject` - runtime injection for OpenCode and Kilo (inline config env var) and Codex/Gemini (config files in the provider overlay's config root)
 
 Current runtime injection is intentionally narrower than import/export: Claude, Goose, Kimi, and Qwen do not have injectors yet. See [mcp-support.md](../docs/mcp-support.md) for the exact CLI-facing behavior and limits.
 
@@ -382,6 +382,12 @@ Timeouts, shell policy, and runtime attempt classification for composed prompt p
 - **Legacy single-brace templates are deprecated**: `{placeholder}` is automatically rewritten to `{{placeholder}}` with a tracing warning. New configs should use Handlebars-style double braces.
 
 ## Compatibility Notes
+
+### Nested-Span Lifecycle Validation (2026-09)
+
+- `composition::lifecycle::validate_no_interpolation_leaks` and `CompositionError::LifecycleInterpolationLeak` are removed. Neither had a production caller.
+- `composition::lifecycle::validate_no_nested_spans_in_literals` and `CompositionError::LifecycleNestedSpanInLiteral { source_path, property, literal, nested, suggestion }` are new. Shared preparation now refuses a `{{ … }}` nested inside a quoted string literal on a single-pass lifecycle value (see [Lifecycle — `LifecycleNestedSpanInLiteral`](../docs/topics/lifecycle.md#lifecyclenestedspaninliteral)).
+- `CompositionError::LifecycleEvaluationError` gained `property: Option<String>` and `reason: Box<LifecycleEvaluationReason>`. Exhaustive struct patterns need `..`.
 
 ### Contextual Errors (2026-04)
 

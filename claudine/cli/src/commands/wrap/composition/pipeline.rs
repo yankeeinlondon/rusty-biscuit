@@ -126,6 +126,8 @@ struct EnvironmentPhase {
     mcp_rebuild: Option<crate::commands::wrap::launch_plan::McpRebuildInputs>,
     /// `OPENCODE_CONFIG_CONTENT` as it stood before the MCP fold.
     opencode_config_base: Option<String>,
+    /// `KILO_CONFIG_CONTENT` as it stood before the MCP fold.
+    kilo_config_base: Option<String>,
     /// R8 — the child environment as it stood before any provider-shaped stage
     /// wrote to it. Diffed against the final plan at the launch-plan record site
     /// to produce [`crate::commands::wrap::launch_plan::LaunchPlanInputs::provider_env_baseline`],
@@ -549,6 +551,10 @@ fn prepare_environment_and_mcp(
             .env
             .get(std::ffi::OsStr::new("OPENCODE_CONFIG_CONTENT"))
             .map(|v| v.to_string_lossy().into_owned());
+        let kilo_config_base = env_plan
+            .env
+            .get(std::ffi::OsStr::new(claudine::opencode_config::KILO_CONFIG_CONTENT))
+            .map(|v| v.to_string_lossy().into_owned());
         let mut mcp_rebuild: Option<crate::commands::wrap::launch_plan::McpRebuildInputs> = None;
         if request.mcp || !request.mcp_use.is_empty() {
             use claudine::mcp::catalog::McpCatalogStore;
@@ -665,10 +671,9 @@ fn prepare_environment_and_mcp(
                         .inject(&session.servers, &mut string_env, config_root)
                         .wrap_err("MCP injection failed")?;
 
-                    // The OpenCode inline config is shared with the system-prompt
-                    // and YOLO producers, so it must merge into any value already on
-                    // the plan rather than overwrite it; every other key is a plain
-                    // set. Mirrors the direct wrapper at wrapper_mcp.rs.
+                    // An inline config merges into any value already on the plan
+                    // rather than overwriting it; every other key is a plain set.
+                    // Mirrors the direct wrapper at wrapper_mcp.rs.
                     super::super::wrapper_mcp::merge_injected_env_into_plan(
                         string_env,
                         &mut env_plan,
@@ -702,6 +707,7 @@ fn prepare_environment_and_mcp(
             mcp_extra_args,
             mcp_rebuild,
             opencode_config_base,
+            kilo_config_base,
             pre_provider_env,
             credential_policy,
         })
@@ -739,6 +745,7 @@ fn construct_argv_and_system_prompt(
             mcp_extra_args,
             mcp_rebuild,
             opencode_config_base,
+            kilo_config_base,
             pre_provider_env,
             credential_policy,
         } = environment;
@@ -1166,6 +1173,7 @@ fn construct_argv_and_system_prompt(
                     .contains_key(&std::ffi::OsString::from("MODEL")),
                 mcp: mcp_rebuild.clone(),
                 opencode_config_base: opencode_config_base.clone(),
+                kilo_config_base: kilo_config_base.clone(),
                 codex_last_message_path: structured_codex_output
                     .as_ref()
                     .map(|o| o.last_message_path.clone())

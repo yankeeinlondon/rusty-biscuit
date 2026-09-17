@@ -82,6 +82,7 @@ fn plan_inputs() -> launch_plan::LaunchPlanInputs {
         has_model_env: false,
         mcp: None,
         opencode_config_base: None,
+        kilo_config_base: None,
         codex_last_message_path: PathBuf::from("/tmp/claudine-test-last-message.txt"),
         // The provider-shaped keys the fixture invocation wrote, none of which
         // existed beforehand — so a rebuild that stops writing one clears it.

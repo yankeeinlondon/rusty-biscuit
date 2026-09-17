@@ -271,6 +271,10 @@ pub(crate) fn execute_sequence(
         &prep_context.invocation,
         &prep_context.source_context,
     )?;
+    // A referenced prompt document composes only at its own turn, so its
+    // single-pass lifecycle literals are checked here, before any approval
+    // prompt or step can run.
+    graph.validate_prompt_lifecycle_literals()?;
     let preflight_approved = approve_preflight_graph(
         &graph,
         source,

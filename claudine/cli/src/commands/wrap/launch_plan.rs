@@ -339,6 +339,9 @@ pub(crate) struct LaunchPlanInputs {
     /// order, so a rebuilt permission mode or server set lands on the same base
     /// the invocation folded onto.
     pub(crate) opencode_config_base: Option<String>,
+    /// `KILO_CONFIG_CONTENT` as it stood before the MCP fold, so a rebuilt Kilo
+    /// server set merges onto the user's exported config as the invocation did.
+    pub(crate) kilo_config_base: Option<String>,
     /// The Codex `--output-last-message` sink, allocated once. Reused across
     /// attempts rather than re-allocated, so the argv a rebuild produces for an
     /// unchanged Codex run matches the recorded one.
@@ -414,6 +417,7 @@ impl LaunchPlanInputs {
             has_model_env: false,
             mcp: None,
             opencode_config_base: None,
+            kilo_config_base: None,
             codex_last_message_path: codex_last_message.unwrap_or_default(),
             provider_env_baseline: HashMap::new(),
             overlay: None,
@@ -891,9 +895,23 @@ fn replay(
         env_overlay.push((OPENCODE_CONFIG.into(), config.into()));
     }
     for (key, value) in mcp_env {
-        if key != OPENCODE_CONFIG {
-            env_overlay.push((key.into(), value.into()));
+        if key == OPENCODE_CONFIG {
+            continue;
         }
+        let value = if key == claudine::opencode_config::KILO_CONFIG_CONTENT {
+            let overlay = serde_json::from_str(&value).map_err(|e| {
+                LaunchPlanError::producer_error("MCP injection produced invalid inline config", e)
+            })?;
+            claudine::opencode_config::merge_named_overlay(
+                &key,
+                inputs.kilo_config_base.as_deref().map(OsStr::new),
+                overlay,
+            )
+            .map_err(|e| LaunchPlanError::producer_error("failed to merge inline config", e))?
+        } else {
+            value
+        };
+        env_overlay.push((key.into(), value.into()));
     }
 
     Ok(LaunchPlan {

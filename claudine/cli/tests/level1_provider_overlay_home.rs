@@ -192,6 +192,40 @@ fn codex_repo_overlay_uses_codex_home_and_leaves_the_user_home() {
     );
 }
 
+/// The roots the native-Windows L2 launch names, because the known-folder home
+/// ignores its fixture `USERPROFILE`: an explicit `CODEX_HOME` source and a
+/// `CLAUDINE_OVERLAY_DIR` storage parent. Nothing lands under the home.
+#[test]
+fn explicit_codex_home_and_overlay_dir_keep_the_overlay_out_of_the_home() {
+    let fixture = CliProcessFixture::named("overlay-home-explicit-roots");
+    fixture.seed_user_config();
+    let source = fixture.workspace_path().join("codex-source");
+    let launches = fixture.workspace_path().join("overlay-launches");
+    write(&source.join("config.toml"), "model = \"explicit\"\n");
+    write_executable(&fixture.bin_dir().join("codex"), RECORD_ENV);
+
+    let output = recording_command(&fixture)
+        .env("CODEX_HOME", &source)
+        .env("CLAUDINE_OVERLAY_DIR", &launches)
+        .args(["codex", "--repo", "--", "--version"])
+        .output()
+        .unwrap();
+    success(&output);
+    let recorded = recorded(&fixture).expect("codex was not spawned");
+
+    assert_home_preserved(&fixture, &recorded);
+    let child = &recorded.child;
+    let root = PathBuf::from(value_of(child, "CODEX_HOME").expect("CODEX_HOME recorded"));
+    assert_eq!(root.parent(), Some(launches.join("codex").as_path()), "{child}");
+    assert!(!root.exists(), "the ended launch left its overlay root {}", root.display());
+    assert!(child.lines().any(|l| l == "CODEX_CONFIG=model = \"explicit\""), "{child}");
+    assert!(child.lines().any(|l| l == line("CODEX_SQLITE_HOME", &source)), "{child}");
+    assert!(
+        !fixture.home().join(".claudine").join("overlays").exists(),
+        "overlay storage was created under the home despite the override"
+    );
+}
+
 /// Claude reads `.claude.json` and its credential store relative to
 /// `CLAUDE_CONFIG_DIR`, so the overlay carries the state file and pins the
 /// credential store to its default entry.
@@ -372,6 +406,10 @@ const RECORD_MCP: &str = r#"#!/bin/sh
   if [ -n "$OPENCODE_CONFIG_CONTENT" ]; then
     printf 'OPENCODE_CONFIG_CONTENT=%s\n' "$OPENCODE_CONFIG_CONTENT"
   fi
+  printf 'KILO_CONFIG_DIR=%s\n' "${KILO_CONFIG_DIR-<unset>}"
+  if [ -n "$KILO_CONFIG_CONTENT" ]; then
+    printf 'KILO_CONFIG_CONTENT=%s\n' "$KILO_CONFIG_CONTENT"
+  fi
 } > "$CLAUDINE_ENV_FILE"
 "$CLAUDINE_NESTED_BIN/run-nested"
 exit 0
@@ -536,6 +574,52 @@ fn opencode_mcp_injects_inline_without_an_overlay() {
     assert!(!overlays.exists(), "OpenCode MCP built overlay storage at {}", overlays.display());
 }
 
+/// The researched `KILO_CONFIG_CONTENT` document a `--mcp` launch with one
+/// catalog `server` and a user-exported `{"theme":"fixture"}` must hand Kilo.
+fn expected_kilo_config(server: &str) -> serde_json::Value {
+    serde_json::json!({
+        "theme": "fixture",
+        "mcp": {
+            server: { "type": "local", "command": ["npx", "-y", format!("@test/{server}")] }
+        }
+    })
+}
+
+/// The `KILO_CONFIG_CONTENT` value `recorded` holds, parsed.
+fn kilo_config(recorded: &str) -> serde_json::Value {
+    let raw = value_of(recorded, "KILO_CONFIG_CONTENT")
+        .unwrap_or_else(|| panic!("Kilo received no KILO_CONFIG_CONTENT:\n{recorded}"));
+    serde_json::from_str(raw).unwrap()
+}
+
+/// Kilo's published `mcp: composable_injection` verdict holds at the process
+/// boundary: `kilo --mcp` launches, the servers arrive inline in the researched
+/// `KILO_CONFIG_CONTENT` shape merged over the user's exported config, and no
+/// overlay directory or `KILO_CONFIG_DIR` selector appears.
+#[test]
+fn kilo_mcp_injects_inline_without_an_overlay() {
+    let fixture = CliProcessFixture::named("overlay-home-kilo-mcp");
+    fixture.seed_user_config();
+    seed_mcp_catalog(&fixture, &["github"]);
+    write_executable(&fixture.bin_dir().join("kilo"), RECORD_MCP);
+
+    let output = recording_command(&fixture)
+        .env("KILO_CONFIG_CONTENT", r#"{"theme":"fixture"}"#)
+        .args(["kilo", "--mcp", "--", "run", "debug #github sync"])
+        .output()
+        .unwrap();
+    success(&output);
+    let recorded = recorded(&fixture).expect("kilo was not spawned");
+    assert_home_preserved(&fixture, &recorded);
+    let child = &recorded.child;
+
+    assert!(child.lines().any(|l| l == "KILO_CONFIG_DIR=<unset>"), "{child}");
+    assert!(!child.contains("OPENCODE_CONFIG_CONTENT="), "{child}");
+    assert_eq!(kilo_config(child), expected_kilo_config("github"));
+    let overlays = fixture.home().join(".claudine").join("overlays");
+    assert!(!overlays.exists(), "Kilo MCP built overlay storage at {}", overlays.display());
+}
+
 /// The composition route hands the injector the same provider-visible root:
 /// `compose --gemini --mcp` lands its settings where `GEMINI_CLI_HOME` points.
 #[test]
@@ -585,6 +669,10 @@ name=$(basename "$0")
   fi
   if [ -n "$OPENCODE_CONFIG_CONTENT" ]; then
     printf 'OPENCODE_CONFIG_CONTENT=%s\n' "$OPENCODE_CONFIG_CONTENT"
+  fi
+  printf 'KILO_CONFIG_DIR=%s\n' "${KILO_CONFIG_DIR-<unset>}"
+  if [ -n "$KILO_CONFIG_CONTENT" ]; then
+    printf 'KILO_CONFIG_CONTENT=%s\n' "$KILO_CONFIG_CONTENT"
   fi
 } > "$CLAUDINE_ENV_FILE.$name"
 cat > /dev/null
@@ -716,6 +804,27 @@ fn a_codex_to_opencode_transition_restores_explicit_ambient_codex_selectors() {
             opencode.lines().any(|l| l == line("CODEX_SQLITE_HOME", &sqlite_home)),
             "{name}: {opencode}"
         );
+    }
+}
+
+/// A Codex → Kilo proxy re-prepares Kilo through the composition MCP fold, and
+/// a retry rebuilds its launch plan; both hand Kilo its servers inline, merged
+/// over the user's exported `KILO_CONFIG_CONTENT`, with no Codex selector.
+#[test]
+fn a_codex_to_kilo_transition_injects_inline_kilo_config() {
+    for (transition, name) in [(Transition::Proxy, "proxy"), (Transition::Retry, "retry")] {
+        let fixture = CliProcessFixture::named(&format!("overlay-home-{name}-codex-kilo"));
+        let (_codex, kilo) = codex_mcp_transition(
+            &fixture,
+            transition,
+            "kilo",
+            &[("KILO_CONFIG_CONTENT", Path::new(r#"{"theme":"fixture"}"#))],
+        );
+
+        for unset in ["CODEX_HOME=<unset>", "CODEX_SQLITE_HOME=<unset>", "KILO_CONFIG_DIR=<unset>"] {
+            assert!(kilo.lines().any(|l| l == unset), "{name}: {unset}:\n{kilo}");
+        }
+        assert_eq!(kilo_config(&kilo), expected_kilo_config("linear"), "{name}");
     }
 }
 
@@ -1637,4 +1746,69 @@ exit 0
     assert_eq!(fs::read_to_string(source.join("auth.json")).unwrap(), "{\"token\":\"rotated\"}");
     assert!(!source.join("created-by-provider.json").exists(), "a new provider entry was written back");
     assert_eq!(fs::read_to_string(source.join("config.toml")).unwrap(), "model = \"fixture\"\n");
+}
+
+/// Invariant 4 when persistence fails: a token the provider rotates but
+/// Claudine cannot write back — here a read-only source directory, standing in
+/// for a permission error, sharing violation, or full disk — is never deleted
+/// with the launch root. The launch says so on stderr, naming the recoverable
+/// copy and never its contents, and the next launch's sweep leaves it alone.
+#[test]
+fn a_rotated_token_that_cannot_be_written_back_stays_recoverable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const ROTATE_TOKEN: &str = r#"#!/bin/sh
+printf 'rotated-secret-value' > "$CODEX_HOME/auth.json.tmp"
+mv "$CODEX_HOME/auth.json.tmp" "$CODEX_HOME/auth.json"
+printf 'CODEX_HOME=%s\n' "$CODEX_HOME" > "$CLAUDINE_ENV_FILE"
+exit 0
+"#;
+    let fixture = CliProcessFixture::named("overlay-launch-failed-write-back");
+    fixture.seed_user_config();
+    let source = fixture.home().join(".codex");
+    write(&source.join("config.toml"), "model = \"fixture\"\n");
+    write(&source.join("auth.json"), "old-secret-value");
+    write_executable(&fixture.bin_dir().join("codex"), ROTATE_TOKEN);
+    let env_file = fixture.workspace_path().join("failed-write-back.env");
+
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o555)).unwrap();
+    // A privileged runner ignores the mode, so the premise is checked, not assumed.
+    let writable = fs::write(source.join("probe"), "").is_ok();
+    let output = fixture
+        .command()
+        .env("CLAUDINE_ENV_FILE", &env_file)
+        .args(["codex", "--repo", "--", "--version"])
+        .output()
+        .unwrap();
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        !writable,
+        "test premise unavailable: a 0o555 directory stayed writable, so this runner is privileged \
+         (root ignores file modes). Run L1 as an unprivileged user; the deterministic, cross-platform \
+         failure cases are `provider_overlay::tests::lease` in the library."
+    );
+
+    let text = flattened(&output);
+    let recorded = fs::read_to_string(&env_file).unwrap_or_else(|_| panic!("the provider was not spawned:\n{text}"));
+    let root = PathBuf::from(value_of(&recorded, "CODEX_HOME").expect("CODEX_HOME recorded"));
+    let kept = root.join("auth.json");
+    assert_eq!(fs::read_to_string(source.join("auth.json")).unwrap(), "old-secret-value");
+    assert_eq!(
+        fs::read_to_string(&kept).unwrap_or_else(|error| panic!("the rotated token was deleted ({error}):\n{text}")),
+        "rotated-secret-value"
+    );
+    assert!(text.contains("could not be written back"), "the failure was not reported:\n{text}");
+    assert!(text.contains(&kept.display().to_string()), "the report must name the recoverable copy:\n{text}");
+    assert!(!text.contains("secret-value"), "the report leaked token contents:\n{text}");
+
+    // The next launch sweeps abandoned roots before building its own.
+    write_executable(&fixture.bin_dir().join("codex"), RECORD_SPAWN);
+    let next = fixture
+        .command()
+        .env("CLAUDINE_ARGS_FILE", fixture.workspace_path().join("next.args"))
+        .args(["codex", "--repo", "--", "--version"])
+        .output()
+        .unwrap();
+    success(&next);
+    assert_eq!(fs::read_to_string(&kept).unwrap(), "rotated-secret-value", "a sweep removed the retained root");
 }

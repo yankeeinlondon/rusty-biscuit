@@ -177,7 +177,7 @@ the `composition_prepare` span.
 | C3.8 | **MCP: lex `#tags` from prompt** [O-flag] | |
 | C3.9 | **MCP: `compute_session_set`** [O-flag] | Resolve tags → server set; ambiguity prompts in TTY+interactive. |
 | C3.10 | **MCP: handle missing/ambiguous tags** [O-flag] | `--strict` makes them fatal. |
-| C3.11 | **MCP: provider injector** [O-flag, O-prov] | Codex/Gemini/OpenCode get runtime injection (writes shadow config or sets `OPENCODE_CONFIG_CONTENT`); other providers hard-fail with a hint to use `claudine mcp export`. |
+| C3.11 | **MCP: provider injector** [O-flag, O-prov] | Codex/Gemini/OpenCode/Kilo get runtime injection (writes shadow config or sets `OPENCODE_CONFIG_CONTENT`/`KILO_CONFIG_CONTENT`); other providers hard-fail with a hint to use `claudine mcp export`. |
 
 ### C4. Provider argv assembly
 

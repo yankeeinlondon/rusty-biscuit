@@ -25,7 +25,7 @@ use crate::invocation_context::{EnvBaseline, HomeBaseline};
 use crate::provider::{OverlayCapability, OverlayReason, OverlayResourceClass, Provider};
 
 use super::lease::OverlayLease;
-use super::selector::{OVERLAY_LAUNCHES_DIR, OverlaySelector, OverlayStorage, provider_visible_root};
+use super::selector::{OVERLAY_DIR_ENV, OVERLAY_LAUNCHES_DIR, OverlaySelector, OverlayStorage, provider_visible_root};
 
 /// A set of [`OverlayReason`]s — one launch can need an overlay for several
 /// reasons at once, which is exactly what `--repo` plus `--mcp` produces.
@@ -475,9 +475,8 @@ impl<'a> OverlayPlanner<'a> {
 
         let spec = provider.overlay_selector().ok_or_else(unplannable)?;
         let (source_root, explicit) = self.resolve_source_root(provider).ok_or_else(unplannable)?;
-        let overlay_home = self.overlay_home().ok_or_else(unplannable)?;
-        let launch_root = overlay_home
-            .join(OVERLAY_LAUNCHES_DIR)
+        let launches_dir = self.launches_dir().ok_or_else(unplannable)?;
+        let launch_root = launches_dir
             .join(provider.as_slug())
             .join(self.launch_id.map_or_else(fresh_launch_id, str::to_string));
         let storage = OverlayStorage::new(&launch_root, spec.shape).ok_or_else(unplannable)?;
@@ -508,9 +507,17 @@ impl<'a> OverlayPlanner<'a> {
         Some((spec.source_root?.resolve_with_home(home), false))
     }
 
-    /// Claudine's data directory, which hosts every launch's overlay root.
-    fn overlay_home(&self) -> Option<PathBuf> {
-        Some(self.home.resolved()?.join(".claudine"))
+    /// The directory holding every launch's overlay root: an absolute
+    /// [`OVERLAY_DIR_ENV`] value, else `~/.claudine/overlays`.
+    ///
+    /// A relative override is unplannable rather than ignored, so a
+    /// misconfigured override never silently lands overlays in the real home.
+    fn launches_dir(&self) -> Option<PathBuf> {
+        if let Some(explicit) = self.env.get(OVERLAY_DIR_ENV).filter(|value| !value.is_empty()) {
+            let explicit = PathBuf::from(explicit);
+            return explicit.is_absolute().then_some(explicit);
+        }
+        Some(self.home.resolved()?.join(".claudine").join(OVERLAY_LAUNCHES_DIR))
     }
 
     /// The reason a materialization-shaped refusal names: the first requested

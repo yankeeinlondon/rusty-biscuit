@@ -17,35 +17,34 @@ use super::{McpRuntimeInfo, bootstrap_mcp_state, env, inline, profile};
 
 /// Fold the injector's String env vars into the child `EnvPlan`.
 ///
-/// `OPENCODE_CONFIG_CONTENT` is the one inline config shared by the MCP,
-/// system-prompt, and YOLO producers, so its injected value must **merge** into
-/// whatever is already on the plan (via [`claudine::opencode_config::merge_overlay`])
-/// rather than overwrite it; every other key is a plain set. Used by both the
-/// direct wrapper and the composition MCP folds so the merge semantics stay in
-/// one place.
+/// An inline config ([`claudine::opencode_config::INLINE_CONFIG_ENV_VARS`]) must
+/// **merge** into whatever is already on the plan rather than overwrite it:
+/// `OPENCODE_CONFIG_CONTENT` is shared by the MCP, system-prompt, and YOLO
+/// producers, and either variable may carry the user's own exported config.
+/// Every other key is a plain set. Used by both the direct wrapper and the
+/// composition MCP folds so the merge semantics stay in one place.
 ///
 /// ## Errors
 ///
-/// Returns an error when the injected `OPENCODE_CONFIG_CONTENT` is not valid
-/// JSON, or when merging it into the existing plan value fails (including an
-/// existing plan value that is present but not valid UTF-8 or not a JSON object).
-/// Error messages name `OPENCODE_CONFIG_CONTENT` but never echo its raw value (it
-/// may carry credentials).
+/// Returns an error when an injected inline config is not valid JSON, or when
+/// merging it into the existing plan value fails (including an existing plan
+/// value that is present but not valid UTF-8 or not a JSON object). Error
+/// messages name the variable but never echo its raw value (it may carry
+/// credentials).
 pub(crate) fn merge_injected_env_into_plan(
     string_env: std::collections::HashMap<String, String>,
     env_plan: &mut env::EnvPlan,
 ) -> Result<()> {
-    const KEY: &str = "OPENCODE_CONFIG_CONTENT";
     for (k, v) in string_env {
-        if k == KEY {
+        if claudine::opencode_config::INLINE_CONFIG_ENV_VARS.contains(&k.as_str()) {
             let current = env_plan
                 .env
-                .get(std::ffi::OsStr::new(KEY))
+                .get(std::ffi::OsStr::new(&k))
                 .map(|v| v.as_os_str());
             let overlay = serde_json::from_str(&v)
-                .wrap_err("MCP injection produced invalid OPENCODE_CONFIG_CONTENT")?;
-            let merged = claudine::opencode_config::merge_overlay(current, overlay)
-                .wrap_err("failed to merge OPENCODE_CONFIG_CONTENT")?;
+                .wrap_err_with(|| format!("MCP injection produced invalid {k}"))?;
+            let merged = claudine::opencode_config::merge_named_overlay(&k, current, overlay)
+                .wrap_err_with(|| format!("failed to merge {k}"))?;
             env_plan.env.insert(k.into(), merged.into());
         } else {
             env_plan.env.insert(k.into(), v.into());
@@ -208,10 +207,9 @@ pub(crate) fn compose_mcp_session(
                     .inject(&session.servers, &mut string_env, config_root)
                     .wrap_err("MCP injection failed")?;
 
-                // Merge injected env vars into the OsString env plan. The
-                // OpenCode inline config is shared with the system-prompt and
-                // YOLO producers, so it must merge into any value already on the
-                // plan rather than overwrite it; every other key is a plain set.
+                // Merge injected env vars into the OsString env plan. An inline
+                // config merges into any value already on the plan rather than
+                // overwriting it; every other key is a plain set.
                 merge_injected_env_into_plan(string_env, env_plan)?;
 
                 for arg in &result.extra_args {
@@ -314,6 +312,20 @@ mod tests {
         assert_eq!(config["theme"], "dark");
         assert_eq!(config["mcp"]["keep"], serde_json::json!({}));
         assert_eq!(config["mcp"]["srv"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn merge_injected_env_merges_a_user_exported_kilo_config() {
+        const KILO: &str = "KILO_CONFIG_CONTENT";
+        let mut plan = env::EnvPlan::default();
+        plan.env.insert(KILO.into(), r#"{"theme":"dark"}"#.into());
+        let injected = HashMap::from([(KILO.to_string(), r#"{"mcp":{"srv":{}}}"#.to_string())]);
+        merge_injected_env_into_plan(injected, &mut plan).unwrap();
+
+        let raw = plan.env.get(std::ffi::OsStr::new(KILO)).unwrap().to_str().unwrap();
+        let config: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(config, serde_json::json!({ "theme": "dark", "mcp": { "srv": {} } }));
+        assert!(!plan.env.contains_key(std::ffi::OsStr::new(KEY)));
     }
 
     #[test]

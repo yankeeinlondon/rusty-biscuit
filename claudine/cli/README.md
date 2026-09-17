@@ -216,8 +216,8 @@ Wrapper behavior:
 - Injects `AGENT`, `YOLO`, `INTERACTIVE`, `AGENT_PARAMS`, `CLAUDINE_SESSION_ID`, `CLAUDINE_PID`, and, when resolvable in monorepos, `PACKAGE_AREA` and `PACKAGE`.
 - `claudine handle` records wrapper-provided `PACKAGE_AREA` / `PACKAGE` values into event logs so they can be used in reporting filters.
 - `--mcp` resolves repo defaults if `<repo>/.claudine/mcp.json` exists, otherwise user defaults; `--use` appends explicit IDs or aliases and also enables MCP mode.
-- Non-interactive Codex, Gemini, and OpenCode runs also strip catalog-resolvable `#tags` from the prompt and activate the matching servers.
-- Runtime MCP injection currently exists for Codex, Gemini, and OpenCode only. Codex and Gemini write into a per-launch provider overlay under `~/.claudine/overlays`, removed when the launch ends and selected through `CODEX_HOME` or `GEMINI_CLI_HOME` without changing `HOME`; OpenCode injects `OPENCODE_CONFIG_CONTENT`.
+- Non-interactive Codex, Gemini, OpenCode, and Kilo runs also strip catalog-resolvable `#tags` from the prompt and activate the matching servers.
+- Runtime MCP injection currently exists for Codex, Gemini, OpenCode, and Kilo only. Codex and Gemini write into a per-launch provider overlay under `~/.claudine/overlays`, removed when the launch ends and selected through `CODEX_HOME` or `GEMINI_CLI_HOME` without changing `HOME`; OpenCode injects `OPENCODE_CONFIG_CONTENT` and Kilo `KILO_CONFIG_CONTENT`.
 - Gemini runtime sessions append `--allowed-mcp-server-names` for the resolved server list.
 - Claude, Goose, Kimi, and Qwen wrappers fail fast with guidance to use `claudine mcp sync <provider>` instead. Roo is import/sync only and has no wrapper command.
 - Runs child process with inherited stdio/cwd and propagates child exit code.

@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-aca71ae44438fa58
+hash: ef46db3751d8e999-d0e2555d35c6d7ee
 last_updated: 2026-09-16
 ---
 # Claudine Composition
@@ -527,7 +527,7 @@ Every composition error rooted in a prompt file's YAML frontmatter appends the
 authored frontmatter — delimiters included — as a `CodeBlock`: syntax
 highlighted, line-numbered so block line N equals source-file line N, and with
 the offending line highlighted when the error's property maps to a locatable
-key. This covers the lifecycle guards (interpolation leak, undefined variable,
+key. This covers the lifecycle guards (nested span in a literal, undefined variable,
 say/effect/shape errors), the prompt/agent/model/interactive type errors, the
 schema errors (load, validation, missing, unsupported-interactive), the
 inline-compose / sequence mismatch, and body-composition failures

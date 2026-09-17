@@ -57,6 +57,16 @@ pub fn provider_visible_root(shape: OverlaySelectorShape, storage_root: &Path) -
 /// never reads, mutates, or removes it.
 pub const OVERLAY_LAUNCHES_DIR: &str = "overlays";
 
+/// Names an absolute directory that replaces `~/.claudine/overlays` as the
+/// parent of every launch's `<provider>/<launch-id>` root.
+///
+/// Read from the invocation's launch baseline, like a provider selector. It
+/// moves only overlay storage, never a provider's source root or a home
+/// variable. It exists because native Windows resolves the home through the
+/// known-folder profile and ignores `USERPROFILE`, so a disposable home (a test
+/// fixture) cannot otherwise keep overlays out of the real profile.
+pub const OVERLAY_DIR_ENV: &str = "CLAUDINE_OVERLAY_DIR";
+
 /// Where Claudine keeps one launch's overlay, and what the provider sees.
 ///
 /// `storage_root` is the value the selector carries; `provider_visible_root` is
