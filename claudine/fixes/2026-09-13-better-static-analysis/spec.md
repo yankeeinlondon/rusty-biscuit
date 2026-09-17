@@ -3,7 +3,9 @@ created: 2026-09-13
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-09-15
-implemented: false
+review_iterations: 1
+implemented: true
+implemented_by: "claude/opus"
 clarified: true
 needs_rulings: false
 clarified_by: claude/opus
