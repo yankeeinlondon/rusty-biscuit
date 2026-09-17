@@ -386,17 +386,26 @@ grammar applies — lifecycle stacks, task `setup:`/`teardown:`, and
 
 ```yaml
 side_effect:
-    set: ["ready", "{{ true }}"]
+    set:
+        ready: "{{ true }}"
 ```
 
-- positional form `set: [key, value]`; key/value form `{action: set, key: …, value: …}`
+- Lifecycle YAML accepts only the mapping form `set: {property: value}`. A
+  one-entry mapping, a multi-entry mapping, and an empty mapping are all valid.
 - a whole-value `{{ expr }}` span carries its typed value — the example above
   writes boolean `true`, not the string `"true"`
+- all values in one mapping read the same pre-write snapshot, and the complete
+  mapping commits atomically; use two consecutive `set` actions when the second
+  assignment must observe the first
 - it writes to the **in-memory runtime layer**, never to disk. That is what
   distinguishes it from `set_frontmatter`, which targets a file.
 - top-level keys only; reserved keys are rejected
 - outside a sequence it still works, mutating the state visible to later
   lifecycle actions and loop iterations in the same run
+
+Do not confuse this lifecycle YAML action with the capability and loop-control
+API spelled `set(key, value)`. That positional API remains unchanged; only
+Claudine lifecycle YAML uses `set: {property: value}`.
 
 Mutations are visible to subsequent lifecycle actions, loop iterations, serial
 tasks, and later steps. `state`, `previous`, and `next` remain immutable
@@ -476,7 +485,8 @@ setup:
       action:
           - message: "the file exists"
     - action:
-          - set: ["title", "About to do the thing"]
+          - set:
+                title: "About to do the thing"
 teardown:
     - when: "ctx.dirty_files"
       action:
