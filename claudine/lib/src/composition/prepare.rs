@@ -49,11 +49,16 @@ pub fn bind_agent_workspace(
     }
 }
 
+mod bootstrap;
 mod entry;
 mod service;
 
+pub use bootstrap::BootstrapPreparation;
 pub use entry::{DocumentEntryReason, LoopOwnership, PreparationStages, SourceBasis};
-pub use service::{DocumentPreparation, PromptSource, SchemaStage, prepare_document};
+pub use service::{
+    BootstrapRequest, DocumentPreparation, PromptSource, SchemaStage, prepare_bootstrap,
+    prepare_document,
+};
 
 /// Options for composition preparation.
 #[derive(Debug, Default, Clone)]
@@ -207,11 +212,11 @@ fn observe_prepared_context(
 /// The one `ComposeOptions` shape every canonical preparation stage composes
 /// with.
 ///
-/// Body preparation, inline preparation, and the proxy target's pre-flight
-/// shell audit all build their options here. They used to build them
-/// separately, three times, and the copies disagreed — the audit discovered
-/// commands against one option set while the compose that executed them used
-/// another.
+/// Body preparation, inline preparation, the initialize-bootstrap read, and the
+/// proxy target's pre-flight shell audit all build their options here. They
+/// used to build them separately, three times, and the copies disagreed — the
+/// audit discovered commands against one option set while the compose that
+/// executed them used another.
 fn canonical_compose_options(
     source_path: &Path,
     ctx: &ComposeContext,
@@ -475,70 +480,8 @@ pub(super) fn prepare_direct_with_prompt(
     };
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
-    if let Some((key, replacement)) =
-        super::lifecycle::scan_removed_validation_keys(&effective_frontmatter)
-    {
-        return Err(CompositionError::RemovedValidationKey {
-            source_path: source.resolved_path.clone(),
-            key,
-            replacement: replacement.to_string(),
-        });
-    }
-    let agent_full = composed
-        .frontmatter()
-        .as_map()
-        .get("agent")
-        .map_or(Ok(ParsedAgentHint::default()), parse_agent_hint_full)?;
-    let agent_hint = agent_full.to_agent_hint();
-    let model_hint = composed
-        .frontmatter()
-        .as_map()
-        .get("model")
-        .map_or(Ok(None), parse_model_hint)?;
-    let interactive_hint = composed
-        .frontmatter()
-        .as_map()
-        .get("interactive")
-        .map_or(Ok(None), parse_interactive_hint)?;
-    let selection_hints = EffectiveSelectionHints {
-        agent: agent_hint,
-        model: model_hint,
-        interactive: interactive_hint,
-        agent_invalid: agent_full.invalid,
-        agent_was_list: agent_full.is_list,
-    };
-    let mut lifecycle =
-        parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
-    // A nested span in a single-pass lifecycle literal can never interpolate;
-    // reject it here, before any provider or lifecycle event runs.
-    validate_no_nested_spans_in_literals(
-        &effective_frontmatter,
-        &lifecycle,
-        &source.resolved_path,
-    )?;
-    // Pre-flight shell resolution (C3): resolve each shell command in the
-    // deferred lifecycle subtree via DM2 with an early-binding-only lookup
-    // and stamp the resolved bytes back so the approved command equals the
-    // executed command. Late-binding references (`err`/`timing`/`current`)
-    // are rejected with a typed error.
-    super::preflight::resolve_lifecycle_shell_commands(
-        &mut lifecycle,
-        &effective_frontmatter,
-        &ctx,
-        &source.resolved_path,
-        options.file_resolution_context.as_ref(),
-        options.file_ref_fallback_dir.as_deref(),
-    )?;
-    // Lifecycle communication/action strings are deferred by design (C1): they
-    // keep their `{{ }}` spans through prepare and resolve at event-time via
-    // DM2 (C2), where strict mode fails closed on undefined roots and malformed
-    // expressions, and the post-DM2 dispatch-time leak guard (C4) backstops a
-    // surviving span before any side effect is sent. The undefined-variable
-    // scan therefore does not run over these deferred strings — it would flag
-    // the authored spans as bugs. Two static scans stay because their defects
-    // hold regardless of binding time: a nested span inside a single-pass
-    // literal (above) and a bare `err` in a no-error event.
-    validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
+    let (selection_hints, lifecycle) =
+        effective_surface(&composed, &effective_frontmatter, &ctx, source, &options)?;
 
     // Resolved after a successful compose so a schema that cannot be prepared
     // keeps surfacing through the composer's own typed failure.
@@ -631,59 +574,8 @@ pub fn prepare_inline(
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
-    if let Some((key, replacement)) =
-        super::lifecycle::scan_removed_validation_keys(&effective_frontmatter)
-    {
-        return Err(CompositionError::RemovedValidationKey {
-            source_path: source.resolved_path.clone(),
-            key,
-            replacement: replacement.to_string(),
-        });
-    }
-    let agent_full = composed
-        .frontmatter()
-        .as_map()
-        .get("agent")
-        .map_or(Ok(ParsedAgentHint::default()), parse_agent_hint_full)?;
-    let agent_hint = agent_full.to_agent_hint();
-    let model_hint = composed
-        .frontmatter()
-        .as_map()
-        .get("model")
-        .map_or(Ok(None), parse_model_hint)?;
-    let interactive_hint = composed
-        .frontmatter()
-        .as_map()
-        .get("interactive")
-        .map_or(Ok(None), parse_interactive_hint)?;
-    let selection_hints = EffectiveSelectionHints {
-        agent: agent_hint,
-        model: model_hint,
-        interactive: interactive_hint,
-        agent_invalid: agent_full.invalid,
-        agent_was_list: agent_full.is_list,
-    };
-    let mut lifecycle =
-        parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
-    // A nested span in a single-pass lifecycle literal can never interpolate;
-    // reject it here, before any provider or lifecycle event runs.
-    validate_no_nested_spans_in_literals(
-        &effective_frontmatter,
-        &lifecycle,
-        &source.resolved_path,
-    )?;
-    // Pre-flight shell resolution (C3): see `prepare_direct`.
-    super::preflight::resolve_lifecycle_shell_commands(
-        &mut lifecycle,
-        &effective_frontmatter,
-        &ctx,
-        &source.resolved_path,
-        options.file_resolution_context.as_ref(),
-        options.file_ref_fallback_dir.as_deref(),
-    )?;
-    // Deferred lifecycle strings resolve at event-time (C2); the prepare-time
-    // undefined-variable scan does not run over them. See `prepare_direct`.
-    validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
+    let (selection_hints, lifecycle) =
+        effective_surface(&composed, &effective_frontmatter, &ctx, source, &options)?;
 
     let body = composed.content().to_string();
     if body.trim().is_empty() && !options.allow_empty_body {
@@ -752,6 +644,199 @@ pub fn prepare_inline(
         dropped_optionals: Vec::new(),
         warnings,
         input_layers,
+        compose_context: ctx,
+        document_epoch: options.document_epoch,
+    })
+}
+
+/// The selection hints and C3-resolved lifecycle surface of one composed
+/// frontmatter — the post-compose steps every canonical read shares, so a
+/// bootstrap read and a full read of the same frontmatter agree on both.
+fn effective_surface(
+    composed: &Markdown,
+    effective_frontmatter: &serde_json::Value,
+    ctx: &ComposeContext,
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+) -> Result<(EffectiveSelectionHints, super::lifecycle::LifecycleConfig), CompositionError> {
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(effective_frontmatter)
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
+    let agent_full = composed
+        .frontmatter()
+        .as_map()
+        .get("agent")
+        .map_or(Ok(ParsedAgentHint::default()), parse_agent_hint_full)?;
+    let agent_hint = agent_full.to_agent_hint();
+    let model_hint = composed
+        .frontmatter()
+        .as_map()
+        .get("model")
+        .map_or(Ok(None), parse_model_hint)?;
+    let interactive_hint = composed
+        .frontmatter()
+        .as_map()
+        .get("interactive")
+        .map_or(Ok(None), parse_interactive_hint)?;
+    let selection_hints = EffectiveSelectionHints {
+        agent: agent_hint,
+        model: model_hint,
+        interactive: interactive_hint,
+        agent_invalid: agent_full.invalid,
+        agent_was_list: agent_full.is_list,
+    };
+    let mut lifecycle = parse_lifecycle_config(effective_frontmatter, &source.resolved_path)?;
+    // A nested span in a single-pass lifecycle literal can never interpolate;
+    // reject it here, before any provider or lifecycle event runs.
+    validate_no_nested_spans_in_literals(effective_frontmatter, &lifecycle, &source.resolved_path)?;
+    // Pre-flight shell resolution (C3): resolve each shell command in the
+    // deferred lifecycle subtree via DM2 with an early-binding-only lookup
+    // and stamp the resolved bytes back so the approved command equals the
+    // executed command. Late-binding references (`err`/`timing`/`current`)
+    // are rejected with a typed error.
+    super::preflight::resolve_lifecycle_shell_commands(
+        &mut lifecycle,
+        effective_frontmatter,
+        ctx,
+        &source.resolved_path,
+        options.file_resolution_context.as_ref(),
+        options.file_ref_fallback_dir.as_deref(),
+    )?;
+    // Lifecycle communication/action strings are deferred by design (C1): they
+    // keep their `{{ }}` spans through prepare and resolve at event-time via
+    // DM2 (C2), where strict mode fails closed on undefined roots and malformed
+    // expressions, and the post-DM2 dispatch-time leak guard (C4) backstops a
+    // surviving span before any side effect is sent. The undefined-variable
+    // scan therefore does not run over these deferred strings — it would flag
+    // the authored spans as bugs. Two static scans stay because their defects
+    // hold regardless of binding time: a nested span inside a single-pass
+    // literal (above) and a bare `err` in a no-error event.
+    validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
+    Ok((selection_hints, lifecycle))
+}
+
+/// The bootstrap read's context and compose options: the canonical assembly,
+/// with the verdict withheld, narrowed to the frontmatter surface.
+///
+/// Shared by [`preflight_bootstrap_shell`] and the bootstrap compose so the
+/// frontmatter commands approved are the commands that projection runs.
+fn bootstrap_compose_options(
+    source: &ResolvedCompositionSource,
+    mode: CompositionMode,
+    options: &PrepareOptions,
+) -> (ComposeContext, ComposeOptions) {
+    let mut ctx = derive_compose_context(source, options);
+    for (key, value) in &options.env_overrides {
+        ctx.env_mut().insert(key.clone(), value.clone());
+    }
+    let schema_phase = match mode {
+        CompositionMode::ChainedDocument => None,
+        CompositionMode::InlineFrontmatterPrompt => Some(SchemaPhase::Launch),
+    };
+    let compose_opts =
+        canonical_compose_options(&source.resolved_path, &ctx, options, schema_phase)
+            .with_deferred_schema_verdict(true)
+            .only_frontmatter_surface();
+    (ctx, compose_opts)
+}
+
+/// Discover and approve the frontmatter `$(...)` commands a bootstrap read of
+/// `source` would run, without reading its body.
+///
+/// The bootstrap counterpart of [`preflight_document_shell`]: fold the
+/// returned commands into the input layers before calling
+/// [`prepare_bootstrap`](super::prepare_bootstrap) with a pre-approved set,
+/// or that compose refuses them as not pre-approved. Body `::shell` commands
+/// and transclusions are left for the post-`initialize` full audit.
+///
+/// ## Errors
+///
+/// A shell-audit denial, as [`preflight_document_shell`]. A collection failure
+/// (a malformed or dynamically-shaped command) returns an empty set so the
+/// bootstrap compose surfaces the authoritative typed error.
+pub fn preflight_bootstrap_shell(
+    source: &ResolvedCompositionSource,
+    mode: CompositionMode,
+    options: &PrepareOptions,
+    approval_options: &crate::harness::ShellApprovalOptions,
+) -> Result<std::collections::HashSet<String>, CompositionError> {
+    observe_prepared_context(
+        options,
+        crate::invocation_context::PreparedContextConsumer::Preflight,
+    );
+    let (_ctx, compose_opts) = bootstrap_compose_options(source, mode, options);
+    let Ok(entries) = darkmatter::markdown::compose::collect_frontmatter_shell_commands(
+        &source.markdown,
+        &compose_opts,
+    ) else {
+        return Ok(std::collections::HashSet::new());
+    };
+    let commands = entries
+        .into_iter()
+        .map(|entry| {
+            let line = entry.origin.line_number();
+            (entry.normalized, entry.source_file, line)
+        })
+        .collect();
+    Ok(super::preflight::approve_discovered_commands(commands, approval_options)?.approved_commands)
+}
+
+/// Compose the bootstrap read of one document: effective frontmatter and
+/// lifecycle surface, no body. See [`prepare_bootstrap`](super::prepare_bootstrap).
+pub(super) fn compose_bootstrap(
+    entry: DocumentEntryReason,
+    mode: CompositionMode,
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+) -> Result<BootstrapPreparation, CompositionError> {
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&frontmatter_to_value(source.markdown.frontmatter()))
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
+    // The bootstrap composes frontmatter only; recording `Body` would claim a
+    // read this stage never performs.
+    observe_prepared_context(
+        &options,
+        crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
+    );
+    let (ctx, compose_opts) = bootstrap_compose_options(source, mode, &options);
+    let input_layers = super::CallerInputLayers::from_options(&options);
+    if let Some(invocation) = options.invocation_context.as_ref() {
+        invocation.record_compose_operation();
+    }
+    let (composed, report) = source
+        .markdown
+        .compose_with(compose_opts)
+        .map_err(|e| map_compose_error(&source.resolved_path, e))?;
+    let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
+    let (selection_hints, lifecycle) =
+        effective_surface(&composed, &effective_frontmatter, &ctx, source, &options)?;
+    let source_repo_root = effective_source_repo_root(
+        options.source_repo_root,
+        options.file_resolution_context.as_ref(),
+        &source.resolved_path,
+    );
+    Ok(BootstrapPreparation {
+        mode,
+        entry,
+        resolved_path: source.resolved_path.clone(),
+        source_repo_root,
+        input_layers,
+        effective_frontmatter,
+        selection_hints,
+        lifecycle,
+        deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_context: ctx,
         document_epoch: options.document_epoch,
     })

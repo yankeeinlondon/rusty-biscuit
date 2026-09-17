@@ -191,7 +191,7 @@ pub fn resolve_lifecycle_shell_approvals(
 }
 
 /// Deduplicate `all_commands` and run each survivor through shell policy.
-fn approve_discovered_commands(
+pub(super) fn approve_discovered_commands(
     all_commands: Vec<(String, std::path::PathBuf, usize)>,
     approval_options: &ShellApprovalOptions,
 ) -> Result<PreFlightResult, CompositionError> {
