@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-3dadcf4453a273ba
+hash: ef46db3751d8e999-149976b01d0952ef
 last_updated: 2026-09-16
 ---
 # Compose Pipeline
@@ -213,6 +213,18 @@ Version: VERSION
 ## Interpolation
 
 Expressions between `{{ }}` are evaluated and replaced with values. To render `{{ ... }}` literally instead of evaluating it, use the interpolation-literal syntax `{{{ ... }}}`; the content is never evaluated and composes down to `{{ ... }}`. See `darkmatter/docs/inline/interpolation.md`.
+
+A whole-value `{{ ... }}` target on `::file`, `::code`, or `::url` preserves
+typed evaluation. `null` and `""` skip the directive with a typed compose
+warning; authored-empty, quoted-empty, mixed, and malformed targets retain
+their ordinary parser/path behavior. Page blocks run first, so the recommended
+optional-target idiom is condition-aware and warning-free:
+
+```markdown
+::block when="file_exists(log)"
+::file {{log}}
+::end-block
+```
 
 ### Variable Resolution
 
@@ -437,6 +449,10 @@ Shell approval and shell execution are separate concerns:
   `::block` regions, and false-condition transclusions all contribute. Collection
   never evaluates conditions, never runs transclusion's merge, and never executes
   anything.
+- Nullable whole-value directive targets are evaluated during the recursive
+  approval walk. An absent target contributes no child edge, but concrete
+  siblings in any branch remain discoverable because the walk does not
+  evaluate page-block conditions.
 - **Execution is condition-aware.** The inline shell stages run only the
   commands whose branch is reached, gated by
   `ComposeOptions::with_pre_approved_commands(set)`. The invariant
@@ -444,6 +460,9 @@ Shell approval and shell execution are separate concerns:
 - A body/`::shell-block` command embedding a frontmatter value still pending
   frontmatter-shell expansion is rejected up front as
   `ShellExpansionError::DynamicCommandShape` (never a late `NotPreApproved`).
+- A transclusion target depending on a pending frontmatter-shell value is
+  rejected by the same fail-closed dynamic-shape boundary before any nullable
+  rewrite or child discovery.
 
 ### Interactive approval: the stage policy snapshot
 
