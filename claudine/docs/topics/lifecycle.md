@@ -174,6 +174,18 @@ A stack item's `action:` value may be a single positional map (`action: { succes
 
 A value whose trimmed content is exactly one `{{ expr }}` span resolves to the expression's **typed** value, matching Darkmatter's whole-value frontmatter rule — so `set_frontmatter: ["s.md", "ready", "{{ true }}"]` writes boolean `true`, `"{{ 3 }}"` writes number `3`, and `"3"` writes the string `"3"`. A bare token is always literal text, never a variable: `set_frontmatter: ["s.md", "status", "done"]` writes the literal string `done`.
 
+#### Braces inside a quoted literal are inert
+
+A lifecycle value is evaluated **once**. Communication fields, stack action operands, `proxy … with` values, and the `when`/`while`/`until` predicates all take Darkmatter's whole-value path, which does not rescan its result. A `{{ … }}` written *inside a quoted string literal* within such an expression is therefore plain text, not a nested interpolation. Because it could never resolve, preparation refuses it ([`LifecycleNestedSpanInLiteral`](#lifecyclenestedspaninliteral)). Build the string with `+` instead:
+
+```yaml
+success:
+  say: |-
+    {{ ctx.area ? "Review in " + ctx.area + " completed" : "Review completed" }}
+```
+
+The document body and mixed frontmatter strings rescan their output, so the same construction resolves there. The rule applies only to the single-pass lifecycle surfaces. To emit literal braces, use `{{{ … }}}`.
+
 #### Object-valued arguments
 
 Some side-effect verbs take an object argument (`merge_frontmatter`, `append_jsonl`, key/value `http_post`). Direct nested YAML maps are **not** accepted inside action values. Place the object in frontmatter or context and pass it through a whole-value `{{{ … }}}` span:
@@ -795,9 +807,41 @@ start:
   unknown_field: "value"  # ERROR: unknown field
 ```
 
-### `LifecycleInterpolationLeak`
+### `LifecycleNestedSpanInLiteral`
 
-Because lifecycle strings are interpolated at event-time (see [When Lifecycle Properties Interpolate](#when-lifecycle-properties-interpolate)), their authored `{{{ … }}}` spans are **not** prepare-time leaks — they are deferred by design. This guard (`reject_surviving_spans`) runs **after** the event-time resolution, immediately before dispatch: a side-effect string that still contains a `{{{ … }}}` span at that point (e.g. a frontmatter value that is itself raw template text) is a typed error and the side effect is not sent. For non-lifecycle surfaces the unchanged prepare-time guard `validate_no_interpolation_leaks` still runs.
+A single-pass lifecycle value nests a `{{ … }}` span inside a quoted string literal (see [Braces inside a quoted literal are inert](#braces-inside-a-quoted-literal-are-inert)). `validate_no_nested_spans_in_literals` checks every communication field, `loop.while`/`loop.until`, every `stack[i].when` predicate (in the condition dialect), and every whole-value action operand and `proxy … with` value. The walk follows `LifecycleSignal` order and reports the first defect. It runs in shared preparation right after the lifecycle parses, so direct and inline compose, `--dry-run`, a proxy target, a `retry`/`resume` re-entry, and a loop seed are all refused before any provider starts. A loop's lifecycle is fixed when its seed is prepared, so lifecycle edits made during the loop never run. `sequence` also pre-scans every statically resolved `prompt:` document right after building its preflight graph, before shell approval, so a defect in a later step stops the run before step one starts. A step reference that preflight cannot resolve is checked when that step prepares.
+
+The error names the property, the offending literal, and the nested span. It also prints a mechanical `+` rewrite (Darkmatter's `lint_expression` suggestion, shown without its `{{ }}` wrapper or YAML quoting) and points to `{{{ … }}}` for intentional braces. The rewrite is omitted when it cannot be proven equivalent, for example when the nested span does not itself parse.
+
+Before (the 2026-09-13 incident):
+
+```yaml
+success:
+  say: |-
+    {{
+    ctx.area
+        ? "The review of the draft specification file in {{ctx.area}} has completed"
+        : "The review of the draft specification file in the {{ctx.repo_name}} repo has completed"
+    }}
+```
+
+After:
+
+```yaml
+success:
+  say: |-
+    {{
+    ctx.area
+        ? "The review of the draft specification file in " + ctx.area + " has completed"
+        : "The review of the draft specification file in the " + ctx.repo + " repo has completed"
+    }}
+```
+
+A positional action body such as `message: "review {{iteration}} passed"` is not affected. That string is not an expression literal; Claudine interpolates it as template text.
+
+### `LifecycleEvaluationError`: surviving span
+
+Some template text only appears at event time, typically a frontmatter value that itself holds `{{ … }}` (for example, one a `set_frontmatter` stored). Static validation cannot see it. As a backstop, `reject_surviving_spans` runs after event-time resolution and before dispatch: a top-level communication field whose resolved text still contains a span fails the event, and the side effect is not sent. The error carries the lifecycle property (`in success.say`) and the typed `SurvivingSpan` reason, which selects a hint to concatenate with `+` (or use `{{{ … }}}` for intentional braces) instead of the missing-path hint that ordinary evaluation errors get. A stack action operand that resolves to template text is re-expanded when its message renders. An unknown root in that text then fails as an ordinary expression error.
 
 ### `LifecycleUndefinedVariable`
 
