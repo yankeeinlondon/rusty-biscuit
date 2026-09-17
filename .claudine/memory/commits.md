@@ -441,3 +441,29 @@ belong here.
   `composition::*` re-exports to point at a function that does not
   exist in the earlier commit's tree, breaking compilation between
   the two commits.
+- A phase-based fix's final close (e.g. `2026-09-15-initialize-after-proxy`
+  Phase 8 documentation phase) has a different shape than a cycle-based
+  fix's review close. There is no `review-N.md` to flip; the close
+  artifacts are the `plan.md` and `implementation-log.md` frontmatter
+  additions plus an optional new `evidence.md`. The single
+  `planning(<area>):` commit appends `## Phase N-1 close` (the prior
+  acceptance phase) and `## Phase N` (the current docs / comments
+  phase) blocks to `implementation-log.md`, adds the
+  `source_files_during_phase_N`, `docs_updated_during_phase_N`, and
+  `skills_files_updated_during_phase_N` blocks to `plan.md`, finalizes
+  the plan frontmatter (`phase: <N>`, `completed_phase: "<N>"`,
+  `implemented: true`), and may attach a new `evidence.md` carrying
+  the requirement-to-test mapping and gate results. The fix remains
+  in its active directory until author review moves it to
+  `_completed` — `planning(<area>):` is correct, NOT `chore:` or
+  `docs(<area>):`. See `5aff59c38` for the
+  2026-09-15-initialize-after-proxy Phase 8 example.
+- Pre-flight a `docs(repo):` rename by listing BOTH endpoints in
+  `git ls-files -s <old> <new>` — the rename is a single index fact
+  but the index holds independent `D` + `A` entries, and the
+  `--only` pathspec must name both. A `git show --name-status <hash>`
+  after commit will surface a single `R0NN` row when both endpoints
+  were included; if only the new path appears as `A`, the old endpoint
+  was silently dropped and the prior `claudine/docs/topics/...` path
+  remains tracked at HEAD. Verify with `git ls-files <old-glob>`
+  before reporting success.
