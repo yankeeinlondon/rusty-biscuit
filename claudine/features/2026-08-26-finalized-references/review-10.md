@@ -59,6 +59,8 @@ evidence on native Windows. None is present for the final tree. Level 3 is not
 applicable because this feature specifies no OS-keyboard, mouse, paste, IME,
 or terminal-input-encoder behavior.
 
+DECISION: we will close this without this evidence for now; evidence will be claimed during cicd
+
 ## Requirement Verification Matrix
 
 | Requirement | Strongest evidence reviewed | Assessment |
