@@ -102,11 +102,16 @@ root is removed when the last plan clone drops — after the lease's guarded
 `WriteBack` copies changed top-level mirrored files (rotated tokens) back over
 sources that did not change meanwhile; injected MCP config
 (`record_claudine_write`), materializations, excluded and new entries never
-qualify — and a root whose sibling `.lock` is free is swept by the next launch
-without write-back. A write-back that fails (`WriteBackOutcome::failed`) makes
-`OverlayLease::release` return `OverlayRelease::Retained`: the root is kept, a
-sibling `<root>.retained` marker (which the sweep honors) and a stderr notice
-name the recoverable copy's path, never its contents. Legacy `~/.claudine/<agent-offset>`
+qualify — and a root whose sibling `.lock` exists and is free is swept by the
+next launch without write-back. A write-back that fails, including an overlay
+metadata (other than `NotFound`), source-read, or fingerprint error
+(`WriteBackOutcome::failed`), makes `OverlayLease::release` return
+`OverlayRelease::Retained`: the root is kept and protected by renaming its lock
+file to `<root>.retained` under the held lock (fallbacks: remove the lock file,
+then create the marker; a lockless or marked root is never swept), and the
+marker plus a stderr notice name the recoverable copy's path, never its
+contents. The filesystem calls go through the crate-private `OverlayIo` seam so
+unit tests inject each failure on every OS. Legacy `~/.claudine/<agent-offset>`
 storage is never touched. Every debug spawn re-checks the home variables
 in `exec/spawn/setup.rs::debug_assert_child_env`. Proxy, retry, and resume
 rebuilds restore the baseline's selector values before applying the target's

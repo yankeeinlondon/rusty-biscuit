@@ -253,7 +253,7 @@ impl WriteBack {
             Ok(overlay) => overlay,
             // A removal inside the overlay is not propagated.
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(_) => return Ok(None),
+            Err(error) => return Err(error),
         };
         if !overlay.is_file() || is_claudine_write(&entry.overlay) {
             return Ok(None);
