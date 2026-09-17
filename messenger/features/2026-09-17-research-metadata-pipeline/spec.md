@@ -3,9 +3,17 @@ status: draft
 created: 2026-09-17
 updated: 2026-09-17
 area: messenger
+clarified: true
+needs_rulings: false
+clarified_by: codex/default
 packages:
     - messenger
     - messenger-cli
+    - claudine-cli
+references:
+    spikes/orchestration/findings.md: >-
+        Records native Claudine worker-input separation and per-child timeout observations.
+        Distinguishes those observations from a limited retained-budget prototype and identifies untested production behavior.
 ---
 
 # Provider Research Metadata Pipeline
@@ -91,6 +99,8 @@ Proposed artifacts, relative to `messenger/`:
 The roster owns identity and coverage; research owns external facts; Rust adapters own implemented behavior. Generated artifacts must identify their inputs and must not be edited manually.
 
 Implement typed loading and deterministic projection in the existing `messenger` library, with maintenance commands in `messenger-cli`. Keep schema/orchestration dependencies outside the normal send path; use an opt-in maintenance feature if needed. Do not add Claudine as a runtime dependency of Messenger. Claudine is the external research orchestrator.
+
+Implement shared per-platform execution budgeting as a narrow orchestration extension in `claudine-cli`, reusing its worker launch and cancellation machinery. Messenger owns research records, validation, and approval policy. Do not add a second Messenger-specific worker coordinator or a generic research framework. Further internal module placement belongs to implementation planning.
 
 The first catalog serves offline reporting and future integration. Ordinary builds and sends require no network, research agent, research workspace, or automatic catalog refresh. Wiring selected constraints into delivery behavior belongs to the follow-up truncation work.
 
@@ -458,11 +468,13 @@ An inaccessible source must be reported rather than counted as successfully rech
 
 Before live research starts, require configured per-platform limits for elapsed time and agent invocations. Count an invocation as an agent launch, not each internal model request. All three research passes, the independent evidence reviewer, and recovery attempts share the same platform budget. Process one platform at a time initially. The existing maximum of two recovery attempts remains in force and does not provide extra budget.
 
+Charge active workflow time, including research, fetching sources, validation, independent agent review, orchestration, and automatic waits or backoff. Pause charging only when the run is explicitly stopped or suspended for human approval or operator resumption. Retain consumed allowance across retries and restarts; a crash must not silently refund consumed time or invocations. Additional budget requires a separate operator decision. Implementation planning defines the persistence and recovery mechanism for these semantics.
+
 No numeric time or invocation defaults are established by this specification; values must be supplied before a live run. Optional token or spending limits may be used where the configured tooling can enforce them. Agent-invocation and elapsed-time limits do not guarantee a dollar ceiling. At exhaustion, stop dispatching further work and attempt to stop in-flight work; report any cancellation limitations or continuing charges rather than claiming that cancellation necessarily stops remote processing or billing.
 
 Record the incomplete stage, consumed budget, and stop reason. Preserve the previous accepted baseline and a resumable candidate. Exhausted work cannot be relabeled as an acceptable investigated unknown, and resumption must not silently receive a new budget.
 
-`messenger-cli` validates and reports run configuration; Claudine orchestrates the workers and enforces the shared execution limits. The `messenger` library independently validates completeness and eligibility for acceptance, without trusting an agent exit code. The feasibility of enforcing these controls with the existing orchestration tooling still needs verification during risk assessment and implementation planning.
+`messenger-cli` validates and reports run configuration; the narrow `claudine-cli` orchestration extension owns worker launches and shared budget accounting. The `messenger` library independently validates completeness and eligibility for acceptance, without trusting an agent exit code. The shared execution limits require coordination beyond the observed per-child timeout.
 
 ### Independent platform publication
 
@@ -563,7 +575,7 @@ The implementation must work on macOS, Linux, native Windows, and WSL2. Use port
 20. Every integration has explicit inbound-text scope, question-kind coverage, and form-packaging findings or gaps. Fixtures distinguish send-only interfaces, callback-only reception, conditional text visibility, and supported companion-interface combinations; no capability is inherited merely from a platform name.
 21. Structured-question fixtures cover affirmative/negative versus cancellation, single versus multiple selections, unknown/stale option IDs, responder/correlation fields, anonymous aggregate results, and callbacks versus link buttons. Text interpretation cannot be projected as a native structured reply.
 22. Form fixtures distinguish one multi-field submission, independent controls in one message, sequential questions, and external forms. They preserve absent/empty/canceled distinctions, field types, lifecycle deadlines, user-action prerequisites, and research-only implementation gaps. Lifecycle replay uses sanitized local fixtures and fake transports, with no live listener or recipient interaction.
-23. Run `just test` and `just lint` in `messenger/` for implementation changes, plus checks enabling the maintenance feature and all affected chat providers because ordinary local recipes do not cover every feature combination. Use nextest through the repository recipes. Tests must not focus terminal/browser windows. This spec-only change does not require Rust tests.
+23. Run `just test` and `just lint` in `messenger/` for implementation changes, plus checks enabling the maintenance feature and all affected chat providers because ordinary local recipes do not cover every feature combination. Run the corresponding package-area checks in `claudine/` for its orchestration extension. Use nextest through the repository recipes. Tests must not focus terminal/browser windows. This documentation-only change does not require Rust tests.
 24. Fake-worker lifecycle tests verify that independent discovery receives identification and shared questions/schema without previous prose or curated links; reconciliation receives discovery output, curated sources, and previous research. Discovery suggestions include what each source contributed, and their presence alone cannot make a claim authoritative or add the URL to the curated roster.
 25. Version fixtures distinguish current stable and public preview versions, provider API and SDK/bridge releases, unknown dates, and established unversioned APIs versus unresearched versioning. Refresh fixtures preserve earlier chronology entries and require evidence for corrections without requiring exhaustive historical backfill.
 26. Lifecycle fixtures place the delta phase after validation and before promotion. Before/after fixtures cover the fixed suspicious-change flags, initial research with no accepted baseline, changed supporting evidence at the same URL, and substantive prose changes with unchanged typed values. Mechanical comparisons and independent-agent conclusions remain distinguishable; a new API version alone cannot validate a changed constraint or capability, and unresolved evidence cannot become an approval.
@@ -577,17 +589,27 @@ The implementation must work on macOS, Linux, native Windows, and WSL2. Use port
 34. Access-policy fixtures distinguish public unauthenticated research and documented project dependencies from actions requiring separate approval. Unchanged-renewal fixtures preserve accepted prose; proposed rewrites do not bypass review. Interrupted-publication checks demonstrate that a usable, internally consistent accepted snapshot remains available.
 35. Retention fixtures keep accepted explanatory evidence durable while candidate, rejected, failed, and routine-renewal records remain local. Cleanup previews identify the exact removals under the configured age threshold, initially 30 days, and disclose lost resumability. Explicit cleanup protects active runs, awaiting-review candidates, and necessary accepted evidence; it performs neither unattended deletion nor automatic Git publication.
 36. Source-access fixtures record attempts for every curated source and distinguish successful review from inaccessible sources. Failed checks prevent automatic renewal, completed accountable gaps remain eligible for human review, and exhaustion remains incomplete. Stored fixtures and review records contain only the necessary attribution and structured findings, without raw transcripts or wholesale social threads.
+37. Claudine budget lifecycle fixtures charge active research, fetching, validation, review, orchestration, and automatic waits/backoff; explicit stopped or suspended human-approval/operator-resumption periods do not consume time. Retry, restart, and crash-recovery fixtures preserve consumed allowances without silent refunds, and extra budget requires a separately recorded operator decision.
 
 Keep deterministic research checks within existing test coverage unless a distinct CI question justifies a new cell. Live fleet research is an explicit maintenance operation, not a CI dependency. Implementation ends ready for review; the author owns moving this feature to `_completed`.
 
+## Spike Findings
+
+The [orchestration feasibility spike](spikes/orchestration/findings.md) exercised the installed Claudine 0.1.0 executable on macOS; its build revision was not verified. Four separate workers received distinct prepared inputs, with prior prose and curated-link markers absent from discovery and present in reconciliation. The native timeout applied to each child rather than the whole workflow. Local-child cancellation was observed, not cancellation of remote model work or billing.
+
+A separate experimental coordinator retained invocation counts and recorded consumed time across restart and refused new work once those saved allowances were exhausted. This establishes a limited retained-budget prototype, not native Claudine workflow budgeting, in-flight shared-deadline enforcement, or crash-safe accounting. The experiment did not decide pause accounting; the subsequent human ruling selected the active-workflow clock specified above.
+
+Inline-compose isolation, production agent tool/context access, remote cancellation, other operating systems, and multi-artifact publication were not verified. The unchanged fixture baseline was only a sentinel, not a publication test. No production architecture follows automatically from the experiment.
+
 ## Implementation Planning and Verification Items
 
-No known human rulings remain from clarification; risk assessment and final review may identify additional questions. The following implementation choices and verification work remain:
+No known human rulings remain before planning and implementation. The following implementation choices and verification work remain:
 
-- Verify that existing orchestration can isolate discovery inputs, account for all agent invocations, enforce shared time limits, and report cancellation limits accurately.
+- Verify production discovery-input isolation and implement complete invocation accounting, shared-time enforcement, cancellation reporting, and recovery using the selected ownership and clock semantics.
+- Exercise inline-compose and the required operating systems; the spike's local Unix fixture is not production cross-platform evidence.
 - Select a publication mechanism that preserves an internally consistent accepted snapshot across interruptions and supports compatible prior-platform reuse.
 - Choose repository review-artifact paths and local working-record locations, including inspection and previewed cleanup that protects accepted evidence and pending review.
 - Supply explicit time and invocation limits before any live research run; no such numeric values have been selected during clarification.
 - Exercise the schema and reviewed implementation mappings against the planned provider pilots, including explicit uncertainty and relevant-input fingerprint invalidation.
 
-These items do not authorize starting live research during this clarification task. The document remains awaiting risk assessment and finalization.
+These items do not authorize starting live research during this clarification task. Clarification is complete; the specification is ready for implementation planning and author review.
