@@ -11,6 +11,7 @@ log: claudine/fixes/2026-09-12-shadow-home/implementation-log.md
 description: A **fix** review of `2026-09-12-shadow-home/spec.md`
 fix: 2026-09-12-shadow-home/review-4.md
 previous: 2026-09-12-shadow-home/review-3.md
+next: 2026-09-12-shadow-home/review-5.md
 findings:
     - "[medium] Unwritable-storage L1 test silently passes when its premise is unavailable"
 ---
