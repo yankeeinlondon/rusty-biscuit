@@ -89,11 +89,9 @@ pub(crate) fn resolve_model_and_validate(
     };
 
     match &source {
-        // Every source is delivered explicitly, a value read from the
-        // provider's own configuration included. Claudine resolves the model in
-        // its own environment but launches the child in a rewritten one (repo
-        // isolation replaces `HOME`; MCP modes redirect provider config), so a
-        // provider asked to rediscover its default can silently run a different
+        // Every source is delivered explicitly, including a value read from the
+        // provider's own configuration. Provider overlays and MCP modes can
+        // redirect provider config, so rediscovery could select a different
         // model — or none — than the one Claudine reports.
         Some(resolved) => {
             let mut env_overrides = Vec::new();

@@ -636,9 +636,9 @@ fn launch_env_overrides(
 ///
 /// `cli_model` is the explicit `--model`, which stays authoritative over any
 /// target frontmatter `model:`. The model is re-resolved against the target's
-/// own [`EffectiveSelectionHints`] with the same catalog validation a direct
-/// invocation performs, so a target that pins its own valid `model:` resolves
-/// it, and an invalid one falls back exactly as it would directly.
+/// own [`EffectiveSelectionHints`] with the same catalog semantics as a direct
+/// invocation: the catalog may order list hints and warn on an unrecognized
+/// value during initial preparation, but it never demotes the document model.
 pub(super) fn rebuild_target_launch(
     intent: &LaunchRebuildIntent,
     cli_model: Option<&str>,
