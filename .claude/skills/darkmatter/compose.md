@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-3dadcf4453a273ba
+hash: ef46db3751d8e999-9cfed90a3795c28a
 last_updated: 2026-09-16
 ---
 # Compose Pipeline
@@ -399,6 +399,28 @@ Inline: `{{ evaluated }}`             # always interpolated
 {{ not_evaluated_by_default }}        # skipped unless opted in
 ```
 ```
+
+### Braces Inside String Literals
+
+A quoted literal inside an expression is inert text. The body and mixed
+frontmatter strings rescan their output, so `{{ "in {{ area }}" }}` happens to
+resolve there. A value that is **exactly one** `{{ … }}` span takes the
+whole-value path, evaluates once, and never rescans, so the braces survive
+raw. Claudine lifecycle values are single-pass and are refused before launch.
+Build strings with `+` (`{{ area ? "in " + area : "at root" }}`), which works
+on every surface. `lint_expression` / `lint_spanned`
+(`compose::expression::lint`) find the defect in authored source and return a
+proven-equivalent `+` rewrite. `is_whole_value_span` is the shared syntactic
+classifier, and the caller decides whether its surface is single-pass. See
+`darkmatter/docs/inline/interpolation.md#braces-inside-string-literals`.
+
+### Escaping an Opener
+
+`\{{` (an odd run of backslashes before `{{`) and `\{\{` are not spans in any
+scan mode. An even run (`\\{{`) escapes itself, so the span stays active.
+Compose keeps every backslash, and the Markdown renderer resolves the escape.
+Use it for prose that quotes Handlebars, Jinja, or similar syntax. Use
+`{{{ … }}}` when the composed output itself should contain `{{ … }}`.
 
 ## ComposeReport
 
