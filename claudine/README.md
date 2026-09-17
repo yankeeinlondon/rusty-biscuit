@@ -118,8 +118,10 @@ All three commands share a wrapper-grade execution pipeline with full support fo
 Provider selection uses explicit flags (`--claude`, `--codex`, etc.), frontmatter hints, config favorites, or interactive chooser. Use `-i` for interactive sessions, `--exclude` to filter providers.
 
 Live `compose` and `inline-compose` documents with `initialize` can create
-files their bodies include: Claudine approves initialization shell commands,
-runs initialization, then rereads, audits, and composes the body. Dry runs do
+files their bodies include: Claudine runs shell-free initialization, then
+rereads, audits, and composes the body. Initialization shell actions, bootstrap
+frontmatter shell expansion, and shells in early catch handlers are forbidden;
+`-y`, whitelists, and cached approvals cannot override this restriction. Dry runs do
 not initialize. Sequence includes must exist before the sequence starts. See
 [initialization ordering](./docs/topics/composition.md#documents-that-declare-initialize).
 

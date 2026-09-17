@@ -8,7 +8,7 @@ prompt: |-
 
   After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
 last_updated: 2026-09-17
-hash: 7738d51f4cfa73e2-a7c60bab36e012cb
+hash: 7738d51f4cfa73e2-a4d63f95f040887d
 ---
 Let me explore the composition-related source code and documentation to trace the exact execution flows.Now let me read the existing composition topic doc and the key source files for precision:Now let me read the critical execution pipeline files:Now let me read the remaining portions of the composition executor to get the full execution pipeline:Now I have a comprehensive understanding of all three flows. Let me compose the complete Markdown body.Now I have all the details needed. Let me produce the comprehensive Markdown body content:Now I have all the details. Let me compose the full Markdown document body:
 
@@ -935,8 +935,9 @@ Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure
 ```
 
 Live `compose` and `inline-compose` documents with an authored `initialize`
-key instead bootstrap the frontmatter/lifecycle surface, approve initialization
-shell commands, run initialization once, and reread before body discovery,
+key instead bootstrap a shell-free frontmatter/lifecycle surface, reject
+initialization shell actions regardless of approvals, run initialization once,
+and reread before body discovery,
 full shell audit, and the schema verdict. Newly adopted proxy targets also
 enter staged initialization. The stabilized body may include files just
 created by initialization. Dry runs do not initialize; sequence static preflight

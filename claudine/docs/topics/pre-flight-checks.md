@@ -23,10 +23,11 @@ Prompt resolved → Pre-flight shell approval → Provider launches
 ### Initialization before body discovery
 
 Live `compose` and `inline-compose` documents with an authored `initialize`
-key use a frontmatter-only bootstrap. A narrow gate approves initialization
-shell commands before the event runs. The stabilized reread then discovers
-body dependencies and audits their commands plus the remaining lifecycle
-surface, reusing cached approvals. This permits initialization to create an
+key use a shell-free frontmatter-only bootstrap. Initialization shell actions
+and bootstrap shell expansion are forbidden regardless of approvals. Early
+catch handlers also cannot execute shells before successful preflight reaches
+`start`. The stabilized reread then discovers body dependencies and audits
+their commands plus the remaining lifecycle surface. This permits initialization to create an
 include without weakening condition-blind discovery: commands in false
 branches still require approval. Newly adopted proxy targets use staged boot
 as well; a missing include after initialization still blocks launch.
@@ -65,7 +66,10 @@ Each command is checked against shell policy (blacklist, whitelist, approval cac
 
 ### Phase 2: Lifecycle Shell Commands
 
-After composition, Claudine walks every reachable lifecycle stack in the effective frontmatter and discovers its `shell` actions — positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions across `initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, and `loop`.
+Shell actions in `initialize` are validation errors, including false branches;
+whitelists, cached approvals, and `--yolo` cannot allow them.
+
+After composition, Claudine walks every reachable lifecycle stack in the effective frontmatter and discovers its `shell` actions — positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions across `start`, `success`, `blocked`, `failure`, `finalize`, and `loop`.
 
 These commands flow through the same `resolve_shell_approvals` function and the same shared approval cache. Any command already approved in phase 1 is a cache hit. Only genuinely new commands trigger additional prompts.
 

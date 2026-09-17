@@ -113,15 +113,19 @@ include is not.
 1. `prepare_bootstrap` composes only the frontmatter/lifecycle surface using
    Darkmatter's `ComposeOptions::only_frontmatter_surface()`. The result is a
    `BootstrapPreparation`, not a completed prompt.
-2. Approve every potentially selected initialization shell command.
+2. Reject initialization shell actions and bootstrap frontmatter shell expansion.
+   Approvals, `--yolo`, false conditions, and `no_error` cannot allow them.
 3. Run `initialize` once. A skip, error, or proxy handoff leaves the abandoned
    body's dependencies unread.
 4. Reread the stabilized document with caller inputs, provenance, document
    epoch, and resolution context retained.
-5. Discover and approve body and lifecycle commands, reusing the narrow gate's
-   approvals; complete canonical composition and the schema verdict. Only then
+5. Discover and approve body and remaining lifecycle commands; complete
+   canonical composition and the schema verdict. Only then
    may the provider receive the prompt. An include still missing at this point
    fails with the ordinary typed diagnostic and `blocked`/`finalize` routing.
+
+Early blocked/failure/finalize handlers remain shell-free until successful
+preflight reaches `start`. Non-shell initialization effects remain available.
 
 The B4–B6 tables describe the eager path; staged documents defer the body audit
 and full preparation until step 4 above. Loop seed preparation uses the

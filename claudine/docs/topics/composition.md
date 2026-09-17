@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-a3dc90903693a828
+hash: ef46db3751d8e999-2661c99b6d811775
 last_updated: 2026-09-17
 ---
 # Claudine Composition
@@ -125,7 +125,7 @@ claudine compose --codex @commit.md
 Steps:
 
 1. **Resolve** — resolve the file reference using `biscuit-file::FileReference`. A bare **implicit** path (`foo.md`, `dir/foo.md`) resolves from the source document's directory first, then the repository root; an **explicit** `./`/`../` path resolves from the source directory only; `@` is a magic-root search, `&` pins to the repository root, `^` searches package root then package-area root then repository root, `~/` is the user's home, `vault:` a configured vault, `%` a recursive modifier, and absolute paths resolve to themselves
-2. **Initialize and compose** — for live staged documents, bootstrap the frontmatter, approve initialization shell commands, run `initialize`, and reread before body discovery; then audit and compose through Darkmatter (see [Documents That Declare `initialize`](#documents-that-declare-initialize))
+2. **Initialize and compose** — for live staged documents, bootstrap shell-free frontmatter, reject initialization shell actions, run `initialize`, and reread before body discovery; then audit and compose through Darkmatter (see [Documents That Declare `initialize`](#documents-that-declare-initialize))
 3. **Prepare** — extract the effective (composed) frontmatter; this is the single source of truth for all downstream decisions
 4. **Select provider** — choose which agentic CLI to use (see Provider Selection below)
 5. **Execute** — run a non-interactive session (or interactive with `-i`) through the wrapper-grade pipeline
@@ -623,7 +623,7 @@ Composition runs execute the full seven-event lifecycle declared in the prompt's
 initialize → start → (success | blocked | failure) → finalize → loop
 ```
 
-- **`initialize`** fires after the prompt file is resolved and frontmatter has parsed, but after its narrow shell approval gate and before body discovery, full shell pre-flight, and the schema verdict. A `skip` control action here opts the whole document out cleanly.
+- **`initialize`** fires after the prompt file is resolved and frontmatter has parsed, before body discovery, shell preflight, and the schema verdict. Shell actions and bootstrap frontmatter shell expansion are forbidden regardless of approval. A `skip` control action here opts the whole document out cleanly.
 - **`start`** fires after schema validation and the lifecycle shell-audit pass succeed, immediately before provider invocation.
 - **`success`/`blocked`/`failure`** are the terminal events. Schema-validation failures and shell-audit denials produce `blocked`; provider errors produce `failure`.
 - **`finalize`** fires once per iteration, immediately after the terminal event.
@@ -770,7 +770,7 @@ frontmatter and lifecycle inputs through Darkmatter's shared projection; it
 retains document identity, caller provenance, and the captured resolution
 context, but produces no composed prompt and never follows body includes.
 
-The order is: bootstrap → approve initialization shell commands → run
+The order is: shell-free bootstrap → reject initialization shell actions → run
 `initialize` once → reread the stabilized document → discover and approve the
 full body/lifecycle shell surface → finish canonical preparation and the schema
 verdict → launch. Initialization can therefore create an absent file used by
@@ -905,7 +905,7 @@ Retry and resume want opposite things from that rebuild. A **retry** opens a fre
 The target's stabilized frontmatter is the basis for the target's decisions. What is rebuilt per target today:
 
 - **Context** — the prepared document stores the exact `ComposeContext` it composed against, captured once per document epoch from the invocation's launch context (see [Launch-Anchored Prepared Context](#launch-anchored-prepared-context)) with the resolved target's identity overrides applied. Body interpolation, effective frontmatter, lifecycle DM2 lookup, schema and file evaluation, and shell preflight all read that one stored snapshot; nothing recaptures ambient context at runtime, which matters because the wrapper deliberately moves the process CWD to the repo root. `current.ctx.*` remains live as a late-binding surface, and is explicitly *not* a fallback for a missing prepared `ctx.*`.
-- **`initialize` and shell** — the target runs its own `initialize` behind a narrow safety gate that approves every potentially-selected `initialize` shell command first ("initialize before full pre-flight" never means "execute unapproved shell"), then rereads the stabilized target so initialize-time mutations are visible, then runs the full audit over every remaining lifecycle and template shell surface, reusing approvals the narrow gate already granted rather than re-prompting. An `initialize` proxy may chain another proxy; the chain stabilizes before any launch.
+- **`initialize` and shell** — the target runs shell-free `initialize`, rereads the stabilized target so initialization mutations are visible, and then audits the remaining lifecycle and template shell surfaces. Shell actions in initialization and shell expansion in bootstrap frontmatter are forbidden regardless of approvals. Early failure/finalize handlers remain shell-free until successful preflight reaches `start`. An `initialize` proxy may chain another proxy; the chain stabilizes before any launch.
 - **Schema and diagnostics** — the target's `$schema` validates the target's effective frontmatter (including any `with:` overlay), and a given failure has one typed identity whichever route reached it.
 - **Launch identity** — when the handoff surfaces to the command-owned coordinator, `compose/prep.rs::prepare_and_run_active_document` re-prepares the target as a fresh document and re-enters the production selection/MCP/argv pipeline, rebuilding from the target's own frontmatter under explicit-CLI precedence: provider selection, profile/binary sub-selection, the argv entrypoint and flags, MCP runtime injection, the effective child environment, interactivity and structured-output mode, dispatch/correlation configuration, model selection, document-loop ownership/recognition, child CWD, and system-prompt delivery. A proxied target therefore selects its authored `agent:`/`model:`, gets its own provider binary and MCP server set, and acquires its own `loop:`, matching a direct invocation. Verified by L2 equivalence rows including a provider *switch* (`level2_lifecycle_equivalence_target_launch_bundle_matches_direct_run`, router `goose` → target `codex`; `level2_lifecycle_equivalence_target_mcp_injection_matches_direct_run`, router `codex` → target `gemini`).
 
@@ -1118,11 +1118,11 @@ See [Sequences](flow-control/sequences.md) for the complete authoring and execut
 Both commands share canonical preparation. Live staged entry uses this order; direct documents without `initialize` retain eager preparation:
 
 ```
-Resolve → Bootstrap → Narrow approval → Initialize → Stabilized reread → Full audit / Prepare → Start → Launch → (Success | Blocked | Failure) → Finalize → Loop
+Resolve → Shell-free bootstrap → Initialize → Stabilized reread → Full audit / Prepare → Start → Launch → (Success | Blocked | Failure) → Finalize → Loop
 ```
 
 - **Resolve**: `composition::resolve_composition_source()` loads the Markdown file
-- **Bootstrap and initialize**: `prepare_bootstrap()` produces only the effective frontmatter/lifecycle surface. The coordinator approves initialization shell commands, dispatches `initialize` once, and rereads before full body discovery; `skip` exits before reading the body. Provider selection supplies early-binding context before composition.
+- **Bootstrap and initialize**: `prepare_bootstrap()` produces only the effective frontmatter/lifecycle surface. The coordinator rejects initialization shell actions and bootstrap shell expansion, dispatches `initialize` once, and rereads before full body discovery; `skip` exits before reading the body. Provider selection supplies early-binding context before composition.
 - **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))
 - **Prepare**: `composition::prepare::service::prepare_document()` — the canonical preparation service every entry reason routes through (direct, proxy target, retry, resume, loop iteration) — composes through Darkmatter via `prepare_direct()` / `prepare_inline()` with the pre-approved command set and produces a `PreparedComposition` with `effective_frontmatter`. There is exactly one composer per mode; see [Document Handoffs](#document-handoffs-and-the-equivalence-contract)
 - **Start**: `LifecycleRunGuard::emit_start_once()` fires the `start` lifecycle event after schema validation and shell audit pass
