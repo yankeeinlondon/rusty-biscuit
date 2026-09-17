@@ -104,6 +104,26 @@ Darkmatter falls back to `ctx.<key>`. So `repo` resolves to `ctx.repo`. The
 reserved `doc` namespace is intercepted **before** this fallback, so bare `doc`
 always means the frontmatter object and never falls back to `ctx.doc`.
 
+### Nullable directive targets
+
+Optional schema properties remain nullable until the document or caller binds
+a concrete non-null value. A schema `default(...)` is descriptive metadata; it
+does not install a runtime value and therefore does not make an unbound target
+non-null. Use `required`, provide a concrete binding, or guard the directive:
+
+```md
+::block when="file_exists(log)"
+::file {{log}}
+::end-block
+```
+
+For a whole-value `::file`, `::code`, or `::url` target, evaluation to `null`
+or `""` skips the directive with a compose warning. The guard above is applied
+before body interpolation, so it removes the directive and suppresses that
+warning. DMLS warns on statically nullable unguarded targets without executing
+the expression; unsupported expression or schema shapes remain unknown rather
+than being guessed nullable or safe.
+
 ## Operator Precedence
 
 From highest to lowest:

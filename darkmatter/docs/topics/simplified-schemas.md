@@ -64,6 +64,19 @@ A **constraint** is the a way to further _constrain_ a base type. There are some
 
 For a full list of the _constraints_ available (and what _types_ can use them), you can read: [Simplified Schema Constraints](./simplified-schema-constraints.md).
 
+#### Defaults, optional values, and runtime presence
+
+Properties are optional unless their definition includes `required`. An
+unbound optional property therefore remains nullable at a use site, including
+when its definition contains `default(...)`: schema defaults are metadata and
+are not applied as runtime values. Only `required` or a concrete non-null
+frontmatter/caller binding establishes that a property is non-null.
+
+This distinction matters when an expression supplies a directive target. DMLS
+warns about an unguarded whole-value target such as `::file {{log}}` when
+`log` is optional. Bind `log`, declare it `file(required)`, or guard the use
+with `::block when="file_exists(log)"`.
+
 ### Descriptors
 
 All schema properties can add a `-> {description}` at the end of their definition to provide a prose description of the property.

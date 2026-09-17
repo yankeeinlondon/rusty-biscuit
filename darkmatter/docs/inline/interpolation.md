@@ -10,6 +10,31 @@ Interpolation happens in two stages during the compose pipeline (see the [pipeli
 Both stages also expose the [read-side functions](../topics/darkmatter-expressions.md#read-side-functions) (`file_exists`, `frontmatter`, `absolute`, `relative`, …) and the `doc.*` namespace — the same grammar resolves identically across every surface.
 
 Body interpolation runs after text replacement and page blocks have been applied. Within the body, all handlebar placeholders like `{{foo}}` or `{{bar}}` are replaced with their resolved values.
+
+### Nullable directive targets
+
+A whole-value `{{ ... }}` target on `::file`, `::code`, or `::url` has special
+absence semantics. If it evaluates to `null` or the empty string, Darkmatter
+skips that directive and records a compose warning instead of turning the
+value into an authored empty target. Literal missing targets, `::file ""`, and
+mixed targets such as `::file "{{dir}}/log.md"` keep their ordinary syntax and
+path behavior.
+
+Page blocks run before body interpolation, so the recommended optional-file
+form removes the directive before its target is evaluated and suppresses the
+runtime warning:
+
+```md
+::block when="file_exists(log)"
+::file {{log}}
+::end-block
+```
+
+Shell-approval preflight remains condition-blind: it scans every branch for
+commands, but an evaluated-absent target contributes no transclusion edge.
+Targets that depend on pending frontmatter shell expansion fail closed before
+approval rather than disappearing and later revealing unapproved content.
+
 - **Fallback Values**
     - if a template placeholder in the document refers to a frontmatter property that has no value then the default value of an empty string will be used.
     - this default is suitable for some situations but not others so you are allowed to express a fallback you'd like to use instead with the following syntax:
