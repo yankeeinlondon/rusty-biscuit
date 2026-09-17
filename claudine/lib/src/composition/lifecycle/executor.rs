@@ -45,6 +45,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use biscuit_file::{FileReference, FileReferenceKind};
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::effects::EffectEngine;
 use darkmatter::markdown::compose::expression::{
@@ -1323,6 +1324,10 @@ impl StackExecutionContext<'_> {
                 .map(scalar_string)
                 .ok_or_else(|| dispatch_err(format!("`{verb}` is missing a required argument")))
         };
+        let path = |idx: usize| -> Result<String, ActionFailure> {
+            let raw = s(idx)?;
+            self.resolve_effect_path(verb, &raw)
+        };
         let v = |idx: usize| -> Result<Value, ActionFailure> {
             values
                 .get(idx)
@@ -1356,14 +1361,14 @@ impl StackExecutionContext<'_> {
             "prepend_frontmatter" => engine.prepend_frontmatter(&s(0)?, &s(1)?, v(2)?),
             "ensure_file" => {
                 if values.len() >= 2 {
-                    engine.ensure_file_with_content(&s(0)?, &s(1)?).map(Value::String)
+                    engine.ensure_file_with_content(&path(0)?, &s(1)?).map(Value::String)
                 } else {
-                    engine.ensure_file(&s(0)?).map(Value::String)
+                    engine.ensure_file(&path(0)?).map(Value::String)
                 }
             }
-            "ensure_dir" => engine.ensure_dir(&s(0)?).map(Value::String),
-            "append_line" => engine.append_line(&s(0)?, &s(1)?).map(Value::String),
-            "append_jsonl" => engine.append_jsonl(&s(0)?, v(1)?).map(Value::String),
+            "ensure_dir" => engine.ensure_dir(&path(0)?).map(Value::String),
+            "append_line" => engine.append_line(&path(0)?, &s(1)?).map(Value::String),
+            "append_jsonl" => engine.append_jsonl(&path(0)?, v(1)?).map(Value::String),
             "http_post" => engine.http_post(&s(0)?, s(1)?.into_bytes()),
             other => return Err(dispatch_err(format!("unknown side effect `{other}`"))),
         };
@@ -1375,6 +1380,53 @@ impl StackExecutionContext<'_> {
         })?;
         self.mirror_frontmatter_mutation(verb, &values, working);
         Ok(out)
+    }
+
+    /// Resolve a document-authored mutation target through the same captured
+    /// file-reference context used by composition.
+    ///
+    /// Existing targets follow ordinary document resolution precedence. For a
+    /// missing implicit-relative target, creation stays anchored to the
+    /// mutation root, preserving the effect engine's existing relative
+    /// mutation policy; other reference kinds use their first document-scoped
+    /// candidate. A later transclusion therefore resolves the same identity.
+    /// Callers without a request snapshot retain the legacy behavior.
+    fn resolve_effect_path(&self, verb: &str, raw: &str) -> Result<String, ActionFailure> {
+        let Some(request_context) = self.file_resolution_context else {
+            return Ok(raw.to_string());
+        };
+        let reference = FileReference::new(raw).map_err(|error| {
+            ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(verb, &error))
+        })?;
+        let document_context = request_context.for_source(self.source_path);
+        let mutation_context = request_context.for_base(self.effect_engine.mutation_root());
+        let resolved = reference
+            .resolve_in_context(&document_context)
+            .map_err(|error| {
+                ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(verb, &error))
+            })?;
+        let path = match resolved {
+            Some(path) => path,
+            None => reference
+                .candidate_plan(if reference.class().kind == FileReferenceKind::ImplicitRelative {
+                    &mutation_context
+                } else {
+                    &document_context
+                })
+                .map_err(|error| {
+                    ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(verb, &error))
+                })?
+                .into_iter()
+                .next()
+                .map(|candidate| candidate.path().to_path_buf())
+                .ok_or_else(|| {
+                    ActionFailure::Dispatch(LifecycleErrorInfo::from_action_failure(
+                        verb,
+                        format!("file reference `{raw}` has no local mutation target"),
+                    ))
+                })?,
+        };
+        Ok(path.to_string_lossy().into_owned())
     }
 
     /// Apply one `set` write to the invocation-local runtime layer and report
