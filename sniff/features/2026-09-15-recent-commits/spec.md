@@ -4,6 +4,8 @@ needs_rulings: false
 clarified_by: opencode/zai-coding-plan/glm-5.3
 references:
   spike-linking-cost.md: Benchmark of the per-remote containment engine reused by Decision 9, measuring pushed/unpushed/old-window scenarios across monorepo, fork-style, and 165k-commit checkouts; establishes the priority-ordered visit budget that bounds the walk.
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Recent Commits — Redesign Spec
