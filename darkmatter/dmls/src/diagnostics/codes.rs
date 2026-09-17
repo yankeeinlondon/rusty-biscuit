@@ -6,6 +6,20 @@
 //! (`wiki.*`) by R-8; Phase 4 ships only the Layer-0 Markdown link subset
 //! (`darkmatter.links.*` source, `dm.links.*` codes). The rest are declared
 //! here so later phases add rows without renaming existing ones.
+//!
+//! ## Severity ladder
+//!
+//! A **warning** means the construct *might* be wrong; an **error** means it
+//! *will never work*. The expression family applies it as:
+//!
+//! | Code | Severity | Why |
+//! | --- | --- | --- |
+//! | `dm.expression.malformed`, exactly projected schema-typed frontmatter value | `ERROR` | The schema declares the value is an expression. |
+//! | `dm.expression.malformed`, document-body span | `WARNING` | A body `{{ … }}` is only inferred to be an expression. |
+//! | `dm.expression.unknown_identifier` | `WARNING` | A late-binding global might supply it at runtime. |
+//! | `dm.expression.nested_span_in_literal` | `ERROR` | Its surfaces never re-interpolate the literal. |
+//!
+//! Design: `claudine/fixes/2026-09-13-better-static-analysis/spec.md` (D7).
 
 /// Namespaced diagnostic `source` values (LSP `Diagnostic.source`).
 pub mod source {
@@ -121,6 +135,9 @@ pub mod code {
     /// An interpolation identifier that names no frontmatter key, `ctx.*`,
     /// `env.*`, or expression function.
     pub const EXPRESSION_UNKNOWN_IDENTIFIER: &str = "dm.expression.unknown_identifier";
+    /// A `{{ … }}` span inside a quoted string literal on a single-pass
+    /// lifecycle surface, where it is never interpolated.
+    pub const EXPRESSION_NESTED_SPAN_IN_LITERAL: &str = "dm.expression.nested_span_in_literal";
     /// A fenced-code info string whose language token no grammar recognizes.
     pub const FENCE_UNKNOWN_LANGUAGE: &str = "dm.fence.unknown_language";
     /// A `::shell` / `::shell-block` / `$()` command the shell policy disallows.

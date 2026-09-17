@@ -1811,6 +1811,45 @@ fn dsl_valid_document_has_no_dsl_diagnostics() {
     fixture.shutdown();
 }
 
+/// Opens `body` as a document and returns its `dm.expression.*` diagnostic codes.
+fn body_expression_codes(body: &str) -> Vec<String> {
+    let workspace = LspWorkspace::new();
+    let text = format!("---\ntitle: Escapes\n---\n\n{body}\n");
+    std::fs::write(workspace.path().join("escapes.md"), &text).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("escapes.md")).unwrap();
+    open(&fixture, uri.as_str(), &text);
+
+    let codes = fixture
+        .wait_for_diagnostics(uri.as_str())
+        .iter()
+        .filter_map(|diagnostic| diagnostic["code"].as_str())
+        .filter(|code| code.starts_with("dm.expression."))
+        .map(str::to_string)
+        .collect();
+    fixture.shutdown();
+    codes
+}
+
+#[test]
+fn backslash_escaped_foreign_template_examples_have_no_expression_diagnostics() {
+    // The deprecated single-pipe form documented in
+    // `claudine/docs/topics/unified-events.md` is not Darkmatter syntax.
+    let example = r#"{{env.VAR | "default"}}"#;
+    assert!(
+        body_expression_codes(&format!("Old form: {example}"))
+            .contains(&"dm.expression.malformed".to_string()),
+        "the unescaped control case must be diagnosed"
+    );
+
+    let codes = body_expression_codes(&format!(
+        "Old form: \\{example}, spelled \\{{\\{{env.VAR | \"default\"}}}}, inline `\\{example}`"
+    ));
+    assert!(codes.is_empty(), "escaped examples must be inert: {codes:?}");
+}
+
 /// A schema-declared-but-unset property is a valid body interpolation, and
 /// `json5` / `mermaid` are recognized fenced languages: none of the three emit a
 /// DSL diagnostic. The `spec` property is declared by the inline `$schema` (a

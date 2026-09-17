@@ -6,7 +6,10 @@
 //! base, `rlsp-yaml-parser` (lossless mode) parses it, and the first
 //! document's root mapping is lowered into a flat arena of authored entries
 //! carrying dotted-path, JSON-Pointer, and byte-span (document-relative)
-//! coordinates. No provider ever sees the parser type — everything past this
+//! coordinates. Lowering descends through mappings **and** sequences: every
+//! sequence item is an explicit [`FmEntryRole::SequenceItem`] entry, never a
+//! mapping key with a fabricated key span (design:
+//! `claudine/fixes/2026-09-13-better-static-analysis/spec.md`, D6). No provider ever sees the parser type — everything past this
 //! module is [`FrontmatterAst`] and [`FmEntry`].
 //!
 //! Malformed-YAML policy (R-3): the parser returns positioned errors but no
@@ -18,8 +21,8 @@
 use darkmatter::markdown::extract_frontmatter_block;
 use darkmatter::markdown::span::SourceSpan;
 use rlsp_yaml_parser::loader::{self, LoadError};
-use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::Span as YamlSpan;
+use rlsp_yaml_parser::node::{Node, NodeMeta};
+use rlsp_yaml_parser::{ScalarStyle, Span as YamlSpan};
 
 /// The value shape of one authored frontmatter entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,21 +37,96 @@ pub enum FmValueKind {
     Alias,
 }
 
-/// One authored key/value entry in the frontmatter mapping tree.
+/// How an entry is addressed within its parent collection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FmEntryRole {
+    /// An authored `key: value` pair in a mapping.
+    MappingProperty,
+    /// The item at `index` in a sequence. It has no authored key token.
+    SequenceItem {
+        /// Zero-based position in the parent sequence.
+        index: usize,
+    },
+}
+
+/// The presentation style of an authored scalar — the input to choosing a safe
+/// decoded-to-authored projection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FmScalarStyle {
+    /// An unquoted plain scalar.
+    Plain,
+    /// A `'single-quoted'` scalar.
+    SingleQuoted,
+    /// A `"double-quoted"` scalar.
+    DoubleQuoted,
+    /// A `|` literal block scalar (any chomping or indentation indicator).
+    Literal,
+    /// A `>` folded block scalar (any chomping or indentation indicator).
+    Folded,
+}
+
+/// One typed step of a frontmatter path.
+///
+/// A mapping key literally spelled `0` and sequence item `0` share a pointer
+/// segment but never a typed segment, which is what lets a schema walk consume
+/// an array index against an array type instead of looking up a property.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FmPathSegment<'a> {
+    /// A decoded mapping key.
+    Key(&'a str),
+    /// A sequence item index.
+    Index(usize),
+}
+
+/// Renders typed segments in dotted notation: keys join with `.`, indices are
+/// bracketed (`initialize.stack[0].when`), so a key named `0` stays `.0`.
+///
+/// This is the one dotted formatter; [`FmEntry::dotted`] is built with it.
+pub fn format_dotted(segments: &[FmPathSegment<'_>]) -> String {
+    let mut dotted = String::new();
+    for segment in segments {
+        push_dotted(&mut dotted, *segment);
+    }
+    dotted
+}
+
+fn push_dotted(dotted: &mut String, segment: FmPathSegment<'_>) {
+    match segment {
+        FmPathSegment::Key(key) => {
+            if !dotted.is_empty() {
+                dotted.push('.');
+            }
+            dotted.push_str(key);
+        }
+        FmPathSegment::Index(index) => {
+            dotted.push('[');
+            dotted.push_str(&index.to_string());
+            dotted.push(']');
+        }
+    }
+}
+
+/// One authored entry in the frontmatter tree: a mapping property or a
+/// sequence item.
 ///
 /// All spans are **document-relative** byte offsets (already shifted past the
 /// opening `---` delimiter), so they convert directly through a
 /// [`SourceMap`](crate::source_map::SourceMap).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FmEntry {
-    /// RFC 6901 JSON Pointer to this entry's value (`/style/page/margin`).
+    /// RFC 6901 JSON Pointer to this entry's value (`/style/page/margin`,
+    /// `/tags/1`).
     pub pointer: String,
-    /// Dotted path in authored spelling (`style.page.margin`).
+    /// Dotted path in authored spelling (`style.page.margin`, `tags[1]`).
     pub dotted: String,
-    /// The leaf key segment.
+    /// The decoded path segment: the key for a mapping property, the decimal
+    /// index for a sequence item.
     pub key: String,
-    /// Byte span of the key token.
-    pub key_span: SourceSpan,
+    /// Whether this entry is a mapping property or a sequence item.
+    pub role: FmEntryRole,
+    /// Byte span of the key token; `Some` exactly for a
+    /// [`FmEntryRole::MappingProperty`].
+    pub key_span: Option<SourceSpan>,
     /// Byte span of the value node (for a mapping/sequence, the whole subtree).
     pub value_span: SourceSpan,
     /// The value's shape.
@@ -56,6 +134,12 @@ pub struct FmEntry {
     /// The scalar value text, when [`kind`](Self::kind) is
     /// [`FmValueKind::Scalar`].
     pub scalar: Option<String>,
+    /// The authored scalar style, when [`kind`](Self::kind) is
+    /// [`FmValueKind::Scalar`].
+    pub scalar_style: Option<FmScalarStyle>,
+    /// Whether the value node was authored with an explicit YAML tag (`!!str`,
+    /// `!x`), which can change how its text is resolved.
+    pub tagged: bool,
     /// Index of the parent entry in [`FrontmatterAst::entries`], if nested.
     pub parent: Option<usize>,
     /// Nesting depth (top-level keys are depth 0).
@@ -189,13 +273,17 @@ impl FrontmatterAst {
         self.entry_by_pointer(&pointer_for(path))
     }
 
-    /// The chain of **decoded** key segments from the root down to the entry at
+    /// The chain of **decoded** segments from the root down to the entry at
     /// arena `index`, outermost first.
     ///
     /// This is the structural replacement for splitting
     /// [`FmEntry::dotted`](FmEntry::dotted) on `.`: it walks the authored
     /// [`parent`](FmEntry::parent) chain, so a key such as `build.target` stays
     /// one segment.
+    ///
+    /// A sequence item contributes its decimal index, which addresses exactly
+    /// like a pointer segment but cannot be told apart from a key spelled the
+    /// same way. Schema resolution must use [`path_at`](Self::path_at).
     pub fn key_path_at(&self, index: usize) -> Vec<&str> {
         let mut path = Vec::new();
         let mut cursor = self.entries.get(index);
@@ -207,15 +295,60 @@ impl FrontmatterAst {
         path
     }
 
+    /// The typed path from the root down to the entry at arena `index`,
+    /// outermost first. O(depth).
+    pub fn path_at(&self, index: usize) -> Vec<FmPathSegment<'_>> {
+        let mut path = Vec::new();
+        let mut cursor = self.entries.get(index);
+        while let Some(entry) = cursor {
+            path.push(match entry.role {
+                FmEntryRole::MappingProperty => FmPathSegment::Key(entry.key.as_str()),
+                FmEntryRole::SequenceItem { index } => FmPathSegment::Index(index),
+            });
+            cursor = entry.parent.and_then(|parent| self.entries.get(parent));
+        }
+        path.reverse();
+        path
+    }
+
+    /// Whether the entry at arena `index` is a sequence item or lies beneath
+    /// one. O(depth).
+    pub fn is_in_sequence(&self, index: usize) -> bool {
+        let mut cursor = self.entries.get(index);
+        while let Some(entry) = cursor {
+            if matches!(entry.role, FmEntryRole::SequenceItem { .. }) {
+                return true;
+            }
+            cursor = entry.parent.and_then(|parent| self.entries.get(parent));
+        }
+        false
+    }
+
     /// The key segments of `entry`, outermost first.
     ///
     /// Convenience over [`key_path_at`](Self::key_path_at) for callers holding a
-    /// borrowed entry rather than its arena index.
+    /// borrowed entry rather than its arena index. O(n) through
+    /// [`index_of`](Self::index_of).
     pub fn key_path(&self, entry: &FmEntry) -> Vec<&str> {
         self.index_of(entry).map(|index| self.key_path_at(index)).unwrap_or_default()
     }
 
+    /// The typed path of `entry`. O(n) through [`index_of`](Self::index_of).
+    pub fn path_of(&self, entry: &FmEntry) -> Vec<FmPathSegment<'_>> {
+        self.index_of(entry).map(|index| self.path_at(index)).unwrap_or_default()
+    }
+
     /// The arena index of `entry`, identified by its pointer.
+    ///
+    /// ## Notes
+    ///
+    /// This is a linear scan. Never call it — or [`key_path`](Self::key_path),
+    /// [`path_of`](Self::path_of), [`entry_by_pointer`](Self::entry_by_pointer),
+    /// or [`entry_by_dotted`](Self::entry_by_dotted) — inside a loop over
+    /// [`entries`](Self::entries): sequence descent grows the arena to thousands
+    /// of entries on real documents, and that shape is quadratic. Iterate with
+    /// the index and use [`key_path_at`](Self::key_path_at) /
+    /// [`path_at`](Self::path_at) instead.
     pub fn index_of(&self, entry: &FmEntry) -> Option<usize> {
         self.entries.iter().position(|candidate| candidate.pointer == entry.pointer)
     }
@@ -238,7 +371,11 @@ impl FrontmatterAst {
             .iter()
             .filter(|entry| match entry.kind {
                 FmValueKind::Mapping => true,
-                FmValueKind::Sequence => entry.key_span.end <= line_start,
+                // An item sequence has no key token; its own line is its value.
+                FmValueKind::Sequence => {
+                    entry.key_span.as_ref().map_or(entry.value_span.start, |key| key.end)
+                        <= line_start
+                }
                 FmValueKind::Scalar | FmValueKind::Alias => false,
             })
             .filter(|entry| entry.value_span.contains(&offset))
@@ -278,13 +415,15 @@ impl FrontmatterAst {
     pub fn key_entry_on_line(&self, line_start: usize, offset: usize) -> Option<&FmEntry> {
         self.entries
             .iter()
-            .filter(|entry| entry.key_span.start >= line_start && entry.key_span.end <= offset)
-            .max_by_key(|entry| entry.key_span.start)
+            .filter_map(|entry| entry.key_span.as_ref().map(|key| (entry, key)))
+            .filter(|(_, key)| key.start >= line_start && key.end <= offset)
+            .max_by_key(|(_, key)| key.start)
+            .map(|(entry, _)| entry)
     }
 
     /// The entry at `pointer`, else its nearest existing ancestor (R-5 mapping
-    /// rules: array items and absent nested paths fall back to the closest
-    /// authored container).
+    /// rules: absent nested paths fall back to the closest authored container;
+    /// an authored array item is an exact hit).
     pub fn entry_or_ancestor(&self, pointer: &str) -> Option<&FmEntry> {
         if let Some(entry) = self.entry_by_pointer(pointer) {
             return Some(entry);
@@ -331,7 +470,7 @@ impl FrontmatterAst {
     /// The key-token span for a child `key` under `parent_pointer` — the
     /// precise range for an unknown-key diagnostic.
     pub fn key_span_for(&self, parent_pointer: &str, key: &str) -> Option<SourceSpan> {
-        self.child_entry(parent_pointer, key).map(|entry| entry.key_span.clone())
+        self.child_entry(parent_pointer, key).and_then(|entry| entry.key_span.clone())
     }
 
     /// The `$schema` top-level entry, if present.
@@ -344,7 +483,8 @@ impl FrontmatterAst {
         self.entries
             .iter()
             .filter(|entry| {
-                entry.key_span.contains(&offset) || entry.value_span.contains(&offset)
+                entry.key_span.as_ref().is_some_and(|key| key.contains(&offset))
+                    || entry.value_span.contains(&offset)
             })
             .max_by_key(|entry| entry.depth)
     }
@@ -365,7 +505,8 @@ fn lower(root: Option<&Node<YamlSpan>>, base: usize, block_span: SourceSpan) -> 
     let mut entries = Vec::new();
     let root_span = match root {
         Some(Node::Mapping { entries: pairs, loc, .. }) => {
-            lower_mapping(pairs, base, "", "", None, 0, &mut entries);
+            let parent = Parent { pointer: "", dotted: "", index: None, depth: 0 };
+            lower_mapping(pairs, base, &parent, &mut entries);
             shift(*loc, base)
         }
         // A non-mapping root (a bare scalar, or an empty document) carries no
@@ -375,14 +516,19 @@ fn lower(root: Option<&Node<YamlSpan>>, base: usize, block_span: SourceSpan) -> 
     FrontmatterAst { entries, block_span, root_span }
 }
 
-/// Lowers one mapping's entries, recursing into nested mappings.
+/// The already-lowered collection whose children are being lowered.
+struct Parent<'a> {
+    pointer: &'a str,
+    dotted: &'a str,
+    index: Option<usize>,
+    depth: usize,
+}
+
+/// Lowers one mapping's entries, recursing into nested collections.
 fn lower_mapping(
     pairs: &[(Node<YamlSpan>, Node<YamlSpan>)],
     base: usize,
-    parent_pointer: &str,
-    parent_dotted: &str,
-    parent: Option<usize>,
-    depth: usize,
+    parent: &Parent<'_>,
     out: &mut Vec<FmEntry>,
 ) {
     for (key_node, value_node) in pairs {
@@ -391,39 +537,104 @@ fn lower_mapping(
             // skip them rather than invent a pointer.
             continue;
         };
-        let pointer = format!("{parent_pointer}/{}", encode_pointer_segment(key));
-        let dotted = if parent_dotted.is_empty() {
-            key.clone()
-        } else {
-            format!("{parent_dotted}.{key}")
-        };
-        let (kind, scalar) = classify(value_node);
-        let index = out.len();
-        out.push(FmEntry {
-            pointer: pointer.clone(),
-            dotted: dotted.clone(),
-            key: key.clone(),
-            key_span: shift(*key_loc, base),
-            value_span: value_span(value_node, base),
-            kind,
-            scalar,
+        lower_entry(
+            value_node,
+            base,
             parent,
-            depth,
-        });
-        if let Node::Mapping { entries: nested, .. } = value_node {
-            lower_mapping(nested, base, &pointer, &dotted, Some(index), depth + 1, out);
-        }
+            key,
+            FmEntryRole::MappingProperty,
+            Some(shift(*key_loc, base)),
+            out,
+        );
     }
 }
 
-/// Classifies a value node into a kind + optional scalar text.
-fn classify(node: &Node<YamlSpan>) -> (FmValueKind, Option<String>) {
-    match node {
-        Node::Scalar { value, .. } => (FmValueKind::Scalar, Some(value.clone())),
-        Node::Mapping { .. } => (FmValueKind::Mapping, None),
-        Node::Sequence { .. } => (FmValueKind::Sequence, None),
-        Node::Alias { .. } => (FmValueKind::Alias, None),
+/// Lowers one entry and, when its value is a collection, its children.
+fn lower_entry(
+    value_node: &Node<YamlSpan>,
+    base: usize,
+    parent: &Parent<'_>,
+    key: &str,
+    role: FmEntryRole,
+    key_span: Option<SourceSpan>,
+    out: &mut Vec<FmEntry>,
+) {
+    let pointer = format!("{}/{}", parent.pointer, encode_pointer_segment(key));
+    let mut dotted = parent.dotted.to_string();
+    push_dotted(
+        &mut dotted,
+        match role {
+            FmEntryRole::MappingProperty => FmPathSegment::Key(key),
+            FmEntryRole::SequenceItem { index } => FmPathSegment::Index(index),
+        },
+    );
+    let (kind, scalar, scalar_style, tagged) = classify(value_node);
+    let index = out.len();
+    out.push(FmEntry {
+        pointer: pointer.clone(),
+        dotted: dotted.clone(),
+        key: key.to_string(),
+        role,
+        key_span,
+        value_span: value_span(value_node, base),
+        kind,
+        scalar,
+        scalar_style,
+        tagged,
+        parent: parent.index,
+        depth: parent.depth,
+    });
+    let children = Parent {
+        pointer: &pointer,
+        dotted: &dotted,
+        index: Some(index),
+        depth: parent.depth + 1,
+    };
+    match value_node {
+        Node::Mapping { entries: nested, .. } => lower_mapping(nested, base, &children, out),
+        Node::Sequence { items, .. } => {
+            for (item_index, item) in items.iter().enumerate() {
+                lower_entry(
+                    item,
+                    base,
+                    &children,
+                    &item_index.to_string(),
+                    FmEntryRole::SequenceItem { index: item_index },
+                    None,
+                    out,
+                );
+            }
+        }
+        Node::Scalar { .. } | Node::Alias { .. } => {}
     }
+}
+
+/// Classifies a value node into its kind, scalar text and style, and tag
+/// presence.
+fn classify(node: &Node<YamlSpan>) -> (FmValueKind, Option<String>, Option<FmScalarStyle>, bool) {
+    match node {
+        Node::Scalar { value, style, meta, .. } => {
+            let style = match style {
+                ScalarStyle::Plain => FmScalarStyle::Plain,
+                ScalarStyle::SingleQuoted => FmScalarStyle::SingleQuoted,
+                ScalarStyle::DoubleQuoted => FmScalarStyle::DoubleQuoted,
+                ScalarStyle::Literal(_) => FmScalarStyle::Literal,
+                ScalarStyle::Folded(_) => FmScalarStyle::Folded,
+            };
+            (FmValueKind::Scalar, Some(value.clone()), Some(style), explicit_tag(meta.as_deref()))
+        }
+        Node::Mapping { meta, .. } => (FmValueKind::Mapping, None, None, explicit_tag(meta.as_deref())),
+        Node::Sequence { meta, .. } => {
+            (FmValueKind::Sequence, None, None, explicit_tag(meta.as_deref()))
+        }
+        Node::Alias { .. } => (FmValueKind::Alias, None, None, false),
+    }
+}
+
+/// Whether a node was authored with a tag. The loader resolves a schema tag
+/// onto every untagged node, so only a source tag location proves authorship.
+fn explicit_tag(meta: Option<&NodeMeta<YamlSpan>>) -> bool {
+    meta.is_some_and(|meta| meta.tag_loc.is_some())
 }
 
 /// The document-relative span of any value node.
@@ -537,10 +748,11 @@ mod tests {
     fn test_top_level_entries_and_spans() {
         let text = "---\ntitle: Hello\ndraft: true\n---\n\n# Body\n";
         let ast = ast(text);
+        assert!(ast.entries().iter().all(|e| e.role == FmEntryRole::MappingProperty));
         let keys: Vec<&str> = ast.top_level().map(|e| e.key.as_str()).collect();
         assert_eq!(keys, vec!["title", "draft"]);
         let title = ast.entry_by_dotted("title").unwrap();
-        assert_eq!(&text[title.key_span.clone()], "title");
+        assert_eq!(&text[title.key_span.clone().unwrap()], "title");
         assert_eq!(&text[title.value_span.clone()], "Hello");
         assert_eq!(title.scalar.as_deref(), Some("Hello"));
         assert_eq!(title.kind, FmValueKind::Scalar);
@@ -562,14 +774,197 @@ mod tests {
     }
 
     #[test]
-    fn test_entry_or_ancestor_falls_back_for_array_index() {
+    fn test_entry_or_ancestor_is_exact_for_array_item() {
+        // Deliberate design switch (item-entries descent, spec D6): this test
+        // was `test_entry_or_ancestor_falls_back_for_array_index`, which pinned
+        // `/tags/1` falling back to the `/tags` sequence. An authored item is now
+        // an exact scalar hit; only an absent index still falls back.
         let text = "---\ntags:\n  - a\n  - b\n---\n\nbody\n";
         let ast = ast(text);
-        // `/tags/1` (an array item) is not an authored mapping entry; it falls
-        // back to the `/tags` sequence node.
         let entry = ast.entry_or_ancestor("/tags/1").unwrap();
-        assert_eq!(entry.pointer, "/tags");
-        assert_eq!(entry.kind, FmValueKind::Sequence);
+        assert_eq!(entry.pointer, "/tags/1");
+        assert_eq!(entry.kind, FmValueKind::Scalar);
+        assert_eq!(&text[entry.value_span.clone()], "b");
+        assert_eq!(ast.value_range("/tags/1"), entry.value_span);
+        let absent = ast.entry_or_ancestor("/tags/5").unwrap();
+        assert_eq!(absent.pointer, "/tags");
+        assert_eq!(absent.kind, FmValueKind::Sequence);
+    }
+
+    #[test]
+    fn test_sequence_items_are_explicit_entries() {
+        let text = "---\ntitle: T\ntags:\n  - a\n  - b\n---\n\nbody\n";
+        let ast = ast(text);
+        let tags_index = ast.entries().iter().position(|e| e.pointer == "/tags").unwrap();
+        let tags = &ast.entries()[tags_index];
+        assert_eq!(tags.role, FmEntryRole::MappingProperty);
+        assert_eq!(&text[tags.key_span.clone().unwrap()], "tags");
+
+        let item = ast.entry_by_pointer("/tags/1").unwrap();
+        assert_eq!(item.role, FmEntryRole::SequenceItem { index: 1 });
+        assert_eq!(item.key_span, None);
+        assert_eq!(item.key, "1");
+        assert_eq!(item.dotted, "tags[1]");
+        assert_eq!(item.kind, FmValueKind::Scalar);
+        assert_eq!(item.scalar.as_deref(), Some("b"));
+        assert_eq!(&text[item.value_span.clone()], "b");
+        assert_eq!(item.parent, Some(tags_index));
+        assert_eq!(item.depth, 1);
+        let item_index = ast.index_of(item).unwrap();
+        assert_eq!(ast.key_path_at(item_index), vec!["tags", "1"]);
+        assert_eq!(
+            ast.path_at(item_index),
+            vec![FmPathSegment::Key("tags"), FmPathSegment::Index(1)]
+        );
+        assert!(ast.is_in_sequence(item_index));
+        assert!(!ast.is_in_sequence(tags_index));
+        // Arena order is document order: the sequence precedes its items.
+        let pointers: Vec<&str> = ast.entries().iter().map(|e| e.pointer.as_str()).collect();
+        assert_eq!(pointers, vec!["/title", "/tags", "/tags/0", "/tags/1"]);
+    }
+
+    #[test]
+    fn test_mapping_items_descend_to_their_keys() {
+        let text = concat!(
+            "---\n",
+            "initialize:\n",
+            "  stack:\n",
+            "    - when: ctx.ok\n",
+            "      action: stop\n",
+            "    - action:\n",
+            "        - skip\n",
+            "---\n\nbody\n",
+        );
+        let ast = ast(text);
+        let when_index = ast
+            .entries()
+            .iter()
+            .position(|e| e.pointer == "/initialize/stack/0/when")
+            .unwrap();
+        let when = &ast.entries()[when_index];
+        assert_eq!(when.dotted, "initialize.stack[0].when");
+        assert_eq!(when.role, FmEntryRole::MappingProperty);
+        assert_eq!(&text[when.key_span.clone().unwrap()], "when");
+        assert_eq!(&text[when.value_span.clone()], "ctx.ok");
+        assert_eq!(when.depth, 3);
+        let item = &ast.entries()[when.parent.unwrap()];
+        assert_eq!(item.pointer, "/initialize/stack/0");
+        assert_eq!(item.role, FmEntryRole::SequenceItem { index: 0 });
+        assert_eq!(item.kind, FmValueKind::Mapping);
+        assert_eq!(item.depth, 2);
+        assert_eq!(ast.entries()[item.parent.unwrap()].pointer, "/initialize/stack");
+        assert_eq!(
+            ast.path_at(when_index),
+            vec![
+                FmPathSegment::Key("initialize"),
+                FmPathSegment::Key("stack"),
+                FmPathSegment::Index(0),
+                FmPathSegment::Key("when"),
+            ]
+        );
+        assert_eq!(format_dotted(&ast.path_at(when_index)), when.dotted);
+
+        let skip = ast.entry_by_dotted("initialize.stack[1].action[0]").unwrap();
+        assert_eq!(skip.pointer, "/initialize/stack/1/action/0");
+        assert_eq!(skip.scalar.as_deref(), Some("skip"));
+        assert_eq!(skip.depth, 4);
+        assert_eq!(
+            ast.entry_by_key_path(&["initialize", "stack", "1", "action", "0"]).unwrap().pointer,
+            skip.pointer
+        );
+        // The cursor on `when`'s value belongs to the item mapping, not the
+        // `stack` sequence.
+        let offset = when.value_span.start;
+        assert_eq!(ast.entry_at_offset(offset).unwrap().pointer, when.pointer);
+    }
+
+    #[test]
+    fn test_index_and_numeric_key_paths_stay_distinct() {
+        let text = concat!(
+            "---\n",
+            "numbered:\n  \"0\": zero\n",
+            "listed:\n  - zero\n",
+            "matrix:\n  - [1, 2]\n",
+            "a/b~c:\n  - x\n",
+            "---\n\nbody\n",
+        );
+        let ast = ast(text);
+        let key_zero = ast.entry_by_pointer("/numbered/0").unwrap();
+        assert_eq!(key_zero.role, FmEntryRole::MappingProperty);
+        assert_eq!(key_zero.dotted, "numbered.0");
+        let item_zero = ast.entry_by_pointer("/listed/0").unwrap();
+        assert_eq!(item_zero.role, FmEntryRole::SequenceItem { index: 0 });
+        assert_eq!(item_zero.dotted, "listed[0]");
+        let key_index = ast.index_of(key_zero).unwrap();
+        let item_index = ast.index_of(item_zero).unwrap();
+        assert_eq!(ast.key_path_at(key_index), vec!["numbered", "0"]);
+        assert_eq!(ast.key_path_at(item_index), vec!["listed", "0"]);
+        assert_ne!(ast.path_at(key_index)[1], ast.path_at(item_index)[1]);
+
+        let cell = ast.entry_by_pointer("/matrix/0/1").unwrap();
+        assert_eq!(cell.dotted, "matrix[0][1]");
+        assert_eq!(cell.scalar.as_deref(), Some("2"));
+        let cell_index = ast.index_of(cell).unwrap();
+        assert_eq!(format_dotted(&ast.path_at(cell_index)), "matrix[0][1]");
+
+        // RFC 6901 escaping round-trips through an index-bearing pointer.
+        let escaped = ast.entry_by_pointer("/a~1b~0c/0").unwrap();
+        assert_eq!(escaped.dotted, "a/b~c[0]");
+        assert_eq!(ast.entry_by_key_path(&["a/b~c", "0"]).unwrap().pointer, escaped.pointer);
+        assert_eq!(ast.entry_or_ancestor("/a~1b~0c/0/deeper").unwrap().pointer, escaped.pointer);
+    }
+
+    #[test]
+    fn test_scalar_style_and_tag_are_retained() {
+        let text = concat!(
+            "---\n",
+            "plain: a\n",
+            "single: 'a'\n",
+            "double: \"a\"\n",
+            "literal: |-\n  a\n",
+            "kept: |+\n  a\n",
+            "indented: |2-\n   a\n",
+            "folded: >\n  a\n",
+            "folded_strip: >-\n  a\n",
+            "tagged: !!str a\n",
+            "anchor: &shared a\n",
+            "alias: *shared\n",
+            "items:\n  - 'q'\n",
+            "---\n\nbody\n",
+        );
+        let ast = ast(text);
+        let style = |pointer: &str| {
+            let entry = ast.entry_by_pointer(pointer).unwrap();
+            (entry.scalar_style, entry.tagged)
+        };
+        assert_eq!(style("/plain"), (Some(FmScalarStyle::Plain), false));
+        assert_eq!(style("/single"), (Some(FmScalarStyle::SingleQuoted), false));
+        assert_eq!(style("/double"), (Some(FmScalarStyle::DoubleQuoted), false));
+        assert_eq!(style("/literal"), (Some(FmScalarStyle::Literal), false));
+        assert_eq!(style("/kept"), (Some(FmScalarStyle::Literal), false));
+        assert_eq!(style("/indented"), (Some(FmScalarStyle::Literal), false));
+        assert_eq!(style("/folded"), (Some(FmScalarStyle::Folded), false));
+        assert_eq!(style("/folded_strip"), (Some(FmScalarStyle::Folded), false));
+        assert_eq!(style("/tagged"), (Some(FmScalarStyle::Plain), true));
+        // The value span excludes the tag token.
+        assert_eq!(&text[ast.entry_by_pointer("/tagged").unwrap().value_span.clone()], "a");
+        assert_eq!(style("/anchor"), (Some(FmScalarStyle::Plain), false));
+        assert_eq!(style("/items/0"), (Some(FmScalarStyle::SingleQuoted), false));
+        let alias = ast.entry_by_pointer("/alias").unwrap();
+        assert_eq!(alias.kind, FmValueKind::Alias);
+        assert_eq!((alias.scalar_style, alias.tagged), (None, false));
+        assert_eq!(ast.entry_by_pointer("/items").unwrap().scalar_style, None);
+    }
+
+    #[test]
+    fn test_container_at_offset_reaches_nested_item_sequences() {
+        let text = "---\nouter:\n  -\n    - a\n    - b\n---\n\nbody\n";
+        let ast = ast(text);
+        let b = ast.entry_by_pointer("/outer/0/1").unwrap();
+        let line_start = text[..b.value_span.start].rfind('\n').unwrap() + 1;
+        let container = ast.container_at_offset(b.value_span.start, line_start).unwrap();
+        assert_eq!(container.pointer, "/outer/0");
+        assert_eq!(container.key_span, None);
     }
 
     #[test]
@@ -616,6 +1011,6 @@ mod tests {
         let ast = ast(text);
         let title = ast.entry_by_dotted("title").unwrap();
         // `title` starts at byte 4 in the document, not byte 0 of the YAML.
-        assert_eq!(title.key_span.start, 4);
+        assert_eq!(title.key_span.as_ref().unwrap().start, 4);
     }
 }

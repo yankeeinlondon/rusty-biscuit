@@ -1,0 +1,436 @@
+{
+  "_agent-skills.md": [
+    {
+      "code": "dm.directive.unknown",
+      "message": "unknown directive `::loop`",
+      "range": {
+        "end": {
+          "character": 6,
+          "line": 21
+        },
+        "start": {
+          "character": 0,
+          "line": 21
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.directive.unknown",
+      "message": "unknown directive `::end-loop`",
+      "range": {
+        "end": {
+          "character": 10,
+          "line": 26
+        },
+        "start": {
+          "character": 0,
+          "line": 26
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.expression.unknown_identifier",
+      "message": "`i` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "range": {
+        "end": {
+          "character": 6,
+          "line": 22
+        },
+        "start": {
+          "character": 5,
+          "line": 22
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    }
+  ],
+  "_docs.md": [],
+  "_implement___fm.md": [
+    {
+      "code": "dm.schema.prepare",
+      "message": "could not resolve $schema reference `./implement.yaml`",
+      "range": {
+        "end": {
+          "character": 25,
+          "line": 1
+        },
+        "start": {
+          "character": 9,
+          "line": 1
+        }
+      },
+      "severity": 1,
+      "source": "darkmatter.schema"
+    },
+    {
+      "code": "dm.expression.unknown_identifier",
+      "message": "`log` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "range": {
+        "end": {
+          "character": 36,
+          "line": 8
+        },
+        "start": {
+          "character": 33,
+          "line": 8
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.expression.unknown_identifier",
+      "message": "`spec` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "range": {
+        "end": {
+          "character": 23,
+          "line": 12
+        },
+        "start": {
+          "character": 19,
+          "line": 12
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.expression.unknown_identifier",
+      "message": "`design` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "range": {
+        "end": {
+          "character": 27,
+          "line": 15
+        },
+        "start": {
+          "character": 21,
+          "line": 15
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.expression.unknown_identifier",
+      "message": "`review` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "range": {
+        "end": {
+          "character": 27,
+          "line": 18
+        },
+        "start": {
+          "character": 21,
+          "line": 18
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    }
+  ],
+  "_interactive-prompting.md": [
+    {
+      "code": "dm.directive.malformed_option",
+      "message": "`actor` is not a recognized option for `::file`",
+      "range": {
+        "end": {
+          "character": 34,
+          "line": 16
+        },
+        "start": {
+          "character": 29,
+          "line": 16
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.transclusion.broken_path",
+      "message": "broken transclusion: no file matches `./_writing_clearly.md`",
+      "range": {
+        "end": {
+          "character": 28,
+          "line": 16
+        },
+        "start": {
+          "character": 7,
+          "line": 16
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    }
+  ],
+  "_repo-context.md": [],
+  "_reviews__observability.md": [],
+  "_reviews__performance-review.md": [
+    {
+      "code": "dm.expression.unknown_identifier",
+      "message": "`time` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "range": {
+        "end": {
+          "character": 64,
+          "line": 341
+        },
+        "start": {
+          "character": 60,
+          "line": 341
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    }
+  ],
+  "_reviews__review-implementation.md": [],
+  "_reviews__review-spec-inline.md": [
+    {
+      "code": "dm.transclusion.broken_path",
+      "message": "broken transclusion: no file matches `_writing_clearly.md`",
+      "range": {
+        "end": {
+          "character": 26,
+          "line": 38
+        },
+        "start": {
+          "character": 7,
+          "line": 38
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.transclusion.broken_path",
+      "message": "broken transclusion: no file matches `./_set_spec_schema.md`",
+      "range": {
+        "end": {
+          "character": 28,
+          "line": 89
+        },
+        "start": {
+          "character": 7,
+          "line": 89
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    }
+  ],
+  "_reviews__suggestion-review.md": [
+    {
+      "code": "dm.transclusion.broken_path",
+      "message": "broken transclusion: no file matches `@{{review}}`",
+      "range": {
+        "end": {
+          "character": 18,
+          "line": 33
+        },
+        "start": {
+          "character": 7,
+          "line": 33
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    }
+  ],
+  "_writing-clearly.md": [],
+  "brainstorm.md": [
+    {
+      "code": "dm.expression.unknown_identifier",
+      "message": "`context` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "range": {
+        "end": {
+          "character": 9,
+          "line": 14
+        },
+        "start": {
+          "character": 2,
+          "line": 14
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.expression.unknown_identifier",
+      "message": "`area` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "range": {
+        "end": {
+          "character": 52,
+          "line": 19
+        },
+        "start": {
+          "character": 48,
+          "line": 19
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    }
+  ],
+  "daily.md": [],
+  "dependency-risk.md": [],
+  "design.md": [],
+  "dream.md": [],
+  "feature.md": [
+    {
+      "code": "dm.transclusion.broken_path",
+      "message": "broken transclusion: no file matches `@prompts/feature-prompts/tech-design.md`",
+      "range": {
+        "end": {
+          "character": 46,
+          "line": 35
+        },
+        "start": {
+          "character": 7,
+          "line": 35
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.transclusion.broken_path",
+      "message": "broken transclusion: no file matches `@prompts/feature-prompts/plan.md`",
+      "range": {
+        "end": {
+          "character": 39,
+          "line": 36
+        },
+        "start": {
+          "character": 7,
+          "line": 36
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.transclusion.broken_path",
+      "message": "broken transclusion: no file matches `@prompts/feature-prompts/implement.md`",
+      "range": {
+        "end": {
+          "character": 44,
+          "line": 37
+        },
+        "start": {
+          "character": 7,
+          "line": 37
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.transclusion.broken_path",
+      "message": "broken transclusion: no file matches `@prompts/feature-prompts/commit-implementation.md`",
+      "range": {
+        "end": {
+          "character": 56,
+          "line": 38
+        },
+        "start": {
+          "character": 7,
+          "line": 38
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.transclusion.broken_path",
+      "message": "broken transclusion: no file matches `@prompts/feature-prompts/review.md`",
+      "range": {
+        "end": {
+          "character": 41,
+          "line": 39
+        },
+        "start": {
+          "character": 7,
+          "line": 39
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.transclusion.broken_path",
+      "message": "broken transclusion: no file matches `@prompts/feature-prompts/suggestions.md`",
+      "range": {
+        "end": {
+          "character": 46,
+          "line": 40
+        },
+        "start": {
+          "character": 7,
+          "line": 40
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.transclusion.broken_path",
+      "message": "broken transclusion: no file matches `@prompts/feature-prompts/commit-review.md`",
+      "range": {
+        "end": {
+          "character": 48,
+          "line": 41
+        },
+        "start": {
+          "character": 7,
+          "line": 41
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.transclusion.broken_path",
+      "message": "broken transclusion: no file matches `@prompts/feature-prompts/update-documents.md`",
+      "range": {
+        "end": {
+          "character": 51,
+          "line": 42
+        },
+        "start": {
+          "character": 7,
+          "line": 42
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
+    }
+  ],
+  "lineage.md": [],
+  "sentrux.md": [],
+  "snippets__debug.md": [],
+  "snippets__test-rigor.md": [],
+  "suggest_constraint/inline.md": [
+    {
+      "code": "dm.schema.invalid_suggestion",
+      "message": "suggestion `many` is not a valid simple decimal number",
+      "range": {
+        "end": {
+          "character": 39,
+          "line": 2
+        },
+        "start": {
+          "character": 35,
+          "line": 2
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.schema"
+    }
+  ],
+  "suggest_constraint/raw-consumer.md": [],
+  "summary-and-suggest.md": [],
+  "validate.md": []
+}

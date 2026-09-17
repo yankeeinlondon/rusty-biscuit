@@ -357,10 +357,12 @@ pub fn index_document_timed(path: &Path, source: &str) -> (DocumentIndex, IndexT
     if let Some(ast) = FrontmatterAst::parse(source).and_then(|parse| parse.ast) {
         let file_typed = inline_schema_file_keys(&ast);
         for entry in ast.top_level() {
+            // Top-level entries are always root-mapping properties.
+            let Some(key_span) = entry.key_span.clone() else { continue };
             frontmatter_keys.push(FrontmatterKeyFact {
                 key: entry.key.clone(),
-                span: entry.key_span.clone(),
-                line: line_of(source, entry.key_span.start),
+                line: line_of(source, key_span.start),
+                span: key_span,
             });
             if entry.kind != FmValueKind::Scalar {
                 continue;
@@ -528,6 +530,7 @@ fn inline_schema_file_keys(ast: &FrontmatterAst) -> HashSet<String> {
         // spelled `$schema.foo` is not a child of `$schema`.
         .filter(|(index, entry)| {
             entry.kind == FmValueKind::Scalar
+                && entry.key_span.is_some()
                 && ast.key_path_at(*index).as_slice() == ["$schema", entry.key.as_str()]
         })
         .map(|(_, entry)| entry)
