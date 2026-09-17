@@ -278,18 +278,26 @@ class ContractArtifactTests(unittest.TestCase):
         self.assertEqual(schema.CONTRACT_PATH.read_text(encoding="utf-8"), expected)
 
     # -----------------------------------------------------------------------
-    # R9: `RESOLVED_PLAN_SCHEMA_VERSION` 2 -> 3 when the plan gains the change
-    # inventory. `RECEIPT_SCHEMA_VERSION`, `LEGACY_RECEIPT_SCHEMA_VERSION`, and
+    # R9: `RESOLVED_PLAN_SCHEMA_VERSION` moves when the plan's required field
+    # set does. It reached 4 because build records and the change inventory
+    # each claimed 3 on separate branches, so the merged shape needed a version
+    # of its own. `RECEIPT_SCHEMA_VERSION`, `LEGACY_RECEIPT_SCHEMA_VERSION`, and
     # `SCOPE_RECEIPT_SCHEMA_VERSION` do NOT move; the scope receipt's embedded
     # `plan_schema_version` check is what produces the one intended miss.
     # -----------------------------------------------------------------------
 
-    def test_the_plan_schema_carries_the_change_inventory_at_version_3(self):
-        if schema.RESOLVED_PLAN_SCHEMA_VERSION != 3:
+    def test_the_plan_schema_carries_the_change_inventory_and_builds_at_version_4(self):
+        if schema.RESOLVED_PLAN_SCHEMA_VERSION != 4:
             raise AssertionError(
-                "the resolved plan schema must be version 3 once it carries "
-                f"the change inventory, got {schema.RESOLVED_PLAN_SCHEMA_VERSION}"
+                "the resolved plan schema must be version 4 once it requires "
+                "both the change inventory and build records, got "
+                f"{schema.RESOLVED_PLAN_SCHEMA_VERSION}"
             )
+        self.assertIn(
+            "builds",
+            schema.RESOLVED_PLAN_FIELDS,
+            "version 4 is the union: build records are required too",
+        )
         self.assertIn(
             "change_inventory",
             schema.RESOLVED_PLAN_FIELDS,
@@ -297,7 +305,7 @@ class ContractArtifactTests(unittest.TestCase):
         )
         self.assertIs(True, schema.RESOLVED_PLAN_FIELDS["change_inventory"])
         shipped = json.loads(schema.CONTRACT_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(3, shipped["resolved_plan"]["schema_version"])
+        self.assertEqual(4, shipped["resolved_plan"]["schema_version"])
         self.assertIn("change_inventory", shipped["resolved_plan"]["document"])
 
     def test_a_plan_without_the_inventory_is_rejected(self):
@@ -581,6 +589,21 @@ class ResolvedPlanValidationTests(unittest.TestCase):
         problems = schema.validate_resolved_plan(plan(schema_version=99))
         self.assertEqual(len(problems), 1)
         self.assertTrue(problems[0].startswith("unknown-schema-version:"))
+
+    def test_a_stale_version_is_named_even_when_the_shape_also_differs(self):
+        # Why the version check precedes the field check. A real version-3
+        # document is not just mislabeled — it also lacks a field this reader
+        # requires, and reporting the field sends a reader after a corrupt
+        # document when the answer is that the tool moved on.
+        document = plan(schema_version=3)
+        del document["change_inventory"]
+        problems = schema.validate_resolved_plan(document)
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(
+            "unknown-schema-version: resolved plan is version 3, this tool writes "
+            f"{schema.RESOLVED_PLAN_SCHEMA_VERSION}",
+            problems[0],
+        )
 
     def test_a_missing_field_names_the_field(self):
         document = plan()

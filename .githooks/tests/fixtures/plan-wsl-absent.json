@@ -175,7 +175,7 @@
   "preflight_reason": "package-local change",
   "prohibited_cells": [],
   "reverse_dependencies": [],
-  "schema_version": 3,
+  "schema_version": 4,
   "source_packages": [
     "alpha"
   ]

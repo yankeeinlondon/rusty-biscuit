@@ -75,7 +75,7 @@ const EXPECTED_MANIFEST_SCHEMA_VERSION: u32 = 1;
 
 /// Version of the resolved execution plan this tool reads
 /// (`scripts/ci/schema.py::RESOLVED_PLAN_SCHEMA_VERSION`).
-const PLAN_SCHEMA_VERSION: u32 = 3;
+const PLAN_SCHEMA_VERSION: u32 = 4;
 
 /// Version of `.github/ci/environments.json`
 /// (`scripts/ci/affected_scope.py::ENVIRONMENTS_SCHEMA_VERSION`). Version 2

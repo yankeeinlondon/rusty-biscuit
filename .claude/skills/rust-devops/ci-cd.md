@@ -98,7 +98,15 @@ computed from the manifest directory with the same rule as
 `sniff repo package-area` and kept honest by a drift contract rather than by a
 committed mapping file.
 
-`RESOLVED_PLAN_SCHEMA_VERSION` is **3**. Version 3 added the required
+`RESOLVED_PLAN_SCHEMA_VERSION` is **4**. Two changes each called themselves
+version 3 on separate branches — build records, and the `change_inventory`
+below — so "3" named two incompatible shapes and a document from either branch
+was refused for a *missing field* rather than a version skew. 4 names the union.
+The validator now checks the version before the field set for that reason: an
+older document usually differs in both, and the field complaint sends the reader
+after a corrupt document.
+
+Version 3 added the required
 `change_inventory`: the calculator's own input paths, normalized to one
 repository-relative spelling, sorted, de-duplicated, and bucketed exhaustively
 into `configuration`, `documentation`, `source`, `other` with per-bucket and

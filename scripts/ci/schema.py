@@ -52,14 +52,22 @@ compiling its own. A version-2 receipt carries no build records at all, so it
 misses as `scope-schema` and CI resolves the plan itself rather than being
 partially upgraded into a document whose builds nothing derived.
 
-Version 3 also adds the required `change_inventory`: the changed paths,
-normalized and bucketed once by the calculator so every reader — the plan
-renderer, the local pre-push report, `ci-reporting` — states the same thing
-about what changed. It is computed from the paths alone and is deliberately
-allowed to disagree with `change_class`, which is derived from the gating
-packages a change selects. A version-2 scope receipt therefore misses once as
-`scope-schema` and is never upgraded in place; validation receipts are
-untouched, so `RECEIPT_SCHEMA_VERSION` does not move.
+Version 4 exists because two changes each called themselves version 3 on
+separate branches: the build records above, and the `change_inventory` below.
+The merged document requires both, so "3" named two incompatible shapes — a
+document from either branch passed the version check and then failed on a
+missing field, which reads as a corrupt document rather than a version skew.
+4 names the union, and either older shape now misses as
+`unknown-schema-version`, which is what it is.
+
+`change_inventory` is the changed paths, normalized and bucketed once by the
+calculator so every reader — the plan renderer, the local pre-push report,
+`ci-reporting` — states the same thing about what changed. It is computed from
+the paths alone and is deliberately allowed to disagree with `change_class`,
+which is derived from the gating packages a change selects. A version-2 or
+version-3 scope receipt therefore misses once as `scope-schema` and is never
+upgraded in place; validation receipts are untouched, so
+`RECEIPT_SCHEMA_VERSION` does not move.
 """
 
 from __future__ import annotations
@@ -74,7 +82,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / ".github" / "ci" / "schemas" / "contract.json"
 
-RESOLVED_PLAN_SCHEMA_VERSION = 3
+RESOLVED_PLAN_SCHEMA_VERSION = 4
 RECEIPT_SCHEMA_VERSION = 2
 
 #: The scope receipt: what the planner selected for one exact `{base, head,
@@ -708,16 +716,22 @@ def validate_resolved_plan(document: Any) -> list[str]:
     Problems in document order. Each begins with a code from [`REJECTIONS`] so
     a caller can classify without parsing prose.
     """
+    # Version before shape, deliberately. A document from an older schema
+    # usually differs in BOTH, and the field check would then report the field
+    # it lacks — sending the reader after a corrupt document when the answer is
+    # that this tool moved on. Guarded on presence because the field check
+    # below is what proves the key exists at all.
+    if isinstance(document, dict) and "schema_version" in document:
+        if document["schema_version"] != RESOLVED_PLAN_SCHEMA_VERSION:
+            return [
+                f"unknown-schema-version: resolved plan is version "
+                f"{document['schema_version']!r}, this tool writes "
+                f"{RESOLVED_PLAN_SCHEMA_VERSION}"
+            ]
+
     problems = _keys("resolved plan", document, RESOLVED_PLAN_FIELDS)
     if problems:
         return problems
-
-    if document["schema_version"] != RESOLVED_PLAN_SCHEMA_VERSION:
-        return [
-            f"unknown-schema-version: resolved plan is version "
-            f"{document['schema_version']!r}, this tool writes "
-            f"{RESOLVED_PLAN_SCHEMA_VERSION}"
-        ]
 
     for field in ("base", "head"):
         problems += _sha(f"resolved plan {field}", document[field])
