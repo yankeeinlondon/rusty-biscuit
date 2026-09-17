@@ -78,7 +78,7 @@ fn bootstrap_harness_prompt_reads_an_initialize_target_without_its_body() {
     assert_eq!(bootstrap.frontmatter["title"], "staged target");
     assert!(
         !bootstrap.lifecycle.as_ref().expect("lifecycle surface").is_empty(),
-        "the initialize stack is on the surface the gate approves"
+        "the shell-free initialize stack is on the bootstrap surface"
     );
     assert!(!generated.exists(), "reading the surface runs no lifecycle action");
     assert!(

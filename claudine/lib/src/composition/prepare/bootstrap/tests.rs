@@ -22,7 +22,7 @@ use crate::composition::{
     BootstrapPreparation, BootstrapRequest, CompositionError, CompositionMode, DocumentEntryReason,
     DocumentPreparation, LifecycleConfig, LifecycleSignal, PrepareOptions, PromptSource,
     ResolvedCompositionSource, SchemaStage, preflight_bootstrap_shell, prepare_bootstrap,
-    prepare_document, resolve_lifecycle_shell_approvals, resolve_shell_approvals,
+    prepare_document,
 };
 use crate::harness::ShellApprovalOptions;
 
@@ -105,7 +105,6 @@ initialize:
   stack:
     - action:
         - ensure_file: \"{{log}}\"
-        - shell: \"touch {{log}}\"
 ---
 Implement phase {{phase}}.
 
@@ -137,11 +136,7 @@ fn bootstrap_reads_the_lifecycle_surface_of_a_body_that_includes_a_missing_file(
         Some(serde_json::json!({ "spec": SPEC, "phase": 1 })),
         "the caller layers are retained for the stabilized reread"
     );
-    assert_eq!(
-        shell_commands(&staged.lifecycle, LifecycleSignal::Initialize),
-        vec![Expr::StringLiteral(format!("touch {LOG}"))],
-        "the initialize shell command carries its C3-stamped bytes"
-    );
+    assert!(shell_commands(&staged.lifecycle, LifecycleSignal::Initialize).is_empty());
     assert!(
         staged.effective_frontmatter["initialize"].to_string().contains("{{log}}"),
         "the lifecycle subtree keeps its authored spans for event time"
@@ -244,149 +239,47 @@ fn approval_options(
     }
 }
 
-/// The narrow gate approves only what `initialize` runs, in its executed
-/// bytes, and the post-stabilization full audit reuses that approval instead of
-/// asking again.
 #[test]
-fn initialize_gate_approves_stamped_bytes_and_the_full_audit_reuses_them() {
+fn bootstrap_rejects_shell_actions_even_with_cached_approval() {
     let dir = TempDir::new().unwrap();
-    let policy = TempDir::new().unwrap();
-    fs::create_dir_all(dir.path().join("fixes/2026-09-14-demo")).unwrap();
-    let source = source_at(
-        dir.path(),
-        "\
----
-spec: \"\"
-log: \"{{ dirname(spec) + '/implementation-log.md' }}\"
-initialize:
-  stack:
-    - action:
-        - shell: \"touch {{log}}\"
-start:
-  stack:
-    - action:
-        - shell: \"mkdir {{log}}.d\"
----
-Read ::file {{log}}
-",
-    );
-    let handler = Arc::new(CountingHandler(Mutex::new(Vec::new())));
-    let cache = Arc::new(Mutex::new(HashMap::new()));
-    let gate = approval_options(policy.path(), Some(handler.clone()), &cache);
-
-    let staged =
-        bootstrap(CompositionMode::ChainedDocument, &source, options_in(dir.path(), 1)).unwrap();
-    let narrow = resolve_lifecycle_shell_approvals(
-        &staged.lifecycle,
-        &staged.resolved_path,
-        &[LifecycleSignal::Initialize],
-        &gate,
-    )
-    .expect("the initialize gate approves");
-    assert_eq!(narrow.approved_commands, HashSet::from([format!("touch {LOG}")]));
-    assert_eq!(*handler.0.lock().unwrap(), vec![format!("touch {LOG}")]);
-
-    fs::write(dir.path().join(LOG), "").unwrap();
-    let prepared = full(CompositionMode::ChainedDocument, &source, options_in(dir.path(), 1))
-        .expect("stabilized reread prepares");
-    assert_eq!(
-        prepared.lifecycle, staged.lifecycle,
-        "the approved initialize bytes are the bytes full preparation stamps"
-    );
-    let audit = approval_options(policy.path(), Some(handler.clone()), &cache);
-    let full_audit = resolve_shell_approvals(
-        None,
-        None,
-        &audit,
-        Some(&prepared.lifecycle),
-        Some(&prepared.resolved_path),
-    )
-    .expect("the full audit approves");
-    assert_eq!(
-        full_audit.approved_commands,
-        HashSet::from([format!("touch {LOG}"), format!("mkdir {LOG}.d")])
-    );
-    assert_eq!(
-        *handler.0.lock().unwrap(),
-        vec![format!("touch {LOG}"), format!("mkdir {LOG}.d")],
-        "only the command the gate never saw prompts; initialize's is not asked twice"
-    );
-}
-
-/// Frontmatter `$(...)` commands run during the bootstrap read, so they are
-/// approved first — and a body `::shell` is neither approved nor run.
-#[test]
-fn bootstrap_runs_approved_frontmatter_commands_and_never_body_commands() {
-    let dir = TempDir::new().unwrap();
-    let policy = TempDir::new().unwrap();
-    let effect = dir.path().join("body-effect");
-    let source = source_at(
-        dir.path(),
-        &format!(
-            "---\nstamp: \"$(echo ready)\"\n---\n::shell touch {}\n\n::file ./missing.md\n",
-            effect.display()
-        ),
-    );
-    let handler = Arc::new(CountingHandler(Mutex::new(Vec::new())));
-    let cache = Arc::new(Mutex::new(HashMap::new()));
-    let gate = approval_options(policy.path(), Some(handler.clone()), &cache);
-
-    let approved = preflight_bootstrap_shell(
-        &source,
-        CompositionMode::ChainedDocument,
-        &PrepareOptions::default(),
-        &gate,
-    )
-    .expect("the frontmatter command is approved");
-    assert_eq!(approved, HashSet::from(["echo ready".to_string()]));
-    assert_eq!(*handler.0.lock().unwrap(), vec!["echo ready".to_string()]);
-
-    let mut layers = CallerInputLayers::default();
-    layers.add_approved_commands(approved);
-    let staged = bootstrap(
-        CompositionMode::ChainedDocument,
-        &source,
-        layers.apply_to(PrepareOptions::default()),
-    )
-    .expect("the approved frontmatter command runs; the body is never read");
-    assert_eq!(staged.effective_frontmatter["stamp"], "ready");
-    assert!(!effect.exists(), "a body ::shell never runs during bootstrap");
-
-    // Negative: an approval set that omits the frontmatter command refuses it.
-    let err = bootstrap(
-        CompositionMode::ChainedDocument,
-        &source,
-        PrepareOptions {
-            pre_approved_commands: Some(HashSet::new()),
+    for action in [
+        serde_json::json!({"shell": "echo ready"}),
+        serde_json::json!({"action": "shell", "command": "echo ready", "no_error": true}),
+    ] {
+        let source = source_at(dir.path(), &format!(
+            "---\ninitialize:\n  stack:\n    - when: 'false'\n      action: {}\n---\n::file ./missing.md\n",
+            action,
+        ));
+        let error = bootstrap(CompositionMode::ChainedDocument, &source, PrepareOptions {
+            pre_approved_commands: Some(HashSet::from(["echo ready".to_string()])),
             ..PrepareOptions::default()
-        },
-    )
-    .expect_err("an unapproved frontmatter command is refused");
-    assert!(
-        matches!(err, CompositionError::ShellExpansionFailed { .. }),
-        "got {err:?}"
-    );
-    assert!(!effect.exists());
+        }).unwrap_err();
+        assert!(matches!(error, CompositionError::LifecycleActionPlacement { ref action, ref event, .. }
+            if action == "shell" && event == "initialize"), "{error:?}");
+    }
 }
 
 #[test]
-fn bootstrap_frontmatter_preflight_without_a_handler_refuses_an_unlisted_command() {
+fn bootstrap_frontmatter_shells_ignore_approval_handlers_and_cached_commands() {
     let dir = TempDir::new().unwrap();
     let policy = TempDir::new().unwrap();
     let source = source_at(dir.path(), "---\nstamp: \"$(echo ready)\"\n---\n::file ./missing.md\n");
+    let handler = Arc::new(CountingHandler(Mutex::new(Vec::new())));
     let cache = Arc::new(Mutex::new(HashMap::new()));
-
-    let err = preflight_bootstrap_shell(
-        &source,
-        CompositionMode::ChainedDocument,
-        &PrepareOptions::default(),
-        &approval_options(policy.path(), None, &cache),
-    )
-    .expect_err("no handler and no whitelist entry");
-    assert!(
-        matches!(err, CompositionError::ShellApprovalUnavailable { .. }),
-        "got {err:?}"
-    );
+    fs::write(policy.path().join(".darkmatter-shell-whitelist"), "prefix echo\n").unwrap();
+    cache.lock().unwrap().insert("echo ready".to_string(), crate::harness::shell::CachedApprovalDecision::Allowed);
+    let gate = approval_options(policy.path(), Some(handler.clone()), &cache);
+    let options = PrepareOptions {
+        pre_approved_commands: Some(HashSet::from(["echo ready".to_string()])),
+        ..PrepareOptions::default()
+    };
+    let error = preflight_bootstrap_shell(
+        &source, CompositionMode::ChainedDocument, &options, &gate,
+    ).unwrap_err();
+    assert!(matches!(error, CompositionError::LifecycleInvalid { .. }), "{error:?}");
+    assert!(handler.0.lock().unwrap().is_empty(), "prohibition must not request approval");
+    let error = bootstrap(CompositionMode::ChainedDocument, &source, options).unwrap_err();
+    assert!(matches!(error, CompositionError::ShellExpansionFailed { .. }), "{error:?}");
 }
 
 /// A document the bootstrap read cannot judge fails with the same typed error
@@ -400,7 +293,7 @@ fn a_malformed_lifecycle_fails_bootstrap_and_full_preparation_identically() {
     );
     let late_binding = source_at(
         dir.path(),
-        "---\ninitialize:\n  stack:\n    - action:\n        - shell: \"rm {{err.msg}}\"\n---\nbody\n",
+        "---\nstart:\n  stack:\n    - action:\n        - shell: \"rm {{err.msg}}\"\n---\nbody\n",
     );
 
     for mode in [CompositionMode::ChainedDocument, CompositionMode::InlineFrontmatterPrompt] {
@@ -419,7 +312,7 @@ fn a_malformed_lifecycle_fails_bootstrap_and_full_preparation_identically() {
         for err in [staged, prepared] {
             match err {
                 CompositionError::LifecycleShellResolution { property, raw, .. } => {
-                    assert_eq!(property, "initialize.stack[0].action[0].command");
+                    assert_eq!(property, "start.stack[0].action[0].command");
                     assert_eq!(raw, "rm {{err.msg}}");
                 }
                 other => panic!("expected LifecycleShellResolution, got {other:?}"),
@@ -452,7 +345,7 @@ initialize:
   stack:
     - when: \"phase > 1\"
       action:
-        - shell: \"touch {{log}}\"
+        - ensure_file: \"{{log}}\"
 success:
   message: \"done {{phase}}\"
 ---
@@ -469,10 +362,7 @@ Implement phase {{phase}}.
         assert_eq!(staged.effective_frontmatter["phase"], 3);
         assert_eq!(staged.selection_hints, prepared.selection_hints);
         assert_eq!(staged.lifecycle, prepared.lifecycle);
-        assert_eq!(
-            shell_commands(&staged.lifecycle, LifecycleSignal::Initialize),
-            vec![Expr::StringLiteral(format!("touch {LOG}"))]
-        );
+        assert!(shell_commands(&staged.lifecycle, LifecycleSignal::Initialize).is_empty());
         assert_eq!(staged.deferred_lifecycle_keys, prepared.deferred_lifecycle_keys);
         assert_eq!(staged.resolved_path, prepared.resolved_path);
         assert_eq!(staged.source_repo_root, prepared.source_repo_root);
@@ -553,4 +443,16 @@ fn a_retry_never_takes_a_bootstrap_read() {
         source: &source,
         options: PrepareOptions::default(),
     });
+}
+
+#[test]
+fn bootstrap_overrides_cannot_enable_shell_expansion() {
+    let dir = TempDir::new().unwrap();
+    let source = source_at(dir.path(), "---\ninitialize: {}\n---\n::file ./missing.md\n");
+    let error = bootstrap(CompositionMode::ChainedDocument, &source, PrepareOptions {
+        set_overrides: Some(serde_json::json!({"stamp": "$(echo ready)"})),
+        pre_approved_commands: Some(HashSet::from(["echo ready".to_string()])),
+        ..PrepareOptions::default()
+    }).unwrap_err();
+    assert!(matches!(error, CompositionError::ShellExpansionFailed { .. }), "{error:?}");
 }

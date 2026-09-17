@@ -6,15 +6,13 @@
 //!
 //! 1. the **bootstrap read** — frontmatter and lifecycle surface only
 //!    ([`bootstrap_document`]);
-//! 2. the **narrow gate** — approve only the shell commands `initialize` could
-//!    select, before any of them can run;
+//! 2. reject initialization shell actions and bootstrap shell expansion;
 //! 3. `initialize`, through the pipeline's ordinary initialize route
 //!    ([`route_staged_initialize`]);
 //! 4. the **stabilized reread** — a fresh read of the document `initialize`
 //!    left on disk, with the caller's layers, overlay, and epoch reapplied
 //!    ([`reread_and_audit`]);
-//! 5. the full body audit and canonical preparation, which reuse the gate's
-//!    approvals from the invocation-wide cache.
+//! 5. the full body audit and canonical preparation.
 //!
 //! Only then is a `PreparedComposition` built and handed to the pipeline. A
 //! document without `initialize` keeps its eager preparation.
@@ -70,16 +68,12 @@ pub(crate) fn authors_initialize(source: &ResolvedCompositionSource) -> bool {
         .contains_key("initialize")
 }
 
-/// Take the bootstrap read and pass the narrow `initialize` gate.
-///
-/// Frontmatter `$(...)` runs during the bootstrap compose, so its commands are
-/// approved first; `options.pre_approved_commands` is replaced by that set.
-/// The returned set is the invocation's approvals so far, for the stabilized
-/// reread to extend.
+/// Take a shell-free bootstrap read. The empty approval set is extended only
+/// by the stabilized reread after initialization.
 ///
 /// ## Errors
 ///
-/// A frontmatter or `initialize` shell denial, or a frontmatter-side
+/// A forbidden frontmatter expansion or `initialize` shell action, or a frontmatter-side
 /// preparation failure. None of these is routed through the document's own
 /// catch stacks: they happen before its lifecycle is installed.
 pub(crate) fn bootstrap_document(
@@ -98,12 +92,6 @@ pub(crate) fn bootstrap_document(
         source,
         options,
     })?;
-    claudine::composition::resolve_lifecycle_shell_approvals(
-        &bootstrap.lifecycle,
-        &bootstrap.resolved_path,
-        &[LifecycleSignal::Initialize],
-        approval_options,
-    )?;
     Ok((bootstrap, approved))
 }
 

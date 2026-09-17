@@ -102,7 +102,7 @@ struct HarnessLoopCtx<'a, 'guard> {
     // An already-committed proxy handoff whose target this run adopts for its
     // staged bootstrap. `Some` when the command coordinator re-prepares a
     // proxied target: the hop was already committed against `handoff_ledger`, so
-    // the loop runs the target's R4 staging (narrow gate → `initialize` →
+    // the loop runs the target's R4 staging (shell-free bootstrap → `initialize` →
     // stabilized reread → audit) without re-committing. `None` for a
     // directly-invoked document.
     adopted_handoff: Option<Box<claudine::composition::ProxyHandoff>>,
@@ -823,7 +823,7 @@ fn observe_reentry_lifecycle_context(
 ///
 /// ## Errors
 ///
-/// A bootstrap or narrow-gate failure precedes installation of the document's
+/// A bootstrap validation failure precedes installation of the document's
 /// lifecycle config and surfaces directly as a typed diagnostic. Once the gate
 /// passes, initialization runs under the installed config and retains its
 /// ordinary lifecycle error routing.
@@ -833,10 +833,7 @@ fn run_initialize_stages(
     control: &mut AttemptRetryProxyControl<'_>,
     materialized: &mut MaterializedHarnessPrompt,
 ) -> Result<Option<LoopStep>> {
-    // Stage 1 — the bootstrap read is `materialized`, already composed against
-    // the caller's input layers by the shared assembly point. Its lifecycle
-    // came from canonical preparation, so its shell commands are C3-resolved:
-    // the bytes the gate approves are the bytes the executor runs.
+    // Canonical preparation rejects shell actions in initialization.
     let bootstrap_lifecycle = match materialized.lifecycle.clone() {
         Some(config) => config,
         None => {
@@ -848,16 +845,6 @@ fn run_initialize_stages(
         }
     };
 
-    // Stage 2 — the narrow safety gate. Every `initialize` shell command the
-    // evaluator could select is approved before the evaluator runs. Later
-    // events are deliberately out of scope: their commands may not survive the
-    // stabilized reread.
-    claudine::composition::resolve_lifecycle_shell_approvals(
-        &bootstrap_lifecycle,
-        &prompt.prompt_state.source_path,
-        &[LifecycleSignal::Initialize],
-        prompt.harness_context.shell_options(),
-    )?;
     lifecycle.guard.set_config(bootstrap_lifecycle);
 
     // Stage 3 — `initialize`, through the normal evaluator.
@@ -955,20 +942,18 @@ fn initialize_adopted_target_phase(
 /// The staging exists because of an ordering conflict: `initialize` may mutate
 /// the document, and the full audit has to read the document it will actually
 /// execute. Auditing everything first and then letting `initialize` rewrite the
-/// file underneath the audit is the drift; running `initialize` first with
-/// nothing approved is a hole. So the boot splits:
+/// file underneath the audit would invalidate it. Initialization is shell-free:
+///
 ///
 /// 1. the **bootstrap read** — the document as adopted, composed with the
 ///    caller's input layers, giving the lifecycle surface `initialize` needs;
-/// 2. the **narrow safety gate** — approve only the shell commands
-///    `initialize` could select, against that same read;
+/// 2. reject shell actions and bootstrap frontmatter shell expansion;
 /// 3. `initialize` itself, through the normal evaluator, consuming
 ///    `skip`/`error`/`proxy` atomically;
 /// 4. the **stabilized reread** — a fresh read, so an initialize-time file or
 ///    frontmatter mutation is visible, with the caller's layers reapplied
 ///    through the same assembly point;
-/// 5. the **full audit** over every lifecycle surface, which reuses the gate's
-///    approvals from the invocation-wide cache rather than prompting twice.
+/// 5. the **full audit** over the remaining lifecycle and body shell surfaces.
 ///
 /// `initialize` fires exactly once across all five stages: only step 3 emits
 /// it, and the reread re-points the guard's config without touching its

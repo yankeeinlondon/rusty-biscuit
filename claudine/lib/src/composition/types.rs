@@ -921,7 +921,7 @@ pub struct CompositionExecutionRequest {
     /// the command coordinator has already committed the hop against the shared
     /// [`handoff_ledger`][Self::handoff_ledger], so the executor must **not**
     /// route the target's `initialize` a second time through the setup pipeline.
-    /// Instead the harness loop's staged bootstrap (narrow initialize-shell gate
+    /// Instead the harness loop's staged bootstrap (shell-free bootstrap validation
     /// → the target's own `initialize` → stabilized reread → full audit) owns the
     /// target's `initialize`, exactly as an in-harness adoption does — the one
     /// canonical R4 staging for every route. `None` for a directly-invoked

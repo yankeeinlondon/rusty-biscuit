@@ -70,7 +70,7 @@ Router body (never composed: the run proxies away at initialize).
 
 /// The proxied target. `phase` comes from the caller so one document covers
 /// the phase-1 (guard excludes the log) and later-phase (guard includes it)
-/// shapes. The `shell` step records that `initialize` ran and gives the log
+/// shapes. Non-shell file effects record that `initialize` ran and give the log
 /// observable content once it exists.
 fn target_doc(events_log: &Path) -> String {
     format!(
@@ -83,7 +83,8 @@ initialize:
   stack:
     - action:
         - ensure_file: \"{{{{log}}}}\"
-        - shell: \"printf 'initialize\\n' >> {events} && printf '{LOG_MARKER}\\n' >> {{{{log}}}}\"
+        - append_line: [\"{events}\", initialize]
+        - append_line: [\"{{{{log}}}}\", \"{LOG_MARKER}\"]
 ---
 {BODY_MARKER} phase {{{{phase}}}}.
 
@@ -93,7 +94,7 @@ initialize:
 ::end-block
 ::end-block
 ",
-        events = sh_quote(&events_log.display().to_string()),
+        events = events_log.display(),
     )
 }
 
@@ -114,7 +115,7 @@ fn stage(name: &str) -> Staged {
     fixture.initialize_repository();
     fixture.seed_user_config();
     let cwd = fixture.cwd();
-    let events_log = fixture.workspace_path().join("events.log");
+    let events_log = fixture.cwd().join("events.log");
     let prompt_file = fixture.workspace_path().join("prompt.txt");
 
     write(&cwd.join("prompts/router.md"), ROUTER_DOC);
@@ -257,12 +258,8 @@ fn level2_proxied_initialize_creates_log_before_guarded_later_phase_body_include
     );
 }
 
-/// R2 approval boundary on the direct route: without `-y` and with no
-/// interactive approval handler, an `initialize` shell command must be refused
-/// before it runs — no effect, no provider launch.
-///
-/// Before the fix the direct route emits `initialize` ahead of any lifecycle
-/// shell audit, so the command's effect lands and only the later audit fails.
+/// Initialization shell actions are forbidden before preflight, including when
+/// no approval handler is available. No shell effect or provider launch occurs.
 #[test]
 #[serial(level2_terminal)]
 fn level2_direct_initialize_shell_has_no_effect_when_approval_is_unavailable() {
@@ -280,8 +277,8 @@ fn level2_direct_initialize_shell_has_no_effect_when_approval_is_unavailable() {
 
     assert_eq!(status, "1", "an unapprovable initialize command must fail the run:\n{frame}");
     assert!(
-        frame.contains("approval"),
-        "the refusal must name the approval requirement:\n{frame}"
+        frame.contains("shell") && frame.contains("initialize"),
+        "the refusal must name the forbidden initialization shell:\n{frame}"
     );
     assert!(
         !effect.exists(),

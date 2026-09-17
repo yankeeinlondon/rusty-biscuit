@@ -195,7 +195,7 @@ pub(crate) fn execute_composition_attempt(
 /// Execute a staged document's first attempt under the guard that already
 /// emitted its `initialize`.
 ///
-/// The command coordinator ran the staged boot (bootstrap read, narrow gate,
+/// The command coordinator ran the staged boot (shell-free bootstrap read,
 /// `initialize`, stabilized reread), so `request.prepared` is the post-
 /// `initialize` read. The pipeline does not route `initialize` again, and it
 /// still runs the full lifecycle audit over that read.

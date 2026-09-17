@@ -682,10 +682,13 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                     "lifecycle action not valid here",
                 ))
                 .body(body)
-                .hint(
+                .hint(if action == "shell" && event == "initialize" {
+                    "Initialization is shell-free because it runs before preflight. Move the \
+                     command to `start` or a later event; approval cannot override this rule."
+                } else {
                     "Check the \"Where valid\" matrix in the lifecycle spec: only certain \
-                     control actions are allowed in each event.",
-                )
+                     control actions are allowed in each event."
+                })
         }
         CompositionError::LifecycleMultipleLifecycleActions {
             source_path, property, ..

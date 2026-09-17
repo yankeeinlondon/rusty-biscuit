@@ -61,7 +61,8 @@ pub fn scan_removed_validation_keys(
 /// [`LifecycleStackItem`] values stored on [`LifecycleConfig::stacks`].
 /// Stack parsing enforces the spec's cardinality rule (at most one
 /// lifecycle control action per item; it must be last) and the per-event
-/// "Where valid" matrix for control actions.
+/// "Where valid" matrix for control actions. Shell actions are forbidden in
+/// `initialize`, including guarded actions that would not currently run.
 ///
 /// Validates mutual exclusivity of `say` and `say_first` and validates sound
 /// effect names against the embedded `playa` catalog.
@@ -138,6 +139,19 @@ pub fn parse_lifecycle_config(
 
         let (notification, stack) =
             parse_event_block(signal, value, source_file, property_name)?;
+
+        if signal == LifecycleSignal::Initialize {
+            for (index, item) in stack.iter().flatten().enumerate() {
+                if item.actions.iter().any(|action| matches!(action.kind, LifecycleActionKind::Shell(_))) {
+                    return Err(CompositionError::LifecycleActionPlacement {
+                        source_path: source_file.to_path_buf(),
+                        property: format!("initialize.stack[{index}].action"),
+                        action: "shell".to_string(),
+                        event: "initialize".to_string(),
+                    });
+                }
+            }
+        }
 
         *event_notification_field_mut(signal, &mut config) = Some(notification);
         *event_stack_field_mut(signal, &mut config) = stack.filter(|s| !s.is_empty());

@@ -724,8 +724,7 @@ fn effective_surface(
 /// The bootstrap read's context and compose options: the canonical assembly,
 /// with the verdict withheld, narrowed to the frontmatter surface.
 ///
-/// Shared by [`preflight_bootstrap_shell`] and the bootstrap compose so the
-/// frontmatter commands approved are the commands that projection runs.
+/// Shell expansion is forbidden even when the caller supplied approvals.
 fn bootstrap_compose_options(
     source: &ResolvedCompositionSource,
     mode: CompositionMode,
@@ -742,29 +741,27 @@ fn bootstrap_compose_options(
     let compose_opts =
         canonical_compose_options(&source.resolved_path, &ctx, options, schema_phase)
             .with_deferred_schema_verdict(true)
-            .only_frontmatter_surface();
+            .only_frontmatter_surface()
+            .with_pre_approved_commands(std::collections::HashSet::new());
     (ctx, compose_opts)
 }
 
-/// Discover and approve the frontmatter `$(...)` commands a bootstrap read of
-/// `source` would run, without reading its body.
+/// Reject frontmatter `$(...)` commands before initialization, without reading
+/// the body or consulting shell approvals.
 ///
-/// The bootstrap counterpart of [`preflight_document_shell`]: fold the
-/// returned commands into the input layers before calling
-/// [`prepare_bootstrap`](super::prepare_bootstrap) with a pre-approved set,
-/// or that compose refuses them as not pre-approved. Body `::shell` commands
-/// and transclusions are left for the post-`initialize` full audit.
+/// The returned set is empty. Body commands and transclusions remain for the
+/// post-initialization audit. The bootstrap composer also enforces an empty
+/// command set, so malformed or dynamically shaped expansions fail closed.
 ///
 /// ## Errors
 ///
-/// A shell-audit denial, as [`preflight_document_shell`]. A collection failure
-/// (a malformed or dynamically-shaped command) returns an empty set so the
-/// bootstrap compose surfaces the authoritative typed error.
+/// A discovered command is a lifecycle contract error, not an approval request.
+/// Collection failures are diagnosed by the bootstrap composer.
 pub fn preflight_bootstrap_shell(
     source: &ResolvedCompositionSource,
     mode: CompositionMode,
     options: &PrepareOptions,
-    approval_options: &crate::harness::ShellApprovalOptions,
+    _approval_options: &crate::harness::ShellApprovalOptions,
 ) -> Result<std::collections::HashSet<String>, CompositionError> {
     observe_prepared_context(
         options,
@@ -777,14 +774,16 @@ pub fn preflight_bootstrap_shell(
     ) else {
         return Ok(std::collections::HashSet::new());
     };
-    let commands = entries
-        .into_iter()
-        .map(|entry| {
-            let line = entry.origin.line_number();
-            (entry.normalized, entry.source_file, line)
-        })
-        .collect();
-    Ok(super::preflight::approve_discovered_commands(commands, approval_options)?.approved_commands)
+    if let Some(entry) = entries.first() {
+        return Err(CompositionError::LifecycleInvalid {
+            property: "initialize".to_string(),
+            message: format!("shell expansion `{}` is forbidden in bootstrap frontmatter before initialize; move the command to start or a later event", entry.normalized),
+            source_file: source.resolved_path.clone(),
+            unknown_field: None,
+            expected_fields: Vec::new(),
+        });
+    }
+    Ok(std::collections::HashSet::new())
 }
 
 /// Compose the bootstrap read of one document: effective frontmatter and

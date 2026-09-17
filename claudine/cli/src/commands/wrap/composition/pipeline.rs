@@ -1759,7 +1759,7 @@ fn provider_run_handoff(
     };
     // An adopted proxy target's `initialize` is NOT routed here: the command
     // coordinator already committed the hop, and the harness loop's staged
-    // bootstrap owns the target's narrow initialize-shell gate, its own
+    // bootstrap owns the target's shell-free bootstrap validation, its own
     // `initialize`, the stabilized reread, and the full audit — the one
     // canonical R4 staging shared with an in-harness adoption. (A target that
     // authors `initialize` never arrives adopted: the coordinator's own staged

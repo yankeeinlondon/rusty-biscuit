@@ -305,12 +305,12 @@ fn a_false_condition_include_still_contributes_its_command_to_the_approval_set()
 fn an_include_initialize_rewrites_reaches_the_prompt_with_its_new_content() {
     let accept = Acceptance::new("init-accept-rewrite-include");
     accept.install_provider("claude", &[]);
-    write(&accept.path(GENERATED), "BOOTSTRAP-TIME-CONTENT\n");
+    write(&accept.path(GENERATED), "---\ncontent: BOOTSTRAP-TIME-CONTENT\n---\n{{content}}\n");
     let doc = accept.write_doc(
         "doc.md",
         &format!(
             "---\ntitle: rewrite\ninitialize:\n  stack:\n    \
-             - action: {{shell: \"printf 'REWRITTEN-BY-INITIALIZE\\\\n' > {path}\"}}\n\
+             - action: {{set_frontmatter: ['{path}', 'content', 'REWRITTEN-BY-INITIALIZE']}}\n\
              ---\n{BODY_MARKER}\n\n::file {GENERATED}\n",
             path = accept.path(GENERATED).display(),
         ),

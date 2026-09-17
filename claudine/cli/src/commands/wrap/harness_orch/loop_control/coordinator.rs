@@ -209,7 +209,7 @@ impl ActiveDocumentCoordinator {
     /// terminal-route commit the harness itself made). This performs the same
     /// CLI-side repointing as [`adopt`](Self::adopt) — discarding the source's
     /// execution state, resetting the guard, and arming the bootstrap so the
-    /// staged boot runs the target's own narrow gate, `initialize`, stabilized
+    /// staged boot runs the target's own shell-free bootstrap, `initialize`, stabilized
     /// reread, and full audit — but it does **not** re-resolve or re-approve the
     /// hop: doing so would re-count it and, because the target is already in the
     /// chain, reject it as a cycle. Hop/cycle accounting stays where it was made,

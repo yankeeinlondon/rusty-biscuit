@@ -158,9 +158,8 @@ pub struct BootstrapRequest<'a> {
 /// Assembles options exactly as [`prepare_document`] does, then composes only
 /// the frontmatter surface: no transclusion is dereferenced and no body
 /// `::shell` runs, so a body that includes a file `initialize` will create does
-/// not fail here. The schema verdict is always withheld. With a pre-approved
-/// set in `options`, it must already contain the commands
-/// [`preflight_bootstrap_shell`](super::preflight_bootstrap_shell) approves.
+/// not fail here. The schema verdict is withheld. Bootstrap frontmatter shell
+/// expansion is forbidden even when `options` carries approvals.
 ///
 /// ## Errors
 ///

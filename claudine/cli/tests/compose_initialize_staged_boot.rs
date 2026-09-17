@@ -13,7 +13,7 @@
 //! missing after `initialize` fails once through the document's own
 //! `blocked`/`finalize`; a document without `initialize` fails eagerly exactly
 //! as before; a dry run fires no lifecycle event; a `skip` ends the run before
-//! any body read; and an unapproved `initialize` shell command is refused
+//! any body read; and every `initialize` shell command is refused
 //! before it can run.
 //!
 //! The provider is a fake `claude` that records the prompt it received and its
@@ -394,9 +394,8 @@ fn an_initialize_skip_ends_the_run_before_the_body_is_discovered() {
     assert!(!staged.prompt.exists(), "{output}");
 }
 
-/// R2/AC5: without `-y` and without an approval handler, the narrow gate refuses
-/// an `initialize` shell command before it runs — and before body discovery,
-/// so the refusal names the command rather than the missing include.
+/// R2/AC5: an initialization shell is an authoring error before body discovery,
+/// so the refusal names the forbidden action rather than the missing include.
 #[test]
 fn an_unapproved_initialize_shell_is_refused_before_the_body_is_discovered() {
     let staged = Staged::new("staged-boot-gate");
@@ -415,7 +414,7 @@ fn an_unapproved_initialize_shell_is_refused_before_the_body_is_discovered() {
     let (success, output) = staged.run(&["compose", doc.to_str().unwrap(), "--claude"]);
 
     assert!(!success, "{output}");
-    assert!(output.contains("approval"), "{output}");
+    assert!(output.contains("is not valid in") && output.contains("initialize"), "{output}");
     assert_no_early_discovery(&output);
     assert!(!effect.exists(), "the unapproved command ran:\n{output}");
     assert!(
@@ -423,4 +422,107 @@ fn an_unapproved_initialize_shell_is_refused_before_the_body_is_discovered() {
         "a refused gate precedes the document's lifecycle, so nothing is caught:\n{output}"
     );
     assert!(!staged.prompt.exists(), "{output}");
+}
+
+#[test]
+fn initialize_shells_are_forbidden_even_with_yolo_across_entry_paths() {
+    for (command, proxy, looping) in [
+        ("compose", false, false),
+        ("inline-compose", false, false),
+        ("compose", true, false),
+        ("inline-compose", true, false),
+        ("compose", false, true),
+        ("sequence", true, false),
+    ] {
+        let staged = Staged::new("initialize-shell-prohibited");
+        staged.install_compose_provider();
+        let effect = staged.fixture.workspace_path().join("forbidden.txt");
+        staged.write_doc("target.md", &format!(
+            "---\nprompt: Do the task\n{}initialize:\n  stack:\n    - when: 'false'\n      action: {{shell: \"touch {}\"}}\n---\nBody\n",
+            if looping { "loop:\n  count: 2\n" } else { "" }, effect.display(),
+        ));
+        staged.write_doc("router.md", "---\nprompt: Route the task\ninitialize:\n  stack:\n    - action: {proxy: './target.md'}\n---\nRouter\n");
+        staged.write_doc("seq.md", "---\nsequence:\n  - name: one\n    prompt: router.md\n---\nSequence\n");
+        staged.write_doc(".darkmatter-shell-whitelist", "prefix touch\n");
+        let entry = if command == "sequence" { "seq.md" } else if proxy { "router.md" } else { "target.md" };
+        let (success, output) = staged.run(&[command, entry, "--claude", "-y"]);
+        assert!(!success, "{command}, proxy={proxy}, looping={looping}: {output}");
+        assert!(output.contains("is not valid in") && output.contains("initialize"), "{output}");
+        assert!(!effect.exists(), "{output}");
+        assert!(!staged.prompt.exists(), "provider launched: {output}");
+    }
+}
+
+#[test]
+fn early_catch_shells_cannot_run_or_enable_another_catch_shell() {
+    for trigger in ["missing", "error", "proxy", "evaluation", "schema", "audit", "adopted"] {
+        for yolo in [false, true] {
+            let staged = Staged::new("early-catch-shell-prohibited");
+            staged.install_compose_provider();
+            let action = match trigger {
+                "error" => "{error: 'INITIALIZE-ERROR'}",
+                "proxy" => "{proxy: './missing-target.md'}",
+                _ => "{ensure_file: 'initialized.md'}",
+            };
+            let body = match trigger {
+                "schema" => "Body",
+                "audit" => "::shell rm forbidden.txt",
+                _ => "::file ./missing.md",
+            };
+            let schema = if trigger == "schema" { "$schema:\n  required_value: string(required)\n" } else { "" };
+            let mut catches = String::new();
+            for event in ["blocked", "failure", "finalize"] {
+                let marker = staged.fixture.workspace_path().join(format!("{event}-shell"));
+                catches.push_str(&format!(
+                    "{event}:\n  stack:\n    - action: {{append_line: ['events.log', '{event}']}}\n",
+                ));
+                if trigger == "evaluation" && event == "blocked" {
+                    catches.push_str("    - action: {info: '{{ definitely_missing_value }}'}\n");
+                }
+                catches.push_str(&format!(
+                    "    - action:\n        action: shell\n        command: \"touch {}\"\n        no_error: true\n", marker.display(),
+                ));
+            }
+            staged.write_doc("doc.md", &format!(
+                "---\n{schema}initialize:\n  stack:\n    - action: {action}\n{catches}---\n{body}\n",
+            ));
+            staged.write_doc("router.md", "---\ninitialize:\n  stack:\n    - action: {proxy: './doc.md'}\n---\nRouter\n");
+            staged.write_doc("seq.md", "---\nsequence:\n  - name: one\n    prompt: router.md\n---\nSequence\n");
+            let mut args = if trigger == "adopted" {
+                vec!["sequence", "seq.md", "--claude"]
+            } else {
+                vec!["compose", "doc.md", "--claude"]
+            };
+            if yolo { args.push("-y"); }
+            let (success, output) = staged.run(&args);
+            assert!(!success, "{trigger}, yolo={yolo}: {output}");
+            assert!(output.contains("shell commands are forbidden"), "{trigger}: {output}");
+            for event in ["blocked", "failure", "finalize"] {
+                assert!(!staged.fixture.workspace_path().join(format!("{event}-shell")).exists(), "{trigger}: {output}");
+                assert!(staged.events().iter().filter(|value| *value == event).count() <= 1, "catch repeated: {output}");
+            }
+            let expected = if trigger == "error" {
+                vec!["failure", "finalize"]
+            } else {
+                vec!["blocked", "failure", "finalize"]
+            };
+            assert_eq!(staged.events(), expected, "{trigger}: {output}");
+            assert!(!staged.prompt.exists(), "provider launched: {output}");
+        }
+    }
+}
+
+#[test]
+fn approved_start_shell_runs_once_after_shell_free_initialization() {
+    let staged = Staged::new("post-preflight-shell");
+    staged.install_compose_provider();
+    let effect = staged.fixture.workspace_path().join("start-shell.txt");
+    staged.write_doc("doc.md", &format!(
+        "---\n{CREATING_INITIALIZE}start:\n  stack:\n    - action: {{shell: \"printf 'ran\\n' >> {}\"}}\n---\n::file {GENERATED}\n",
+        effect.display(),
+    ));
+    let (success, output) = staged.run(&["compose", "doc.md", "--claude", "-y"]);
+    assert!(success, "{output}");
+    assert_eq!(fs::read_to_string(effect).unwrap(), "ran\n", "{output}");
+    assert_eq!(staged.events(), ["initialize", "provider-ran"], "{output}");
 }

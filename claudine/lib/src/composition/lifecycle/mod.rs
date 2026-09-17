@@ -658,7 +658,13 @@ impl<'a> LifecycleRunGuard<'a> {
         signal: LifecycleSignal,
         stack_ctx: &super::lifecycle_executor::StackExecutionContext<'_>,
     ) -> super::lifecycle_executor::LifecycleEventOutcome {
-        stack_ctx.with_signal(signal).execute_event(&self.config)
+        let mut context = stack_ctx.with_signal(signal);
+        // `start` follows successful preflight; proxy adoption resets it. Catch
+        // events reached before that boundary must not inherit a shell runner.
+        if !self.start_emitted {
+            context.shell_runner = &super::lifecycle_executor::DisabledShellRunner;
+        }
+        context.execute_event(&self.config)
     }
 
     /// Execute the full lifecycle event (top-level notification + stack) for

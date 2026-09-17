@@ -5373,17 +5373,9 @@ fn run_in_tmux_until_exit(staged: &Staged) -> String {
     pane
 }
 
-/// The narrow safety gate: a proxy target's `initialize` shell command is
-/// approved **before** the evaluator dispatches it.
-///
-/// The target's `initialize` runs before the target's full pre-flight audit
-/// can — the audit has to read the document `initialize` may rewrite. That
-/// ordering must never mean "execute unapproved shell": the gate approves
-/// every command `initialize` could select first, on its own.
-///
-/// `rm` is builtin-blacklisted, so a gate that ran would refuse it. Before the
-/// staged boot the proxy route audited no lifecycle surface at all, so this
-/// command reached `SystemShellRunner` and deleted the sentinel.
+/// A proxy target's initialization shell action is prohibited before dispatch,
+/// regardless of approval. The sentinel and provider marker prove the target
+/// cannot execute the command or proceed to launch.
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch() {
@@ -5408,8 +5400,8 @@ fn level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch() {
     );
     assert!(
         sentinel.exists(),
-        "the blacklisted `initialize` shell command must be refused by the narrow \
-         gate before dispatch — it deleted the sentinel instead; pane:\n{pane}"
+        "the forbidden `initialize` shell command must be refused \
+         before dispatch — it deleted the sentinel instead; pane:\n{pane}"
     );
     assert!(
         !lines.iter().any(|l| l == "provider-ran"),
@@ -5424,7 +5416,7 @@ fn level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch() {
 }
 
 /// The full post-stabilization audit covers a proxy target's later lifecycle
-/// surfaces too — not only the ones the narrow gate scoped.
+/// surfaces after shell-free initialization.
 ///
 /// The gate deliberately skips `success`, so if the audit that follows the
 /// stabilized reread did not run, this blacklisted `success` command would
@@ -6775,22 +6767,8 @@ fn level2_lifecycle_proxy_shell_approved_bytes_equal_executed_bytes() {
 
 // ── AC25: overlay-installed control-plane shell configuration ────────────────
 //
-// The AC17 row above proves byte equality for a shell action the *target*
-// authored, with the overlay supplying only an interpolated value. AC25 is the
-// stronger claim: `with:` may install the lifecycle stack itself — the overlay
-// is the *origin* of the shell configuration — and that reach still buys no
-// exemption from the target's own policy. Both rows below therefore stage a
-// target that authors no `initialize` at all, so the audited command can only
-// have come from the router's overlay.
-
-/// **Acceptance criterion 25, denial.** A router that installs the target's
-/// entire `initialize` shell stack through `proxy.with:` does not get to run an
-/// un-approvable command: the target's narrow initialize gate refuses it, the
-/// operator sees the denial, and no provider process starts.
-///
-/// `rm` is builtin-blacklisted, so a gate that ran at all refuses it. The
-/// sentinel is the physical evidence — if the overlay could bypass target-side
-/// policy the command would delete it before anything else could object.
+/// An overlay cannot install an initialization shell. The initialization
+/// prohibition is applied to the target's effective configuration before launch.
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_overlay_installed_initialize_shell_is_denied_by_target_policy() {
@@ -6813,17 +6791,17 @@ fn level2_lifecycle_overlay_installed_initialize_shell_is_denied_by_target_polic
 
     assert!(
         sentinel.exists(),
-        "a blacklisted command installed by `proxy.with:` must be refused by the \
-         target's own shell policy — it deleted the sentinel instead; pane:\n{pane}"
+        "an initialization shell installed by `proxy.with:` must be refused by the \
+         target's lifecycle contract — it deleted the sentinel instead; pane:\n{pane}"
     );
     assert!(
-        prose.contains("blacklisted"),
+        prose.contains("is not valid in"),
         "the operator must see the target-side denial diagnostic; flattened \
          pane:\n{prose}"
     );
     assert!(
-        prose.contains("rm sentinel.txt"),
-        "the denial must name the overlay-installed command; flattened \
+        prose.contains("Initialization is shell-free"),
+        "the denial must explain the shell-free initialization rule; flattened \
          pane:\n{prose}"
     );
     assert!(
@@ -6838,56 +6816,21 @@ fn level2_lifecycle_overlay_installed_initialize_shell_is_denied_by_target_polic
     );
 }
 
-/// **Acceptance criterion 25, approval.** The same overlay-installed
-/// `initialize` stack, this time carrying a command the target's policy does
-/// approve, runs — and the bytes the shell executed are exactly the bytes the
-/// audit approved.
-///
-/// The pairing with the denial row above is the point: approval is a policy
-/// *decision* about overlay-installed configuration, not a path that skips the
-/// gate. The whitelist lives in the target's own policy root, so what changed
-/// between the two rows is the target's verdict, not the overlay's reach.
+/// Whitelisting does not authorize an overlay-installed initialization shell.
 #[test]
 #[serial(level2_lifecycle_control)]
-fn level2_lifecycle_overlay_installed_initialize_shell_runs_the_approved_bytes() {
+fn level2_lifecycle_overlay_initialization_shell_cannot_be_whitelisted() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-
-    let source_doc = "---\ntitle: overlay-installed approval router\ninitialize:\n  stack:\n    \
-         - action: {action: proxy, target: '@target.md', with: \
-         {initialize: {stack: [{action: {shell: \"logbytes 'overlay installed bytes'\"}}]}}}\n\
-         ---\nrouter body\n";
-    let target_doc = "---\ntitle: overlay-installed approval target\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'ac25-approved']}\n---\ntarget body\n";
-    let staged = stage_proxy_pair(source_doc, target_doc, true);
-
+    let source_doc = "---\ninitialize:\n  stack:\n    - action: {action: proxy, target: '@target.md', with: {initialize: {stack: [{action: {shell: \"logbytes forbidden\"}}]}}}\n---\nRouter\n";
+    let staged = stage_proxy_pair(source_doc, "---\ntitle: target\n---\nTarget\n", true);
     let executed_log = staged.workspace.path().join("executed.log");
     write_bytes_recorder(&staged.bin_dir, &executed_log);
-    fs::write(
-        staged.workspace.path().join(".darkmatter-shell-whitelist"),
-        "prefix logbytes\n",
-    )
-    .unwrap();
-
-    let pane = run_in_tmux_for(&staged, "ac25-approved");
-    let lines = event_lines(&staged);
+    fs::write(staged.workspace.path().join(".darkmatter-shell-whitelist"), "prefix logbytes\n").unwrap();
+    let pane = run_in_tmux_until_exit(&staged);
     let prose = flattened(&pane);
-
-    assert_eq!(
-        fs::read_to_string(&executed_log).unwrap_or_default(),
-        "overlay installed bytes",
-        "the approved bytes must be the executed bytes for a shell action the \
-         overlay installed, embedded spaces and all; pane:\n{pane}"
-    );
-    assert!(
-        !prose.contains("blacklisted"),
-        "an approved overlay-installed command must not render a denial; \
-         flattened pane:\n{prose}"
-    );
-    assert!(
-        lines.iter().any(|l| l == "provider-ran"),
-        "the run must reach the provider once the gate approves; got {lines:?}; \
-         pane:\n{pane}"
-    );
+    assert!(prose.contains("Initialization is shell-free"), "{pane}");
+    assert!(!executed_log.exists(), "the whitelisted shell executed: {pane}");
+    assert!(!event_lines(&staged).iter().any(|line| line == "provider-ran"), "{pane}");
 }
 
 // ── AC26: overlay retention across retry, resume, and loop refresh ───────────
@@ -8188,7 +8131,7 @@ fn level2_lifecycle_diagnostic_matrix_preparation_failure_is_route_equivalent() 
 
 // ── Review 7, finding 1: `initialize` precedes the schema verdict ───────────
 //
-// R4 orders a fresh document's stages: narrow initialize-shell gate → its own
+// R4 orders a fresh document's stages: shell-free bootstrap → its own
 // `initialize` → schema validation → full pre-flight. The rows below pin the
 // consequence an operator can see. A target that only satisfies its `$schema`
 // *because* its `initialize` supplies the value must run — on every route. And

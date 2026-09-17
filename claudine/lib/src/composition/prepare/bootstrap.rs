@@ -24,10 +24,9 @@ use crate::composition::types::{CallerInputLayers, CompositionMode, EffectiveSel
 /// The effective frontmatter and lifecycle surface of a document, read before
 /// its `initialize` runs.
 ///
-/// Holds nothing derived from the body. `lifecycle` carries C3-stamped shell
-/// commands, so approving
-/// [`LifecycleSignal::Initialize`](crate::composition::LifecycleSignal::Initialize)'s
-/// commands from it approves exactly the bytes `initialize` executes.
+/// Holds nothing derived from the body. Initialization shell actions and
+/// frontmatter shell expansion are forbidden. Other events' shell commands
+/// remain subject to the audit after the stabilized reread.
 #[derive(Debug, Clone)]
 pub struct BootstrapPreparation {
     /// Which composer the stabilized reread will run.

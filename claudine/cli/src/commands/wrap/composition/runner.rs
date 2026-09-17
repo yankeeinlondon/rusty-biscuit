@@ -142,7 +142,7 @@ pub(super) fn run_composition_body(
     let hands_off = initial_transition.hands_off_source();
 
     // Whether `request.prepared` is an already-committed proxy target the harness
-    // loop will re-stage (narrow gate → `initialize` → stabilized reread → audit)
+    // loop will re-stage (shell-free bootstrap → `initialize` → stabilized reread → audit)
     // via its bootstrap. When adopting, the target's `initialize` has NOT fired
     // here (the setup pipeline skipped `route_initialize`), so this body must not
     // pre-parse the harness plan or run the pre-flight audit against the
@@ -232,8 +232,8 @@ pub(super) fn run_composition_body(
     // checks that need an effective-plan transform.
 
     // ── Pre-flight shell approval for harness commands ───────────
-    // Skipped for an adopted target: the staged boot runs the narrow
-    // initialize-shell gate and then the full post-stabilization audit itself,
+    // Skipped for an adopted target: the staged boot runs shell-free
+    // initialization and then the full post-stabilization audit itself,
     // so auditing the bootstrap read here (before the target's `initialize` and
     // stabilized reread) would audit a document the run will not execute.
     if !skip_preflight && !adopting {

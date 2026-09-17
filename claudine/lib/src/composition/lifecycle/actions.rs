@@ -60,10 +60,8 @@ pub struct LifecycleAction {
     /// The typed action body.
     pub kind: LifecycleActionKind,
 
-    /// When `true`, an unintentional error from this action is logged but
-    /// does not propagate: stack processing continues to the next item and
-    /// the composition outcome is unchanged regardless of which event is
-    /// processing the stack.
+    /// Suppress dispatch failures and continue the stack. Expression errors
+    /// and the prohibition on shells before preflight cannot be suppressed.
     ///
     /// Defaults to `false`. The spec extends the existing `shell.no_error`
     /// flag to every action category.

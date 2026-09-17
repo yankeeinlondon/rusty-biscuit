@@ -1002,8 +1002,8 @@ pub enum CompositionError {
         verb: String,
     },
 
-    /// A lifecycle control action was used in an event where the spec's
-    /// "Where valid" matrix forbids it (e.g. `Skip` outside `initialize`).
+    /// An action was used in a forbidden event: a shell in `initialize`, or
+    /// a lifecycle control outside its placement matrix.
     ///
     /// Raised at parse time after the action identity is known, so the
     /// diagnostic can name both the action and the event.

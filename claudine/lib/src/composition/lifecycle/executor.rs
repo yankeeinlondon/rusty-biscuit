@@ -249,17 +249,14 @@ impl LifecycleExprError {
     }
 }
 
-/// A shell command that could not be started at all.
-///
-/// Distinct from a command that ran and exited non-zero: that is an exit code,
-/// reported through [`ShellRunner::run`]'s `Ok` arm. This is the failure to
-/// spawn.
-///
-/// `command` is carried so the `Display` is self-contained — the executor used
-/// to build this prose itself from an untyped runner error, which is what left
-/// the underlying [`std::io::Error`] unrecoverable.
+/// A shell command refused by the lifecycle boundary or unable to start.
+/// A command that ran and exited nonzero is reported through
+/// [`ShellRunner::run`]'s `Ok` arm. Spawn failures retain their I/O source.
 #[derive(Debug, thiserror::Error)]
 pub enum ShellRunError {
+    /// The lifecycle has not crossed the preflight boundary.
+    #[error("shell commands are forbidden during initialize and before preflight completes; move the command to start or a later event")]
+    BeforePreflight,
     /// The shell process could not be spawned or waited on.
     #[error("command `{command}` failed to run: {source}")]
     Spawn {
@@ -277,9 +274,20 @@ pub enum ShellRunError {
 /// during pre-flight; this trait runs an already-approved command. Injectable
 /// so tests can assert command dispatch without spawning real processes.
 pub trait ShellRunner: Sync {
-    /// Run `command`. Returns the process exit code, or [`ShellRunError`] when
-    /// the process could not be spawned at all.
+    /// Return the exit code, or [`ShellRunError`] when execution is prohibited
+    /// or the process could not be started.
     fn run(&self, command: &str) -> Result<i32, ShellRunError>;
+}
+
+/// Runner for initialization and its early catch handlers. Approvals cannot
+/// enable shell execution on this route.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DisabledShellRunner;
+
+impl ShellRunner for DisabledShellRunner {
+    fn run(&self, _command: &str) -> Result<i32, ShellRunError> {
+        Err(ShellRunError::BeforePreflight)
+    }
 }
 
 /// Production [`ShellRunner`] that runs commands through the system shell.
@@ -1250,17 +1258,26 @@ impl StackExecutionContext<'_> {
 
     /// Run a shell action. A failed command-string interpolation is an
     /// evaluation error; a non-zero exit or spawn failure is a dispatch error
-    /// (subject to `no_error` upstream). `on_error` is emitted as a warning
-    /// status line before a dispatch error propagates.
+    /// (subject to `no_error` upstream). Initialization and preflight prohibitions
+    /// are unsuppressible. `on_error` is emitted as a warning status line before
+    /// a dispatch error propagates.
     fn run_shell_action(
         &self,
         shell: &super::actions::ShellAction,
         fm: &Map<String, Value>,
     ) -> Result<(), ActionFailure> {
+        if self.signal == LifecycleSignal::Initialize {
+            return Err(ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(
+                "shell", &ShellRunError::BeforePreflight,
+            )));
+        }
         let command = self.render_message(&shell.command, fm).map_err(|error| {
             ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action("shell", &error))
         })?;
         match self.shell_runner.run(&command) {
+            Err(ShellRunError::BeforePreflight) => Err(ActionFailure::Evaluation(
+                LifecycleErrorInfo::from_error_or_action("shell", &ShellRunError::BeforePreflight),
+            )),
             Ok(0) => Ok(()),
             Ok(code) => {
                 if let Some(on_error) = &shell.on_error {

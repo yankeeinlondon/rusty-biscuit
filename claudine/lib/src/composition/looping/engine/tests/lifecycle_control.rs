@@ -132,7 +132,9 @@ fn run_loop_lifecycle_with_engine_path(
         emitter,
         None,
         None,
-        |_ctx, _guard| {
+        |_ctx, guard| {
+            // A successful provider iteration has crossed preflight and start.
+            guard.emit_start_once();
             *invocations.borrow_mut() += 1;
             Ok(LoopIterationOutput::success("ran"))
         },
