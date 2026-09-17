@@ -500,15 +500,17 @@ fn source_line_spans(source: &str) -> Vec<SourceLineSpan> {
 ///    double quotes in `"$(dirname "{{path}}")"`) don't break the YAML parser.
 fn parse_yaml_with_fallbacks(yaml: &str) -> Result<FrontmatterMap, YamlParseError> {
     // Strategy 1: direct parse
-    match serde_yaml_ng::from_str(yaml) {
+    match parse_yaml_map_rejecting_duplicates(yaml) {
         Ok(map) => Ok(map),
         Err(original_err) => {
             // Strategy 2: tab normalization
             let normalized = normalize_frontmatter_indentation(yaml);
-            if normalized != *yaml
-                && let Ok(map) = serde_yaml_ng::from_str(&normalized)
-            {
-                return Ok(map);
+            if normalized != *yaml {
+                match parse_yaml_map_rejecting_duplicates(&normalized) {
+                    Ok(map) => return Ok(map),
+                    Err(error) if is_duplicate_yaml_error(&error) => return Err(error),
+                    Err(_) => {}
+                }
             }
 
             // Strategy 3: protect shell and interpolation expressions.
@@ -531,16 +533,32 @@ fn parse_yaml_with_fallbacks(yaml: &str) -> Result<FrontmatterMap, YamlParseErro
                 return Err(original_err);
             }
 
-            match serde_yaml_ng::from_str::<FrontmatterMap>(&fully_protected) {
+            match parse_yaml_map_rejecting_duplicates(&fully_protected) {
                 Ok(map) => {
                     let map = restore_expressions_in_map(map, &expr_replacements);
                     let map = restore_expressions_in_map(map, &shell_replacements);
                     Ok(map)
                 }
+                Err(error) if is_duplicate_yaml_error(&error) => Err(error),
                 Err(_) => Err(original_err),
             }
         }
     }
+}
+
+/// Parse through YAML's value model before converting to the JSON-backed map.
+///
+/// Deserializing directly into `serde_json::Map` silently applies last-wins
+/// semantics to duplicate YAML keys. `serde_yaml_ng::Value` rejects duplicates
+/// recursively and retains the parser's source location, so every fallback
+/// strategy validates the authored mapping before conversion can collapse it.
+fn parse_yaml_map_rejecting_duplicates(yaml: &str) -> Result<FrontmatterMap, YamlParseError> {
+    let value = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml)?;
+    serde_yaml_ng::from_value(value)
+}
+
+fn is_duplicate_yaml_error(error: &YamlParseError) -> bool {
+    error.to_string().contains("duplicate entry with key")
 }
 
 /// Replaces `$(...)` shell command substitution bodies with safe placeholders.
@@ -1042,6 +1060,69 @@ This is content."#;
         assert_eq!(prompt, Some("Line one\nLine two".to_string()));
         assert_eq!(last_updated, Some("2026-02-27".to_string()));
         assert!(remaining.starts_with("# macOS Audio"));
+    }
+
+    #[test]
+    fn duplicate_frontmatter_keys_are_rejected_at_every_nesting_level() {
+        for content in [
+            "---\nstatus: first\nstatus: second\n---\n# Body\n",
+            "---\nouter:\n  status: first\n  status: second\n---\n# Body\n",
+            "---\nitems:\n  - status: first\n    status: second\n---\n# Body\n",
+        ] {
+            let error = parse_frontmatter(content).expect_err("duplicate YAML keys must fail");
+            assert!(
+                matches!(error, MarkdownError::FrontmatterParse { .. }),
+                "unexpected error: {error:?}"
+            );
+            assert!(error.to_string().contains("duplicate entry"), "{error}");
+        }
+    }
+
+    #[test]
+    fn duplicate_keys_are_not_hidden_by_indentation_or_expression_fallbacks() {
+        let normalized = concat!(
+            "---\n",
+            "prompt: |-\n",
+            "\tLine one\n",
+            "duplicate: first\n",
+            "duplicate: second\n",
+            "---\n",
+            "# Body\n",
+        );
+        let protected = concat!(
+            "---\n",
+            "route: \"{{ fallback || \"plan.md\" }}\"\n",
+            "duplicate: first\n",
+            "duplicate: second\n",
+            "---\n",
+            "# Body\n",
+        );
+
+        for content in [normalized, protected] {
+            let error = parse_frontmatter(content).expect_err("fallback must retain duplicate error");
+            assert!(error.to_string().contains("duplicate entry"), "{error}");
+        }
+    }
+
+    #[test]
+    fn duplicate_looking_expression_text_remains_scalar_content() {
+        let content = concat!(
+            "---\n",
+            "route: \"{{ fallback || \"status: first, status: second\" }}\"\n",
+            "shell: \"$(printf \"status: first\\nstatus: second\")\"\n",
+            "---\n",
+            "# Body\n",
+        );
+
+        let (frontmatter, _) = parse_frontmatter(content).expect("expression text is not YAML keys");
+        assert_eq!(
+            frontmatter.get::<String>("route").unwrap().as_deref(),
+            Some("{{ fallback || \"status: first, status: second\" }}")
+        );
+        assert_eq!(
+            frontmatter.get::<String>("shell").unwrap().as_deref(),
+            Some("$(printf \"status: first\\nstatus: second\")")
+        );
     }
 
     #[test]
