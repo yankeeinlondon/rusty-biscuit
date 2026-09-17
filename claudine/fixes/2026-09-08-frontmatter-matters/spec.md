@@ -4,6 +4,7 @@ created: 2026-09-08
 updated: 2026-09-08
 area: claudine
 implemented: true
+review_iterations: 1
 packages:
     - claudine
     - claudine-cli

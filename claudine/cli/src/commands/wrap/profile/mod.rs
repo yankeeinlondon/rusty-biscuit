@@ -369,8 +369,9 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// given, read from the provider's configuration.
     ///
     /// Consulted by the shared model stage only for providers whose catalog
-    /// sets `model_required_in_non_tty`, so the launch can be reported and
-    /// `MODEL` exported without pushing a flag the provider does not need.
+    /// sets `model_required_in_non_tty`. The discovered value is then delivered
+    /// through [`WrapperProfile::apply_model`] like any other source: it is read
+    /// in Claudine's environment, and the child's may not be the same one.
     /// Default: `None` (no discoverable default).
     fn configured_default_model(&self) -> Option<ConfiguredModel> {
         None

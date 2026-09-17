@@ -1,5 +1,4 @@
 ---
-status: draft
 created: 2026-09-13
 reviewed: true
 reviewed_by: codex/gpt-5.6-sol

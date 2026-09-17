@@ -178,7 +178,17 @@ belong here.
   being scheduled for implementation, distinct from `_unscheduled/`; same
   `planning(<area>): schedule <name>` shape — see `97f12132c` adding
   `fixes/2026-09-10-local-affected-scope/spec.md`, `aedeeb46d` adding
-  `fixes/2026-09-11-cicd-cleanup/spec.md`), **new spec files added to an
+  `fixes/2026-09-11-cicd-cleanup/spec.md`), **new plan.md /
+  implementation-log.md added to an active `fixes/YYYY-MM-DD-<name>/`
+  directory whose `spec.md` is already tracked at HEAD** is
+  `planning(<area>): record execution plan for <name> fix`, NOT another
+  `schedule` event — the spec was committed in a prior `planning: schedule`
+  commit and a naive `schedule` heading overstates the work. Pre-flight
+  `git ls-tree HEAD <dir>` distinguishes the two: if the spec is already
+  there, treat the new file as an execution-time artifact. See `5b772e59a`
+  adding `claudine/fixes/2026-09-16-better-spec-syntax/plan.md` and
+  `ef4824fdd` adding `darkmatter/fixes/2026-09-15-nullable-directive-targets/plan.md`.
+  **new spec files added to an
   active `features/YYYY-MM-DD-<name>/` directory** (the `features/` analog
   of the dated-fix case above — same `planning(<area>): schedule <name>`
   shape; see `c36f72fd0c` adding `features/2026-09-09-more-context/spec.md`,
