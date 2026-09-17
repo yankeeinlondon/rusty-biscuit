@@ -1,11 +1,69 @@
 ---
 total_phases: 5
 created: 2026-09-15
-phase: 4
+phase: 5
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
-implemented: false
+implemented: true
 implemented_by: "codex/gpt-5.6-sol"
+source_code:
+    - claudine/cli/tests/compose_caller_file_provenance.rs
+    - claudine/cli/tests/composition_outputs.rs
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/inline_completion_lifecycle.rs
+    - claudine/cli/tests/level2_sequence_task_stream_capture.rs
+    - claudine/cli/tests/sequence_groups.rs
+    - claudine/cli/tests/sequence_jit.rs
+    - claudine/cli/tests/shipped_prompt_contract.rs
+    - claudine/cli/tests/shipped_prompts.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/source_map.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/runtime_state/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - darkmatter/cli/tests/get_set_rm.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - prompts/_implement/implement-plan.md
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/tests/loop_initialize_state.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/seed.rs
+    - darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md
+documentation:
+    - claudine/fixes/2026-09-16-better-spec-syntax/spec.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/plan.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
+    - claudine/README.md
+    - claudine/docs/topics/lifecycle.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-07-11-sequence-plus/plan.md
+    - claudine/features/2026-07-11-sequence-plus/spec.md
+    - claudine/features/2026-07-11-sequence-plus/validation-matrix.md
+    - darkmatter/README.md
+    - darkmatter/docs/structs/Markdown.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/composition.md
+    - .claude/skills/claudine/lifecycle.md
+    - .claude/skills/darkmatter/frontmatter.md
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
     - claudine/fixes/2026-09-16-better-spec-syntax/spec.md
@@ -86,27 +144,43 @@ docs_updated_during_phase_4:
     - claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - claudine/cli/tests/shipped_prompts.rs
+    - darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md
+docs_updated_during_phase_5:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/lifecycle.md
+    - claudine/features/2026-07-11-sequence-plus/plan.md
+    - claudine/features/2026-07-11-sequence-plus/spec.md
+    - claudine/features/2026-07-11-sequence-plus/validation-matrix.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/plan.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
+    - darkmatter/README.md
+    - darkmatter/docs/structs/Markdown.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/composition.md
+    - .claude/skills/claudine/lifecycle.md
+    - .claude/skills/darkmatter/frontmatter.md
 packages:
+    - claudine
     - claudine-cli
-completed_phase: "4"
+    - darkmatter
+    - dmls
+completed_phase: "5"
 human_review: true
 human_review_items:
-    - >-
-        Decide whether the stale L2 dry-run approval test should be rewritten
-        for the current documented contract that dry-run stops before shell
-        approval; it consistently expects a prompt that production correctly
-        does not render.
     - >-
         Diagnose the unrelated terminal proxy-route L2 capture, which reaches
         provider launch and then never renders the expected
         failure.stack[*].proxy diagnostic before the harness deadline.
 message_to_agent: >-
-    Phase 4 implementation is complete and its targeted library, CLI, corpus,
-    shipped-artifact, and L2 sequence tests are green. Full L1 and lint pass.
-    Full L2 is 229/231 with two reproducible unrelated failures recorded in
-    human_review_items; resolve or formally disposition those before treating
-    the package-wide L2 checkpoint as green. Phase 5 still owns DMLS fixture,
-    documentation, skill, and active-spec migrations.
+    Phase 5 is implementation-complete and ready for review. Targeted tests,
+    full Claudine L1, both package-area lint gates, full Darkmatter L1, and the
+    DMLS fixture regression pass. The full Claudine L2 run has one reproducible
+    pre-existing proxy-route terminal-capture failure recorded in
+    human_review_items; two other initial capture failures passed alone.
 ---
 
 # Plan: Mapping-Only Claudine Lifecycle `set` Syntax
@@ -543,7 +617,7 @@ and acceptance audit.
 
 ### Tasks
 
-- [ ] **Prompt migration**
+- [x] **Prompt migration**
   - Rewrite `prompts/_implement/implement-plan.md:40,56-57` to the canonical
     mapping form (`set: {epilog: "{{message_to_agent}}", message_to_agent:
     null}` and the null reset), removing the temporary two-positional-action
@@ -555,7 +629,7 @@ and acceptance audit.
   - Migrate `darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md`,
     include it in corpus coverage, and run its consuming DMLS tests. This
     fixture migration is required alongside the approved shared-parser change.
-- [ ] **Documentation updates** (work-group: docs, skill, and spec migration
+- [x] **Documentation updates** (work-group: docs, skill, and spec migration
   are independent files, concurrent)
   - `claudine/docs/topics/flow-control/sequences.md` — rewrite "Mutating
     state with `set`" (line 370+) and the `setup:` example (line 479) to
@@ -573,14 +647,14 @@ and acceptance audit.
   - Darkmatter README/frontmatter documentation and skill guidance: document
     duplicate rejection for every YAML frontmatter mapping, the migration
     from last-wins behavior, and the unchanged explicit document-merge rules.
-- [ ] **Comment-drift review**
+- [x] **Comment-drift review**
   - Behavior-changing symbols get a doc/comment pass in the same change:
     `dispatch_side_effect`, `apply_runtime_set` (deleted or rewritten),
     `RuntimeState::set`/batch, `parse_positional_action`,
     `classify_positional_value`, and `executor.rs:1436`'s now-drifted
     comment; module docs in `actions.rs`, `runtime_state.rs` ("what the
     `set` side effect writes"), and `parse.rs` disambiguation docs.
-- [ ] **Final validation sweep**
+- [x] **Final validation sweep**
   - `just test`, `just test-l2`, `just lint` in the claudine package area;
     record evidence per repository policy (reuse qualifying passing
     evidence; macOS host evidence recorded; flag Linux/native-Windows/WSL2

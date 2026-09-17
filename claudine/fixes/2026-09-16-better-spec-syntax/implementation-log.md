@@ -2,8 +2,66 @@
 spec: "claudine/fixes/2026-09-16-better-spec-syntax/spec.md"
 plan: "claudine/fixes/2026-09-16-better-spec-syntax/plan.md"
 implemented_by: "codex/gpt-5.6-sol"
-started_phase: "4"
-implemented: false
+started_phase: "5"
+implemented: true
+source_code:
+    - claudine/cli/tests/compose_caller_file_provenance.rs
+    - claudine/cli/tests/composition_outputs.rs
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/inline_completion_lifecycle.rs
+    - claudine/cli/tests/level2_sequence_task_stream_capture.rs
+    - claudine/cli/tests/sequence_groups.rs
+    - claudine/cli/tests/sequence_jit.rs
+    - claudine/cli/tests/shipped_prompt_contract.rs
+    - claudine/cli/tests/shipped_prompts.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/source_map.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/runtime_state/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - darkmatter/cli/tests/get_set_rm.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - prompts/_implement/implement-plan.md
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/tests/loop_initialize_state.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/seed.rs
+    - darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md
+documentation:
+    - claudine/fixes/2026-09-16-better-spec-syntax/spec.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/plan.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
+    - claudine/README.md
+    - claudine/docs/topics/lifecycle.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-07-11-sequence-plus/plan.md
+    - claudine/features/2026-07-11-sequence-plus/spec.md
+    - claudine/features/2026-07-11-sequence-plus/validation-matrix.md
+    - darkmatter/README.md
+    - darkmatter/docs/structs/Markdown.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/composition.md
+    - .claude/skills/claudine/lifecycle.md
+    - .claude/skills/darkmatter/frontmatter.md
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
     - claudine/fixes/2026-09-16-better-spec-syntax/spec.md
@@ -84,27 +142,43 @@ docs_updated_during_phase_4:
     - claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - claudine/cli/tests/shipped_prompts.rs
+    - darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md
+docs_updated_during_phase_5:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/lifecycle.md
+    - claudine/features/2026-07-11-sequence-plus/plan.md
+    - claudine/features/2026-07-11-sequence-plus/spec.md
+    - claudine/features/2026-07-11-sequence-plus/validation-matrix.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/plan.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
+    - darkmatter/README.md
+    - darkmatter/docs/structs/Markdown.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/composition.md
+    - .claude/skills/claudine/lifecycle.md
+    - .claude/skills/darkmatter/frontmatter.md
 packages:
+    - claudine
     - claudine-cli
-completed_phase: "4"
+    - darkmatter
+    - dmls
+completed_phase: "5"
 human_review: true
 human_review_items:
-    - >-
-        Decide whether the stale L2 dry-run approval test should be rewritten
-        for the current documented contract that dry-run stops before shell
-        approval; it consistently expects a prompt that production correctly
-        does not render.
     - >-
         Diagnose the unrelated terminal proxy-route L2 capture, which reaches
         provider launch and then never renders the expected
         failure.stack[*].proxy diagnostic before the harness deadline.
 message_to_agent: >-
-    Phase 4 implementation is complete and its targeted library, CLI, corpus,
-    shipped-artifact, and L2 sequence tests are green. Full L1 and lint pass.
-    Full L2 is 229/231 with two reproducible unrelated failures recorded in
-    human_review_items; resolve or formally disposition those before treating
-    the package-wide L2 checkpoint as green. Phase 5 still owns DMLS fixture,
-    documentation, skill, and active-spec migrations.
+    Phase 5 is implementation-complete and ready for review. Targeted tests,
+    full Claudine L1, both package-area lint gates, full Darkmatter L1, and the
+    DMLS fixture regression pass. The full Claudine L2 run has one reproducible
+    pre-existing proxy-route terminal-capture failure recorded in
+    human_review_items; two other initial capture failures passed alone.
 ---
 
 # Implementation Log for 2026-09-16-better-spec-syntax (5 phases)
@@ -759,3 +833,171 @@ truncated output. It saw four dirty files, including the unrelated pre-existing
 `messenger/features/2026-09-17-research-metadata-pipeline/spec.md`, and reported
 that no indexed symbol overlapped the changed hunks. The three Claudine files
 listed in the Phase 4 metadata are the complete authorized change set.
+
+## Phase 5
+
+### Test-design map — before implementation
+
+- The shipped implementation prompt and its intentionally side-effect-reduced
+  CLI mirror map to
+  `shipped_lifecycle_artifacts_use_mapping_only_set` and
+  `shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch`.
+  These tests observe parseability, provider reachability, the reported
+  multi-key mapping, source/log immutability, and suppressed audio through the
+  normal CLI path.
+- The remaining DMLS `sequence_descent/implement-plan.md` migration maps to
+  `providers::frontmatter::sequence_tests::expression_pass_materializes_each_distinct_ancestor_shape_once`
+  and to the expanded shipped-artifact corpus scan. The provider test consumes
+  the real fixture; the corpus scan rejects every removed lifecycle `set` form.
+- Lifecycle documentation, active Sequence Plus specification examples, and
+  skill mirrors map to an active-artifact source scan for `set: [...]` and
+  `action: set`, excluding completed historical specifications and the
+  deliberately unchanged Darkmatter/capability `set(key, value)` API.
+- Darkmatter duplicate-key documentation maps to
+  `duplicate_frontmatter_keys_are_rejected_at_every_nesting_level`,
+  `duplicate_keys_are_not_hidden_by_indentation_or_expression_fallbacks`,
+  `duplicate_looking_expression_text_remains_scalar_content`, and the existing
+  `md` frontmatter read/write/read CLI regression from Phase 2. Those tests
+  cover direct and fallback parsing, nested mappings and arrays, valid
+  expression content, typed errors, and unchanged explicit merge behavior.
+- The behavior-changing source comments for lifecycle parsing, runtime batch
+  commit, and executor dispatch map to a direct contract-drift review. No
+  production edit is planned unless a comment contradicts the implemented
+  mapping-only, snapshot, atomicity, or presence-based prior-value behavior.
+
+GitNexus was current at commit `3a43d5f`. The shared Darkmatter parser is
+CRITICAL risk with 46 upstream impacts, four indexed processes, and eight
+modules; Phase 5 does not edit that parser. `parse_lifecycle_config` is LOW
+risk with seven upstream test/preflight impacts. The corpus test symbol is not
+indexed (`UNKNOWN`); text search confirms it is an isolated test entry point
+with no production callers.
+
+### Artifact, documentation, and comment migration
+
+- The real `prompts/_implement/implement-plan.md` was already canonical from
+  Phase 2. Its CLI fixture intentionally omits audio and commit shell actions,
+  but its lifecycle `set` payloads match the real prompt. The remaining DMLS
+  sequence-descent fixture now carries the reported null reset and two-key
+  mapping exactly.
+- The passive corpus test now includes the DMLS fixture directory. The
+  `shipped_prompts` binary passed 4/4, including the corpus test and normal-path
+  fake-provider regression. The consuming DMLS test
+  `expression_pass_materializes_each_distinct_ancestor_shape_once` passed 1/1;
+  7,947 unrelated tests were filtered. An earlier attempt to pass a raw
+  parenthesized Nextest expression through the package recipe failed in the
+  generated shell before compilation or test execution; the supported name
+  filter rerun is the recorded evidence.
+- Sequence and lifecycle docs now teach only `set: {property: value}`, snapshot
+  evaluation, and atomic commit. Composition docs explicitly distinguish that
+  YAML shape from the retained capability/loop `set(key, value)` API. The
+  active Sequence Plus spec, plan, and validation matrix use the same labels.
+- Darkmatter's README, Markdown API docs, and linked skill mirrors now document
+  duplicate-key rejection at every YAML mapping depth, the migration away from
+  last-value-wins parsing, and unchanged explicit document-merge strategies.
+- The source-comment review covered `parse_positional_action`,
+  `classify_positional_value`, `dispatch_side_effect`,
+  `dispatch_runtime_set`, `RuntimeState::set`, `RuntimeState::set_batch`, and
+  their module docs. They already describe the mapping-only parser exception,
+  positional-effect separation, pre-write snapshot, atomic batch, and
+  presence-based prior values. No stale comment or production edit was found.
+- An active-artifact scan found no removed lifecycle `set: [...]` or
+  `action: set` spelling in shipped prompts, active Claudine docs, the active
+  Sequence Plus feature, the migrated DMLS fixture, or either Claudine skill
+  mirror. Completed historical specifications and intentional negative tests
+  remain untouched.
+
+### Acceptance criteria to test mapping
+
+1. The two reported prompt mappings and a valid false-guarded mapping are
+   covered by `runtime_set_parses_the_reported_mappings_as_one_typed_action`,
+   `runtime_set_invalid_keys_fail_even_below_a_false_guard`, and
+   `shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch`.
+2. Event, setup/teardown, and sequence-task surfaces are covered by
+   `a_mutation_in_start_is_visible_to_a_later_event`,
+   `a_mapping_set_appends_its_prior_value_object`,
+   `the_mutation_delta_reports_the_keys_the_task_wrote`, and
+   `a_sibling_mutation_is_invisible_until_the_group_completes`.
+3. The representation matrix is covered by
+   `runtime_set_parses_the_reported_mappings_as_one_typed_action`,
+   `runtime_set_preserves_recursive_authored_types_and_empty_mapping`,
+   `runtime_set_accepts_no_error_as_modifier_and_as_destination`,
+   `a_one_property_mapping_writes_the_runtime_layer`, and
+   `a_whole_value_span_keeps_its_type`.
+4. Snapshot ordering and later-action visibility are covered by
+   `mapping_set_swaps_values_in_either_destination_order` and
+   `consecutive_set_actions_observe_each_others_updates`.
+5. Atomic refusal and null-presence semantics are covered by
+   `failed_expression_publishes_no_part_of_the_mapping_with_or_without_runtime`,
+   `late_invalid_destination_publishes_no_part_of_the_task_side_effect`,
+   `no_error_suppresses_a_batch_refusal_without_exposing_a_partial_write`,
+   `mapping_result_reports_all_priors_and_preserves_explicit_runtime_null`,
+   `set_refuses_every_reserved_root_key`, and `set_refuses_a_dotted_key`.
+6. Every removed or nonmapping spelling is covered by
+   `runtime_set_removed_and_non_mapping_forms_have_canonical_guidance`.
+7. Prior-value output, empty/absent results, downstream visibility, and source
+   immutability are covered by `set_can_read_an_absent_destination_as_null`,
+   `mapping_result_reports_all_priors_and_preserves_explicit_runtime_null`,
+   `a_mapping_set_appends_its_prior_value_object`,
+   `a_mutation_in_start_is_visible_to_a_later_event`, `set_writes_no_file`,
+   and the hermetic shipped-prompt regression.
+8. `shipped_lifecycle_artifacts_use_mapping_only_set` passively scans the
+   shipped corpus, while
+   `shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch`
+   executes the real prompt through the normal isolated CLI path.
+9. Runtime isolation and retained APIs are covered by
+   `a_sibling_mutation_is_invisible_until_the_group_completes`,
+   `set_rejects_every_reserved_root_key`, the
+   `context_side_effects_*` CLI tests, loop-control
+   `set_with_lookup_stores_typed_number`,
+   `set_without_lookup_stores_raw_template_string`,
+   `set_rejects_reserved_properties`, `set_assigns_new_value`, and
+   Darkmatter's `set_returns_prior_value_and_mutates_in_memory`,
+   `set_preserves_whole_value_types`, `set_performs_no_filesystem_write`,
+   `set_rejects_empty_and_dotted_keys`, and
+   `verb_signature_set_equals_descriptor_signature_set`. A production source
+   audit found only the deliberate mapping parser branch and typed dispatch;
+   there is no compatibility executor for removed lifecycle forms.
+10. Full paths, canonical guidance, typed projections, and guarded behavior are
+    covered by `runtime_set_reports_the_full_nested_value_path`,
+    `runtime_set_shape_diagnostics_share_render_highlight_and_machine_identity`,
+    `runtime_set_invalid_keys_fail_even_below_a_false_guard`, and
+    `runtime_set_parses_the_reported_mappings_as_one_typed_action`.
+
+### Final validation
+
+- `just test-cli --test shipped_prompts` in `claudine/`: 4/4 passed.
+- The focused DMLS fixture test
+  `expression_pass_materializes_each_distinct_ancestor_shape_once`: 1/1
+  passed; 7,947 unrelated tests were filtered.
+- `just test` in `claudine/`: 7,278/7,278 passed, with nine tests skipped by
+  the configured tier/filter policy. The linker emitted the known non-failing
+  macOS compact-unwind warning.
+- `just lint` in `claudine/`: passed for all five packages, error guards, and
+  lifecycle documentation facets.
+- `just test` in `darkmatter/`: 7,941/7,941 passed, with seven tests skipped by
+  the configured tier/filter policy. This includes the duplicate-key unit
+  regressions, the normal `md get` CLI rejection path, explicit merge/hash
+  round trips, and the retained `EffectEngine::set` tests.
+- `just lint` in `darkmatter/`: passed for `darkmatter`, `darkmatter-cli`,
+  `dmls`, `zed-dmls-cli`, and the `wasm32-wasip2` Zed extension. A non-failing
+  kache cross-device-copy advisory was emitted.
+- `BISCUIT_L2_THREADS=4 just test-l2 --no-fail-fast` in `claudine/` initially
+  passed 228/231 with 2,750 tests skipped by the L2 filter. Two capture-only
+  failures, `level2_explicit_sequence_source_miss_uses_typed_diagnostic_without_picker`
+  and `level2_lifecycle_loop_gate_error_fails_and_exits`, passed when rerun
+  alone through the canonical L2 recipe. The pre-existing
+  `level2_proxy_routes_share_identity_across_routes_in_tmux` remains
+  reproducibly red: provider launch is reached, but the expected
+  `failure.stack[*].proxy` diagnostic does not arrive before the harness
+  deadline. It is unrelated to this documentation/artifact phase and is the
+  sole human-review item.
+- Phase 5 changes contain no OS-conditional production logic: they migrate
+  platform-neutral YAML, documentation, skills, and corpus coverage. macOS
+  evidence is recorded above; existing CI remains responsible for Linux,
+  native Windows, and WSL2 without adding speculative matrix work.
+- Final GitNexus `detect-changes --scope all` completed without a partial or
+  truncated result: 18 changed files and 45 symbols, zero affected indexed
+  processes, and LOW aggregate risk. The worktree also contains unrelated
+  concurrent prompt and Messenger edits, which were not modified or included
+  in the Phase 5 inventory.
+- No formatting command was run.
