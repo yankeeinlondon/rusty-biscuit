@@ -3,7 +3,7 @@ created: 2026-09-15
 total_phases: 8
 phase: 1
 agent: opencode/zai-coding-plan/glm-5.3
-yolo: "true"
+yolo: true
 area: claudine
 packages:
     - claudine
