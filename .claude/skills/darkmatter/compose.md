@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-149976b01d0952ef
+hash: ef46db3751d8e999-c86ed94e4c505efc
 last_updated: 2026-09-16
 ---
 # Compose Pipeline
@@ -236,7 +236,8 @@ override.
   - Every group is captured once per request, under a write lock.
   - A child's group set depends only on its path from the root, never on the
     order siblings resolve in.
-- Child compose-cache identity:
+- Child compose-cache identity (run-local in production; the persistent
+  manifest path below is disabled until `ContentPolicy`, R18):
   - The key's `context_hash` is the hash of the child's snapshot. The hoisted
     phase hash is reused when the child named no new group.
   - `ComposeResult` records the subtree's context-group closure, and

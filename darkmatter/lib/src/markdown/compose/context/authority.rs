@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn a_pipeline_without_the_root_extension_fails_with_the_named_group() {
         let options = ComposeOptions::new().with_context_authority(ContextAuthority::DarkmatterOwned);
-        let mut runtime = PipelineRuntime::new(16, CacheAccessMode::Off, None);
+        let mut runtime = PipelineRuntime::new(16, CacheAccessMode::Off);
         runtime.context_epoch.seed(options.context());
         let mut markdown: crate::markdown::Markdown = "os={{ ctx.os }}\n".into();
 

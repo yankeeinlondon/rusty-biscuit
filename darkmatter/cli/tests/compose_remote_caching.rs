@@ -301,6 +301,63 @@ fn test_compose_remote_ttl_serves_cached_url_without_second_request() {
     assert_get_requests(&server, &["/ttl.md"]);
 }
 
+/// R18: `--cache-root` persists raw remote bodies only. A warm run still
+/// serves the remote body from the cache, but recomposes the local `::file`
+/// child and `::code` operation instead of replaying the cold run's output,
+/// and no composed, operation, or snapshot manifest is ever written.
+#[test]
+fn test_compose_cache_root_never_replays_composed_local_output() {
+    let fixture =
+        CliProcessFixture::named("test_compose_cache_root_never_replays_composed_local_output");
+    let cache_dir = tempfile::TempDir::new().unwrap();
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "Remote body\n",
+        cache_control: Some("max-age=0"),
+    }]);
+    let url = server.url("/remote.md");
+    let root = fixture.write_file(
+        "cwd/root.md",
+        &format!("# Root\n\n::file ./child.md\n\n::code ./main.rs\n\n::file {url}\n"),
+    );
+    fixture.write_file("cwd/child.md", "stamp=[{{ ctx.timestamp_ms }}]\n");
+    fixture.write_file("cwd/main.rs", "fn main() {}\n");
+
+    let run = || {
+        let output = fixture
+            .command()
+            .arg("compose")
+            .arg(&root)
+            .args(["--allow-host", "127.0.0.1", "--remote-ttl", "300", "--cache-root"])
+            .arg(cache_dir.path())
+            .output()
+            .expect("md compose runs");
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let stamp = |stdout: &str| {
+        let start = stdout.find("stamp=[").expect("child rendered") + "stamp=[".len();
+        stdout[start..start + stdout[start..].find(']').unwrap()].to_string()
+    };
+
+    let cold = run();
+    std::thread::sleep(Duration::from_millis(5));
+    let warm = run();
+
+    for stdout in [&cold, &warm] {
+        assert!(stdout.contains("Remote body"), "{stdout}");
+        assert!(stdout.contains("fn main() {}"), "{stdout}");
+    }
+    assert_ne!(stamp(&cold), stamp(&warm), "the warm run replayed composed output");
+    assert_eq!(server.request_count(), 1, "the remote body is still cached");
+
+    let manifests = cache_dir.path().join(".darkmatter/cache/v1/manifests");
+    assert!(manifests.join("remote").is_dir(), "remote bodies persist under --cache-root");
+    for class in ["composed", "operation", "snapshot"] {
+        assert!(!manifests.join(class).exists(), "a local {class} artifact was persisted");
+    }
+}
+
 #[test]
 fn test_compose_invalid_remote_freshness_fails_fast() {
     let fixture = CliProcessFixture::named("test_compose_invalid_remote_freshness_fails_fast");

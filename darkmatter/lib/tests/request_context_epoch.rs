@@ -308,6 +308,9 @@ mod persistent_cache {
         (composed.content().to_string(), report.cache_stats.expect("cache stats"))
     }
 
+    /// A cache root persists no composed output (R18,
+    /// `fixes/2026-09-16-content-policy-no-cache`), so every run recomposes:
+    /// a changed value is never stale and an unchanged request never hits.
     fn assert_child_only_value_is_never_stale(root: &Path, cache: &Path, reader: &str) {
         let (first, _) = compose_cached(root, cache, "one");
         assert!(rendered(&first, reader).contains("one-1"), "{first}");
@@ -320,7 +323,11 @@ mod persistent_cache {
 
         let (third, stats) = compose_cached(root, cache, "two");
         assert_eq!(third, second);
-        assert!(stats.persistent_hits > 0, "an unchanged request still hits: {stats:?}");
+        assert_eq!(
+            (stats.persistent_hits, stats.persistent_writes),
+            (0, 0),
+            "an unchanged request must not replay persisted output: {stats:?}"
+        );
     }
 
     /// A child whose own key covers the group it reads.
@@ -348,8 +355,8 @@ mod persistent_cache {
         assert_child_only_value_is_never_stale(&root, cache.path(), "leaf");
     }
 
-    /// An entry written by a request that could capture the group is not a
-    /// way around the missing-capture contract for a frozen request — in any
+    /// A request that could capture the group leaves nothing persisted that a
+    /// frozen request could read around the missing-capture contract — in any
     /// freshness mode, including the ones that skip revalidation or fall back
     /// to stale output on a compute error.
     #[test]
@@ -360,7 +367,7 @@ mod persistent_cache {
         write(directory.path(), "middle.md", "middle\n\n::file ./leaf.md\n");
         write(directory.path(), "leaf.md", "leaf={{ ctx.repo_root }}\n");
         let (_, stats) = compose_cached(&root, cache.path(), "one");
-        assert!(stats.persistent_writes > 0, "{stats:?}");
+        assert_eq!(stats.persistent_writes, 0, "{stats:?}");
 
         for mode in [
             CacheFreshnessMode::Strict,

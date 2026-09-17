@@ -113,8 +113,10 @@ links are never fetched. Frontmatter interpolation and `$()` branching are
 local-only; a remote URL there fails loudly.
 
 - CLI callers opt in with `md compose --allow-host <host>`.
-- Persistent artifacts require `--cache-root` or
-  `ComposeOptions::with_cache_root(...)`.
+- `--cache-root` / `ComposeOptions::with_cache_root(...)` persists fetched
+  remote URL bodies only. Until a `ContentPolicy` exists (R18), no composed
+  document, `::file` child, `::code`/`::toc-linking` result, or snapshot is
+  persisted; do not reattach a persistent store to `RunLocalCache`.
 - Freshness is controlled by `RemoteReadConfig` and the CLI remote freshness,
   refresh, and TTL flags.
 - `absolute` and `relative` are local path transforms, never remote fetches.

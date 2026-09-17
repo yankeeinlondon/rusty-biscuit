@@ -23,7 +23,7 @@ use crate::markdown::toc::MarkdownTocNode;
 use crate::markdown::types::MarkdownResult;
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -113,7 +113,11 @@ const INFLIGHT_TIMEOUT: Duration = Duration::from_secs(30);
 /// (same backing data), matching the old `PipelineCache` clone semantics.
 ///
 /// When a `FileStore` is attached, the cache also reads/writes persistent
-/// artifacts on disk for cross-run caching.
+/// artifacts on disk for cross-run caching. No production path attaches one:
+/// until a `ContentPolicy` defines freshness for cached content, composed
+/// children, operation results, and document snapshots are never persisted
+/// (more-context R18, `fixes/2026-09-16-content-policy-no-cache`). The
+/// persistent read/write path is retained, and unit-tested, for that policy.
 #[derive(Clone)]
 pub(crate) struct RunLocalCache {
     markdown_documents: Arc<DashMap<String, Markdown>>,
@@ -180,7 +184,8 @@ impl RunLocalCache {
     ///
     /// If the `FileStore` cannot be created (e.g., permission error),
     /// falls back to run-local only and logs the error.
-    pub fn with_persistent(mut self, cache_root: PathBuf) -> Self {
+    #[cfg(test)]
+    pub fn with_persistent(mut self, cache_root: std::path::PathBuf) -> Self {
         match FileStore::new(cache_root) {
             Ok(store) => {
                 self.persistent = Some(Arc::new(store));

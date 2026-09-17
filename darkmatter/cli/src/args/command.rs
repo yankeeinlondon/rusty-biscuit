@@ -226,7 +226,7 @@ pub enum Command {
         #[arg(long, value_enum, default_value_t = RemoteFreshness::Fallback)]
         remote_freshness: RemoteFreshness,
 
-        /// Persistent compose cache root (enables remote URL artifact caching)
+        /// Cache root for fetched remote URL bodies (composed output is never persisted)
         #[arg(long, value_name = "DIR")]
         cache_root: Option<PathBuf>,
     },

@@ -18,7 +18,7 @@ use super::{
     EffectiveStateBuilder, abbreviate_path, prepare_frontmatter_for_compose,
 };
 use super::{
-    cache, context, frontmatter_interpolation, frontmatter_shell_expansion, perf, remote,
+    context, frontmatter_interpolation, frontmatter_shell_expansion, perf, remote,
     schema_validation, shell_expansion, transclusion,
 };
 use serde_json::{Map, Value};
@@ -35,21 +35,16 @@ impl Markdown {
         options.extend_context_for(self);
         options.ensure_file_resolution_context();
 
-        // Resolve persistent cache root if configured
-        let persistent_root = options.cache_root.as_ref().map(|root| {
-            cache::FileStore::resolve_cache_root(Some(root), options.cache_namespace.as_deref())
-        });
-
         // Reuse the caller-supplied shared runtime when present (so a pre-flight
         // walk and this pass fetch each URL once); otherwise build one whose
-        // persistent store is shared with the local compose artifact cache.
+        // persistent store holds raw remote bodies. It is the only persistent
+        // store a compose run uses (R18).
         let remote_fetch = options.remote_fetch_runtime();
         options.remote_fetch = Some(remote_fetch.clone());
 
         let mut runtime = shell_expansion::types::PipelineRuntime::with_remote_fetch(
             options.max_transclusion_depth,
             options.cache_access_mode,
-            persistent_root,
             remote_fetch,
         );
         runtime.context_epoch.seed(options.context());

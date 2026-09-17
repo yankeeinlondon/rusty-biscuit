@@ -6,10 +6,21 @@ It replaces the earlier proposal-oriented notes in this file with the behavior t
 
 ## Overview
 
+> **Persistence of local artifacts is disabled.** Until a `ContentPolicy`
+> defines the freshness of cached content, no production path attaches a
+> persistent store to `RunLocalCache` (more-context ruling R18,
+> `darkmatter/fixes/2026-09-16-content-policy-no-cache`). A configured
+> `cache_root` / `--cache-root` stores fetched remote URL bodies only. Document
+> snapshots, composed documents, and operation results described below are
+> never read from or written to disk, so a warm cache cannot replay an earlier
+> run's composed output. The persistent sections document the retained,
+> unit-tested machinery that `ContentPolicy` is expected to reuse.
+
 Darkmatter uses a two-layer cache for compose work:
 
 1. A run-local in-memory cache owned by `PipelineRuntime`
-2. An optional persistent file-backed cache stored under `.darkmatter/cache/v1/`
+2. A persistent file-backed store under `.darkmatter/cache/v1/` (currently
+   remote URL bodies only; see the note above)
 
 The cache is focused on transclusion-heavy compose work, especially:
 
@@ -26,9 +37,14 @@ The goals of the current implementation are:
 
 ## Current Status
 
-The implemented cache includes:
+Active in production:
 
 - Run-local single-flight deduplication for compose cores and operation results
+- Concurrent run-local maps for low-contention cache access
+- Persistent remote URL bodies under `cache_root`, with TTL, refresh, and freshness controls (`remote_cache.rs`, `remote_fetch.rs`)
+
+Implemented and unit-tested, but disabled until `ContentPolicy` exists:
+
 - Persistent document snapshots
 - Persistent composed document cores
 - Persistent operation results for `::code` and `::toc-linking`
@@ -36,12 +52,11 @@ The implemented cache includes:
 - Context-closure identity for composed documents, so a descendant's context change re-keys its ancestors
 - Freshness policy handling for persistent reads
 - In-memory retention of loaded document snapshots to avoid repeated manifest reads
-- Concurrent run-local maps for low-contention cache access
 
 The implementation does not yet include:
 
-- Remote artifact caching
-- TTL-driven policies for remote or LLM-backed operations
+- `ContentPolicy`, the freshness policy required before any composed or agentic content is persisted
+- TTL-driven policies for LLM-backed operations
 - A special forced-mode empty-output fallback on generation failure
 - Persisted report warnings reconstruction from cache
 
@@ -511,22 +526,16 @@ These are merged upward through child compose reports in the normal compose-repo
 
 ## Reference Analysis as a Cache Consumer
 
-The reference analysis subsystem (`reference_graph()`, `validate_references()`, `composed_references()`, and related methods) also uses the persistent cache to avoid re-loading child documents during graph traversal.
+The reference analysis subsystem (`reference_graph()`, `validate_references()`, `composed_references()`, and related methods) uses the run-local cache to avoid re-loading child documents during graph traversal.
 
-Reference analysis constructs its own `RunLocalCache` via `make_cache()` in `markdown/reference/graph.rs`. This cache uses the same `FileStore::resolve_cache_root()` path resolution as the compose pipeline, including `cache_namespace` support. This means:
-
-- The reference analysis pipeline and the compose pipeline resolve to the **same persistent cache directory** for a given `ComposeOptions`
-- `cache_namespace` isolation (e.g., per-branch or per-profile) is honored consistently across both consumers
-- Cached document loads from compose runs can be reused by reference analysis and vice versa
+Reference analysis constructs its own `RunLocalCache` via `make_cache()` in `markdown/reference/graph.rs`. Like the compose pipeline, it attaches no persistent store: every graph build reads its documents from disk. When child composition fetches remote URLs, those bodies use the same `FileStore::resolve_cache_root()` path resolution as the compose pipeline, including `cache_namespace` support.
 
 ### What reference analysis caches
 
-Reference analysis currently uses the persistent cache layer for:
+Reference analysis caches in run-local memory only:
 
-- `load_markdown()` — avoids re-reading child documents from disk during graph traversal
-- Document snapshot manifests — retained in run-local memory to avoid repeated manifest reads
-
-Reference analysis does **not** write composed-document or operation-result artifacts. It reads source documents and snapshot manifests but does not execute the full compose pipeline at each node.
+- `load_markdown()` — avoids re-reading a child document within one graph build
+- TOC heading extraction for repeated targets
 
 ### Configuration
 

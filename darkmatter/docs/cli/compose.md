@@ -90,7 +90,7 @@ md compose doc.md iteration=1 draft=false name=Alice
 - `--remote-ttl <SECONDS>`: override remote artifact freshness TTL. Without this, server cache headers are used when present.
 - `--remote-refresh`: force revalidation of cached remote artifacts.
 - `--remote-freshness <strict|fallback|optimistic>`: choose stale-cache behavior for remote artifacts. Defaults to `fallback`, which serves the stale cached body when revalidation fails on the network.
-- `--cache-root <DIR>`: enable persistent compose caching at the given root. Remote URL cache behavior across CLI runs requires this option.
+- `--cache-root <DIR>`: persist fetched remote URL bodies at the given root so `--remote-ttl`, `--remote-refresh`, and `--remote-freshness` apply across CLI runs. Composed documents, `::file` children, `::code` and `::toc-linking` results, and document snapshots are never persisted; every run recomposes local content.
 
 ### Compose Warnings
 

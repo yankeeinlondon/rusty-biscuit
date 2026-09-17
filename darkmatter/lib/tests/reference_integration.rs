@@ -858,11 +858,11 @@ fn reference_graph_with_cache_root() {
     let mut options = ReferenceGraphOptions::default();
     options.compose = options.compose.with_cache_root(cache_dir.path());
 
-    // First pass — populates the cache
+    // Two passes against one cache root build identical graphs; no local
+    // artifact is persisted between them (R18).
     let graph1 = md.reference_graph(options.clone()).unwrap();
     assert_eq!(graph1.node_count(), 2);
 
-    // Second pass — should hit the cache for child document load
     let graph2 = md.reference_graph(options).unwrap();
     assert_eq!(graph2.node_count(), 2);
     assert_eq!(
@@ -1005,16 +1005,15 @@ fn reference_graph_cache_honors_namespace() {
         .with_cache_root(cache_dir.path())
         .with_cache_namespace("test-branch");
 
-    // Build the graph — should use namespace-scoped persistent cache
+    // The only persistent store is the remote-body store, which child
+    // composition resolves through the same namespaced cache-root path.
     let graph = md.reference_graph(options).unwrap();
     assert_eq!(graph.node_count(), 2);
 
-    // Verify the namespaced cache directory was created
     let expected_cache = cache_dir.path().join(".darkmatter").join("cache");
-    // The version directory should exist under the namespace
     assert!(
         expected_cache.exists(),
-        "persistent cache directory structure should be created under resolve_cache_root path"
+        "the remote-body store should be created under the resolve_cache_root path"
     );
 }
 

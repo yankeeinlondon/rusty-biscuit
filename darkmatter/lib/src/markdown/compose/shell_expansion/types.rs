@@ -1356,12 +1356,8 @@ impl PipelineRuntime {
     pub fn new(
         max_depth: usize,
         cache_access_mode: crate::markdown::compose::cache::CacheAccessMode,
-        cache_root: Option<std::path::PathBuf>,
     ) -> Self {
         let mut cache = crate::markdown::compose::cache::RunLocalCache::new(cache_access_mode);
-        if let Some(root) = cache_root {
-            cache = cache.with_persistent(root);
-        }
         let remote_fetch = crate::markdown::compose::remote_fetch::RemoteFetchRuntime::with_store(
             &crate::markdown::compose::remote::RemoteReadConfig::default(),
             None,
@@ -1381,16 +1377,16 @@ impl PipelineRuntime {
     }
 
     /// Creates a `PipelineRuntime` with the given remote fetch runtime.
+    ///
+    /// The run-local cache never gets a persistent store (R18): a configured
+    /// cache root reaches only `remote_fetch`, which persists raw remote-URL
+    /// bodies.
     pub fn with_remote_fetch(
         max_depth: usize,
         cache_access_mode: crate::markdown::compose::cache::CacheAccessMode,
-        cache_root: Option<std::path::PathBuf>,
         remote_fetch: crate::markdown::compose::remote_fetch::RemoteFetchRuntime,
     ) -> Self {
         let mut cache = crate::markdown::compose::cache::RunLocalCache::new(cache_access_mode);
-        if let Some(root) = cache_root {
-            cache = cache.with_persistent(root);
-        }
         // Share the run's fetch runtime with the cache so compose-manifest
         // validation can revalidate RemoteUrl dependencies under the active
         // RemoteReadConfig (e.g. --remote-refresh, expired TTL).

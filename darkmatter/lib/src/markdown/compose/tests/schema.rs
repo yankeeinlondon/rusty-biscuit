@@ -361,20 +361,12 @@ mod schema_validation_integration {
     }
 
     /// Different baseline schemas must not share cache entries for the same
-    /// transcluded child. Compose the same parent+child three times against
-    /// a shared persistent cache:
-    ///
-    /// 1. baseline A → cold cache, child is computed and written to the
-    ///    persistent store (`persistent_hits == 0`, `persistent_writes >= 1`).
-    /// 2. baseline A again → cache is warm and the child compose entry is
-    ///    reused (`persistent_hits >= 1`).
-    /// 3. baseline B → baseline differs, so the persistent cache key
-    ///    differs; the child must be recomputed rather than reuse the
-    ///    baseline-A entry (`persistent_hits == 0` again).
-    ///
-    /// This proves `options_hash` includes `baseline_schema` in a way that
-    /// actually invalidates the persistent cache — guarding against the
-    /// "stale success keyed without baseline" regression.
+    /// transcluded child. Compose the same parent+child under baseline A,
+    /// A again, then B against one cache root: no run reads or writes a
+    /// persisted composed child (R18, `fixes/2026-09-16-content-policy-no-cache`),
+    /// so baseline B can never reuse baseline A's output. Key sensitivity to
+    /// `baseline_schema` for the retained persistent path is covered by
+    /// `cache::hashing` `options_hash_sensitive_to_baseline_schema`.
     #[test]
     fn baseline_cache_does_not_reuse_across_distinct_baselines() {
         use crate::markdown::compose::CacheAccessMode;
@@ -437,15 +429,12 @@ mod schema_validation_integration {
             .cache_stats
             .expect("expected cache stats with cache enabled");
         assert_eq!(
-            stats1.persistent_hits, 0,
-            "run 1 should have a cold persistent cache, got {stats1:?}"
-        );
-        assert!(
-            stats1.persistent_writes >= 1,
-            "run 1 must write the child compose to the persistent cache, got {stats1:?}"
+            (stats1.persistent_hits, stats1.persistent_writes),
+            (0, 0),
+            "run 1 must not touch the persistent store, got {stats1:?}"
         );
 
-        // ── Run 2: same baseline A → cache should be warm ──────────
+        // ── Run 2: same baseline A → still nothing persisted to reuse ──
         let md2 = Markdown::try_from(root.as_path()).unwrap();
         let (_, report2) = md2
             .compose_with(mk_options("alpha"))
@@ -453,9 +442,10 @@ mod schema_validation_integration {
         let stats2 = report2
             .cache_stats
             .expect("expected cache stats with cache enabled");
-        assert!(
-            stats2.persistent_hits >= 1,
-            "run 2 must reuse the warmed persistent entry, got {stats2:?}",
+        assert_eq!(
+            (stats2.persistent_hits, stats2.persistent_writes),
+            (0, 0),
+            "run 2 must not replay or write a persisted child, got {stats2:?}",
         );
 
         // ── Run 3: baseline B → distinct key, must not reuse run 1 ─
@@ -467,13 +457,9 @@ mod schema_validation_integration {
             .cache_stats
             .expect("expected cache stats with cache enabled");
         assert_eq!(
-            stats3.persistent_hits, 0,
-            "run 3 must NOT reuse the baseline-A entry — options_hash must include \
-             baseline_schema. got {stats3:?}",
-        );
-        assert!(
-            stats3.persistent_writes >= 1,
-            "run 3 must compute and write a fresh entry under the new baseline, got {stats3:?}"
+            (stats3.persistent_hits, stats3.persistent_writes),
+            (0, 0),
+            "run 3 must NOT reuse the baseline-A entry, got {stats3:?}",
         );
     }
 
@@ -484,9 +470,8 @@ mod schema_validation_integration {
     /// configured.
     ///
     /// The anchor nevertheless remains part of `ComposeOptions` identity
-    /// (`options_hash`), so two runs that differ only in their anchor still get
-    /// distinct persistent cache keys (a conservative over-invalidation): run 2
-    /// must not reuse run 1's entry.
+    /// (`options_hash`). With no composed output persisted (R18), run 2 cannot
+    /// reuse run 1's entry either way.
     #[test]
     fn distinct_file_ref_fallback_dirs_do_not_share_a_cache_entry_and_never_resolve_via_fallback() {
         use crate::markdown::compose::CacheAccessMode;

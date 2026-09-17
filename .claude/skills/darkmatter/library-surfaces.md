@@ -64,8 +64,9 @@ behavior.
 
 - The effect engine owns explicit writes, shell calls, and HTTP POST behavior.
 - Remote reads and writes share `biscuit_file::FetchPolicy`.
-- Persistent cache keys include the source/reference identity and freshness
-  state needed to prevent stale or cross-context reuse.
+- Only raw remote-URL bodies persist today (R18). The retained persistent
+  compose keys include the source/reference identity and freshness state
+  needed to prevent stale or cross-context reuse.
 - Passive schema, DMLS, and validation surfaces never invoke the effect engine.
 
 ## Package boundaries
