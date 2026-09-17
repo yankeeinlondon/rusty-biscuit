@@ -409,16 +409,12 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tested-revision }}
-          # Full history ONLY for a package that declares companion suites.
-          # `test_build_baseline_revision.py` reads blobs out of the
-          # pre-cutover revision `build_baseline_revision.BASE_REVISION`
-          # names, and skips 8 of its 11 tests when that commit is absent. At
-          # the default depth of 1 it always is (measured against a `--depth 1`
-          # clone), so the suite ran green having checked nothing.
-          #
-          # Quoted digits, not bare ones: GitHub reads `0` as FALSE, so the
-          # usual `<cond> && 0 || 1` idiom yields 1 on both branches.
-          fetch-depth: ${{ inputs.companion-suites != '[]' && '0' || '1' }}
+          # Shallow, like every other checkout here. The one suite that needed
+          # real history — `test_build_baseline_revision.py`, which read blobs
+          # out of a pre-cutover revision and skipped 8 of its 11 tests when
+          # that commit was absent — was retired on 2026-09-16. A companion
+          # suite that needs more than the tested revision should say so by
+          # failing, not by being handed history nothing asks for.
       - name: Install just
         uses: extractions/setup-just@v4
       # Which build record this cell consumes. Every executing L1/L2/browser

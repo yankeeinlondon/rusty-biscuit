@@ -15,17 +15,47 @@ tasks:
 acceptance_criterion: AC8
 revision: 8aa105e7c5a180b2d2a10ffbed2332b88671c996
 measured_revision: fb8681b86902bc3bfe67dfee76bb35727b611eee
-status: deferred; mechanism in place, observations not collected
+status: deferred; the instrument was retired 2026-09-16, observations not collected
 ---
 
 # Deferred — the AC8 cold and warm performance measurements
 
-This document exists because the work it describes was **not done**, and
-because everything needed to do it now is. It maps to Review 2's third finding,
-*"The required performance acceptance gate has no usable baseline"*
-([review-2.md](review-2.md)), and it is the reason plan Tasks 1.6, 7.4, and 7.5
-remain unchecked and AC8 remains `NOT MET` in
+This document exists because the work it describes was **not done**. It maps to
+Review 2's third finding, *"The required performance acceptance gate has no
+usable baseline"* ([review-2.md](review-2.md)), and it is the reason plan Tasks
+1.6, 7.4, and 7.5 remain unchecked and AC8 remains `NOT MET` in
 [rollout-2026-09-12.md](rollout-2026-09-12.md).
+
+## The instrument was retired on 2026-09-16
+
+`scripts/ci/build_baseline_revision.py` and its suite
+`scripts/ci/test_build_baseline_revision.py` were **deleted**, and the suite was
+removed from `SUITE_REGISTRY` and from `repo-deps`'s `companion-suites`.
+Recover either from the commit that removed them.
+
+They could no longer do their job. The instrument constructs an
+instrumentation-only revision by copying `CARRIER_PATHS` onto base
+`8aa105e7`, and that list named `scripts/Cargo.lock`, which PR #79 deleted when
+it made `scripts` a member of the root workspace. Dropping the stale carrier
+takes the suite from 8 failures to 1, but it does not make the result usable:
+the construction would copy today's `scripts/Cargo.toml` — now a workspace
+*member* — onto a base whose root manifest does not list `"scripts"` and which
+carries its own `scripts/Cargo.lock`. The constructed revision would be a member
+with no workspace and no lockfile, so it could not be dispatched, which is the
+only thing it exists for. Keeping the suite would have meant a green test
+attesting to an instrument that cannot run — the exact defect this branch spent
+its time removing.
+
+**What a replacement has to decide first.** Re-basing onto post-#79 `main` is
+mechanically possible, but the measurements taken on 2026-09-16 suggest the
+original comparison is no longer the one worth running: the compile-once
+architecture captures 24 of 24 available savings, yet that is 10.5% of full-scope
+compiles and **zero** for a single-package L1-only change, while every executing
+tier cell now pays archive transfer it did not pay before. PR #81, merged the
+same day, independently removes compile work on exactly that common case. A
+replacement should measure **archive transfer overhead against compiles avoided
+on a representative single-package pull request**, and adopting it is an explicit
+amendment to AC8 rather than a substitution made quietly.
 
 ## What is deferred
 

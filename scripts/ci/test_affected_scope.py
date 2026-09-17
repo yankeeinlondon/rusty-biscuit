@@ -3173,7 +3173,6 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
         "artifact-publisher": "repo-deps",
         "homelab-frontend": "homelab-server",
         "test_affected_scope.py": "repo-deps",
-        "test_build_baseline_revision.py": "repo-deps",
         "test_build_key.py": "repo-deps",
         "test_ci_local.py": "repo-deps",
         "test_constraints.py": "repo-deps",

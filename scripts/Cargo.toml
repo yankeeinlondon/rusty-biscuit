@@ -93,7 +93,6 @@ tiers = ["L1"]
 companion-suites = [
     "artifact-publisher",
     "test_affected_scope.py",
-    "test_build_baseline_revision.py",
     "test_build_key.py",
     "test_ci_local.py",
     "test_constraints.py",

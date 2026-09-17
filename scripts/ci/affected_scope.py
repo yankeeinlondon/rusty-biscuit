@@ -203,7 +203,6 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
         }
         for suite in (
             "test_affected_scope.py",
-            "test_build_baseline_revision.py",
             "test_build_key.py",
             "test_ci_local.py",
             "test_constraints.py",

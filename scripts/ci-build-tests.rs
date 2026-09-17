@@ -778,9 +778,10 @@ fn the_json_report_is_a_versioned_document_a_status_artifact_can_embed() {
 /// renamed or dropped field fails this test before it can silently zero the
 /// owner totals AC8 is read from.
 ///
-/// It sits outside `scripts/ci/` because it travels with the instrument:
-/// `build_baseline_revision.py` carries this file's tests onto the pre-cutover
-/// revision and refuses any construction that adds a `scripts/ci/` path.
+/// It sits outside `scripts/ci/` because the retired baseline instrument
+/// carried this file's tests onto a pre-cutover revision and refused any
+/// construction that added a `scripts/ci/` path. Nothing enforces that now;
+/// the location is kept because moving a fixture buys nothing.
 const PUBLISHER_FIXTURE: &str = "fixtures/compiler-work/publisher-documents.json";
 
 const BLESS_PUBLISHER_FIXTURE: &str = "BLESS_COMPILER_WORK_FIXTURE";
