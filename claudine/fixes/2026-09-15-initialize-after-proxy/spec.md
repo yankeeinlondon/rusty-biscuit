@@ -5,7 +5,7 @@ reviewed: true
 reviewed_by: codex/gpt-5.6-sol
 reviewed_on: 2026-09-15
 implemented: true
-implemented_by: claude/default
+implemented_by: codex/default
 area: claudine
 packages:
     - claudine
@@ -321,9 +321,9 @@ ordering. Review comments on changed symbols for drift.
 
 The fix is complete when the generated-file flow succeeds through the normal
 invocation path, all applicable acceptance cases pass, approval and lifecycle
-semantics remain intact, and validation evidence is recorded. This document is
-a specification; implementation and a separate implementation plan remain future
-work.
+semantics remain intact, and validation evidence is recorded. Implementation and acceptance evidence are recorded in [the plan](plan.md),
+[implementation log](implementation-log.md), and [validation evidence](evidence.md).
+The fix remains in its active directory pending author review.
 
 ## Open Questions
 
@@ -346,8 +346,8 @@ artifact before starting the sequence.
   and the rule that sequence execution never introduces a new approval prompt;
   keeps this defect fix bounded to the reported execution path.
 - **Cons:** a document with this initialization pattern is not fully
-  route-equivalent when used as a sequence prompt task; authors need a prior
-  task or preexisting file.
+  route-equivalent when used as a sequence prompt task; authors need the file to exist before starting the sequence; even a prior
+  task runs too late for static preflight.
 
 #### Option B — Allow a post-initialization just-in-time audit in sequences
 

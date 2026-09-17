@@ -2,6 +2,7 @@
 spec: ./spec.md
 plan: ./plan.md
 packages:
+    - claudine
     - claudine-cli
 source_files_during_phase_1:
     - claudine/cli/tests/level2_initialize_generated_transclusion.rs
@@ -86,42 +87,110 @@ docs_updated_during_phase_6:
     - claudine/fixes/2026-09-15-initialize-after-proxy/implementation-log.md
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/cli/tests/compose_initialize_acceptance.rs
+    - darkmatter/lib/src/effects/fs_write.rs
+docs_updated_during_phase_7:
+    - claudine/fixes/2026-09-15-initialize-after-proxy/spec.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/plan.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/implementation-log.md
+docs_created_during_phase_7:
+    - claudine/fixes/2026-09-15-initialize-after-proxy/evidence.md
+skills_files_updated_during_phase_7: []
 human_review: false
 message_to_agent: |-
-    Phase 6+ notes from Phase 5 (sequence static-preflight boundary; see implementation-log.md ## Phase 5).
-    (1) OQ1 Option A is implemented as guidance only: `approve_preflight_graph` (cli/src/commands/wrap/sequence/mod.rs) emits a
-    stderr Prose `note:` ahead of the UNCHANGED typed error when static preflight fails with
-    `PreFlightDiscoveryFailed(Transclusion(Io(NotFound)))` (`is_missing_include`). The code stays `composition.failed`; nothing
-    about staging, approval, or dry run changed.
-    (2) Plan deviation: the note does NOT suggest "add a prior task that creates it". A probe showed static preflight composes
-    every prompt document before step 1, so an earlier `shell:` step cannot satisfy the include. Phase 8 docs must say "create
-    the file before starting the sequence", not "add a prior task".
-    (3) Pre-existing behaviors observed, not changed, worth a reviewer's eye (and accurate wording in Phase 8 docs):
-    (a) a sequence step's prompt is composed BEFORE that step's `initialize` runs, so content `initialize` appends to an
-    existing include is absent from that step's prompt (pinned in
-    `sequence_initialize_include_preflight::existing_include::a_sequence_whose_include_exists_runs_unchanged`);
-    (b) `sequence --dry-run --yolo` executed a `shell:` step (created its marker file); composition.md's Dry Run section only
-    carves out `::shell` spans. Not pinned by any test.
-    (4) Phase 7's AC coverage can cite `cli/tests/sequence_initialize_include_preflight.rs` (L1) and
-    `level2_initialize_generated_transclusion::level2_sequence_preflight_note_renders_for_an_include_initialize_would_create` (L2)
-    for the sequence boundary. That L2 file's header no longer says the tests are expected to fail (drift fixed).
-    (5) Cross-OS: see the Phase 5 log (build-win-native still out of disk).
-    Phase 6 notes (shipped prompt repair; see implementation-log.md ## Phase 6).
-    (6) The planned `parent_dir(spec)` -> `dirname(spec)` log repair was ALREADY on the branch (commit 47e9259ab, as
-    `dirname(spec || plan)`); Phase 6 made no expression change there.
-    (7) The real Phase 6 defect was the logging blocks in `prompts/_implement/implement-plan.md`: `initialize` runs
-    `ensure_file: log` before the body composes, so `!file_exists(log)` could never be true and a fresh run was told
-    "the log file already exists". The blocks now key on an UNSTARTED log:
-    `!file_exists(log) || (markdown_body_empty(log) && is_empty(frontmatter(log)))` and its complement. Phase 8 docs describing
-    the prompt should use that wording.
-    (8) For AC10 (Phase 7) the L1 e2e `shipped_prompt_contract::shipped_implement_plan_logging_instructions_follow_log_content`
-    drives the side-effect-free fixture through `claudine compose --goose` and asserts `ensure_file` creates an empty log
-    on first run and preserves existing bytes afterwards (useful AC4 evidence). New guard
-    `shipped_prompt_route_drift::fixture_body_matches_the_shipped_body` makes the fixture a faithful stand-in for the shipped body.
-    It does NOT use the router or preserve an original spec spelling; Phase 7 still owns the router e2e.
-    (9) Unrelated flake seen once under load (concurrent `just lint`): LEAK-FAIL in
-    `claudine composition::sequence::task::tests::shell_tasks::an_early_wait_error_still_reaps_the_whole_tree` (32s); passed
-    3/3 in isolation and in a clean `just test` rerun.
+    Phase 8 is complete; implementation is ready for author review, and the fix remains in its active directory.
+    This phase changed documentation/skills and comments only (loop_control.rs and composition/preflight.rs).
+    Both areas passed just test, just lint, and just test-l2. Claudine L1 passed 7,258 tests after removing
+    inherited HOME/USERPROFILE from the test command; the ordinary inherited environment repeats seven
+    pre-existing HOME-overlay assertions. Use the exact commands and skip inventory in evidence.md.
+    No new cross-OS evidence is claimed; Phase 7's Linux/Windows/WSL gaps remain for normal CI qualification.
+    Sequence includes must exist before the sequence starts; an earlier task cannot satisfy static preflight.
+    No files were formatted, staged, committed, or moved to _completed. The temporary build target was removed.
+
+source_files_during_phase_8:
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+
+docs_updated_during_phase_8:
+    - claudine/docs/topics/pre-flight-checks.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/README.md
+    - claudine/docs/pipeline.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/lifecycle.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/spec.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/plan.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/implementation-log.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/evidence.md
+
+docs_created_during_phase_8: []
+
+skills_files_updated_during_phase_8:
+    - .claude/skills/claudine/composition.md
+    - .claude/skills/claudine/lifecycle.md
+
+source_code:
+    - claudine/cli/tests/level2_initialize_generated_transclusion.rs
+    - claudine/cli/Cargo.toml
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/tests/frontmatter_surface_projection.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/bootstrap.rs
+    - claudine/lib/src/composition/prepare/bootstrap/tests.rs
+    - claudine/lib/src/composition/prepare/service.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/cli/tests/composition_seams.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/tests/compose_initialize_staged_boot.rs
+    - claudine/lib/src/composition/looping/seed.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/tests.rs
+    - claudine/cli/tests/sequence_initialize_include_preflight.rs
+    - prompts/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/shipped_prompt_contract.rs
+    - claudine/cli/tests/shipped_prompt_route_drift.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/cli/tests/compose_initialize_acceptance.rs
+    - darkmatter/lib/src/effects/fs_write.rs
+
+documentation:
+    - claudine/docs/topics/pre-flight-checks.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/spec.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/plan.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/implementation-log.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/design.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - claudine/fixes/2026-09-15-initialize-after-proxy/evidence.md
+    - claudine/README.md
+    - claudine/docs/pipeline.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/lifecycle.md
+
+completed_phase: "8"
+implemented: true
 ---
 
 # Implementation Log — Run Initialization Before Body Discovery
@@ -879,3 +948,176 @@ with a no-op turned both failure rows red (2/5); restored afterwards.
 - `fixture_body_matches_the_shipped_body` is portable. Both files check out
   under the same line-ending policy, which the existing hash guard already
   depends on.
+
+## Phase 7
+
+Phase 7 closes the AC1–AC12 acceptance matrix and records full package-area
+evidence in [`evidence.md`](./evidence.md).
+
+### Regression-first design
+
+Before changing implementation code, three AC12 tests were enabled against the
+old behavior. They failed on the exact authored references
+`./generated/notes.md`, `&generated/notes.md`, and the shadowed implicit
+`generated/notes.md`. The first two could not create their intended targets;
+the third mutated the repository-root decoy rather than the existing
+document-local file. Each test asserts the created or preserved identity,
+resulting bytes, downstream provider prompt, and decoy exclusion.
+
+The completed matrix adds repository-scoped `^generated/notes.md`, interpolated
+`{{ ctx.repo_root }}/generated/notes.md`, missing implicit creation, and the
+invalid escape `&../outside.md`. The negative case asserts failure before a
+file or provider effect. Existing Phase 4–6 tests supply direct, inline, proxy,
+loop, sequence, approval, dry-run, shipped-corpus, and repeated persistence
+coverage. The exact AC-to-test mapping is in `evidence.md`.
+
+### Implementation
+
+- Lifecycle filesystem effects now parse document-authored path arguments as
+  `biscuit_file::FileReference` and resolve them with the captured request
+  context. Existing targets use normal document resolution and shadowing.
+  Missing explicit-relative, repository-root, and repository-scoped targets use
+  their request-scoped identities. A missing implicit relative target retains
+  the prior mutation-root policy.
+- Darkmatter's filesystem write guard now canonicalizes the deepest existing
+  ancestor and reattaches any missing tail before containment comparison. This
+  handles equivalent macOS spellings such as `/var` and `/private/var` while
+  preserving the boundary: an in-root symlink to an outside directory is
+  rejected before creation.
+- The shipped-router end-to-end helper quotes the transclusion reference, so
+  the real fixture also works when the checkout or temporary root contains a
+  space.
+
+### Verification
+
+- Targeted Claudine acceptance: 23/23 pass after a 3/3 red regression proof.
+  The final row covers `ensure_dir`, both `ensure_file` forms, `append_line`,
+  and `append_jsonl` through one document-relative identity.
+- Targeted Darkmatter containment: 2/2 pass.
+- Claudine L2: 231/231 CLI and 3/3 generator tests pass.
+- Darkmatter L1: 7,937/7,937 pass. Darkmatter L2: 18/18 library,
+  69/69 CLI, and 3/3 DMLS tests pass.
+- Claudine and Darkmatter `just lint`: pass; the latter includes the
+  `wasm32-wasip2` Zed extension check.
+- Claudine L1 ran all 7,257 tests: 7,250 passed, including every Phase 7 test;
+  seven pre-existing spawn tests failed because inherited host state sets
+  `HOME=/Users/ken/.claudine`. The failure is unrelated to the changed paths
+  and is recorded rather than hidden by changing externally owned HOME state.
+- Remote qualification was attempted. Linux was locked by another build,
+  native Windows was out of disk, and WSL reset the connection. CI remains the
+  qualification path for those three environments. See `evidence.md` for the
+  exact commands and gap handling.
+
+An intermediate rerun was blocked before tests by the shared target directory's
+write permissions. The first draft of the all-effects fixture also used a
+`.jsonl` transclusion and correctly received Darkmatter's unsupported-file-type
+error; changing only that fixture target to `.md` made its appended JSON record
+observable through the supported composition path. Neither is a product
+failure; both are recorded in `evidence.md`.
+
+No skill file changed. Phase 8 still owns the planned repository documentation,
+Claudine skill update, and final comment-drift review.
+
+## Phase 8
+
+### Scope and test design before edits
+
+This phase changes documentation and comments only; it introduces no runtime,
+parser, schema, prompt, or persistence behavior. Existing Phase 7 working-tree
+changes and unrelated work are preserved. The plan's doubled `claudine/` path
+is a spelling error; this phase uses the fix directory named in the spec.
+The `.opencode/skill/claudine` files resolve to the canonical
+`.claude/skills/claudine` files, which are edited once.
+
+| Documented requirement | Concrete verification |
+|---|---|
+| Live bootstrap precedes body discovery, including inline/proxy/loop routes | `compose_initialize_staged_boot` and `compose_initialize_acceptance`; L2 `level2_initialize_generated_transclusion` |
+| Approval denial, post-initialize mutations, typed missing include, once-only initialization | Named AC5–AC8 tests in `evidence.md` |
+| Eager no-initialize path, retry/resume, dry run remain unchanged | Named AC7/AC11 tests in `evidence.md` |
+| Sequence static preflight requires includes before the sequence starts | `sequence_initialize_include_preflight` plus its generated-transclusion L2 diagnostic test |
+| Shipped guarded log, exact original spec spelling, persisted contents | AC4/AC10 tests in `evidence.md`, `shipped_prompt_contract`, and `shipped_prompt_route_drift` |
+| Frontmatter-only projection does not discover body dependencies | Darkmatter `frontmatter_surface_projection` |
+
+No new test is necessary for prose-only corrections. Final gates are `just
+test`, `just lint`, and `just test-l2` in both Claudine and Darkmatter; results
+and any failures/skips will be appended to `evidence.md`. Markdown hashes use
+Darkmatter. No formatting, staging, commits, or completion-directory move.
+
+### Documentation and comment review
+
+Updated pipeline, composition, lifecycle, and README guidance, plus the
+canonical Claudine composition/lifecycle skill pages. The docs explain staged
+eligibility, frontmatter-only bootstrap, narrow approvals, stabilized reread,
+full condition-blind audit, schema verdict, failure ownership, once-only
+initialization, dry-run behavior, and the sequence boundary. Existing-file
+sequence mutation timing is explicitly documented; no claim is made that an
+earlier sequence task can create an include in time for static preflight.
+
+Reviewed the plan's named symbols: `prepare_and_run_active_document`,
+`execute_loop_or_single`, `build_and_run_loop`, `resolve_shell_approvals`,
+`prepare_document`, `prepare_bootstrap`, `run_initialize_stages`,
+`bootstrap_adopted_document_phase`, `route_initialize`, and Darkmatter's
+projection/options/preflight comments. One correction was needed:
+`run_initialize_stages` claimed every failure bypassed lifecycle routing,
+although only bootstrap/narrow-gate failures precede config installation.
+Corrected the comment, keeping code unchanged. GitNexus upstream impact was
+LOW, four impacted symbols, two direct callers
+(`bootstrap_adopted_document_phase`, `initialize_adopted_target_phase`), and
+zero recorded processes. The local registered index was dated 2026-09-17 at
+commit `30d9802`; source inspection confirmed the current behavior.
+
+Initial `just test --no-fail-fast` could not compile: the shared target contains
+read-only `.rmeta` artifacts. No tests ran in that attempt. Validation is being
+retried with isolated artifact placement; no shared permissions are changed.
+
+The final review also corrected `resolve_shell_approvals`'s argument docs:
+callers provide source Markdown, not necessarily already composed Markdown;
+the condition-blind walker dereferences includes, so staged live callers must
+pass the stabilized reread. GitNexus reports CRITICAL risk (18 impacted symbols,
+four direct callers across compose, sequence, and harness paths, including the
+`run_phase_1c_with_schema` process family). This was reported before editing;
+only its argument documentation changed. No approval behavior changed.
+
+The edited skill's pre-existing `reconcile_inline_artifact` relative link was
+repaired. All eight edited topic/skill documents pass `md validate refs
+--fragments`. README-wide validation reaches an existing shell directive and
+requires approval; its new initialization link targets the independently
+validated composition heading. No shell directive was executed for this check.
+
+### L1 environment resolution
+
+The isolated-target ordinary Claudine run repeated all seven Phase 7 HOME
+assertion failures. Removing inherited `HOME`/`USERPROFILE` only from the test
+command lets the existing spawn fixture use its intended temporary-directory
+fallback: all nine targeted spawn tests passed. The full, unfiltered rerun
+with that environment then passed **7,258/7,258**, with nine pre-existing
+performance/diagnostic opt-ins skipped. No fixture, product code, or persistent
+home configuration was changed. Both runs and exact failures are retained in
+`evidence.md`.
+
+### Final gates and closure
+
+- Claudine: `just test` **7,258/7,258 pass** in the clean inherited environment;
+  `just lint` **pass**; `just test-l2` **231/231 CLI + 3/3 generator pass**.
+- Darkmatter: `just test` **7,937/7,937 pass**; `just lint` **pass**, including
+  `wasm32-wasip2`; `just test-l2` **18/18 library + 69/69 CLI + 3/3 DMLS pass**.
+- Exact commands, the initial shared-target permission error, all seven
+  inherited-HOME failures, the resolving nine-test probe, and the nine Claudine
+  and seven Darkmatter L1 skips are recorded in `evidence.md`. L2's non-L2
+  exclusions are identified separately. No new targeted tests were added:
+  this phase's changes are documentation/comments only, and the existing
+  mapped acceptance suites all passed.
+- No new OS-specific behavior was introduced. Phase 7's Linux, native Windows,
+  and WSL qualification gaps remain explicit for normal CI; no new remote run
+  is claimed and no human decision is needed to complete this documentation
+  phase.
+- Plan tasks are all checked. Plan/log frontmatter records the Phase 8 files,
+  cumulative source/documentation inventories, touched packages, phase `8`,
+  `implemented: true`, and `human_review: false`. The spec retains the requested
+  `implemented: true` and `implemented_by: codex/default` and now links to the
+  completed implementation/evidence rather than describing it as future work.
+- The session-owned isolated target measured 29 GiB and was removed after the
+  gates. Shared target files and pre-existing working-tree changes were left
+  intact. No formatting, staging, commits, or `_completed` move occurred.
+
+**Implementation complete, ready for review.**
