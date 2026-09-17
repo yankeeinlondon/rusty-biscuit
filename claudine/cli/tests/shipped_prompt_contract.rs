@@ -656,7 +656,8 @@ fn deliver_implement_plan_prompt(
         .command()
         .env("CLAUDINE_PROMPT_CAPTURE", &delivered)
         .arg("compose")
-        .arg(prompts.join("_implement/implement-plan.md"))
+        .arg(prompts.join(if phase == 3 { "implement.md" } else { "_implement/implement-plan.md" }))
+        .arg(format!("phase={phase}"))
         .arg(format!("spec={}", case.join("spec.md").display()))
         .args(["--goose", "-y"])
         .output()
@@ -717,6 +718,7 @@ fn shipped_implement_plan_logging_instructions_follow_log_content() {
     // Frontmatter alone, or a body alone, means an earlier phase started the log;
     // ensure_file must keep those bytes and the prompt must append to them.
     for (started, phase) in [
+        ("---\nmessage_to_agent: Phase 2 is complete; begin Phase 3.\n---\n# Implementation Log\n", 3),
         ("---\nspec: fixes/case/spec.md\n---\n", 2),
         ("# Implementation Log\n\n## Phase 1\n\n- did things\n", 2),
         ("---\nstarted_phase: 1\n---\n# Implementation Log\n\n## Phase 1\n", 1),
@@ -728,7 +730,7 @@ fn shipped_implement_plan_logging_instructions_follow_log_content() {
         assert!(!prompt.contains(UNSTARTED), "{started:?} is started:\n{prompt}");
         assert!(!prompt.contains("# Implementation Log for"), "no re-title:\n{prompt}");
         assert_eq!(
-            prompt.contains("we do have the log entries for 1"),
+            prompt.contains(&format!("we do have the log entries for {}", phase - 1)),
             phase > 1,
             "prior-phase pointer tracks the phase:\n{prompt}"
         );
