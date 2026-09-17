@@ -173,6 +173,85 @@ fn proxy_with_values_are_checked_at_their_overlay_path() {
     assert_eq!(suggestion.as_deref(), Some("'in ' + area"));
 }
 
+fn proxy_with_frontmatter(with: serde_json::Value) -> serde_json::Value {
+    json!({
+        "failure": { "stack": [{ "action": {
+            "action": "proxy",
+            "target": "next.md",
+            "with": with,
+        } }] }
+    })
+}
+
+#[test]
+fn dotted_proxy_keys_cannot_collide_with_nested_mapping_paths() {
+    let defect = "{{ ok ? 'bad {{ x }}' : 'fine' }}";
+
+    let nested_defect = proxy_with_frontmatter(json!({
+        "a": { "b": defect },
+        "a.b": "fine",
+    }));
+    assert_eq!(
+        rejection(&nested_defect).0,
+        "failure.stack[0].action[0].with.a.b"
+    );
+
+    let dotted_key_defect = proxy_with_frontmatter(json!({
+        "a": { "b": "fine" },
+        "a.b": defect,
+    }));
+    assert_eq!(
+        rejection(&dotted_key_defect).0,
+        r#"failure.stack[0].action[0].with["a.b"]"#
+    );
+}
+
+#[test]
+fn bracket_shaped_proxy_keys_cannot_collide_with_array_paths() {
+    let defect = "{{ ok ? 'bad {{ x }}' : 'fine' }}";
+
+    let array_defect = proxy_with_frontmatter(json!({
+        "files": [defect],
+        "files[0]": "fine",
+    }));
+    assert_eq!(
+        rejection(&array_defect).0,
+        "failure.stack[0].action[0].with.files[0]"
+    );
+
+    let bracket_key_defect = proxy_with_frontmatter(json!({
+        "files": ["fine"],
+        "files[0]": defect,
+    }));
+    assert_eq!(
+        rejection(&bracket_key_defect).0,
+        r#"failure.stack[0].action[0].with["files[0]"]"#
+    );
+}
+
+#[test]
+fn flat_proxy_keys_cannot_collide_with_nested_mapping_and_array_paths() {
+    let defect = "{{ ok ? 'bad {{ x }}' : 'fine' }}";
+
+    let nested_defect = proxy_with_frontmatter(json!({
+        "bundle": [{ "meta": { "value": defect } }],
+        "bundle[0].meta.value": "fine",
+    }));
+    assert_eq!(
+        rejection(&nested_defect).0,
+        "failure.stack[0].action[0].with.bundle[0].meta.value"
+    );
+
+    let flat_key_defect = proxy_with_frontmatter(json!({
+        "bundle": [{ "meta": { "value": "fine" } }],
+        "bundle[0].meta.value": defect,
+    }));
+    assert_eq!(
+        rejection(&flat_key_defect).0,
+        r#"failure.stack[0].action[0].with["bundle[0].meta.value"]"#
+    );
+}
+
 #[test]
 fn events_are_reported_in_lifecycle_signal_order() {
     let defect = "{{ 'x {{y}}' }}";

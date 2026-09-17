@@ -38,21 +38,26 @@ pub fn validate_no_nested_spans_in_literals(
         }
         if signal == LifecycleSignal::Loop {
             for predicate in ["while", "until"] {
-                let property = format!("{event}.{predicate}");
-                if let Some(AuthoredValue::Text(text)) = sources.get(&property) {
-                    reject_nested_span(source_path, &property, text, true)?;
+                let path = LifecycleSurfacePath::root(event).field(predicate);
+                if let Some(AuthoredValue::Text(text)) = sources.get(&path) {
+                    reject_nested_span(source_path, &path.to_string(), text, true)?;
                 }
             }
         }
         for surface in surfaces.iter().filter(|surface| surface.signal == signal) {
-            match sources.get(&surface.property) {
+            match sources.get(&surface.path) {
                 Some(AuthoredValue::Text(text)) => {
-                    reject_nested_span(source_path, &surface.property, text, surface.predicate)?;
+                    reject_nested_span(
+                        source_path,
+                        &surface.path.to_string(),
+                        text,
+                        surface.predicate,
+                    )?;
                 }
                 Some(AuthoredValue::NonText) => {}
                 None => {
                     return Err(CompositionError::LifecycleInvalid {
-                        property: surface.property.clone(),
+                        property: surface.path.to_string(),
                         message: "internal error: no authored source was recorded for this \
                                   lifecycle surface, so it cannot be checked for nested \
                                   interpolation"
@@ -102,9 +107,8 @@ fn reject_nested_span(
 
 /// A single expression surface discovered by [`iter_stack_expression_surfaces`].
 struct LifecycleExpressionSurface<'a> {
-    /// Dotted property path for diagnostics, e.g. `start.stack[1].when` or
-    /// `failure.stack[0].action`.
-    property: String,
+    /// Structural source identity, rendered as a property path for diagnostics.
+    path: LifecycleSurfacePath,
     /// The owning event — used by the `err` static scan to decide whether
     /// `err` references are permitted.
     signal: LifecycleSignal,
@@ -137,19 +141,19 @@ fn iter_stack_expression_surfaces<'a>(
         let Some(stack) = config.stack(signal) else {
             continue;
         };
-        let event_name = signal.property_name();
+        let event_path = LifecycleSurfacePath::root(signal.property_name());
         for (idx, item) in stack.iter().enumerate() {
-            let prefix = format!("{event_name}.stack[{idx}]");
+            let prefix = event_path.field("stack").index(idx);
             if let Some(when) = &item.when {
                 surfaces.push(LifecycleExpressionSurface {
-                    property: format!("{prefix}.when"),
+                    path: prefix.field("when"),
                     signal,
                     predicate: true,
                     expr: when,
                 });
             }
             for (action_idx, action) in item.actions.iter().enumerate() {
-                let action_prefix = format!("{prefix}.action[{action_idx}]");
+                let action_prefix = prefix.field("action").index(action_idx);
                 iter_action_expressions(&action.kind, &action_prefix, signal, &mut surfaces);
             }
         }
@@ -161,7 +165,7 @@ fn iter_stack_expression_surfaces<'a>(
 /// `surfaces`.
 fn iter_action_expressions<'a>(
     kind: &'a LifecycleActionKind,
-    prefix: &str,
+    prefix: &LifecycleSurfacePath,
     signal: LifecycleSignal,
     surfaces: &mut Vec<LifecycleExpressionSurface<'a>>,
 ) {
@@ -170,7 +174,7 @@ fn iter_action_expressions<'a>(
             LifecycleControlAction::Error { reason } => {
                 if let Some(reason) = reason {
                     surfaces.push(LifecycleExpressionSurface {
-                        property: format!("{prefix}.reason"),
+                        path: prefix.field("reason"),
                         signal,
                         predicate: false,
                         expr: reason,
@@ -179,7 +183,7 @@ fn iter_action_expressions<'a>(
             }
             LifecycleControlAction::Proxy { target, with } => {
                 surfaces.push(LifecycleExpressionSurface {
-                    property: format!("{prefix}.target"),
+                    path: prefix.field("target"),
                     signal,
                     predicate: false,
                     expr: target,
@@ -192,7 +196,7 @@ fn iter_action_expressions<'a>(
                 for (key, value) in with.iter() {
                     iter_with_value_expressions(
                         value,
-                        &format!("{prefix}.with.{key}"),
+                        &prefix.field("with").map_key(key),
                         signal,
                         surfaces,
                     );
@@ -205,7 +209,7 @@ fn iter_action_expressions<'a>(
             } => {
                 if let Some(max_attempts) = max_attempts {
                     surfaces.push(LifecycleExpressionSurface {
-                        property: format!("{prefix}.max_attempts"),
+                        path: prefix.field("max_attempts"),
                         signal,
                         predicate: false,
                         expr: max_attempts,
@@ -213,7 +217,7 @@ fn iter_action_expressions<'a>(
                 }
                 if let Some(delay) = delay {
                     surfaces.push(LifecycleExpressionSurface {
-                        property: format!("{prefix}.delay"),
+                        path: prefix.field("delay"),
                         signal,
                         predicate: false,
                         expr: delay,
@@ -225,14 +229,14 @@ fn iter_action_expressions<'a>(
                 max_attempts,
             } => {
                 surfaces.push(LifecycleExpressionSurface {
-                    property: format!("{prefix}.message"),
+                    path: prefix.field("message"),
                     signal,
                     predicate: false,
                     expr: message,
                 });
                 if let Some(max_attempts) = max_attempts {
                     surfaces.push(LifecycleExpressionSurface {
-                        property: format!("{prefix}.max_attempts"),
+                        path: prefix.field("max_attempts"),
                         signal,
                         predicate: false,
                         expr: max_attempts,
@@ -241,14 +245,14 @@ fn iter_action_expressions<'a>(
             }
             LifecycleControlAction::Defer { delay, reason } => {
                 surfaces.push(LifecycleExpressionSurface {
-                    property: format!("{prefix}.delay"),
+                    path: prefix.field("delay"),
                     signal,
                     predicate: false,
                     expr: delay,
                 });
                 if let Some(reason) = reason {
                     surfaces.push(LifecycleExpressionSurface {
-                        property: format!("{prefix}.reason"),
+                        path: prefix.field("reason"),
                         signal,
                         predicate: false,
                         expr: reason,
@@ -259,14 +263,14 @@ fn iter_action_expressions<'a>(
         },
         LifecycleActionKind::Communication(comm) => {
             surfaces.push(LifecycleExpressionSurface {
-                property: format!("{prefix}.message"),
+                path: prefix.field("message"),
                 signal,
                 predicate: false,
                 expr: &comm.message,
             });
             if let Some(route) = &comm.route {
                 surfaces.push(LifecycleExpressionSurface {
-                    property: format!("{prefix}.route"),
+                    path: prefix.field("route"),
                     signal,
                     predicate: false,
                     expr: route,
@@ -275,14 +279,14 @@ fn iter_action_expressions<'a>(
         }
         LifecycleActionKind::Shell(shell) => {
             surfaces.push(LifecycleExpressionSurface {
-                property: format!("{prefix}.command"),
+                path: prefix.field("command"),
                 signal,
                 predicate: false,
                 expr: &shell.command,
             });
             if let Some(on_error) = &shell.on_error {
                 surfaces.push(LifecycleExpressionSurface {
-                    property: format!("{prefix}.on_error"),
+                    path: prefix.field("on_error"),
                     signal,
                     predicate: false,
                     expr: on_error,
@@ -292,7 +296,7 @@ fn iter_action_expressions<'a>(
         LifecycleActionKind::SideEffect(effect) => {
             for (i, arg) in effect.args.iter().enumerate() {
                 surfaces.push(LifecycleExpressionSurface {
-                    property: format!("{prefix}.arg[{i}]"),
+                    path: prefix.field("arg").index(i),
                     signal,
                     predicate: false,
                     expr: arg,
@@ -302,7 +306,7 @@ fn iter_action_expressions<'a>(
         LifecycleActionKind::ExpressionFunction(func) => {
             for (i, arg) in func.args.iter().enumerate() {
                 surfaces.push(LifecycleExpressionSurface {
-                    property: format!("{prefix}.arg[{i}]"),
+                    path: prefix.field("arg").index(i),
                     signal,
                     predicate: false,
                     expr: arg,
@@ -316,26 +320,26 @@ fn iter_action_expressions<'a>(
 /// its path below the overlay key (e.g. `…with.metadata.area`, `…with.files[0]`).
 fn iter_with_value_expressions<'a>(
     value: &'a ProxyWithValue,
-    prefix: &str,
+    prefix: &LifecycleSurfacePath,
     signal: LifecycleSignal,
     surfaces: &mut Vec<LifecycleExpressionSurface<'a>>,
 ) {
     match value {
         ProxyWithValue::Null => {}
         ProxyWithValue::Scalar(expr) => surfaces.push(LifecycleExpressionSurface {
-            property: prefix.to_string(),
+            path: prefix.clone(),
             signal,
             predicate: false,
             expr,
         }),
         ProxyWithValue::Array(items) => {
             for (i, item) in items.iter().enumerate() {
-                iter_with_value_expressions(item, &format!("{prefix}[{i}]"), signal, surfaces);
+                iter_with_value_expressions(item, &prefix.index(i), signal, surfaces);
             }
         }
         ProxyWithValue::Object(map) => {
             for (key, item) in map {
-                iter_with_value_expressions(item, &format!("{prefix}.{key}"), signal, surfaces);
+                iter_with_value_expressions(item, &prefix.map_key(key), signal, surfaces);
             }
         }
     }
@@ -483,7 +487,7 @@ pub fn validate_no_undefined_lifecycle_variables(
         if let Some(variable) = find_undefined_stack_variable(surface.expr, defined) {
             return Err(CompositionError::LifecycleUndefinedVariable {
                 source_path: source_path.to_path_buf(),
-                property: surface.property,
+                property: surface.path.to_string(),
                 variable: variable.to_string(),
             });
         }
@@ -725,7 +729,7 @@ pub fn validate_no_err_in_no_error_events(
         if surface_references_err(surface.expr) {
             return Err(CompositionError::LifecycleErrNotAvailable {
                 source_path: source_path.to_path_buf(),
-                property: surface.property,
+                property: surface.path.to_string(),
                 event: surface.signal.property_name().to_string(),
             });
         }
@@ -834,8 +838,9 @@ pub fn collect_lifecycle_shell_commands(
     let mut commands = Vec::new();
     for surface in iter_stack_expression_surfaces(lifecycle) {
         if let Some(literal) = expr_as_string_literal(surface.expr) {
-            if surface.property.ends_with(".command") || surface.property.ends_with(".on_error") {
-                commands.push((literal, surface.property));
+            let property = surface.path.to_string();
+            if property.ends_with(".command") || property.ends_with(".on_error") {
+                commands.push((literal, property));
             }
         }
     }
@@ -881,7 +886,7 @@ fn expr_as_string_literal(expr: &Expr) -> Option<String> {
 /// Normalizes empty or whitespace-only strings to `None`.
 use super::*;
 use super::actions::ProxyWithValue;
-use super::source_map::{AuthoredValue, LifecycleSourceMap};
+use super::source_map::{AuthoredValue, LifecycleSourceMap, LifecycleSurfacePath};
 use darkmatter::markdown::compose::expression::{
     ExpressionLintKind, ParseMode, is_whole_value_span, lint_expression,
 };

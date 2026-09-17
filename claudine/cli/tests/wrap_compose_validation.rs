@@ -836,6 +836,25 @@ fn predicates_operands_and_proxy_with_values_are_rejected_before_launch() {
     }
 }
 
+#[test]
+fn colliding_proxy_overlay_paths_are_rejected_before_launch() {
+    let fixture = CliProcessFixture::named("nested-span-proxy-path-collision");
+    fixture.seed_user_config();
+    let marker = install_marker_provider(&fixture);
+    let doc = fixture.cwd().join("collision.md");
+    fs::write(
+        &doc,
+        "---\nfailure:\n    stack:\n        - action:\n              action: proxy\n              target: ./next.md\n              with:\n                  a:\n                      b: \"{{ ok ? 'bad {{ x }}' : 'fine' }}\"\n                  \"a.b\": fine\n---\nBody\n",
+    )
+    .unwrap();
+
+    let (success, stderr) =
+        run_with_marker(&fixture, &marker, &["compose", "--goose", doc.to_str().unwrap()]);
+    assert!(!success, "the colliding nested defect must be refused: {stderr}");
+    assert_nested_span_rejection(&stderr, "failure.stack[0].action[0].with.a.b");
+    assert_eq!(provider_runs(&marker), 0, "no provider may start");
+}
+
 /// Acceptance 4: synthesized action bodies, mixed strings, ordinary
 /// whole-value frontmatter, and the valid `+` form still launch the provider.
 #[test]

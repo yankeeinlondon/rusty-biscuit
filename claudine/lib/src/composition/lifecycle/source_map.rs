@@ -1,16 +1,19 @@
-//! Authored lifecycle scalars keyed by canonical surface property path.
+//! Authored lifecycle scalars keyed by canonical typed surface path.
 //!
 //! The parsed stack keeps only [`darkmatter::markdown::compose::expression::Expr`]
 //! trees, but a nested-span lint must read the authored text: a synthesized
 //! literal and an authored quoted literal are indistinguishable once parsed.
 //! [`LifecycleSourceMap`] projects the frontmatter the lifecycle config was
-//! parsed from onto the property paths `iter_stack_expression_surfaces` emits,
-//! so a validator can look up the authored scalar for each surface the one
-//! canonical iterator yields. The naming rules mirror the parser's verb
-//! dispatch in `action_shape.rs`; a surface the map cannot name is reported as
-//! an internal validation error rather than skipped.
+//! parsed from onto the paths `iter_stack_expression_surfaces` emits, so a
+//! validator can look up the authored scalar for each surface the one canonical
+//! iterator yields. Structural fields, arbitrary overlay keys, and array
+//! indices are distinct path segments; display punctuation is never used as
+//! identity. The naming rules mirror the parser's verb dispatch in
+//! `action_shape.rs`; a surface the map cannot name is reported as an internal
+//! validation error rather than skipped.
 
 use std::collections::HashMap;
+use std::fmt;
 
 use serde_json::Value;
 
@@ -26,11 +29,69 @@ pub(super) enum AuthoredValue {
     NonText,
 }
 
-/// Authored lifecycle scalars keyed by canonical property path
-/// (`success.stack[0].action[1].message`, `loop.while`, …).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum LifecyclePathSegment {
+    Field(String),
+    MapKey(String),
+    Index(usize),
+}
+
+/// Structural identity for one lifecycle expression surface.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct LifecycleSurfacePath(Vec<LifecyclePathSegment>);
+
+impl LifecycleSurfacePath {
+    pub(super) fn root(field: impl Into<String>) -> Self {
+        Self(vec![LifecyclePathSegment::Field(field.into())])
+    }
+
+    pub(super) fn field(&self, field: impl Into<String>) -> Self {
+        let mut path = self.clone();
+        path.0.push(LifecyclePathSegment::Field(field.into()));
+        path
+    }
+
+    pub(super) fn map_key(&self, key: impl Into<String>) -> Self {
+        let mut path = self.clone();
+        path.0.push(LifecyclePathSegment::MapKey(key.into()));
+        path
+    }
+
+    pub(super) fn index(&self, index: usize) -> Self {
+        let mut path = self.clone();
+        path.0.push(LifecyclePathSegment::Index(index));
+        path
+    }
+}
+
+impl fmt::Display for LifecycleSurfacePath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (position, segment) in self.0.iter().enumerate() {
+            match segment {
+                LifecyclePathSegment::Field(field) => {
+                    if position > 0 {
+                        f.write_str(".")?;
+                    }
+                    f.write_str(field)?;
+                }
+                LifecyclePathSegment::MapKey(key)
+                    if key.starts_with(|c: char| c == '_' || c.is_ascii_alphabetic())
+                        && key.chars().all(|c| c == '_' || c.is_ascii_alphanumeric()) =>
+                {
+                    write!(f, ".{key}")?;
+                }
+                LifecyclePathSegment::MapKey(key) => write!(f, "[{key:?}]")?,
+                LifecyclePathSegment::Index(index) => write!(f, "[{index}]")?,
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Authored lifecycle scalars keyed by canonical typed paths.
 #[derive(Debug, Default)]
 pub(super) struct LifecycleSourceMap {
-    entries: HashMap<String, AuthoredValue>,
+    entries: HashMap<LifecycleSurfacePath, AuthoredValue>,
 }
 
 impl LifecycleSourceMap {
@@ -47,7 +108,10 @@ impl LifecycleSourceMap {
             };
             if signal == LifecycleSignal::Loop {
                 for predicate in ["while", "until"] {
-                    map.record(format!("{event}.{predicate}"), block.get(predicate));
+                    map.record(
+                        LifecycleSurfacePath::root(event).field(predicate),
+                        block.get(predicate),
+                    );
                 }
             }
             let Some(Value::Array(stack)) = block.get("stack") else {
@@ -55,15 +119,15 @@ impl LifecycleSourceMap {
             };
             for (idx, item) in stack.iter().enumerate() {
                 let Value::Object(item) = item else { continue };
-                let prefix = format!("{event}.stack[{idx}]");
-                map.record(format!("{prefix}.when"), item.get("when"));
+                let prefix = LifecycleSurfacePath::root(event).field("stack").index(idx);
+                map.record(prefix.field("when"), item.get("when"));
                 match item.get("action") {
                     Some(Value::Array(actions)) => {
                         for (action_idx, action) in actions.iter().enumerate() {
-                            map.record_action(&format!("{prefix}.action[{action_idx}]"), action);
+                            map.record_action(&prefix.field("action").index(action_idx), action);
                         }
                     }
-                    Some(action) => map.record_action(&format!("{prefix}.action[0]"), action),
+                    Some(action) => map.record_action(&prefix.field("action").index(0), action),
                     None => {}
                 }
             }
@@ -71,22 +135,22 @@ impl LifecycleSourceMap {
         map
     }
 
-    /// The authored value at `property`, or `None` when nothing was recorded.
-    pub(super) fn get(&self, property: &str) -> Option<&AuthoredValue> {
-        self.entries.get(property)
+    /// The authored value at `path`, or `None` when nothing was recorded.
+    pub(super) fn get(&self, path: &LifecycleSurfacePath) -> Option<&AuthoredValue> {
+        self.entries.get(path)
     }
 
-    fn record(&mut self, property: String, value: Option<&Value>) {
+    fn record(&mut self, path: LifecycleSurfacePath, value: Option<&Value>) {
         let authored = match value {
             Some(Value::String(text)) => AuthoredValue::Text(text.clone()),
             Some(Value::Number(_) | Value::Bool(_)) => AuthoredValue::NonText,
             _ => return,
         };
-        self.entries.insert(property, authored);
+        self.entries.insert(path, authored);
     }
 
     /// Record one action object's operands under `prefix` (`…action[j]`).
-    fn record_action(&mut self, prefix: &str, action: &Value) {
+    fn record_action(&mut self, prefix: &LifecycleSurfacePath, action: &Value) {
         let Value::Object(obj) = action else { return };
         if let Some(Value::String(verb)) = obj.get("action") {
             self.record_key_value_action(prefix, verb, obj);
@@ -97,7 +161,12 @@ impl LifecycleSourceMap {
 
     /// `{verb: value}` or `{verb: [values…]}`: argument `k` is the scalar or
     /// the array's `k`th element.
-    fn record_positional_action(&mut self, prefix: &str, verb: &str, value: &Value) {
+    fn record_positional_action(
+        &mut self,
+        prefix: &LifecycleSurfacePath,
+        verb: &str,
+        value: &Value,
+    ) {
         let args: Vec<&Value> = match value {
             Value::Array(items) => items.iter().collect(),
             scalar => vec![scalar],
@@ -113,11 +182,11 @@ impl LifecycleSourceMap {
             _ => None,
         };
         for (k, arg) in args.into_iter().enumerate() {
-            let property = match single_field {
-                Some(field) => format!("{prefix}.{field}"),
-                None => format!("{prefix}.arg[{k}]"),
+            let path = match single_field {
+                Some(field) => prefix.field(field),
+                None => prefix.field("arg").index(k),
             };
-            self.record(property, Some(arg));
+            self.record(path, Some(arg));
         }
     }
 
@@ -125,7 +194,7 @@ impl LifecycleSourceMap {
     /// stores each parameter.
     fn record_key_value_action(
         &mut self,
-        prefix: &str,
+        prefix: &LifecycleSurfacePath,
         verb: &str,
         obj: &serde_json::Map<String, Value>,
     ) {
@@ -134,7 +203,7 @@ impl LifecycleSourceMap {
             .filter(|(key, _)| !matches!(key.as_str(), "action" | "no_error" | "with"))
             .collect();
         if let Some(with) = obj.get("with") {
-            self.record_with_value(&format!("{prefix}.with"), with);
+            self.record_with_value(&prefix.field("with"), with);
         }
 
         let is_control = matches!(
@@ -143,7 +212,7 @@ impl LifecycleSourceMap {
         );
         if is_control || verb == "shell" {
             for (key, value) in params {
-                self.record(format!("{prefix}.{key}"), Some(value));
+                self.record(prefix.field(key), Some(value));
             }
             return;
         }
@@ -151,8 +220,8 @@ impl LifecycleSourceMap {
             let message = ["message", "text", "sound"]
                 .into_iter()
                 .find_map(|key| obj.get(key));
-            self.record(format!("{prefix}.message"), message);
-            self.record(format!("{prefix}.route"), obj.get("route"));
+            self.record(prefix.field("message"), message);
+            self.record(prefix.field("route"), obj.get("route"));
             return;
         }
 
@@ -174,23 +243,23 @@ impl LifecycleSourceMap {
             }
         };
         for (k, value) in ordered.into_iter().enumerate() {
-            self.record(format!("{prefix}.arg[{k}]"), Some(value));
+            self.record(prefix.field("arg").index(k), Some(value));
         }
     }
 
-    fn record_with_value(&mut self, path: &str, value: &Value) {
+    fn record_with_value(&mut self, path: &LifecycleSurfacePath, value: &Value) {
         match value {
             Value::Array(items) => {
                 for (i, item) in items.iter().enumerate() {
-                    self.record_with_value(&format!("{path}[{i}]"), item);
+                    self.record_with_value(&path.index(i), item);
                 }
             }
             Value::Object(map) => {
                 for (key, item) in map {
-                    self.record_with_value(&format!("{path}.{key}"), item);
+                    self.record_with_value(&path.map_key(key), item);
                 }
             }
-            scalar => self.record(path.to_string(), Some(scalar)),
+            scalar => self.record(path.clone(), Some(scalar)),
         }
     }
 }
