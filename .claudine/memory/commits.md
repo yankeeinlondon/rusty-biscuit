@@ -417,3 +417,27 @@ belong here.
   See `7600faaee` (planning close) followed by `8a1fdc2f2` (one-line
   `Err(error) => return Err(error)` follow-up to the M1 mutant captured
   in `57e23751f`).
+- The `source_files_during_phase_N` lists can be INCOMPLETE — the last
+  phase (typically Phase 7 acceptance regression) is usually written
+  *after* the plan's frontmatter is committed, so its source list is
+  empty or partial even when the corresponding test files ARE in the
+  staged set. A staged file that matches no phase source list is NOT
+  automatically a sibling-fix path: cross-reference the file's content
+  (or its sibling Phase 4 file's `!` comment about it, e.g.
+  `compose_initialize_staged_boot.rs` naming its
+  `compose_initialize_acceptance.rs` companion). When the cross-ref
+  confirms same-fix, route the file to its own `test(<area>):` or
+  `feat(<area>):` group keyed on the file's primary subject (AC4-AC12
+  coverage in this example) rather than treating it as a missed group
+  or splitting it into the prior phase's commit.
+- A file listed in MULTIPLE `source_files_during_phase_N` lists of the
+  same fix accumulates changes from each phase (e.g.
+  `claudine/lib/src/composition/mod.rs` re-exports new
+  `prepare::bootstrap` symbols in Phase 3 and a new
+  `looping::build_loop_seed_from_bootstrap` in Phase 4; the same
+  applies to `composition_seams.rs` allowlist entries). Place the file
+  in the LATEST phase's commit so every symbol is defined before any
+  re-export references it; splitting it would require the
+  `composition::*` re-exports to point at a function that does not
+  exist in the earlier commit's tree, breaking compilation between
+  the two commits.
