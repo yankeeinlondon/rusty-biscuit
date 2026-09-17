@@ -5,7 +5,10 @@ human_review: false
 reviewed_by: codex/default
 created: 2026-09-16T19:39:15-07:00
 spec: 2026-09-13-better-static-analysis/spec.md
-implemented: false
+log: claudine/fixes/2026-09-13-better-static-analysis/implementation-log.md
+implemented: true
+implemented_by: codex/default
+next: 2026-09-13-better-static-analysis/review-2.md
 description: A **fix** review of `2026-09-13-better-static-analysis/spec.md`
 fix: 2026-09-13-better-static-analysis/review-1.md
 findings:

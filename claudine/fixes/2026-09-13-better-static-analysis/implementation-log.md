@@ -3,6 +3,7 @@ created: 2026-09-16
 area: claudine
 spec: ./spec.md
 plan: ./plan.md
+implementation_1: "2026-09-16T20:02:17-07:00"
 source_files_during_phase_1:
     - darkmatter/lib/src/markdown/compose/expression/parser.rs
     - claudine/cli/tests/wrap_compose_validation.rs
@@ -1587,3 +1588,33 @@ lands.
         - final GitNexus change detection reported LOW risk across the shared worktree, 5 changed files, 13 changed symbols, no affected execution processes, and no partial or truncated result
 - work completed for 'Expression-literal decoding reverses escaped-opener parity after the hard lint' at 20:31:33
 - starting the work on 'Ambiguous proxy overlay paths can bypass prepare-time validation' at 20:32:24
+        - refreshed the GitNexus index to the current worktree commit; the canonical lifecycle surface iterator has LOW upstream risk with four direct consumers and no indexed execution process
+        - GitNexus could not resolve callers for `LifecycleSourceMap` or `validate_no_nested_spans_in_literals`, so text search confirmed the map is private to the validator and the validator is reached by both shared preparation paths, sequence preflight, shipped-prompt coverage, and lifecycle unit tests
+        - confirmed that dotted display strings are serving as internal identity in both independent walks, allowing arbitrary `proxy.with` map keys to collide with structural fields and array indices
+        - selected a typed lifecycle surface path whose field, map-key, and array-index segments compare structurally while retaining a separate human-readable diagnostic rendering
+        - implemented the typed path in both the raw source map and canonical expression-surface iterator; ordinary diagnostic paths remain unchanged while punctuation-bearing overlay keys render explicitly, such as `with["a.b"]`
+        - added six Level 1 library regressions covering dotted keys, bracket-shaped keys, and a nested mapping/array path with the defect on each side of every collision
+        - added a CLI process regression for the previously bypassed dotted-key case and asserted that the provider marker is never written
+        - the focused compile check, all six library collision cases, and the CLI no-provider-start case passed in the isolated target directory
+        - the full Claudine Level 1 gate passed all 7,204 selected tests with 9 tier-filtered skips when run with the native user home
+        - `just lint` passed the Claudine guard tests and every crate-specific Clippy phase
+        - audited the changed module and symbol documentation so the typed identity and diagnostic-rendering boundary are explicit; no user-facing lifecycle policy changed
+        - final GitNexus change detection reported LOW risk across the shared worktree, 10 changed files, 40 changed symbols, no affected execution processes, and no partial or truncated result
+- work completed for 'Ambiguous proxy overlay paths can bypass prepare-time validation' at 20:50:36
+
+### Successful Completion
+
+- The implementation of review cycle 1 has completed successfully in 50 minutes 3 seconds. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+        - fixed: expression-literal escape parity is now classified after decoding while diagnostic ranges remain mapped to authored bytes
+        - fixed: lifecycle source association now uses structural field, map-key, and array-index path segments that cannot collide
+        - deferred: none
+- The files changed for these findings were:
+        - `darkmatter/lib/src/markdown/compose/expression/lint.rs`
+        - `darkmatter/lib/proptest-regressions/markdown/compose/expression/lint.txt`
+        - `darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs`
+        - `claudine/lib/src/composition/lifecycle/source_map.rs`
+        - `claudine/lib/src/composition/lifecycle/validate.rs`
+        - `claudine/lib/src/composition/lifecycle/tests/nested_span.rs`
+        - `claudine/cli/tests/wrap_compose_validation.rs`
+        - `claudine/fixes/2026-09-13-better-static-analysis/review-1.md`
+        - `claudine/fixes/2026-09-13-better-static-analysis/implementation-log.md`
