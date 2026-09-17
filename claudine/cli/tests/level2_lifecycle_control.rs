@@ -7422,12 +7422,9 @@ const MCP_PROBE_SERVER: &str = "proxyprobeserver";
 fn seed_mcp_catalog(workspace: &Path) {
     let mcp_dir = workspace.join(".claudine").join("mcp");
     fs::create_dir_all(&mcp_dir).unwrap();
-    // Runtime MCP injection for Codex and Gemini runs through a shadow HOME,
-    // and the shadow-home builder mirrors the *original* provider config
-    // directory — it refuses to run when that directory is missing. `HOME` is
-    // the arm's temporary workspace, so both must be materialized here.
-    fs::create_dir_all(workspace.join(".gemini")).unwrap();
-    fs::create_dir_all(workspace.join(".codex")).unwrap();
+    // No `.codex`/`.gemini` root is seeded: runtime injection writes into a
+    // per-launch provider overlay, and a missing default source root is an
+    // empty overlay rather than a refusal.
     fs::write(
         mcp_dir.join("catalog.json"),
         format!(
@@ -7508,7 +7505,8 @@ mcp target body #proxyprobeserver
 /// prompt tags, and matches the same target invoked directly.
 ///
 /// This is the provider-switch case: the router authors `codex` (whose injector
-/// writes a shadow-home TOML and contributes no argv), the target authors
+/// writes `config.toml` into the `CODEX_HOME` provider overlay and contributes
+/// no argv), the target authors
 /// `gemini` (whose injector contributes `--allowed-mcp-server-names`). No
 /// provider flag is passed, so the injector actually used can only have been
 /// chosen from the target's own frontmatter.
