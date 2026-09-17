@@ -227,6 +227,18 @@ belong here.
   relationship between old and new IS the consolidation — commit both
   sides together. See `4616e9aec` for a 5-file example (3 M supersede +
   ratification, 2 A new spec + design annex).
+- A fix's complete execution record arriving in one implementer batch
+  (plan.md + implementation-log.md + spec.md `implemented:`/cycle edits +
+  review-1.md + verification-matrix.md + surfaces.md + error-taxonomy.md)
+  is ONE atomic `planning(<area>):` commit, not separate "record
+  execution plan" / "close cycle 0, open cycle 1" commits. The journal's
+  separate-event guidance applies when those events arrive in separate
+  batches; when one implementer stages a fix's full execution through
+  cycle 1 review as a single batch, splitting ships a "record plan"
+  commit referencing a cycle-1 review that does not yet exist (or vice
+  versa) and orphans the evidence from the plan. Same rationale as
+  multi-spec consolidation — the events are one cohesive planning
+  record.
 
 - A brief that says "write the message body to a temp file" yields a file
   with no subject line, and `git commit -F` then collapses every bullet into
