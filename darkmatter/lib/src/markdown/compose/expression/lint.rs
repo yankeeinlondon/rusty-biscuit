@@ -5,6 +5,8 @@
 //! on a rescanning surface it resolves on the next pass. The lint only
 //! describes syntax — callers decide whether the surface they own is
 //! single-pass. Design: `claudine/fixes/2026-09-13-better-static-analysis/spec.md` (D1).
+//! Literal escape parity is classified after expression-string decoding, with
+//! findings mapped back to authored byte ranges.
 
 use std::collections::HashMap;
 
@@ -155,8 +157,8 @@ fn collect_flagged(
     out: &mut Vec<FlaggedLiteral>,
 ) {
     match &expr.kind {
-        SpannedExprKind::StringLiteral(_) => {
-            flag_literal(source, &expr.span, tight_parent, false, out);
+        SpannedExprKind::StringLiteral(value) => {
+            flag_literal(source, &expr.span, value, tight_parent, false, out);
         }
         SpannedExprKind::Variable(_)
         | SpannedExprKind::NumberLiteral(_)
@@ -168,7 +170,7 @@ fn collect_flagged(
         }
         SpannedExprKind::ObjectLiteral(entries) => {
             for (key, value) in entries {
-                flag_literal(source, &key.span, false, true, out);
+                flag_literal(source, &key.span, &key.value, false, true, out);
                 collect_flagged(source, value, false, out);
             }
         }
@@ -213,15 +215,24 @@ fn collect_flagged(
 fn flag_literal(
     source: &str,
     span: &SourceSpan,
+    value: &str,
     tight_parent: bool,
     is_object_key: bool,
     out: &mut Vec<FlaggedLiteral>,
 ) {
     // Bare identifier object keys carry no quotes and cannot hold a span.
-    let Some(inner) = raw_literal_inner(source, span) else {
+    let Some((inner, decoded_to_authored)) = decoded_literal_inner(source, span, value) else {
         return;
     };
-    let nested = ExpressionFinder::find_all_plain(inner);
+    let nested = ExpressionFinder::find_all_plain(value)
+        .into_iter()
+        .filter_map(|location| {
+            let start = *decoded_to_authored.get(location.start)?;
+            let end = *decoded_to_authored.get(location.end)?;
+            let expression = inner.get(start + 2..end.checked_sub(2)?)?.trim().to_string();
+            Some(ExpressionLocation { start, end, expression })
+        })
+        .collect::<Vec<_>>();
     if nested.is_empty() {
         return;
     }
@@ -233,14 +244,54 @@ fn flag_literal(
     });
 }
 
-/// The as-authored text between a quoted literal's quotes.
-fn raw_literal_inner<'a>(source: &'a str, span: &SourceSpan) -> Option<&'a str> {
+/// Decodes a quoted literal while retaining every decoded byte boundary's
+/// authored offset. Escape parity belongs to the value the expression lexer
+/// produces, while diagnostics and rewrites must continue to select authored
+/// bytes.
+fn decoded_literal_inner<'a>(
+    source: &'a str,
+    span: &SourceSpan,
+    expected: &str,
+) -> Option<(&'a str, Vec<usize>)> {
     let token = source.get(span.clone())?;
     let quote = token.chars().next()?;
     if !matches!(quote, '"' | '\'') || token.len() < 2 || !token.ends_with(quote) {
         return None;
     }
-    Some(&token[1..token.len() - 1])
+    let inner = &token[1..token.len() - 1];
+    let mut decoded = String::with_capacity(inner.len());
+    let mut boundaries = vec![0];
+    let mut chars = inner.char_indices().peekable();
+    while let Some((start, ch)) = chars.next() {
+        if ch != '\\' {
+            decoded.push(ch);
+            boundaries.extend((1..=ch.len_utf8()).map(|offset| start + offset));
+            continue;
+        }
+
+        let (escaped_start, escaped) = chars.next()?;
+        let escaped_end = escaped_start + escaped.len_utf8();
+        let replacement = match escaped {
+            'n' => Some('\n'),
+            't' => Some('\t'),
+            'r' => Some('\r'),
+            '\\' => Some('\\'),
+            ch if ch == quote => Some(ch),
+            _ => None,
+        };
+        if let Some(replacement) = replacement {
+            decoded.push(replacement);
+            boundaries.push(escaped_end);
+        } else {
+            decoded.push('\\');
+            boundaries.push(escaped_start);
+            decoded.push(escaped);
+            boundaries.extend(
+                (1..=escaped.len_utf8()).map(|offset| escaped_start + offset),
+            );
+        }
+    }
+    (decoded == expected).then_some((inner, boundaries))
 }
 
 /// Builds the corrected expression and proves it: the rewrite must re-parse,
@@ -591,6 +642,25 @@ mod tests {
         }
 
         #[test]
+        fn escaped_opener_parity_is_classified_after_literal_decoding() {
+            for (authored_backslashes, flagged) in [
+                (1, false),
+                (2, false),
+                (3, true),
+                (4, true),
+                (5, false),
+                (6, false),
+            ] {
+                let source = format!("'{}{{{{ name }}}}'", "\\".repeat(authored_backslashes));
+                let lints = lint(&source);
+                assert_eq!(!lints.is_empty(), flagged, "{source}");
+                for found in lints {
+                    assert_eq!(&source[found.span.clone()], "{{ name }}", "{source}");
+                }
+            }
+        }
+
+        #[test]
         fn parse_failure_yields_no_lints() {
             assert!(lint(r#""a {{ x }}" +"#).is_empty());
         }
@@ -834,8 +904,8 @@ mod tests {
 
         proptest! {
             /// Invariant 2, first half: the literals the lint flags are exactly
-            /// the lexer's string tokens whose raw text `find_all_plain` finds a
-            /// span in — independent of the lint's own tree walk.
+            /// the lexer's decoded string tokens in which `find_all_plain`
+            /// finds a span, independent of the lint's own tree walk.
             #[test]
             fn flagged_literals_equal_scanner_hits(
                 source in expression_source(),
@@ -851,12 +921,26 @@ mod tests {
                 let expected: BTreeSet<(usize, usize, usize)> = lex_spanned(&source, mode)
                     .unwrap()
                     .into_iter()
-                    .filter(|token| matches!(token.value, Token::StringLiteral(_)))
                     .flat_map(|token| {
-                        let inner = &source[token.span.start + 1..token.span.end - 1];
-                        ExpressionFinder::find_all_plain(inner)
+                        let Token::StringLiteral(value) = token.value else {
+                            return Vec::new().into_iter();
+                        };
+                        let Some((_, boundaries)) =
+                            decoded_literal_inner(&source, &token.span, &value)
+                        else {
+                            return Vec::new().into_iter();
+                        };
+                        ExpressionFinder::find_all_plain(&value)
                             .into_iter()
-                            .map(move |loc| (token.span.start, token.span.end, token.span.start + 1 + loc.start))
+                            .filter_map(move |loc| {
+                                Some((
+                                    token.span.start,
+                                    token.span.end,
+                                    token.span.start + 1 + *boundaries.get(loc.start)?,
+                                ))
+                            })
+                            .collect::<Vec<_>>()
+                            .into_iter()
                     })
                     .collect();
                 let flagged: BTreeSet<(usize, usize, usize)> = lint_expression(&source, mode)

@@ -7,3 +7,4 @@
 cc c852fd22e311d1803a5e194ea7a03b85a0d1059e0779623cdbfade3e9143ed88 # shrinks to pieces = ["{{{ 1 }}}"]
 cc b0f83649a52ab78f597bfb007d4e9e93121a67fd6f3186de875a72b5e359ff06 # shrinks to source = "{\"{{ x }}\": \"\"}", condition = false
 cc 907e9c4d666dec442c5d04c3059114b9b5999b04411b5a3c2f3cfee9c362cd9c # shrinks to source = "(\"\")[\"{{ x }}\"]", condition = false
+cc 6b8edba8b38363695b2907f885a1091e79ab326b6991e494df289ab9d4ff7a9b # shrinks to source = "\"\\\\{{ x }}\"", condition = false
