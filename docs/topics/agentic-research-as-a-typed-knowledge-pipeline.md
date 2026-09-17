@@ -1,5 +1,51 @@
 ---
-prompt: "## Context\n\n- Claudine needs to be able to use agentic research to update it's understanding of the Agentic CLI providers that it supports.\n- This is necessary because the providers which are supported change frequently and over time the providers we already support change so we need to re-establish their \"facts\" through a re-application of the research process\n- We start this process by leveraging Claudine's `sequence` operation:\n    - we decompose the information we need to know about an Agentic CLI provider:\n        - Deep research on each supported provider on how and what they support regarding **Agent Skills** can be found in @claudine/docs/research/skills\n        - Similarly research into how provider's CLI behaves and what it exposes can be found @claudine/docs/research\n        - each provider get's their own research document\n    - the @claudine/docs/providers.yaml defines the enumerated list of providers we support (or want to support)\n    - that enumeration is used in each of the provider information areas (mentioned above) so that each knowledge area we care about will sequentially do the research provider by provider.\n- Research asks for the agent to produce _prose content_ into a document that can be read by human or agent alike to educate themselves on the research topic\n- but our prompts also define a schema of metadata that we expect the research to be able to answer:\n    - the schema is defined using the `SimplifiedSchema` grammar provided by Darkmatter\n- the schema presents the schema and instructions on the properties in the frontmatter of the research document \n- this means that the output of our research is not only _prose_ but also schema enforced metadata\n- we can also leverage Claudine's lifecycle hooks to:\n    - communicate progress throughout the research process\n    - challange results from research that were unexpected\n        - retry, resume flow control\n- as an added benefit, we summarize each research topic area into a singular document (versus a document per provider) and then are able to \"publish\" this into the 'claudine' Agent Skill\n\n## Task\n\nIn the context section (above) we outline Claudine's \"agentic research\" -> \"strongly typed metadata\" pipeline. This is an extremely \nimportant and useful process for Claudine but it's also a repeatable process that many other repos as well as packages in this \nmonorepo might benefit from.\n\nYour task is to create a document that describes the _pattern/pipeline_ that Claudine is using. You can use examples from Claudine to provide grounding to the process you're describing but Claudine's deep implementation details are not the topic of this document ... it's the process, why the process has utility, and how another repo/package could take advantage of it. \n\nYour audience is a developer who wants to use this pattern somewhere else. They need to know:\n\n- describe what problem this type of pipeline solves\n- describe what the pipeline looks like\n    - key steps\n    - considerations at each step\n    - how to \"refresh\" content versus just building the content the first time\n    - use Claudine examples where ever you see an opportunity to clarify through examples\n    - describe the schema definition and validation process\n        - provide pointers to Darkmatter's `SimpliedSchema` struct\n- discuss how the pipeline helps a repo stay up date\n- discuss how the pipeline is able to provide higher quality typed data than might otherwise would have been practical\n\nAs a mildly separate concern, discuss how this _detailed_ research can then be rolled up and included as part of a Agent Skill. \n\n> Note: the bullets above are not meant to the document structure, just trying to highlight key topics that should be included in the document."
+prompt: |-
+    ## Context
+
+    - Claudine needs to be able to use agentic research to update it's understanding of the Agentic CLI providers that it supports.
+    - This is necessary because the providers which are supported change frequently and over time the providers we already support change so we need to re-establish their "facts" through a re-application of the research process
+    - We start this process by leveraging Claudine's `sequence` operation:
+        - we decompose the information we need to know about an Agentic CLI provider:
+            - Deep research on each supported provider on how and what they support regarding **Agent Skills** can be found in @claudine/docs/research/skills
+            - Similarly research into how provider's CLI behaves and what it exposes can be found @claudine/docs/research
+            - each provider get's their own research document
+        - the @claudine/docs/providers.yaml defines the enumerated list of providers we support (or want to support)
+        - that enumeration is used in each of the provider information areas (mentioned above) so that each knowledge area we care about will sequentially do the research provider by provider.
+    - Research asks for the agent to produce _prose content_ into a document that can be read by human or agent alike to educate themselves on the research topic
+    - but our prompts also define a schema of metadata that we expect the research to be able to answer:
+        - the schema is defined using the `SimplifiedSchema` grammar provided by Darkmatter
+    - the schema presents the schema and instructions on the properties in the frontmatter of the research document
+    - this means that the output of our research is not only _prose_ but also schema enforced metadata
+    - we can also leverage Claudine's lifecycle hooks to:
+        - communicate progress throughout the research process
+        - challange results from research that were unexpected
+            - retry, resume flow control
+    - as an added benefit, we summarize each research topic area into a singular document (versus a document per provider) and then are able to "publish" this into the 'claudine' Agent Skill
+
+    ## Task
+
+    In the context section (above) we outline Claudine's "agentic research" -> "strongly typed metadata" pipeline. This is an extremely
+    important and useful process for Claudine but it's also a repeatable process that many other repos as well as packages in this
+    monorepo might benefit from.
+
+    Your task is to create a document that describes the _pattern/pipeline_ that Claudine is using. You can use examples from Claudine to provide grounding to the process you're describing but Claudine's deep implementation details are not the topic of this document ... it's the process, why the process has utility, and how another repo/package could take advantage of it.
+
+    Your audience is a developer who wants to use this pattern somewhere else. They need to know:
+
+    - describe what problem this type of pipeline solves
+    - describe what the pipeline looks like
+        - key steps
+        - considerations at each step
+        - how to "refresh" content versus just building the content the first time
+        - use Claudine examples where ever you see an opportunity to clarify through examples
+        - describe the schema definition and validation process
+            - provide pointers to Darkmatter's `SimpliedSchema` struct
+    - discuss how the pipeline helps a repo stay up date
+    - discuss how the pipeline is able to provide higher quality typed data than might otherwise would have been practical
+
+    As a mildly separate concern, discuss how this _detailed_ research can then be rolled up and included as part of a Agent Skill.
+
+    > Note: the bullets above are not meant to the document structure, just trying to highlight key topics that should be included in the document.
 last_updated: 2026-07-16
 hash: 4e4b915e5450f9fd-d5257a209c23fad8
 ---
