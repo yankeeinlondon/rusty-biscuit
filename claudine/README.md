@@ -125,6 +125,12 @@ frontmatter shell expansion, and shells in early catch handlers are forbidden;
 not initialize. Sequence includes must exist before the sequence starts. See
 [initialization ordering](./docs/topics/composition.md#documents-that-declare-initialize).
 
+Loop initialization and its catch handlers can read the full bootstrap
+frontmatter, including derived fields. Mapping-based `set` writes made during
+loop initialization persist into subsequent iterations. An absent destination
+key in a `set` mapping reads as null during that mapping's snapshot evaluation;
+null interpolated into text renders empty.
+
 For eager file parameters with a schema `match(...)` glob, a partial path triggers confirmation or a file chooser before `initialize` reads it. This also works with `-y`; missing unrelated parameters remain deferred until after initialization. See [Composition](./docs/topics/composition.md#provided-partial-file-references) for the matching rules and interactive gates.
 
 ### Performance Reporting
