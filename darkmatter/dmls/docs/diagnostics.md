@@ -137,6 +137,7 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
 | `dm.directive.malformed_option` | An option key a directive family does not recognize. |
 | `dm.directive.malformed_disclosure` | A `::disclosure` triple left structurally malformed. |
 | `dm.transclusion.broken_path` | A `::file` / `::code` / prologue / epilogue target matched no file. |
+| `dm.transclusion.nullable_target` | **Warning.** A whole-value `::file`, `::code`, or `::url` expression is statically nullable and is not narrowed by an enclosing guard. |
 | `dm.transclusion.cycle` | A `::file` / `::code` transclusion cycle (ancestry in `relatedInformation`). |
 | `dm.expression.malformed` | A malformed `{{ … }}` interpolation or `when=` expression. |
 | `dm.expression.unknown_identifier` | An identifier naming no frontmatter key, schema-declared property, `ctx.*`, `env.*`, or function. (A key the effective schema declares counts as known even when the document does not set it — it is a compose-time parameter. Content inside a `{{{ … }}}` literal is inert and never diagnosed.) |
@@ -172,6 +173,14 @@ Ranges come from the concrete syntax tree, never from parsing the message text:
   (a visible, non-zero-width range).
 - A YAML parse error ranges the parser's reported position; the last-good tree
   keeps completion and hover alive meanwhile.
+- `dm.transclusion.nullable_target` ranges the complete `{{ ... }}` target
+  expression. DMLS suppresses it when an enclosing supported guard proves the
+  same property present, including `file_exists(x)`, truthy `x`, `!!x`,
+  successful `x != null` / `x != ''`, parentheses, and conjunctions. Unknown,
+  mixed, and statically non-null targets do not receive the warning.
+- `dm.transclusion.broken_path` applies only to concrete local targets.
+  Interpolated targets are excluded because their resolved path is not known
+  statically.
 
 ## `relatedInformation`
 
