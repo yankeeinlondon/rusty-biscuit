@@ -1,5 +1,9 @@
 # Phase 7 Acceptance Evidence
 
+> Historical evidence below predates the [shell-free ruling](shell-free-ruling.md).
+> The final section records fresh verification of amended R2 and AC5. Earlier
+> approval-based initialization results do not qualify the amended contract.
+
 Evidence collected on macOS on 2026-09-17. All commands ran from the named
 package area. `CARGO_TARGET_DIR=/tmp/claudine-phase7-target` was a no-space
 symlink to a session-owned target directory on a local volume because the
@@ -181,3 +185,68 @@ Darkmatter L1's seven skips, as printed by `--status-level skip`:
 
 These pre-existing exclusions were not changed. No Phase 8 acceptance test was
 added, ignored, or filtered out of the final Claudine L1 run.
+
+
+## Shell-free amendment verification — 2026-09-17
+
+This section qualifies the binding amendment to R2 and AC5, not the older
+initialization approval gate. All commands below ran from `claudine/` on macOS
+with `CARGO_TARGET_DIR=/tmp/claudine-shell-free-target`; the shared target had
+unwritable cached compiler artifacts. No shared cache permissions were changed.
+
+| Check | Result |
+|---|---|
+| `just test initialize bootstrap lifecycle preflight overlay --no-fail-fast` | **899/899 pass**; 6,370 tests excluded by the explicit name filters. |
+| `just test --test compose_initialize_staged_boot --test compose_initialize_acceptance --no-fail-fast` | **36/36 pass**. |
+| `just test bootstrap --no-fail-fast` | **48/48 pass**. |
+| `just test overlay --no-fail-fast` | **194/194 pass**. |
+| `just test-l2 level2_proxied_initialize level2_lifecycle_overlay --no-fail-fast` | **4/4 CLI terminal tests pass**; 2,974 CLI and 177 generator tests excluded by the filter, with no matching generator tests. |
+| `just lint` | **Pass** for the Claudine package area. |
+
+The filtered runs overlap; their counts are not additive. The new regression
+coverage checks:
+
+- Configured shell actions are rejected in direct, inline, proxy, loop, and
+  harness-adopted initialization, even with false conditions, a whitelist, and
+  `--yolo` (`initialize_shells_are_forbidden_even_with_yolo_across_entry_paths`).
+- Programmatically constructed initialization stacks cannot dispatch shells,
+  including `no_error` (`programmatic_initialize_shell_is_rejected_even_with_no_error`).
+- Bootstrap frontmatter expansion cannot use approval handlers, cached grants,
+  whitelists, preapproved commands, or caller overrides (the three bootstrap
+  prohibition tests).
+- Early blocked/failure/finalize chains preserve non-shell effects and exact
+  event counts but cannot execute shells, including after missing includes,
+  explicit errors, invalid proxies, evaluation failures, schema failures,
+  audit failures, and adopted targets
+  (`early_catch_shells_cannot_run_or_enable_another_catch_shell`).
+- Approved `start` shells still execute once after shell-free initialization
+  (`approved_start_shell_runs_once_after_shell_free_initialization`).
+- Proxy overlays cannot install initialization shells
+  (`overlay_cannot_install_an_initialization_shell`).
+
+An earlier broad `just test --no-fail-fast` ran 7,258 tests: 7,246 passed,
+12 failed, and nine existing opt-ins were skipped. Two failures exposed old
+initialization-shell fixtures; both were corrected and pass in the final
+899-test selection. The other ten failures were seven inherited HOME-overlay
+assertions described above, plus three shipped-prompt contract/drift failures
+associated with pre-existing edits to `prompts/commit.md` and
+`prompts/_implement/implement-plan.md`. Those user edits and the inherited HOME
+were preserved. This amendment does not claim a green full-area L1 run.
+
+Earlier terminal checks also exposed stale shell-approval expectations and
+out-of-root fixture markers. The fixtures now use permitted non-shell effects
+inside the fixture repository and assert unconditional shell prohibition.
+The earlier `just test-l2 initialize --no-fail-fast` passed 34/38 CLI tests;
+the four corrected failures all pass in the final terminal run above. These
+are focused L2 results, not a full-area L2 qualification.
+
+Public README, composition/lifecycle/frontmatter/preflight/execution-flow
+references, the pipeline map, Claudine skills, schema descriptions, diagnostics,
+and affected source comments now state the same prohibition. Earlier design
+and plan documents explicitly defer to the amended spec. Stored Markdown
+hashes were refreshed with Darkmatter. `git diff --check` passes.
+
+These are local macOS results. No new Linux, native Windows, or WSL result is
+claimed for this amendment. The changes introduce no OS-specific branch; the
+normal cross-platform qualification remains required. A fresh review must
+assess amended R2 and AC5; the active fix remains ready for review, not completed.

@@ -6,6 +6,13 @@ plan: ./plan.md
 
 # Design Note — Run Initialization Before Body Discovery
 
+> **Superseded safety design (2026-09-17):** the shell-free ruling in
+> [spec R2](spec.md#r2-initialization-is-shell-free-binding-ruling-2026-09-17)
+> and [its handoff](shell-free-ruling.md) replaces every initialization shell
+> approval step below. Initialization and early catches cannot execute shells,
+> regardless of approval. Earlier phase results do not verify this amendment.
+
+
 Phase 1 output: rulings, the reproduction, the Darkmatter projection contract,
 the loop-path decision, and regression archaeology. Later phases treat this
 file as their contract. Line numbers are from the worktree at `e4ae0139a`.

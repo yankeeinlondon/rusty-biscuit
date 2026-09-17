@@ -200,6 +200,13 @@ implemented: true
 
 # Execution Plan — Run Initialization Before Body Discovery
 
+> **Superseded safety design (2026-09-17):** the shell-free ruling in
+> [spec R2](spec.md#r2-initialization-is-shell-free-binding-ruling-2026-09-17)
+> and [its handoff](shell-free-ruling.md) replaces every initialization shell
+> approval step below. Initialization and early catches cannot execute shells,
+> regardless of approval. Earlier phase results do not verify this amendment.
+
+
 Converts `spec.md` into an ordered, observable execution plan.
 
 ## Work Summary and Success Criteria

@@ -195,6 +195,9 @@ implemented: true
 
 # Implementation Log — Run Initialization Before Body Discovery
 
+> Entries before the shell-free amendment are historical. The binding
+> [ruling](shell-free-ruling.md) supersedes initialization approval gates.
+
 ## Phase 1
 
 Phase 1 covers rulings, the reproduction, and spikes. No production code
@@ -1121,3 +1124,33 @@ home configuration was changed. Both runs and exact failures are retained in
   intact. No formatting, staging, commits, or `_completed` move occurred.
 
 **Implementation complete, ready for review.**
+
+
+## Shell-free amendment — 2026-09-17
+
+Implemented the author's ruling in spec R2 and AC5. Lifecycle parsing rejects
+initialization shell actions, the executor independently rejects programmatic
+initialization shells, and early catch dispatch replaces the shell runner until
+successful preflight reaches `start`. The prohibition is unsuppressible by
+`no_error`. Bootstrap composition clears supplied shell grants; frontmatter
+shell discovery reports a contract error without asking for approval. Removed
+the obsolete initialization-specific approval calls in staged and harness boot.
+
+Regression coverage exercises initialization entry paths, proxy overlays,
+caller overrides, approval bypass attempts, early catch chains, and a positive
+approved `start` shell. Existing shell-dependent initialization fixtures now
+use permitted non-shell actions. Public documentation, schema descriptions,
+skill guidance, and comments match the amended contract; original review 1
+remains unchanged and historical plan/design text is explicitly superseded.
+
+GitNexus upstream impact was checked before behavior edits. Shared lifecycle
+routing reported CRITICAL risk, and bootstrap call sites reported HIGH risk;
+those risks motivated entry-path and catch-chain regression coverage. Missing
+or UNKNOWN test-symbol results were checked against source instead of treated
+as an all-clear.
+
+Fresh local checks: 899/899 focused L1 tests, 36/36 CLI initialization acceptance
+tests, 4/4 corrected terminal regressions, and package lint pass. The evidence appendix records overlapping checks,
+earlier fixture failures, and ten unrelated full-suite failures rather than
+claiming a green full-area run. No formatting, commit, or `_completed` move
+was performed. Implementation complete, ready for a new review of amended R2.

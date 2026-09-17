@@ -4,6 +4,7 @@ status: proposed
 reviewed: true
 reviewed_by: codex/gpt-5.6-sol
 reviewed_on: 2026-09-15
+review_iterations: 1
 implemented: true
 implemented_by: codex/default
 area: claudine
@@ -24,8 +25,9 @@ When an included file does not exist yet, that scan fails and the action
 intended to create it never executes.
 
 This violates the staged initialization contract already expressed by the
-harness: approve initialization's shell commands, run initialization, reread
-the document, and then audit and compose the resulting document.
+harness: run shell-free initialization, reread the document, and then audit
+and compose the resulting document. The binding shell-free ruling below
+supersedes the earlier initialization-approval design.
 
 ## Reported Failure
 
@@ -77,7 +79,7 @@ correct log path can be absent until `ensure_file` runs.
 The regression must therefore also be demonstrated with an unambiguous valid
 path, so success cannot be attributed solely to repairing the shipped prompt.
 
-## Evidence and Root Cause
+## Original Evidence and Root Cause
 
 The failure is user-reported and the ordering is confirmed by current source
 inspection. An isolated executable reproduction and the first regressing
@@ -106,9 +108,10 @@ also checked against the working-tree source.
   ensures command approval covers all possible branches.
 - `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs`,
   `run_initialize_stages` and `bootstrap_adopted_document_phase`: already
-  describe and implement a narrow initialization-shell gate followed by
-  initialization, a stabilized reread, and a full lifecycle audit. The earlier
-  command-level scan can fail before this sequence is reached.
+  originally implemented an initialization-shell approval gate followed by
+  initialization, a stabilized reread, and a full lifecycle audit. R2 now
+  supersedes that gate with a shell prohibition. The original command-level
+  scan could fail before the sequence was reached.
 
 The defect is the placement of body discovery before initialization, not the
 fact that a real missing transclusion produces a fatal error.
@@ -133,8 +136,8 @@ For a live direct document or newly adopted proxy target that declares
 
 1. load and parse the root document, assemble caller inputs and any proxy
    overlay, resolve target identity, and capture the document epoch;
-2. prepare only the lifecycle surface needed by `initialize` and approve every
-   shell command that event could select;
+2. prepare only the lifecycle surface needed by `initialize`, rejecting shell
+   actions and bootstrap frontmatter shell expansion regardless of approvals;
 3. emit `initialize` exactly once;
 4. reread the active document from disk and reapply the same caller inputs,
    origins, overlay, file-resolution context, and document epoch;
@@ -186,21 +189,42 @@ inputs remains permitted. This requirement does not prohibit all
 interpolation before initialization, nor does it defer resolution of explicitly
 supplied eager file inputs that must already exist for initialization to use.
 
-### R2. Preserve the approval boundary
+### R2. Initialization is shell-free (binding ruling, 2026-09-17)
 
-Approve the shell commands initialization could execute before executing any
-of them. A denied command must prevent its effects and provider launch.
+`initialize` runs before preflight and must never execute user-authored shell
+commands. Reject shell actions even behind false conditions. Approval flags
+(`-y`/`--yolo`), whitelists, cached approvals, and interactive approval cannot
+override this prohibition. It applies to direct, inline, loop, sequence, proxy,
+and harness-adopted initialization paths.
+
+No indirect path may bypass the restriction: bootstrap frontmatter `$(...)`
+expansion is forbidden, including expansions supplied through caller inputs or
+proxy overlays. Lifecycle expression functions remain read-only. Internal
+Claudine subprocess operations are outside this user-authored shell restriction.
 Non-shell effects such as `ensure_file` retain their existing path-resolution
 and mutation policies.
+
+Failure and finalization handlers reached before successful preflight must not
+execute shells either. Preserve non-shell catch behavior and exactly-once event
+routing, including a catch evaluation error that routes to another catch. A
+shell prohibition is unsuppressible by `no_error`. Shell actions belong in
+`start` or a later event after successful preflight.
 
 After initialization, reread the document and reapply the retained caller
 inputs and their origins. Discover and approve body/transclusion commands and
 the remaining lifecycle commands against this stabilized state before those
 commands can execute. The body must be composed from the same stabilized read
-that was audited. Reuse qualifying approvals from the invocation cache.
+that was audited. Reuse qualifying approvals for these later commands only.
 
-Do not fix this by ignoring missing-file errors, making approval discovery
-condition-dependent, or disabling discovery under `-y`.
+Enforce the initialization restriction both in validation and at the shared
+execution boundary. Removing the early approval gate alone is insufficient.
+Do not ignore missing-file errors, make discovery condition-dependent, or
+disable discovery under `-y`.
+
+This ruling supersedes the initialization-approval design and the approval-based
+remedy in [review 1](review-1.md). That review remains a historical record.
+See [the implementation handoff](shell-free-ruling.md) for verification and
+documentation obligations.
 
 ### R3. Initialize each adopted document exactly once
 
@@ -267,8 +291,14 @@ boot before loop ownership is acted upon.
 4. **Existing file and repeated invocation:** `ensure_file` preserves existing
    contents. A second invocation succeeds, reads the persisted file correctly,
    and runs initialization once for that invocation.
-5. **Approval integrity:** deny an initialization shell command and assert no
-   command effects or provider launch. Have initialization create or rewrite an
+5. **Shell-free initialization:** reject initialization shell actions with and
+   without `-y`, whitelists, cached approvals, and an approval handler. Cover
+   positional and long forms, false conditions, `no_error`, indirect bootstrap
+   expansion, and all initialization entry paths. Assert no shell effects or
+   provider launch. Exercise missing dependencies, initialization errors, refused
+   handoffs, schema/audit failures, and catch evaluation errors with shell-bearing
+   catches. Verify allowed non-shell catches and later approved shells run once.
+   Have non-shell initialization create or rewrite an
    included document containing a shell directive; prove its command is audited
    before execution. An existing false-condition include still contributes its
    commands to the approval set.
@@ -369,8 +399,8 @@ that static preflight can inspect.
 - **Pros:** can eventually preserve static analyzability while supporting a
   useful subset of generated dependencies; makes the dependency explicit.
 - **Cons:** introduces a new authoring schema, validation model, and content
-  trust boundary far beyond this fix; arbitrary initialization shell commands
-  still cannot describe their future output safely.
+  trust boundary far beyond this fix; generated content still needs a defined
+  static inspection contract. Initialization shells are forbidden by R2.
 
 **Recommendation:** choose Option A for this fix. It is the only option that
 does not silently relax an established sequence guarantee. If sequence support
