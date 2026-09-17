@@ -675,14 +675,9 @@ fn the_shipped_router_reaches_the_reported_guarded_log_include_at_each_phase() {
 
 // ── AC12: resolution parity ─────────────────────────────────────────────────
 //
-// `ensure_file` (like every Darkmatter mutation verb) joins its argument onto
-// the mutation root, while `::file` parses a `FileReference` against the
-// authoring document. The two agree only where both spellings name one file:
-// an absolute path and an implicit-relative path with no same-named candidate
-// beside the document. The ignored rows record the reference kinds on which
-// they diverge today (explicit-relative, repository-root, and an implicit
-// reference shadowed beside the document); see the Phase 7 log and
-// `human_review_items` of the fix plan.
+// Lifecycle file mutations and `::file` both resolve document-authored values
+// through the invocation's captured `FileResolutionContext`. Existing targets
+// follow normal precedence; an absent creation target uses the first candidate.
 
 /// A document below the repository root whose `initialize` ensures `reference`,
 /// appends a marker to it, and whose body includes the same `reference`. An
@@ -701,7 +696,7 @@ fn assert_resolution_parity(name: &str, reference: &str, resolved: &str, decoy: 
             "---\ntitle: parity\ninitialize:\n  stack:\n    \
              - action: {{ensure_file: \"{reference}\"}}\n    \
              - action: {{append_line: [\"{reference}\", PARITY-MARKER]}}\n\
-             ---\n{BODY_MARKER}\n\n::file {reference}\n"
+             ---\n{BODY_MARKER}\n\n::file \"{reference}\"\n"
         ),
     );
 
@@ -709,10 +704,14 @@ fn assert_resolution_parity(name: &str, reference: &str, resolved: &str, decoy: 
 
     assert_no_early_discovery(&output);
     assert!(success, "{reference}:\n{output}");
+    let resolved_content = fs::read_to_string(accept.path(resolved)).unwrap_or_default();
+    let source_content =
+        fs::read_to_string(accept.path("docs/area/generated/notes.md")).unwrap_or_default();
+    let root_content = fs::read_to_string(accept.path("generated/notes.md")).unwrap_or_default();
     assert_eq!(
-        fs::read_to_string(accept.path(resolved)).unwrap_or_default(),
+        resolved_content,
         "PARITY-MARKER\n",
-        "{reference} must be ensured at {resolved}"
+        "{reference} must be ensured at {resolved}; source={source_content:?}; root={root_content:?}"
     );
     let attempts = accept.attempts();
     assert_eq!(attempts.len(), 1, "{output}");
@@ -744,7 +743,6 @@ fn an_unshadowed_implicit_reference_ensures_and_includes_one_file() {
 }
 
 #[test]
-#[ignore = "AC12 gap: ensure_file joins onto the mutation root, ::file resolves `./` beside the document"]
 fn an_explicit_relative_reference_ensures_and_includes_one_file() {
     assert_resolution_parity(
         "init-accept-parity-explicit",
@@ -755,7 +753,6 @@ fn an_explicit_relative_reference_ensures_and_includes_one_file() {
 }
 
 #[test]
-#[ignore = "AC12 gap: ensure_file does not parse `&` and creates a literal `&generated` directory"]
 fn a_repository_root_reference_ensures_and_includes_one_file() {
     assert_resolution_parity(
         "init-accept-parity-repository",
@@ -766,12 +763,94 @@ fn a_repository_root_reference_ensures_and_includes_one_file() {
 }
 
 #[test]
-#[ignore = "AC12 gap: ::file prefers a same-named file beside the document; ensure_file writes at the root"]
-fn a_shadowed_implicit_reference_ensures_and_includes_one_file() {
+fn a_repository_scoped_reference_ensures_and_includes_one_file() {
     assert_resolution_parity(
-        "init-accept-parity-shadowed",
-        "generated/notes.md",
+        "init-accept-parity-repository-scoped",
+        "^generated/notes.md",
         "generated/notes.md",
         Some("docs/area/generated/notes.md"),
     );
+}
+
+#[test]
+fn a_shadowed_implicit_reference_mutates_the_file_the_include_prefers() {
+    let accept = Acceptance::new("init-accept-parity-shadowed");
+    accept.install_provider("claude", &[]);
+    write(
+        &accept.path("docs/area/generated/notes.md"),
+        "SOURCE-PREEXISTING\n",
+    );
+    write(&accept.path("generated/notes.md"), "ROOT-DECOY\n");
+    let doc = accept.write_doc(
+        "docs/area/doc.md",
+        "---\ntitle: parity\ninitialize:\n  stack:\n    \
+         - action: {ensure_file: generated/notes.md}\n    \
+         - action: {append_line: [generated/notes.md, PARITY-MARKER]}\n\
+         ---\nSTAGED-BODY\n\n::file generated/notes.md\n",
+    );
+
+    let (success, output) = accept.run(&["compose", doc.to_str().unwrap(), "-y", "--claude"]);
+
+    assert!(success, "{output}");
+    assert_eq!(
+        fs::read_to_string(accept.path("docs/area/generated/notes.md")).unwrap(),
+        "SOURCE-PREEXISTING\nPARITY-MARKER\n",
+    );
+    assert_eq!(
+        fs::read_to_string(accept.path("generated/notes.md")).unwrap(),
+        "ROOT-DECOY\n",
+    );
+    let attempts = accept.attempts();
+    assert!(attempts[0].contains("SOURCE-PREEXISTING\nPARITY-MARKER"));
+    assert!(!attempts[0].contains("ROOT-DECOY"));
+}
+
+#[test]
+fn every_filesystem_effect_uses_the_document_reference_identity() {
+    let accept = Acceptance::new("init-accept-parity-all-fs-effects");
+    accept.install_provider("claude", &[]);
+    let doc = accept.write_doc(
+        "docs/area/doc.md",
+        "---\ntitle: parity\npayload:\n  event: ready\ninitialize:\n  stack:\n    \
+         - action: {ensure_dir: ./generated/nested}\n    \
+         - action: {ensure_file: [./generated/content.md, SEEDED-CONTENT]}\n    \
+         - action: {append_jsonl: [./generated/events.md, \"{{ payload }}\"]}\n\
+         ---\n::file \"./generated/content.md\"\n::file \"./generated/events.md\"\n",
+    );
+
+    let (success, output) = accept.run(&["compose", doc.to_str().unwrap(), "-y", "--claude"]);
+
+    assert!(success, "{output}");
+    assert!(accept.path("docs/area/generated/nested").is_dir());
+    assert_eq!(
+        fs::read_to_string(accept.path("docs/area/generated/content.md")).unwrap(),
+        "SEEDED-CONTENT",
+    );
+    assert_eq!(
+        fs::read_to_string(accept.path("docs/area/generated/events.md")).unwrap(),
+        "{\"event\":\"ready\"}\n",
+    );
+    assert!(!accept.path("generated").exists());
+    let attempts = accept.attempts();
+    assert_eq!(attempts.len(), 1, "{output}");
+    assert!(attempts[0].contains("SEEDED-CONTENT"));
+    assert!(attempts[0].contains("{\"event\":\"ready\"}"));
+}
+
+#[test]
+fn a_repository_escape_is_rejected_before_any_file_or_provider_effect() {
+    let accept = Acceptance::new("init-accept-parity-escape");
+    accept.install_provider("claude", &[]);
+    let doc = accept.write_doc(
+        "docs/area/doc.md",
+        "---\ntitle: invalid reference\ninitialize:\n  stack:\n    \
+         - action: {ensure_file: '&../outside.md'}\n---\nBODY\n",
+    );
+
+    let (success, output) = accept.run(&["compose", doc.to_str().unwrap(), "-y", "--claude"]);
+
+    assert!(!success, "{output}");
+    assert!(output.contains("lifecycle initialize failed"), "{output}");
+    assert_eq!(accept.count("provider-ran"), 0, "{output}");
+    assert!(!accept.fixture.workspace_path().join("outside.md").exists());
 }
