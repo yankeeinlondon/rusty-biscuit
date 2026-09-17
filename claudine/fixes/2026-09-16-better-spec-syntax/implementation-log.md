@@ -2,7 +2,7 @@
 spec: "claudine/fixes/2026-09-16-better-spec-syntax/spec.md"
 plan: "claudine/fixes/2026-09-16-better-spec-syntax/plan.md"
 implemented_by: "codex/gpt-5.6-sol"
-started_phase: "3"
+started_phase: "4"
 implemented: false
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
@@ -77,18 +77,34 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/lifecycle.md
+source_files_during_phase_4:
+    - claudine/cli/tests/shipped_prompts.rs
+docs_updated_during_phase_4:
+    - claudine/fixes/2026-09-16-better-spec-syntax/plan.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
-    - claudine
     - claudine-cli
-completed_phase: "3"
-human_review: false
-human_review_items: []
+completed_phase: "4"
+human_review: true
+human_review_items:
+    - >-
+        Decide whether the stale L2 dry-run approval test should be rewritten
+        for the current documented contract that dry-run stops before shell
+        approval; it consistently expects a prompt that production correctly
+        does not render.
+    - >-
+        Diagnose the unrelated terminal proxy-route L2 capture, which reaches
+        provider launch and then never renders the expected
+        failure.stack[*].proxy diagnostic before the harness deadline.
 message_to_agent: >-
-    Phase 3 is complete; begin Phase 4. Snapshot evaluation, atomic batch
-    publication, prior-value result semantics, and the full execution matrix
-    are green. The legacy positional executor branch and single-key helper are
-    removed. The initialization blocker repair carried full bootstrap state and
-    RuntimeState writes into loop preparation; preserve its CLI regression.
+    Phase 4 implementation is complete and its targeted library, CLI, corpus,
+    shipped-artifact, and L2 sequence tests are green. Full L1 and lint pass.
+    Full L2 is 229/231 with two reproducible unrelated failures recorded in
+    human_review_items; resolve or formally disposition those before treating
+    the package-wide L2 checkpoint as green. Phase 5 still owns DMLS fixture,
+    documentation, skill, and active-spec migrations.
 ---
 
 # Implementation Log for 2026-09-16-better-spec-syntax (5 phases)
@@ -628,3 +644,118 @@ GitNexus `detect-changes --scope all` completed without partial or truncated
 output: 20 changed tracked files, 16 changed symbols, zero affected indexed
 processes, and LOW risk. The changed-file count excludes the new untracked CLI
 regression until it is added by the author’s later staging workflow.
+
+## Phase 4
+
+### Test-design map — before implementation
+
+- Sequence `side_effect:` parsing, classification, dispatch, prior-value
+  serialization, runtime publication, and `outputs` accumulation map to
+  `side_effect_tasks::a_mapping_set_appends_its_prior_value_object`.
+- Task-stack mapping syntax and downstream visibility map to
+  `side_effect_tasks::the_mutation_delta_reports_the_keys_the_task_wrote`,
+  which runs `setup:` before the primary mapping and asserts both the returned
+  prior-value object and the final mutation delta.
+- Parallel task isolation and post-group merge map to
+  `parallel_groups::a_sibling_mutation_is_invisible_until_the_group_completes`.
+  Its writer uses a mapping in `setup:`, its reader uses a mapping in
+  `teardown:`, and a gate proves the read occurs after the sibling write while
+  still observing the group-start snapshot.
+- The six named CLI files already author only mapping payloads on entry to
+  Phase 4. Targeted test-binary runs will preserve their existing public CLI,
+  filesystem, output, and group-order assertions; a source scan will prove no
+  removed form remains in those files.
+- The artifact regression will invoke a copied, byte-identical real
+  `prompts/_implement/implement-plan.md` with `CliProcessFixture`, a fake
+  provider, fixture-owned repository/home, dry-run audio policy, and a
+  populated prior-phase log. Reaching the provider without a lifecycle parse
+  or evaluation error proves the reported multi-key mapping executed on the
+  normal non-dry-run route; the test will also assert the source and log remain
+  unchanged.
+- Passive corpus coverage will parse lifecycle frontmatter for shipped prompt
+  and executable Markdown fixture trees, scan generated-input fixtures plus
+  Claudine schema catalogs for removed lifecycle `set` spellings, and retain
+  the real implementation prompt as a positive mapping witness. The corpus
+  test is L1 and performs no provider, terminal, browser, or network work.
+
+All Phase 4 additions are L1 except the already-existing group-stream CLI
+binary whose canonical test is L2. The L2 recipe is required for that migrated
+file and must remain non-focusing under the package harness.
+
+### Pre-edit impact refresh
+
+Repository: `rusty-biscuit` at
+`/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis`; worktree and
+index were refreshed at commit `b3a4e6d00`. `is_side_effect_action` is LOW risk
+with one direct caller (`TaskExecution::run_side_effect`) and three upstream
+symbols in the Task module. GitNexus returned UNKNOWN for
+`dispatch_task_side_effect`, `parse_single_action`, and
+`parse_task_action_stack`; text search resolved their production seams:
+`TaskExecution::run_side_effect` calls the single-action parser and task
+dispatcher, while `TaskExecution::parse_stacks` calls the task-stack parser for
+both `setup` and `teardown`. No HIGH or CRITICAL result was returned.
+
+### Implementation and targeted verification
+
+- `shipped_lifecycle_artifacts_use_mapping_only_set` walks shipped prompts,
+  executable CLI fixtures, generator fixtures, and both Claudine schema
+  catalogs. It rejects exact `set` keys whose payload is not a mapping,
+  rejects the explicit `action: set` form, parses every Markdown artifact that
+  authors `set` through `parse_lifecycle_config`, and requires a positive
+  mapping witness. This remains a passive L1 test.
+- `shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch`
+  copies the real prompt corpus, invokes the byte-identical shipped
+  `implement-plan.md` through normal non-dry-run `compose`, and uses a failing
+  fake Goose provider so the prompt's unrelated success-shell branch cannot
+  run. The provider is reached after initialization; the reported
+  `epilog`/`message_to_agent` mapping raises no parse/evaluation diagnostic;
+  the prior-phase handoff is rendered; the source prompt and existing log are
+  byte-unchanged; and no audio is published.
+- The three focused sequence tests passed 3/3. They prove task side-effect
+  classification/dispatch/result serialization, setup-to-primary visibility,
+  teardown mapping acceptance, private parallel state, and declaration-order
+  post-group merge.
+- The five named L1 CLI binaries passed 88/88 tests. The mapping-relevant test
+  in `level2_sequence_task_stream_capture` passed alone through the canonical
+  L2 recipe in self-spawn mode. A source scan found no removed `set` spelling
+  in any of the six migration files.
+- The final shipped-prompts binary passed 4/4 after the Clippy-only rewrite,
+  proving both new tests are reachable in ordinary L1 (the end-to-end test was
+  renamed so the reserved `real_` tier prefix could not exclude it).
+
+### Broader gates and outstanding failures
+
+- `just test` in `claudine/`: pass, 7,278/7,278 tests with 9 tier-filtered
+  tests skipped. The macOS linker emitted the pre-existing compact-unwind-size
+  warning; it did not fail the gate.
+- `just lint` in `claudine/`: pass for all five area packages after replacing
+  one nested test-only `if` with the Clippy-required let-chain. The error guard
+  and lifecycle-doc-facets prerequisites also passed.
+- `BISCUIT_L2_THREADS=4 just test-l2 --no-fail-fast`: 229/231 passed with
+  2,750 non-L2 tests filtered out. The Phase 4 sequence test passed. Two
+  reproducible failures are outside this phase's syntax behavior:
+  `level2_dry_run_approval_prompt_matches_normal_mode_in_tmux` expects the old
+  approval prompt even though the documented dry-run contract stops before
+  shell approval, and `level2_proxy_routes_share_identity_across_routes_in_tmux`
+  reaches provider launch on its terminal route but does not render the
+  expected terminal proxy diagnostic before the harness deadline. Each also
+  failed alone. They are recorded in `human_review_items`; no unrelated
+  terminal behavior or test contract was changed here.
+- The complete L2 run used self-spawn mode and did not create shared terminal
+  windows. Two earlier focused attempts used the recipe's serial broker before
+  this was isolated; the broker reported spawning WezTerm, tmux, and Apple
+  Terminal resources. No browser test ran.
+- Phase 4 adds no platform-conditional production behavior. Linux, native
+  Windows, and WSL2 execution remain CI evidence; no cross-OS run was needed
+  for the passive source scan and hermetic fake-provider test.
+
+No persisted lifecycle state was introduced, so no new persistence round trip
+applies. The existing prompt and log are read before invocation and read again
+afterward to prove this runtime-only mutation leaves both unchanged. No
+formatting command ran, and no file was staged or committed.
+
+Post-edit GitNexus `detect-changes --scope all` completed without partial or
+truncated output. It saw four dirty files, including the unrelated pre-existing
+`messenger/features/2026-09-17-research-metadata-pipeline/spec.md`, and reported
+that no indexed symbol overlapped the changed hunks. The three Claudine files
+listed in the Phase 4 metadata are the complete authorized change set.

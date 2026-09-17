@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-15
-phase: 3
+phase: 4
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
 implemented: false
@@ -79,18 +79,34 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/lifecycle.md
+source_files_during_phase_4:
+    - claudine/cli/tests/shipped_prompts.rs
+docs_updated_during_phase_4:
+    - claudine/fixes/2026-09-16-better-spec-syntax/plan.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
-    - claudine
     - claudine-cli
-completed_phase: "3"
-human_review: false
-human_review_items: []
+completed_phase: "4"
+human_review: true
+human_review_items:
+    - >-
+        Decide whether the stale L2 dry-run approval test should be rewritten
+        for the current documented contract that dry-run stops before shell
+        approval; it consistently expects a prompt that production correctly
+        does not render.
+    - >-
+        Diagnose the unrelated terminal proxy-route L2 capture, which reaches
+        provider launch and then never renders the expected
+        failure.stack[*].proxy diagnostic before the harness deadline.
 message_to_agent: >-
-    Phase 3 is complete; begin Phase 4. Snapshot evaluation, atomic batch
-    publication, prior-value result semantics, and the full execution matrix
-    are green. The legacy positional executor branch and single-key helper are
-    removed. The initialization blocker repair carried full bootstrap state and
-    RuntimeState writes into loop preparation; preserve its CLI regression.
+    Phase 4 implementation is complete and its targeted library, CLI, corpus,
+    shipped-artifact, and L2 sequence tests are green. Full L1 and lint pass.
+    Full L2 is 229/231 with two reproducible unrelated failures recorded in
+    human_review_items; resolve or formally disposition those before treating
+    the package-wide L2 checkpoint as green. Phase 5 still owns DMLS fixture,
+    documentation, skill, and active-spec migrations.
 ---
 
 # Plan: Mapping-Only Claudine Lifecycle `set` Syntax
@@ -485,7 +501,7 @@ corpus check.
 
 ### Tasks
 
-- [ ] **Sequence consumer verification**
+- [x] **Sequence consumer verification**
   - `side_effect: {set: {…}}` parses via `parse_single_action`
     (`parse.rs:330`), classifies as executable side-effect work
     (`is_side_effect_action`, `task/mod.rs:957`), executes through
@@ -495,13 +511,13 @@ corpus check.
   - Serial/parallel group isolation and visibility boundaries are unchanged
     by this syntax (assert a parallel member's writes still land only in its
     private cell until the post-group merge).
-- [ ] **CLI test migration** (work-group: one task per file, concurrent)
+- [x] **CLI test migration** (work-group: one task per file, concurrent)
   - Migrate `claudine/cli/tests/sequence_jit.rs`,
     `level2_sequence_task_stream_capture.rs`,
     `compose_caller_file_provenance.rs`, `inline_completion_lifecycle.rs`,
     `composition_outputs.rs`, and `sequence_groups.rs` to the
     mapping grammar, preserving each test's behavioral assertions.
-- [ ] **Hermetic CLI regression** (acceptance 8)
+- [x] **Hermetic CLI regression** (acceptance 8)
   - A `CliProcessFixture`-backed, fake-provider, isolated-state,
     suppressed-audio CLI test composes/executes the **real**
     `prompts/_implement/implement-plan.md` mapping shape through the normal
@@ -509,7 +525,7 @@ corpus check.
     tree), isolating this syntax change from the separately specified
     initialize-after-proxy bug; terminal/browser windows must not gain
     focus.
-- [ ] **Passive corpus coverage** (acceptance 8)
+- [x] **Passive corpus coverage** (acceptance 8)
   - A corpus test walks all active shipped artifacts (prompts, fixtures,
     gen inputs) and asserts none authors a removed `set` form and every
     `set` occurrence parses under the new grammar; `claudine/schemas/` and
