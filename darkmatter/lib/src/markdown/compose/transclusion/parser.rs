@@ -32,12 +32,22 @@ pub fn parse_directives(
     content: &str,
     ctx: SourceContext,
 ) -> Result<Vec<BlockDirective>, TransclusionError> {
+    parse_directives_with_line_offset(content, ctx, 0)
+}
+
+/// Parses block transclusion directives whose body-relative lines must be
+/// projected into a larger source context.
+pub(crate) fn parse_directives_with_line_offset(
+    content: &str,
+    ctx: SourceContext,
+    line_offset: usize,
+) -> Result<Vec<BlockDirective>, TransclusionError> {
     let code_regions = find_code_regions(content);
     let mut directives = Vec::new();
 
     let bytes = content.as_bytes();
     let mut line_start = 0usize;
-    let mut line_number = 1usize;
+    let mut line_number = 1usize + line_offset;
 
     for i in 0..=bytes.len() {
         let is_eol = i == bytes.len() || bytes[i] == b'\n';

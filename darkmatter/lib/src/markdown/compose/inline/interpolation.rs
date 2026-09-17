@@ -3,6 +3,7 @@
 use super::super::super::Markdown;
 use super::super::super::types::MarkdownResult;
 use super::super::context::effective_state as state;
+use super::super::directive_targets::rewrite_directive_targets;
 use super::super::interpolation;
 use super::super::shell_expansion;
 use super::super::{ComposeOptions, ComposeReport, EffectiveState};
@@ -42,23 +43,31 @@ pub(crate) fn run_stage(
         options.expression_resolution_context(&runtime.remote_fetch),
     );
     let evaluator = Evaluator::new(&lookup).with_presentation_values(state.presentation_values());
-    let result = interpolate_text(
+    let targets = rewrite_directive_targets(
         markdown.content(),
+        &evaluator,
+        options.fail_fast,
+        markdown.frontmatter_line_count(),
+    )?;
+    report.warnings.extend(targets.warnings);
+    let result = interpolate_text(
+        &targets.output,
         &evaluator,
         scan_mode,
         options.fail_fast,
         "interpolation",
     )?;
 
-    if result.replacements > 0 {
+    if targets.replacements > 0 || result.replacements > 0 {
         *markdown.content_mut() = result.output;
     }
     report.warnings.extend(result.warnings);
+    let replacements = targets.replacements + result.replacements;
     debug!(
-        count = result.replacements,
+        count = replacements,
         "compose: interpolations applied"
     );
-    Ok(result.replacements)
+    Ok(replacements)
 }
 
 /// Resolves whether interpolation should process fenced/indented code blocks.

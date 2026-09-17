@@ -572,7 +572,7 @@ pub enum ShellExpansionError {
     },
 
     #[error(
-        "Command '{command}' at {origin} depends on frontmatter key '{key}', which is \
+        "dynamic command shape: command '{command}' at {origin} depends on frontmatter key '{key}', which is \
          resolved by frontmatter shell expansion. A condition-blind pre-flight cannot \
          approve a command whose shape is not yet known."
     )]

@@ -30,6 +30,7 @@ use crate::markdown::compose::prepare_frontmatter_for_compose;
 use crate::markdown::compose::shell_expansion::alias::resolve_alias;
 use crate::markdown::compose::shell_expansion::parser::parse_directives;
 use crate::markdown::compose::expression::ExpressionFinder;
+use crate::markdown::compose::expression::{Expr, parse};
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
 use crate::markdown::compose::shell_expansion::types::{
     ShellCommandEntry, ShellCommandOrigin, ShellDirective, ShellExpansionError, frontmatter_key_line,
@@ -211,6 +212,15 @@ fn collect_recursive(
     // ── Frontmatter commands ───────────────────────────────────────
     scan_one_frontmatter(markdown, options, &source_file, seen, entries, &mut local_entries)?;
 
+    let authored_ctx = markdown.full_source_context_for_errors();
+    let authored_pending = pending_shell_literals(markdown, &authored_ctx);
+    detect_authored_dynamic_target(
+        markdown.content(),
+        &authored_pending,
+        &authored_ctx,
+        markdown.frontmatter_line_count(),
+    )?;
+
     // ── Resolve this document's inline state ───────────────────────
     // Interpolation + text replacement only: never page blocks (so
     // `when=`-false regions survive), never transclusion (we walk children
@@ -317,7 +327,11 @@ fn collect_recursive(
     // ── Recurse into referenced children (condition-blind) ─────────
     let transclusion_opts = options.transclusion_options();
 
-    for directive in transclusion::parse_directives(prepared.content(), prepared_ctx.clone())? {
+    for directive in transclusion::parse_directives_with_line_offset(
+        prepared.content(),
+        prepared_ctx.clone(),
+        line_offset,
+    )? {
         // `::file` and `::url` can both reference Markdown children that
         // contain shell directives. `::code` inserts literal code (no shell
         // directives), so it is excluded.
@@ -695,9 +709,107 @@ fn pending_shell_literals(
     pending
 }
 
+/// Rejects an authored transclusion target that reads a frontmatter value whose
+/// shell expansion has not run yet.
+fn detect_authored_dynamic_target(
+    content: &str,
+    pending: &[(String, String)],
+    ctx: &biscuit_terminal::errors::SourceContext,
+    line_offset: usize,
+) -> MarkdownResult<()> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+
+    for directive in crate::markdown::compose::directives_api::scan_darkmatter_directives(content)
+    {
+        if !matches!(
+            directive.kind,
+            crate::markdown::compose::directives_api::DirectiveKind::File
+                | crate::markdown::compose::directives_api::DirectiveKind::Code
+                | crate::markdown::compose::directives_api::DirectiveKind::Url
+        ) {
+            continue;
+        }
+        let Some(target) = directive.target else {
+            continue;
+        };
+        for location in ExpressionFinder::find_all_plain(&target.value) {
+            let Ok(expression) = parse(&location.expression) else {
+                continue;
+            };
+            let mut roots = Vec::new();
+            collect_expression_roots(&expression, &mut roots);
+            let Some((key, _)) = pending.iter().find(|(key, _)| roots.contains(key)) else {
+                continue;
+            };
+            return Err(ShellExpansionError::DynamicCommandShape {
+                ctx: Box::new(ctx.clone()),
+                command: content[directive.span.clone()].to_string(),
+                key: key.clone(),
+                origin: ShellCommandOrigin::Body {
+                    line: directive.line + line_offset,
+                },
+            }
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
+fn collect_expression_roots(expression: &Expr, roots: &mut Vec<String>) {
+    match expression {
+        Expr::Variable(path) => {
+            let path = path.strip_prefix("doc.").unwrap_or(path);
+            if let Some(root) = path.split('.').next()
+                && !root.is_empty()
+            {
+                roots.push(root.to_string());
+            }
+        }
+        Expr::UnaryNot(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::Paren(inner)
+        | Expr::MemberAccess { base: inner, .. } => collect_expression_roots(inner, roots),
+        Expr::Fallback { primary, fallback } => {
+            collect_expression_roots(primary, roots);
+            collect_expression_roots(fallback, roots);
+        }
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_expression_roots(condition, roots);
+            collect_expression_roots(then_branch, roots);
+            collect_expression_roots(else_branch, roots);
+        }
+        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
+            collect_expression_roots(left, roots);
+            collect_expression_roots(right, roots);
+        }
+        Expr::Index { base, index } => {
+            collect_expression_roots(base, roots);
+            collect_expression_roots(index, roots);
+        }
+        Expr::FunctionCall { args, .. } | Expr::ArrayLiteral(args) => {
+            for argument in args {
+                collect_expression_roots(argument, roots);
+            }
+        }
+        Expr::ObjectLiteral(entries) => {
+            for (_, value) in entries {
+                collect_expression_roots(value, roots);
+            }
+        }
+        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
+    }
+}
+
 /// Fails with [`ShellExpansionError::DynamicCommandShape`] when a pending
-/// frontmatter shell value has been interpolated into a body `::shell` directive
-/// or `::shell-block` command.
+/// frontmatter shell value has been interpolated into a body shell command or
+/// transclusion target.
 fn detect_dynamic_command_shape(
     content: &str,
     pending: &[(String, String)],
@@ -714,6 +826,19 @@ fn detect_dynamic_command_shape(
         .filter(|p| matches!(p.kind, block_pairs::BlockOpenKind::Shell))
         .map(|p| p.body_span)
         .collect();
+    let transclusion_target_spans: Vec<Range<usize>> =
+        crate::markdown::compose::directives_api::scan_darkmatter_directives(content)
+            .into_iter()
+            .filter(|directive| {
+                matches!(
+                    directive.kind,
+                    crate::markdown::compose::directives_api::DirectiveKind::File
+                        | crate::markdown::compose::directives_api::DirectiveKind::Code
+                        | crate::markdown::compose::directives_api::DirectiveKind::Url
+                )
+            })
+            .filter_map(|directive| directive.target.map(|target| target.span))
+            .collect();
 
     for (key, literal) in pending {
         let mut from = 0usize;
@@ -732,8 +857,11 @@ fn detect_dynamic_command_shape(
             let in_shell_block = shell_block_spans
                 .iter()
                 .any(|span| at >= span.start && at < span.end);
+            let in_transclusion_target = transclusion_target_spans
+                .iter()
+                .any(|span| at >= span.start && at < span.end);
 
-            if in_shell_directive || in_shell_block {
+            if in_shell_directive || in_shell_block || in_transclusion_target {
                 let line_number = content[..at].matches('\n').count() + 1 + line_offset;
                 return Err(ShellExpansionError::DynamicCommandShape {
                     ctx: Box::new(ctx.clone()),
@@ -756,6 +884,167 @@ mod tests {
     use crate::markdown::compose::ComposeOptions;
     use std::io::Write;
     use tempfile::TempDir;
+
+    #[test]
+    fn authored_target_and_pending_shell_data_identify_the_same_dependency() {
+        let md: Markdown = "---\nchild: \"$(printf child.md)\"\n---\n::file {{child}}\n".into();
+        let ctx = md.full_source_context_for_errors();
+        let pending = pending_shell_literals(&md, &ctx);
+        assert_eq!(pending, vec![("child".to_string(), "$(printf child.md)".to_string())]);
+
+        let directive = crate::markdown::compose::directives_api::scan_darkmatter_directives(
+            md.content(),
+        )
+        .into_iter()
+        .next()
+        .expect("authored directive");
+        let target = directive.target.expect("authored target span");
+        assert_eq!(&md.content()[target.span.clone()], "{{child}}");
+        let expressions = ExpressionFinder::find_all_plain(&target.value);
+        assert_eq!(expressions.len(), 1);
+        assert_eq!(expressions[0].expression, pending[0].0);
+    }
+
+    #[test]
+    fn runtime_page_blocks_suppress_guarded_null_target() {
+        let content = "---\n$schema:\n  log: file\n---\n\n::block when=\"file_exists(log)\"\n::file {{log}}\n::end-block\n";
+        let md: Markdown = content.into();
+        let (composed, report) = md.compose_with(ComposeOptions::new()).unwrap();
+        assert!(!composed.content().contains("::file"), "{}", composed.content());
+        assert!(
+            report.warnings.iter().all(|warning| !warning.message.contains("nullable target")),
+            "a runtime-suppressed directive must not warn: {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn condition_blind_preflight_skips_null_edge_but_keeps_concrete_sibling() {
+        let temp = TempDir::new().unwrap();
+        let child = temp.path().join("child.md");
+        std::fs::write(&child, "# Child\n::shell echo sibling-command\n").unwrap();
+        let root = temp.path().join("root.md");
+        let content = "---\n$schema:\n  log: file\n---\n\n::block when=\"file_exists(log)\"\n::file {{log}}\n::end-block\n\n::file ./child.md when=false\n";
+        std::fs::write(&root, content).unwrap();
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let (entries, graph) = collect_shell_commands_with_graph(
+            &md,
+            &ComposeOptions::new().with_source_file(&root),
+        )
+        .expect("nullable target must not abort condition-blind preflight");
+        assert_eq!(entries.len(), 1, "entries: {entries:?}");
+        assert_eq!(entries[0].raw_command, "echo sibling-command");
+        assert_eq!(graph.edges.len(), 1, "only the concrete child forms an edge");
+        assert_eq!(graph.children.len(), 1, "only the concrete child is retained");
+    }
+
+    #[test]
+    fn unguarded_null_target_is_skipped_with_one_warning() {
+        let content = "---\n$schema:\n  log: file\n---\n\n::file {{log}}\n";
+        let md: Markdown = content.into();
+        let (composed, report) = md
+            .compose_with(ComposeOptions::new())
+            .expect("unguarded null target must compose");
+        assert!(!composed.content().contains("::file"));
+        let warnings: Vec<_> = report
+            .warnings
+            .iter()
+            .filter(|warning| warning.message.contains("nullable target"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "warnings: {:?}", report.warnings);
+        assert!(warnings[0].message.contains("log"));
+        assert!(warnings[0].message.contains("null"));
+    }
+
+    #[test]
+    fn unguarded_empty_string_target_keeps_its_typed_reason() {
+        let content = "---\nlog: \"\"\n---\n\n::file {{log}}\n";
+        let md: Markdown = content.into();
+        let (composed, report) = md
+            .compose_with(ComposeOptions::new())
+            .expect("empty-string target must compose");
+        assert!(!composed.content().contains("::file"));
+        let warnings: Vec<_> = report
+            .warnings
+            .iter()
+            .filter(|warning| warning.message.contains("nullable target"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "warnings: {:?}", report.warnings);
+        assert!(warnings[0].message.contains("log"));
+        assert!(warnings[0].message.contains("empty string"));
+        assert!(!warnings[0].message.contains("evaluated to null"));
+    }
+
+    #[test]
+    fn authored_empty_targets_remain_errors_and_mixed_targets_remain_paths() {
+        for content in ["::file\n", "::file \"\"\n"] {
+            let md: Markdown = content.into();
+            assert!(md.compose_with(ComposeOptions::new()).is_err(), "{content:?}");
+        }
+
+        let content = "::file \"{{dir}}/log.md\"\n";
+        let parsed = transclusion::parse_directives(
+            content,
+            Markdown::from(content).source_context_for_errors(),
+        )
+        .unwrap();
+        assert_eq!(parsed[0].raw_target, "{{dir}}/log.md");
+    }
+
+    #[test]
+    fn malformed_directive_in_false_block_has_distinct_runtime_and_preflight_outcomes() {
+        let content = "---\nenabled: false\n---\n\n::block when=\"enabled\"\n::file\n::end-block\n";
+        let md: Markdown = content.into();
+        let (composed, _) = md.compose_with(ComposeOptions::new()).unwrap();
+        assert!(!composed.content().contains("::file"));
+
+        let error = collect_shell_commands(&md, &ComposeOptions::new())
+            .expect_err("condition-blind preflight must reject authored malformed syntax");
+        assert!(error.to_string().contains("Failed to parse directive"));
+    }
+
+    #[test]
+    fn preflight_parse_errors_use_file_relative_lines() {
+        for frontmatter in [
+            "---\na: 1\n---\n",
+            "---\na: 1\nb: 2\nc: 3\n---\n",
+            "---\na: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\n---\n",
+        ] {
+            let content = format!("{frontmatter}\n# Body\n::file\n");
+            let expected_line = content[..content.find("::file").unwrap()].matches('\n').count() + 1;
+            let md: Markdown = content.into();
+            let error = collect_shell_commands(&md, &ComposeOptions::new())
+                .expect_err("malformed directive");
+            let crate::markdown::types::MarkdownError::Transclusion(error) = error else {
+                panic!("expected transclusion error");
+            };
+            let transclusion::TransclusionError::ParseDirective { line, ctx, .. } = *error else {
+                panic!("expected directive parse error");
+            };
+            assert_eq!(line, expected_line, "reported line must be the directive's file line");
+            assert!(ctx.content.lines().nth(line - 1).is_some_and(|line| line.contains("::file")));
+        }
+    }
+
+    #[test]
+    fn pending_shell_target_is_rejected_before_child_command_approval() {
+        let temp = TempDir::new().unwrap();
+        let child = temp.path().join("child.md");
+        std::fs::write(&child, "::shell touch should-not-be-approved\n").unwrap();
+        let root = temp.path().join("root.md");
+        let content = "---\nchild: \"$(printf child.md)\"\n---\n::file {{child}}\n";
+        std::fs::write(&root, content).unwrap();
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let error = collect_shell_commands(
+            &md,
+            &ComposeOptions::new().with_source_file(&root),
+        )
+        .expect_err("pending target must fail as a dynamic command shape");
+        let message = error.to_string();
+        assert!(message.contains("child"), "pending target must fail as a dynamic command shape: {message}");
+        assert!(message.contains("dynamic"), "pending target must fail as a dynamic command shape: {message}");
+        assert!(!message.contains("should-not-be-approved"), "{message}");
+    }
 
     #[test]
     fn discovers_shell_directives_in_simple_document() {

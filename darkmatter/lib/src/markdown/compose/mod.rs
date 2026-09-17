@@ -87,6 +87,7 @@ mod type_tests;
 
 pub mod block_pairs;
 pub mod directives_api;
+pub mod directive_targets;
 pub mod expression;
 pub mod file_links;
 pub(crate) mod inline;

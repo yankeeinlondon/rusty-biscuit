@@ -287,7 +287,7 @@ pub(crate) fn interpolate_value<L: EvaluationLookup>(
 /// [`interpolate_text`] string path. Detection is independent of parse/eval
 /// outcome, so a malformed whole-value `{{ … }}` is still recognized as
 /// whole-value and held to the strict parse-and-evaluate contract.
-fn whole_value_span(input: &str) -> Option<ExpressionLocation> {
+pub(crate) fn whole_value_span(input: &str) -> Option<ExpressionLocation> {
     let mut locations = ExpressionFinder::find_all_plain(input);
     if locations.len() != 1 {
         return None;
@@ -452,6 +452,27 @@ mod tests {
         assert_eq!(result.output, "no expressions here");
         assert_eq!(result.replacements, 0);
         assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn whole_value_evaluation_preserves_nullable_target_types() {
+        let state = make_state(json!({
+            "null_target": null,
+            "empty_target": "",
+            "concrete_target": "child.md",
+        }));
+        let evaluator = Evaluator::new(&state);
+        for (expression, expected) in [
+            ("{{ null_target }}", Value::Null),
+            ("{{ empty_target }}", Value::String(String::new())),
+            ("{{ concrete_target }}", Value::String("child.md".to_string())),
+        ] {
+            let (value, replacements, warnings) =
+                interpolate_value(expression, &evaluator, true, "target-evaluation").unwrap();
+            assert_eq!(value, expected, "{expression}");
+            assert_eq!(replacements, 1, "{expression}");
+            assert!(warnings.is_empty(), "{expression}: {warnings:?}");
+        }
     }
 
     /// F14 fast-path: input with single braces but no `{{` skips the scan
