@@ -403,3 +403,17 @@ belong here.
   are normal extraction artifacts, not missing files; match by string
   after stripping non-ASCII prefix bytes and treating the truncated name
   as the full one.
+- A `planning(<area>):` cycle close whose `implementation-log.md` records a
+  follow-up code change as "present only in the working tree" (e.g. a
+  non-vacuity mutant accidentally captured by a sibling `fix:` commit,
+  restored in the working tree, awaiting a follow-up) must land BEFORE
+  the follow-up `fix:` commit. The log's present-tense claim is accurate
+  at the moment of its own commit (the working tree has the fix, history
+  does not); after the follow-up fix lands, the line is also in history,
+  so the claim is no longer accurate at HEAD. Committing the follow-up
+  fix first makes the close commit land on top of an already-fixed tree,
+  inverting the log's narrative. Sequential ordering matters even when
+  the paths are disjoint and the commits could otherwise run in parallel.
+  See `7600faaee` (planning close) followed by `8a1fdc2f2` (one-line
+  `Err(error) => return Err(error)` follow-up to the M1 mutant captured
+  in `57e23751f`).
