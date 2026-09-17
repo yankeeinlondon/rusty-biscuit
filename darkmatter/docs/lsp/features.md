@@ -145,6 +145,12 @@ This matrix lists every individual Darkmatter feature and the LSP capabilities t
 | `style.hr` defaults                  | unknown enum, unknown key                                   | enum values, attribute keys            | resolved style/color                    | —                                             | inlay color swatch when `color` set   | "Pick from palette"                                   | semantic tokens                       |
 | `interpolate_code_blocks`            | type mismatch                                               | boolean                                | —                                       | —                                             | —                                     | —                                                     | —                                     |
 
+Frontmatter coverage notes:
+
+- The frontmatter model descends into **sequences**. Each list item is its own entry. Diagnostics, hover, completion, and navigation reach the keys and values inside list items (a lifecycle `stack:` item's `when`, action operands, `proxy … with` values), and a schema problem inside an array ranges the failing element rather than the whole sequence. The synthetic item marker and index stay silent.
+- Frontmatter **string scalars** are scanned for interpolation spans, but only on the surfaces a diagnostic owns. The nested-span rule applies only to Claudine's single-pass lifecycle values and predicates, never to mixed strings or arbitrary whole-value keys.
+- Exact source projection exists only for untagged **plain, single-quoted, and double-quoted** scalars (plus literal `|` blocks for the nested-span rule). Folded `>` blocks, tagged scalars, and aliases keep the generic schema diagnostic or a whole-scalar range and are never given a fabricated expression range or an edit.
+
 ### 4.2 Page Blocks
 
 | Feature                 | Diagnostics                                                                    | Completion                                        | Hover                           | Inlay                              | Code Action                                               | Other                                                                            |
@@ -165,6 +171,20 @@ This matrix lists every individual Darkmatter feature and the LSP capabilities t
 | Comparisons                         | type mismatch warning                                                            | operators                                               | —                                                          | —                                                               | —                       | resolved boolean        | —                                                         |
 | Helpers `length`, `number`, `round` | wrong arity, wrong type                                                          | function names + signatures                             | doc + return type                                          | —                                                               | —                       | resolved value          | —                                                         |
 | Code-block opt-in                   | warn when `{{ }}` appears in fenced block but `interpolate_code_blocks` is false | —                                                       | —                                                          | —                                                               | —                       | —                       | "Enable `interpolate_code_blocks`", "Escape literal `{{`" |
+| Nested `{{ }}` in a quoted literal  | `dm.expression.nested_span_in_literal` on single-pass lifecycle values and predicates only, one per expression at its first nested span | — | — | — | — | — | "Rewrite with + concatenation" from a typed, versioned diagnostic payload; offered for plain, quoted, and literal-block scalars, not for folded or tagged scalars or a literal that spans lines |
+
+Expression diagnostics follow one severity policy:
+
+> A **warning** means the construct **might** be wrong. An **error** means it **will never work**.
+
+| Code | Severity | Why |
+|------|----------|-----|
+| `dm.expression.malformed`, schema-typed frontmatter value with exact projection | Error | The schema declares the value is an expression, so a parse failure never evaluates. |
+| `dm.expression.malformed`, document-body span | Warning | A body `{{ … }}` is only *inferred* to be an expression; it may be foreign template syntax. Authors can opt out with `\{{`. |
+| `dm.expression.unknown_identifier` | Warning | A late-binding global may supply the name at run time. `err`, `timing`, and `current` are known beneath lifecycle event keys only. |
+| `dm.expression.nested_span_in_literal` | Error | On a single-pass surface the braces are never interpolated, and Claudine refuses the document. |
+
+The authoritative per-code list is [DMLS diagnostics — Severity](../../dmls/docs/diagnostics.md#severity). A new diagnostic takes its severity from this policy rather than from a neighboring code.
 
 ### 4.4 Shell Expansion (`::shell`)
 

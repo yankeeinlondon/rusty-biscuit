@@ -113,6 +113,9 @@ feature layer.
 | `dm.schema.document_malformed` | A recognized standalone SimplifiedSchema envelope is malformed (missing or non-mapping `types`, unsupported tagged-envelope keys, or an invalid payload) and no more precise declaration or definition diagnostic claims the failure. Ranged over the whole schema document. |
 | `dm.style.unknown_key` | A `style:` key the style schema does not recognize. |
 | `dm.style.deprecated_key` | A deprecated `style:` key (a canonical replacement exists). |
+| `dm.expression.malformed` | An `expression`-typed value that does not parse. Emitted only for untagged single-line plain and quoted scalars; block and tagged values keep the schema problem. Pending `{{ … }}` / `$(…)` values are deferred. |
+| `dm.expression.unknown_identifier` | A bare root of an `expression`-typed value naming nothing DMLS can resolve. `err`, `timing`, and `current` are known beneath lifecycle event keys only. |
+| `dm.expression.nested_span_in_literal` | A `{{ … }}` inside a quoted string literal on a single-pass lifecycle surface — a whole-value communication field, stack action operand, or `proxy … with` value, or a `when` / `while` / `until` predicate — where it is never interpolated. Offers **Rewrite with + concatenation** when a safe rewrite exists (not for folded or tagged scalars, or a literal that spans lines). |
 
 Two Layer-2 behaviors reach beyond the Markdown document under edit:
 
@@ -161,6 +164,16 @@ are **errors**. Two codes vary with `schema.strict`:
 contract (the value is injected via CLI / seed / interactive prompt), so a
 statically-absent required key is not an editor error. Turn on strict mode when
 you want edit-time enforcement of required keys.
+
+The expression family follows one ladder: a **warning** means the construct
+*might* be wrong, an **error** means it *will never work*.
+
+| Code | Severity |
+|------|----------|
+| `dm.expression.malformed` on a schema-typed frontmatter value | Error |
+| `dm.expression.malformed` on a body `{{ … }}` span | Warning (the braces may be foreign template syntax) |
+| `dm.expression.unknown_identifier` | Warning |
+| `dm.expression.nested_span_in_literal` | Error |
 
 ## Ranging
 
