@@ -307,7 +307,12 @@ pub fn run_compose(
     // interpolation inside transclusion targets (e.g., `::file @{{ctx.pkg}}/{{plan}}`)
     // can resolve user-provided variables during the validation pass.
     let opts_start = perf.then(Instant::now);
-    let mut options = ComposeOptions::new_with_context(shared_context);
+    // The shared context is a host capture anchored on the launch directory,
+    // so a transcluded source naming a group the root does not may grow it by
+    // the same discovery rather than fail.
+    let mut options = ComposeOptions::new_with_context(shared_context).with_context_authority(
+        darkmatter::markdown::compose::ContextAuthority::DarkmatterOwned,
+    );
     options = apply_compose_baseline_schema(options, baseline_schema, no_baseline_schema)?;
     options = options.with_trigger_schemas(!no_trigger_schemas);
 

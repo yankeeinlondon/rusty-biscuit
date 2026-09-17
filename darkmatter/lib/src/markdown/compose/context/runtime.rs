@@ -163,11 +163,10 @@ impl ComposeContext {
     /// environment snapshot every capture takes.
     ///
     /// Git, repository, file-change, language, document, OS, hardware, and GPU
-    /// values are left uncaptured. Nothing becomes unresolvable: an expression
-    /// naming one of those keys triggers
-    /// [`resolve_ctx`](crate::markdown::compose::expression) to capture that
-    /// single group on demand. Skipping them up front therefore drops work no
-    /// document read, rather than narrowing what `ctx.*` can answer.
+    /// values are left uncaptured. Composition reads this snapshot as-is:
+    /// evaluating a `ctx.*` key from one of those groups fails with
+    /// [`ExpressionError::ContextNotCaptured`](crate::markdown::compose::expression::ExpressionError::ContextNotCaptured)
+    /// rather than capturing it on demand.
     ///
     /// Prefer [`capture_for_document`](Self::capture_for_document) when the
     /// document is already in hand — it captures exactly the groups the
@@ -319,6 +318,11 @@ impl ComposeContext {
         }
     }
 
+    /// Whether `other` is this very snapshot (a clone that was never grown).
+    pub(crate) fn is_same_snapshot(&self, other: &ComposeContext) -> bool {
+        std::sync::Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
     /// The groups this snapshot's values were captured for.
     pub fn capture_requirements(&self) -> &ContextRequirements {
         &self.inner.captured
@@ -356,16 +360,71 @@ impl ComposeContext {
         required: &ContextRequirements,
         evidence: &super::capture::ContextCaptureEvidence,
     ) -> bool {
+        self.extend_missing_with(required, |anchor, missing| {
+            super::capture::capture_runtime_context_with_evidence(anchor, missing, evidence)
+        })
+    }
+
+    /// Extend this snapshot in place with the groups of `required` it is
+    /// missing, discovered from the host at the retained anchor.
+    ///
+    /// The discovery-backed twin of [`Self::extend_with_evidence`], with the
+    /// same epoch guarantees: the retained anchor is the scanning base and the
+    /// invocation directory (the process CWD is never read), the Agent group
+    /// derives from the snapshot's own environment, and no captured value is
+    /// overwritten. It is how a Darkmatter-owned request context grows when a
+    /// transcluded source first names a group.
+    pub fn extend_ambient(&mut self, required: &ContextRequirements) -> bool {
+        self.extend_missing_with(required, |anchor, missing| {
+            super::capture::capture_runtime_context_for_requirements(anchor, missing)
+        })
+    }
+
+    /// Copies the groups of `groups` this snapshot is missing from `source`.
+    ///
+    /// Both snapshots must belong to one request epoch: `source` is the
+    /// request's shared context, so the adopted values are the ones every other
+    /// source in the request reads. Groups `source` has not captured are left
+    /// missing. Capture diagnostics `source` carries that this snapshot lacks
+    /// are appended so a partial capture still warns where it is read.
+    pub(crate) fn adopt_groups(&mut self, source: &ComposeContext, groups: &ContextRequirements) {
+        let adoptable = groups
+            .iter()
+            .filter(|group| {
+                !self.inner.captured.contains(*group) && source.inner.captured.contains(*group)
+            })
+            .collect::<Vec<_>>();
+        if adoptable.is_empty() {
+            return;
+        }
+        let inner = std::sync::Arc::make_mut(&mut self.inner);
+        for group in adoptable {
+            for key in group.projected_keys() {
+                if let Some(value) = source.inner.values.get(key) {
+                    inner.values.insert(key.to_string(), value.clone());
+                }
+            }
+            inner.captured = inner.captured.clone().with(group);
+        }
+        for diagnostic in &source.inner.capture_diagnostics {
+            if !inner.capture_diagnostics.contains(diagnostic) {
+                inner.capture_diagnostics.push(diagnostic.clone());
+            }
+        }
+        inner.overrides = std::sync::OnceLock::new();
+    }
+
+    fn extend_missing_with(
+        &mut self,
+        required: &ContextRequirements,
+        capture: impl FnOnce(&std::path::Path, &ContextRequirements) -> super::capture::CaptureResult,
+    ) -> bool {
         let missing = self.missing_requirements(required);
         if missing.iter().next().is_none() {
             return false;
         }
         let (mut values, mut diagnostics, mut timings, environment) =
-            super::capture::capture_runtime_context_with_evidence(
-                &self.inner.anchor,
-                &missing,
-                evidence,
-            );
+            capture(&self.inner.anchor, &missing);
         // The Agent group derives from the environment the snapshot already
         // carries, so compose-time overrides remain the effective identity.
         if missing.contains(super::capture::ContextGroup::Agent) {
@@ -397,6 +456,18 @@ impl ComposeContext {
     /// Looks up a value from the backing store.
     pub fn get(&self, key: &str) -> Option<&serde_json::Value> {
         self.inner.values.get(key)
+    }
+
+    /// Classifies `ctx.<key>` against this snapshot's captured groups.
+    ///
+    /// A present value is the effective one (compose-time `AGENT`/`MODEL`
+    /// overrides applied), matching [`Self::get_effective`].
+    pub(crate) fn classify_ctx_key(&self, key: &str) -> super::checked::CtxLookupOutcome {
+        super::checked::CtxLookupOutcome::classify(
+            key,
+            |group| self.inner.captured.contains(group),
+            |key| self.get_effective(key),
+        )
     }
 
     /// Looks up a value after applying compose-time environment overrides.
@@ -488,6 +559,11 @@ impl ComposeContext {
         for (k, v) in &fields {
             values.insert((*k).to_string(), serde_json::Value::String(v.to_string()));
         }
+        // A captured group projects every key it owns; the checked lookup
+        // treats an omitted key as a malformed snapshot.
+        for key in super::capture::ContextGroup::DateTime.projected_keys() {
+            values.entry(key).or_insert(serde_json::Value::Null);
+        }
 
         let get_str = |key: &str| -> String {
             values
@@ -524,6 +600,9 @@ impl ComposeContext {
     /// Returns a copy of [`fixed_for_testing`](Self::fixed_for_testing) with the
     /// given values inserted (or overwritten).
     ///
+    /// Each inserted cataloged key marks its owning group captured, and that
+    /// group's other keys project `null`, so the snapshot stays well formed.
+    ///
     /// Lets a test build two contexts that differ only in a single value — e.g.
     /// a volatile `timestamp` — to prove the reference-graph identity is
     /// complete rather than reusing the persistent-cache `context_hash`.
@@ -534,10 +613,29 @@ impl ComposeContext {
         let mut ctx = Self::fixed_for_testing();
         let inner = std::sync::Arc::make_mut(&mut ctx.inner);
         for (key, value) in extra {
+            if let Some(group) = super::capture::ContextGroup::for_key(key)
+                && !inner.captured.contains(group)
+            {
+                inner.captured = inner.captured.clone().with(group);
+                for owned in group.projected_keys() {
+                    inner.values.entry(owned).or_insert(serde_json::Value::Null);
+                }
+            }
             inner.values.insert(key.to_string(), value);
         }
         inner.overrides = std::sync::OnceLock::new();
         ctx
+    }
+
+    /// Returns this snapshot with `key` removed from the projection while its
+    /// group stays captured: the malformed shape behind
+    /// `ContextProjectionInvariant`.
+    #[cfg(test)]
+    pub(crate) fn with_projection_key_removed(mut self, key: &str) -> Self {
+        let inner = std::sync::Arc::make_mut(&mut self.inner);
+        inner.values.remove(key);
+        inner.overrides = std::sync::OnceLock::new();
+        self
     }
 }
 

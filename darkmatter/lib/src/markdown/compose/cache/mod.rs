@@ -17,7 +17,8 @@ pub(crate) mod types;
 pub(crate) use hashing::compose_cache_key as compose_cache_key_for_path;
 pub(crate) use operation::{CodeOperation, TocLinkingOperation};
 pub(crate) use runtime::{
-    ComposeResult, OperationPersistentContext, OperationResult, PersistentContext, RunLocalCache,
+    ComposeResult, ContextClosureIdentity, OperationPersistentContext, OperationResult,
+    PersistentContext, RunLocalCache,
 };
 pub(crate) use store::FileStore;
 pub use types::{CacheAccessMode, CacheFreshnessMode, CacheStats};

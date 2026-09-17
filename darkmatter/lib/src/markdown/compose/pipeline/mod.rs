@@ -28,12 +28,11 @@ use tracing::{info, instrument, trace};
 impl Markdown {
     /// Internal pipeline runner.
     pub(crate) fn run_compose_pipeline(&mut self, mut options: ComposeOptions) -> MarkdownResult<ComposeReport> {
-        // `ComposeOptions::new` captures no discovered `ctx.*` group because a
-        // constructor has no document to justify the walk. This is the first
-        // point that has both, so it is where the two meet: the context grows
-        // to exactly the groups this document names, and stays untouched when
-        // it names none or when the caller chose the context themselves.
-        options.upgrade_ambient_context_for(self);
+        // A constructor has no document, so `ComposeOptions::new` captures no
+        // discovered `ctx.*` group. This is the first point that has both: an
+        // extendable context grows to the groups this document names, and the
+        // result seeds the request epoch every transcluded source extends.
+        options.extend_context_for(self);
         options.ensure_file_resolution_context();
 
         // Resolve persistent cache root if configured
@@ -53,6 +52,7 @@ impl Markdown {
             persistent_root,
             remote_fetch,
         );
+        runtime.context_epoch.seed(options.context());
 
         // Eagerly register discovered remote URLs and start fetching. The two
         // discovery paths gate independently: directive (`::file`/`::code`)

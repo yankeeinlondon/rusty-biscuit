@@ -48,8 +48,50 @@ impl ContextGroup {
         ]
     }
 
+    /// Stable identifier persisted in compose-cache manifests.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Invocation => "invocation",
+            Self::DateTime => "datetime",
+            Self::Git => "git",
+            Self::Repo => "repo",
+            Self::FileChanges => "file_changes",
+            Self::Languages => "languages",
+            Self::Documents => "documents",
+            Self::Os => "os",
+            Self::Hardware => "hardware",
+            Self::Gpu => "gpu",
+            Self::Agent => "agent",
+        }
+    }
+
+    /// The group persisted as [`name`](Self::name).
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        Self::all().into_iter().find(|group| group.name() == name)
+    }
+
     pub(crate) fn for_key(key: &str) -> Option<Self> {
         group_for_key(key)
+    }
+
+    /// Every `ctx.*` key a capture of this group projects, date/time aliases
+    /// included. A captured group whose values omit one of these keys is a
+    /// malformed snapshot (`ContextProjectionInvariant`).
+    pub(crate) fn projected_keys(self) -> impl Iterator<Item = &'static str> {
+        let (keys, aliases): (&'static [&'static str], &'static [&'static str]) = match self {
+            Self::Invocation => (invocation::KEYS, &[]),
+            Self::DateTime => (datetime::KEYS, datetime::ALIASES),
+            Self::Git => (git::KEYS, &[]),
+            Self::Repo => (repo::KEYS, &[]),
+            Self::FileChanges => (changes::KEYS, &[]),
+            Self::Languages => (languages::KEYS, &[]),
+            Self::Documents => (docs::KEYS, &[]),
+            Self::Os => (host::OS_KEYS, &[]),
+            Self::Hardware => (host::HARDWARE_KEYS, &[]),
+            Self::Gpu => (host::GPU_KEYS, &[]),
+            Self::Agent => (agent::KEYS, &[]),
+        };
+        keys.iter().chain(aliases).copied()
     }
 }
 
@@ -58,7 +100,7 @@ impl ContextGroup {
 /// The set describes capture requirements only; it does not expose how a group
 /// is populated. Date/time is always included because every existing
 /// demand-driven capture entry point provides those zero-discovery values.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ContextRequirements {
     groups: HashSet<ContextGroup>,
 }
@@ -96,6 +138,13 @@ impl ContextRequirements {
         self
     }
 
+    /// Every group required by this set or by `other`.
+    pub(crate) fn union(&self, other: &Self) -> Self {
+        Self {
+            groups: self.groups.union(&other.groups).copied().collect(),
+        }
+    }
+
     /// Iterates the required groups in unspecified order.
     pub fn iter(&self) -> impl Iterator<Item = ContextGroup> + '_ {
         self.groups.iter().copied()
@@ -109,22 +158,9 @@ impl ContextRequirements {
 }
 
 fn group_for_key(key: &str) -> Option<ContextGroup> {
-    [
-        (ContextGroup::Invocation, invocation::KEYS),
-        (ContextGroup::DateTime, datetime::KEYS),
-        (ContextGroup::Git, git::KEYS),
-        (ContextGroup::Repo, repo::KEYS),
-        (ContextGroup::FileChanges, changes::KEYS),
-        (ContextGroup::Languages, languages::KEYS),
-        (ContextGroup::Documents, docs::KEYS),
-        (ContextGroup::Os, host::OS_KEYS),
-        (ContextGroup::Hardware, host::HARDWARE_KEYS),
-        (ContextGroup::Gpu, host::GPU_KEYS),
-        (ContextGroup::Agent, agent::KEYS),
-    ]
-    .into_iter()
-    .find_map(|(group, keys)| keys.contains(&key).then_some(group))
-    .or_else(|| datetime::ALIASES.contains(&key).then_some(ContextGroup::DateTime))
+    ContextGroup::all()
+        .into_iter()
+        .find(|group| group.projected_keys().any(|owned| owned == key))
 }
 
 /// Finds the runtime-context domains referenced by `ctx.KEY` expressions.
@@ -164,6 +200,17 @@ mod tests {
 
     use super::*;
 
+    /// Persisted compose-cache manifests store group names.
+    #[test]
+    fn every_group_name_is_unique_and_round_trips() {
+        let names: HashSet<_> = ContextGroup::all().into_iter().map(ContextGroup::name).collect();
+        assert_eq!(names.len(), ContextGroup::all().len());
+        for group in ContextGroup::all() {
+            assert_eq!(ContextGroup::from_name(group.name()), Some(group));
+        }
+        assert_eq!(ContextGroup::from_name("Repo"), None);
+    }
+
     #[test]
     fn every_owned_key_has_exactly_one_group() {
         let domains = [
@@ -198,6 +245,21 @@ mod tests {
                 "descriptor `{}` has no capture group",
                 descriptor.name,
             );
+        }
+    }
+
+    /// The checked lookup trusts `projected_keys` as the capture contract, so it
+    /// must name exactly the catalog: no projected key the catalog omits.
+    #[test]
+    fn every_projected_key_is_a_generated_descriptor() {
+        use crate::markdown::compose::context::catalog::context_variable_descriptors;
+
+        let descriptors: HashSet<&str> =
+            context_variable_descriptors().iter().map(|descriptor| descriptor.name).collect();
+        for group in ContextGroup::all() {
+            for key in group.projected_keys() {
+                assert!(descriptors.contains(key), "{group:?} projects uncataloged key `{key}`");
+            }
         }
     }
 

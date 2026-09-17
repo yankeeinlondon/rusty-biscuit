@@ -84,7 +84,7 @@ pub(crate) fn capture_runtime_context_for_groups(
     capture_runtime_context_for_requirements(base_dir, &requirements)
 }
 
-fn capture_runtime_context_for_requirements(
+pub(crate) fn capture_runtime_context_for_requirements(
     base_dir: &Path,
     requirements: &ContextRequirements,
 ) -> CaptureResult {

@@ -142,3 +142,33 @@ fn test_compose_invalid_file_reference_reports_cause_not_mechanism() {
         // Links the prompt file by name.
         .stderr(predicate::str::contains("prompt.md"));
 }
+
+// =============================================================================
+//                MISSING RUNTIME CONTEXT CAPTURE
+// =============================================================================
+
+/// An expression can produce a `ctx.*` reference that no requirement scan of
+/// the authored text can see, so its group is never captured. Composition must
+/// exit nonzero naming the variable and group, never render it empty.
+#[test]
+fn test_compose_uncaptured_context_group_exits_nonzero_naming_variable_and_group() {
+    let fixture = CliProcessFixture::named(
+        "test_compose_uncaptured_context_group_exits_nonzero_naming_variable_and_group",
+    );
+    let document = fixture.write_file(
+        "cwd/generated.md",
+        "before\n\nos=[{{ '{' + '{ ctx' + '.os }' + '}' }}]\n",
+    );
+    let output = fixture.command().arg("compose").arg(&document).output().unwrap();
+
+    assert!(!output.status.success(), "an uncaptured group must fail composition");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("os=["), "no partially composed document: {stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("runtime context not captured")
+            && stderr.contains("ctx.os")
+            && stderr.contains("Os"),
+        "stderr must name the variable and group: {stderr}"
+    );
+}

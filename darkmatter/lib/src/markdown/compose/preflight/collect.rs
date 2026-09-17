@@ -202,6 +202,12 @@ fn collect_recursive(
         return Ok(super::PreflightGraphNode::default());
     }
 
+    // The compose pass hands each source its parent's context plus the groups
+    // the source names; discovery must read that same context, and its
+    // children inherit it.
+    let extended = options.extended_for(markdown);
+    let options = extended.as_ref();
+
     // Per-document accumulator: shell entries first discovered *here* (so the
     // returned graph node can attribute them to this document). The global
     // `entries` and `seen` are still updated so the flat list stays deduped
@@ -248,6 +254,7 @@ fn collect_recursive(
         .only(&inline_ops)
         .with_exclude_keys(inline_exclude_keys);
     inline_options.defer_shell_pending_schema_problems = true;
+    inline_options.defer_missing_runtime_context = true;
     let (prepared, _) = markdown.compose_with(inline_options)?;
     let line_offset = prepared.frontmatter_line_count();
     let prepared_ctx = prepared.full_source_context_for_errors();
@@ -523,6 +530,7 @@ fn scan_one_frontmatter(
     let pre_interpolation_snapshot = prepare_frontmatter_for_compose(&mut fm_clone, options, true);
     let mut preflight_exclude_keys = options.exclude_keys.clone();
     preflight_exclude_keys.insert("$schema".to_string());
+    let mut best_effort_missing_context = None;
     if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
         // Defer templated keys that reference a shell-pending (`$(...)`) value.
         // Without this, a key like `review: "{{ dir + '/x' }}"` resolves against
@@ -540,7 +548,7 @@ fn scan_one_frontmatter(
         // compose pass. This keeps command discovery resilient while avoiding a
         // false schema failure when a required property is derived through
         // `file_exists()` or `frontmatter()`.
-        let _ = interpolate_frontmatter_best_effort(
+        best_effort_missing_context = interpolate_frontmatter_best_effort(
             fm_clone.frontmatter_mut(),
             options.context(),
             false,
@@ -548,7 +556,9 @@ fn scan_one_frontmatter(
             Some(options.frontmatter_resolution_context()),
             &preflight_exclude_keys,
             &options.name_coercion_keys,
-        );
+        )
+        .ok()
+        .and_then(|report| report.missing_runtime_context);
     }
 
     let scan_ctx = fm_clone.full_source_context_for_errors();
@@ -563,7 +573,13 @@ fn scan_one_frontmatter(
     // here with a clear dynamic-shape error rather than letting it surface later
     // as the misleading "command not pre-approved … bug in the pre-flight
     // scanner". This mirrors `detect_dynamic_command_shape` for body directives.
-    detect_dynamic_frontmatter_command_shape(fm_clone.frontmatter(), &scan_ctx)?;
+    //
+    // A key left raw because it read an uncaptured runtime context group is not
+    // a dynamic shape: the compose pass fails that key in frontmatter
+    // interpolation whatever the document's conditions, so report that error.
+    if let Err(error) = detect_dynamic_frontmatter_command_shape(fm_clone.frontmatter(), &scan_ctx) {
+        return Err(best_effort_missing_context.unwrap_or(error));
+    }
 
     let candidates = scan_frontmatter(
         fm_clone.frontmatter(),

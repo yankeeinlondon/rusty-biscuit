@@ -308,6 +308,8 @@ mod tests {
             dependencies: vec![],
             payload_blob_hash: 77777,
             warnings_hash: 0,
+            context_closure_groups: Vec::new(),
+            context_closure_hash: 0,
             created_at: SystemTime::now(),
             last_accessed_at: SystemTime::now(),
             expires_at: None,

@@ -12,7 +12,8 @@
 //! topic for the full grammar.
 
 use super::expression::{
-    CtxLookup, EvaluationLookup, ResolutionContext, doc_namespace, evaluate, is_truthy,
+    CtxLookup, EvaluationLookup, ExpressionError, ResolutionContext, doc_namespace, evaluate,
+    is_truthy,
     parse_condition,
 };
 use super::interpolation::Evaluator;
@@ -41,12 +42,15 @@ pub enum ConditionError {
         span: Range<usize>,
     },
     /// Failed to evaluate a condition expression.
-    #[error("Failed to evaluate condition '{expr}' at line {line}: {message}")]
+    #[error("Failed to evaluate condition '{expr}' at line {line}: {cause}")]
     Eval {
         ctx: Box<SourceContext>,
         expr: String,
         line: usize,
-        message: String,
+        /// The typed evaluation failure, kept so a caller can tell a missing
+        /// runtime context capture from an authoring mistake.
+        #[source]
+        cause: Box<ExpressionError>,
     },
 }
 
@@ -94,7 +98,7 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
                 ctx,
                 expr,
                 line,
-                message,
+                cause,
             } => {
                 let body = vec![
                     Prose::new(format!(
@@ -107,7 +111,7 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("ConditionError", "evaluation failed"))
                     .body(body)
-                    .hint(format!("Error: {message}"))
+                    .hint(format!("Error: {cause}"))
             }
         }
     }
@@ -149,7 +153,7 @@ pub fn evaluate_condition<L: EvaluationLookup>(
         ctx: Box::new(ctx),
         expr: expr.to_string(),
         line,
-        message: error.to_string(),
+        cause: Box::new(error),
     })?;
 
     let result = is_truthy(&value);
@@ -282,7 +286,7 @@ pub fn evaluate_condition_against(
         ctx: Box::new(ctx),
         expr: expr.to_string(),
         line: 1,
-        message: error.to_string(),
+        cause: Box::new(error),
     })?;
 
     let result = is_truthy(&value);
@@ -369,6 +373,19 @@ impl EvaluationLookup for ShortcutLookup<'_> {
         self.get(&format!("ctx.{path}"))
     }
 
+    fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
+        if doc_namespace::is_doc_namespace(path) || path.starts_with("env.") {
+            return Ok(self.get(path));
+        }
+        if path == "ctx" || path.starts_with("ctx.") {
+            return self.ctx.resolve_ctx_checked(path);
+        }
+        match self.get_from_data(path) {
+            Some(value) => Ok(Some(value)),
+            None => self.ctx.resolve_ctx_checked(&format!("ctx.{path}")),
+        }
+    }
+
     fn resolution_context(&self) -> Option<ResolutionContext> {
         self.resolution_context.clone()
     }
@@ -383,6 +400,40 @@ impl EvaluationLookup for ShortcutLookup<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The public condition API shares the checked `ctx.*` path: a capture
+    /// that omits a cataloged key fails evaluation instead of reading `null`.
+    #[test]
+    fn shortcut_lookup_reports_a_projection_invariant_failure() {
+        let data = json!({});
+        let lookup = ShortcutLookup::new(&data, Path::new("."));
+        lookup.ctx.mark_captured_without_projection(super::super::context::capture::ContextGroup::Os);
+
+        for expression in ["ctx.os == 'macos'", "os"] {
+            let parsed = parse_condition(expression).unwrap();
+            assert!(
+                matches!(
+                    evaluate(&parsed, &lookup),
+                    Err(ExpressionError::ContextProjectionInvariant { .. })
+                ),
+                "{expression} must surface the invariant",
+            );
+        }
+        assert!(evaluate(&parse_condition("ctx.oss").unwrap(), &lookup).is_ok());
+    }
+
+    /// The public standalone entry point classifies like its lookup: an
+    /// unknown `ctx.*` name is falsy rather than an error, and a short-circuited
+    /// known name is never read.
+    #[test]
+    fn evaluate_condition_against_keeps_unknown_names_falsy_and_skips_unreached_groups() {
+        let data = json!({ "flag": false });
+        let dir = Path::new(".");
+
+        assert!(!evaluate_condition_against("ctx.oss", &data, dir).unwrap());
+        assert!(!evaluate_condition_against("flag && ctx.os == 'macos'", &data, dir).unwrap());
+        assert!(evaluate_condition_against("ctx.year > 2000", &data, dir).unwrap());
+    }
     use crate::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
     use serde_json::{Value, json};
     use std::collections::HashMap;

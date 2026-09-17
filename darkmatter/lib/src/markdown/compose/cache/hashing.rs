@@ -101,19 +101,10 @@ pub(crate) fn effective_state_hash(state: &EffectiveState) -> u64 {
 /// volatile per-second fields (`now`, `utc`, `time`, `timestamp`, etc.)
 /// and volatile system state (`memory_used`, `memory_avail`).
 pub(crate) fn context_hash(ctx: &ComposeContext) -> u64 {
-    // Clone the values map and remove volatile fields
     let mut values = ctx.values().clone();
-    // Per-second volatile fields
-    values.remove("now");
-    values.remove("now_utc");
-    values.remove("utc");
-    values.remove("time");
-    values.remove("time_military");
-    values.remove("timestamp");
-    values.remove("timestamp_ms");
-    // Volatile system state
-    values.remove("memory_used");
-    values.remove("memory_avail");
+    for key in VOLATILE_CONTEXT_KEYS {
+        values.remove(*key);
+    }
 
     let canonical = canonical_json_sorted(&Value::Object(values));
     let mut parts = vec![canonical];
@@ -126,6 +117,48 @@ pub(crate) fn context_hash(ctx: &ComposeContext) -> u64 {
     }
 
     xx_hash(&parts.join("\0"))
+}
+
+/// Per-second clock fields and volatile system state that would otherwise
+/// re-key a stable document on every run.
+const VOLATILE_CONTEXT_KEYS: &[&str] = &[
+    "now",
+    "now_utc",
+    "utc",
+    "time",
+    "time_military",
+    "timestamp",
+    "timestamp_ms",
+    "memory_used",
+    "memory_avail",
+];
+
+/// Hash of `ctx`'s values for the keys `groups` project, with the same
+/// volatile exclusions as [`context_hash`].
+///
+/// The context-closure half of a persisted composed entry's identity: a
+/// descendant can read a group its parent's key never saw, so the manifest
+/// records the groups its whole subtree read and this hash of their values.
+pub(crate) fn context_groups_hash(
+    ctx: &ComposeContext,
+    groups: &crate::markdown::compose::ContextRequirements,
+) -> u64 {
+    let mut names: Vec<_> = groups.iter().collect();
+    names.sort_by_key(|group| group.name());
+    let mut values = Map::new();
+    for group in &names {
+        for key in group.projected_keys() {
+            if VOLATILE_CONTEXT_KEYS.contains(&key) {
+                continue;
+            }
+            values.insert(
+                key.to_string(),
+                ctx.values().get(key).cloned().unwrap_or(Value::Null),
+            );
+        }
+    }
+    let names = names.iter().map(|group| group.name()).collect::<Vec<_>>().join(",");
+    xx_hash(&format!("{names}\0{}", canonical_json_sorted(&Value::Object(values))))
 }
 
 /// Precomputed per-transclusion-phase state identity.
@@ -721,6 +754,42 @@ mod tests {
         let empty_identity = PhaseStateIdentity::capture(&empty);
         assert_eq!(empty_identity.state_hash, effective_state_hash(&empty));
         assert_eq!(empty_identity.context_hash, context_hash(empty.context()));
+    }
+
+    #[test]
+    fn context_groups_hash_follows_only_the_recorded_groups_values() {
+        use crate::markdown::compose::{ContextGroup, ContextRequirements};
+        use serde_json::json;
+
+        let repo = ContextRequirements::from_groups([ContextGroup::Repo]);
+        let base = ComposeContext::fixed_for_testing_with([("repo_root", json!("/one")), ("os", json!("linux"))]);
+        let other_repo =
+            ComposeContext::fixed_for_testing_with([("repo_root", json!("/two")), ("os", json!("linux"))]);
+        let other_os =
+            ComposeContext::fixed_for_testing_with([("repo_root", json!("/one")), ("os", json!("macos"))]);
+        let other_clock = ComposeContext::fixed_for_testing_with([
+            ("repo_root", json!("/one")),
+            ("os", json!("linux")),
+            ("now", json!("2031-01-01T00:00:00Z")),
+        ]);
+
+        assert_ne!(context_groups_hash(&base, &repo), context_groups_hash(&other_repo, &repo));
+        assert_eq!(context_groups_hash(&base, &repo), context_groups_hash(&other_os, &repo));
+        assert_ne!(
+            context_groups_hash(&base, &ContextRequirements::from_groups([ContextGroup::Os])),
+            context_groups_hash(&other_os, &ContextRequirements::from_groups([ContextGroup::Os])),
+        );
+        let clock = ContextRequirements::from_groups([ContextGroup::DateTime, ContextGroup::Repo]);
+        assert_eq!(
+            context_groups_hash(&base, &clock),
+            context_groups_hash(&other_clock, &clock),
+            "volatile clock values do not re-key a closure"
+        );
+        assert_ne!(
+            context_groups_hash(&base, &repo),
+            context_groups_hash(&base, &ContextRequirements::default()),
+            "the recorded group set is part of the identity"
+        );
     }
 
     #[test]

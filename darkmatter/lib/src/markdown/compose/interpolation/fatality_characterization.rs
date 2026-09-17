@@ -23,6 +23,9 @@
 //!   cells below pin the purely local failure kinds.
 //!   The remaining failures (arity, arg-type, parse) are demoted to a
 //!   `ComposeWarning` with the original `{{ … }}` left in place.
+//! - **Missing runtime context** ([`ContextNotCaptured`],
+//!   [`ContextProjectionInvariant`]): fatal on every cell. A known `ctx.*`
+//!   variable with no captured value is never rendered as an empty string.
 //! - **Frontmatter whole-value span** ([`interpolate_value`]): a value whose
 //!   trimmed content is exactly one `{{ expr }}` is executable state, so *every*
 //!   parse/eval failure is fatal regardless of `fail_fast`.
@@ -35,6 +38,8 @@
 //! [`is_authoring_fatal`]: crate::markdown::compose::expression::ExpressionError::is_authoring_fatal
 //! [`interpolate_text`]: super::rewrite::interpolate_text
 //! [`interpolate_value`]: super::rewrite::interpolate_value
+//! [`ContextNotCaptured`]: crate::markdown::compose::expression::ExpressionError::ContextNotCaptured
+//! [`ContextProjectionInvariant`]: crate::markdown::compose::expression::ExpressionError::ContextProjectionInvariant
 
 use super::rewrite::{ScanMode, interpolate_text, interpolate_value};
 use super::Evaluator;
@@ -84,7 +89,8 @@ struct Case {
     fragment: &'static str,
 }
 
-/// The six failure kinds from the integrated-design §5 matrix.
+/// The failure kinds: the six from the integrated-design §5 matrix plus the two
+/// missing-runtime-context kinds.
 ///
 /// `missing-file` and `malformed-path` share the `invalid file path` fragment
 /// and the same (now fatal) lenient-body disposition, but are listed separately
@@ -124,12 +130,29 @@ const CASES: &[Case] = &[
         input: "{{ > invalid }}",
         fragment: "parse",
     },
+    Case {
+        kind: "context-not-captured",
+        input: "{{ ctx.repo_root }}",
+        fragment: "did not capture",
+    },
+    Case {
+        // Paired with a snapshot whose captured DateTime group omits `today`.
+        kind: "context-projection-invariant",
+        input: "{{ ctx.today }}",
+        fragment: "Darkmatter bug",
+    },
 ];
 
-fn empty_state() -> EffectiveState {
+fn empty_state(kind: &str) -> EffectiveState {
+    let context = match kind {
+        "context-projection-invariant" => {
+            ComposeContext::fixed_for_testing().with_projection_key_removed("today")
+        }
+        _ => ComposeContext::fixed_for_testing(),
+    };
     EffectiveStateBuilder::new()
         .with_frontmatter(HashMap::new())
-        .with_context(ComposeContext::fixed_for_testing())
+        .with_context(context)
         .build()
         .unwrap()
 }
@@ -142,9 +165,9 @@ fn empty_state() -> EffectiveState {
 /// filesystem builtins (`frontmatter`, `absolute`) actually run rather than
 /// short-circuiting to the "no resolution context" recoverable error. The
 /// directory is intentionally empty: `does-not-exist.md` must miss.
-fn classify(input: &str, surface: Surface, fail_fast: bool) -> (Outcome, String) {
+fn classify(kind: &str, input: &str, surface: Surface, fail_fast: bool) -> (Outcome, String) {
     let dir = tempfile::TempDir::new().unwrap();
-    let state = empty_state();
+    let state = empty_state(kind);
     let ctx = ResolutionContext::new(dir.path().to_path_buf());
     let lookup = ResolvingLookup::new(&state, ctx);
     let evaluator = Evaluator::new(&lookup);
@@ -214,7 +237,11 @@ fn expected(kind: &str, surface: Surface, fail_fast: bool) -> Outcome {
                 // the always-fatal unknown function. Arity/arg-type/parse remain
                 // warnings — they are not file references.
                 match kind {
-                    "unknown-function" | "missing-file" | "malformed-path" => Outcome::Fatal,
+                    "unknown-function"
+                    | "missing-file"
+                    | "malformed-path"
+                    | "context-not-captured"
+                    | "context-projection-invariant" => Outcome::Fatal,
                     _ => Outcome::Warning,
                 }
             }
@@ -227,7 +254,7 @@ fn fatality_matrix_is_locked() {
     for case in CASES {
         for surface in [Surface::Body, Surface::FrontmatterWholeValue] {
             for fail_fast in [false, true] {
-                let (outcome, message) = classify(case.input, surface, fail_fast);
+                let (outcome, message) = classify(case.kind, case.input, surface, fail_fast);
                 let want = expected(case.kind, surface, fail_fast);
                 assert_eq!(
                     outcome, want,
@@ -262,7 +289,7 @@ fn fatality_matrix_is_locked() {
 
 #[test]
 fn body_unknown_function_is_fatal_in_lenient_mode() {
-    let (outcome, message) = classify("{{ unknown_fn(\"x\") }}", Surface::Body, false);
+    let (outcome, message) = classify("unknown-function", "{{ unknown_fn(\"x\") }}", Surface::Body, false);
     assert_eq!(outcome, Outcome::Fatal);
     assert!(message.contains("Unknown function"), "message: {message}");
 }
@@ -272,6 +299,7 @@ fn body_missing_file_is_fatal_in_lenient_mode() {
     // Ratified (real-errors finding #1): a present file reference that misses is
     // fatal even in lenient body mode — it was a warning before this change.
     let (outcome, message) = classify(
+        "missing-file",
         "{{ frontmatter(\"does-not-exist.md\", \"x\") }}",
         Surface::Body,
         false,
@@ -284,28 +312,28 @@ fn body_missing_file_is_fatal_in_lenient_mode() {
 fn body_malformed_path_is_fatal_in_lenient_mode() {
     // Ratified (real-errors finding #1): a malformed (present) reference is fatal
     // even in lenient body mode — it was a warning before this change.
-    let (outcome, message) = classify("{{ absolute(\"\") }}", Surface::Body, false);
+    let (outcome, message) = classify("malformed-path", "{{ absolute(\"\") }}", Surface::Body, false);
     assert_eq!(outcome, Outcome::Fatal);
     assert!(message.contains("invalid file path"), "message: {message}");
 }
 
 #[test]
 fn body_arity_is_warning_in_lenient_mode() {
-    let (outcome, message) = classify("{{ min(1) }}", Surface::Body, false);
+    let (outcome, message) = classify("arity", "{{ min(1) }}", Surface::Body, false);
     assert_eq!(outcome, Outcome::Warning);
     assert!(message.contains("requires"), "message: {message}");
 }
 
 #[test]
 fn body_arg_type_is_warning_in_lenient_mode() {
-    let (outcome, message) = classify("{{ min(\"a\", \"b\") }}", Surface::Body, false);
+    let (outcome, message) = classify("arg-type", "{{ min(\"a\", \"b\") }}", Surface::Body, false);
     assert_eq!(outcome, Outcome::Warning);
     assert!(message.contains("numeric"), "message: {message}");
 }
 
 #[test]
 fn body_parse_failure_is_warning_in_lenient_mode() {
-    let (outcome, message) = classify("{{ > invalid }}", Surface::Body, false);
+    let (outcome, message) = classify("parse", "{{ > invalid }}", Surface::Body, false);
     assert_eq!(outcome, Outcome::Warning);
     assert!(message.contains("parse"), "message: {message}");
 }
@@ -313,7 +341,7 @@ fn body_parse_failure_is_warning_in_lenient_mode() {
 #[test]
 fn body_every_failure_is_fatal_in_fail_fast_mode() {
     for case in CASES {
-        let (outcome, _message) = classify(case.input, Surface::Body, true);
+        let (outcome, _message) = classify(case.kind, case.input, Surface::Body, true);
         assert_eq!(
             outcome,
             Outcome::Fatal,
@@ -329,6 +357,7 @@ fn frontmatter_whole_value_missing_file_is_fatal_in_lenient_mode() {
     // failure that merely warns in body text aborts in a whole-value frontmatter
     // span even when fail_fast is off.
     let (outcome, message) = classify(
+        "missing-file",
         "{{ frontmatter(\"does-not-exist.md\", \"x\") }}",
         Surface::FrontmatterWholeValue,
         false,
@@ -341,7 +370,7 @@ fn frontmatter_whole_value_missing_file_is_fatal_in_lenient_mode() {
 fn frontmatter_whole_value_every_failure_is_fatal_in_lenient_mode() {
     for case in CASES {
         let (outcome, _message) =
-            classify(case.input, Surface::FrontmatterWholeValue, false);
+            classify(case.kind, case.input, Surface::FrontmatterWholeValue, false);
         assert_eq!(
             outcome,
             Outcome::Fatal,
@@ -349,4 +378,20 @@ fn frontmatter_whole_value_every_failure_is_fatal_in_lenient_mode() {
             case.kind
         );
     }
+}
+
+#[test]
+fn body_context_not_captured_is_fatal_in_lenient_mode() {
+    let (outcome, message) =
+        classify("context-not-captured", "{{ ctx.repo_root }}", Surface::Body, false);
+    assert_eq!(outcome, Outcome::Fatal);
+    assert!(message.contains("ctx.repo_root"), "message: {message}");
+}
+
+#[test]
+fn body_context_projection_invariant_is_fatal_in_lenient_mode() {
+    let (outcome, message) =
+        classify("context-projection-invariant", "{{ ctx.today }}", Surface::Body, false);
+    assert_eq!(outcome, Outcome::Fatal);
+    assert!(message.contains("ctx.today"), "message: {message}");
 }

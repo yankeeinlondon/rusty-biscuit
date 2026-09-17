@@ -275,16 +275,14 @@ pub struct ComposeOptions {
     /// environment variables).
     context: ComposeContext,
 
-    /// Whether [`context`](Self::context) is the zero-discovery default
-    /// [`ComposeOptions::new`] installs, rather than one the caller chose.
+    /// Whether composition may grow [`context`](Self::context) when a source
+    /// names a `ctx.*` group it has not captured.
     ///
-    /// A constructor cannot know which `ctx.*` groups a document needs, so
-    /// `new` captures none of the discovered ones. The compose pipeline can
-    /// know — it has the document — and upgrades the context to exactly the
-    /// groups the document names before any stage reads `ctx`. Only a default
-    /// context is upgraded: a caller who supplied one is expressing intent
-    /// (a pinned test snapshot, a repository-scoped capture) that must survive.
-    context_is_ambient_default: bool,
+    /// The root document and every transcluded source are extended through
+    /// this authority before their first expression stage. A frozen
+    /// (`CallerSupplied`) context is never augmented: a pinned test snapshot or
+    /// an evidence-backed capture must fail rather than consult the host.
+    context_authority: super::authority::ContextAuthority,
 
     /// When true, external `replace` keys override document `replace`
     /// keys (used during recursive transclusion to inherit parent
@@ -353,6 +351,14 @@ pub struct ComposeOptions {
     /// to fix. In both cases a later terminal pass composes the settled document
     /// and reports the verdict. Default: `false`.
     pub(crate) defer_schema_verdict: bool,
+
+    /// When `true`, body interpolation renders a `ctx.*` variable whose group
+    /// the request never captured as `null` instead of failing. Used only by
+    /// the shell-command discovery pass, which composes without page blocks:
+    /// it would otherwise evaluate content a false `::block` removes before
+    /// the terminal pass, which owns the missing-capture verdict. Default:
+    /// `false`.
+    pub(crate) defer_missing_runtime_context: bool,
 
     /// The runtime schema phase the compose-time verdict is judged at, when the
     /// caller is preparing a launch rather than validating an authored
@@ -515,9 +521,10 @@ impl ComposeOptions {
     /// eagerly probing Git, repository topology, working-tree changes,
     /// languages, documents, OS, hardware, and GPU would be speculative: it
     /// walks the whole working tree once per call (~2s inside this monorepo on
-    /// Windows) for values most callers never read. Any `ctx.*` key from those
-    /// groups is still captured on demand during expression evaluation, so
-    /// this changes cost, not what resolves.
+    /// Windows) for values most callers never read. Composition instead
+    /// captures the groups the root document names before its first stage;
+    /// a `ctx.*` key from any other group fails with
+    /// [`ExpressionError::ContextNotCaptured`](crate::markdown::compose::expression::ExpressionError::ContextNotCaptured).
     ///
     /// When the document is already available, prefer
     /// [`new_with_context`](Self::new_with_context) with
@@ -526,31 +533,71 @@ impl ComposeOptions {
     /// key. [`ComposeContext::capture`] remains available for callers that
     /// genuinely want the full snapshot.
     pub fn new() -> Self {
-        let mut options = Self::new_with_context(ComposeContext::capture_minimal());
-        options.context_is_ambient_default = true;
-        options
+        Self::new_with_context(ComposeContext::capture_minimal())
+            .with_context_authority(super::authority::ContextAuthority::DarkmatterOwned)
     }
 
-    /// Replaces an ambient-default context with one captured for `document`.
+    /// Installs a source's request-epoch context, keeping the authority.
+    pub(crate) fn with_request_context(mut self, context: ComposeContext) -> Self {
+        self.context = context;
+        self
+    }
+
+    /// Sets who may grow this request's runtime context.
     ///
-    /// No-op unless the context is the default [`Self::new`] installed and
-    /// `document` names a `ctx.*` group beyond date/time — so a document that
-    /// reads no runtime context, or options carrying a caller-chosen context,
-    /// pay nothing and keep what they have.
-    pub(crate) fn upgrade_ambient_context_for(&mut self, document: &crate::markdown::Markdown) {
-        if !self.context_is_ambient_default {
+    /// [`new_with_context`](Self::new_with_context) freezes the supplied
+    /// context. A caller whose context was itself captured from the host (for
+    /// example [`ComposeContext::capture_for_document`]) and that accepts the
+    /// same discovery for transcluded sources passes
+    /// [`ContextAuthority::DarkmatterOwned`](super::authority::ContextAuthority::DarkmatterOwned);
+    /// a caller holding its own retained evidence passes
+    /// [`ContextAuthority::CallerExtended`](super::authority::ContextAuthority::CallerExtended).
+    pub fn with_context_authority(mut self, authority: super::authority::ContextAuthority) -> Self {
+        self.context_authority = authority;
+        self
+    }
+
+    /// Who may grow this request's runtime context.
+    pub fn context_authority(&self) -> &super::authority::ContextAuthority {
+        &self.context_authority
+    }
+
+    /// Extends the context with the groups `document` names, when the context
+    /// authority permits.
+    ///
+    /// A document that names only groups already captured, or options whose
+    /// context is frozen, pay nothing and keep what they have.
+    pub(crate) fn extend_context_for(&mut self, document: &crate::markdown::Markdown) {
+        if !self.context_authority.is_extendable() {
             return;
         }
         let requirements = super::capture::ContextRequirements::for_document(document);
-        if !requirements
-            .iter()
-            .any(|group| group != super::capture::ContextGroup::DateTime)
+        self.context_authority.extend(&mut self.context, &requirements);
+    }
+
+    /// These options as the compose pass of `document` will see them, after
+    /// [`extend_context_for`](Self::extend_context_for).
+    ///
+    /// Pre-flight discovery evaluates a document before that pass runs, so it
+    /// must read the same context or it would observe groups the real pass has.
+    pub(crate) fn extended_for(
+        &self,
+        document: &crate::markdown::Markdown,
+    ) -> std::borrow::Cow<'_, Self> {
+        let requirements = super::capture::ContextRequirements::for_document(document);
+        if !self.context_authority.is_extendable()
+            || self
+                .context
+                .missing_requirements(&requirements)
+                .iter()
+                .next()
+                .is_none()
         {
-            return;
+            return std::borrow::Cow::Borrowed(self);
         }
-        let base_dir = self.context.anchor().to_path_buf();
-        self.context = ComposeContext::capture_for_document(&base_dir, document);
-        self.context_is_ambient_default = false;
+        let mut extended = self.clone();
+        extended.extend_context_for(document);
+        std::borrow::Cow::Owned(extended)
     }
 
     /// Capture file-resolution evidence once for an ambient compatibility request.
@@ -616,7 +663,7 @@ impl ComposeOptions {
             cache_namespace: None,
             perf_enabled: false,
             context,
-            context_is_ambient_default: false,
+            context_authority: super::authority::ContextAuthority::CallerSupplied,
             replace_parent_wins: false,
             one_off_replace: None,
             interpolate_code_blocks: false,
@@ -628,6 +675,7 @@ impl ComposeOptions {
             remote_read_config: RemoteReadConfig::default(),
             defer_shell_pending_schema_problems: false,
             defer_schema_verdict: false,
+            defer_missing_runtime_context: false,
             schema_phase: None,
             preflight_graph: None,
             remote_fetch: None,
@@ -1333,9 +1381,13 @@ impl ComposeOptions {
     /// Replaces the captured runtime context.
     ///
     /// Use this to share a single captured context between validation
-    /// and compose, avoiding redundant capture work.
+    /// and compose, avoiding redundant capture work. The supplied context is
+    /// frozen, as with [`new_with_context`](Self::new_with_context); call
+    /// [`with_context_authority`](Self::with_context_authority) afterwards to
+    /// let composition grow it.
     pub fn with_context(mut self, context: ComposeContext) -> Self {
         self.context = context;
+        self.context_authority = super::authority::ContextAuthority::CallerSupplied;
         self
     }
 
@@ -2007,7 +2059,7 @@ impl ComposeOptions {
             cache_namespace,
             perf_enabled,
             context,
-            context_is_ambient_default,
+            context_authority,
             replace_parent_wins,
             one_off_replace,
             interpolate_code_blocks,
@@ -2017,6 +2069,7 @@ impl ComposeOptions {
             remote_read_config,
             defer_shell_pending_schema_problems,
             defer_schema_verdict,
+            defer_missing_runtime_context,
             schema_phase,
             exclude_keys,
             name_coercion_keys,
@@ -2267,13 +2320,12 @@ impl ComposeOptions {
         enc.field("context");
         enc.u64(graph_context_fingerprint(context));
 
-        // Whether `context` above is still the constructor's zero-discovery
-        // default. Encoded because graph identity is conservative and fails
-        // closed: this flag decides whether the pipeline may replace `context`
-        // wholesale with a document-scoped capture, so two option sets that
-        // compare equal today can still diverge once composed.
-        enc.field("context_is_ambient_default");
-        enc.bool(*context_is_ambient_default);
+        // Who may grow `context` above. Encoded because graph identity is
+        // conservative and fails closed: an extendable context can gain groups
+        // once composed, so two option sets whose contexts compare equal today
+        // can still diverge.
+        enc.field("context_authority");
+        enc.tag(context_authority.fingerprint_tag());
 
         enc.field("replace_parent_wins");
         enc.bool(*replace_parent_wins);
@@ -2338,6 +2390,8 @@ impl ComposeOptions {
         enc.bool(*defer_shell_pending_schema_problems);
         enc.field("defer_schema_verdict");
         enc.bool(*defer_schema_verdict);
+        enc.field("defer_missing_runtime_context");
+        enc.bool(*defer_missing_runtime_context);
         enc.field("schema_phase");
         enc.tag(schema_phase_tag(*schema_phase));
 
@@ -2653,8 +2707,9 @@ mod tests {
     /// pinned on the group identity rather than on a duration, which would be
     /// flaky and would not say what broke.
     ///
-    /// The lazily-captured groups stay reachable: an expression naming one
-    /// captures it on demand during evaluation.
+    /// The groups stay reachable: composition extends the request context with
+    /// the groups a document names before that document's first expression
+    /// stage, never during evaluation.
     #[test]
     fn new_captures_no_discovery_derived_group() {
         use crate::markdown::compose::context::capture::ContextGroup;
@@ -2705,7 +2760,7 @@ mod tests {
         std::env::set_current_dir(target.path()).unwrap();
         options.source = ComposeSource::File(target.path().join("prompt.md"));
         let document: crate::markdown::Markdown = "{{ ctx.cwd }}".into();
-        options.upgrade_ambient_context_for(&document);
+        options.extend_context_for(&document);
 
         assert_eq!(options.context.anchor(), expected);
         assert_eq!(

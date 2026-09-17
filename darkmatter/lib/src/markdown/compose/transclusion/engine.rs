@@ -57,6 +57,29 @@ struct HeadingInfo {
 }
 
 /// Finds the nearest preceding heading level before a byte offset.
+/// The request epoch's answer to a persisted child entry's context closure.
+///
+/// Growing the epoch here is the same growth composing the child would perform;
+/// a frozen request that cannot cover a recorded group yields `None`, so the
+/// entry is a miss and the recomputation reports the missing capture.
+struct RequestContextClosure<'a> {
+    epoch: &'a crate::markdown::compose::context::authority::RequestContextEpoch,
+    seed: &'a crate::markdown::compose::ComposeContext,
+    authority: &'a crate::markdown::compose::ContextAuthority,
+}
+
+impl cache::ContextClosureIdentity for RequestContextClosure<'_> {
+    fn closure_hash(&self, groups: &crate::markdown::compose::ContextRequirements) -> Option<u64> {
+        let request = self.epoch.ensure(self.seed, groups, self.authority);
+        request
+            .missing_requirements(groups)
+            .iter()
+            .next()
+            .is_none()
+            .then(|| cache::hashing::context_groups_hash(&request, groups))
+    }
+}
+
 pub fn find_preceding_heading_level(content: &str, offset: usize) -> Option<HeadingLevel> {
     let mut current = None;
 
@@ -1102,7 +1125,13 @@ impl<'a> TransclusionEngine<'a> {
                     let runtime = runtime_mutex.lock().unwrap();
                     runtime.clone_for_child()
                 };
-                let mut child_options = options.clone();
+                let child_context = child_runtime.context_epoch.context_for_source(
+                    state.context(),
+                    &crate::markdown::compose::ContextRequirements::for_document(&child),
+                    options.context_authority(),
+                );
+                child_runtime.record_context_groups(child_context.capture_requirements());
+                let mut child_options = options.clone().with_request_context(child_context);
                 child_options.source = child_source;
                 // Recursive graph reuse for remote children: hand the child its
                 // OWN preflight sub-node (whose edges point at grandchildren) so
@@ -1430,6 +1459,37 @@ impl<'a> TransclusionEngine<'a> {
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
     ) -> MarkdownResult<String> {
+        // ── Request context handoff ────────────────────────────────
+        // The child's context must cover the groups it names before its first
+        // expression stage and before its cache identity is taken, so the
+        // (memoized) load and the per-directive set overlay — which can add
+        // `ctx.*` references — happen here rather than inside the compute.
+        // The overlay is applied to the child's authored frontmatter only; it
+        // does NOT propagate through `child_options`, so grandchildren do not
+        // inherit it.
+        let mut child = runtime.load_markdown(path)?;
+        if directive_options.set_object.is_some() || !directive_options.set_properties.is_empty() {
+            let base_indexmap = std::mem::take(child.frontmatter_mut().as_map_mut());
+            let base_map: serde_json::Map<String, Value> = base_indexmap.into_iter().collect();
+            let overlaid = state::apply_set_overrides(
+                &base_map,
+                directive_options.set_object.as_ref(),
+                &directive_options.set_properties,
+            );
+            *child.frontmatter_mut().as_map_mut() = overlaid.into_iter().collect();
+        }
+        let child_context = runtime.context_epoch.context_for_source(
+            state.context(),
+            &crate::markdown::compose::ContextRequirements::for_document(&child),
+            options.context_authority(),
+        );
+        let context_epoch = std::sync::Arc::clone(&runtime.context_epoch);
+        let context_closure = RequestContextClosure {
+            epoch: &context_epoch,
+            seed: &child_context,
+            authority: options.context_authority(),
+        };
+
         // ── Core compose (cacheable via single-flight) ─────────────
         let overlay_hash = cache::hashing::set_overlay_hash(
             directive_options.set_object.as_ref(),
@@ -1439,13 +1499,20 @@ impl<'a> TransclusionEngine<'a> {
             cache::hashing::options_hash(options),
             overlay_hash,
         );
-        // 35.1: the state and context hashes are phase-wide (identical for every
-        // directive), captured once by the caller and threaded in here.
+        // 35.1: the state hash is phase-wide (identical for every directive),
+        // captured once by the caller and threaded in here. The context hash is
+        // too, unless this child named a group its parent lacks.
+        let context_hash = if child_context.is_same_snapshot(state.context()) {
+            state_identity.context_hash
+        } else {
+            cache::hashing::context_hash(&child_context)
+        };
         let persistent_ctx = cache::PersistentContext {
             source_id: cache::hashing::source_id_hash(&cache::compose_cache_key_for_path(path)),
             state_hash: state_identity.state_hash,
-            context_hash: state_identity.context_hash,
+            context_hash,
             options_hash,
+            context_closure: Some(&context_closure),
         };
         let cache_key = format!(
             "compose:{:016x}:{:016x}:{:016x}:{:016x}:{:016x}",
@@ -1468,13 +1535,6 @@ impl<'a> TransclusionEngine<'a> {
         };
         let path_buf = path.to_path_buf();
 
-        // Snapshot the per-directive set overlay. The overlay is applied to
-        // the child's authored frontmatter before any of the child's pre-op
-        // stages run; it does NOT propagate through `child_options` so
-        // grandchildren do not inherit it.
-        let set_object = directive_options.set_object.clone();
-        let set_properties = directive_options.set_properties.clone();
-
         let cached = cache_handle.get_or_compute_compose(
             &cache_key,
             Some(&persistent_ctx),
@@ -1484,7 +1544,8 @@ impl<'a> TransclusionEngine<'a> {
                 let mut child_options = options
                     .clone()
                     .with_replace_parent_wins(replace_parent_wins)
-                    .with_one_off_replace(one_off.clone());
+                    .with_one_off_replace(one_off.clone())
+                    .with_request_context(child_context.clone());
                 child_options.external_state = Some(inherited.clone());
                 child_options = child_options.with_accepted_source_file(path_buf.clone());
                 // Recursive graph reuse: hand the child its OWN preflight
@@ -1499,22 +1560,6 @@ impl<'a> TransclusionEngine<'a> {
                     .and_then(|graph| graph.child_for_source(&path_buf).cloned());
 
                 let mut compose_runtime = runtime.clone_for_child();
-                let mut child = compose_runtime.load_markdown(path)?;
-
-                // Apply the three-layer set overlay on the child's frontmatter
-                // before any of its pre-op stages observe it. Keeping this
-                // scoped inside the closure preserves the rule that
-                // grandchildren referenced by the child's own `::file`
-                // directives do NOT inherit this parent-applied overlay.
-                if set_object.is_some() || !set_properties.is_empty() {
-                    let base_indexmap = std::mem::take(child.frontmatter_mut().as_map_mut());
-                    let base_map: serde_json::Map<String, Value> =
-                        base_indexmap.into_iter().collect();
-                    let overlaid =
-                        state::apply_set_overrides(&base_map, set_object.as_ref(), &set_properties);
-                    *child.frontmatter_mut().as_map_mut() = overlaid.into_iter().collect();
-                }
-
                 let child_report =
                     child.run_compose_pipeline_internal(child_options, &mut compose_runtime)?;
                 runtime.merge_child(&compose_runtime);
@@ -1523,9 +1568,13 @@ impl<'a> TransclusionEngine<'a> {
                     content: child.content().to_string(),
                     report: child_report,
                     dependencies: compose_runtime.dependencies().to_vec(),
+                    context_groups: compose_runtime
+                        .context_groups()
+                        .union(child_context.capture_requirements()),
                 })
             },
         )?;
+        runtime.record_context_groups(&cached.context_groups);
 
         if let Some(dependency) = cache_handle.compose_dependency_ref(&persistent_ctx) {
             runtime.record_dependency(dependency);

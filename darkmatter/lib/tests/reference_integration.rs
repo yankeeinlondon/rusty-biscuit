@@ -72,8 +72,9 @@ fn reference_options(repo_root: &std::path::Path) -> ComposeOptions {
     // Demand-driven capture: `ComposeOptions::new()` scans git, repo, file
     // changes, languages, docs, OS, hardware and GPU rooted at the real working
     // tree on every call. These fixtures compose throwaway documents in a temp
-    // repository and read no `ctx.*`, so the scan is pure cost — and `ctx.*`
-    // still captures its group on demand during evaluation if one appears.
+    // repository and read no `ctx.*`, so the scan is pure cost. The context is
+    // caller-supplied and frozen: a `ctx.*` read of another group would fail
+    // with `ContextNotCaptured`.
     ComposeOptions::new_with_context(ComposeContext::capture_for_content(repo_root, ""))
         .with_file_resolution_context(context)
 }

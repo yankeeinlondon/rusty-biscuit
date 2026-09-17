@@ -256,7 +256,16 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
             // Objects must pass through the lookup's string hook because some
             // production lookups apply configured name coercion there. Scalars
             // stay on the single-lookup fast path.
-            let value = match self.state.get(name) {
+            let resolved = match self.state.get_checked(name) {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    return EvalResult::Error {
+                        error,
+                        original: expr.to_string(),
+                    };
+                }
+            };
+            let value = match resolved {
                 Some(array @ Value::Array(_)) => scalar_string(&array),
                 Some(Value::Object(_)) => self.state.get_string(name),
                 None | Some(Value::Null) => String::new(),

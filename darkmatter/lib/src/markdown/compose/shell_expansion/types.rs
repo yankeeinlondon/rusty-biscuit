@@ -526,6 +526,18 @@ pub enum ShellExpansionError {
         message: String,
     },
 
+    /// A frontmatter `$()` ternary's condition or branch expression failed to
+    /// interpolate or evaluate. The typed cause is kept so a caller can tell a
+    /// missing runtime context capture from an authoring mistake.
+    #[error("Shell directive expression error at {origin}: {message}")]
+    ExpressionEvaluation {
+        ctx: Box<SourceContext>,
+        origin: ShellCommandOrigin,
+        message: String,
+        #[source]
+        cause: Box<crate::markdown::compose::expression::ExpressionError>,
+    },
+
     #[error("Command not found: '{command}' at {origin}")]
     CommandNotFound {
         ctx: Box<SourceContext>,
@@ -620,8 +632,9 @@ impl ShellExpansionError {
     /// The authored shell command this error is about, when the variant carries
     /// one.
     ///
-    /// `ParseDirective`, `PolicyIo`, and `Preflight` describe failures that are
-    /// not scoped to a single resolved command, so they return `None`.
+    /// `ParseDirective`, `ExpressionEvaluation`, `PolicyIo`, and `Preflight`
+    /// describe failures that are not scoped to a single resolved command, so
+    /// they return `None`.
     pub fn command(&self) -> Option<&str> {
         match self {
             Self::CommandNotFound { command, .. }
@@ -632,7 +645,10 @@ impl ShellExpansionError {
             | Self::DynamicCommandShape { command, .. }
             | Self::Timeout { command, .. }
             | Self::ExecutionFailed { command, .. } => Some(command),
-            Self::ParseDirective { .. } | Self::PolicyIo { .. } | Self::Preflight(_) => None,
+            Self::ParseDirective { .. }
+            | Self::ExpressionEvaluation { .. }
+            | Self::PolicyIo { .. }
+            | Self::Preflight(_) => None,
         }
     }
 }
@@ -662,6 +678,22 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint("Body syntax: <cyan>::shell \"command\"</cyan>. Frontmatter syntax: <cyan>key: $(command)</cyan>."),
+
+            ShellExpansionError::ExpressionEvaluation {
+                ctx,
+                origin,
+                message,
+                ..
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ShellExpansionError",
+                    "expression evaluation failed",
+                ))
+                .body(vec![
+                    Prose::new(format!("<dim>Origin:</dim> {origin}\n<dim>Message:</dim> {message}")),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("Frontmatter ternary syntax: <cyan>key: $(condition ? command : command)</cyan>."),
 
             ShellExpansionError::CommandNotFound {
                 ctx,
@@ -1309,6 +1341,11 @@ pub(crate) struct PipelineRuntime {
     pub cache: crate::markdown::compose::cache::RunLocalCache,
     dependencies: Vec<crate::markdown::compose::cache::types::DependencyRef>,
     pub remote_fetch: crate::markdown::compose::remote_fetch::RemoteFetchRuntime,
+    /// The request's shared runtime context, grown as sources name groups.
+    pub context_epoch: crate::markdown::compose::context::authority::SharedRequestContextEpoch,
+    /// Every context group read by a source composed under this runtime — the
+    /// context-group closure a cached result of this subtree depends on.
+    context_groups: crate::markdown::compose::ContextRequirements,
 }
 
 impl PipelineRuntime {
@@ -1338,6 +1375,8 @@ impl PipelineRuntime {
             cache,
             dependencies: Vec::new(),
             remote_fetch,
+            context_epoch: Default::default(),
+            context_groups: crate::markdown::compose::ContextRequirements::from_groups([]),
         }
     }
 
@@ -1364,6 +1403,8 @@ impl PipelineRuntime {
             cache,
             dependencies: Vec::new(),
             remote_fetch,
+            context_epoch: Default::default(),
+            context_groups: crate::markdown::compose::ContextRequirements::from_groups([]),
         }
     }
 
@@ -1376,12 +1417,16 @@ impl PipelineRuntime {
             cache: self.cache.clone(),
             dependencies: Vec::new(),
             remote_fetch: self.remote_fetch.clone(),
+            context_epoch: std::sync::Arc::clone(&self.context_epoch),
+            context_groups: crate::markdown::compose::ContextRequirements::from_groups([]),
         }
     }
 
-    /// Merges a child runtime's stats back into this runtime.
+    /// Merges a child runtime's stats and context-group closure back into this
+    /// runtime.
     pub fn merge_child(&mut self, child: &Self) {
         self.transclusion.merge_child(&child.transclusion);
+        self.record_context_groups(&child.context_groups);
     }
 
     pub fn record_dependency(
@@ -1393,6 +1438,14 @@ impl PipelineRuntime {
 
     pub fn dependencies(&self) -> &[crate::markdown::compose::cache::types::DependencyRef] {
         &self.dependencies
+    }
+
+    pub fn record_context_groups(&mut self, groups: &crate::markdown::compose::ContextRequirements) {
+        self.context_groups = self.context_groups.union(groups);
+    }
+
+    pub fn context_groups(&self) -> &crate::markdown::compose::ContextRequirements {
+        &self.context_groups
     }
 
     pub fn load_markdown(&self, path: &std::path::Path) -> MarkdownResult<Markdown> {

@@ -46,7 +46,8 @@ impl Markdown {
             }
             ComposeOperation::Interpolation => {
                 report.interpolations_applied =
-                    inline::interpolation::run_stage(self, state, options, runtime, report)?;
+                    inline::interpolation::run_stage(self, state, options, runtime, report)
+                        .map_err(|e| e.with_on_disk_source(&self.full_source_context_for_errors()))?;
                 Ok(())
             }
             ComposeOperation::ShellExpansion => {
@@ -378,6 +379,9 @@ impl Markdown {
                 Ok(resolved) => resolved,
                 Err(failure) => {
                     let (anchor, error) = *failure;
+                    // A child that cannot read its runtime context would be
+                    // replaced by a notice: the partially composed document
+                    // the missing-capture contract forbids.
                     let is_structural = matches!(
                         error,
                         MarkdownError::Transclusion(ref inner)
@@ -387,7 +391,7 @@ impl Markdown {
                                     | transclusion::TransclusionError::MaxDepthExceeded { .. }
                                     | transclusion::TransclusionError::RemoteFetchFailed { .. }
                             )
-                    );
+                    ) || error.missing_runtime_context().is_some();
                     if is_structural || options.fail_fast {
                         return Err(error);
                     }

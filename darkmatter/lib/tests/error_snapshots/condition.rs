@@ -2,6 +2,8 @@
 
 use darkmatter::markdown::compose::conditions::ConditionError;
 
+use darkmatter::markdown::compose::expression::ExpressionError;
+
 use crate::helpers::{assert_contains_all, render, test_ctx_lines};
 
 #[test]
@@ -36,7 +38,10 @@ fn eval_points_at_state() {
         ctx: Box::new(test_ctx_lines(15, "test.md")),
         expr: "length(items) > 0".into(),
         line: 10,
-        message: "items not found".into(),
+        cause: Box::new(ExpressionError::Other {
+            function: "length".into(),
+            message: "items not found".into(),
+        }),
     };
     let out = render(&err);
     assert_contains_all(

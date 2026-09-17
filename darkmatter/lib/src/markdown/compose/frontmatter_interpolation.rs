@@ -28,7 +28,10 @@
 //! second time to resolve those keys against the shell-expanded values.
 
 use super::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
-use super::expression::{EvaluationLookup, Expr, ExpressionFinder, ResolutionContext, doc_namespace, parse};
+use super::expression::{
+    EvaluationLookup, Expr, ExpressionError, ExpressionFinder, ResolutionContext, doc_namespace,
+    parse,
+};
 use super::interpolation::{Evaluator, convert_literals, interpolate_value, ScanMode};
 use super::{ComposeContext, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
@@ -124,6 +127,13 @@ impl EvaluationLookup for FrontmatterSeedState {
 
         // Simple key in seed data
         self.data.get(path).cloned()
+    }
+
+    fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
+        match path.strip_prefix("ctx.") {
+            Some(ctx_key) => self.context.classify_ctx_key(ctx_key).into_checked(|| self.context.get_effective(ctx_key)),
+            None => Ok(self.get(path)),
+        }
     }
 
     fn get_string(&self, path: &str) -> String {
@@ -324,6 +334,9 @@ pub(crate) struct FrontmatterInterpolationReport {
     pub replacements: usize,
     /// Warnings generated during rewrite.
     pub warnings: Vec<ComposeWarning>,
+    /// Best-effort only: the first key error that was a missing runtime
+    /// context capture. The compose pass raises the same error for that key.
+    pub missing_runtime_context: Option<MarkdownError>,
 }
 
 /// Interpolates templated frontmatter values using seed (non-templated) values.
@@ -408,6 +421,12 @@ pub(crate) fn interpolate_frontmatter_best_effort(
     )
 }
 
+fn record_missing_runtime_context(first: &mut Option<MarkdownError>, error: MarkdownError) {
+    if first.is_none() && error.missing_runtime_context().is_some() {
+        *first = Some(error);
+    }
+}
+
 /// Shared implementation behind [`interpolate_frontmatter`] and
 /// [`interpolate_frontmatter_best_effort`]. When `best_effort` is `true`, a
 /// per-key rewrite error is skipped (the key is left unresolved) rather than
@@ -469,6 +488,7 @@ fn interpolate_frontmatter_impl(
         return Ok(FrontmatterInterpolationReport {
             replacements: 0,
             warnings: vec![],
+            missing_runtime_context: None,
         });
     }
 
@@ -538,6 +558,7 @@ fn interpolate_frontmatter_impl(
     // dependents are propagated into this set and left unresolved, mirroring the
     // shell-pending deferral.
     let mut errored: HashSet<String> = HashSet::new();
+    let mut missing_runtime_context: Option<MarkdownError> = None;
     let mut total_replacements = 0;
     let mut all_warnings = Vec::new();
 
@@ -606,7 +627,8 @@ fn interpolate_frontmatter_impl(
             };
             let (new_value, count, mut warnings) = match outcome {
                 Ok(triple) => triple,
-                Err(_) if best_effort => {
+                Err(error) if best_effort => {
+                    record_missing_runtime_context(&mut missing_runtime_context, error);
                     // Record the failure and mark resolved so the fixpoint
                     // loop makes progress and the fallback pass still runs
                     // for the other keys; leave this key's original
@@ -684,7 +706,10 @@ fn interpolate_frontmatter_impl(
             Ok(triple) => triple,
             // Best-effort: leave this key's original value in place and keep
             // resolving the rest (see [`interpolate_frontmatter_best_effort`]).
-            Err(_) if best_effort => continue,
+            Err(error) if best_effort => {
+                record_missing_runtime_context(&mut missing_runtime_context, error);
+                continue;
+            }
             Err(e) => return Err(e),
         };
 
@@ -707,6 +732,7 @@ fn interpolate_frontmatter_impl(
     Ok(FrontmatterInterpolationReport {
         replacements: total_replacements,
         warnings: all_warnings,
+        missing_runtime_context,
     })
 }
 
@@ -1611,8 +1637,12 @@ mod tests {
                 "review_file": "{{ctx.area}}/review.md",
                 "summary": "{{ctx.current_package_area}}"
             }));
+            let context = ComposeContext::fixed_for_testing_with([
+                ("area", json!("darkmatter")),
+                ("current_package_area", json!("darkmatter")),
+            ]);
             let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new(), &[]).unwrap();
+                interpolate_frontmatter(&mut fm, &context, false, false, None, &HashSet::new(), &[]).unwrap();
             assert!(
                 !report
                     .warnings

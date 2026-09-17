@@ -5,7 +5,8 @@
 //! This type was extracted from [`ShortcutLookup`](super::conditions::ShortcutLookup)
 //! so that `ctx.*` resolution can be composed on top of any other lookup.
 
-use super::EvaluationLookup;
+use super::{EvaluationLookup, ExpressionError};
+use crate::markdown::compose::context::checked::CtxLookupOutcome;
 use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -37,23 +38,39 @@ impl<'a> CtxLookup<'a> {
     /// `"ctx.today"`). The bare `"ctx"` token is also accepted and returns
     /// `None` because there is no single value associated with the `ctx`
     /// namespace itself.
+    ///
+    /// A capture that fails to project a cataloged key also returns `None`
+    /// here; [`resolve_ctx_checked`](Self::resolve_ctx_checked) reports it.
     pub fn resolve_ctx(&self, path: &str) -> Option<Value> {
-        let ctx_key = path.strip_prefix("ctx.")?;
+        self.resolve_ctx_checked(path).ok().flatten()
+    }
 
-        // Check cache first
-        if let Some(cached) = self.cache.borrow().get(ctx_key) {
-            return Some(cached.clone());
-        }
+    /// Checked twin of [`resolve_ctx`](Self::resolve_ctx).
+    ///
+    /// The group is captured on demand, so a known key is never
+    /// "not captured" here.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`ExpressionError::ContextProjectionInvariant`] when the
+    /// just-captured group did not project `path`'s cataloged key.
+    pub fn resolve_ctx_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
+        let Some(ctx_key) = path.strip_prefix("ctx.") else {
+            return Ok(None);
+        };
 
-        // Determine which group this key belongs to
-        if let Some(group) = super::super::context::capture::ContextGroup::for_key(ctx_key) {
-            let need_capture = !self.captured.borrow().contains(&group);
-            if need_capture {
-                self.capture_group(group);
-            }
-        }
-
-        self.cache.borrow().get(ctx_key).cloned()
+        let outcome = CtxLookupOutcome::classify(
+            ctx_key,
+            |group| {
+                if !self.captured.borrow().contains(&group) {
+                    self.capture_group(group);
+                }
+                true
+            },
+            |key| self.cache.borrow().get(key).cloned(),
+        );
+        // Every group this lookup reaches is captured, so `NotCaptured` is unreachable.
+        outcome.into_checked(|| None)
     }
 
     /// Captures a single context group and merges its values into the cache.
@@ -72,6 +89,16 @@ impl<'a> CtxLookup<'a> {
         captured.insert(group);
     }
 
+    /// Marks `group` captured without projecting any of its keys: the
+    /// malformed capture behind `ContextProjectionInvariant`.
+    #[cfg(test)]
+    pub(crate) fn mark_captured_without_projection(
+        &self,
+        group: super::super::context::capture::ContextGroup,
+    ) {
+        self.captured.borrow_mut().insert(group);
+    }
+
     /// Returns the set of context groups that have been captured so far.
     #[cfg(test)]
     pub(crate) fn captured_groups(&self) -> Vec<super::super::context::capture::ContextGroup> {
@@ -85,6 +112,13 @@ impl<'a> EvaluationLookup for CtxLookup<'a> {
             return self.resolve_ctx(path);
         }
         None
+    }
+
+    fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
+        if path == "ctx" || path.starts_with("ctx.") {
+            return self.resolve_ctx_checked(path);
+        }
+        Ok(None)
     }
 }
 
@@ -155,6 +189,41 @@ mod tests {
             lookup.get("ctx").is_none(),
             "Bare 'ctx' token should return None"
         );
+    }
+
+    #[test]
+    fn a_capture_missing_a_cataloged_key_is_an_internal_invariant() {
+        let lookup = CtxLookup::new(Path::new("."));
+        lookup.mark_captured_without_projection(ContextGroup::Os);
+
+        assert!(matches!(
+            lookup.get_checked("ctx.os"),
+            Err(ExpressionError::ContextProjectionInvariant { ref key, group: ContextGroup::Os })
+                if key == "os"
+        ));
+        // Evaluation surfaces the typed cause instead of a silent `null`.
+        let expr = crate::markdown::compose::expression::parse("ctx.os").unwrap();
+        assert!(matches!(
+            crate::markdown::compose::expression::evaluate(&expr, &lookup),
+            Err(ExpressionError::ContextProjectionInvariant { .. })
+        ));
+        // The unchecked accessor keeps its `Option` contract, and the group is
+        // not re-captured behind the invariant's back.
+        assert!(lookup.resolve_ctx("ctx.os").is_none());
+        assert_eq!(lookup.captured_groups(), vec![ContextGroup::Os]);
+    }
+
+    #[test]
+    fn checked_resolution_captures_only_the_groups_it_reaches() {
+        let lookup = CtxLookup::new(Path::new("."));
+
+        assert!(lookup.get_checked("ctx.zzz").unwrap().is_none());
+        assert!(lookup.get_checked("ctx").unwrap().is_none());
+        assert!(lookup.get_checked("env.HOME").unwrap().is_none());
+        assert!(lookup.captured_groups().is_empty(), "unknown keys capture nothing");
+
+        assert!(lookup.get_checked("ctx.today").unwrap().is_some());
+        assert_eq!(lookup.captured_groups(), vec![ContextGroup::DateTime]);
     }
 
     /// `ctx.agent` and `ctx.model` resolve lazily and capture only the Agent

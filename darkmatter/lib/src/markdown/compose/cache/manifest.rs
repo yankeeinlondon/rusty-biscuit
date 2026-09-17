@@ -66,6 +66,12 @@ pub struct ComposedDocumentManifest {
     pub payload_blob_hash: u64,
     /// xxHash of serialized warnings (for report reconstruction).
     pub warnings_hash: u64,
+    /// Names of every runtime-context group a source in the composed subtree
+    /// read. Required: a manifest written before closures were recorded fails
+    /// to deserialize and is a miss, never a hit that skipped the check.
+    pub context_closure_groups: Vec<String>,
+    /// `context_groups_hash` of those groups' values when the entry was written.
+    pub context_closure_hash: u64,
     /// When this artifact was created.
     pub created_at: SystemTime,
     /// When this artifact was last read from cache.
@@ -177,6 +183,17 @@ impl OperationResultManifest {
 }
 
 impl ComposedDocumentManifest {
+    /// The recorded context closure, or `None` when a group name is unknown.
+    pub(crate) fn context_closure_requirements(
+        &self,
+    ) -> Option<crate::markdown::compose::ContextRequirements> {
+        self.context_closure_groups
+            .iter()
+            .map(|name| crate::markdown::compose::ContextGroup::from_name(name))
+            .collect::<Option<Vec<_>>>()
+            .map(crate::markdown::compose::ContextRequirements::from_groups)
+    }
+
     /// Updates the last-accessed timestamp to now.
     pub fn touch(&mut self) {
         self.last_accessed_at = SystemTime::now();
@@ -299,6 +316,8 @@ mod tests {
             dependencies: vec![],
             payload_blob_hash: 44444,
             warnings_hash: 55555,
+            context_closure_groups: Vec::new(),
+            context_closure_hash: 0,
             created_at: initial_time,
             last_accessed_at: initial_time,
             expires_at: None,
@@ -324,6 +343,8 @@ mod tests {
             dependencies: vec![],
             payload_blob_hash: 44444,
             warnings_hash: 55555,
+            context_closure_groups: Vec::new(),
+            context_closure_hash: 0,
             created_at: SystemTime::now(),
             last_accessed_at: SystemTime::now(),
             expires_at: None,
@@ -347,6 +368,8 @@ mod tests {
             dependencies: vec![],
             payload_blob_hash: 44444,
             warnings_hash: 55555,
+            context_closure_groups: Vec::new(),
+            context_closure_hash: 0,
             created_at: SystemTime::now(),
             last_accessed_at: SystemTime::now(),
             expires_at: Some(future_time),
@@ -370,6 +393,8 @@ mod tests {
             dependencies: vec![],
             payload_blob_hash: 44444,
             warnings_hash: 55555,
+            context_closure_groups: Vec::new(),
+            context_closure_hash: 0,
             created_at: past_time,
             last_accessed_at: past_time,
             expires_at: Some(past_time),
@@ -529,6 +554,8 @@ mod tests {
             dependencies: vec![dep1, dep2],
             payload_blob_hash: 44444,
             warnings_hash: 55555,
+            context_closure_groups: Vec::new(),
+            context_closure_hash: 0,
             created_at: SystemTime::now(),
             last_accessed_at: SystemTime::now(),
             expires_at: None,

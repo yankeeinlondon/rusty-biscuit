@@ -191,6 +191,21 @@ pub trait EvaluationLookup {
     /// - `None` when the path does not resolve
     fn get(&self, path: &str) -> Option<Value>;
 
+    /// Looks up a value by dotted path on the evaluator's error channel.
+    ///
+    /// Expression evaluation reads variables through this method. The default
+    /// delegates to [`get`](Self::get) and never fails. Composition lookups
+    /// override it so a known `ctx.*` variable with no captured value surfaces
+    /// as [`ExpressionError::ContextNotCaptured`] or
+    /// [`ExpressionError::ContextProjectionInvariant`] instead of `None`.
+    ///
+    /// ## Errors
+    ///
+    /// Only overriding implementations fail, and only for `ctx.*` reads.
+    fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
+        Ok(self.get(path))
+    }
+
     /// Looks up a value by path, coercing to a string.
     ///
     /// ## Returns
@@ -388,7 +403,7 @@ pub fn scalar_string(value: &Value) -> String {
 /// ```
 pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, ExpressionError> {
     match expr {
-        Expr::Variable(path) => Ok(lookup.get(path).unwrap_or(Value::Null)),
+        Expr::Variable(path) => Ok(lookup.get_checked(path)?.unwrap_or(Value::Null)),
         Expr::StringLiteral(s) => Ok(Value::String(s.clone())),
         Expr::NumberLiteral(n) => {
             let num = if n.fract() == 0.0 {

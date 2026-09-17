@@ -275,6 +275,32 @@ impl From<crate::markdown::reference::ReferenceError> for MarkdownError {
 pub type MarkdownResult<T> = Result<T, MarkdownError>;
 
 impl MarkdownError {
+    /// The missing runtime context failure somewhere in this error's cause
+    /// chain, if any.
+    ///
+    /// Stage wrappers (page-block and transclusion conditions, frontmatter
+    /// `$()` ternaries, transcluded children) keep the typed
+    /// [`ExpressionError`] as a source, so this finds
+    /// [`ContextNotCaptured`](ExpressionError::ContextNotCaptured) or
+    /// [`ContextProjectionInvariant`](ExpressionError::ContextProjectionInvariant)
+    /// whichever stage raised it.
+    pub fn missing_runtime_context(&self) -> Option<&ExpressionError> {
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            // Wrappers box their cause, and `Box<T>` is its own `dyn Error`.
+            let expression = error
+                .downcast_ref::<ExpressionError>()
+                .or_else(|| error.downcast_ref::<Box<ExpressionError>>().map(AsRef::as_ref));
+            if let Some(expression) = expression
+                && expression.is_missing_runtime_context()
+            {
+                return Some(expression);
+            }
+            current = error.source();
+        }
+        None
+    }
+
     /// Anchors a [`MarkdownError::Interpolation`] to a real on-disk frontmatter
     /// region so the rendered block can show an OSC8-linked prompt file and a
     /// focused YAML excerpt.

@@ -51,6 +51,8 @@ pub(crate) struct ComposeResult {
     pub report: ComposeReport,
     /// Direct cache dependencies of this composed document.
     pub dependencies: Vec<DependencyRef>,
+    /// Every runtime-context group read by a source in this subtree.
+    pub context_groups: crate::markdown::compose::ContextRequirements,
 }
 
 /// The cached result of an individual operation (code transclusion, TOC linking).
@@ -65,11 +67,26 @@ pub(crate) struct OperationResult {
 /// call site. Combined with `body_semantic_hash` from the document snapshot,
 /// these form the full multi-dimensional persistent cache key via
 /// [`compose_entry_key`](super::hashing::compose_entry_key).
-pub(crate) struct PersistentContext {
+pub(crate) struct PersistentContext<'a> {
     pub source_id: u64,
     pub state_hash: u64,
     pub context_hash: u64,
     pub options_hash: u64,
+    /// Answers the context-closure half of the entry identity. Without it, a
+    /// manifest's recorded closure is not checked.
+    pub context_closure: Option<&'a dyn ContextClosureIdentity>,
+}
+
+/// The current request's view of a persisted entry's context closure.
+///
+/// `context_hash` in the entry key covers only the groups the composed source
+/// itself saw; a descendant may have read more. A persistent hit is fresh only
+/// when the request covers every recorded group and their values hash the same.
+pub(crate) trait ContextClosureIdentity {
+    /// [`context_groups_hash`](super::hashing::context_groups_hash) of the
+    /// request's values for `groups`, or `None` when the request context does
+    /// not (and may not be grown to) cover them.
+    fn closure_hash(&self, groups: &crate::markdown::compose::ContextRequirements) -> Option<u64>;
 }
 
 /// Pre-computed source state for a persistable operation result.
@@ -255,7 +272,7 @@ impl RunLocalCache {
     pub fn get_or_compute_compose<F>(
         &self,
         key: &str,
-        persistent_ctx: Option<&PersistentContext>,
+        persistent_ctx: Option<&PersistentContext<'_>>,
         freshness_mode: CacheFreshnessMode,
         persistent_eligible: bool,
         compute: F,
@@ -634,7 +651,7 @@ impl RunLocalCache {
     fn try_persistent_read_compose(
         &self,
         key: &str,
-        persistent_ctx: Option<&PersistentContext>,
+        persistent_ctx: Option<&PersistentContext<'_>>,
         freshness_mode: CacheFreshnessMode,
     ) -> Option<PersistentLookup<ComposeResult>> {
         let store = self.persistent.as_ref()?;
@@ -656,6 +673,18 @@ impl RunLocalCache {
                 }
             };
 
+        // The context closure is identity, not freshness: a mismatch is a
+        // different entry, never a stale fallback — otherwise a request that
+        // cannot capture a group a descendant reads would reuse output rendered
+        // from another request's values instead of failing.
+        let context_groups = manifest.context_closure_requirements()?;
+        if let Some(closure) = persistent_ctx.and_then(|ctx| ctx.context_closure)
+            && closure.closure_hash(&context_groups) != Some(manifest.context_closure_hash)
+        {
+            tracing::debug!("Persistent compose cache context closure differs for {}", key);
+            return None;
+        }
+
         let content = self.read_blob_string(key, manifest.payload_blob_hash)?;
 
         let is_stale = match freshness_mode {
@@ -671,6 +700,7 @@ impl RunLocalCache {
                 content,
                 report: ComposeReport::new(),
                 dependencies: manifest.dependencies.clone(),
+                context_groups: context_groups.clone(),
             }));
         }
 
@@ -683,6 +713,7 @@ impl RunLocalCache {
             content,
             report: ComposeReport::new(),
             dependencies: manifest.dependencies.clone(),
+            context_groups,
         };
 
         if is_stale {
@@ -746,7 +777,7 @@ impl RunLocalCache {
     fn try_persistent_write_compose(
         &self,
         key: &str,
-        persistent_ctx: Option<&PersistentContext>,
+        persistent_ctx: Option<&PersistentContext<'_>>,
         result: &ComposeResult,
     ) {
         use super::hashing::{closure_hash, compose_entry_key};
@@ -784,6 +815,20 @@ impl RunLocalCache {
             }
         };
 
+        let context_closure_hash = match persistent_ctx.and_then(|ctx| ctx.context_closure) {
+            Some(closure) => match closure.closure_hash(&result.context_groups) {
+                Some(hash) => hash,
+                None => return,
+            },
+            None => 0,
+        };
+        let mut context_closure_groups: Vec<String> = result
+            .context_groups
+            .iter()
+            .map(|group| group.name().to_string())
+            .collect();
+        context_closure_groups.sort_unstable();
+
         let deps = result.dependencies.clone();
         let c_hash = closure_hash(self_hash, &deps);
 
@@ -798,6 +843,8 @@ impl RunLocalCache {
             dependencies: deps,
             payload_blob_hash: blob_hash,
             warnings_hash: 0,
+            context_closure_groups,
+            context_closure_hash,
             created_at: std::time::SystemTime::now(),
             last_accessed_at: std::time::SystemTime::now(),
             expires_at: None,
@@ -961,7 +1008,7 @@ impl RunLocalCache {
         Some(snapshot)
     }
 
-    fn compose_entry_key(&self, ctx: &PersistentContext) -> Option<u64> {
+    fn compose_entry_key(&self, ctx: &PersistentContext<'_>) -> Option<u64> {
         use super::hashing::compose_entry_key;
 
         let snapshot = self.get_document_snapshot(ctx.source_id)?;
@@ -1093,7 +1140,7 @@ impl RunLocalCache {
 
     pub fn compose_dependency_ref(
         &self,
-        persistent_ctx: &PersistentContext,
+        persistent_ctx: &PersistentContext<'_>,
     ) -> Option<DependencyRef> {
         let store = self.persistent.as_ref()?;
         let entry_key = self.compose_entry_key(persistent_ctx)?;
@@ -1183,6 +1230,7 @@ mod tests {
                         content: format!("result-{}", call_count),
                         report: ComposeReport::new(),
                         dependencies: vec![],
+                        context_groups: Default::default(),
                     })
                 })
                 .unwrap();
@@ -1207,6 +1255,7 @@ mod tests {
                     content: "hello".to_string(),
                     report: ComposeReport::new(),
                     dependencies: vec![],
+                    context_groups: Default::default(),
                 })
             })
             .unwrap();
@@ -1218,6 +1267,7 @@ mod tests {
                     content: "should not compute".to_string(),
                     report: ComposeReport::new(),
                     dependencies: vec![],
+                    context_groups: Default::default(),
                 })
             })
             .unwrap();
@@ -1264,6 +1314,7 @@ mod tests {
                                     content: "shared-result".to_string(),
                                     report: ComposeReport::new(),
                                     dependencies: vec![],
+                                    context_groups: Default::default(),
                                 })
                             },
                         )
@@ -1328,6 +1379,7 @@ mod tests {
                     content: "original".to_string(),
                     report: ComposeReport::new(),
                     dependencies: vec![],
+                    context_groups: Default::default(),
                 })
             })
             .unwrap();
@@ -1351,6 +1403,7 @@ mod tests {
                     content: "refreshed".to_string(),
                     report: ComposeReport::new(),
                     dependencies: vec![],
+                    context_groups: Default::default(),
                 })
             })
             .unwrap();
@@ -1474,6 +1527,7 @@ mod tests {
                     content: "compose-content".to_string(),
                     report: ComposeReport::new(),
                     dependencies: vec![],
+                    context_groups: Default::default(),
                 })
             })
             .unwrap();
@@ -1510,12 +1564,14 @@ mod tests {
             state_hash: 0,
             context_hash: 0,
             options_hash: 0,
+            context_closure: None,
         };
         let child_ctx = PersistentContext {
             source_id: source_id_hash(&child_source),
             state_hash: 0,
             context_hash: 0,
             options_hash: 0,
+            context_closure: None,
         };
 
         cache
@@ -1529,6 +1585,7 @@ mod tests {
                         content: "# Child\n\nVersion 1\n".to_string(),
                         report: ComposeReport::new(),
                         dependencies: vec![],
+                        context_groups: Default::default(),
                     })
                 },
             )
@@ -1547,6 +1604,7 @@ mod tests {
                         content: "# Parent\n\n# Child\n\nVersion 1\n".to_string(),
                         report: ComposeReport::new(),
                         dependencies: vec![child_dep.clone()],
+                        context_groups: Default::default(),
                     })
                 },
             )
@@ -1639,6 +1697,7 @@ mod tests {
             state_hash: 0,
             context_hash: 0,
             options_hash: 0,
+            context_closure: None,
         };
 
         cache
@@ -1652,6 +1711,7 @@ mod tests {
                         content: "# Title\n\nBody\n".to_string(),
                         report: ComposeReport::new(),
                         dependencies: vec![],
+                        context_groups: Default::default(),
                     })
                 },
             )
@@ -1674,6 +1734,7 @@ mod tests {
                         content: "should not compute".to_string(),
                         report: ComposeReport::new(),
                         dependencies: vec![],
+                        context_groups: Default::default(),
                     })
                 },
             )
@@ -1697,6 +1758,7 @@ mod tests {
             state_hash: 0,
             context_hash: 0,
             options_hash: 0,
+            context_closure: None,
         };
 
         // Ineligible: run-local single-flight still works, but nothing is
@@ -1712,6 +1774,7 @@ mod tests {
                         content: "# Title\n\nBody\n".to_string(),
                         report: ComposeReport::new(),
                         dependencies: vec![],
+                        context_groups: Default::default(),
                     })
                 },
             )
@@ -1740,6 +1803,7 @@ mod tests {
                         content: "# Title\n\nBody\n".to_string(),
                         report: ComposeReport::new(),
                         dependencies: vec![],
+                        context_groups: Default::default(),
                     })
                 },
             )
@@ -1766,6 +1830,7 @@ mod tests {
                         content: "# Title\n\nBody\n".to_string(),
                         report: ComposeReport::new(),
                         dependencies: vec![],
+                        context_groups: Default::default(),
                     })
                 },
             )
@@ -1854,12 +1919,14 @@ mod tests {
             state_hash: 0,
             context_hash: 0,
             options_hash: 0,
+            context_closure: None,
         };
         let child_ctx = PersistentContext {
             source_id: source_id_hash(&child_source),
             state_hash: 0,
             context_hash: 0,
             options_hash: 0,
+            context_closure: None,
         };
 
         cache
@@ -1873,6 +1940,7 @@ mod tests {
                         content: "# Child\n\nVersion 1\n".to_string(),
                         report: ComposeReport::new(),
                         dependencies: vec![],
+                        context_groups: Default::default(),
                     })
                 },
             )
@@ -1891,6 +1959,7 @@ mod tests {
                         content: "# Parent\n\n# Child\n\nVersion 1\n".to_string(),
                         report: ComposeReport::new(),
                         dependencies: vec![child_dep.clone()],
+                        context_groups: Default::default(),
                     })
                 },
             )
@@ -1935,12 +2004,14 @@ mod tests {
             state_hash: 0,
             context_hash: 0,
             options_hash: 0,
+            context_closure: None,
         };
         let child_ctx = PersistentContext {
             source_id: source_id_hash(&child_source),
             state_hash: 0,
             context_hash: 0,
             options_hash: 0,
+            context_closure: None,
         };
 
         cache
@@ -1954,6 +2025,7 @@ mod tests {
                         content: "# Child\n\nVersion 1\n".to_string(),
                         report: ComposeReport::new(),
                         dependencies: vec![],
+                        context_groups: Default::default(),
                     })
                 },
             )
@@ -1972,6 +2044,7 @@ mod tests {
                         content: "# Parent\n\n# Child\n\nVersion 1\n".to_string(),
                         report: ComposeReport::new(),
                         dependencies: vec![child_dep.clone()],
+                        context_groups: Default::default(),
                     })
                 },
             )
@@ -1996,6 +2069,7 @@ mod tests {
                         content: "should not compute".to_string(),
                         report: ComposeReport::new(),
                         dependencies: vec![],
+                        context_groups: Default::default(),
                     })
                 },
             )

@@ -37,7 +37,7 @@ use serde_json::Value;
 
 use super::context::effective_state::EffectiveState;
 use super::expression::{
-    EvaluationLookup, Expr, ExpressionFinder, ResolutionContext, parse,
+    EvaluationLookup, Expr, ExpressionError, ExpressionFinder, ResolutionContext, parse,
 };
 use super::interpolation::{Evaluator, interpolate_value};
 use crate::markdown::types::MarkdownError;
@@ -221,6 +221,14 @@ impl<'a> EvaluationLookup for LayeredLookup<'a> {
             return walk_dotted_path(&value, &path[root.len()..]);
         }
         self.state.get(path)
+    }
+
+    fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
+        let root = path.split('.').next().unwrap_or(path);
+        if self.globals.contains_key(root) {
+            return Ok(self.get(path));
+        }
+        self.state.get_checked(path)
     }
 
     fn get_string(&self, path: &str) -> String {

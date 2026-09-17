@@ -236,6 +236,54 @@ impl EffectiveState {
             .or_else(|| self.get_context_value(path))
     }
 
+    /// Checked twin of [`get`](Self::get) for the evaluator channel.
+    ///
+    /// Explicit `ctx.*` paths and the bare-name ctx fallback classify against
+    /// the captured groups before any user-authored `ctx` value is consulted,
+    /// so an authored value cannot mask a missing capture.
+    pub(crate) fn get_checked(
+        &self,
+        path: &str,
+    ) -> Result<Option<Value>, super::super::expression::ExpressionError> {
+        if super::super::expression::doc_namespace::is_doc_namespace(path) {
+            return Ok(self.get(path));
+        }
+        if let Some(ctx_key) = path.strip_prefix("ctx.") {
+            return self
+                .classify_context_value(ctx_key)
+                .into_checked(|| self.get_context_value(ctx_key));
+        }
+        if path.starts_with("env.") {
+            return Ok(self.get(path));
+        }
+        match self.get_nested_value(path) {
+            Some(value) => Ok(Some(value)),
+            None => self
+                .classify_context_value(path)
+                .into_checked_bare_name(|| self.get_context_value(path)),
+        }
+    }
+
+    /// Classifies `ctx.<key>`; a present value keeps the merge order of
+    /// [`get_context_value`](Self::get_context_value): user-authored `ctx`
+    /// first, then the captured projection.
+    fn classify_context_value(&self, key: &str) -> super::checked::CtxLookupOutcome {
+        use super::checked::CtxLookupOutcome;
+
+        match self.context.classify_ctx_key(key) {
+            CtxLookupOutcome::Present(effective) => {
+                let authored = self.data.get("ctx").and_then(|ctx| ctx.get(key));
+                CtxLookupOutcome::Present(
+                    authored
+                        .or_else(|| self.context.get(key))
+                        .cloned()
+                        .unwrap_or(effective),
+                )
+            }
+            other => other,
+        }
+    }
+
     /// Gets a string value, coercing types as needed.
     ///
     /// - `null` -> `""`
@@ -354,6 +402,13 @@ impl super::super::expression::EvaluationLookup for EffectiveState {
         self.get(path)
     }
 
+    fn get_checked(
+        &self,
+        path: &str,
+    ) -> Result<Option<Value>, super::super::expression::ExpressionError> {
+        self.get_checked(path)
+    }
+
     fn get_string(&self, path: &str) -> String {
         self.get_string(path)
     }
@@ -411,6 +466,13 @@ impl<'a> ResolvingLookup<'a> {
 impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
         self.state.get(path)
+    }
+
+    fn get_checked(
+        &self,
+        path: &str,
+    ) -> Result<Option<Value>, super::super::expression::ExpressionError> {
+        self.state.get_checked(path)
     }
 
     fn get_string(&self, path: &str) -> String {

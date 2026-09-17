@@ -312,9 +312,12 @@ pub(crate) fn interpolation_block(
                         body.push(Prose::new("Defined in:"));
                         body.push(ctx.linked_path_prose());
                     }
-                    let excerpt = ctx.focused_yaml_excerpt(&involved_keys(key, expression));
-                    if !excerpt.content().is_empty() {
-                        body.push(excerpt);
+                    // A body expression has no frontmatter region to excerpt.
+                    if key.is_some() {
+                        let excerpt = ctx.focused_yaml_excerpt(&involved_keys(key, expression));
+                        if !excerpt.content().is_empty() {
+                            body.push(excerpt);
+                        }
                     }
                 }
                 SourceRef::Effective {
@@ -358,6 +361,35 @@ pub(crate) fn interpolation_block(
                     "Confirm the path is correct, or guard an optional reference with \
                      `file_exists(...)` so a missing file is not treated as an error.",
                 )
+        }
+        ExpressionError::ContextNotCaptured { .. }
+        | ExpressionError::ContextProjectionInvariant { .. } => {
+            let mut body = vec![Prose::new(format!(
+                "{scope} failed to evaluate <dim>`{}`</dim>:\n\n{}",
+                Prose::escape_text(expression),
+                Prose::escape_text(&cause.to_string())
+            ))];
+            if let SourceRef::OnDisk(ctx) = source
+                && ctx.display != std::path::Path::new("unknown")
+            {
+                body.push(Prose::new("Defined in:"));
+                body.push(ctx.linked_path_prose());
+            }
+            let (headline, hint) = match cause {
+                ExpressionError::ContextNotCaptured { .. } => (
+                    "runtime context not captured",
+                    "Composition reads `ctx.*` only from the request's captured context \
+                     and never captures a group on demand.",
+                ),
+                _ => (
+                    "runtime context projection invariant",
+                    "This is a Darkmatter bug; please report it with the variable name.",
+                ),
+            };
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("MarkdownError", headline))
+                .body(body)
+                .hint(hint)
         }
         other => {
             let body = format!(

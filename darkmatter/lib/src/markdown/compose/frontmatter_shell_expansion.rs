@@ -26,7 +26,9 @@
 //! `"$( file_exists('x') ? 'a' : 'b' )"` — is a user error and is rejected with a
 //! diagnostic suggesting `{{ … }}` interpolation instead.
 
-use super::expression::{doc_namespace, evaluate, is_truthy, parse, parse_condition, scalar_string};
+use super::expression::{
+    ExpressionError, doc_namespace, evaluate, is_truthy, parse, parse_condition, scalar_string,
+};
 use super::frontmatter_interpolation::FrontmatterSeedState;
 use super::interpolation::{Evaluator, ScanMode, interpolate_text};
 use super::shell_expansion::store::resolve_policy_paths;
@@ -41,7 +43,7 @@ use super::shell_expansion::{
 use super::{ComposeOptions, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::span::{SourceSpan, Spanned};
-use crate::markdown::types::MarkdownResult;
+use crate::markdown::types::{MarkdownError, MarkdownResult};
 use biscuit_terminal::errors::SourceContext;
 use rayon::prelude::*;
 use serde_json::Value;
@@ -1529,8 +1531,10 @@ pub(crate) fn directive_reachable_pipelines(
 /// boolean (`false`) before the truthy check runs. Condition-mode
 /// parsing additionally enables infix `&&` / `||` / `!` and comparisons
 /// in the condition, matching the spec's "single boolean expression"
-/// contract. Parse, interpolation, and evaluation failures surface as
-/// [`ShellExpansionError::ParseDirective`] tagged with the frontmatter key.
+/// contract. Parse failures surface as [`ShellExpansionError::ParseDirective`]
+/// and interpolation or evaluation failures as
+/// [`ShellExpansionError::ExpressionEvaluation`], both tagged with the
+/// frontmatter key.
 fn evaluate_ternary_condition(
     condition_source: &str,
     state: &FrontmatterSeedState,
@@ -1546,10 +1550,11 @@ fn evaluate_ternary_condition(
         "frontmatter-shell-ternary-condition",
     )
     .map_err(|err| {
-        frontmatter_parse_error(
+        frontmatter_interpolation_error(
             key,
             ctx,
-            format!("Frontmatter shell ternary condition interpolation failed: {err}"),
+            "Frontmatter shell ternary condition interpolation failed",
+            err,
         )
     })?;
 
@@ -1574,10 +1579,11 @@ fn evaluate_ternary_condition(
     })?;
 
     let value = evaluate(&parsed, state).map_err(|error| {
-        frontmatter_parse_error(
+        frontmatter_expression_error(
             key,
             ctx,
             format!("Frontmatter shell ternary condition must be a boolean expression: {error}"),
+            error,
         )
     })?;
 
@@ -1725,13 +1731,11 @@ fn evaluate_value_branch(
         "frontmatter-shell-ternary-value",
     )
     .map_err(|err| {
-        frontmatter_parse_error(
+        frontmatter_interpolation_error(
             key,
             ctx,
-            format!(
-                "Frontmatter shell ternary {} interpolation failed: {err}",
-                position.name()
-            ),
+            &format!("Frontmatter shell ternary {} interpolation failed", position.name()),
+            err,
         )
     })?;
 
@@ -1749,13 +1753,14 @@ fn evaluate_value_branch(
     })?;
 
     let value = evaluate(&parsed, state).map_err(|error| {
-        frontmatter_parse_error(
+        frontmatter_expression_error(
             key,
             ctx,
             format!(
                 "Frontmatter shell ternary {} evaluation failed: {error}",
                 position.name()
             ),
+            error,
         )
     })?;
 
@@ -1767,7 +1772,7 @@ fn evaluate_value_branch(
 ///
 /// Interpolation runs in [`ScanMode::Plain`] so the entire branch is
 /// scanned. Failures are surfaced as branch-tagged
-/// [`ShellExpansionError::ParseDirective`] errors.
+/// [`ShellExpansionError::ExpressionEvaluation`] errors.
 fn interpolate_branch_text(
     original_text: &str,
     state: &FrontmatterSeedState,
@@ -1784,13 +1789,11 @@ fn interpolate_branch_text(
         "frontmatter-shell-ternary-branch",
     )
     .map_err(|err| {
-        frontmatter_parse_error(
+        frontmatter_interpolation_error(
             key,
             ctx,
-            format!(
-                "Frontmatter shell ternary {} interpolation failed: {err}",
-                position.name()
-            ),
+            &format!("Frontmatter shell ternary {} interpolation failed", position.name()),
+            err,
         )
     })?;
     Ok(rewrite.output)
@@ -1943,6 +1946,39 @@ fn frontmatter_parse_error(
             line: frontmatter_key_line(ctx, key),
         },
         message: message.into(),
+    }
+}
+
+fn frontmatter_expression_error(
+    key: &str,
+    ctx: &SourceContext,
+    message: String,
+    cause: ExpressionError,
+) -> ShellExpansionError {
+    ShellExpansionError::ExpressionEvaluation {
+        ctx: Box::new(ctx.clone()),
+        origin: ShellCommandOrigin::Frontmatter {
+            key: key.to_string(),
+            line: frontmatter_key_line(ctx, key),
+        },
+        message,
+        cause: Box::new(cause),
+    }
+}
+
+/// Wraps an `interpolate_text` failure, keeping its typed cause when it has one.
+fn frontmatter_interpolation_error(
+    key: &str,
+    ctx: &SourceContext,
+    summary: &str,
+    error: MarkdownError,
+) -> ShellExpansionError {
+    let message = format!("{summary}: {error}");
+    match error {
+        MarkdownError::Interpolation { cause, .. } => {
+            frontmatter_expression_error(key, ctx, message, *cause)
+        }
+        _ => frontmatter_parse_error(key, ctx, message),
     }
 }
 

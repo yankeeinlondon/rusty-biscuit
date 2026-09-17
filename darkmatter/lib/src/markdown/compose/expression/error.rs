@@ -31,6 +31,7 @@
 //!   by [`ExpressionError::Other`], which always keeps the function name so it is
 //!   never *less* informative than today's string.
 
+use crate::markdown::compose::context::ContextGroup;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -305,6 +306,36 @@ pub enum ExpressionError {
         message: String,
     },
 
+    /// A cataloged `ctx.*` variable whose owning capture group the composition
+    /// request never captured. This is a caller or pipeline contract violation,
+    /// not a fact about the host: a captured group that found nothing projects
+    /// a typed `null`/empty value instead.
+    #[error(
+        "context variable `ctx.{key}` belongs to the {group:?} capture group, \
+         which this composition request did not capture; capture the document's \
+         `ContextRequirements` (e.g. `ComposeContext::capture_for_document`) or \
+         build options with `ComposeOptions::new()`"
+    )]
+    ContextNotCaptured {
+        /// The bare catalog key (`repo_root` for `ctx.repo_root`).
+        key: String,
+        /// The capture group that owns `key`.
+        group: ContextGroup,
+    },
+
+    /// A captured group whose projection omitted one of its own cataloged keys.
+    /// A Darkmatter internal invariant failure; the caller is not at fault.
+    #[error(
+        "internal error: the {group:?} context capture did not project cataloged \
+         variable `ctx.{key}`; this is a Darkmatter bug"
+    )]
+    ContextProjectionInvariant {
+        /// The bare catalog key missing from the projection.
+        key: String,
+        /// The captured group that should have projected `key`.
+        group: ContextGroup,
+    },
+
     /// Migration catch-all for the long tail of pure builtins not yet
     /// individually classified. Always carries the function name, so it is never
     /// *less* informative than today's string.
@@ -355,6 +386,10 @@ impl ExpressionError {
     ///   frontmatter, body, and `$()` surfaces and forbids replacing it with an
     ///   empty value or an unevaluated `{{ … }}`.
     ///
+    /// - [`ContextNotCaptured`] and [`ContextProjectionInvariant`] — a known
+    ///   `ctx.*` variable with no captured value is a request or Darkmatter
+    ///   defect; rendering it as an empty string would hide it.
+    ///
     /// Every other variant (arity, arg-type, parse, arithmetic, generic
     /// [`Other`], …) is demoted to a `ComposeWarning` in lenient body
     /// interpolation. [`RemoteNotEnabled`] is
@@ -364,6 +399,8 @@ impl ExpressionError {
     /// [`UnknownFunction`]: ExpressionError::UnknownFunction
     /// [`FileReference`]: ExpressionError::FileReference
     /// [`Provider`]: ExpressionError::Provider
+    /// [`ContextNotCaptured`]: ExpressionError::ContextNotCaptured
+    /// [`ContextProjectionInvariant`]: ExpressionError::ContextProjectionInvariant
     /// [`Other`]: ExpressionError::Other
     /// [`Malformed`]: FileRefFailure::Malformed
     /// [`NotFound`]: FileRefFailure::NotFound
@@ -373,6 +410,8 @@ impl ExpressionError {
         match self {
             ExpressionError::UnknownFunction { .. } => true,
             ExpressionError::Provider { .. } => true,
+            ExpressionError::ContextNotCaptured { .. }
+            | ExpressionError::ContextProjectionInvariant { .. } => true,
             // A present file reference that fails to resolve is fatal (see the
             // doc comment for the WHY). `RemoteNotEnabled` is deliberately *not*
             // in this set: it is a v1 capability gap, not a reference mistake.
@@ -384,6 +423,22 @@ impl ExpressionError {
             ),
             _ => false,
         }
+    }
+
+    /// Whether this is a missing runtime context failure
+    /// ([`ContextNotCaptured`] or [`ContextProjectionInvariant`]).
+    ///
+    /// Such a failure means the request snapshot cannot answer a known
+    /// `ctx.*` read, so no stage may tolerate it into partial output.
+    ///
+    /// [`ContextNotCaptured`]: ExpressionError::ContextNotCaptured
+    /// [`ContextProjectionInvariant`]: ExpressionError::ContextProjectionInvariant
+    pub fn is_missing_runtime_context(&self) -> bool {
+        matches!(
+            self,
+            ExpressionError::ContextNotCaptured { .. }
+                | ExpressionError::ContextProjectionInvariant { .. }
+        )
     }
 
     /// Compatibility helper for existing tests that asserted against the old

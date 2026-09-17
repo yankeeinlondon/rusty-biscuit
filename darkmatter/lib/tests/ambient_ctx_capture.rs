@@ -15,7 +15,10 @@ use std::process::Command;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::context::catalog::context_variable_descriptors;
-use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+use darkmatter::markdown::compose::expression::ExpressionError;
+use darkmatter::markdown::compose::{
+    ComposeContext, ComposeOptions, ContextCaptureEvidence, ContextGroup, ContextRequirements,
+};
 use tempfile::TempDir;
 
 struct Fixture {
@@ -227,3 +230,188 @@ fn every_catalog_variable_survives_ambient_options() {
 // `compose::context::options::tests::new_captures_no_discovery_derived_group`,
 // which reads the crate-private context directly instead of inferring the
 // captured set from rendered output.
+
+// ── Pre-change baseline (fix 2026-08-02-silent-empty-ctx-values, Phase 1) ──
+//
+// These tests pin today's defective behavior so the phases that fix it have a
+// named assertion to invert. Each one documents the target outcome; when a
+// later phase lands that outcome, the assertion here must be flipped to it
+// rather than deleted.
+
+/// The spec's original failing input, verbatim.
+const REGRESSION_INPUT: &str = "repo_root={{ ctx.repo_root }}|os={{ ctx.os }}|today={{ ctx.today }}\n";
+
+fn field<'a>(rendered: &'a str, name: &str) -> &'a str {
+    rendered
+        .split('|')
+        .find_map(|pair| pair.strip_prefix(&format!("{name}=")))
+        .unwrap_or_else(|| panic!("`{name}=` missing from {rendered:?}"))
+}
+
+/// Ambient options already resolve the regression input for a root document:
+/// the root context extension captures Repo and OS before any stage reads `ctx`.
+#[test]
+#[serial_test::serial]
+fn baseline_ambient_root_resolves_the_regression_input() {
+    let fixture = Fixture::build();
+    let _cwd = CwdGuard::enter(&fixture.cwd);
+
+    let ambient = compose_ambient(REGRESSION_INPUT);
+    let full = compose_full_capture(REGRESSION_INPUT);
+
+    assert_eq!(ambient, full);
+    for name in ["repo_root", "os", "today"] {
+        assert!(!field(&ambient, name).is_empty(), "{name} rendered empty: {ambient:?}");
+    }
+}
+
+/// A caller-supplied context that never captured Repo or OS fails composition
+/// with a typed missing-capture error instead of rendering both empty (the
+/// 2026-08-02 defect). The full per-surface matrix lives in
+/// `missing_ctx_capture.rs`.
+#[test]
+#[serial_test::serial]
+fn caller_supplied_minimal_context_fails_instead_of_rendering_uncaptured_groups_empty() {
+    let fixture = Fixture::build();
+    let _cwd = CwdGuard::enter(&fixture.cwd);
+
+    let md: Markdown = REGRESSION_INPUT.into();
+    let options = ComposeOptions::new_with_context(ComposeContext::capture_minimal());
+    let error = md
+        .compose_with(options)
+        .expect_err("an uncaptured group must fail composition");
+
+    assert!(
+        matches!(
+            error.missing_runtime_context(),
+            Some(ExpressionError::ContextNotCaptured {
+                group: ContextGroup::Repo | ContextGroup::Os,
+                ..
+            })
+        ),
+        "{error:?}"
+    );
+}
+
+/// A root naming no discovery-backed group transcludes a child, and a nested
+/// grandchild, that are the first to read `ctx.os`. Ambient options grow the
+/// request context when the child becomes reachable, so both render the value
+/// a full capture renders (verification #7). The same graph under a frozen
+/// minimal context fails instead (verification #8).
+#[test]
+#[serial_test::serial]
+fn ambient_child_first_reference_renders_the_full_capture_value() {
+    let fixture = Fixture::build();
+    let _cwd = CwdGuard::enter(&fixture.cwd);
+    let root = fixture.cwd.join("root.md");
+    std::fs::write(&root, "root\n\n::file ./child.md\n").unwrap();
+    std::fs::write(
+        fixture.cwd.join("child.md"),
+        "child|os={{ ctx.os }}|end\n\n::file ./nested.md\n",
+    )
+    .unwrap();
+    std::fs::write(fixture.cwd.join("nested.md"), "nested|os={{ ctx.os }}|end\n").unwrap();
+
+    let compose = |options: ComposeOptions| {
+        let md = Markdown::try_from(root.as_path()).expect("root loads");
+        md.compose_with(options.with_source_file(root.clone()))
+            .map(|(composed, _report)| composed.content().to_string())
+    };
+    let os_of = |output: &str, prefix: &str| {
+        let line = output
+            .lines()
+            .find(|line| line.starts_with(prefix))
+            .unwrap_or_else(|| panic!("{prefix} content missing from {output:?}"));
+        field(line, "os").to_string()
+    };
+
+    let full = compose(ComposeOptions::new_with_context(ComposeContext::capture()))
+        .expect("a full capture composes");
+    let ambient = compose(ComposeOptions::new()).expect("ambient options grow the request context");
+
+    assert!(!os_of(&full, "child|").is_empty(), "a full capture renders ctx.os: {full:?}");
+    assert_eq!(os_of(&ambient, "child|"), os_of(&full, "child|"), "{ambient:?}");
+    assert_eq!(os_of(&ambient, "nested|"), os_of(&ambient, "child|"), "{ambient:?}");
+
+    let error = compose(ComposeOptions::new_with_context(ComposeContext::capture_minimal()))
+        .expect_err("a frozen minimal context cannot grow");
+    assert!(
+        matches!(
+            error.missing_runtime_context(),
+            Some(ExpressionError::ContextNotCaptured { group: ContextGroup::Os, .. })
+        ),
+        "{error:?}"
+    );
+}
+
+/// Every catalog variable grouped by the capture requirements naming it alone
+/// implies, so each group is captured once with all of its keys referenced.
+fn descriptors_by_requirements() -> Vec<(ContextRequirements, Vec<&'static str>)> {
+    let mut sets: Vec<(ContextRequirements, Vec<&'static str>)> = Vec::new();
+    for descriptor in context_variable_descriptors() {
+        let requirements =
+            ContextRequirements::for_content(&format!("{{{{ ctx.{} }}}}", descriptor.name));
+        match sets.iter_mut().find(|(existing, _)| *existing == requirements) {
+            Some((_, keys)) => keys.push(descriptor.name),
+            None => sets.push((requirements, vec![descriptor.name])),
+        }
+    }
+    sets
+}
+
+/// A captured group must project every cataloged key it owns, whether discovery
+/// found a value, found nothing, or had no evidence to read. The checked `ctx.*`
+/// lookup reports an omitted key as `ContextProjectionInvariant`, a Darkmatter
+/// bug, so a legitimate capture can never be allowed to produce one.
+fn assert_projection_complete(situation: &str, capture: impl Fn(&ContextRequirements, &str) -> ComposeContext) {
+    let sets = descriptors_by_requirements();
+    assert!(sets.len() > 1, "the catalog must span more than the date/time group");
+
+    for (requirements, keys) in sets {
+        let content: String =
+            keys.iter().map(|key| format!("{{{{ ctx.{key} }}}}\n")).collect();
+        let context = capture(&requirements, &content);
+
+        for group in requirements.iter() {
+            assert!(
+                context.capture_requirements().contains(group),
+                "{situation}: {group:?} was required but not marked captured",
+            );
+        }
+        let missing: Vec<&str> =
+            keys.iter().copied().filter(|key| !context.values().contains_key(*key)).collect();
+        assert!(
+            missing.is_empty(),
+            "{situation}: capture of {:?} omitted cataloged keys {missing:?}",
+            requirements.iter().collect::<Vec<_>>(),
+        );
+    }
+}
+
+#[test]
+fn a_repository_capture_projects_every_key_of_each_captured_group() {
+    let fixture = Fixture::build();
+    assert_projection_complete("inside a repository", |_, content| {
+        ComposeContext::capture_for_content(&fixture.cwd, content)
+    });
+}
+
+#[test]
+fn a_capture_outside_any_repository_projects_every_key_of_each_captured_group() {
+    let outside = TempDir::new().expect("temp dir");
+    assert_projection_complete("outside a repository", |_, content| {
+        ComposeContext::capture_for_content(outside.path(), content)
+    });
+}
+
+#[test]
+fn a_capture_without_supplied_evidence_projects_every_key_of_each_captured_group() {
+    let outside = TempDir::new().expect("temp dir");
+    assert_projection_complete("with empty supplied evidence", |requirements, _| {
+        ComposeContext::capture_with_evidence(
+            outside.path(),
+            requirements,
+            &ContextCaptureEvidence::new(HashMap::new()),
+        )
+    });
+}

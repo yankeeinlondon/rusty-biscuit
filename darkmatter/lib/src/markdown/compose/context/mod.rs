@@ -4,8 +4,10 @@
 //! environment, repository/monorepo inspection, document discovery,
 //! OS, and hardware -- all powered by the `sniff` library.
 
+pub(crate) mod authority;
 pub mod catalog;
 pub(crate) mod capture;
+pub(crate) mod checked;
 pub(crate) mod diagnostics;
 pub(crate) mod effective_state;
 pub(crate) mod format;
@@ -15,6 +17,7 @@ pub(crate) mod report;
 mod repository_scope;
 pub(crate) mod runtime;
 
+pub use authority::{ContextAuthority, ContextExtension};
 pub use catalog::{context_variable_descriptors, ContextValueType, ContextVariableDescriptor};
 pub use capture::{ContextCaptureEvidence, ContextGroup, ContextRequirements};
 pub use capture::capture_file_resolution_context;

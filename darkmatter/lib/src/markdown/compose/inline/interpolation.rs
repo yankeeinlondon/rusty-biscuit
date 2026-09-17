@@ -6,7 +6,9 @@ use super::super::context::effective_state as state;
 use super::super::directive_targets::rewrite_directive_targets;
 use super::super::interpolation;
 use super::super::shell_expansion;
+use super::super::expression::{EvaluationLookup, ExpressionError, ResolutionContext};
 use super::super::{ComposeOptions, ComposeReport, EffectiveState};
+use serde_json::Value;
 use tracing::debug;
 
 /// Runs the interpolation stage.
@@ -38,10 +40,13 @@ pub(crate) fn run_stage(
     // expression functions (`frontmatter`, `file_exists`, `markdown_title`, …)
     // resolve filesystem paths and — when remote reads are enabled — HTTP(S)
     // URL arguments through the run's remote-fetch runtime.
-    let lookup = state::ResolvingLookup::new(
-        state,
-        options.expression_resolution_context(&runtime.remote_fetch),
-    );
+    let lookup = DeferrableLookup {
+        inner: state::ResolvingLookup::new(
+            state,
+            options.expression_resolution_context(&runtime.remote_fetch),
+        ),
+        defer_not_captured: options.defer_missing_runtime_context,
+    };
     let evaluator = Evaluator::new(&lookup).with_presentation_values(state.presentation_values());
     let targets = rewrite_directive_targets(
         markdown.content(),
@@ -68,6 +73,53 @@ pub(crate) fn run_stage(
         "compose: interpolations applied"
     );
     Ok(replacements)
+}
+
+/// [`ResolvingLookup`](state::ResolvingLookup) that can answer an uncaptured
+/// group with `null` (see `ComposeOptions::defer_missing_runtime_context`).
+///
+/// A projection-invariant failure is never deferred: it is a Darkmatter bug,
+/// not a verdict a later pass could reach differently.
+struct DeferrableLookup<'a> {
+    inner: state::ResolvingLookup<'a>,
+    defer_not_captured: bool,
+}
+
+impl EvaluationLookup for DeferrableLookup<'_> {
+    fn get(&self, path: &str) -> Option<Value> {
+        self.inner.get(path)
+    }
+
+    fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
+        match self.inner.get_checked(path) {
+            Err(ExpressionError::ContextNotCaptured { .. }) if self.defer_not_captured => Ok(None),
+            other => other,
+        }
+    }
+
+    fn get_string(&self, path: &str) -> String {
+        self.inner.get_string(path)
+    }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.inner.resolution_context()
+    }
+
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+        self.inner.resolution_context_ref()
+    }
+
+    fn is_valid_context_variable(&self, name: &str) -> bool {
+        self.inner.is_valid_context_variable(name)
+    }
+
+    fn context_variable_names(&self) -> &[&'static str] {
+        self.inner.context_variable_names()
+    }
+
+    fn is_known_variable_root(&self, root: &str) -> bool {
+        self.inner.is_known_variable_root(root)
+    }
 }
 
 /// Resolves whether interpolation should process fenced/indented code blocks.
