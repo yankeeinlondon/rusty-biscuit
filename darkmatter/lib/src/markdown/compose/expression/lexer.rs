@@ -3,7 +3,8 @@
 //! This module provides two main components:
 //!
 //! 1. `ExpressionFinder` - Locates `{{ ... }}` expressions in markdown content
-//!    while skipping code spans and fenced code blocks.
+//!    while skipping fenced and indented code blocks (inline code spans are
+//!    scanned).
 //!
 //! 2. `Lexer` - Tokenizes the content inside `{{ ... }}` into a stream of tokens
 //!    for parsing.
@@ -74,8 +75,12 @@ pub struct ExpressionScanResult {
 /// Finds interpolation expressions in markdown content.
 ///
 /// This finder scans content for `{{ ... }}` patterns while respecting
-/// markdown structure - expressions inside code spans and fenced code
-/// blocks are ignored.
+/// markdown structure - expressions inside fenced and indented code blocks
+/// are ignored; inline code spans are scanned.
+///
+/// An opener preceded by an odd run of backslashes (`\{{`) is not a span in
+/// any scan mode; an even run (`\\{{`) leaves it active. Scanning never
+/// removes the backslashes.
 ///
 /// ## Examples
 ///
@@ -133,6 +138,15 @@ impl<'a> ExpressionFinder<'a> {
         let len = bytes.len();
 
         while pos < len.saturating_sub(3) {
+            // An odd run of backslashes escapes the opener. The backslashes stay
+            // in the text; the Markdown renderer removes the visual escape.
+            if bytes[pos] == b'{' && bytes[pos + 1] == b'{' && is_escaped_opener(bytes, pos) {
+                while pos < len && bytes[pos] == b'{' {
+                    pos += 1;
+                }
+                continue;
+            }
+
             // Check for literal opener before regular expression opener.
             // A literal opener is exactly three consecutive `{` characters.
             if bytes[pos] == b'{'
@@ -306,6 +320,13 @@ impl<'a> ExpressionFinder<'a> {
 
         regions
     }
+}
+
+/// Returns `true` when the brace at `pos` follows an odd-length run of
+/// backslashes, which escapes it; an even run escapes itself instead.
+fn is_escaped_opener(bytes: &[u8], pos: usize) -> bool {
+    let run = bytes[..pos].iter().rev().take_while(|&&b| b == b'\\').count();
+    run % 2 == 1
 }
 
 /// Token types for interpolation expressions.
@@ -1206,6 +1227,95 @@ And {{ another }}."#;
             let exprs = finder.find_all();
 
             assert!(exprs.is_empty());
+        }
+    }
+
+    mod backslash_escape {
+        use super::*;
+
+        fn plain_expressions(content: &str) -> Vec<String> {
+            ExpressionFinder::find_all_plain(content)
+                .into_iter()
+                .map(|loc| loc.expression)
+                .collect()
+        }
+
+        #[test]
+        fn single_backslash_suppresses_opener_in_both_scan_modes() {
+            let content = r"literal \{{ x }} here";
+            assert!(plain_expressions(content).is_empty());
+            assert!(ExpressionFinder::new(content).find_all().is_empty());
+        }
+
+        #[test]
+        fn fully_escaped_braces_are_not_an_opener() {
+            assert!(plain_expressions(r"literal \{\{ x }} here").is_empty());
+        }
+
+        #[test]
+        fn unescaped_span_is_still_found() {
+            assert_eq!(plain_expressions("a {{ x }} b"), vec!["x"]);
+        }
+
+        #[test]
+        fn backslash_run_parity_decides_the_opener() {
+            // An even run escapes itself under Markdown rules, leaving the
+            // opener active; an odd run escapes the brace.
+            for (content, expected) in [
+                (r"\{{ x }}", Vec::<&str>::new()),
+                (r"\\{{ x }}", vec!["x"]),
+                (r"\\\{{ x }}", vec![]),
+                (r"\\\\{{ x }}", vec!["x"]),
+            ] {
+                assert_eq!(plain_expressions(content), expected, "for {content:?}");
+            }
+        }
+
+        #[test]
+        fn escaped_span_does_not_hide_a_following_span() {
+            assert_eq!(plain_expressions(r"\{{ a }} and {{ b }}"), vec!["b"]);
+        }
+
+        #[test]
+        fn unrelated_backslash_does_not_suppress_opener() {
+            assert_eq!(plain_expressions(r"path\to {{ x }}"), vec!["x"]);
+            assert_eq!(plain_expressions(r"\ {{ x }}"), vec!["x"]);
+        }
+
+        #[test]
+        fn escaped_literal_opener_is_neither_literal_nor_expression() {
+            let result = ExpressionFinder::scan_plain(r"\{{{ x }}}");
+            assert!(result.expressions.is_empty());
+            assert!(result.literals.is_empty());
+        }
+
+        #[test]
+        fn unescaped_literal_opener_is_unchanged() {
+            let result = ExpressionFinder::scan_plain(r"\\{{{ x }}}");
+            assert!(result.expressions.is_empty());
+            assert_eq!(result.literals.len(), 1);
+            assert_eq!(result.literals[0].content, " x ");
+        }
+
+        #[test]
+        fn escaped_unclosed_opener_finds_nothing() {
+            assert!(plain_expressions(r"\{{ x").is_empty());
+        }
+
+        #[test]
+        fn escaped_opener_inside_fenced_code_is_still_skipped() {
+            let content = "```\n\\{{ x }}\n{{ y }}\n```\n";
+            assert!(ExpressionFinder::new(content).find_all().is_empty());
+        }
+
+        #[test]
+        fn escaped_inner_opener_does_not_change_depth_counting() {
+            // Inside an open span the backslash belongs to expression text; the
+            // brace-depth counter still pairs the inner `{{` with its `}}`.
+            assert_eq!(
+                plain_expressions(r"{{ 'a \{{ b }}' }}"),
+                vec![r"'a \{{ b }}'"]
+            );
         }
     }
 

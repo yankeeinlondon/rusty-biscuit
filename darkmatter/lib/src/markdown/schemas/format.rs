@@ -241,13 +241,7 @@ pub(crate) fn register_darkmatter_formats_in_context(
         // I/O, or context. Condition mode is the either-dialect superset (§Q2),
         // so a value valid in either expression dialect validates here.
         .with_format(DARKMATTER_EXPRESSION_FORMAT, |value: &str| {
-            // A value still holding an unresolved `$(...)` shell expression or
-            // `{{ ... }}` template is pending, not a final expression: defer
-            // rather than eager-fail the parse. This mirrors the pending-value
-            // deferral the compose/validation layers apply to every content
-            // string, and neither marker is part of expression syntax, so the
-            // guard never masks a genuinely malformed expression.
-            if value.contains("$(") || value.contains("{{") {
+            if is_pending_expression_value(value) {
                 return true;
             }
             crate::markdown::compose::expression::parse_condition(value).is_ok()
@@ -258,6 +252,18 @@ pub(crate) fn register_darkmatter_formats_in_context(
             valid_iso8601_datetime(value)
         })
         .with_format(DARKMATTER_TIME_FORMAT, |value: &str| valid_iso8601_time(value))
+}
+
+/// True when an `expression`-typed value still holds an unresolved `$(...)`
+/// shell expression or `{{ ... }}` template. Such a value is pending, not a
+/// final expression, so validation defers rather than eager-failing the parse.
+///
+/// Lexical only: nothing is evaluated, executed, or read. Neither marker is
+/// expression syntax, so deferral never masks a malformed final expression.
+/// Editor analysis must call this before parsing so it defers exactly where
+/// schema validation does.
+pub fn is_pending_expression_value(value: &str) -> bool {
+    value.contains("$(") || value.contains("{{")
 }
 
 /// Validates a string by parsing it as a `FileReference` and confirming the
@@ -1070,6 +1076,42 @@ mod schema_plus_content_formats {
             "config: json",
             &json!({ "config": "{\"title\": \"Foo\"}" })
         ));
+    }
+
+    #[test]
+    fn pending_expression_values_are_classified_lexically() {
+        use super::super::format::is_pending_expression_value;
+        for pending in ["{{ x }}", "a == {{ x }}", "$(date)", "x == $(cmd", "{{ not ( valid }}"] {
+            assert!(is_pending_expression_value(pending), "{pending:?}");
+        }
+        for final_value in ["a == b", "a ((", "", "$ (x)", "{ {x} }", "{x: 1}"] {
+            assert!(!is_pending_expression_value(final_value), "{final_value:?}");
+        }
+    }
+
+    #[test]
+    fn expression_validation_defers_exactly_on_pending_values() {
+        use super::super::format::is_pending_expression_value;
+        // Malformed-but-pending values are accepted; a malformed final value
+        // is not, so the deferral cannot hide a real defect.
+        for (value, accepted) in [
+            ("{{ x ( }}", true),
+            ("$(broken ((", true),
+            ("a && {{ flag }}", true),
+            ("ctx.area ? 'a' : 'b'", true),
+            ("a ((", false),
+        ] {
+            assert_eq!(
+                accepts("when: expression", &json!({ "when": value })),
+                accepted,
+                "{value:?}"
+            );
+            assert_eq!(
+                is_pending_expression_value(value),
+                accepted && value != "ctx.area ? 'a' : 'b'",
+                "{value:?}"
+            );
+        }
     }
 
     /// The `{ frontmatter: yaml }` union arm from `example.yaml`'s `invocation`
