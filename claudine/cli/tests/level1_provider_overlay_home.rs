@@ -1348,10 +1348,14 @@ fn an_unwritable_storage_root_stops_the_launch_with_the_typed_diagnostic() {
     let writable = fs::write(storage.join("probe"), "").is_ok();
     let (output, recorded) = launch(&fixture, &["codex", "--repo", "--", "--version"]);
     fs::set_permissions(&storage, fs::Permissions::from_mode(0o755)).unwrap();
-    if writable {
-        eprintln!("skipping: the storage root stays writable for this user");
-        return;
-    }
+    assert!(
+        !writable,
+        "test premise unavailable: a 0o555 directory stayed writable, so this runner is privileged \
+         (root ignores file modes). Run L1 as an unprivileged user; the privilege-independent failure \
+         is `a_failed_overlay_stops_the_launch_without_a_null_home` in this binary, and the typed \
+         projection is `provider_overlay::tests::a_materialization_failure_projects_its_stage_and_publishes_its_cause` \
+         in the library."
+    );
 
     let text = flattened(&output);
     assert!(!output.status.success(), "an unwritable overlay must not launch:\n{text}");
