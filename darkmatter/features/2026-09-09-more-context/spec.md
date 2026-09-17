@@ -1,12 +1,14 @@
 ---
 status: draft
+implemented: true
+implemented_by: claude/opus
 created: 2026-09-09
 reviewed: true
 reviewed_by: codex/gpt-6-astra
 reviewed_on: "2026-09-11"
 review_iterations: 6
 clarified: claude/claude-fable-5-1
-rulings: R1-R33 ruled by Ken 2026-09-10/11; folded into body; review questions Q1-Q3 remain
+rulings: R1-R33 ruled by Ken 2026-09-10/11; folded into body; Q1-Q3 recommendations adopted 2026-09-16 (plan Phase 1, see decisions.md), pending Ken's confirmation
 inputs:
   - ../../docs/schemas/darkmatter.yaml
   - ../../docs/schemas/expression-functions.yaml
@@ -29,7 +31,10 @@ related:
   - ../_completed/2026-06-15-context-vars-additions
   - ../_completed/2026-07-01-has-command-fn
   - ../_completed/2026-05-28-darkmatter-hashing
-  - ../../fixes/_unscheduled/content-policy-no-cache
+  - ../../fixes/2026-09-16-content-policy-no-cache
+  - decisions.md
+depends-on:
+  - ../../fixes/2026-09-16-content-policy-no-cache
 ---
 
 # More Context
@@ -77,8 +82,9 @@ Out of scope:
 
 - DMLS evaluating any of these values (diagnostics/hover only see descriptors)
 - changes to remote-fetch behavior beyond reusing its allow-list for ICMP
-- any change to the persistent compose cache (**R18**; tracked separately in
-  `fixes/_unscheduled/content-policy-no-cache`)
+- any change to the persistent compose cache beyond the prerequisite fix
+  (**R18**; the cache-disable portion is implemented as
+  `fixes/2026-09-16-content-policy-no-cache` during Phase 1, see Q3)
 - anything not listed in this document
 
 ## Background (verified in code)
@@ -136,13 +142,15 @@ or included fragments see the root document's values.
 - `ctx.hash` — `string`. `{fm}-{body}` xxHash computed over the on-disk source
   before composition; equals what `md hash <file>` prints for that file (**R3**).
 - `ctx.id` — `string`. xxHash over: page source, `ctx.timestamp_ms`, hostname,
-  repository name. Intended to distinguish executions (**R2**); the listed inputs alone do
-  not guarantee uniqueness for two runs in the same millisecond (see Q1). Repository name is `""` outside a
-  git repository; the id is still generated (**R4**).
+  repository name, and a per-execution random nonce (Q1). Distinguishes
+  executions (**R2**): two runs with identical inputs in the same millisecond
+  differ with practical (not mathematical) certainty. Repository name is `""`
+  outside a git repository; the id is still generated (**R4**).
 - `ctx.sid` — `string`. Same inputs as `ctx.id`, hashed with blake3 via
   `biscuit-hash`'s `blake3` feature, providing a cryptographic digest (**R2**). This is not encryption or a
   secrecy guarantee: a known candidate page and known inputs can be checked
-  against an unkeyed digest. Same uniqueness and cache caveats as `ctx.id`.
+  against an unkeyed digest. Same inputs and nonce as `ctx.id`, so the same
+  uniqueness guarantee.
 
 Source-kind contract: `ComposeSource` already supports `File`, `Url`, and
 `Unknown` (`context/options.rs`); adding document identity must preserve all
@@ -159,11 +167,16 @@ than selecting a file implicitly.
 
 All five fields retain root identity in transclusions and `as_markdown`.
 Length-prefix and version the hash input tuple (UTF-8 source, integer epoch
-milliseconds, hostname, repository name); concatenate neither ambiguous strings
-nor display-formatted timestamps. Missing hostname uses `""`, with the normal
-capture diagnostic where evidence was not supplied. Use the existing
-`biscuit-hash` xxHash output convention and full BLAKE3 hexadecimal output;
-freeze test vectors once Q1 is resolved.
+milliseconds, hostname, repository name, execution nonce); concatenate neither
+ambiguous strings nor display-formatted timestamps. The exact encoding is
+recorded in `decisions.md` (D1). The nonce is 16 bytes from the operating
+system's CSPRNG, drawn once per root compose request and shared by every
+fragment of that request; failure to obtain entropy is a typed compose error,
+never a fallback to a fixed or time-derived nonce. Missing hostname uses `""`,
+with the normal capture diagnostic where evidence was not supplied. Use the
+existing `biscuit-hash` xxHash output convention and full BLAKE3 hexadecimal
+output; freeze test vectors through a crate-internal nonce injection seam (no
+public override).
 
 ### Host (group: existing `Os`)
 
@@ -335,9 +348,9 @@ canonicalization or topology discovery to the lookup stage.
     error
   - planned pings are surfaced by compose preflight as approvable effects,
     like `$()` shell
-- `ping_under(address: IpAddress, allowed_time: number, attempts?: number) -> boolean | "unstable" | null`
-  — `attempts` pings (default 3), each with `allowed_time` ms as the timeout.
-  `true` if all replies arrive under `allowed_time`, `false` if none do,
+- `ping_under(address: IpAddress, timeout: number, attempts?: number) -> boolean | "unstable" | null`
+  — `attempts` pings (default 3), each with `timeout` ms as the timeout.
+  `true` if all replies arrive under `timeout`, `false` if none do,
   `"unstable"` otherwise. Consent and error rules identical to `ping` (**R6**).
   The return type must be representable in the descriptor catalog as
   `boolean | "unstable"`.
@@ -348,7 +361,7 @@ IPv4 and IPv6 literals and scoped IPv6 (`fe80::1%en0`); it is not a Rust
 non-finite or non-positive time budgets, and fractional/non-positive attempts
 before probing. Numeric conversions must be checked for overflow. Attempts
 run sequentially; each has a monotonic deadline and `ping_under` has a bounded
-total budget of attempts × allowed_time plus bounded setup/cleanup. A reply at
+total budget of attempts × timeout plus bounded setup/cleanup. A reply at
 or after the threshold counts as late. Any send/API failure aborts the call,
 even after earlier successes. A denied multi-attempt call returns one `null`
 and diagnostic and sends no packets. Descriptor return types include `null`.
@@ -530,13 +543,17 @@ Required behavior:
   key by name. Neither has any other member: `current.ctx.x`, `current.env.x`,
   and `current_env.ctx.x` are unknown paths and fail the way any unknown
   `ctx.<missing>` path fails today.
-- Each `current.<key>` / `current_env.<key>` is evaluated lazily. Memo scope
-  remains an open decision (Q2); request-wide memoization cannot also promise
-  that a second read after a state change returns the changed value. Today's
-  lazy-global memo is per `LayeredLookup` instance (per subtree compose), so
-  it must be reconciled with Q2 rather than treated as the semantic authority.
-  A lifecycle event starts a fresh evaluation scope; mutable facts are
-  observed when the handler reaches them, rather than at launch.
+- Each `current.<key>` / `current_env.<key>` is evaluated lazily and memoized
+  **per expression evaluation, per key** (Q2): repeated reads of one key within
+  a single expression observe one value, while a later expression (another
+  `{{ }}` interpolation, frontmatter value, `when=` condition, or `$()`
+  branch) observes the fact afresh. There is no atomic snapshot across
+  different keys. Today's lazy-global memo is per `LayeredLookup` instance
+  (per subtree compose) and must be narrowed to this scope for the two reserved
+  roots. Every lifecycle event starts fresh evaluation scopes; mutable facts
+  are observed when the handler reaches them, rather than at launch. Child
+  pipelines share the invocation-owned provider, never memoized observations,
+  and no memo lock is held while a nested expression evaluates.
 - Under Claudine-driven compose the lazy `current.*` read must go through the
   same evidence path as `ctx` (fail-closed: an unsupplied group yields `null`
   plus the `PartialRuntimeCapture` diagnostic), not a fresh ambient capture.
@@ -748,7 +765,12 @@ named `root`, or an unrelated root-directory label, must not be rewritten.
 
 ## Caching (**R18**)
 
-The rollout dependency in Q3 must be resolved before claiming this guarantee.
+Q3 outcome: the cache-disable portion of
+`fixes/2026-09-16-content-policy-no-cache` is a hard prerequisite, implemented
+during Phase 1 of this feature's plan. Persistent storage is limited to raw
+remote-URL response bodies under `--cache-root`; no composed document, operation
+result, or document snapshot is persisted, so no composed output containing
+these values can be replayed.
 
 Ken's ruling: local file transclusion does not need caching. Persistent caching
 is for content that arrives through an expensive or agentic operation (for
@@ -760,7 +782,8 @@ Consequences here: the new `ctx.*` values and `ping` / `ping_under` results
 never participate in any persistent cache, and this feature makes no change to
 the existing volatile-exclusion list in `cache/hashing.rs`. Disabling the
 current `--cache-root` persistent cache and designing `ContentPolicy` are a
-separate unscheduled fix (`fixes/_unscheduled/content-policy-no-cache`).
+separate fix (`fixes/2026-09-16-content-policy-no-cache`); its cache-disable
+portion ships before this feature.
 
 ## Sniff additions
 
@@ -1006,8 +1029,10 @@ R1–R10 ruled by Ken 2026-09-10; R11–R33 ruled 2026-09-11.
 
 ## Open Questions
 
-The following review questions expose conflicts not resolved by the earlier
-rulings. Recommendations are not new ratified rulings.
+The following review questions exposed conflicts not resolved by the earlier
+rulings. On 2026-09-16 Phase 1 of the plan adopted each recommendation and
+folded it into the body above (`decisions.md`, D1). These outcomes await Ken's
+confirmation; they are not rulings R34+.
 
 ### Q1 — Execution identity guarantees (R2)
 
@@ -1028,6 +1053,10 @@ unkeyed BLAKE3 also cannot promise that a candidate page is unrecognizable.
   outsiders without the key from checking candidate inputs. Cons: introduces
   key storage, rotation, and cross-process semantics absent from this feature.
   Choose only if candidate confidentiality is an actual requirement.
+
+**Outcome (adopted 2026-09-16):** per-execution nonce, as recommended. The
+tuple gains a fifth field (16 CSPRNG bytes), entropy failure is a typed compose
+error, and AC4/AC36 test same-millisecond executions.
 
 ### Q2 — Freshness versus memoization (R30–R32)
 
@@ -1050,6 +1079,10 @@ Tests and public documentation must use the selected scope consistently. The
 identity fields remain request-owned under every option; lazy lookup does not
 create a new execution identity.
 
+**Outcome (adopted 2026-09-16):** memoize per expression evaluation, per key,
+as recommended. AC27/AC28/AC36 test same-expression stability and
+later-expression freshness.
+
 ### Q3 — Persistent-cache rollout dependency (R18)
 
 The statement “nothing is cached persistently” cannot be guaranteed while the
@@ -1069,8 +1102,14 @@ cache-key fields does not prevent stale composed output from containing them.
   correct. Cons: duplicates the deferred fix and changes existing public
   `--cache-root` behavior here, requiring an explicit scope amendment.
 
-Until resolved, the earlier caching section describes the desired end state,
-not an independently satisfied guarantee.
+**Outcome (adopted 2026-09-16):** hard prerequisite, as recommended. The fix
+was activated as `fixes/2026-09-16-content-policy-no-cache` and its
+cache-disable portion implemented in Phase 1: composed `::file` children,
+`::code` and `::toc-linking` results, and document snapshots are never read
+from or written to the persistent store. Pending Ken's ruling on the fix's
+open question, `--cache-root` stays scoped to raw remote-URL bodies, which
+carry no composed context. A warm-cache regression test proves composed
+output is not replayed.
 
 ## Acceptance Criteria (**R23**)
 
@@ -1084,8 +1123,11 @@ L1 must pass CI on macOS, Linux, native Windows, and WSL2.
   equals the ambient value (directory basename); from the main checkout it is
   `null`. (L2: needs a real Claudine run.)
 - **AC3** — `ctx.hash` for a fixture equals the output of `md hash <file>`.
-- **AC4** — `ctx.id` differs across two runs of the same document; `ctx.sid`
-  differs from `ctx.id` in the same run.
+- **AC4** — `ctx.id` differs across two runs of the same document, including
+  two runs with an identical frozen clock, hostname, and repository name;
+  `ctx.sid` differs from `ctx.id` in the same run. Frozen test vectors with an
+  injected nonce match the D1 encoding, and an entropy failure is a typed
+  compose error.
 - **AC5** — `ctx.self` is absolute, canonical, native-separated; `ctx.hash`,
   `ctx.id`, `ctx.self` inside a transcluded fragment equal the root document's.
 - **AC6** — `ping` on a non-allow-listed target yields `null` plus a warning
@@ -1167,16 +1209,19 @@ L1 must pass CI on macOS, Linux, native Windows, and WSL2.
   `claudine context --expressions`, both projected from one descriptor entry
   (the corpus test asserts a single source, not two hand-written entries).
 - **AC27** — `current.branch` equals `ctx.branch` at the start of a compose;
-  after a branch switch between expression evaluations (fixture-driven,
-  subject to Q2) `current.branch` reflects
+  after a branch switch between expression evaluations (fixture-driven)
+  `current.branch` reflects
   the new branch while `ctx.branch` does not. `current.recent_commits` exists
   and has the AC24 shape. A `current.*` reference resolves in frontmatter, in
-  the body, and in `when=`. A `current.ctx.x` reference is an unknown-path
+  the body, and in `when=`. Two reads of `current.branch` within one expression
+  agree even if the branch switches between them (Q2 memo scope). A
+  `current.ctx.x` reference is an unknown-path
   error, not an alias (clean break, **R33**).
 - **AC28** — Claudine lifecycle handlers that reference `current.*` and
   `current_env.*` work in every lifecycle event. After a controlled provider changes a dedicated
   test environment key between evaluations in the composing process,
-  `current_env` reflects the change while `env` does not (subject to Q2).
+  `current_env` reflects the change while `env` does not, and each lifecycle
+  event observes the value current when that event evaluates (Q2).
   A subprocess cannot mutate its parent's environment; do not test freshness
   by exporting a variable in a child shell or changing fixture-owned HOME. Every migrated shipped prompt (including
   `prompts/format.md`) composes. (L2: needs a real Claudine run.)
@@ -1217,10 +1262,12 @@ associated gates can pass):
 - **AC35** — Path fixtures distinguish sibling prefixes and deepest nested
   packages; area-only directories resolve correctly. Typed malformed-reference
   diagnostics survive; valid nonexistent descendants use lexical lookup.
-- **AC36** — Two independent executions with identical frozen clocks exercise
-  the Q1 decision. Repeat-key reads within and across expressions/events test
-  Q2. Warm persistent-cache runs exercise Q3 and cannot replay an earlier
-  execution's identity or probe output.
+- **AC36** — Two independent executions with identical frozen clocks produce
+  different `ctx.id` and `ctx.sid` values (Q1). Repeat-key reads within one
+  expression agree, while reads in later expressions or lifecycle events
+  observe changes (Q2). Warm persistent-cache runs with `--cache-root` write no
+  composed, operation, or snapshot artifact and cannot replay an earlier
+  execution's identity or probe output (Q3).
 - **AC37** — Empty/unborn repositories yield `[]`; repositories with empty
   commits produce fewer rendered elements as specified. Git failures in a
   known repository are reported, not silently relabeled “outside a repo.”

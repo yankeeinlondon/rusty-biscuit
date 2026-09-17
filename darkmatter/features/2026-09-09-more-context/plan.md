@@ -1,9 +1,135 @@
 ---
 total_phases: 12
 created: "2026-09-11"
-phase: 1
-agent: "codex/gpt-5.6-sol"
+phase: 3
+agent: "claude/opus"
 yolo: "true"
+source_files_during_phase_1:
+  - darkmatter/cli/src/args/command.rs
+  - darkmatter/cli/tests/compose_remote_caching.rs
+  - darkmatter/lib/src/markdown/compose/cache/runtime.rs
+  - darkmatter/lib/src/markdown/compose/context/authority.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+  - darkmatter/lib/src/markdown/compose/tests/schema.rs
+  - darkmatter/lib/src/markdown/reference/graph.rs
+  - darkmatter/lib/tests/persistent_cache_disabled.rs
+  - darkmatter/lib/tests/reference_integration.rs
+  - darkmatter/lib/tests/request_context_epoch.rs
+docs_updated_during_phase_1:
+  - darkmatter/docs/cli/compose.md
+  - darkmatter/docs/structs/Markdown.md
+  - darkmatter/docs/topics/caching.md
+  - darkmatter/features/2026-09-09-more-context/spec.md
+  - darkmatter/features/2026-09-09-more-context/plan.md
+  - darkmatter/features/2026-09-09-more-context/implementation-log.md
+  - darkmatter/fixes/2026-09-16-content-policy-no-cache/spec.md
+docs_created_during_phase_1:
+  - darkmatter/features/2026-09-09-more-context/decisions.md
+skills_files_updated_during_phase_1:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/compose.md
+  - .claude/skills/darkmatter/library-surfaces.md
+source_files_during_phase_2:
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/src/filesystem/repo/aggregate.rs
+  - sniff/lib/src/filesystem/repo/aggregate_view.rs
+  - sniff/lib/src/filesystem/git/types.rs
+  - sniff/lib/src/filesystem/git/recent_commits.rs
+  - sniff/lib/tests/git_parity.rs
+  - sniff/lib/tests/integration.rs
+  - sniff/cli/src/args/repo.rs
+  - sniff/cli/src/bin/render_git_status_fixture.rs
+  - sniff/cli/src/commands/mod.rs
+  - sniff/cli/src/output/filesystem/deps.rs
+  - sniff/cli/src/output/filesystem/mod.rs
+  - sniff/cli/src/output/filesystem/package_areas.rs
+  - sniff/cli/src/output/filesystem/repo.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/tests/cli.rs
+  - sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_text.snap
+  - sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_text.snap
+  - sniff/cli/tests/snapshots/snapshots__repo_aggregate_json.snap
+  - darkmatter/lib/src/markdown/compose/context/capture/snapshot.rs
+  - darkmatter/lib/tests/empty_package_area.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - claudine/lib/src/composition/launch_workspace.rs
+  - claudine/lib/src/composition/lifecycle/control.rs
+  - claudine/lib/src/events/environment.rs
+  - claudine/cli/src/commands/wrap/env/mod.rs
+  - claudine/cli/src/commands/wrap/env/package_context.rs
+  - claudine/cli/src/commands/wrap/env/tests.rs
+docs_updated_during_phase_2:
+  - sniff/docs/cli/repo.md
+  - sniff/docs/cli/repo_deps.md
+  - sniff/docs/cli/repo_package-area.md
+  - sniff/docs/cli/repo_package-area-root.md
+  - sniff/docs/cli/repo_package-areas.md
+  - sniff/docs/cli/repo_recent-commits.md
+  - darkmatter/features/2026-09-09-more-context/plan.md
+  - darkmatter/features/2026-09-09-more-context/implementation-log.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/sniff/remote-and-repository.md
+source_files_during_phase_3:
+  - sniff/lib/Cargo.toml
+  - Cargo.lock
+  - sniff/lib/src/network/mod.rs
+  - sniff/lib/src/network/interface.rs
+  - sniff/lib/src/network/address.rs
+  - sniff/lib/src/network/gateway/mod.rs
+  - sniff/lib/src/network/gateway/linux.rs
+  - sniff/lib/src/network/gateway/windows.rs
+  - sniff/lib/src/network/gateway/darwin.rs
+  - sniff/lib/src/network/gateway/fixtures/linux_route_v4.txt
+  - sniff/lib/src/network/gateway/fixtures/linux_route_v4_on_link.txt
+  - sniff/lib/src/network/gateway/fixtures/linux_route_v4_no_default.txt
+  - sniff/lib/src/network/gateway/fixtures/linux_ipv6_route.txt
+  - sniff/lib/src/network/gateway/fixtures/linux_ipv6_route_on_link.txt
+  - sniff/lib/src/network/gateway/fixtures/windows_route_print.txt
+  - sniff/lib/src/network/gateway/fixtures/windows_route_print_on_link.txt
+  - sniff/lib/src/network/gateway/fixtures/windows_route_print_no_default.txt
+  - sniff/lib/src/network/icmp/mod.rs
+  - sniff/lib/src/network/icmp/packet.rs
+  - sniff/lib/src/network/icmp/unix.rs
+  - sniff/lib/src/network/icmp/windows.rs
+  - sniff/lib/tests/network_primitives.rs
+docs_updated_during_phase_3:
+  - sniff/docs/dependencies.md
+  - docs/dependencies.md
+  - darkmatter/features/2026-09-09-more-context/plan.md
+  - darkmatter/features/2026-09-09-more-context/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/sniff/network.md
+  - .claude/skills/os/macos.md
+packages:
+  - sniff
+human_review: true
+human_review_items:
+  - "Build-host storage crisis blocks native Windows and WSL2 evidence (AC14, and Phase 12 generally). W: on build-win-native has 8192 bytes free, so cross-check fails with 'No space left on device' and the WSL guest (VHDX on W:) resets SSH. Read-only inventory: W:\\ci-verification\\rusty-biscuit\\target 95.1 GB (over the 80 GB sweep cap; that standing clone has no .cargo/config.toml target-dir pin), W:\\ci-verification\\rb-pr66 61.4 GB (2026-08-30, another session), W:\\WSL\\Ubuntu-26.04\\ext4.vhdx 130.8 GB. The daily sweep reported success at 04:00. Nothing was deleted because none of it belongs to this session (storage-strategy rule 2). Decide what to remove or compact."
+  - "build-linux cross-check lock held since 2026-09-14T18:25Z by purpose=nightly-reward-spike, branch=feat-nightly-perf. It is probably stale, but the script never removes locks. Linux evidence for this phase came from Docker Desktop instead. Remove it if that run is dead."
+  - "Confirm three Phase 3 design decisions that later phases build on. (a) Gateways are a separate API, sniff::network::detect_default_gateways(), not a NetworkRequest flag, because detect_network_with_request is GitNexus HIGH. (b) ICMP uses unprivileged datagram sockets with no ping-subprocess fallback, so Linux/WSL2 hosts whose net.ipv4.ping_group_range excludes the process group get IcmpError::NotPermitted, which becomes a compose error per R6. The wsl2-ubuntu CI leg must provide that sysctl for AC14. (c) macOS primary default = first UP default route that is not RTF_IFSCOPE (matches `route get default`); the spec's 'first default route in the dump' did not mention scoped routes."
+  - "Carried from Phases 1-2, still unconfirmed: the retroactive HIGH edit to Darkmatter current_package_context; Q1 execution nonce (blocks Phase 5); Q2 per-expression memo scope (blocks Phase 6); the content-policy-no-cache --cache-root scope ruling (Phase 11/12); explicit review before Phase 10.3 edits CRITICAL capture_at_event."
+message_to_agent: >-
+  Phase 3 added Sniff network primitives; no Darkmatter/Claudine code changed. APIs for Phase 5/7/9:
+  sniff::network::{ScopedIpAddr (strict FromStr/Display/serde string; `ipv6%zone`; is_within(&ipnet::IpNet) ignores the zone,
+  is_loopback, is_link_local), host_addresses(&info.interfaces) -> sorted, deduped Vec<ScopedIpAddr> (IPv6 link-local zoned with the
+  interface name on Unix, numeric index on Windows), cgnat_network(), contains_cgnat_address(..) (ctx.tailnet),
+  detect_default_gateways() -> Result<DefaultGateways { v4: Option<Ipv4Addr>, v6: Option<ScopedIpAddr> }> (ctx.gateway / ctx.gateway_v6;
+  a separate call, NOT part of detect_network_with_request, which is HIGH risk and was not edited; on Windows it costs one route print)}.
+  sniff::network::icmp::{ping(&ScopedIpAddr, ProbeBudget) -> Result<PingReport, IcmpError>, ping_with(&mut dyn EchoProbe, ..) as the
+  stub seam for AC8, ProbeBudget::from_millis(f64 ms, f64 attempts) (rejects NaN/inf/<=0/>60000 ms and fractional or out-of-range
+  attempts 1..=100 without truncation; ping() default is from_millis(100.0, 1.0)), PingReport::verdict() AllReplied|NoneReplied|Unstable
+  -> true|false|"unstable", IcmpError::{InvalidBudget, NotPermitted, UnknownScope, Send, Unsupported} = compose error; no reply is never an error}.
+  Darkmatter still owns: allow-list/CIDR ICMP policy and denial null+warning (sends nothing), preflight effect records, and the
+  ipv4()/ipv6() substring-vs-CIDR filter rule (use ipnet; is_within already returns false across families). Unix ICMP needs
+  net.ipv4.ping_group_range on Linux/WSL2. Real ICMP tests are `real_`-prefixed in sniff/lib/tests/network_primitives.rs (just test-real).
+  Native Windows and WSL2 runtime evidence is still missing because the Windows build host's W: volume is full (see human_review_items);
+  Windows has compile evidence only (just check-windows). Baselines after Phase 3: sniff L1 2699 passed; darkmatter L1 7905 passed; both lints clean.
 ---
 
 # Execution Plan: More Context
@@ -39,43 +165,43 @@ after that owner lands the contract.
 
 ## Phase 1 — Resolve Contracts and Establish the Baseline
 
-- [ ] **1.1 Resolve Q1 before identity implementation.** Ratify the recommended per-execution random nonce shared by `ctx.id` and `ctx.sid`, specify a typed entropy-failure error, retain the four length-prefixed/versioned inputs, and update R2/AC4/AC36 in `spec.md`; if the recommendation is rejected, explicitly weaken the uniqueness claim and freeze the alternate collision contract.
-- [ ] **1.2 Resolve Q2 before lazy-global implementation.** Ratify the recommended per-expression-evaluation, per-key memo scope, define a fresh evaluation scope for every lifecycle event, and update R30/AC27/AC28/AC36 so repeat reads within one expression are stable while later expressions can observe mutations.
-- [ ] **1.3 Resolve Q3 as a shipping prerequisite.** Activate and complete the cache-disable portion of `darkmatter/fixes/_unscheduled/content-policy-no-cache`, or amend this feature's scope with another ratified mechanism; prove with a warm-cache test that identity and probe output cannot be replayed before proceeding to Phase 12.
-- [ ] **1.4 Record architecture boundaries.** Write a short implementation decision record in the feature directory covering root-source ownership, fixed resolution/repository anchors, eager requirements versus lazy capabilities, the refresh-provider interface, descriptor-pair ownership, ICMP policy separation, and the shared recursion budget.
-- [ ] **1.5 Capture the source baseline.** Repeat the spec's scoped searches for `current.ctx.`, `current.env.`, and sentinel comparisons involving `package_area`, `current_package_area`, or `ctx.area`; classify each hit as implementation, test, shipped prompt, documentation, historical spec, or unrelated literal so later cleanup is observable.
-- [ ] **1.6 Capture the test baseline.** Run the existing package-local L1 suites for `sniff`, `darkmatter`, `claudine/gen`, and `claudine`, recording any pre-existing failures separately from this feature.
-- [ ] **1.7 Perform required impact analysis before edits.** For every existing symbol selected for modification, run GitNexus upstream impact analysis, record direct callers/processes/risk in the implementation log, and stop for explicit review before changing any symbol reported HIGH or CRITICAL.
-- [ ] **Checkpoint 1.** Q1-Q3 have ratified, testable contracts; the cache prerequisite is completed or a scope amendment is ratified; inventories and baseline test results are saved; and no implementation phase remains dependent on an unstated assumption.
+- [x] **1.1 Resolve Q1 before identity implementation.** Ratify the recommended per-execution random nonce shared by `ctx.id` and `ctx.sid`, specify a typed entropy-failure error, retain the four length-prefixed/versioned inputs, and update R2/AC4/AC36 in `spec.md`; if the recommendation is rejected, explicitly weaken the uniqueness claim and freeze the alternate collision contract.
+- [x] **1.2 Resolve Q2 before lazy-global implementation.** Ratify the recommended per-expression-evaluation, per-key memo scope, define a fresh evaluation scope for every lifecycle event, and update R30/AC27/AC28/AC36 so repeat reads within one expression are stable while later expressions can observe mutations.
+- [x] **1.3 Resolve Q3 as a shipping prerequisite.** Activate and complete the cache-disable portion of `darkmatter/fixes/_unscheduled/content-policy-no-cache`, or amend this feature's scope with another ratified mechanism; prove with a warm-cache test that identity and probe output cannot be replayed before proceeding to Phase 12.
+- [x] **1.4 Record architecture boundaries.** Write a short implementation decision record in the feature directory covering root-source ownership, fixed resolution/repository anchors, eager requirements versus lazy capabilities, the refresh-provider interface, descriptor-pair ownership, ICMP policy separation, and the shared recursion budget.
+- [x] **1.5 Capture the source baseline.** Repeat the spec's scoped searches for `current.ctx.`, `current.env.`, and sentinel comparisons involving `package_area`, `current_package_area`, or `ctx.area`; classify each hit as implementation, test, shipped prompt, documentation, historical spec, or unrelated literal so later cleanup is observable.
+- [x] **1.6 Capture the test baseline.** Run the existing package-local L1 suites for `sniff`, `darkmatter`, `claudine/gen`, and `claudine`, recording any pre-existing failures separately from this feature.
+- [x] **1.7 Perform required impact analysis before edits.** For every existing symbol selected for modification, run GitNexus upstream impact analysis, record direct callers/processes/risk in the implementation log, and stop for explicit review before changing any symbol reported HIGH or CRITICAL.
+- [x] **Checkpoint 1.** Q1-Q3 have ratified, testable contracts; the cache prerequisite is completed or a scope amendment is ratified; inventories and baseline test results are saved; and no implementation phase remains dependent on an unstated assumption.
 
 ## Phase 2 — Normalize Sniff Repository Semantics
 
-- [ ] **2.1 Remove the stored `"root"` package-area sentinel.** Change package detection, `Package.package_area`, `area_for_dir`, directory fallback, aggregate models, and fixtures under `sniff/lib/src/filesystem/repo/` to use `""` for the repository-root area while preserving a legitimate area actually named `root`.
-- [ ] **2.2 Update Sniff CLI projections.** Adjust `sniff repo area`, package-area listings, dependency/repository JSON output, help text, and `sniff/docs/cli/repo_deps.md` so semantic values stay empty and any human-facing root label is added only during rendering; keep the existing exit-status distinction for an empty result.
-- [ ] **2.3 Add a cheap current-worktree observation.** Expose the linked worktree name without requiring full worktree enumeration, returning `null`/absence for the main checkout and outside a repository, and make it available to invocation-owned evidence builders.
-- [ ] **2.4 Expose the canonical per-commit plain formatter.** Move or publish the per-commit rendering entry point from `recent_commits.rs`, parameterize deterministic date/time context as needed, and keep `CommitDescSet::describe(true)` plus `sniff repo recent-commits --plain` delegating to it byte-for-byte.
-- [ ] **2.5 Add repository regression fixtures.** Cover top-level packages, an area-only directory, repository root, outside-monorepo behavior, a real area named `root`, linked versus main worktrees, conventional/non-conventional commits, empty commits, and deterministic time-zone rendering.
-- [ ] **Checkpoint 2.** Sniff L1 tests and lint pass; AC22 and the Sniff-owned portions of AC2, AC21, AC24, and AC37 are proven; a scoped semantic grep finds no sentinel-specific branch left in Sniff.
+- [x] **2.1 Remove the stored `"root"` package-area sentinel.** Change package detection, `Package.package_area`, `area_for_dir`, directory fallback, aggregate models, and fixtures under `sniff/lib/src/filesystem/repo/` to use `""` for the repository-root area while preserving a legitimate area actually named `root`.
+- [x] **2.2 Update Sniff CLI projections.** Adjust `sniff repo area`, package-area listings, dependency/repository JSON output, help text, and `sniff/docs/cli/repo_deps.md` so semantic values stay empty and any human-facing root label is added only during rendering; keep the existing exit-status distinction for an empty result.
+- [x] **2.3 Add a cheap current-worktree observation.** Expose the linked worktree name without requiring full worktree enumeration, returning `null`/absence for the main checkout and outside a repository, and make it available to invocation-owned evidence builders.
+- [x] **2.4 Expose the canonical per-commit plain formatter.** Move or publish the per-commit rendering entry point from `recent_commits.rs`, parameterize deterministic date/time context as needed, and keep `CommitDescSet::describe(true)` plus `sniff repo recent-commits --plain` delegating to it byte-for-byte.
+- [x] **2.5 Add repository regression fixtures.** Cover top-level packages, an area-only directory, repository root, outside-monorepo behavior, a real area named `root`, linked versus main worktrees, conventional/non-conventional commits, empty commits, and deterministic time-zone rendering.
+- [x] **Checkpoint 2.** Sniff L1 tests and lint pass; AC22 and the Sniff-owned portions of AC2, AC21, AC24, and AC37 are proven; a scoped semantic grep finds no sentinel-specific branch left in Sniff.
 
 ## Phase 3 — Add Cross-Platform Sniff Network Primitives
 
-- [ ] **3.1 Load and follow the repository `os` skill before platform edits.** Identify the macOS, Linux, native Windows, and WSL2 evidence paths and define fixture formats that do not require the executing host to match the parsed OS.
-- [ ] **3.2 Add stable interface-address helpers.** Preserve routable IPv6 scope suffixes, deduplicate by address-and-scope, provide stable ordering, and expose reusable address-bit matching for CGNAT and Darkmatter filtering without DNS or ambient rediscovery.
-- [ ] **3.3 Parse primary IPv4 and IPv6 gateways.** Extend Linux `/proc` parsers, Windows route output/parsers, and macOS routing-socket parsing to select the specified UP lowest-metric/first default route, return no gateway for on-link routes, and retain `%scope` for link-local IPv6 gateways.
-- [ ] **3.4 Add the CGNAT/Tailscale predicate.** Return true when any captured interface address is within `100.64.0.0/10`, with deterministic fixture-driven coverage and no requirement for a live Tailscale installation.
-- [ ] **3.5 Implement the ICMP transport API.** Provide single-attempt and sequential multi-attempt probes with monotonic millisecond deadlines, bounded setup/cleanup, checked numeric limits, scoped IPv6 support, and distinct timeout versus cannot-send errors on macOS, Linux, native Windows, and WSL2.
-- [ ] **3.6 Harden subprocess/process behavior.** Close stdin, bound output and child lifetime, use Unix process groups and Windows process containment, and guarantee probe tests never activate a terminal or browser window.
-- [ ] **3.7 Add deterministic parser and transport tests.** Supply six route fixtures (two families on three OSes), on-link/no-route fixtures, scoped IPv6 fixtures, stubbed all-fast/all-slow/mixed ICMP outcomes, send-failure-after-success, invalid/overflow budgets, and bounded cleanup cases.
-- [ ] **Checkpoint 3.** Sniff L1 tests and lint pass on the macOS host; AC9, AC13, and deterministic portions of AC8/AC33 pass; cross-platform compilation evidence is queued for Phase 12.
+- [x] **3.1 Load and follow the repository `os` skill before platform edits.** Identify the macOS, Linux, native Windows, and WSL2 evidence paths and define fixture formats that do not require the executing host to match the parsed OS.
+- [x] **3.2 Add stable interface-address helpers.** Preserve routable IPv6 scope suffixes, deduplicate by address-and-scope, provide stable ordering, and expose reusable address-bit matching for CGNAT and Darkmatter filtering without DNS or ambient rediscovery.
+- [x] **3.3 Parse primary IPv4 and IPv6 gateways.** Extend Linux `/proc` parsers, Windows route output/parsers, and macOS routing-socket parsing to select the specified UP lowest-metric/first default route, return no gateway for on-link routes, and retain `%scope` for link-local IPv6 gateways.
+- [x] **3.4 Add the CGNAT/Tailscale predicate.** Return true when any captured interface address is within `100.64.0.0/10`, with deterministic fixture-driven coverage and no requirement for a live Tailscale installation.
+- [x] **3.5 Implement the ICMP transport API.** Provide single-attempt and sequential multi-attempt probes with monotonic millisecond deadlines, bounded setup/cleanup, checked numeric limits, scoped IPv6 support, and distinct timeout versus cannot-send errors on macOS, Linux, native Windows, and WSL2.
+- [x] **3.6 Harden subprocess/process behavior.** Close stdin, bound output and child lifetime, use Unix process groups and Windows process containment, and guarantee probe tests never activate a terminal or browser window.
+- [x] **3.7 Add deterministic parser and transport tests.** Supply six route fixtures (two families on three OSes), on-link/no-route fixtures, scoped IPv6 fixtures, stubbed all-fast/all-slow/mixed ICMP outcomes, send-failure-after-success, invalid/overflow budgets, and bounded cleanup cases.
+- [x] **Checkpoint 3.** Sniff L1 tests and lint pass on the macOS host; AC9, AC13, and deterministic portions of AC8/AC33 pass; cross-platform compilation evidence is queued for Phase 12.
 
 ## Phase 4 — Establish Descriptor and Generation Sources of Truth
 
-- [ ] **4.1 Design the variable/function pair representation.** Make one descriptor entry own the shared `recent_commits` semantics and project exactly one `ctx.recent_commits` variable plus one `recent_commits(count)` function, while retaining compatibility with the existing schema and expression catalogs.
-- [ ] **4.2 Extend the context descriptor catalog.** Add the Document group fields, `hostname`, Network fields, `recent_commits`, required-string scope fields, and reserved `current`/`current_env` roots with correct optionality and output types.
-- [ ] **4.3 Extend expression descriptors.** Add `as_markdown`, repository, Git, network, shell, and agentic-CLI functions; represent `IpAddress`, nullable returns, and `boolean | "unstable" | null` without weakening argument validation.
-- [ ] **4.4 Add direct dependencies deliberately.** Enable Darkmatter's required `biscuit-hash` BLAKE3 feature, add direct `ipnet` and any ratified nonce/ICMP support dependency, and update root/per-area dependency records in Phase 11; do not introduce a Darkmatter-to-Claudine dependency.
-- [ ] **4.5 Extend `claudine-gen` with a roster-level emitter.** Read `claudine/docs/providers.yaml` directly, include every slug and `cli_aliases` regardless of `skip_research`, validate each `sniff_binding`, and emit a committed Darkmatter artifact containing accepted names and their `sniff::AiCli` mapping.
-- [ ] **4.6 Add generation drift protection.** Make `claudine-gen generate` reproduce the artifact and `claudine-gen check` plus nextest fail for stale additions, removals, aliases, renames, or mappings without routing through per-provider generation.
+- [x] **4.1 Design the variable/function pair representation.** Make one descriptor entry own the shared `recent_commits` semantics and project exactly one `ctx.recent_commits` variable plus one `recent_commits(count)` function, while retaining compatibility with the existing schema and expression catalogs.
+- [x] **4.2 Extend the context descriptor catalog.** Add the Document group fields, `hostname`, Network fields, `recent_commits`, required-string scope fields, and reserved `current`/`current_env` roots with correct optionality and output types. _(Phase 4 note: the `required` flag on `current_package`/`current_package_area` moved to 5.5, because capture still projects `null` on both the ambient and supplied paths and the flag must change atomically with that projection.)_
+- [x] **4.3 Extend expression descriptors.** Add `as_markdown`, repository, Git, network, shell, and agentic-CLI functions; represent `IpAddress`, nullable returns, and `boolean | "unstable" | null` without weakening argument validation.
+- [x] **4.4 Add direct dependencies deliberately.** Enable Darkmatter's required `biscuit-hash` BLAKE3 feature, add direct `ipnet` and any ratified nonce/ICMP support dependency, and update root/per-area dependency records in Phase 11; do not introduce a Darkmatter-to-Claudine dependency.
+- [x] **4.5 Extend `claudine-gen` with a roster-level emitter.** Read `claudine/docs/providers.yaml` directly, include every slug and `cli_aliases` regardless of `skip_research`, validate each `sniff_binding`, and emit a committed Darkmatter artifact containing accepted names and their `sniff::AiCli` mapping.
+- [x] **4.6 Add generation drift protection.** Make `claudine-gen generate` reproduce the artifact and `claudine-gen check` plus nextest fail for stale additions, removals, aliases, renames, or mappings without routing through per-provider generation.
 - [ ] **4.7 Preserve passive tooling.** Update schema parsing, descriptor corpus, DMLS completion/hover, and validation fixtures so all names and signatures are discoverable without evaluating functions, reading files, launching profiles, probing the network, or mutating documents.
 - [ ] **Checkpoint 4.** Generator, descriptor-corpus, and passive DMLS tests pass; AC1, AC19, AC26, and descriptor portions of AC12/AC18/AC33 pass.
 
@@ -85,7 +211,7 @@ after that owner lands the contract.
 - [ ] **5.2 Implement the Document context group.** Project `ctx.self`, `ctx.last_updated`, and `ctx.hash` according to source kind; compute the Markdown frontmatter/body xxHash through `Markdown::hash`; compute versioned, length-prefixed `ctx.id`/`ctx.sid` using the Q1 contract and fixed hostname/repository-name inputs.
 - [ ] **5.3 Extend Host and Network eager capture.** Project `ctx.hostname`, `ctx.tailnet`, `ctx.gateway`, and `ctx.gateway_v6` from captured Sniff evidence, with schema-compatible empty/null values and `PartialRuntimeCapture` when requested evidence was not supplied.
 - [ ] **5.4 Refine Git requirements below the public group.** Distinguish ordinary Git facts from eager recent-history demand, capture ten `CommitDesc` values only for `ctx.recent_commits`, render each through Sniff's canonical formatter, preserve `[]` outside/empty repositories, and report real Git failures.
-- [ ] **5.5 Normalize scope projections.** Make `ctx.current_package` and `ctx.current_package_area` required strings with `""` for misses, retain `ctx.area`'s empty-string contract, and delete Darkmatter sentinel workarounds in `capture/repo.rs` and `repository_scope.rs`.
+- [ ] **5.5 Normalize scope projections.** Make `ctx.current_package` and `ctx.current_package_area` required strings with `""` for misses (including the `required` flag in `darkmatter.yaml`, deferred from 4.2), retain `ctx.area`'s empty-string contract, and delete Darkmatter sentinel workarounds in `capture/repo.rs` and `repository_scope.rs`.
 - [ ] **5.6 Supply current-worktree evidence consistently.** Use Sniff's cheap observation in supplied/Claudine capture while leaving the working ambient path equivalent, so linked worktrees and main checkouts project the same values in both paths.
 - [ ] **5.7 Preserve graph-wide identity.** Ensure transclusions and future `as_markdown` children reuse root Document values, fixed resolution anchors, diagnostics, and repository observation rather than creating nested snapshots.
 - [ ] **5.8 Add hermetic capture tests.** Cover file/URL/in-memory roots, root mutation after load, missing mtime/hostname/evidence, outside-repository identity, frozen-clock collision behavior from Q1, all five scope positions through ambient and supplied evidence, and demand counters proving unrelated captures do no history/network/profile work.
