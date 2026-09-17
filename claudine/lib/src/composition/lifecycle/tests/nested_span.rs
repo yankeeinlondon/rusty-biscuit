@@ -86,6 +86,23 @@ fn incident_failure_say_is_reported_once_success_say_is_repaired() {
 }
 
 #[test]
+fn preparation_uses_decoded_escape_parity_for_literal_openers() {
+    for authored_backslashes in [1, 2, 5, 6] {
+        let say = format!("{{{{ '{}{{{{ name }}}}' }}}}", "\\".repeat(authored_backslashes));
+        let frontmatter = json!({ "success": { "say": say } });
+        validate(&frontmatter).unwrap_or_else(|error| {
+            panic!("{authored_backslashes} authored backslashes must remain escaped: {error}")
+        });
+    }
+
+    for authored_backslashes in [3, 4] {
+        let say = format!("{{{{ '{}{{{{ name }}}}' }}}}", "\\".repeat(authored_backslashes));
+        let frontmatter = json!({ "success": { "say": say } });
+        assert_eq!(rejection(&frontmatter).2, "{{ name }}");
+    }
+}
+
+#[test]
 fn every_communication_field_on_every_event_is_checked() {
     let defect = "{{ ok ? 'in {{x}}' : 'y' }}";
     for event in ["initialize", "start", "success", "blocked", "failure", "finalize"] {
