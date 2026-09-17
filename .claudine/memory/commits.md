@@ -193,6 +193,29 @@ belong here.
   of the dated-fix case above — same `planning(<area>): schedule <name>`
   shape; see `c36f72fd0c` adding `features/2026-09-09-more-context/spec.md`,
   `0b80ca7c9` adding `features/2026-09-15-dasherized-identifiers/spec.md`),
+  **new plan.md / implementation-log.md / spike-*.md added to an
+  active `features/YYYY-MM-DD-<name>/` directory whose `spec.md` is
+  already tracked at HEAD** is `planning(<area>): record execution plan
+  for <name> feature` (the features/ analog of the dated-fix
+  record-execution-plan case above); when a single commit lands the
+  expanded spec, the plan, AND a spike report together (e.g.
+  `d97996487` `planning(sniff): record decisions and execution plan for
+  recent-commits feature` for sniff/features/2026-09-15-recent-commits
+  with modified `spec.md`, new `plan.md`, and new `spike-linking-cost.md`
+  referenced from spec.md Decision 9), the spec/plan/spike
+  cross-references must resolve within that one commit — splitting
+  them lands a spec that cites a non-existent plan or spike file. The
+  spec's modification belongs with the new artifacts because the
+  decisions that distill the spec's expanded content are what the plan
+  derives from and the spike is what one of those decisions cites; a
+  separate `docs(sniff): expand spec` commit splits a single planning
+  cycle into two log entries with no boundary between them.
+  Pre-flight `git ls-tree HEAD <dir>` confirms spec is already tracked.
+  See `95216cfd8` for the larger multi-artifact example
+  (`darkmatter/features/2026-09-09-more-context` landed spec.md +
+  decisions.md + plan.md + implementation-log.md in one commit,
+  `planning(darkmatter): record Phase 1-3 execution of more-context
+  feature`).
   AND review-cycle doc edits
   inside a fix/feature directory (`log.md` entry, `review-N.md` flipping
   `implemented: true`, new `review-(N+1).md`, `spec.md` bumping
