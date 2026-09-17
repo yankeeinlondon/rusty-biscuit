@@ -1,11 +1,11 @@
 ---
 $schema: feature-review.yaml
-ready: false
+ready: true
 human_review: false
 reviewed_by: codex/gpt-5.6-sol
 created: 2026-09-15T22:31:55-07:00
 spec: 2026-09-08-frontmatter-matters/spec.md
-implemented: false
+implemented: true
 description: A **fix** review of `2026-09-08-frontmatter-matters/spec.md`
 fix: 2026-09-08-frontmatter-matters/review-1.md
 findings:
@@ -15,7 +15,24 @@ findings:
 
 # Review 1: Frontmatter Matters
 
-## Verdict
+## Resolution (2026-09-17)
+
+Both findings are resolved.
+
+1. Configured defaults now pass through the profile's normal model mapping, so
+   the child receives both `--model <id>` and `MODEL=<id>`. The direct and
+   composition process regressions were added in `f570958a0`. The later
+   provider-overlay work in `9ef76132f` also removed global `HOME` replacement;
+   OpenCode repo isolation now fails closed before spawn because its additive
+   config selector cannot provide the requested isolation.
+2. The `rebuild_target_launch` documentation now states the actual catalog
+   contract: it may order list hints and warn during initial preparation, but
+   it never demotes the document model.
+
+The implementation is ready for production. The original verdict and findings
+below record the state reviewed on 2026-09-15.
+
+## Original Verdict
 
 The frontmatter regression itself is fixed: an unrecognized document model is
 forwarded to OpenCode on argv and through `MODEL`, the warning policy behaves as
@@ -36,7 +53,7 @@ are deterministic and can be corrected and verified by an agent.
 
 ## Findings
 
-### 1. Configured OpenCode defaults are not delivered through a shadow HOME (high)
+### 1. Configured OpenCode defaults are not delivered through a shadow HOME (high) — Resolved
 
 `configured_default_model_in` correctly finds the global default in
 `~/.config/opencode/opencode.jsonc`, `opencode.json`, or legacy `config.json`
@@ -80,7 +97,13 @@ have caught the defect; the current unit tests stop before the child-environment
 boundary, and the current `wrap_opencode` Level 1 tests cover only missing,
 provider-env, and explicit-CLI sources.
 
-### 2. Rebuild documentation still describes the removed catalog fallback (low)
+**Resolution:** `f570958a0` made every resolved source authoritative through
+`WrapperProfile::apply_model`, which gives OpenCode both `--model <id>` and
+`MODEL=<id>`, and added process coverage for direct and composition routes.
+`9ef76132f` subsequently replaced shadow homes with provider-owned overlays and
+made unsupported OpenCode `--repo` requests fail before spawn.
+
+### 2. Rebuild documentation still describes the removed catalog fallback (low) — Resolved
 
 The documentation on `rebuild_target_launch` says an invalid frontmatter model
 "falls back exactly as it would directly"
@@ -89,6 +112,9 @@ The implementation and this fix's contract now forward unrecognized models
 unchanged. This is behavior-documentation drift at a high-impact launch seam;
 rewrite the sentence to say the catalog may warn but never demotes the document
 model.
+
+**Resolution:** the `rebuild_target_launch` documentation now describes those
+catalog semantics directly.
 
 ## Requirement Verification Levels
 
@@ -101,7 +127,7 @@ model.
 | Direct OpenCode provider-env selection and missing-model failure | Level 1 fake-provider process tests | Appropriate and passing. |
 | OpenCode global config parsing and filename precedence | Level 1 unit tests over an explicit directory | Adequate for parsing, but not for launch delivery; finding 1 identifies the missing process boundary. |
 | Two-step sequence launches both steps with the document model and warns once | Level 1 fake-provider process test | Appropriate and passing. |
-| Configured default remains authoritative after child-environment rewriting | No process-level verification | Inadequate; the production behavior is broken under `--repo` (finding 1). |
+| Configured default remains authoritative after child-environment rewriting | Level 1 fake-provider process tests for direct and composition routes | Adequate and passing; configured defaults are delivered explicitly, while unsupported OpenCode repo isolation fails before spawn. |
 
 Level 2 and Level 3 are not required for this fix. Its observable contracts are
 argv, environment, warning text, dry-run data, and subprocess suppression; none
@@ -123,7 +149,7 @@ the focused current-tree runs above are sufficient to reproduce the coverage
 boundary and establish the production blocker. Cross-OS execution evidence is
 left to CI and does not affect this readiness verdict.
 
-## Design Assessment
+## Original Design Assessment
 
 The shared `resolve_document_model` helper is an ergonomic improvement: the
 catalog now orders list hints and supplies warnings without silently changing
