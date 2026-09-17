@@ -36,7 +36,7 @@ You are expected to review a draft specification document located at:
 
 This will be an "inline review" meaning your task is to directly update the specification document with your changes (versus creating a sidecar review document).
 
-::file _writing_clearly.md 
+::file ../_writing-clearly.md 
 
 ::block when='frontmatter(spec, "parent") || frontmatter(spec, "depends-on") || frontmatter(spec, "peers")'
 ### Spec Frontmatter
@@ -87,9 +87,8 @@ Look for how this spec file could be improved:
 Update the spec file's ({{spec}}) Frontmatter (keep any other properties that were set unchanged):
 
 
-::file ./_set_spec_schema.md
+::file ../_set_spec_schema.md
 - set the spec file's `reviewed` Frontmatter property to `true`
 - set the spec file's `reviewed_by` Frontmatter property to "{{ctx.agent}}/{{ctx.model}}"
 - set the spec file's `reviewed_on` Frontmatter property to "{{ctx.today}}"
 - set the spec file's `review_iterations` to `0`
-- set the `

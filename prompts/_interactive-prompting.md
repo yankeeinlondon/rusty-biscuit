@@ -14,7 +14,7 @@ actor: "caller"
 maturity: "na"
 ---
 
-::file ./_writing_clearly.md actor={{actor}}
+::file ./_writing-clearly.md actor={{actor}}
 
 
 ## Interactive Prompting
