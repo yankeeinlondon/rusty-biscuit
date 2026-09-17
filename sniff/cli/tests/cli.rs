@@ -4425,6 +4425,53 @@ fn test_repo_hash_surfaces_corrupt_commit_object() {
         .failure();
 }
 
+/// `repo hash` and `repo git-status` link a commit only when a local
+/// remote-tracking ref contains it. The unpushed tip carries no remote-tracking
+/// decoration and must not be linked, and neither command may fetch.
+#[test]
+fn test_repo_hash_and_git_status_link_only_remote_contained_commits() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "pushed.txt", "pushed");
+    let repo = git2::Repository::open(&path).unwrap();
+    let pushed_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+    repo.remote("origin", "git@github.com:o/r.git").unwrap();
+    repo.reference("refs/remotes/origin/main", pushed_oid, true, "test remote tip")
+        .unwrap();
+    test_commit_file(&path, "unpushed.txt", "unpushed");
+    let unpushed = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    let pushed = pushed_oid.to_string();
+    let pushed_url = format!("https://github.com/o/r/commit/{pushed}");
+
+    let stdout = |args: &[&str]| {
+        let output = common::owned_sniff_command()
+            .args(["--base", path.to_str().unwrap()])
+            .args(args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        String::from_utf8(output).unwrap()
+    };
+
+    assert!(stdout(&["repo", "hash", &pushed]).contains(&pushed_url));
+    assert!(!stdout(&["repo", "hash", &unpushed]).contains("github.com/o/r/commit"));
+
+    // Rendered links wrap at the terminal width, so match the short-hash label
+    // and the start of its link target rather than the full URL.
+    let status = stdout(&["repo", "git-status"]);
+    let linked = |sha: &str| format!("[{}](https://github.com/o/r/commit/", &sha[..7]);
+    assert!(status.contains(&linked(&pushed)), "{status}");
+    assert!(!status.contains(&linked(&unpushed)), "{status}");
+    assert!(status.contains(&format!("[{}]", &unpushed[..7])), "{status}");
+}
+
 /// Corrupt the HEAD commit object of a freshly-built test repo and return its
 /// path, so corruption surfaces through any history-reading command.
 fn repo_with_corrupt_head() -> (tempfile::TempDir, PathBuf) {
@@ -5176,451 +5223,632 @@ fn test_repo_unstaged_source_code_returns_modified_only() {
 }
 
 // ============================================================================
-// Recent Commits CLI Integration Tests (Step 14)
+// Recent Commits CLI Integration Tests
 // ============================================================================
 
-#[test]
-fn test_repo_recent_commits_default_period() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
+const COMMIT_FAMILY_SUBCOMMANDS: [&str; 3] = [
+    "recent-commits",
+    "source-code-changes",
+    "documentation-changes",
+];
 
+/// Run `sniff --base <path> repo <args>` and return its output.
+fn run_repo(path: &Path, args: &[&str]) -> std::process::Output {
     common::owned_sniff_command()
-        .args(["--base", path.to_str().unwrap(), "repo", "recent-commits"])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_recent_commits_with_period() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "1d",
-        ])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_recent_commits_with_count_period() {
-    let (_dir, path) = create_test_repo();
-    for i in 0..5 {
-        test_commit_file(&path, &format!("src/file{i}.rs"), "fn main() {}");
-    }
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "2",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
-    let commits = json["commits"].as_array().expect("commits array");
-    assert_eq!(commits.len(), 2, "expected exactly 2 commits");
-    assert_eq!(
-        json["period_label"].as_str().unwrap(),
-        "last 2 commits",
-        "period label should describe the count"
-    );
-}
-
-#[test]
-fn test_repo_source_code_changes_with_count_period() {
-    let (_dir, path) = create_test_repo();
-    for i in 0..3 {
-        test_commit_file(&path, &format!("src/file{i}.rs"), "fn main() {}");
-    }
-
-    common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "source-code-changes",
-            "2",
-        ])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_recent_commits_with_json() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    // JSON output should contain commit fields
-    assert!(
-        stdout.contains("\"commits\""),
-        "JSON should have commits array"
-    );
-    assert!(
-        stdout.contains("\"period_label\""),
-        "JSON should have period_label"
-    );
-}
-
-#[test]
-fn test_repo_recent_commits_with_plain() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    let output = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--plain",
-        ])
+        .args(["--base", path.to_str().unwrap(), "repo"])
+        .args(args)
         .output()
-        .expect("failed to run sniff");
+        .expect("run sniff repo")
+}
 
+/// Run a commit-family command in JSON mode, requiring success and a bare
+/// JSON array on stdout.
+fn run_commit_json(path: &Path, args: &[&str]) -> Vec<Value> {
+    let output = run_repo(path, args);
+    assert!(
+        output.status.success(),
+        "{args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Plain output should not have ANSI escape codes
+    let value: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("{args:?} stdout is not JSON ({error}): {stdout}"));
+    value
+        .as_array()
+        .unwrap_or_else(|| panic!("{args:?} stdout is not a bare array: {value}"))
+        .clone()
+}
+
+fn headings(commits: &[Value]) -> Vec<&str> {
+    commits
+        .iter()
+        .map(|commit| commit["heading"].as_str().expect("heading is a string"))
+        .collect()
+}
+
+fn file_paths(commit: &Value) -> Vec<&str> {
+    commit["files"]
+        .as_array()
+        .expect("files is an array")
+        .iter()
+        .map(|file| file["path"].as_str().expect("path is a string"))
+        .collect()
+}
+
+/// Commit several files at once with `message`.
+fn commit_files_with_message(repo_path: &Path, files: &[(&str, &str)], message: &str) {
+    let repo = git2::Repository::open(repo_path).unwrap();
+    let mut index = repo.index().unwrap();
+    for (relative, content) in files {
+        let full = repo_path.join(relative);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, content).unwrap();
+        index.add_path(Path::new(relative)).unwrap();
+    }
+    index.write().unwrap();
+    let sig = repo.signature().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head])
+        .unwrap();
+}
+
+/// Commit `files` on `HEAD` as Ada at a fixed `seconds` timestamp and return
+/// the new commit id. An empty `files` list makes an empty commit.
+fn commit_files_at(
+    repo_path: &Path,
+    files: &[(&str, &str)],
+    message: &str,
+    seconds: i64,
+) -> git2::Oid {
+    let repo = git2::Repository::open(repo_path).unwrap();
+    let mut index = repo.index().unwrap();
+    for (relative, content) in files {
+        let full = repo_path.join(relative);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, content).unwrap();
+        index.add_path(Path::new(relative)).unwrap();
+    }
+    index.write().unwrap();
+    let sig = git2::Signature::new("Ada Lovelace", "ada@example.com", &git2::Time::new(seconds, 0))
+        .unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let parents: Vec<git2::Commit<'_>> = repo
+        .head()
+        .ok()
+        .and_then(|head| head.peel_to_commit().ok())
+        .into_iter()
+        .collect();
+    let parent_refs: Vec<&git2::Commit<'_>> = parents.iter().collect();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)
+        .unwrap()
+}
+
+/// Run bare `sniff repo --json` and return the aggregate object.
+fn run_aggregate_json(path: &Path) -> Value {
+    let output = run_repo(path, &["--json"]);
     assert!(
-        !stdout.contains("\x1b["),
-        "Plain output should not have ANSI escape codes"
+        output.status.success(),
+        "repo --json failed: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
+    serde_json::from_slice(&output.stdout).expect("repo --json stdout must be JSON")
 }
 
+/// The aggregate's three commit families are the focused commands' default
+/// bare arrays, byte-for-byte in value: last 10 regardless of age, with
+/// author, file types, attribution, and local links, and with the sibling
+/// projections pruned identically.
 #[test]
-fn test_repo_source_code_changes() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
+fn test_repo_aggregate_commit_families_match_the_focused_commands() {
+    // 2020-01-01T00:00:00Z: far older than the removed 3-day aggregate window.
+    const OLD: i64 = 1_577_836_800;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    let repo = git2::Repository::init(&path).unwrap();
+    repo.remote("origin", "https://github.com/acme/widgets.git")
+        .unwrap();
 
-    common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "source-code-changes",
-            "1w",
-        ])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_source_code_changes_with_json() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "source-code-changes",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(
-        stdout.contains("\"commits\""),
-        "JSON should have commits array"
+    commit_files_at(
+        &path,
+        &[
+            ("Cargo.toml", "[workspace]\nmembers = [\"pkg-a/lib\", \"pkg-b/lib\"]\n"),
+            (
+                "pkg-a/lib/Cargo.toml",
+                "[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+            ),
+            ("pkg-a/lib/src/lib.rs", "pub fn a() {}\n"),
+            (
+                "pkg-b/lib/Cargo.toml",
+                "[package]\nname = \"pkg-b\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+            ),
+            ("pkg-b/lib/src/lib.rs", "pub fn b() {}\n"),
+        ],
+        "chore: scaffold workspace",
+        OLD,
     );
-}
-
-#[test]
-fn test_repo_documentation_changes() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "docs/guide.md", "# Guide\n");
-
-    common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "documentation-changes",
-            "1w",
-        ])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_documentation_changes_with_json() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "docs/guide.md", "# Guide\n");
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "documentation-changes",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(
-        stdout.contains("\"commits\""),
-        "JSON should have commits array"
-    );
-}
-
-#[test]
-fn test_source_code_changes_json_filters_commits_and_files() {
-    // Two commits: one touches a source file, one touches only docs.
-    // `source-code-changes --json` must keep only the source commit and
-    // tag the payload with `"filter": "source_code"`.
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-    test_commit_file(&path, "README.md", "# readme");
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "source-code-changes",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let value: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
-
-    assert_eq!(
-        value["filter"], "source_code",
-        "source-code-changes --json must include `filter: source_code`: {value}"
-    );
-
-    let commits = value["commits"].as_array().expect("commits must be array");
-    // Only the source-touching commit should remain after filtering.
-    assert_eq!(
-        commits.len(),
-        1,
-        "expected exactly one commit after source-code filtering: {value}"
-    );
-
-    // All files left in the kept commit must look like source code.
-    for commit in commits {
-        let files = commit["files"].as_array().expect("files must be array");
-        assert!(!files.is_empty(), "filtered commit must keep its files");
-        for file in files {
-            let path_str = file["path"].as_str().expect("path is a string");
-            assert!(
-                !path_str.ends_with(".md"),
-                "source-code filter must not keep markdown: {path_str}"
-            );
+    let mut pushed = None;
+    for i in 1..=9 {
+        let seconds = OLD + i * 3_600;
+        let (files, message): (Vec<(String, String)>, String) = match i % 3 {
+            0 => (
+                vec![(format!("docs/guide{i}.md"), format!("# Guide {i}\n"))],
+                format!("docs: guide {i}"),
+            ),
+            1 => (
+                vec![("pkg-a/lib/src/lib.rs".to_string(), format!("pub fn a() {{ /* {i} */ }}\n"))],
+                format!("feat(pkg-a): source change {i}"),
+            ),
+            _ => (
+                vec![
+                    ("pkg-b/lib/src/lib.rs".to_string(), format!("pub fn b() {{ /* {i} */ }}\n")),
+                    ("pkg-b/lib/README.md".to_string(), format!("# pkg-b {i}\n")),
+                ],
+                format!("fix(pkg-b): mixed change {i}"),
+            ),
+        };
+        let borrowed: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(file, content)| (file.as_str(), content.as_str()))
+            .collect();
+        let id = commit_files_at(&path, &borrowed, &message, seconds);
+        if i == 5 {
+            pushed = Some(id);
         }
     }
-}
+    commit_files_at(&path, &[], "chore: empty marker", OLD + 10 * 3_600);
+    let pushed = pushed.unwrap();
+    repo.reference("refs/remotes/origin/main", pushed, true, "fixture remote tip")
+        .unwrap();
 
-#[test]
-fn test_documentation_changes_json_filters_commits_and_files() {
-    // Two commits: one touches a source file, one touches docs.
-    // `documentation-changes --json` must keep only doc commits and tag
-    // the payload with `"filter": "documentation"`.
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-    test_commit_file(&path, "README.md", "# readme");
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "documentation-changes",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let value: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
-
-    assert_eq!(
-        value["filter"], "documentation",
-        "documentation-changes --json must include `filter: documentation`: {value}"
-    );
-
-    let commits = value["commits"].as_array().expect("commits must be array");
-    assert!(
-        !commits.is_empty(),
-        "expected at least one doc commit: {value}"
-    );
-
-    for commit in commits {
-        let files = commit["files"].as_array().expect("files must be array");
-        assert!(!files.is_empty(), "filtered commit must keep its files");
-        for file in files {
-            let path_str = file["path"].as_str().expect("path is a string");
-            assert!(
-                !path_str.ends_with(".rs"),
-                "documentation filter must not keep .rs files: {path_str}"
-            );
-        }
-    }
-}
-
-#[test]
-fn test_filtered_commit_json_trims_packages() {
-    // `source-code-changes` and `documentation-changes` should NOT include
-    // the full `packages` metadata for brevity.
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-    test_commit_file(&path, "README.md", "# readme");
-
-    for (subcommand, label) in [
-        ("source-code-changes", "source_code"),
-        ("documentation-changes", "documentation"),
+    let aggregate = run_aggregate_json(&path);
+    for (key, command) in [
+        ("recent_commits", "recent-commits"),
+        ("source_code_changes", "source-code-changes"),
+        ("documentation_changes", "documentation-changes"),
     ] {
-        let assert = common::owned_sniff_command()
-            .args([
-                "--base",
-                path.to_str().unwrap(),
-                "repo",
-                subcommand,
-                "--json",
-            ])
-            .assert()
-            .success();
-
-        let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-        let value: Value = serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
-
+        let focused = run_commit_json(&path, &[command, "--json"]);
         assert_eq!(
-            value["filter"], label,
-            "{subcommand} --json must include `filter: {label}`"
+            aggregate[key],
+            Value::Array(focused),
+            "aggregate `{key}` must equal `repo {command} --json`"
         );
-        assert!(
-            value.get("packages").is_none(),
-            "{subcommand} --json must NOT include full `packages` metadata: {value}"
-        );
+    }
+
+    let recent = aggregate["recent_commits"].as_array().unwrap();
+    assert_eq!(recent.len(), 10, "last 10 of 11 commits, however old");
+    assert_eq!(recent[0]["heading"], "empty marker");
+    assert_eq!(recent[0]["files"], serde_json::json!([]));
+    assert!(
+        recent
+            .iter()
+            .all(|commit| commit["datetime"].as_str().unwrap().starts_with("2020-01-01")),
+        "old quiet history must still be reported: {recent:?}"
+    );
+    assert_eq!(
+        recent[0]["author"],
+        serde_json::json!({"name": "Ada Lovelace", "email": "ada@example.com"})
+    );
+    let pushed_hash = pushed.to_string();
+    let pushed_commit = recent
+        .iter()
+        .find(|commit| commit["hash"] == pushed_hash.as_str())
+        .expect("the pushed commit is inside the last 10");
+    assert_eq!(pushed_commit["remote"], Value::Bool(true));
+    assert_eq!(
+        pushed_commit["commit_url"],
+        format!("https://github.com/acme/widgets/commit/{pushed_hash}")
+    );
+    assert_eq!(pushed_commit["packages"], serde_json::json!(["pkg-b"]));
+    assert_eq!(pushed_commit["file_types"]["documentation"], true);
+    assert_eq!(recent[1]["remote"], Value::Bool(false));
+    assert!(recent[1].get("commit_url").is_none());
+
+    // Sibling projections prune files, drop emptied commits, and keep
+    // whole-commit facts.
+    let source = aggregate["source_code_changes"].as_array().unwrap();
+    let documentation = aggregate["documentation_changes"].as_array().unwrap();
+    assert!(source.iter().flat_map(file_paths).all(|file| file.ends_with(".rs")));
+    assert!(documentation.iter().flat_map(file_paths).all(|file| file.ends_with(".md")));
+    // Of the last 10: three source-only, three docs-only, and three mixed
+    // commits; the empty commit touches neither category.
+    assert_eq!(source.len(), 6, "{aggregate}");
+    assert_eq!(documentation.len(), 6, "{aggregate}");
+    let pruned_mixed = source
+        .iter()
+        .find(|commit| commit["hash"] == pushed_hash.as_str())
+        .expect("mixed commit keeps its source file");
+    assert_eq!(file_paths(pruned_mixed), ["pkg-b/lib/src/lib.rs"]);
+    assert_eq!(pruned_mixed["file_types"], pushed_commit["file_types"]);
+}
+
+/// A family with no matching commits embeds `[]`, exactly as its focused
+/// command emits.
+#[test]
+fn test_repo_aggregate_embeds_empty_commit_families_as_empty_arrays() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let aggregate = run_aggregate_json(&path);
+    assert_eq!(aggregate["documentation_changes"], serde_json::json!([]));
+    assert_eq!(
+        aggregate["documentation_changes"],
+        Value::Array(run_commit_json(&path, &["documentation-changes", "--json"]))
+    );
+    assert!(!aggregate["recent_commits"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn test_recent_commits_defaults_to_the_last_ten_as_a_bare_json_array() {
+    let (_dir, path) = create_test_repo();
+    for i in 0..12 {
+        test_commit_file(&path, &format!("src/file{i}.rs"), "fn main() {}");
+    }
+
+    let commits = run_commit_json(&path, &["recent-commits", "--json"]);
+    assert_eq!(commits.len(), 10, "no period must select the last 10 commits");
+    assert_eq!(
+        file_paths(&commits[0]),
+        ["src/file11.rs"],
+        "newest commit comes first"
+    );
+
+    let mut keys: Vec<&str> = commits[0]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "author",
+            "bullet_points",
+            "datetime",
+            "description",
+            "file_types",
+            "files",
+            "hash",
+            "heading",
+            "operation",
+            "remote",
+            "scope",
+        ]
+    );
+    assert_eq!(commits[0]["heading"], "add file");
+    assert_eq!(
+        commits[0]["author"],
+        serde_json::json!({"name": "Test", "email": "test@test.com"})
+    );
+    assert_eq!(commits[0]["remote"], Value::Bool(false));
+    assert_eq!(
+        commits[0]["files"][0],
+        serde_json::json!({"kind": "added", "path": "src/file11.rs", "added": 1, "removed": 0})
+    );
+
+    assert_eq!(run_commit_json(&path, &["recent-commits", "2", "--json"]).len(), 2);
+}
+
+#[test]
+fn test_commit_family_json_ignores_display_flags() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(
+        &path,
+        "src/main.rs",
+        "fn main() {}",
+        "feat(cli): add main\n\nMore detail.\n\n- first point",
+    );
+    test_commit_file(&path, "README.md", "# readme");
+
+    for subcommand in COMMIT_FAMILY_SUBCOMMANDS {
+        let baseline = run_repo(&path, &[subcommand, "--json"]);
+        for display in [&["-v", "--show-author"][..], &["-c"][..]] {
+            let mut args = vec![subcommand, "--json"];
+            args.extend_from_slice(display);
+            let output = run_repo(&path, &args);
+            assert!(output.status.success(), "{args:?}");
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&baseline.stdout),
+                "{args:?} must not change JSON"
+            );
+        }
     }
 }
 
 #[test]
-fn test_recent_commits_json_unchanged() {
-    // Regression guard — `recent-commits --json` must NOT include the
-    // `filter` field that the filtered variants add.
+fn test_commit_family_empty_results_succeed_with_empty_output() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
-    test_commit_file(&path, "README.md", "# readme");
 
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--json",
-        ])
-        .assert()
-        .success();
+    for subcommand in COMMIT_FAMILY_SUBCOMMANDS {
+        let json = run_repo(&path, &[subcommand, "2099-01-01", "--json"]);
+        assert!(json.status.success(), "{subcommand} --json must exit 0");
+        assert_eq!(String::from_utf8_lossy(&json.stdout).trim(), "[]", "{subcommand}");
+        assert!(json.stderr.is_empty(), "{subcommand} --json stderr: {:?}", json.stderr);
 
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let value: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+        for format in [&[][..], &["--plain"][..]] {
+            let mut args = vec![subcommand, "2099-01-01"];
+            args.extend_from_slice(format);
+            let text = run_repo(&path, &args);
+            assert!(text.status.success(), "{args:?} must exit 0");
+            assert!(text.stdout.is_empty(), "{args:?} stdout: {:?}", text.stdout);
+            assert!(
+                String::from_utf8_lossy(&text.stderr).contains("No commits matched."),
+                "{args:?} stderr: {}",
+                String::from_utf8_lossy(&text.stderr)
+            );
+        }
+    }
 
-    let obj = value.as_object().expect("payload must be a JSON object");
-    assert!(
-        !obj.contains_key("filter"),
-        "recent-commits --json must NOT include `filter`: {value}"
-    );
-    assert!(
-        obj.contains_key("commits"),
-        "recent-commits --json must include `commits`"
-    );
-    assert!(
-        obj.contains_key("period_label"),
-        "recent-commits --json must include `period_label`"
-    );
+    // A filter that matches nothing is the same successful empty result.
+    assert!(run_commit_json(&path, &["recent-commits", "--author", "nobody", "--json"]).is_empty());
+    // Only documentation files were never committed.
+    assert!(run_commit_json(&path, &["documentation-changes", "--json"]).is_empty());
 }
 
 #[test]
-fn test_repo_recent_commits_no_error_flag() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
+fn test_commit_family_invalid_inputs_are_typed_failures() {
+    let (_mono_dir, mono) = create_cli_monorepo();
+    let (_plain_dir, plain) = create_test_repo();
+    test_commit_file(&plain, "src/main.rs", "fn main() {}");
 
-    // Use a future date - valid period that returns no commits
-    common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "2099-01-01",
-            "--no-error",
-        ])
-        .assert()
-        .success();
+    for (path, args, stderr_fragment) in [
+        (&plain, vec!["invalid-period"], "invalid-period"),
+        (&plain, vec!["0"], "0"),
+        (&plain, vec!["--branch", "no-such-branch"], "no-such-branch"),
+        (&plain, vec!["abcdef1234567"], "abcdef1234567"),
+        (&plain, vec!["--package", "pkg-a"], "onorepo"),
+        (&mono, vec!["--package", "nonexistent"], "pkg-a"),
+        (&mono, vec!["--package-area", "nonexistent"], "pkg-b"),
+    ] {
+        for subcommand in COMMIT_FAMILY_SUBCOMMANDS {
+            let mut full = vec![subcommand];
+            full.extend_from_slice(&args);
+            full.push("--json");
+            let output = run_repo(path, &full);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!output.status.success(), "{full:?} must fail");
+            assert!(output.stdout.is_empty(), "{full:?} stdout: {:?}", output.stdout);
+            assert!(stderr.contains(stderr_fragment), "{full:?} stderr: {stderr}");
+        }
+    }
+
+    // The default selection is a count, so the guidance must name that form.
+    for period in ["notaperiod", "0"] {
+        let output = run_repo(&plain, &["recent-commits", period]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{period} must fail");
+        assert!(output.stdout.is_empty(), "{period} stdout: {:?}", output.stdout);
+        assert!(stderr.contains("positive count (e.g., 10)"), "{period} stderr: {stderr}");
+    }
 }
 
 #[test]
-fn test_repo_recent_commits_invalid_period_error() {
+fn test_recent_commits_plain_output_is_the_library_plain_report() {
     let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    test_commit_file_with_message(
+        &path,
+        "src/main.rs",
+        "fn main() {}",
+        "feat(cli): add main\n\nMore detail.\n\n- first point",
+    );
 
-    common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "invalid-period",
-        ])
-        .assert()
-        .failure();
+    let normal = String::from_utf8(run_repo(&path, &["recent-commits", "--plain"]).stdout).unwrap();
+    let lines: Vec<&str> = normal.lines().collect();
+    assert!(lines[0].starts_with("- ["), "{normal}");
+    assert!(lines[0].contains("] feat(cli) at "), "{normal}");
+    assert!(lines[0].ends_with(": add main"), "{normal}");
+    assert_eq!(lines[1..4], ["  Files Impacted:", "  - added: src/main.rs", ""], "{normal}");
+    assert!(lines[4].ends_with(": initial"), "{normal}");
+    assert_eq!(lines[5], "  Files Impacted: none", "empty initial commit: {normal}");
+    for marker in ["**", "\x1b", "](", "file://", "<bold>", "\\["] {
+        assert!(!normal.contains(marker), "{marker:?} in plain output: {normal}");
+    }
+
+    let verbose =
+        String::from_utf8(run_repo(&path, &["recent-commits", "--plain", "-v"]).stdout).unwrap();
+    assert!(
+        verbose.contains(
+            ": add main\n  More detail.\n\n  Details:\n\n  - first point\n\n  Files Impacted:\n  - added: src/main.rs\n"
+        ),
+        "{verbose}"
+    );
+
+    let compact =
+        String::from_utf8(run_repo(&path, &["recent-commits", "--plain", "-c", "--show-author"]).stdout)
+            .unwrap();
+    let compact_lines: Vec<&str> = compact.lines().collect();
+    assert_eq!(compact_lines.len(), 2, "{compact}");
+    assert!(compact_lines[0].contains("] feat(cli) by Test at "), "{compact}");
+    assert!(compact_lines[1].contains("] by Test at "), "{compact}");
 }
 
 #[test]
-fn test_repo_recent_commits_on_error_flag() {
+fn test_recent_commits_terminal_output_renders_library_prose() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(
+        &path,
+        "src/main.rs",
+        "fn main() {}",
+        "fix(cli): handle <red>tags</red> and _em_ literally",
+    );
+
+    let output = run_repo(&path, &["recent-commits"]);
+    assert!(output.status.success());
+    let stdout =
+        biscuit_terminal::prelude::strip_escape_codes(String::from_utf8_lossy(&output.stdout).into_owned());
+
+    assert!(
+        stdout.contains("fix(cli) at "),
+        "operation and scope render as text: {stdout}"
+    );
+    assert!(
+        stdout.contains("handle <red>tags</red> and _em_ literally"),
+        "commit text must not be read as markup: {stdout}"
+    );
+    assert!(stdout.contains("Files Impacted:"), "{stdout}");
+    assert!(stdout.contains("src/main.rs](file://"), "file link: {stdout}");
+    for leaked in ["<bold>", "<italic>", "<blue>", "\\[", "**"] {
+        assert!(!stdout.contains(leaked), "{leaked:?} leaked: {stdout}");
+    }
+}
+
+#[test]
+fn test_source_and_documentation_changes_project_their_files() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(&path, "src/main.rs", "fn main() {}", "feat: add main");
+    test_commit_file_with_message(&path, "README.md", "# readme", "docs: add readme");
+    commit_files_with_message(
+        &path,
+        &[("src/lib.rs", "pub fn lib() {}"), ("docs/guide.md", "# Guide")],
+        "feat: add lib and guide",
+    );
+
+    let all = run_commit_json(&path, &["recent-commits", "--json"]);
+    assert_eq!(file_paths(&all[0]), ["docs/guide.md", "src/lib.rs"]);
+
+    let source = run_commit_json(&path, &["source-code-changes", "--json"]);
+    assert_eq!(headings(&source), ["add lib and guide", "add main"]);
+    assert_eq!(file_paths(&source[0]), ["src/lib.rs"]);
+    assert_eq!(
+        source[0]["file_types"]["documentation"],
+        Value::Bool(true),
+        "file_types still describe the whole commit"
+    );
+
+    let documentation = run_commit_json(&path, &["documentation-changes", "--json"]);
+    assert_eq!(headings(&documentation), ["add lib and guide", "add readme"]);
+    assert_eq!(file_paths(&documentation[0]), ["docs/guide.md"]);
+
+    let source_plain =
+        String::from_utf8(run_repo(&path, &["source-code-changes", "--plain"]).stdout).unwrap();
+    assert!(source_plain.starts_with("Source Code Changes\n\n- ["), "{source_plain}");
+    assert!(source_plain.contains("  - added: src/lib.rs\n"), "{source_plain}");
+    assert!(!source_plain.contains("guide.md"), "{source_plain}");
+    assert!(!source_plain.contains("README.md"), "{source_plain}");
+
+    let documentation_plain =
+        String::from_utf8(run_repo(&path, &["documentation-changes", "--plain"]).stdout).unwrap();
+    assert!(
+        documentation_plain.starts_with("Documentation Changes\n\n- ["),
+        "{documentation_plain}"
+    );
+    assert!(!documentation_plain.contains(".rs"), "{documentation_plain}");
+}
+
+#[test]
+fn test_recent_commits_filters_run_through_the_library() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(&path, "src/a.rs", "a", "feat(cli): add a");
+    test_commit_file_with_message(&path, "src/b.rs", "b", "refactor(lib): simplify b");
+    test_commit_file_with_message(&path, "src/c.rs", "c", "fix(cli): repair c");
+    test_commit_file_with_message(&path, "docs/d.md", "d", "Planning(sniff): record d");
+    test_commit_file_with_message(&path, "e.png", "e", "chore: add image");
+
+    let operations = run_commit_json(
+        &path,
+        &["recent-commits", "--operation", "feat", "--operation", "planning", "--json"],
+    );
+    assert_eq!(headings(&operations), ["record d", "add a"]);
+
+    let scoped = run_commit_json(&path, &["recent-commits", "--scope", "CLI", "--json"]);
+    assert_eq!(headings(&scoped), ["repair c", "add a"]);
+
+    let combined = run_commit_json(
+        &path,
+        &["recent-commits", "--scope", "cli", "--operation", "fix", "--json"],
+    );
+    assert_eq!(headings(&combined), ["repair c"]);
+
+    let by_author = run_commit_json(&path, &["recent-commits", "--author", "TEST.COM", "--json"]);
+    assert_eq!(by_author.len(), 6);
+
+    let images = run_commit_json(&path, &["recent-commits", "--images", "--json"]);
+    assert_eq!(headings(&images), ["add image"]);
+    let documentation = run_commit_json(&path, &["recent-commits", "--documentation", "--json"]);
+    assert_eq!(headings(&documentation), ["record d"]);
+
+    // Count selection is satisfied by matching commits found during the walk.
+    let last_source = run_commit_json(&path, &["recent-commits", "2", "--source-code", "--json"]);
+    assert_eq!(headings(&last_source), ["repair c", "simplify b"]);
+}
+
+#[test]
+fn test_recent_commits_branch_is_a_history_base() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(&path, "src/a.rs", "a", "feat: before branch");
+    {
+        let repo = git2::Repository::open(&path).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &head, false).unwrap();
+    }
+    test_commit_file_with_message(&path, "src/b.rs", "b", "feat: after branch");
+
+    let head = run_commit_json(&path, &["recent-commits", "--json"]);
+    assert_eq!(headings(&head)[..2], ["after branch", "before branch"]);
+
+    let feature = run_commit_json(&path, &["recent-commits", "--branch", "feature", "--json"]);
+    assert_eq!(headings(&feature), ["before branch", "initial"]);
+}
+
+#[test]
+fn test_recent_commits_hash_period_walks_back_to_the_hash() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
+    test_commit_file_with_message(&path, "src/lib.rs", "pub fn lib() {}", "feat: add lib");
 
-    common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "2099-01-01",
-            "--on-error",
-            "No recent commits",
-            "--plain",
-        ])
-        .assert()
-        .code(1)
-        .stderr(predicate::str::contains("No recent commits"));
+    let parent_hash = {
+        let repo = git2::Repository::open(&path).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        head.parent(0).unwrap().id().to_string()
+    };
+
+    let commits = run_commit_json(&path, &["recent-commits", &parent_hash[..10], "--json"]);
+    assert_eq!(headings(&commits), ["add lib", "add file"]);
+    assert_eq!(commits[1]["hash"], Value::String(parent_hash));
+}
+
+#[test]
+fn test_recent_commits_package_filters_and_attribution_in_a_monorepo() {
+    let (_dir, path) = create_cli_monorepo();
+    test_commit_file_with_message(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}", "feat: a2");
+    test_commit_file_with_message(&path, "pkg-b/lib/src/lib.rs", "pub fn b2() {}", "feat: b2");
+
+    let package = run_commit_json(&path, &["recent-commits", "--package", "pkg-a", "--json"]);
+    assert_eq!(headings(&package), ["a2", "initial monorepo"]);
+    assert_eq!(package[0]["packages"], serde_json::json!(["pkg-a"]));
+    assert_eq!(package[0]["package_areas"], serde_json::json!(["pkg-a"]));
+    assert_eq!(file_paths(&package[0]), ["pkg-a/lib/src/lib.rs"]);
+
+    let area = run_commit_json(&path, &["recent-commits", "--package-area", "pkg-b", "--json"]);
+    assert_eq!(headings(&area), ["b2", "initial monorepo"]);
+}
+
+#[test]
+fn test_recent_commits_no_change_commit_is_reported_with_no_files() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    {
+        let repo = git2::Repository::open(&path).unwrap();
+        let sig = repo.signature().unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let tree = head.tree().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "chore: empty marker", &tree, &[&head])
+            .unwrap();
+    }
+
+    let commits = run_commit_json(&path, &["recent-commits", "--json"]);
+    assert_eq!(commits[0]["heading"], "empty marker");
+    assert_eq!(commits[0]["files"], serde_json::json!([]));
+
+    let plain = String::from_utf8(run_repo(&path, &["recent-commits", "1", "--plain"]).stdout).unwrap();
+    assert!(plain.ends_with(": empty marker\n  Files Impacted: none\n"), "{plain}");
 }
 
 // ============================================================================
-// Recent Commits CLI — Hash, Package, and Date routing tests
+// Monorepo and single-package repository fixtures
 // ============================================================================
 
 /// Create a monorepo-style test repo for CLI testing.
@@ -5761,490 +5989,6 @@ members = ["pkg-a/lib", "pkg-b/lib", "."]
     .unwrap();
 
     (dir, path)
-}
-
-#[test]
-fn test_repo_recent_commits_with_hash_period() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-    test_commit_file(&path, "src/lib.rs", "pub fn lib() {}");
-
-    let repo = git2::Repository::open(&path).unwrap();
-    let head = repo.head().unwrap().peel_to_commit().unwrap();
-    // Get the parent commit hash to use as boundary
-    let parent = head.parent(0).unwrap();
-    let parent_hash = parent.id().to_string();
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            &parent_hash,
-            "--plain",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(!stdout.is_empty(), "Hash-based query should produce output");
-}
-
-#[test]
-fn test_repo_recent_commits_with_today_period() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "today",
-            "--plain",
-        ])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_recent_commits_with_date_period() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "2020-01-01",
-            "--plain",
-        ])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_recent_commits_action_filter_single_action() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file_with_message(
-        &path,
-        "src/feature.rs",
-        "pub fn feature() {}",
-        "feat(cli): add action filter",
-    );
-    test_commit_file_with_message(
-        &path,
-        "src/fix.rs",
-        "pub fn fix() {}",
-        "fix(cli): tighten recent commit filtering",
-    );
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--action",
-            "feat",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"]
-        .as_array()
-        .expect("Should have commits array");
-
-    assert_eq!(commits.len(), 1, "Only feat commits should remain");
-    assert_eq!(
-        commits[0]["description"].as_str(),
-        Some("feat(cli): add action filter")
-    );
-}
-
-#[test]
-fn test_repo_recent_commits_action_filter_or_semantics() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file_with_message(
-        &path,
-        "src/feature.rs",
-        "pub fn feature() {}",
-        "feat(cli): add action filter",
-    );
-    test_commit_file_with_message(
-        &path,
-        "src/refactor.rs",
-        "pub fn refactor() {}",
-        "refactor(cli): simplify commit filtering",
-    );
-    test_commit_file_with_message(
-        &path,
-        "src/fix.rs",
-        "pub fn fix() {}",
-        "fix(cli): tighten recent commit filtering",
-    );
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--action",
-            "feat",
-            "--action",
-            "refactor",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"]
-        .as_array()
-        .expect("Should have commits array");
-    let descriptions: Vec<&str> = commits
-        .iter()
-        .filter_map(|commit| commit["description"].as_str())
-        .collect();
-
-    assert_eq!(
-        descriptions.len(),
-        2,
-        "feat and refactor commits should remain"
-    );
-    assert!(descriptions.contains(&"feat(cli): add action filter"));
-    assert!(descriptions.contains(&"refactor(cli): simplify commit filtering"));
-    assert!(!descriptions.contains(&"fix(cli): tighten recent commit filtering"));
-}
-
-#[test]
-fn test_repo_recent_commits_package_filter() {
-    let (_dir, path) = create_cli_monorepo();
-    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}");
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--package",
-            "pkg-a",
-            "--plain",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(
-        !stdout.is_empty(),
-        "Package-filtered query should produce output"
-    );
-}
-
-#[test]
-fn test_repo_recent_commits_package_area_filter() {
-    let (_dir, path) = create_cli_monorepo();
-    test_commit_file(&path, "pkg-b/lib/src/lib.rs", "pub fn b2() {}");
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--package-area",
-            "pkg-b",
-            "--plain",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(
-        !stdout.is_empty(),
-        "Package-area filtered query should produce output"
-    );
-}
-
-#[test]
-fn test_repo_recent_commits_package_json_scoped() {
-    let (_dir, path) = create_cli_monorepo();
-    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}");
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--package",
-            "pkg-a",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-
-    // The packages array should only contain the filtered package
-    if let Some(packages) = json["packages"].as_array() {
-        for pkg in packages {
-            assert_eq!(
-                pkg["name"], "pkg-a",
-                "JSON packages should be scoped to the filter"
-            );
-        }
-    }
-
-    // No files from pkg-b should appear in any commit
-    if let Some(commits) = json["commits"].as_array() {
-        for commit in commits {
-            if let Some(files) = commit["files"].as_array() {
-                for file in files {
-                    let f = file.as_str().unwrap_or("");
-                    assert!(
-                        !f.starts_with("pkg-b/"),
-                        "Filtered JSON should not contain pkg-b files, got: {}",
-                        f
-                    );
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn test_repo_recent_commits_unknown_package_error() {
-    let (_dir, path) = create_cli_monorepo();
-    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}");
-
-    common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--package",
-            "nonexistent",
-        ])
-        .assert()
-        .failure();
-}
-
-// ============================================================================
-// Recent Commits CLI — Empty commit and exact payload tests
-// ============================================================================
-
-#[test]
-fn test_repo_recent_commits_json_includes_empty_commits() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    // Create an empty commit on top
-    let repo = git2::Repository::open(&path).unwrap();
-    let sig = repo.signature().unwrap();
-    let head = repo.head().unwrap().peel_to_commit().unwrap();
-    let tree = head.tree().unwrap();
-    repo.commit(
-        Some("HEAD"),
-        &sig,
-        &sig,
-        "chore: empty marker",
-        &tree,
-        &[&head],
-    )
-    .unwrap();
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"]
-        .as_array()
-        .expect("Should have commits array");
-
-    // Find the empty commit
-    let empty = commits
-        .iter()
-        .find(|c| c["description"].as_str() == Some("chore: empty marker"));
-    assert!(empty.is_some(), "Empty commit should appear in JSON output");
-    let empty = empty.unwrap();
-    let files = empty["files"].as_array().expect("Should have files array");
-    assert!(files.is_empty(), "Empty commit should have files: []");
-}
-
-#[test]
-fn test_repo_recent_commits_json_exact_commit_fields() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"]
-        .as_array()
-        .expect("Should have commits array");
-
-    // Should have at least 2 commits (initial + add file)
-    assert!(
-        commits.len() >= 2,
-        "Should have at least 2 commits, got {}",
-        commits.len()
-    );
-
-    // Verify each commit has required fields
-    for commit in commits {
-        assert!(commit["hash"].is_string(), "Commit should have hash");
-        assert!(
-            commit["datetime"].is_string(),
-            "Commit should have datetime"
-        );
-        assert!(commit["files"].is_array(), "Commit should have files array");
-        assert!(
-            commit["description"].is_string(),
-            "Commit should have description"
-        );
-        assert!(
-            commit["bullet_points"].is_array(),
-            "Commit should have bullet_points"
-        );
-    }
-}
-
-#[test]
-fn test_repo_source_code_changes_json_exact_fields() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "source-code-changes",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"]
-        .as_array()
-        .expect("Should have commits array");
-
-    // At least one commit should have a .rs file
-    let has_rs_file = commits.iter().any(|c| {
-        c["files"].as_array().is_some_and(|files| {
-            files
-                .iter()
-                .any(|f| f["path"].as_str().is_some_and(|s| s.ends_with(".rs")))
-        })
-    });
-    assert!(has_rs_file, "Source code changes should include .rs files");
-}
-
-#[test]
-fn test_repo_documentation_changes_json_exact_fields() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "docs/guide.md", "# Guide\n");
-
-    let assert = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "documentation-changes",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"]
-        .as_array()
-        .expect("Should have commits array");
-
-    // At least one commit should have a .md file
-    let has_md_file = commits.iter().any(|c| {
-        c["files"].as_array().is_some_and(|files| {
-            files
-                .iter()
-                .any(|f| f["path"].as_str().is_some_and(|s| s.ends_with(".md")))
-        })
-    });
-    assert!(
-        has_md_file,
-        "Documentation changes should include .md files"
-    );
-}
-
-#[test]
-fn test_repo_recent_commits_plain_output_exact_structure() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    let output = common::owned_sniff_command()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--plain",
-        ])
-        .output()
-        .expect("failed to run sniff");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Plain output should contain markdown structure
-    assert!(
-        stdout.contains("[") && stdout.contains("] at "),
-        "Plain output should have `[hash] at TIME` commit markers, got:\n{stdout}"
-    );
-    assert!(
-        stdout.contains("**Files Impacted:**"),
-        "Plain output should have files section, got:\n{stdout}"
-    );
-    assert!(
-        stdout.contains("add file"),
-        "Plain output should include the commit description, got:\n{stdout}"
-    );
-    assert!(
-        stdout.contains("src/main.rs"),
-        "Plain output should list the committed file, got:\n{stdout}"
-    );
 }
 
 // ============================================================================
@@ -6965,9 +6709,11 @@ fn test_repo_recent_commits_json_perf_stdout_is_valid_json() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let _: Value = serde_json::from_str(stdout.trim())
+    let value: Value = serde_json::from_str(stdout.trim())
         .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
-    assert!(stdout.contains("commits"), "should contain commits key");
+    // `--perf` wraps a bare array as `{ data, performance }`.
+    assert!(value["data"].is_array(), "commits array under data: {value}");
+    assert!(value["performance"].is_object(), "performance report: {value}");
 }
 
 #[test]

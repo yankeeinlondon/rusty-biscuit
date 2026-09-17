@@ -4,7 +4,6 @@
 //! Each major section (OS, Hardware, Network, Filesystem, Programs, Services)
 //! has its own submodule.
 
-mod commit_blocks;
 mod filesystem;
 mod hardware;
 mod just;
@@ -14,6 +13,8 @@ mod os;
 mod perf_tree;
 mod programs;
 pub(crate) mod recent_commits;
+#[cfg(test)]
+mod recent_commits_prose_layout;
 mod remote;
 mod render;
 pub(crate) mod repo_json;

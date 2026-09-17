@@ -26,7 +26,7 @@ use serde::Serialize;
 use serde_json::{Map, Value, json};
 use sniff::SniffResult;
 use sniff::filesystem::blast_radius::{ChangeScope, ChangedPathKind};
-use sniff::filesystem::git::{BranchInfo, FileChange, GitConfig};
+use sniff::filesystem::git::{BranchInfo, FileChange, GitConfig, RecentCommitsProjection};
 use sniff::filesystem::repo::types::RepoInfo;
 use sniff::filesystem::repo::{
     ExternalDependencyFilter, Package, PathAttribution, RepoAggregate, attribute_paths, scope_paths,
@@ -34,7 +34,6 @@ use sniff::filesystem::repo::{
 
 use crate::args::RepoAction;
 use crate::output::filesystem;
-use crate::output::recent_commits::{RecentCommitsMode, commit_family_value};
 
 /// Result returned by [`build_with_outcome`] for repo-action JSON.
 ///
@@ -623,6 +622,8 @@ struct SniffRepo {
     unstaged: ScopeBucket,
     untracked: ScopeBucket,
     has_merge_conflict: bool,
+    /// The same bare arrays the focused commit-family commands emit with
+    /// default options, all projected from the one aggregate collection.
     recent_commits: Value,
     source_code_changes: Value,
     documentation_changes: Value,
@@ -736,7 +737,7 @@ pub(crate) fn build_aggregate_value(result: &SniffResult, aggregate: &RepoAggreg
         })
         .collect();
     let context = &aggregate.context;
-    let commit_set = &aggregate.commits;
+    let commits = &aggregate.commits;
     let value = SniffRepo {
         name: identity.name.clone(),
         version: aggregate.version.clone(),
@@ -775,15 +776,13 @@ pub(crate) fn build_aggregate_value(result: &SniffResult, aggregate: &RepoAggreg
         unstaged: scope_bucket(result, ChangeScope::Unstaged),
         untracked: scope_bucket(result, ChangeScope::Untracked),
         has_merge_conflict: aggregate.has_merge_conflict,
-        recent_commits: aggregate_commit_family_value(commit_set, RecentCommitsMode::RecentCommits),
-        source_code_changes: aggregate_commit_family_value(
-            commit_set,
-            RecentCommitsMode::SourceCodeChanges,
-        ),
-        documentation_changes: aggregate_commit_family_value(
-            commit_set,
-            RecentCommitsMode::DocumentationChanges,
-        ),
+        recent_commits: commits.to_json(),
+        source_code_changes: commits
+            .projected(RecentCommitsProjection::SourceCode)
+            .to_json(),
+        documentation_changes: commits
+            .projected(RecentCommitsProjection::Documentation)
+            .to_json(),
     };
 
     serde_json::to_value(value).unwrap_or(Value::Null)
@@ -979,22 +978,6 @@ fn changed_path_attribution(result: &SniffResult, paths: &[PathBuf]) -> PathAttr
         return PathAttribution::default();
     };
     attribute_paths(packages, paths)
-}
-
-fn aggregate_commit_family_value(
-    commit_set: &sniff::filesystem::git::recent_commits::CommitDescSet,
-    mode: RecentCommitsMode,
-) -> Value {
-    let mut value = commit_family_value(commit_set, mode);
-    if let Some(obj) = value.as_object_mut() {
-        obj.remove("repo_root");
-        obj.remove("packages");
-        obj.remove("filter");
-        if let Some(period) = obj.remove("period_label") {
-            obj.insert("period".into(), json!({ "label": period }));
-        }
-    }
-    value
 }
 
 /// Build the legacy full-`RepoInfo` JSON value (today's behavior).
@@ -2379,12 +2362,7 @@ mod tests {
                 worktrees: Vec::new(),
                 current_worktree: None,
                 has_merge_conflict: false,
-                commits: sniff::filesystem::git::recent_commits::CommitDescSet {
-                    commits: Vec::new(),
-                    period_label: "last 3d".to_string(),
-                    repo_root: PathBuf::from("/tmp/repo"),
-                    packages: None,
-                },
+                commits: sniff::filesystem::git::RecentCommits::default(),
                 context: sniff::filesystem::repo::AggregateCwdContext::default(),
             }
         }
@@ -2502,13 +2480,19 @@ mod tests {
         }
 
         /// The aggregate's one shared history observation, which all three
-        /// commit-family projections read, is loaded by the library entry point.
+        /// commit-family projections read, is the default-options collection.
         #[test]
         fn aggregate_carries_the_default_commit_family_set() {
+            use sniff::filesystem::git::{GitRepo, RecentCommits, RecentCommitsOptions};
+
             let (_temp, path) = temp_git_repo();
             let result = result_fixture(&path);
             let aggregate = aggregate_fixture(&path, &result);
-            assert_eq!(aggregate.commits.period_label, "last 3d");
+
+            let repo = GitRepo::discover(&path).unwrap().unwrap();
+            let focused = RecentCommits::collect(&repo, &RecentCommitsOptions::new()).unwrap();
+            assert_eq!(aggregate.commits.len(), 1);
+            assert_eq!(aggregate.commits.to_json(), focused.to_json());
         }
 
         #[test]
@@ -2655,7 +2639,7 @@ mod tests {
         }
 
         #[test]
-        fn aggregate_commit_family_leaves_are_objects() {
+        fn aggregate_commit_family_leaves_are_bare_arrays() {
             let (_temp, path) = temp_git_repo();
             let result = result_fixture(&path);
             let aggregate = aggregate_fixture(&path, &result);
@@ -2667,19 +2651,9 @@ mod tests {
                 "documentation_changes",
             ] {
                 assert!(
-                    value[key].is_object(),
-                    "{key} must be an object in aggregate: {value}"
+                    value[key].is_array(),
+                    "{key} must be a bare array in aggregate: {value}"
                 );
-                assert!(value[key]["period"].is_object(), "{key} period: {value}");
-                assert!(
-                    value[key].get("repo_root").is_none(),
-                    "{key} repo_root: {value}"
-                );
-                assert!(
-                    value[key].get("packages").is_none(),
-                    "{key} packages: {value}"
-                );
-                assert!(value[key].get("filter").is_none(), "{key} filter: {value}");
             }
         }
 
@@ -2726,7 +2700,7 @@ mod tests {
                 "package_dependencies keeps the narrow dependency projection: {value}"
             );
             assert!(
-                value["recent_commits"].get("packages").is_none(),
+                value["recent_commits"].is_array(),
                 "recent_commits must not embed package catalog: {value}"
             );
         }
@@ -2966,7 +2940,7 @@ mod tests {
         //! reintroduce an observation that every bare `sniff repo --json` pays.
 
         use super::*;
-        use sniff::filesystem::git::recent_commits::CommitDescSet;
+        use sniff::filesystem::git::RecentCommits;
         use sniff::filesystem::repo::{AggregateCwdContext, RepoIdentity};
         use sniff::performance::{PerformanceCollector, with_current_collector};
 
@@ -3013,12 +2987,7 @@ mod tests {
                 worktrees: Vec::new(),
                 current_worktree: None,
                 has_merge_conflict: false,
-                commits: CommitDescSet {
-                    commits: Vec::new(),
-                    period_label: "last 3d".to_string(),
-                    repo_root: PathBuf::from("/tmp/repo"),
-                    packages: None,
-                },
+                commits: RecentCommits::default(),
                 context: AggregateCwdContext::default(),
             };
             (temp, aggregate)
@@ -3069,6 +3038,34 @@ mod tests {
                 is_current: true,
                 is_detached: false,
             }];
+            let commits = json!([
+                {
+                    "hash": "0123456789abcdef0123456789abcdef01234567",
+                    "datetime": "2026-09-01T12:00:00+00:00",
+                    "author": { "name": "Ada", "email": "ada@example.com" },
+                    "operation": "feat",
+                    "scope": null,
+                    "heading": "mixed change",
+                    "description": "",
+                    "bullet_points": [],
+                    "file_types": {
+                        "source_code": true,
+                        "web_assets": false,
+                        "images": false,
+                        "documentation": true,
+                        "configuration": false,
+                        "cicd": false
+                    },
+                    "packages": ["a"],
+                    "package_areas": ["root"],
+                    "files": [
+                        { "path": "a/src/lib.rs", "kind": "modified", "added": 1, "removed": 0 },
+                        { "path": "a/README.md", "kind": "added", "added": 2, "removed": 0 }
+                    ],
+                    "remote": null
+                }
+            ]);
+            aggregate.commits = serde_json::from_value(commits.clone()).expect("payload fixture");
             aggregate.context = AggregateCwdContext {
                 package: "sniff-lib".to_string(),
                 package_area: "sniff".to_string(),
@@ -3096,7 +3093,21 @@ mod tests {
             );
             assert_eq!(value["worktrees"][0]["name"], "wt-1");
             assert_eq!(value["worktrees"][0]["current"], true);
-            assert_eq!(value["recent_commits"]["period"]["label"], "last 3d");
+            assert_eq!(value["recent_commits"], aggregate.commits.to_json());
+            assert_eq!(value["recent_commits"][0]["remote"], Value::Null);
+            assert_eq!(
+                value["source_code_changes"][0]["files"],
+                json!([commits[0]["files"][0]])
+            );
+            assert_eq!(
+                value["documentation_changes"][0]["files"],
+                json!([commits[0]["files"][1]])
+            );
+            // Commit-level facts describe the whole commit in every projection.
+            assert_eq!(
+                value["source_code_changes"][0]["file_types"],
+                commits[0]["file_types"]
+            );
         }
     }
 }
