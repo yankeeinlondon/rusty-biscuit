@@ -430,3 +430,32 @@ belong here.
   which builders still carry the old shape; check each builder explicitly
   (`git show :<path> | grep -F '"<new-field>"'`) or accept the test
   failure as "missing required field" rather than a missing path.
+- A single-file-to-module-directory split (D old file + N A new sub-module
+  files, where the new directory's `mod.rs` re-exports the sub-modules)
+  must ship atomically in one commit. Splitting it lands broken code at
+  every intermediate state: a D without any A's removes the module outright,
+  a partial set of A's leaves callers importing old paths the D removed,
+  and the surviving sub-modules cannot be reached because the `mod.rs`
+  re-export hasn't landed. This is a stronger coupling than the
+  staged-`R` rename case (lines 126-131) — the rename is a single D+A pair
+  with both endpoints in one index fact, while the module split is a D+N
+  where the N re-exports cohere only when all arrive together. The git
+  index makes this look safe to split (each `A` is independently staged),
+  but every intermediate commit fails to compile. Group the D, the
+  `mod.rs`, and every sub-module `A` into a single `--only` pathspec
+  alongside the call-site `M` updates that consume the new module path,
+  even when the sub-modules individually look independent.
+- CLI test files (`cli/tests/cli.rs`, `cli/tests/snapshots.rs`, etc.) that
+  cover both focused subcommands AND aggregate output force the aggregate's
+  library driver (`filesystem/repo/aggregate_view.rs` and friends) to ship
+  in the same commit as the CLI tests, even when the aggregate driver is
+  technically library code. The coupling is through the test's imports:
+  the test deserializes or asserts on a `RepoAggregate` / aggregate JSON
+  shape whose struct is owned by the library file, and the test will fail
+  to compile (or test a stale shape) if the library file is committed
+  separately. Splitting "library feat" and "CLI refactor" along the
+  conventional `sniff/lib/**` vs `sniff/cli/**` boundary can lose this
+  coupling; pre-flight `git grep -nE 'fn test_.*(aggregate|json)'` over
+  the CLI test file reveals which library symbols the tests reference,
+  and any of those symbols' defining file belongs with the CLI commit
+  rather than the library one.
