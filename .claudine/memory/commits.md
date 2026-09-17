@@ -386,3 +386,20 @@ belong here.
   which builders still carry the old shape; check each builder explicitly
   (`git show :<path> | grep -F '"<new-field>"'`) or accept the test
   failure as "missing required field" rather than a missing path.
+- A fix's `implementation-log.md` frontmatter carries the
+  authoritative per-phase file lists
+  (`source_files_during_phase_N`, `docs_updated_during_phase_N`,
+  `skills_files_updated_during_phase_N`) plus a top-level `source_code:`
+  catalog of every file touched across all phases. When a multi-package
+  fix spans a `commit-messages` batch (the canonical pattern is one commit
+  per package area per phase group, plus a separate `planning(<area>):`
+  close), diffing the sorted staged set against the sorted
+  `source_code:` list gives an exact "what belongs to this fix" scope
+  without scanning every file's diff. Files in the staged set that are
+  NOT in the catalog belong to a sibling fix (different planning dir or
+  unrelated entry) and route to their own commit. Lines that begin with
+  embedded Unicode glyphs in `source_code:` (e.g. raw emoji or a marker
+  prefix) and adjacent truncation (e.g. `lint.tx` instead of `lint.txt`)
+  are normal extraction artifacts, not missing files; match by string
+  after stripping non-ASCII prefix bytes and treating the truncated name
+  as the full one.
