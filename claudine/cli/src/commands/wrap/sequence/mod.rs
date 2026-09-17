@@ -84,7 +84,10 @@ fn approve_preflight_graph(
         shared.yolo,
     );
 
+    // The document the graph walk is composing, so a failure can name it.
+    let composing = std::cell::RefCell::new(None::<std::path::PathBuf>);
     let compose_options = |path: &std::path::Path| {
+        composing.replace(Some(path.to_path_buf()));
         let source_context = invocation
             .derive_source(path)
             .expect("resolved prompt document always has a parent directory");
@@ -115,8 +118,51 @@ fn approve_preflight_graph(
     };
 
     let result =
-        composition::resolve_graph_shell_approvals(graph, &approval_options, &compose_options)?;
+        composition::resolve_graph_shell_approvals(graph, &approval_options, &compose_options)
+            .inspect_err(|error| {
+                if is_missing_include(error)
+                    && let Some(document) = composing.borrow().as_deref()
+                {
+                    emit_missing_include_note(document);
+                }
+            })?;
     Ok(result.approved_commands)
+}
+
+/// Whether static preflight failed because a prompt document's `::file`
+/// target does not exist.
+///
+/// Sequences deliberately do not support an include that the document's own
+/// `initialize` (or any earlier step) would create: every prompt document is
+/// discovered before the first step runs (fix
+/// `2026-09-15-initialize-after-proxy`, OQ1 Option A).
+fn is_missing_include(error: &CompositionError) -> bool {
+    use darkmatter::markdown::MarkdownError;
+    use darkmatter::markdown::compose::TransclusionError;
+
+    matches!(
+        error,
+        CompositionError::PreFlightDiscoveryFailed(MarkdownError::Transclusion(inner))
+            if matches!(inner.as_ref(), TransclusionError::Io(io) if io.kind() == std::io::ErrorKind::NotFound)
+    )
+}
+
+/// Tell the author how to satisfy a missing include at sequence preflight.
+///
+/// Emitted ahead of the unchanged typed error, which the top-level renderer
+/// prints after this returns.
+fn emit_missing_include_note(document: &std::path::Path) {
+    let name = document
+        .file_name()
+        .map_or_else(|| document.display().to_string(), |n| n.to_string_lossy().into_owned());
+    let rendered = Prose::new(format!(
+        "<orange><bold>note:</bold></orange> a sequence checks every prompt document before its \
+         first step runs, so a file that <b>{name}</b> includes must already exist. Neither \
+         an earlier step nor the document's own <b>initialize</b> can create it. Create the \
+         file before starting the sequence."
+    ))
+    .render(&log::terminal());
+    log::message(&rendered);
 }
 
 /// Execute a full sequence: iterate steps, compose each, and report results.
