@@ -52,7 +52,9 @@ pub struct PreFlightResult {
 ///
 /// ## Arguments
 ///
-/// * `markdown` — composed Markdown for template `::shell` discovery.
+/// * `markdown` — Markdown source for condition-blind template `::shell`
+///   discovery, which can dereference body includes. For staged live entry,
+///   pass the stabilized reread after initialization.
 /// * `compose_options` — Darkmatter compose options for the template walker.
 /// * `approval_options` — shell approval policy, handler, and cache.
 /// * `lifecycle` — parsed lifecycle configuration; when present, every

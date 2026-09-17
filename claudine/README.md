@@ -117,6 +117,12 @@ All three commands share a wrapper-grade execution pipeline with full support fo
 
 Provider selection uses explicit flags (`--claude`, `--codex`, etc.), frontmatter hints, config favorites, or interactive chooser. Use `-i` for interactive sessions, `--exclude` to filter providers.
 
+Live `compose` and `inline-compose` documents with `initialize` can create
+files their bodies include: Claudine approves initialization shell commands,
+runs initialization, then rereads, audits, and composes the body. Dry runs do
+not initialize. Sequence includes must exist before the sequence starts. See
+[initialization ordering](./docs/topics/composition.md#documents-that-declare-initialize).
+
 For eager file parameters with a schema `match(...)` glob, a partial path triggers confirmation or a file chooser before `initialize` reads it. This also works with `-y`; missing unrelated parameters remain deferred until after initialization. See [Composition](./docs/topics/composition.md#provided-partial-file-references) for the matching rules and interactive gates.
 
 ### Performance Reporting

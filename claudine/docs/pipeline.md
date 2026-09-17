@@ -7,7 +7,7 @@ description: |-
     named so they can be discussed, reordered, parallelized, deferred, or
     eliminated in pursuit of an order-of-magnitude speedup of both real and
     perceived latency.
-last_updated: 2026-07-23
+last_updated: 2026-09-17
 ---
 
 # Compose / Inline-Compose Pipeline
@@ -101,7 +101,41 @@ correctly.
 | B3.5 | **Final model resolution** [M] | Re-run model resolution with the (potentially refreshed) catalog. |
 | B3.6 | **Install `AGENT` env var** [M] | Both into the parent process env (`set_var`) and into `env_overrides` for the child. |
 
-### B4. Shell preflight (template commands)
+### B4. Staged initialization and shell preflight
+
+For live `compose` and `inline-compose`, a document with an authored
+`initialize` key takes the staged path below. Newly adopted proxy targets also
+enter staged initialization. Direct documents without that key retain eager
+body discovery and schema validation. Parsing the root document and capturing
+its request context are permitted before initialization; following a body
+include is not.
+
+1. `prepare_bootstrap` composes only the frontmatter/lifecycle surface using
+   Darkmatter's `ComposeOptions::only_frontmatter_surface()`. The result is a
+   `BootstrapPreparation`, not a completed prompt.
+2. Approve every potentially selected initialization shell command.
+3. Run `initialize` once. A skip, error, or proxy handoff leaves the abandoned
+   body's dependencies unread.
+4. Reread the stabilized document with caller inputs, provenance, document
+   epoch, and resolution context retained.
+5. Discover and approve body and lifecycle commands, reusing the narrow gate's
+   approvals; complete canonical composition and the schema verdict. Only then
+   may the provider receive the prompt. An include still missing at this point
+   fails with the ordinary typed diagnostic and `blocked`/`finalize` routing.
+
+The B4–B6 tables describe the eager path; staged documents defer the body audit
+and full preparation until step 4 above. Loop seed preparation uses the
+bootstrap surface; iteration 1 composes the stabilized reread. Retry/resume
+reread and audit without another initialization. Later loop iterations reuse
+the audited structural plan.
+
+`--dry-run` retains the eager discovery path without initialization effects or
+dynamic proxy traversal, so generated includes can still be missing. Sequences
+retain static preflight over the complete graph: create includes before
+starting the sequence, not in an earlier sequence task. See
+[composition](topics/composition.md#documents-that-declare-initialize) and
+[lifecycle](topics/lifecycle.md#lifecycle-properties).
+
 
 The composition pipeline pre-approves shell-expansion commands found in
 the template body so Darkmatter can run them non-interactively.

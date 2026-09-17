@@ -7,8 +7,8 @@ prompt: |-
   - identify what CLI switches or prompt frontmatter has an impact on each step and what that impact is
 
   After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
-last_updated: 2026-09-08
-hash: 7738d51f4cfa73e2-9cbc39f30e9c60b6
+last_updated: 2026-09-17
+hash: 7738d51f4cfa73e2-a7c60bab36e012cb
 ---
 Let me explore the composition-related source code and documentation to trace the exact execution flows.Now let me read the existing composition topic doc and the key source files for precision:Now let me read the critical execution pipeline files:Now let me read the remaining portions of the composition executor to get the full execution pipeline:Now I have a comprehensive understanding of all three flows. Let me compose the complete Markdown body.Now I have all the details needed. Let me produce the comprehensive Markdown body content:Now I have all the details. Let me compose the full Markdown document body:
 
@@ -928,11 +928,22 @@ The following interfaces have been removed and replaced by the two canonical com
 
 ## Architecture
 
-All three commands follow the same six-stage pipeline:
+The shared eager preparation path has the following outline:
 
 ```text
 Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure
 ```
+
+Live `compose` and `inline-compose` documents with an authored `initialize`
+key instead bootstrap the frontmatter/lifecycle surface, approve initialization
+shell commands, run initialization once, and reread before body discovery,
+full shell audit, and the schema verdict. Newly adopted proxy targets also
+enter staged initialization. The stabilized body may include files just
+created by initialization. Dry runs do not initialize; sequence static preflight
+still requires all includes before any task starts. See the current
+[pipeline map](../pipeline.md#b4-staged-initialization-and-shell-preflight) and
+[composition contract](composition.md#documents-that-declare-initialize).
+
 
 - **Resolve**: `composition::resolve_composition_source()` loads the Markdown file
 - **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))

@@ -308,6 +308,17 @@ Before anything runs, Claudine walks the **entire task graph**:
 A preflight failure aborts the sequence regardless of `fail_fast`. Preparation
 never degrades to best-effort.
 
+An include that a prompt's `initialize` would create must already exist at this
+boundary. A missing include remains a typed preflight failure, with guidance to
+create it **before starting the sequence**. An earlier task in the same sequence
+cannot create it in time because no task starts before static preflight passes.
+Live standalone `compose` and `inline-compose` support initialization-created
+includes through [staged preparation](../composition.md#documents-that-declare-initialize).
+A sequence task composes its prompt before its own initialization, so a change
+to an existing include during that initialization does not alter the prompt
+already composed for that task.
+
+
 ### Phase 2 — Just-in-time composition
 
 Each step composes **at its turn**, not up front. At every step boundary

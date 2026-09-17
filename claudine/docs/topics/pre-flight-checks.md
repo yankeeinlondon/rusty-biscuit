@@ -20,7 +20,23 @@ The pre-flight runs as part of every wrapper command — `claudine compose`, `cl
 Prompt resolved → Pre-flight shell approval → Provider launches
 ```
 
-### Two-Phase Discovery
+### Initialization before body discovery
+
+Live `compose` and `inline-compose` documents with an authored `initialize`
+key use a frontmatter-only bootstrap. A narrow gate approves initialization
+shell commands before the event runs. The stabilized reread then discovers
+body dependencies and audits their commands plus the remaining lifecycle
+surface, reusing cached approvals. This permits initialization to create an
+include without weakening condition-blind discovery: commands in false
+branches still require approval. Newly adopted proxy targets use staged boot
+as well; a missing include after initialization still blocks launch.
+
+Direct documents without `initialize` retain the eager discovery described
+below. Dry runs do not initialize or traverse dynamic proxies. Sequences keep
+static graph preflight, so their includes must exist before the sequence starts.
+See [initialization ordering](composition.md#documents-that-declare-initialize).
+
+### Two-Phase Discovery (eager preparation)
 
 Claudine discovers shell commands in two phases because lifecycle stack properties can only be read from the **effective (composed) frontmatter**, which is not available until after Darkmatter composition runs. But composition itself needs the pre-approved command set to execute `::shell` directives. This creates a dependency:
 

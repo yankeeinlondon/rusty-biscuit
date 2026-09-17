@@ -823,10 +823,10 @@ fn observe_reentry_lifecycle_context(
 ///
 /// ## Errors
 ///
-/// A failure here is deliberately *not* routed through the document's own
-/// `blocked`/`finalize`: its lifecycle config is not installed until the gate
-/// passes, and the source's was discarded by the clean handoff, so there is no
-/// legitimate catch surface to fire. It surfaces as its own typed diagnostic.
+/// A bootstrap or narrow-gate failure precedes installation of the document's
+/// lifecycle config and surfaces directly as a typed diagnostic. Once the gate
+/// passes, initialization runs under the installed config and retains its
+/// ordinary lifecycle error routing.
 fn run_initialize_stages(
     prompt: &mut AttemptPromptPreparation<'_>,
     lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
