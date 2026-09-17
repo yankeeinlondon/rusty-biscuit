@@ -102,6 +102,43 @@ skills_files_updated_during_phase_3:
   - .claude/skills/sniff/SKILL.md
   - .claude/skills/sniff/network.md
   - .claude/skills/os/macos.md
+source_files_during_phase_4:
+  - Cargo.lock
+  - darkmatter/lib/Cargo.toml
+  - darkmatter/lib/src/markdown/compose/context/catalog.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/ast.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/roots.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/agentic_cli_generated.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/pending.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/dmls/src/overlay/expressions.rs
+  - darkmatter/dmls/tests/lsp_session.rs
+  - darkmatter/cli/tests/schema_about.rs
+  - darkmatter/lib/tests/ambient_ctx_capture.rs
+  - claudine/gen/src/agentic_clis.rs
+  - claudine/gen/src/agentic_clis/tests.rs
+  - claudine/gen/src/apply.rs
+  - claudine/gen/src/errors.rs
+  - claudine/gen/src/lib.rs
+  - claudine/gen/src/main.rs
+  - claudine/gen/tests/drift.rs
+  - claudine/gen/tests/generate_ux.rs
+docs_updated_during_phase_4:
+  - darkmatter/docs/schemas/darkmatter.yaml
+  - darkmatter/docs/schemas/expression-functions.yaml
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/docs/topics/context-variables.md
+  - darkmatter/docs/dependencies.md
+  - darkmatter/features/2026-09-09-more-context/plan.md
+  - darkmatter/features/2026-09-09-more-context/implementation-log.md
+  - .claude/skills/darkmatter/library-surfaces.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
   - sniff
 human_review: true
