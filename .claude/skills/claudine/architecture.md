@@ -610,6 +610,48 @@ composed against; ambient `ComposeContext::capture()` is not a runtime fallback
 on any prepared path (the wrapper moves process CWD to the repo root, so a
 recapture reads the wrong anchor).
 
+Beside it, `service.rs::prepare_bootstrap` takes a document's
+**initialize-bootstrap read**: the same `canonical_compose_options`, narrowed
+with Darkmatter's `only_frontmatter_surface()`, returning a
+`BootstrapPreparation` (identity, caller layers, effective frontmatter,
+selection hints, C3-stamped `LifecycleConfig`, context snapshot). It holds
+no prompt, closure plan, or schema verdict, and it never dereferences a body
+transclusion, so a body that includes a file `initialize` will create does not
+fail it. Approve its frontmatter `$(...)` first with
+`preflight_bootstrap_shell`, then gate `initialize` with
+`resolve_lifecycle_shell_approvals(&bootstrap.lifecycle, …, &[Initialize], …)`;
+the shared approval cache lets the post-`initialize` full audit reuse those
+approvals. Only `Direct`/`ProxyTarget` entries take a bootstrap read. The
+post-compose steps (hints, lifecycle parse, C3 stamping, static guards) live in
+one `effective_surface` helper shared by all three reads, and `compose_bootstrap`
+is a reasoned `COMPOSE_WITH_ALLOWLIST` entry in `cli/tests/composition_seams.rs`.
+
+The command coordinator (`compose/prep.rs`) calls it for every live document
+whose authored frontmatter has an `initialize` key
+(`wrap::composition::staged_boot::authors_initialize`, the one predicate) — the
+caller's own document or an adopted target. `staged_boot` runs the order:
+bootstrap read → narrow gate → `initialize` through the pipeline's own
+`route_initialize` (a proxy commits via `pipeline::commit_initialize_proxy`) →
+`reread_and_audit` (fresh disk read + overlay, epoch context extended, full
+body audit) → `prepare_staged(Validate)`. A reread failure fires the document's
+`blocked`/`finalize` once (`route_stabilized_failure`). The single route then
+runs the pipeline under that guard (`execute_staged_composition`, the
+external-guard seam the loop uses), so the pipeline never routes `initialize`
+again. The loop route seeds from the bootstrap
+(`build_loop_seed_from_bootstrap`), the engine emits `initialize`, and iteration
+1 composes the stabilized reread. A harness-adopted target (a sequence task has
+no command ledger) takes `bootstrap_harness_prompt` for boot stages 1-3
+(`BootstrapStage::TargetInitialized`). A dry run and a document without
+`initialize` keep eager discovery.
+
+Sequences do not stage (OQ1 Option A): static preflight
+(`approve_preflight_graph`) composes every referenced prompt document before
+the first step runs, so an include that a step's own `initialize` or an
+earlier step would create fails there as the unchanged typed
+`TransclusionError`, preceded by a stderr `note:` telling the author to create
+the file first. A sequence step's prompt is composed before its `initialize`
+runs; a target that step *proxies* to is still staged inside the harness.
+
 File-valued input keeps its provenance through that service. A reference
 authored in a document resolves from the document's source context; an eager
 `file` value supplied by the caller (`--set` or an immediate `proxy.with`

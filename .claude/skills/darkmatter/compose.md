@@ -494,6 +494,20 @@ candidates. The lower-level `collect_shell_commands(&md, &options)` returns the
 raw `ShellCommandEntry` list. See
 `docs/inline/preflight-checks.md`.
 
+### Frontmatter-surface projection
+
+`ComposeOptions::only_frontmatter_surface()` narrows a compose to frontmatter
+interpolation and frontmatter `$(...)` expansion (intersected with what is
+already enabled). The body comes back exactly as authored: no transclusion is
+dereferenced, no body directive or `::block when` is evaluated. With a
+pre-approved set, its up-front check uses
+`collect_frontmatter_shell_commands(&md, &options)` (frontmatter commands only,
+excluded keys contribute none) instead of the graph walk, so a missing include
+cannot fail it. Use it to read the frontmatter that drives a step (e.g. a
+lifecycle `initialize`) that creates files the body includes; never use the
+projected body as a prompt. Full compose and `compose_preflight` still fail on
+the missing include.
+
 ## Shell Command Caching
 
 Identical commands (same normalized command string) execute **once per compose
