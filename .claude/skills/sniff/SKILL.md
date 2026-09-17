@@ -157,6 +157,7 @@ filesystem walks, Git diff/blob work, or interpreting archived baselines.
 | Program catalog, lookup, and install CLI | [programs.md](programs.md) |
 | Add or change a detector/category/install implementation | [extending.md](extending.md) |
 | Service detection | [services.md](services.md) |
+| Scoped addresses, default gateways, ICMP probes | [network.md](network.md) |
 | Adding detection capabilities | [extending.md](extending.md) |
 
 Load only the reference matching the active subsystem.
