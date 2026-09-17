@@ -4,6 +4,16 @@ created: 2026-09-15
 phase: 1
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
+implemented: false
+implemented_by: "claude/default"
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+human_review: true
+human_review_items:
+  - "Confirm Rulings 1, 3, 4, and 5 before Phase 2."
+message_to_agent: "Resume Phase 1, not Phase 2. Storage is restored, but baseline and graph impact evidence are missing. Ruling 2 is approved: reject duplicate YAML mapping keys in Darkmatter. Read implementation-log.md and obtain confirmation of Rulings 1, 3, 4, and 5."
 ---
 
 # Plan: Mapping-Only Claudine Lifecycle `set` Syntax
@@ -30,8 +40,8 @@ The grammar change touches four layers of one shared pipeline:
    a recursive typed action-value tree analogous to
    `ProxyWithValue` (`actions.rs:217`). Positional, long-form, and any
    call-spelling variants become typed migration-guidance errors.
-2. **Executor layer** (`executor.rs:1272` `dispatch_side_effect`,
-   `executor.rs:1367` `apply_runtime_set`): the mapping is one typed action
+2. **Executor layer** (`executor.rs:1293` `dispatch_side_effect`,
+   `executor.rs:1439` `apply_runtime_set`): the mapping is one typed action
    and one runtime-state transaction — all values resolve against the
    pre-action working state, all keys validate, then the complete mutation
    map commits. The single-key `verb == "set"` arm is replaced by the batch
@@ -94,10 +104,25 @@ No production code changes. Close every open design question so Phase 2 is
 pure execution, and record the baseline the later phases are measured
 against.
 
+### Recovery status — 2026-09-17
+
+Phase 1 is **incomplete**. The previous attempt stopped with ENOSPC on
+`/private/tmp` and `/Volumes/coding`; the author has restored storage.
+The three completed spikes are recorded from the agent's handoff in
+[implementation-log.md](implementation-log.md), not independently rerun in
+this documentation update. No source changes were reported.
+
+The startup `implemented: true` did not represent completed implementation
+and is corrected to `false`. Phase stays at 1; no `completed_phase` is set.
+Empty phase file lists describe implementation deliverables, excluding
+plan/log bookkeeping. Baseline and refreshed graph evidence remain missing;
+Ruling 2 is approved; Rulings 1, 3, 4, and 5 remain unconfirmed. **Do not begin Phase 2 until the Phase 1
+checkpoint is satisfied.**
+
 ### Necessary Rules
 
-The following rulings are required before Phase 2 begins. Each records the
-recommended resolution; the author must confirm or override.
+The following rulings are required before Phase 2 begins. Checked rulings record author-approved decisions; unchecked rulings remain
+recommendations for the author to confirm or override.
 
 - [ ] **Ruling 1 — Where reserved-key validation happens for the mapping.**
   Recommendation: structural malformation (non-mapping payload, non-string /
@@ -110,16 +135,19 @@ recommended resolution; the author must confirm or override.
   suppresses "an evaluation or dispatch failure"). Acceptance criterion 10's
   "static malformed mappings fail even under a false `when`" reads on
   structural shape only.
-- [ ] **Ruling 2 — Duplicate destination keys.** R1 requires duplicates to
-  "fail during YAML parsing rather than silently selecting one value".
-  Spike 1 determines whether Darkmatter's frontmatter YAML parsing already
-  rejects duplicate mapping keys. If it silently last-wins, the ruling must
-  decide the enforcement point (frontmatter parser behavior is shared with
-  Darkmatter and may be out of bounds; the fallback is a typed parse error
-  at the `set` mapping boundary, which is only reachable when Claudine's
-  serde path has already collapsed duplicates — in that case the spike's
-  finding decides whether a Claudine-side guard is possible at all, or
-  whether the spec requirement is met by the YAML layer).
+- [x] **Ruling 2 — Duplicate destination keys (approved 2026-09-17).**
+  The author approved option (a): Darkmatter rejects duplicate keys within
+  any YAML frontmatter mapping, including nested mappings, through the
+  shared `parse_yaml_with_fallbacks` path. Apply the same rule to direct,
+  indentation-normalized, and expression-protected parsing; fallback paths
+  must not hide duplicate errors. Preserve typed errors and source-location
+  information. Claudine consumes the shared parser without reparsing.
+  Duplicate-looking text inside expression strings remains expression
+  content. Explicit merging between separate documents is unchanged.
+  This deliberately expands scope to all Darkmatter frontmatter consumers:
+  documents relying on last-wins behavior must be corrected. Run shared
+  parser impact analysis, establish Darkmatter baselines, and validate
+  shipped artifacts and normal CLI invocation alongside Claudine coverage.
 - [ ] **Ruling 3 — Action representation.** Recommendation: a dedicated
   `LifecycleActionKind` variant (e.g. `RuntimeSet`) holding an
   order-preserving `IndexMap<String, …>` of a recursive typed value tree —
@@ -148,33 +176,42 @@ recommended resolution; the author must confirm or override.
   mapping. Per R5, reuse an existing catalog code when remedy and
   disposition are unchanged; any new code/detail field must update the
   catalog and its guard tests in the same change
-  (`composition/error/tests.rs`).
+  (`composition/error/tests.rs`). Lifecycle `set('k', v)` already fails
+  with `LifecycleShortFormRemoved`, but its current suggestion uses the
+  positional form being removed; give `set` mapping-specific guidance.
 
 ### Spikes
 
-- [ ] **Spike 1 — Duplicate-key behavior of the YAML frontmatter parser.**
+- [x] **Spike 1 — Duplicate-key behavior of the YAML frontmatter parser.**
   Write a throwaway test against Darkmatter frontmatter parsing with a
   duplicate-key mapping and record error-vs-last-wins. Feeds Ruling 2.
   Small (≤ half day).
-- [ ] **Spike 2 — Result-value plumbing audit.** Trace
+- [x] **Spike 2 — Result-value plumbing audit.** Trace
   `dispatch_task_side_effect` (`executor.rs:533`) and stack execution to
   confirm where an action's `Ok(Value)` surfaces: side-effect task
   serialization (`run_side_effect`'s `Ok(other) => other.to_string()`),
   event-stack discard, and `err.*`/machine projection seams. Confirms R4's
   "where the side-effect protocol exposes an action's result" inventory and
   the exact seams Phase 3 must touch. Small.
-- [ ] **Spike 3 — Migration inventory validation.** Re-run the corpus scans
+- [x] **Spike 3 — Migration inventory validation.** Re-run the corpus scans
   (`set: [`, `action: set`, `"set":`, `action: "set"`) over `prompts/`,
   `claudine/` excluding `_completed` trees, and record the authoritative
   file list. Known starting inventory from planning:
-  `prompts/_implement/implement-plan.md:43,59-60`;
-  `claudine/docs/topics/flow-control/sequences.md:378,381,468`;
+  `prompts/_implement/implement-plan.md:40,56-57`;
+  `claudine/docs/topics/flow-control/sequences.md:389,392,479`;
   `claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs`;
-  `claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs`;
+  `claudine/lib/src/composition/sequence/task/tests.rs` (about 17 sites);
   `claudine/lib/src/composition/sequence/preflight/tests.rs:1353`;
   `claudine/cli/tests/{sequence_jit.rs,level2_sequence_task_stream_capture.rs,compose_caller_file_provenance.rs,inline_completion_lifecycle.rs,composition_outputs.rs,sequence_groups.rs}`;
   `claudine/features/2026-07-11-sequence-plus/{spec.md,plan.md,validation-matrix.md}`;
-  comment drift at `executor.rs:1364`. Explicit non-targets: loop-control
+  `darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md`;
+  `claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md`
+  (already drifted from the real prompt);
+  comment drift at `executor.rs:1436`. `action_shape_control.rs` has no
+  `set` usage and is not a migration target. `error/tests.rs:2174,2181`
+  uses `set` only as a label; review when diagnostics change. No hits were
+  reported in `claudine/schemas/` or Claudine skill files.
+  Explicit non-targets: loop-control
   `set(...)`, Darkmatter `set(key, value)` descriptor examples, jq
   expressions in `prompts/dependency-upgrade.md` (`requirement_set:` is an
   unrelated property), `fixes/_completed/**`.
@@ -185,18 +222,32 @@ recommended resolution; the author must confirm or override.
   - Re-run `just gitnexus`, then upstream impact for
     `parse_lifecycle_config`, `parse_positional_action`,
     `dispatch_side_effect`, `RuntimeState::set`, `dispatch_task_side_effect`,
-    and `is_known_side_effect` (`signatures.rs:221`); record callers,
+    and `is_known_side_effect` (`signatures.rs:221`), plus Darkmatter's
+    `parse_yaml_with_fallbacks` for approved Ruling 2; record callers,
     processes, and risk in the implementation log.
   - Planning-run findings for reference: `dispatch_side_effect` upstream is
     LOW risk (2 direct callers, Lifecycle module only);
     `parse_lifecycle_config` upstream is LOW risk (3 direct callers,
     Preflight module); `RuntimeState::set` callers are the executor plus its
-    own tests.
+    own tests **plus `sequence/task/group.rs:406`**, which merges parallel
+    group results. The original inventory missed this second production
+    caller. Planning findings do not substitute for refreshed evidence.
 - [ ] **Baseline capture**
   - Run `just test` and `just test-l2` in the claudine package area and
     record the pre-change pass/fail baseline (any pre-existing failures
     must be distinguishable from regressions introduced by this change).
-  - Run `just lint` and record a clean baseline.
+  - Run `just lint` and record the actual result.
+  - For approved Ruling 2, also capture `just test` and `just lint` in
+    `darkmatter/`, distinguishing pre-existing failures from regressions.
+  - The interrupted L1 run exited nonzero during a from-scratch build,
+    likely but not conclusively due to disk exhaustion. No L2 or lint log
+    survived; none of these attempts counts as passing baseline evidence.
+- [ ] **Recovery cleanup**
+  - Review `/tmp/bss-spike` (scratch crate/build output) and
+    `/tmp/bss-baseline` (partial logs), preserving useful evidence before
+    cleanup. Storage is restored; if more build-space reclamation is
+    necessary, follow the storage-strategy skill and run `just sweep`
+    before considering manual build-artifact deletion.
 
 Validation checkpoint: rulings recorded in the implementation log with the
 author's confirmation; Spike 1-3 findings written up; baseline outputs
@@ -223,9 +274,9 @@ pass at the end of this phase.
   - In `parse_stack_item_action_object` / `parse_positional_action`
     (`parse.rs:734`, `action_shape.rs:1`): special-case verb `set` — the
     payload must be a mapping (empty allowed); build the new action kind
-    from the typed tree; keys must be literal, nonempty strings (dotted and
-    empty key shapes surface through the existing runtime key-shape rule in
-    Phase 3; dynamic keys fail here at parse).
+    from the typed tree; keys must be literal, nonempty strings. Under
+    proposed Ruling 1, empty/non-string/dynamic keys fail at parse time;
+    dotted and reserved keys fail runtime validation in Phase 3.
   - Reject `set: "{{mapping}}"` whole-span form and any call spelling with
     a typed non-goal error (mirror `LifecycleProxyWithWholeMapping`
     `parse.rs:1007`).
@@ -234,7 +285,20 @@ pass at the end of this phase.
     nested under `set` (i.e. `set: {no_error: x}` is a normal assignment).
   - Structural validation runs regardless of a false `when` (parse always
     happens; no eager value evaluation).
-  - Apply Ruling 2's outcome for duplicate destination keys.
+  - Rely on the shared Darkmatter duplicate-key rejection below; do not
+    add a second frontmatter parsing pass in Claudine.
+- [ ] **Shared Darkmatter duplicate-key rejection** (approved Ruling 2)
+  - Enforce duplicate rejection before conversion can collapse mapping
+    entries, consistently across all `parse_yaml_with_fallbacks` strategies.
+    Preserve existing value typing, ordering, expression handling, typed
+    errors, and source-location information.
+  - Cover top-level and nested duplicates, including mappings in arrays,
+    through direct, indentation-normalized, and expression-protected paths.
+    Cover valid expression-bearing values and duplicate-looking expression
+    text; explicit document merge behavior remains unchanged.
+  - Add passive shipped-artifact coverage and a hermetic normal-invocation
+    CLI regression. Correct active artifacts that depended on last-wins
+    parsing; preserve completed historical specs unless executable inputs.
 - [ ] **Removed-form diagnostics**
   - `set: [key, value]` positional, `{action: set, key: …, value: …}`
     long-form, and any formerly accepted lifecycle call spelling of `set`
@@ -251,8 +315,8 @@ pass at the end of this phase.
   - Do not reuse the current "avoid object values" instruction
     (`LifecycleObjectDataThroughInterpolationPositional`'s hint) for `set`.
 - [ ] **Lib test migration and parse coverage**
-  - Migrate `executor/tests/runtime_set.rs` and
-    `lifecycle/tests/action_shape_control.rs` (plus any other lib test the
+  - Migrate `executor/tests/runtime_set.rs`, `sequence/task/tests.rs`,
+    and `sequence/preflight/tests.rs` (plus any other lib test the
     Spike 3 inventory lists) to the mapping form; keep every existing
     behavioral assertion (reserved keys, dotted keys, typed values, runtime
     visibility, no-file-write) intact — only the authored grammar changes.
@@ -272,7 +336,9 @@ pass at the end of this phase.
   the parser; its executor wiring lands in Phase 3.
 
 Validation checkpoint: `just test-library` green in the claudine package
-area; new parse tests cover the R1 matrix; a `rg 'set: \['` over
+area; `just test` and `just lint` green in `darkmatter/`; shared-parser,
+shipped-artifact, and normal-invocation regressions pass; new parse tests
+cover the R1 matrix; a `rg 'set: \['` over
 `claudine/lib` returns no production or test authoring of the removed
 lifecycle form (comments and prose updated, not left drifting).
 
@@ -289,6 +355,10 @@ Implement the executor and runtime semantics (R2-R4) and their test matrix.
     semantics), validate every destination key, then commit the complete
     mutation map — validate/resolve **outside** the lock, commit under one
     mutex acquisition (R3).
+  - Explicitly match the new kind in `is_side_effect_action` and task
+    dispatch. `dispatch_task_side_effect` writes its working map back to
+    live state even on failure: validate/resolve before any mutation and
+    cover this outer write-back path in the atomicity tests.
   - Without a shared runtime cell, perform the same validation and snapshot
     evaluation before changing the working map; reserved-key and key-shape
     refusals leave both layers unchanged by this action.
@@ -296,7 +366,7 @@ Implement the executor and runtime semantics (R2-R4) and their test matrix.
     successful updates are visible to later actions in the same stack, later
     events, loop iterations, and serial tasks per the existing contract.
   - Remove the single-key `verb == "set"` arm in `dispatch_side_effect`
-    (`executor.rs:1317-1327`) and `apply_runtime_set`; no compatibility
+    (`executor.rs:1342`) and `apply_runtime_set`; no compatibility
     branch remains in production execution.
 - [ ] **Runtime batch semantics**
   - Batch operation on `RuntimeState` (from Work-Group A): prior values
@@ -306,7 +376,11 @@ Implement the executor and runtime semantics (R2-R4) and their test matrix.
     document value). Keep `RuntimeState::set`'s single-key public behavior
     consistent with the presence rule or fold it into the batch path —
     without broadening or breaking Darkmatter's `EffectEngine::set`.
+    Preserve `sequence/task/group.rs:406` post-parallel-group merge
+    semantics, including isolation, visibility, and explicit-null writes.
 - [ ] **Result semantics**
+  - Event and setup/teardown stacks discard results; preserve that contract.
+    Only sequence side-effect tasks expose the prior-value object.
   - The action's result is one object mapping each assigned key to its
     prior effective value (null for absent; empty update → empty object);
     `run_side_effect` serializes it through the existing textual output path
@@ -354,8 +428,7 @@ corpus check.
   - Migrate `claudine/cli/tests/sequence_jit.rs`,
     `level2_sequence_task_stream_capture.rs`,
     `compose_caller_file_provenance.rs`, `inline_completion_lifecycle.rs`,
-    `composition_outputs.rs`, `sequence_groups.rs`, and
-    `claudine/lib/src/composition/sequence/preflight/tests.rs` to the
+    `composition_outputs.rs`, and `sequence_groups.rs` to the
     mapping grammar, preserving each test's behavioral assertions.
 - [ ] **Hermetic CLI regression** (acceptance 8)
   - A `CliProcessFixture`-backed, fake-provider, isolated-state,
@@ -384,18 +457,21 @@ and acceptance audit.
 ### Tasks
 
 - [ ] **Prompt migration**
-  - Rewrite `prompts/_implement/implement-plan.md:43,59-60` to the canonical
+  - Rewrite `prompts/_implement/implement-plan.md:40,56-57` to the canonical
     mapping form (`set: {epilog: "{{message_to_agent}}", message_to_agent:
     null}` and the null reset), removing the temporary two-positional-action
-    workaround; review `prompts/depencency-upgrade.md` (non-target per Spike
+    workaround; review `prompts/dependency-upgrade.md` (non-target per Spike
     3) stays untouched.
   - Review `claudine/cli/tests/fixtures/shipped_implement_route/` for
     byte-copy drift against the migrated shipped prompt and sync if the
-    fixture mirrors it.
+    fixture mirrors it; Spike 3 already found drift.
+  - Migrate `darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md`,
+    include it in corpus coverage, and run its consuming DMLS tests. This
+    fixture migration is required alongside the approved shared-parser change.
 - [ ] **Documentation updates** (work-group: docs, skill, and spec migration
   are independent files, concurrent)
   - `claudine/docs/topics/flow-control/sequences.md` — rewrite "Mutating
-    state with `set`" (line 370+) and the `setup:` example (line 468) to
+    state with `set`" (line 370+) and the `setup:` example (line 479) to
     the mapping-only grammar; add the two-`set`-surfaces labeling rule
     (`set(key, value)` = capability/loop API, `set: {property: value}` =
     Claudine lifecycle YAML) wherever both appear, including
@@ -407,11 +483,14 @@ and acceptance audit.
   - Active feature spec `claudine/features/2026-07-11-sequence-plus/`
     (`spec.md:113,416-417,570,600`, `plan.md`, `validation-matrix.md`):
     migrate old-form examples; leave `fixes/_completed/**` intact.
+  - Darkmatter README/frontmatter documentation and skill guidance: document
+    duplicate rejection for every YAML frontmatter mapping, the migration
+    from last-wins behavior, and the unchanged explicit document-merge rules.
 - [ ] **Comment-drift review**
   - Behavior-changing symbols get a doc/comment pass in the same change:
     `dispatch_side_effect`, `apply_runtime_set` (deleted or rewritten),
     `RuntimeState::set`/batch, `parse_positional_action`,
-    `classify_positional_value`, and `executor.rs:1364`'s now-drifted
+    `classify_positional_value`, and `executor.rs:1436`'s now-drifted
     comment; module docs in `actions.rs`, `runtime_state.rs` ("what the
     `set` side effect writes"), and `parse.rs` disambiguation docs.
 - [ ] **Final validation sweep**
@@ -419,6 +498,9 @@ and acceptance audit.
     record evidence per repository policy (reuse qualifying passing
     evidence; macOS host evidence recorded; flag Linux/native-Windows/WSL2
     coverage needs for CI without adding speculative matrix cells).
+  - Run `just test` and `just lint` in `darkmatter/` for the shared-parser
+    change, including shipped-artifact and normal CLI invocation coverage;
+    run the consuming DMLS fixture tests and record actual results.
   - Run GitNexus `detect_changes` (scope `all`) and review the affected-
     processes/risk report before hand-off; `partial: true` or
     `truncated: true` is not a clean check — re-run it.

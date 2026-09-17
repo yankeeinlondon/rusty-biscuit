@@ -9,6 +9,9 @@ area: claudine
 packages:
     - claudine
     - claudine-cli
+    - darkmatter
+    - darkmatter-cli
+    - dmls
 ---
 
 # Make Key-to-Value Mappings the Only Claudine `set` Action Syntax
@@ -130,6 +133,19 @@ to the existing top-level-key and reserved-key restrictions. Do not introduce
 dynamic key interpolation, YAML merge-key expansion, non-string destination
 keys, or dotted-path writes. Duplicate destination keys must fail during YAML
 parsing rather than silently selecting one value.
+
+**Ruling 2, approved by the author on 2026-09-17:** enforce duplicate-key
+rejection in Darkmatter's shared frontmatter parser for every YAML mapping,
+including nested mappings, before conversion can discard duplicate entries.
+This applies consistently to direct parsing, indentation normalization, and
+expression-protection fallbacks. Preserve typed errors and source-location
+information; a fallback must not hide a duplicate-key failure. Claudine
+consumes this shared behavior without reparsing frontmatter.
+
+This explicitly expands scope beyond Claudine lifecycle syntax to all
+Darkmatter frontmatter consumers. Documents relying on last-wins parsing
+must be corrected. Duplicate-looking text inside expression strings remains
+expression content; explicit merging between separate documents is unchanged.
 
 Preserve the universal per-action `no_error` behavior without placing it inside
 the assignments mapping:
@@ -316,6 +332,13 @@ text search. Review comments on behavior-changing symbols for drift.
 ## Validation and Completion
 
 Use nextest-backed package-area `just test` and appropriate lint checks.
+For the shared parser change, also run `just test` and `just lint` in
+`darkmatter/`. Cover top-level and nested duplicates (including mappings in
+arrays), each fallback path, valid expression-bearing values, and unchanged
+explicit document merging. Include passive shipped-artifact coverage and a
+hermetic end-to-end regression through normal CLI invocation. Run the tests
+consuming the migrated DMLS fixture.
+
 CLI tests must use `CliProcessFixture`, fake providers, isolated state, and
 suppressed lifecycle audio. Tests must not focus terminal/browser windows or
 invoke real providers. Ensure the implementation works on macOS, Linux, native
