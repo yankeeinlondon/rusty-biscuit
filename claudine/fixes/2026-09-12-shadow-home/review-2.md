@@ -5,10 +5,13 @@ human_review: false
 reviewed_by: codex/gpt-5.6-sol
 created: 2026-09-16T09:49:29-07:00
 spec: 2026-09-12-shadow-home/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: claudine/fixes/2026-09-12-shadow-home/implementation-log.md
 description: A **fix** review of `2026-09-12-shadow-home/spec.md`
 fix: 2026-09-12-shadow-home/review-2.md
 previous: 2026-09-12-shadow-home/review-1.md
+next: 2026-09-12-shadow-home/review-3.md
 findings:
     - "[high] Failed provider-state write-back is logged and then destroyed"
     - "[high] The native-Windows Level 2 test still cannot reach the launch"

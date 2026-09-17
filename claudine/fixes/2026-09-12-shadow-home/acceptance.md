@@ -131,7 +131,7 @@ L2 failures unrelated to this fix. Neither criterion was amended.
 | macOS | met | Phase 11: L2 overlay test 20/20 stress; all L1 contracts. Phase 12 gates below. |
 | Linux | met | Phase 11, `build-linux` scratch clone: L2 overlay test pass; overlay L1/unit filter 123/123. |
 | WSL2 | **unmet** | `build-win` reset SSH at key exchange (VHDX on the full `W:`); CI `claudine-cli/wsl2-ubuntu/L2` is an accepted gap. L1 runs in CI. |
-| Native Windows | **unmet** | `build-win-native` `W:` had 0 GB free. The Windows L2 is compile-verified only, and its hermetic premise fails by design: the overlay home is `dirs::home_dir()` (known-folder profile). Phase 5 copy-mode unit tests (26 passed on `build-win-native`) are the only native materialization evidence. Needs the author's decision (plan `human_review_items`). |
+| Native Windows | **unmet** | `build-win-native` `W:` had 0 GB free. The Windows L2 is compile-verified only; it now names its Codex source (`CODEX_HOME`) and overlay storage (`CLAUDINE_OVERLAY_DIR`) inside the fixture, so it no longer depends on the known-folder home (review-2 finding 2), but it has not yet run natively. Phase 5 copy-mode unit tests (26 passed on `build-win-native`) are the only native materialization evidence. Needs a native run once `W:` has space. |
 
 Not re-attempted in Phase 12: the blockers are host capacity and a design
 decision, neither of which a documentation phase can clear.
