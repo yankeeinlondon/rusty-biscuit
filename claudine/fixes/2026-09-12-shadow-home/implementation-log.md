@@ -398,6 +398,7 @@ message_to_agent: |
 implementation_2: "2026-09-16T15:30:56-07:00"
 implementation_3: "2026-09-16T19:38:20-07:00"
 implementation_4: "2026-09-16T20:16:31-07:00"
+implementation_5: "2026-09-16T20:39:38-07:00"
 ---
 
 # Implementation Log — Preserve Provider Overlays Without Replacing the User Home
@@ -2936,3 +2937,35 @@ The implementation of review cycle 4 has completed successfully in 13m 23s (20:1
 - the files changed by this cycle:
         - CLI tests: `claudine/cli/tests/level1_provider_overlay_home.rs`
 - final gates (macOS, from `claudine/`): `just test-cli --test level1_provider_overlay_home` → 33 passed, 0 skipped; `just test` → 7200 passed, 9 skipped; `just lint` → clean
+
+## Implementation of Review Findings #5
+
+> **started at:** 2026-09-16T20:39:38-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis/claudine/fixes/2026-09-12-shadow-home/review-5.md'
+- this is iteration 5 of the review-to-implement cycle
+- starting the work on 'Finding 1: Level 2 fixture still documents and provisions the retired shadow-HOME behavior' at 20:39:50
+        - discovered: `seed_mcp_catalog` (`cli/tests/level2_lifecycle_control.rs`) claims Codex/Gemini MCP injection runs through a shadow `HOME` that refuses a missing provider root, and creates empty `.gemini`/`.codex` under the arm's `HOME`; the equivalence row's doc says Codex "writes a shadow-home TOML"
+        - discovered: `lib/src/provider_overlay/mod.rs` documents per-launch overlays under `~/.claudine/overlays/<provider>/` selected via provider-owned selectors, never moving `HOME`; test-map maps "default root absent → empty overlay" to `a_missing_default_source_root_launches_with_an_empty_overlay` and `codex_mcp_without_a_codex_root_injects_into_an_empty_overlay`, so the empty provider roots have no current purpose
+        - discovered: `seed_mcp_catalog`'s "under the arm's `HOME`" is accurate — `staged_env_prefix` sets `HOME` to the workspace and the catalog lives at `~/.claudine/mcp/`
+        - discovered: sibling grep of `cli/tests/*.rs` for "shadow" finds only historical spec/finding references (`cli_process_fixture.rs`, `level1_provider_overlay_home.rs`, `level2_provider_overlay_capture.rs`, `wrap_opencode.rs`), negative assertions, and the L1 test name `mcp_cli.rs::codex_wrapper_mcp_dry_run_shows_cleaned_prompt_and_shadow_file` (not a shadow-HOME claim; left untouched)
+        - changed: `seed_mcp_catalog` no longer creates empty `.gemini`/`.codex` directories; its stale shadow-`HOME` comment is replaced by a one-line contract note that the injection targets a per-launch provider overlay and a missing default source root is an empty overlay, not a refusal
+        - changed: the doc comment on `level2_lifecycle_equivalence_target_mcp_injection_matches_direct_run` now says Codex's injector writes `config.toml` into the `CODEX_HOME` provider overlay instead of "a shadow-home TOML"
+        - gate: `just _test_l2 claudine-cli --features terminal-tests --test level2_lifecycle_control level2_lifecycle_equivalence_target_mcp_injection_matches_direct_run` → 1 passed, 95 skipped (11.3 s)
+        - non-vacuity: re-ran with `BISCUIT_TEST_REQUIRED_BACKENDS=tmux` over all three `seed_mcp_catalog` consumers (the equivalence row plus `level2_lifecycle_retry_rebuilds_mcp_injection_from_the_refreshed_body` and `level2_lifecycle_retry_keeps_an_interpolated_mcp_tag_at_child_launch`) → 3 passed; `backend-proof: tmux run=3 skip=0 panic=0`, so the rows executed against the real tmux backend without any provider root seeded and still observed the injected `mcp-allowed` server
+        - gate: `just test` (claudine/) → 7204 passed (2 slow), 9 skipped
+        - gate: `just lint` (claudine/) → exit 0, no warnings or errors
+- work completed for 'Finding 1: Level 2 fixture still documents and provisions the retired shadow-HOME behavior' at 20:54:22
+        - orchestrator verification: `git diff HEAD` on `cli/tests/level2_lifecycle_control.rs` shows only the two comment rewrites and the removal of both `fs::create_dir_all` calls; no remaining "shadow" text in that file
+
+### Successful Completion
+
+The implementation of review cycle 5 has completed successfully in 14m 36s (20:39:38 → 20:54:22). During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no finding was deferred
+- residual items recorded against the fixed finding (not deferrals of the finding itself):
+        - the L2 tmux command prefix sets only `NO_COLOR`, `MODEL`, `HOME`, and `PATH`, so an inherited `CODEX_HOME`/`GEMINI_CLI_HOME` in the tmux server environment would reach the child; pre-existing and unaffected by this change
+        - the change is comment and fixture-setup only in a Unix tmux L2 file; no `cfg(windows)` code was touched, so no cross-OS run was made
+- the files changed by this cycle:
+        - CLI tests: `claudine/cli/tests/level2_lifecycle_control.rs`
+- final gates (macOS, from `claudine/`): the three `seed_mcp_catalog` L2 rows → 3 passed on tmux (`run=3 skip=0`); `just test` → 7204 passed, 9 skipped; `just lint` → clean

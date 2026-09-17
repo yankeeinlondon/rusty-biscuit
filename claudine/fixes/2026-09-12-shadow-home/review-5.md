@@ -5,10 +5,13 @@ human_review: false
 reviewed_by: codex/gpt-5.6-sol
 created: 2026-09-16T20:30:09-07:00
 spec: 2026-09-12-shadow-home/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: claudine/fixes/2026-09-12-shadow-home/implementation-log.md
 description: A **fix** review of `2026-09-12-shadow-home/spec.md`
 fix: 2026-09-12-shadow-home/review-5.md
 previous: 2026-09-12-shadow-home/review-4.md
+next: 2026-09-12-shadow-home/review-6.md
 findings:
     - "[low] Level 2 fixture still documents and provisions the retired shadow-HOME behavior"
 ---
