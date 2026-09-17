@@ -2853,14 +2853,22 @@ fn real_plan(dir: &Path, workspace: &Path, package: &str, triple: &str) -> PathB
     path
 }
 
-/// Produce `package`'s archive from a throwaway checkout, then take that
-/// checkout and its target directory away.
+/// Produce every `package`'s archive from ONE throwaway checkout, then take
+/// that checkout and its target directory away.
+///
+/// One producer serves them all deliberately. The checkout is a file-by-file
+/// copy of this repository and the target directory is a cold build, so doing
+/// either per package is the whole cost of this fixture; sharing them lets the
+/// packages' common dependencies compile once. What may not be shared is the
+/// *teardown*: every archive is produced and every consumer cloned before the
+/// producer is removed, so each archive still runs with nothing of its producer
+/// left, which is the property under test.
 ///
 /// ## Returns
 ///
-/// The archive, and the consumer checkout it must be run against — at an
-/// address the producer never wrote to.
-fn relocate_real_package(dir: &Path, package: &str) -> (PathBuf, PathBuf) {
+/// One archive per package, paired with the consumer checkout it must be run
+/// against — at an address the producer never wrote to.
+fn relocate_real_packages(dir: &Path, packages: &[&str]) -> Vec<(PathBuf, PathBuf)> {
     let binary = crate::tests::shipped_wrapper();
     let triple = host_triple();
 
@@ -2872,68 +2880,75 @@ fn relocate_real_package(dir: &Path, package: &str) -> (PathBuf, PathBuf) {
     fixture_git(&producer, &["add", "-A"]);
     fixture_git(&producer, &["commit", "--quiet", "-m", "relocation fixture"]);
 
-    let plan = real_plan(dir, &producer, package, &triple);
     let out = dir.join("out");
     let target = dir.join("target");
-    let output = Command::new(&binary)
-        .arg("produce")
-        .arg("--plan")
-        .arg(&plan)
-        .arg("--producer")
-        .arg("local-host")
-        .arg("--out-dir")
-        .arg(&out)
-        .arg("--workspace")
-        .arg(&producer)
-        .arg("--target-dir")
-        .arg(&target)
-        .arg("--json")
-        .output()
-        .expect("running ci-build produce");
-    assert!(
-        output.status.success(),
-        "producing {package} failed: {}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let mut produced = Vec::with_capacity(packages.len());
 
-    let manifest_path = out.join(format!("build-{package}-local-host-1122334455667788.manifest.json"));
-    let manifest = read_manifest(&manifest_path).expect("the producer's own manifest must parse");
-    let archive = out.join(&manifest.archive.file);
+    for package in packages {
+        let plan = real_plan(dir, &producer, package, &triple);
+        let output = Command::new(&binary)
+            .arg("produce")
+            .arg("--plan")
+            .arg(&plan)
+            .arg("--producer")
+            .arg("local-host")
+            .arg("--out-dir")
+            .arg(&out)
+            .arg("--workspace")
+            .arg(&producer)
+            .arg("--target-dir")
+            .arg(&target)
+            .arg("--json")
+            .output()
+            .expect("running ci-build produce");
+        assert!(
+            output.status.success(),
+            "producing {package} failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
 
-    // The consumer's checkout, at a path of its own. `git clone`, not a file
-    // copy: it is what the WSL2 guest does, and a checkout without a `.git`
-    // would fail tests that ask whether they are inside a repository — a
-    // fixture artifact, not a relocation defect. A local clone hardlinks the
-    // object store, so the producer's removal below cannot take it away.
-    let consumer = dir.join("elsewhere").join("checkout");
-    fs::create_dir_all(consumer.parent().expect("the consumer has a parent"))
-        .expect("creating the consumer's directory");
-    let cloned = Command::new("git")
-        .args(["-c", "gc.auto=0"])
-        .arg("clone")
-        .arg("--quiet")
-        .arg(&producer)
-        .arg(&consumer)
-        .output()
-        .expect("git must be present to clone the consumer checkout");
-    assert!(
-        cloned.status.success(),
-        "cloning the consumer checkout: {}",
-        String::from_utf8_lossy(&cloned.stderr)
-    );
+        let manifest_path =
+            out.join(format!("build-{package}-local-host-1122334455667788.manifest.json"));
+        let manifest = read_manifest(&manifest_path).expect("the producer's own manifest must parse");
+        let archive = out.join(&manifest.archive.file);
+
+        // The consumer's checkout, at a path of its own. `git clone`, not a file
+        // copy: it is what the WSL2 guest does, and a checkout without a `.git`
+        // would fail tests that ask whether they are inside a repository — a
+        // fixture artifact, not a relocation defect. A local clone hardlinks the
+        // object store, so the producer's removal below cannot take it away.
+        let consumer = dir.join("elsewhere").join(package);
+        fs::create_dir_all(consumer.parent().expect("the consumer has a parent"))
+            .expect("creating the consumer's directory");
+        let cloned = Command::new("git")
+            .args(["-c", "gc.auto=0"])
+            .arg("clone")
+            .arg("--quiet")
+            .arg(&producer)
+            .arg(&consumer)
+            .output()
+            .expect("git must be present to clone the consumer checkout");
+        assert!(
+            cloned.status.success(),
+            "cloning the consumer checkout: {}",
+            String::from_utf8_lossy(&cloned.stderr)
+        );
+
+        produced.push((archive, consumer));
+    }
 
     // Both halves of the producer, gone. DELETED rather than renamed aside: a
     // baked `CARGO_MANIFEST_DIR` or `CARGO_BIN_EXE_…` must resolve to nothing,
     // not to a tree that still happens to hold what it wanted. It also returns
-    // the package's whole dependency build to the disk before the archived
-    // suite starts, which is what keeps this fixture affordable.
+    // every package's dependency build to the disk before the archived suites
+    // start, which is what keeps this fixture affordable.
     remove_tree(&producer);
     remove_tree(&target);
     assert!(!producer.exists(), "the producer checkout must be gone");
     assert!(!target.exists(), "the producer target directory must be gone");
 
-    (archive, consumer)
+    produced
 }
 
 /// Run `package`'s archived L1 suite against `consumer`, with nothing of the
@@ -2986,9 +3001,12 @@ fn run_relocated(dir: &Path, package: &str, archive: &Path, consumer: &Path) {
 /// and took an unrelated fixture down with them.
 #[test]
 fn slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout() {
-    for package in ["test-toolkit", "biscuit-file"] {
-        let dir = Scratch::new(&format!("reloc-{package}"));
-        let (archive, consumer) = relocate_real_package(dir.path(), package);
+    let packages = ["test-toolkit", "biscuit-file"];
+    let dir = Scratch::new("reloc");
+    for (package, (archive, consumer)) in packages
+        .iter()
+        .zip(relocate_real_packages(dir.path(), &packages))
+    {
         run_relocated(dir.path(), package, &archive, &consumer);
     }
 }
