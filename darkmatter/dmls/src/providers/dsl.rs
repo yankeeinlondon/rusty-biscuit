@@ -14,6 +14,10 @@
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::compose::directives_api::{DirectiveKind, scan_shell_block_commands};
+use darkmatter::markdown::compose::directive_targets::{
+    TargetNullability, analyze_directive_targets,
+};
+use darkmatter::markdown::compose::expression::ExpressionFinder;
 use darkmatter::markdown::compose::{
     FrontmatterShellValue, parse_frontmatter_shell_value_spanned,
 };
@@ -607,8 +611,45 @@ fn disclosure_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Broken transclusion paths and transclusion cycles.
+/// Transclusion target warnings and transclusion cycles.
 fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
+    let empty_frontmatter = serde_json::Value::Object(serde_json::Map::new());
+    let bundle = ctx.overlay.and_then(|overlay| overlay.bundle());
+    let effective_schema = bundle.map(|bundle| &bundle.effective);
+    let static_frontmatter = bundle
+        .map(|bundle| &bundle.frontmatter_json)
+        .unwrap_or(&empty_frontmatter);
+    if let Ok(analyses) = analyze_directive_targets(ctx.text, effective_schema, static_frontmatter) {
+        for analysis in analyses {
+            let TargetNullability::Nullable { root } = &analysis.nullability else {
+                continue;
+            };
+            if analysis.is_narrowed() {
+                continue;
+            }
+            let Some(range) = ctx
+                .source_map
+                .byte_range_to_lsp(analysis.expression_span.clone())
+            else {
+                continue;
+            };
+            let keyword = directives::info_for(analysis.kind)
+                .map(|info| info.keyword)
+                .unwrap_or("directive");
+            out.push(diagnostic(
+                range,
+                DiagnosticSeverity::WARNING,
+                code::TRANSCLUSION_NULLABLE_TARGET,
+                source::COMPOSE,
+                format!(
+                    "`{}` may be null here; a null `{keyword}` target transcludes nothing. Guard with `::block when=\"file_exists({})\"`, bind a non-null value, or make the parameter required.",
+                    root.as_str(),
+                    root.as_str(),
+                ),
+            ));
+        }
+    }
+
     for directive in directives::directives(ctx.text) {
         if !directives::is_transclusion(directive.kind) {
             continue;
@@ -616,6 +657,9 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
         let Some(target) = directive.target else {
             continue;
         };
+        if !ExpressionFinder::find_all_plain(&target.value).is_empty() {
+            continue;
+        }
         let path = target.value.split('#').next().unwrap_or(&target.value);
         if is_remote(path) {
             continue;

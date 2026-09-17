@@ -114,6 +114,8 @@ pub mod code {
     pub const DIRECTIVE_MALFORMED_DISCLOSURE: &str = "dm.directive.malformed_disclosure";
     /// A `::file`/`::code`/prologue/epilogue target that matched no file.
     pub const TRANSCLUSION_BROKEN_PATH: &str = "dm.transclusion.broken_path";
+    /// A whole-value directive target that may evaluate to null at runtime.
+    pub const TRANSCLUSION_NULLABLE_TARGET: &str = "dm.transclusion.nullable_target";
     /// A `::file`/`::code` transclusion cycle.
     pub const TRANSCLUSION_CYCLE: &str = "dm.transclusion.cycle";
     /// A malformed `{{ … }}` interpolation or `when=` expression.

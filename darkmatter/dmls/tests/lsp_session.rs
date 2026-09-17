@@ -1649,6 +1649,70 @@ const DSL_DOC: &str = "---\ntitle: Guide\n---\n\n# Guide\n\n::file ./intro.md\n\
 const INTRO_DOC: &str = "# Intro\n\nWelcome.\n";
 
 #[test]
+fn interpolated_transclusion_target_does_not_report_broken_path() {
+    let workspace = LspWorkspace::new();
+    let text = "---\n$schema:\n  log: file\n---\n\n::file {{log}}\n";
+    let path = workspace.path().join("nullable.md");
+    std::fs::write(&path, text).unwrap();
+    let uri = url::Url::from_file_path(path).unwrap();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    open(&fixture, uri.as_str(), text);
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let broken: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.transclusion.broken_path"))
+        .collect();
+    assert!(broken.is_empty(), "interpolated targets must not report broken_path: {diagnostics:?}");
+    fixture.shutdown();
+}
+
+#[test]
+fn nullable_transclusion_diagnostic_matrix() {
+    let workspace = LspWorkspace::new();
+    let text = "---\n$schema:\n  optional: file\n  guarded: file\n  outer: file\n  required: 'file(required)'\n  defaulted: \"file(default('fallback.md'))\"\n---\n\n::file {{optional}}\n\n::block when=\"file_exists(guarded)\"\n::file {{guarded}}\n::end-block\n\n::block when=\"file_exists(outer)\"\n::block when=\"true\"\n::file {{outer}}\n::end-block\n::end-block\n\n::file {{required}}\n::file {{defaulted}}\n::file prefix-{{optional}}.md\n::file {{optional || required}}\n::file missing.md\n";
+    let path = workspace.path().join("matrix.md");
+    std::fs::write(&path, text).unwrap();
+    let uri = url::Url::from_file_path(path).unwrap();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    open(&fixture, uri.as_str(), text);
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+
+    let broken: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.transclusion.broken_path"))
+        .collect();
+    assert_eq!(
+        broken.len(),
+        1,
+        "interpolated targets must not report broken_path: {diagnostics:?}"
+    );
+    assert_eq!(broken[0]["range"], range_of(text, "missing.md"));
+
+    let nullable: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.transclusion.nullable_target"))
+        .collect();
+    assert_eq!(nullable.len(), 2, "unexpected nullable diagnostics: {diagnostics:?}");
+    for (diagnostic, (expression, root)) in nullable.iter().zip([
+        ("{{optional}}", "optional"),
+        ("{{defaulted}}", "defaulted"),
+    ]) {
+        assert_eq!(diagnostic["source"], json!("darkmatter.compose"));
+        assert_eq!(diagnostic["severity"], json!(2));
+        assert_eq!(diagnostic["range"], range_of(text, expression));
+        assert_eq!(
+            diagnostic["message"],
+            json!(format!(
+                "`{root}` may be null here; a null `::file` target transcludes nothing. Guard with `::block when=\"file_exists({root})\"`, bind a non-null value, or make the parameter required."
+            ))
+        );
+    }
+    fixture.shutdown();
+}
+
+#[test]
 fn dsl_overlay_navigation_hover_and_diagnostics() {
     let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("guide.md"), DSL_DOC).unwrap();
