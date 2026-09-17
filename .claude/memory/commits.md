@@ -43,4 +43,12 @@ git commit -m "feat(foo): add `bar` helper"
 git commit -m "feat(foo): add" -m "`bar` helper"
 ```
 
-The multi-flag approach avoids shell escaping entirely and keeps the message intact.
+The multi-flag approach avoids shell escaping entirely and keeps the message intact. Writing the full message (subject + blank line + bullets) to a temp file and feeding it via `-F /tmp/msg.md -- <paths>` is even safer — no shell evaluation runs against the body at all, and the file is reusable across retry attempts under lock contention. Keep the filename scoped (e.g. `/tmp/commit_msgs/<n>-<op>-<scope>.md`) so concurrent subagents do not overwrite each other.
+
+## Atomic Multi-Site Contract Changes
+
+A contract change that is enforced at multiple sites — e.g. parser rejection plus executor backstop plus bootstrap clearing plus runner substitution — must ship in **one** commit. Splitting the parser from the executor leaves a window where a programmatically built stack passes parsing but reaches the executor (or vice versa), violating the contract. The shell-free initialization ruling for `2026-09-15-initialize-after-proxy` is the canonical example: `parse_lifecycle_config` rejects `initialize` shell actions, `run_shell_action` short-circuits with `ShellRunError::BeforePreflight` for `LifecycleSignal::Initialize`, the lifecycle guard swaps in `DisabledShellRunner` until `start`, and the staged boot / harness boot drop the narrow-shell-approval calls. All 30 files (lib + cli + tests) landed in one `feat(claudine):` commit because any split would have left the contract half-enforced. The companion `docs(claudine):`, `chore(skills):`, `chore(darkmatter):`, `fix(prompts):`, and `planning(claudine):` commits are downstream documentation and planning artifacts — they describe the new contract but do not enforce it — so they are safe to ship in their own commits after the enforcement commit lands.
+
+## `--only` Includes Untracked New Files
+
+`git commit --only -- <path>` commits the working-tree content of `<path>` even when the file is untracked (status `??` in `git status` or `A` after staging sibling changes in the same batch). The staging it does to enable the commit is implicit — there is no need to `git add` first when the file is on disk with the desired content. This is useful for split-batch patterns where the developer staged an unrelated set of changes and you are committing a slice that includes new files (e.g. a new `implementation-log.md` alongside modified `spec.md` and `plan.md` for a planning close). Pair the staging-only-on-working-tree hint with a post-commit `git status --short -- <path>` to confirm the path was consumed; if `git show --name-status <hash>` lists the path with `A`, the working-tree content was what shipped.
