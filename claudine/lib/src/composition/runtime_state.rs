@@ -29,6 +29,7 @@ use std::sync::Mutex;
 
 use darkmatter::effects::{EffectEngine, EffectError};
 use darkmatter::markdown::FrontmatterMap;
+use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
 use super::sequence::reserved::ROOT_OVERLAY_KEYS;
@@ -124,17 +125,50 @@ impl RuntimeState {
         value: Value,
         prior_base: &Map<String, Value>,
     ) -> Result<Value, RuntimeMutationError> {
-        if ROOT_OVERLAY_KEYS.contains(&key) {
-            return Err(RuntimeMutationError::ReservedKey { key: key.to_string() });
+        let mut updates = IndexMap::new();
+        updates.insert(key.to_string(), value);
+        Ok(self
+            .set_batch(engine, &updates, prior_base)?
+            .remove(key)
+            .expect("single update returns one prior value"))
+    }
+
+    /// Atomically commit one mapping-based lifecycle `set` action.
+    ///
+    /// Every destination is validated before the cell is locked. The commit is
+    /// prepared against a clone and published under one mutex acquisition, so
+    /// a refusal cannot expose a partial batch. Prior values are selected by
+    /// key presence: an explicitly stored runtime null overrides a non-null
+    /// document value.
+    pub fn set_batch(
+        &self,
+        engine: &EffectEngine,
+        updates: &IndexMap<String, Value>,
+        prior_base: &Map<String, Value>,
+    ) -> Result<Map<String, Value>, RuntimeMutationError> {
+        let mut validated = FrontmatterMap::new();
+        for (key, value) in updates {
+            if ROOT_OVERLAY_KEYS.contains(&key.as_str()) {
+                return Err(RuntimeMutationError::ReservedKey { key: key.clone() });
+            }
+            engine.set(&mut validated, key, value.clone())?;
         }
+
         let mut inner = self.inner.lock().expect(POISONED);
-        // Darkmatter owns the mutation primitive (and the key-shape rule); this
-        // layer owns only Claudine's reserved-key policy.
-        let prior_mutation = engine.set(&mut inner.mutations, key, value)?;
-        Ok(match prior_mutation {
-            Value::Null => prior_base.get(key).cloned().unwrap_or(Value::Null),
-            existing => existing,
-        })
+        let mut next = inner.mutations.clone();
+        let mut prior = Map::new();
+        for (key, value) in updates {
+            prior.insert(
+                key.clone(),
+                next.get(key)
+                    .cloned()
+                    .or_else(|| prior_base.get(key).cloned())
+                    .unwrap_or(Value::Null),
+            );
+            engine.set(&mut next, key, value.clone())?;
+        }
+        inner.mutations = next;
+        Ok(prior)
     }
 
     /// Commit one task's captured stdout as the next `outputs` entry.

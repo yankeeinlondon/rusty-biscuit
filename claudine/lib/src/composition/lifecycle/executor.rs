@@ -64,7 +64,7 @@ use super::{
 };
 use super::actions::{
     CommunicationChannel, LifecycleAction, LifecycleActionKind, LifecycleControlAction, ProxyWith,
-    ProxyWithValue, RetryBackoff, is_known_side_effect,
+    ProxyWithValue, RetryBackoff, RuntimeSet, is_known_side_effect,
 };
 use crate::composition::coordinator::ActionLocation;
 use super::context::{
@@ -575,6 +575,7 @@ impl StackExecutionContext<'_> {
         working: &mut Map<String, Value>,
     ) -> Result<Value, LifecycleErrorInfo> {
         let dispatched = match &action.kind {
+            LifecycleActionKind::RuntimeSet(set) => self.dispatch_runtime_set(set, working),
             LifecycleActionKind::SideEffect(effect) => {
                 self.dispatch_side_effect(&effect.verb, &effect.args, working)
             }
@@ -1177,6 +1178,9 @@ impl StackExecutionContext<'_> {
             LifecycleActionKind::Shell(shell) => {
                 self.run_shell_action(shell, working).map(|()| None)
             }
+            LifecycleActionKind::RuntimeSet(set) => {
+                self.dispatch_runtime_set(set, working).map(|_| None)
+            }
             LifecycleActionKind::SideEffect(effect) => self
                 .dispatch_side_effect(&effect.verb, &effect.args, working)
                 .map(|_| None),
@@ -1399,6 +1403,43 @@ impl StackExecutionContext<'_> {
         Ok(out)
     }
 
+    /// Resolve and commit one mapping-based runtime mutation action.
+    fn dispatch_runtime_set(
+        &self,
+        set: &RuntimeSet,
+        working: &mut Map<String, Value>,
+    ) -> Result<Value, ActionFailure> {
+        let snapshot = working.clone();
+        let mut updates = IndexMap::with_capacity(set.len());
+        for (key, value) in set.iter() {
+            let resolved = self.resolve_with_value(value, &snapshot).map_err(|(suffix, error)| {
+                ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(
+                    "set",
+                    format!("`set.{key}{suffix}` could not be resolved: {error}"),
+                ))
+            })?;
+            updates.insert(key.clone(), resolved);
+        }
+
+        let fallback;
+        let state = match self.runtime_state {
+            Some(state) => state,
+            None => {
+                fallback = super::super::runtime_state::RuntimeState::new();
+                &fallback
+            }
+        };
+        let prior = state
+            .set_batch(self.effect_engine, &updates, &snapshot)
+            .map_err(|error| {
+                ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action("set", &error))
+            })?;
+        for (key, value) in updates {
+            working.insert(key, value);
+        }
+        Ok(Value::Object(prior))
+    }
+
     /// Resolve a document-authored mutation target through the same captured
     /// file-reference context used by composition.
     ///
@@ -1450,8 +1491,8 @@ impl StackExecutionContext<'_> {
     /// the value it replaced.
     ///
     /// Without a runtime cell the write is still key-checked — an author must
-    /// get the same typed refusal for `set: [outputs, …]` whether or not the
-    /// caller wired an accumulator — and the prior value is read from the
+    /// get the same typed refusal for a reserved destination whether or not
+    /// the caller wired an accumulator — and the prior value is read from the
     /// caller's working state.
     fn apply_runtime_set(
         &self,

@@ -35,6 +35,16 @@ fn shipped_prompt_corpus_parses_frontmatter() {
     files.sort();
 
     assert!(!files.is_empty(), "the shipped prompt corpus must not be empty");
+    let implement_plan = std::fs::read_to_string(prompts.join("_implement/implement-plan.md"))
+        .expect("shipped implementation prompt");
+    assert!(
+        implement_plan.contains("epilog: null"),
+        "the passive corpus must include the mapping-only lifecycle set artifact"
+    );
+    assert!(
+        !implement_plan.contains("set: ["),
+        "the shipped implementation prompt must not retain positional lifecycle set syntax"
+    );
     let failures = files
         .iter()
         .filter_map(|path| {

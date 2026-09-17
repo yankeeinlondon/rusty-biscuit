@@ -956,7 +956,7 @@ enum PrimaryResult {
 /// knows arrives as an expression function and is resolved by name.
 fn is_side_effect_action(action: &LifecycleAction) -> bool {
     match &action.kind {
-        LifecycleActionKind::SideEffect(_) => true,
+        LifecycleActionKind::SideEffect(_) | LifecycleActionKind::RuntimeSet(_) => true,
         LifecycleActionKind::ExpressionFunction(func) => is_known_side_effect(&func.function),
         _ => false,
     }
@@ -978,6 +978,7 @@ fn describe_action(action: &LifecycleAction) -> String {
             format!("`{}` is a read-only expression function", func.function)
         }
         LifecycleActionKind::SideEffect(effect) => format!("`{}` is a side effect", effect.verb),
+        LifecycleActionKind::RuntimeSet(_) => "`set` is a side effect".to_string(),
     }
 }
 

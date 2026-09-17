@@ -37,12 +37,12 @@ fn config(value: Value) -> LifecycleConfig {
     parse_lifecycle_config(&value, Path::new("t.md")).unwrap()
 }
 
-/// The positional form writes the runtime layer and a later action in the same
+/// The mapping form writes the runtime layer and a later action in the same
 /// stack reads the new value.
 #[test]
 fn set_is_visible_to_a_later_action_in_the_same_stack() {
     let config = config(json!({"success": {"stack": [{"action": [
-        {"set": ["phase", "build"]},
+        {"set": {"phase": "build"}},
         {"message": "phase={{phase}}"}
     ]}]}}));
     let base = map(json!({"phase": "plan"}));
@@ -64,11 +64,11 @@ fn set_is_visible_to_a_later_action_in_the_same_stack() {
     assert_eq!(runtime.snapshot().mutations.get("phase"), Some(&json!("build")));
 }
 
-/// The key/value action form is equivalent to the positional form.
+/// A one-property mapping writes the runtime layer.
 #[test]
-fn the_key_value_form_writes_the_same_runtime_layer() {
+fn a_one_property_mapping_writes_the_runtime_layer() {
     let config = config(json!({"success": {"stack": [{"action": [
-        {"action": "set", "key": "phase", "value": "ship"},
+        {"set": {"phase": "ship"}},
         {"message": "phase={{phase}}"}
     ]}]}}));
     let base = map(json!({"phase": "plan"}));
@@ -95,9 +95,11 @@ fn the_key_value_form_writes_the_same_runtime_layer() {
 #[test]
 fn a_whole_value_span_keeps_its_type() {
     let config = config(json!({"success": {"stack": [{"action": [
-        {"set": ["ready", "{{ true }}"]},
-        {"set": ["retries", "{{ 2 + 1 }}"]},
-        {"set": ["items", "{{ tags }}"]}
+        {"set": {
+            "ready": "{{ true }}",
+            "retries": "{{ 2 + 1 }}",
+            "items": "{{ tags }}"
+        }}
     ]}]}}));
     let base = map(json!({"tags": ["a", "b"]}));
     let live = std::sync::Mutex::new(base.clone());
@@ -125,7 +127,7 @@ fn a_whole_value_span_keeps_its_type() {
 #[test]
 fn a_mutation_in_start_is_visible_to_a_later_event() {
     let config = config(json!({
-        "start": {"stack": [{"action": {"set": ["phase", "running"]}}]},
+        "start": {"stack": [{"action": {"set": {"phase": "running"}}}]},
         "success": {"message": "phase={{phase}}"}
     }));
     let base = map(json!({"phase": "pending"}));
@@ -159,7 +161,7 @@ fn a_mutation_in_start_is_visible_to_a_later_event() {
 #[test]
 fn set_writes_no_file() {
     let config = config(json!({"success": {"stack": [
-        {"action": {"set": ["phase", "build"]}}
+        {"action": {"set": {"phase": "build"}}}
     ]}}));
     let base = map(json!({"phase": "plan"}));
     let live = std::sync::Mutex::new(base.clone());
@@ -190,8 +192,10 @@ fn set_writes_no_file() {
 #[test]
 fn set_refuses_every_reserved_root_key() {
     for key in ["state", "previous", "next", "outputs", "sequence_id"] {
+        let mut destinations = Map::new();
+        destinations.insert(key.to_string(), json!("hijacked"));
         let config = config(json!({"success": {"stack": [
-            {"action": {"set": [key, "hijacked"]}}
+            {"action": {"set": Value::Object(destinations)}}
         ]}}));
         let base = map(json!({}));
         let live = std::sync::Mutex::new(base.clone());
@@ -209,7 +213,7 @@ fn set_refuses_every_reserved_root_key() {
 
         let error = outcome
             .action_error
-            .unwrap_or_else(|| panic!("`set: [{key}, …]` must fail the event"));
+            .unwrap_or_else(|| panic!("`set: {{{key}: …}}` must fail the event"));
         assert!(
             error.msg.contains(key) && error.msg.contains("reserved"),
             "{key} produced {:?}",
@@ -224,7 +228,7 @@ fn set_refuses_every_reserved_root_key() {
 #[test]
 fn set_refuses_a_dotted_key() {
     let config = config(json!({"success": {"stack": [
-        {"action": {"set": ["a.b", "x"]}}
+        {"action": {"set": {"a.b": "x"}}}
     ]}}));
     let base = map(json!({}));
     let live = std::sync::Mutex::new(base.clone());
@@ -254,7 +258,7 @@ fn without_a_runtime_cell_set_still_applies_and_still_refuses_reserved_keys() {
     let harness = Harness::default();
 
     let applied = config(json!({"success": {"stack": [{"action": [
-        {"set": ["phase", "build"]},
+        {"set": {"phase": "build"}},
         {"message": "phase={{phase}}"}
     ]}]}}));
     let fm = map(json!({"phase": "plan"}));
@@ -276,7 +280,7 @@ fn without_a_runtime_cell_set_still_applies_and_still_refuses_reserved_keys() {
     );
 
     let refused = config(json!({"success": {"stack": [
-        {"action": {"set": ["outputs", "hijacked"]}}
+        {"action": {"set": {"outputs": "hijacked"}}}
     ]}}));
     let recorder = Recorder::default();
     let context = ctx(

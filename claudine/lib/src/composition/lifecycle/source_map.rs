@@ -152,6 +152,12 @@ impl LifecycleSourceMap {
     /// Record one action object's operands under `prefix` (`…action[j]`).
     fn record_action(&mut self, prefix: &LifecycleSurfacePath, action: &Value) {
         let Value::Object(obj) = action else { return };
+        if let Some(value) = obj.get("set")
+            && obj.keys().all(|key| matches!(key.as_str(), "set" | "no_error"))
+        {
+            self.record_with_value(&prefix.field("set"), value);
+            return;
+        }
         if let Some(Value::String(verb)) = obj.get("action") {
             self.record_key_value_action(prefix, verb, obj);
         } else if let [(verb, value)] = obj.iter().collect::<Vec<_>>().as_slice() {

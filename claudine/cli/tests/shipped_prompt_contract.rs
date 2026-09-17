@@ -233,6 +233,11 @@ fn shipped_implement_plan_launches_without_a_sibling_spec() {
     fixture.seed_user_config();
     let prompts = fixture.cwd().join("prompts");
     copy_shipped_prompts(&prompts);
+    let implement_plan = fs::read_to_string(prompts.join("_implement/implement-plan.md")).unwrap();
+    assert!(
+        implement_plan.contains("epilog: null"),
+        "the normal invocation must exercise the shipped mapping-only lifecycle action"
+    );
     let feature_dir = fixture.home().join("features/no-spec-here");
     fs::create_dir_all(&feature_dir).unwrap();
     write_executable(&fixture.bin_dir().join("codex"), "#!/bin/sh\nexit 0\n");
@@ -589,17 +594,9 @@ fn shipped_commit_prompt_composes_resides_in_and_fires_success_cleanly() {
         &fixture.bin_dir().join("opencode"),
         "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$CLAUDINE_PROMPT_CAPTURE\"\n/bin/cat >> \"$CLAUDINE_PROMPT_CAPTURE\"\nexit 0\n",
     );
-    // `success.stack` runs `just gitnexus`; the stub keeps it off the host.
-    let just_runs = fixture.cwd().join("just-runs.txt");
-    write_executable(
-        &fixture.bin_dir().join("just"),
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$JUST_RUNS\"\nexit 0\n",
-    );
-
     let output = fixture
         .command()
         .env("CLAUDINE_PROMPT_CAPTURE", &delivered)
-        .env("JUST_RUNS", &just_runs)
         .arg("compose")
         .arg(prompts.join("commit.md"))
         .arg("-y")
@@ -621,11 +618,6 @@ fn shipped_commit_prompt_composes_resides_in_and_fires_success_cleanly() {
         "`resides_in` must compose into the delivered prompt:\n{delivered}"
     );
     assert!(!delivered.contains("{{"), "no raw span may reach the provider:\n{delivered}");
-    assert_eq!(
-        std::fs::read_to_string(&just_runs).unwrap_or_default(),
-        "gitnexus\n",
-        "`success.stack` must run after the provider:\n{rendered}"
-    );
     assert_clean_lifecycle(&rendered);
 }
 

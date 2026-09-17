@@ -1350,7 +1350,7 @@ mod shell {
                 "sequence",
                 json!([{
                     "name": "one",
-                    "side_effect": { "set": ["ready", "{{ true }}"] },
+                    "side_effect": { "set": {"ready": "{{ true }}"} },
                     "setup": [ {
                         "action": [ {
                             "action": "shell",

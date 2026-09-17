@@ -822,6 +822,72 @@ pub enum CompositionError {
         verb: String,
     },
 
+    /// The removed positional lifecycle `set: [key, value]` form was used.
+    #[error(
+        "lifecycle `{property}.{path}` uses the removed positional `set` form ({source_path}); \
+         use `set: {{property: value}}`",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleSetPositionalRemoved {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event or indexed stack item.
+        property: String,
+        /// Path within the stack item, rooted at `action[N].set`.
+        path: String,
+    },
+
+    /// The removed `{action: set, key: ..., value: ...}` form was used.
+    #[error(
+        "lifecycle `{property}.{path}` uses the removed long-form `set` action ({source_path}); \
+         use `set: {{property: value}}`",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleSetLongFormRemoved {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event or indexed stack item.
+        property: String,
+        /// Path within the stack item, rooted at `action[N].set`.
+        path: String,
+    },
+
+    /// Lifecycle `set:` received a non-mapping payload.
+    #[error(
+        "lifecycle `{property}.{path}` must be a mapping, got {actual} ({source_path}); \
+         use `set: {{property: value}}`",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleSetNotMapping {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event or indexed stack item.
+        property: String,
+        /// Path within the stack item, rooted at `action[N].set`.
+        path: String,
+        /// The authored payload type or named unsupported whole-value form.
+        actual: String,
+    },
+
+    /// A lifecycle `set:` destination key is empty or dynamic.
+    #[error(
+        "lifecycle `{property}.{path}` has invalid destination key `{key}`: {message} \
+         ({source_path}); use literal non-empty keys in `set: {{property: value}}`",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleSetInvalidKey {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event or indexed stack item.
+        property: String,
+        /// The deepest representable `set` path.
+        path: String,
+        /// The invalid key, verbatim.
+        key: String,
+        /// Why the key is invalid.
+        message: String,
+    },
+
     /// A key/value lifecycle action parameter received a direct YAML map value.
     ///
     /// Object-valued side-effect arguments must be passed through a whole-value
@@ -3150,7 +3216,11 @@ impl CompositionError {
             CompositionError::LifecycleProxyWithNotMapping { property, path, .. }
             | CompositionError::LifecycleProxyWithWholeMapping { property, path, .. }
             | CompositionError::LifecycleProxyWithDynamicKey { property, path, .. }
-            | CompositionError::LifecycleProxyWithEvaluationFailed { property, path, .. } => {
+            | CompositionError::LifecycleProxyWithEvaluationFailed { property, path, .. }
+            | CompositionError::LifecycleSetPositionalRemoved { property, path, .. }
+            | CompositionError::LifecycleSetLongFormRemoved { property, path, .. }
+            | CompositionError::LifecycleSetNotMapping { property, path, .. }
+            | CompositionError::LifecycleSetInvalidKey { property, path, .. } => {
                 Some(FrontmatterHighlight::Property(format!("{property}.{path}")))
             }
             CompositionError::LifecycleSayConflict(property)

@@ -1971,12 +1971,8 @@ fn proxy_with_authored_yaml_rejects_dynamic_key() {
 }
 
 #[test]
-fn proxy_with_authored_yaml_non_string_key_is_normalized_to_a_static_string() {
-    // YAML permits a non-string mapping key (`1:`). Frontmatter parsing
-    // normalizes it to the string `"1"` before the lifecycle parser runs, so
-    // there is no unrepresentable-key case to diagnose here — it is simply a
-    // static key naming a target property called `1`.
-    let config = lifecycle_from_markdown(
+fn authored_yaml_non_string_mapping_keys_are_rejected_before_json_conversion() {
+    let documents = [
         "---\n\
          initialize:\n\
          \x20   stack:\n\
@@ -1986,20 +1982,24 @@ fn proxy_with_authored_yaml_non_string_key_is_normalized_to_a_static_string() {
          \x20             with:\n\
          \x20                 1: one\n\
          ---\nbody\n",
-    )
-    .expect("a numeric YAML key normalizes to a static string key");
-    let stack = config
-        .stack(LifecycleSignal::Initialize)
-        .expect("initialize stack");
-    let LifecycleActionKind::LifecycleControl(LifecycleControlAction::Proxy { with, .. }) =
-        &stack[0].actions[0].kind
-    else {
-        panic!("expected a proxy control action");
-    };
-    assert_eq!(
-        with.get("1"),
-        Some(&ProxyWithValue::Scalar(Expr::StringLiteral("one".into())))
-    );
+        "---\n\
+         initialize:\n\
+         \x20   stack:\n\
+         \x20       - action:\n\
+         \x20             set:\n\
+         \x20                 1: one\n\
+         ---\nbody\n",
+    ];
+
+    for document in documents {
+        let error = darkmatter::markdown::Markdown::try_from_content(document.to_string())
+            .expect_err("mapping keys must be strings");
+        assert!(
+            matches!(error, darkmatter::markdown::MarkdownError::FrontmatterParse { .. }),
+            "unexpected error: {error:?}"
+        );
+        assert!(error.to_string().contains("expected a string key"), "{error}");
+    }
 }
 
 #[test]
@@ -2037,5 +2037,148 @@ fn action_value_to_expr_rejects_direct_array() {
     assert!(
         err.contains("{{"),
         "error should mention whole-value interpolation: {err}"
+    );
+}
+
+#[test]
+fn runtime_set_parses_the_reported_mappings_as_one_typed_action() {
+    let config = lifecycle_from_markdown(
+        "---\n\
+         initialize:\n\
+         \x20   stack:\n\
+         \x20       - action:\n\
+         \x20             - set:\n\
+         \x20                   epilog: \"{{message_to_agent}}\"\n\
+         \x20                   message_to_agent: null\n\
+         \x20             - set:\n\
+         \x20                   epilog: null\n\
+         ---\nbody\n",
+    )
+    .expect("the reported mapping syntax parses");
+    let stack = config
+        .stack(LifecycleSignal::Initialize)
+        .expect("initialize stack");
+
+    let LifecycleActionKind::RuntimeSet(first) = &stack[0].actions[0].kind else {
+        panic!("expected one runtime-set action");
+    };
+    assert_eq!(first.len(), 2);
+    assert_eq!(
+        first.get("epilog"),
+        Some(&ProxyWithValue::Scalar(Expr::Variable("message_to_agent".into())))
+    );
+    assert_eq!(first.get("message_to_agent"), Some(&ProxyWithValue::Null));
+
+    let LifecycleActionKind::RuntimeSet(second) = &stack[0].actions[1].kind else {
+        panic!("expected one runtime-set action");
+    };
+    assert_eq!(second.get("epilog"), Some(&ProxyWithValue::Null));
+}
+
+#[test]
+fn runtime_set_preserves_recursive_authored_types_and_empty_mapping() {
+    let fm = json!({
+        "start": {"stack": [
+            {"action": {"set": {}}},
+            {"action": {"set": {
+                "native_bool": true,
+                "quoted_bool": "true",
+                "native_number": 3,
+                "quoted_number": "3",
+                "native_null": null,
+                "items": [1, "{{ ctx.area }}", null],
+                "metadata": {"area": "{{ ctx.area }}", "enabled": false}
+            }}}
+        ]}
+    });
+    let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+    let stack = config.stack(LifecycleSignal::Start).unwrap();
+    let LifecycleActionKind::RuntimeSet(empty) = &stack[0].actions[0].kind else {
+        panic!("expected runtime set");
+    };
+    assert!(empty.is_empty());
+
+    let LifecycleActionKind::RuntimeSet(set) = &stack[1].actions[0].kind else {
+        panic!("expected runtime set");
+    };
+    assert_eq!(set.get("native_bool"), Some(&ProxyWithValue::Scalar(Expr::BoolLiteral(true))));
+    assert_eq!(
+        set.get("quoted_bool"),
+        Some(&ProxyWithValue::Scalar(Expr::StringLiteral("true".into())))
+    );
+    assert_eq!(set.get("native_number"), Some(&ProxyWithValue::Scalar(Expr::NumberLiteral(3.0))));
+    assert_eq!(
+        set.get("quoted_number"),
+        Some(&ProxyWithValue::Scalar(Expr::StringLiteral("3".into())))
+    );
+    assert_eq!(set.get("native_null"), Some(&ProxyWithValue::Null));
+    assert!(matches!(set.get("items"), Some(ProxyWithValue::Array(items)) if items.len() == 3));
+    assert!(matches!(set.get("metadata"), Some(ProxyWithValue::Object(map)) if map.len() == 2));
+}
+
+#[test]
+fn runtime_set_accepts_no_error_as_modifier_and_as_destination() {
+    let fm = json!({"failure": {"stack": [
+        {"action": {"set": {"ready": true}, "no_error": true}},
+        {"action": {"set": {"no_error": "literal destination"}}}
+    ]}});
+    let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+    let stack = config.stack(LifecycleSignal::Failure).unwrap();
+    assert!(stack[0].actions[0].no_error);
+    let LifecycleActionKind::RuntimeSet(set) = &stack[1].actions[0].kind else {
+        panic!("expected runtime set");
+    };
+    assert!(set.get("no_error").is_some());
+}
+
+#[test]
+fn runtime_set_removed_and_non_mapping_forms_have_canonical_guidance() {
+    let cases = [
+        json!({"start": {"stack": [{"action": [{"set": ["phase", "build"]}]}]}}),
+        json!({"start": {"stack": [{"action": [{"action": "set", "key": "phase", "value": "build"}]}]}}),
+        json!({"start": {"stack": [{"action": [{"set": "{{ mapping }}"}]}]}}),
+        json!({"start": {"stack": [{"action": [{"set": "phase"}]}]}}),
+        json!({"start": {"stack": [{"action": ["set('phase', 'build')"]}]}}),
+    ];
+
+    for fm in cases {
+        let error = parse_lifecycle_config(&fm, Path::new("reported.md")).unwrap_err();
+        assert!(error.to_string().contains("set: {property: value}"), "{error}");
+        assert!(error.to_string().contains("start.stack[0].action[0].set"), "{error}");
+    }
+}
+
+#[test]
+fn runtime_set_invalid_keys_fail_even_below_a_false_guard() {
+    for key in ["", "{{ destination }}", "$(printf destination)"] {
+        let mut destinations = serde_json::Map::new();
+        destinations.insert(key.to_string(), json!("value"));
+        let fm = json!({"start": {"stack": [{
+            "when": "false",
+            "action": [{"set": Value::Object(destinations)}]
+        }]}});
+        let error = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        assert!(matches!(error, CompositionError::LifecycleSetInvalidKey { .. }), "{error:?}");
+    }
+
+    let valid = json!({"start": {"stack": [{
+        "when": "false",
+        "action": [{"set": {"value": "{{ undefined_at_runtime }}"}}]
+    }]}});
+    parse_lifecycle_config(&valid, dummy_path()).expect("values are not evaluated while parsing");
+}
+
+#[test]
+fn runtime_set_reports_the_full_nested_value_path() {
+    let fm = json!({"start": {"stack": [{
+        "action": [{"set": {"metadata": {"area": "{{ broken( }}"}}}]
+    }]}});
+    let error = parse_lifecycle_config(&fm, Path::new("reported.md")).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("start.stack[0].action[0].set.metadata.area"),
+        "{error}"
     );
 }

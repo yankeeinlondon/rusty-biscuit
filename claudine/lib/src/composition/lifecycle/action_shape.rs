@@ -4,6 +4,7 @@ pub(super) fn parse_positional_action(
     value: &serde_json::Value,
     source_file: &Path,
     property_name: &str,
+    action_index: usize,
 ) -> Result<LifecycleAction, CompositionError> {
     if !is_known_lifecycle_verb(verb) {
         let rewrite = did_you_mean_verb(verb)
@@ -15,6 +16,16 @@ pub(super) fn parse_positional_action(
             verb: verb.to_string(),
             rewrite,
         });
+    }
+
+    if verb == "set" {
+        return super::parse::parse_runtime_set(
+            value,
+            false,
+            source_file,
+            property_name,
+            action_index,
+        );
     }
 
     let args = classify_positional_value(verb, value, source_file, property_name)?;

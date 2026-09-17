@@ -407,13 +407,20 @@ fn annotate_stack_error(err: CompositionError, property: &str, idx: usize) -> Co
             action,
             message,
             source,
-        } => CompositionError::LifecycleActionInvalidLongForm {
-            source_path,
-            property: dotted,
-            action,
-            message,
-            source,
-        },
+        } => {
+            let message = if action == "set" && message.starts_with("`action[") {
+                format!("`{dotted}.{}", &message[1..])
+            } else {
+                message
+            };
+            CompositionError::LifecycleActionInvalidLongForm {
+                source_path,
+                property: dotted,
+                action,
+                message,
+                source,
+            }
+        }
         CompositionError::LifecycleActionPlacement {
             source_path,
             property: _,
@@ -495,6 +502,48 @@ fn annotate_stack_error(err: CompositionError, property: &str, idx: usize) -> Co
             property: dotted,
             verb,
             param,
+        },
+        CompositionError::LifecycleSetPositionalRemoved {
+            source_path,
+            property: _,
+            path,
+        } => CompositionError::LifecycleSetPositionalRemoved {
+            source_path,
+            property: dotted,
+            path,
+        },
+        CompositionError::LifecycleSetLongFormRemoved {
+            source_path,
+            property: _,
+            path,
+        } => CompositionError::LifecycleSetLongFormRemoved {
+            source_path,
+            property: dotted,
+            path,
+        },
+        CompositionError::LifecycleSetNotMapping {
+            source_path,
+            property: _,
+            path,
+            actual,
+        } => CompositionError::LifecycleSetNotMapping {
+            source_path,
+            property: dotted,
+            path,
+            actual,
+        },
+        CompositionError::LifecycleSetInvalidKey {
+            source_path,
+            property: _,
+            path,
+            key,
+            message,
+        } => CompositionError::LifecycleSetInvalidKey {
+            source_path,
+            property: dotted,
+            path,
+            key,
+            message,
         },
         other => other,
     }
@@ -642,6 +691,14 @@ fn parse_lifecycle_stack_item(
                 let action = match item {
                     serde_json::Value::String(s) => {
                         if s.contains('(') {
+                            if is_set_call(s) {
+                                return Err(CompositionError::LifecycleSetNotMapping {
+                                    source_path: source_file.to_path_buf(),
+                                    property: property_name.to_string(),
+                                    path: format!("action[{action_index}].set"),
+                                    actual: "call spelling".to_string(),
+                                });
+                            }
                             return Err(CompositionError::LifecycleShortFormRemoved {
                                 source_path: source_file.to_path_buf(),
                                 property: property_name.to_string(),
@@ -744,6 +801,8 @@ fn parse_lifecycle_stack_item(
 /// - Object with an `action:` key → key/value long form.
 /// - Single-key object whose key is a known verb → positional form.
 /// - Single-key object whose key is not a known verb → unknown-verb error.
+/// - One verb plus sibling `no_error:` → the same positional action with its
+///   universal modifier.
 /// - Multi-key object without an `action:` key → ambiguous error.
 fn parse_stack_item_action_object(
     signal: LifecycleSignal,
@@ -770,9 +829,44 @@ fn parse_stack_item_action_object(
         }),
         1 => {
             let (verb, value) = obj.iter().next().expect("single-key object");
-            parse_positional_action(signal, verb, value, source_file, property_name)
+            parse_positional_action(
+                signal,
+                verb,
+                value,
+                source_file,
+                property_name,
+                action_index,
+            )
         }
         _ => {
+            if obj.len() == 2
+                && let Some(no_error_value) = obj.get("no_error")
+                && let Some((verb, value)) = obj.iter().find(|(key, _)| key.as_str() != "no_error")
+                && is_known_lifecycle_verb(verb)
+            {
+                let serde_json::Value::Bool(no_error) = no_error_value else {
+                    return Err(CompositionError::LifecycleActionInvalidLongForm {
+                        source_path: source_file.to_path_buf(),
+                        property: property_name.to_string(),
+                        action: verb.clone(),
+                        message: format!(
+                            "`no_error` must be a boolean, got {}",
+                            json_type_name(no_error_value)
+                        ),
+                        source: None,
+                    });
+                };
+                let mut action = parse_positional_action(
+                    signal,
+                    verb,
+                    value,
+                    source_file,
+                    property_name,
+                    action_index,
+                )?;
+                action.no_error = *no_error;
+                return Ok(action);
+            }
             let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
             keys.sort_unstable();
             let known_verb = keys.iter().copied().find(|k| is_known_lifecycle_verb(k));
@@ -821,6 +915,14 @@ fn parse_scalar_action(
     }
 
     if trimmed.contains('(') {
+        if is_set_call(trimmed) {
+            return Err(CompositionError::LifecycleSetNotMapping {
+                source_path: source_file.to_path_buf(),
+                property: property_name.to_string(),
+                path: "action[0].set".to_string(),
+                actual: "call spelling".to_string(),
+            });
+        }
         return Err(CompositionError::LifecycleShortFormRemoved {
             source_path: source_file.to_path_buf(),
             property: property_name.to_string(),
@@ -830,6 +932,10 @@ fn parse_scalar_action(
     }
 
     parse_bare_verb_string(signal, trimmed, no_error, source_file, property_name)
+}
+
+fn is_set_call(raw: &str) -> bool {
+    raw.trim_start().strip_prefix("set").is_some_and(|rest| rest.trim_start().starts_with('('))
 }
 
 /// Parse a bare verb-name string as a zero-arg positional action.
@@ -925,6 +1031,14 @@ fn parse_long_form_action_object(
         });
     }
 
+    if verb == "set" {
+        return Err(CompositionError::LifecycleSetLongFormRemoved {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            path: format!("action[{action_index}].set"),
+        });
+    }
+
     let no_error = match obj.get("no_error") {
         Some(serde_json::Value::Bool(b)) => *b,
         Some(other) => {
@@ -993,6 +1107,88 @@ fn parse_long_form_action_object(
     }
 
     build_action_from_params(signal, &verb, params, no_error, proxy_with, source_file)
+}
+
+/// Parse the only authored lifecycle `set` form: a literal destination map.
+pub(super) fn parse_runtime_set(
+    value: &serde_json::Value,
+    no_error: bool,
+    source_file: &Path,
+    property_name: &str,
+    action_index: usize,
+) -> Result<LifecycleAction, CompositionError> {
+    let path = format!("action[{action_index}].set");
+    let Some(map) = value.as_object() else {
+        let actual = match value {
+            serde_json::Value::Array(_) => {
+                return Err(CompositionError::LifecycleSetPositionalRemoved {
+                    source_path: source_file.to_path_buf(),
+                    property: property_name.to_string(),
+                    path,
+                });
+            }
+            serde_json::Value::String(raw) => {
+                let trimmed = raw.trim();
+                let spans = ExpressionFinder::find_all_plain(trimmed);
+                if let Some(span) = spans.first()
+                    && spans.len() == 1
+                    && span.start == 0
+                    && span.end == trimmed.len()
+                {
+                    "whole-mapping interpolation"
+                } else {
+                    json_type_name(value)
+                }
+            }
+            _ => json_type_name(value),
+        };
+        return Err(CompositionError::LifecycleSetNotMapping {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            path,
+            actual: actual.to_string(),
+        });
+    };
+
+    let authored: IndexMap<String, serde_json::Value> = map
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let set = RuntimeSet::new(authored).map_err(|error| match error {
+        RuntimeSetError::EmptyKey => CompositionError::LifecycleSetInvalidKey {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            path: path.clone(),
+            key: String::new(),
+            message: "destination keys must not be empty".to_string(),
+        },
+        RuntimeSetError::DynamicKey(key) => CompositionError::LifecycleSetInvalidKey {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            path: if is_safe_path_segment(&key) {
+                format!("{path}.{key}")
+            } else {
+                path.clone()
+            },
+            key,
+            message: "destination keys must be literal and are never interpolated".to_string(),
+        },
+        RuntimeSetError::Value {
+            path: value_path,
+            message,
+        } => CompositionError::LifecycleActionInvalidLongForm {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            action: "set".to_string(),
+            message: format!("`{path}.{value_path}` is not a valid value: {message}"),
+            source: None,
+        },
+    })?;
+
+    Ok(LifecycleAction {
+        kind: LifecycleActionKind::RuntimeSet(set),
+        no_error,
+    })
 }
 
 /// Parse the `with:` value of a key/value `proxy` action into a [`ProxyWith`].

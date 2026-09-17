@@ -367,6 +367,53 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                     "Pass object data through a whole-value `{{ ... }}` interpolation.",
                 )
         }
+        CompositionError::LifecycleSetPositionalRemoved {
+            source_path,
+            property,
+            path,
+        } => set_shape_block(
+            source_path,
+            property,
+            path,
+            "positional `set` form removed",
+            "This action uses the removed `set: [key, value]` form.",
+        ),
+        CompositionError::LifecycleSetLongFormRemoved {
+            source_path,
+            property,
+            path,
+        } => set_shape_block(
+            source_path,
+            property,
+            path,
+            "long-form `set` action removed",
+            "This action uses the removed `{ action: set, key: ..., value: ... }` form.",
+        ),
+        CompositionError::LifecycleSetNotMapping {
+            source_path,
+            property,
+            path,
+            actual,
+        } => set_shape_block(
+            source_path,
+            property,
+            path,
+            "`set` must be a mapping",
+            &format!("The authored `set` payload is {actual}, not a mapping."),
+        ),
+        CompositionError::LifecycleSetInvalidKey {
+            source_path,
+            property,
+            path,
+            key,
+            message,
+        } => set_shape_block(
+            source_path,
+            property,
+            path,
+            "invalid `set` destination",
+            &format!("Destination key <cyan>`{}`</cyan> is invalid: {message}.", escape_prose_path(key)),
+        ),
         CompositionError::LifecycleProxyWithNotMapping {
             source_path,
             property,
@@ -832,4 +879,22 @@ fn lifecycle_evaluation_surface_label(surface: &str) -> String {
         "interpolation" => "an interpolated string".to_string(),
         verb => format!("the `{verb}` action value"),
     }
+}
+
+fn set_shape_block(
+    source_path: &std::path::Path,
+    property: &str,
+    path: &str,
+    title: &'static str,
+    explanation: &str,
+) -> StatusBlock {
+    let file_link = render_file_link(source_path);
+    let body = format!(
+        "Lifecycle action <cyan>`set`</cyan> at <cyan>`{property}.{path}`</cyan> in \
+         {file_link} is not valid.\n\n{explanation}"
+    );
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("CompositionError", title))
+        .body(body)
+        .hint("Use only the mapping form: `set: {property: value}`.")
 }

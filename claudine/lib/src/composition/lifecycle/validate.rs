@@ -303,6 +303,16 @@ fn iter_action_expressions<'a>(
                 });
             }
         }
+        LifecycleActionKind::RuntimeSet(set) => {
+            for (key, value) in set.iter() {
+                iter_with_value_expressions(
+                    value,
+                    &prefix.field("set").map_key(key),
+                    signal,
+                    surfaces,
+                );
+            }
+        }
         LifecycleActionKind::ExpressionFunction(func) => {
             for (i, arg) in func.args.iter().enumerate() {
                 surfaces.push(LifecycleExpressionSurface {

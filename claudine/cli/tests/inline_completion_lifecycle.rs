@@ -186,7 +186,7 @@ fn a_direct_compose_run_fails_completion_when_a_start_effect_invalidates_a_prope
         "agent: goose\n",
         "start:\n",
         "  stack:\n",
-        "    - action: {set: [researched_by, '{{ 42 }}']}\n",
+        "    - action: {set: {researched_by: '{{ 42 }}'}}\n",
         "success:\n",
         "  info: 'SUCCESS-SENTINEL'\n",
         "failure:\n",
@@ -670,7 +670,7 @@ fn a_sequence_applies_the_verdict_per_step_and_fail_fast_stops_at_step_two() {
         "  stack:\n",
         // `state` is the per-step object, so the branch reads its id.
         "    - when: \"state.id == 'beta'\"\n",
-        "      action: {set: [marker, '{{ 42 }}']}\n",
+        "      action: {set: {marker: '{{ 42 }}'}}\n",
         "---\n",
         "Step {{ state }}.\n",
     );
@@ -721,7 +721,7 @@ fn a_loop_applies_the_verdict_per_iteration() {
         "start:\n",
         "  stack:\n",
         "    - when: \"counter == 1\"\n",
-        "      action: {set: [marker, '{{ 42 }}']}\n",
+        "      action: {set: {marker: '{{ 42 }}'}}\n",
         "---\n",
         "Iteration {{ counter }}.\n",
     );

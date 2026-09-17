@@ -93,6 +93,9 @@ pub enum LifecycleActionKind {
     /// Darkmatter side-effect invoked by name.
     SideEffect(SideEffectAction),
 
+    /// Invocation-local frontmatter mutations authored as one mapping.
+    RuntimeSet(RuntimeSet),
+
     /// Read-only Darkmatter expression function invoked for its result.
     ExpressionFunction(ExpressionFunctionAction),
 }
@@ -239,6 +242,75 @@ pub enum ProxyWithError {
         /// The reason from the shared rule.
         message: String,
     },
+}
+
+/// Why an authored lifecycle `set:` mapping could not be typed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeSetError {
+    /// A destination key is empty.
+    EmptyKey,
+    /// A destination key carries an interpolation span.
+    DynamicKey(String),
+    /// A value could not be typed by the shared action-value rule.
+    Value {
+        /// Path below `set`, e.g. `metadata.area` or `files[0]`.
+        path: String,
+        /// The reason from the shared rule.
+        message: String,
+    },
+}
+
+/// One lifecycle runtime mutation action.
+///
+/// The mapping is retained as one action rather than lowered into independent
+/// writes. Values use the same recursive typed tree as `proxy.with`, preserving
+/// native YAML values and whole-value expression types.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RuntimeSet(IndexMap<String, ProxyWithValue>);
+
+impl RuntimeSet {
+    /// Type a lifecycle `set:` mapping.
+    pub fn new(authored: IndexMap<String, serde_json::Value>) -> Result<Self, RuntimeSetError> {
+        for key in authored.keys() {
+            if key.is_empty() {
+                return Err(RuntimeSetError::EmptyKey);
+            }
+            if !ExpressionFinder::find_all_plain(key).is_empty() || key.contains("$(") {
+                return Err(RuntimeSetError::DynamicKey(key.clone()));
+            }
+        }
+        let mut typed = IndexMap::with_capacity(authored.len());
+        for (key, value) in authored {
+            let value = type_with_value(&value, &key).map_err(|error| match error {
+                ProxyWithError::DynamicKey(_) => unreachable!("value typing does not inspect keys"),
+                ProxyWithError::Value { path, message } => {
+                    RuntimeSetError::Value { path, message }
+                }
+            })?;
+            typed.insert(key, value);
+        }
+        Ok(Self(typed))
+    }
+
+    #[allow(missing_docs)]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    #[allow(missing_docs)]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// The typed value assigned to `key`.
+    pub fn get(&self, key: &str) -> Option<&ProxyWithValue> {
+        self.0.get(key)
+    }
+
+    /// Iterate destination keys and typed values in deterministic order.
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &ProxyWithValue)> {
+        self.0.iter()
+    }
 }
 
 /// The authored `proxy.with` mapping — a transient top-level frontmatter

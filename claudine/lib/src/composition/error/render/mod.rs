@@ -53,6 +53,10 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleStackAmbiguous { .. }
             | CompositionError::LifecycleObjectDataThroughInterpolationPositional { .. }
             | CompositionError::LifecycleObjectDataThroughInterpolationParameter { .. }
+            | CompositionError::LifecycleSetPositionalRemoved { .. }
+            | CompositionError::LifecycleSetLongFormRemoved { .. }
+            | CompositionError::LifecycleSetNotMapping { .. }
+            | CompositionError::LifecycleSetInvalidKey { .. }
             | CompositionError::LifecycleWrongArity { .. }
             | CompositionError::LifecycleShortFormRemoved { .. }
             | CompositionError::LifecycleActionPlacement { .. }
@@ -423,6 +427,10 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleProxyWithDynamicKey { .. }
             | CompositionError::LifecycleProxyWithEvaluationFailed { .. }
             | CompositionError::LifecycleProxyOnlyParameter { .. }
+            | CompositionError::LifecycleSetPositionalRemoved { .. }
+            | CompositionError::LifecycleSetLongFormRemoved { .. }
+            | CompositionError::LifecycleSetNotMapping { .. }
+            | CompositionError::LifecycleSetInvalidKey { .. }
             | CompositionError::LifecycleEvaluationError { .. } => "composition.lifecycle_invalid",
             // Everything else is a composition failure without a finer code yet.
             _ => "composition.failed",
@@ -754,6 +762,32 @@ impl Diagnostic for CompositionError {
                 base["property"] = json!(format!("{property}.{path}"));
                 base["message"] =
                     json!(format!("could not be resolved for the proxy to `{target}`: {message}"));
+            }
+            CompositionError::LifecycleSetPositionalRemoved { property, path, .. } => {
+                base["property"] = json!(format!("{property}.{path}"));
+                base["message"] = json!("positional `set` form has been removed");
+            }
+            CompositionError::LifecycleSetLongFormRemoved { property, path, .. } => {
+                base["property"] = json!(format!("{property}.{path}"));
+                base["message"] = json!("long-form `set` action has been removed");
+            }
+            CompositionError::LifecycleSetNotMapping {
+                property,
+                path,
+                actual,
+                ..
+            } => {
+                base["property"] = json!(format!("{property}.{path}"));
+                base["message"] = json!(format!("`set` must be a mapping, got {actual}"));
+            }
+            CompositionError::LifecycleSetInvalidKey {
+                property,
+                path,
+                message,
+                ..
+            } => {
+                base["property"] = json!(format!("{property}.{path}"));
+                base["message"] = json!(message);
             }
             CompositionError::LifecycleProxyOnlyParameter {
                 property,

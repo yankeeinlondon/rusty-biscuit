@@ -2563,6 +2563,58 @@ fn proxy_with_not_mapping_renders_and_locates_the_with_line() {
 }
 
 #[test]
+fn runtime_set_shape_diagnostics_share_render_highlight_and_machine_identity() {
+    let cases = [
+        CompositionError::LifecycleSetPositionalRemoved {
+            source_path: PathBuf::from("reported.md"),
+            property: "initialize.stack[0]".to_string(),
+            path: "action[1].set".to_string(),
+        },
+        CompositionError::LifecycleSetLongFormRemoved {
+            source_path: PathBuf::from("reported.md"),
+            property: "initialize.stack[0]".to_string(),
+            path: "action[1].set".to_string(),
+        },
+        CompositionError::LifecycleSetNotMapping {
+            source_path: PathBuf::from("reported.md"),
+            property: "initialize.stack[0]".to_string(),
+            path: "action[1].set".to_string(),
+            actual: "whole-mapping interpolation".to_string(),
+        },
+        CompositionError::LifecycleSetInvalidKey {
+            source_path: PathBuf::from("reported.md"),
+            property: "initialize.stack[0]".to_string(),
+            path: "action[1].set".to_string(),
+            key: "{{ destination }}".to_string(),
+            message: "destination keys must be literal".to_string(),
+        },
+    ];
+
+    for error in cases {
+        assert_eq!(error.code(), "composition.lifecycle_invalid");
+        assert!(matches!(
+            error.frontmatter_block_spec(),
+            Some(FrontmatterHighlight::Property(ref property))
+                if property == "initialize.stack[0].action[1].set"
+        ));
+        let detail = error.detail();
+        assert_eq!(
+            detail["property"],
+            serde_json::json!("initialize.stack[0].action[1].set")
+        );
+        assert!(detail["message"].as_str().is_some_and(|message| !message.is_empty()));
+
+        let rendered = render(&error);
+        assert!(rendered.contains("reported.md"), "{rendered}");
+        assert!(
+            rendered.contains("initialize.stack[0].action[1].set"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("set: {property: value}"), "{rendered}");
+    }
+}
+
+#[test]
 fn proxy_with_whole_mapping_renders_named_follow_up_and_explicit_key_hint() {
     let err = CompositionError::LifecycleProxyWithWholeMapping {
         source_path: PathBuf::from("router.md"),

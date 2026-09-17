@@ -140,10 +140,8 @@ fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
         [
             "git add ..",
             "just commit",
-            "gitnexus analyze --force",
             "git add ..",
             "git commit -m \"\"",
-            "gitnexus analyze --force",
         ],
         "preflight is condition-blind, so both branches must resolve without an unknown-root error",
     );

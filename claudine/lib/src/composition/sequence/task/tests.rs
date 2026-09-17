@@ -2273,14 +2273,14 @@ mod side_effect_tasks {
         assert_eq!(runtime.output_count(), 1);
     }
 
-    /// `set` returns the value it replaced — nothing, on a first write — so the
-    /// task still contributes exactly one (empty) entry.
+    /// `set` returns one prior-value mapping, using null for a first write, so
+    /// the task contributes exactly one serialized object entry.
     #[test]
-    fn a_side_effect_with_no_textual_return_appends_the_empty_string() {
+    fn a_mapping_set_appends_its_prior_value_object() {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(
             dir.path(),
-            json!({ "name": "alpha", "side_effect": { "set": ["ready", "{{ true }}"] } }),
+            json!({ "name": "alpha", "side_effect": { "set": {"ready": "{{ true }}"} } }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
@@ -2292,8 +2292,8 @@ mod side_effect_tasks {
         let outcome = fixture.execute(&wiring);
 
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
-        assert_eq!(outcome.stdout, "");
-        assert_eq!(runtime.last_output_text().as_deref(), Some(""));
+        assert_eq!(outcome.stdout, "{\"ready\":null}");
+        assert_eq!(runtime.last_output_text().as_deref(), Some("{\"ready\":null}"));
         assert_eq!(
             runtime.snapshot().mutations.get("ready"),
             Some(&Value::Bool(true)),
@@ -2308,8 +2308,8 @@ mod side_effect_tasks {
             dir.path(),
             json!({
                 "name": "alpha",
-                "side_effect": { "set": ["stage", "primary"] },
-                "setup": [{ "action": { "set": ["stage", "setup"] } }],
+                "side_effect": { "set": {"stage": "primary"} },
+                "setup": [{ "action": { "set": {"stage": "setup"} } }],
             }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -2331,8 +2331,8 @@ mod side_effect_tasks {
             "the delta is measured against the layer as it stood before the task",
         );
         assert_eq!(
-            outcome.stdout, "setup",
-            "the primary `set` returns what the setup stage wrote",
+            outcome.stdout, "{\"stage\":\"setup\"}",
+            "the primary `set` returns the prior mapping from the setup stage",
         );
     }
 
@@ -2367,7 +2367,7 @@ mod side_effect_tasks {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(
             dir.path(),
-            json!({ "name": "alpha", "side_effect": { "set": ["outputs", "hijacked"] } }),
+            json!({ "name": "alpha", "side_effect": { "set": {"outputs": "hijacked"} } }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
@@ -3003,7 +3003,7 @@ mod serial_groups {
                         {
                             "name": "writer",
                             "shell": "one",
-                            "teardown": [{ "action": { "set": ["marker", "written"] } }],
+                            "teardown": [{ "action": { "set": {"marker": "written"} } }],
                         },
                         {
                             "name": "reader",
@@ -3474,8 +3474,8 @@ mod parallel_groups {
                     "name": "bundle",
                     "execution": "parallel",
                     "tasks": [
-                        { "name": "writer", "shell": "write", "setup": [{ "action": [{ "set": ["marker", "written"] }] }] },
-                        { "name": "reader", "shell": "read", "teardown": [{ "action": [{ "set": ["observed", "{{ marker }}"] }] }] },
+                        { "name": "writer", "shell": "write", "setup": [{ "action": [{ "set": {"marker": "written"} }] }] },
+                        { "name": "reader", "shell": "read", "teardown": [{ "action": [{ "set": {"observed": "{{ marker }}"} }] }] },
                     ],
                 },
             }])),
@@ -3597,8 +3597,8 @@ mod parallel_groups {
                     "name": "bundle",
                     "execution": "parallel",
                     "tasks": [
-                        { "name": "left", "shell": "l", "setup": [{ "action": [{ "set": ["left_key", "L"] }] }] },
-                        { "name": "right", "shell": "r", "setup": [{ "action": [{ "set": ["right_key", "R"] }] }] },
+                        { "name": "left", "shell": "l", "setup": [{ "action": [{ "set": {"left_key": "L"} }] }] },
+                        { "name": "right", "shell": "r", "setup": [{ "action": [{ "set": {"right_key": "R"} }] }] },
                     ],
                 },
             }),
@@ -3638,8 +3638,8 @@ mod parallel_groups {
                     "name": "bundle",
                     "execution": "parallel",
                     "tasks": [
-                        { "name": "early", "shell": "e", "setup": [{ "action": [{ "set": ["shared", "from-early"] }] }] },
-                        { "name": "late", "shell": "l", "setup": [{ "action": [{ "set": ["shared", "from-late"] }] }] },
+                        { "name": "early", "shell": "e", "setup": [{ "action": [{ "set": {"shared": "from-early"} }] }] },
+                        { "name": "late", "shell": "l", "setup": [{ "action": [{ "set": {"shared": "from-late"} }] }] },
                     ],
                 },
             }),
@@ -3690,7 +3690,7 @@ mod parallel_groups {
                     "name": "bundle",
                     "execution": "parallel",
                     "tasks": [
-                        { "name": "a", "shell": "a", "setup": [{ "action": [{ "set": ["touched", "yes"] }] }] },
+                        { "name": "a", "shell": "a", "setup": [{ "action": [{ "set": {"touched": "yes"} }] }] },
                         { "name": "b", "shell": "b" },
                     ],
                 },
@@ -3738,9 +3738,9 @@ mod parallel_groups {
                         "name": "bundle",
                         "execution": "parallel",
                         "tasks": [
-                            { "name": "one", "shell": "one", "setup": [{ "action": [{ "set": ["k1", 1] }] }] },
-                            { "name": "two", "shell": "two", "setup": [{ "action": [{ "set": ["k2", 2] }] }] },
-                            { "name": "three", "shell": "three", "setup": [{ "action": [{ "set": ["k3", 3] }] }] },
+                            { "name": "one", "shell": "one", "setup": [{ "action": [{ "set": {"k1": 1} }] }] },
+                            { "name": "two", "shell": "two", "setup": [{ "action": [{ "set": {"k2": 2} }] }] },
+                            { "name": "three", "shell": "three", "setup": [{ "action": [{ "set": {"k3": 3} }] }] },
                         ],
                     },
                 }),

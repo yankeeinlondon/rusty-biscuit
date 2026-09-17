@@ -754,7 +754,7 @@ fn a_sequence_runtime_mutation_shadows_the_same_named_task_file_param() {
     );
     write(
         &fixture.cwd().join("mutator.md"),
-        "---\nsuccess:\n  stack:\n    - action: {set: [spec, runtime/spec.md]}\n---\nMutator.\n",
+        "---\nsuccess:\n  stack:\n    - action: {set: {spec: runtime/spec.md}}\n---\nMutator.\n",
     );
     write(
         &fixture.cwd().join("router.md"),
