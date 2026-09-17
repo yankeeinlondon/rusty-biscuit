@@ -123,7 +123,9 @@ fn run_loop_lifecycle_with_engine_path(
     execute_loop_with_lifecycle(
         engine_prompt_path,
         config,
-        initial_frontmatter,
+        initial_frontmatter.clone(),
+        &initial_frontmatter,
+        None,
         LoopExecutionOptions::default(),
         lifecycle,
         &lifecycle_ctx,
@@ -640,7 +642,9 @@ fn run_loop_lifecycle_emitting_terminal(
     execute_loop_with_lifecycle(
         prompt_path,
         config,
-        initial_frontmatter,
+        initial_frontmatter.clone(),
+        &initial_frontmatter,
+        None,
         LoopExecutionOptions::default(),
         lifecycle,
         &lifecycle_ctx,

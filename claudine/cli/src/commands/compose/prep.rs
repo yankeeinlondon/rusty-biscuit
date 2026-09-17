@@ -960,6 +960,8 @@ fn build_and_run_loop(
         source,
         &config,
         initial_frontmatter,
+        &loop_seed.initialize_frontmatter,
+        &runtime_state,
         loop_options,
         &lifecycle_config,
         &lifecycle_ctx,

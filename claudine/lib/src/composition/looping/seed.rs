@@ -58,6 +58,9 @@ pub fn build_loop_seed(
 pub struct LoopSeed {
     /// Iteration-control seed frontmatter (control variables + CLI setters).
     pub seed: Map<String, Value>,
+    /// Full bootstrap state for initialize and its catch handlers. Kept out of
+    /// the control seed so derived values still recompose on each iteration.
+    pub initialize_frontmatter: Map<String, Value>,
     /// Lifecycle config parsed from the **full** composed effective
     /// frontmatter — carries every event block, unlike [`Self::seed`].
     pub lifecycle: LifecycleConfig,
@@ -97,6 +100,7 @@ pub fn build_loop_seed_with_lifecycle(
             prepare_options.set_overrides.as_ref(),
         ),
         lifecycle: prepared.lifecycle,
+        initialize_frontmatter: prepared.effective_frontmatter.as_object().cloned().unwrap_or_default(),
     })
 }
 
@@ -119,6 +123,7 @@ pub fn build_loop_seed_from_bootstrap(
             bootstrap.input_layers.set_overrides.as_ref(),
         ),
         lifecycle: bootstrap.lifecycle.clone(),
+        initialize_frontmatter: bootstrap.effective_frontmatter.as_object().cloned().unwrap_or_default(),
     }
 }
 

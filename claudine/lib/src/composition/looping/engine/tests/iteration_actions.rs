@@ -71,6 +71,8 @@ fn loop_iterations_share_one_exact_document_epoch() {
         &source.resolved_path,
         &config,
         seed.seed,
+        &seed.initialize_frontmatter,
+        None,
         LoopExecutionOptions::default(),
         &seed.lifecycle,
         &lifecycle_ctx,
