@@ -53,20 +53,44 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_3:
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/loop_initialize_state.rs
+    - claudine/cli/tests/shipped_prompt_contract.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/seed.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - prompts/_implement/implement-plan.md
+docs_updated_during_phase_3:
+    - claudine/README.md
+    - claudine/docs/topics/lifecycle.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/spec.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/plan.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/lifecycle.md
 packages:
     - claudine
     - claudine-cli
-    - darkmatter
-    - darkmatter-cli
-completed_phase: "2"
+completed_phase: "3"
 human_review: false
 human_review_items: []
 message_to_agent: >-
-    Phase 2 is complete; begin Phase 3. Mapping-only parsing, typed diagnostics,
-    shared duplicate-key rejection, and RuntimeState batch groundwork are in
-    place. Executor wiring was added to keep the migrated corpus green, but
-    Phase 3 must still perform its dedicated snapshot/atomicity/result audit
-    and remove the remaining legacy single-key executor helper and dispatch arm.
+    Phase 3 is complete; begin Phase 4. Snapshot evaluation, atomic batch
+    publication, prior-value result semantics, and the full execution matrix
+    are green. The legacy positional executor branch and single-key helper are
+    removed. The initialization blocker repair carried full bootstrap state and
+    RuntimeState writes into loop preparation; preserve its CLI regression.
 ---
 
 # Plan: Mapping-Only Claudine Lifecycle `set` Syntax
@@ -395,7 +419,7 @@ Implement the executor and runtime semantics (R2-R4) and their test matrix.
 
 ### Tasks
 
-- [ ] **Executor batch dispatch**
+- [x] **Executor batch dispatch**
   - Dispatch the new action kind: evaluate every value against the
     pre-action working state (recursive resolution through arrays/objects;
     whole-value spans keep types; mixed strings keep interpolation
@@ -415,7 +439,7 @@ Implement the executor and runtime semantics (R2-R4) and their test matrix.
   - Remove the single-key `verb == "set"` arm in `dispatch_side_effect`
     (`executor.rs:1342`) and `apply_runtime_set`; no compatibility
     branch remains in production execution.
-- [ ] **Runtime batch semantics**
+- [x] **Runtime batch semantics**
   - Batch operation on `RuntimeState` (from Work-Group A): prior values
     selected by key presence — an explicitly assigned null is present state;
     this must also correct the single-key ambiguity at
@@ -425,7 +449,7 @@ Implement the executor and runtime semantics (R2-R4) and their test matrix.
     without broadening or breaking Darkmatter's `EffectEngine::set`.
     Preserve `sequence/task/group.rs:406` post-parallel-group merge
     semantics, including isolation, visibility, and explicit-null writes.
-- [ ] **Result semantics**
+- [x] **Result semantics**
   - Event and setup/teardown stacks discard results; preserve that contract.
     Only sequence side-effect tasks expose the prior-value object.
   - The action's result is one object mapping each assigned key to its
@@ -433,7 +457,7 @@ Implement the executor and runtime semantics (R2-R4) and their test matrix.
     `run_side_effect` serializes it through the existing textual output path
     (`Ok(other) => other.to_string()`) and appends one `outputs` entry
     (Spike 2's audit confirms the seams).
-- [ ] **Execution test matrix** (R3/acceptance 4-5, 7)
+- [x] **Execution test matrix** (R3/acceptance 4-5, 7)
   - Swap example succeeds in either key order; consecutive actions observe
     each other's updates.
   - Failure following an otherwise valid entry produces no partial update,

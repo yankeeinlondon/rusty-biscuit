@@ -2,7 +2,7 @@
 spec: "claudine/fixes/2026-09-16-better-spec-syntax/spec.md"
 plan: "claudine/fixes/2026-09-16-better-spec-syntax/plan.md"
 implemented_by: "codex/gpt-5.6-sol"
-started_phase: "2"
+started_phase: "3"
 implemented: false
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
@@ -51,20 +51,44 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_3:
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/loop_initialize_state.rs
+    - claudine/cli/tests/shipped_prompt_contract.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/seed.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - prompts/_implement/implement-plan.md
+docs_updated_during_phase_3:
+    - claudine/README.md
+    - claudine/docs/topics/lifecycle.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/spec.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/plan.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/lifecycle.md
 packages:
     - claudine
     - claudine-cli
-    - darkmatter
-    - darkmatter-cli
-completed_phase: "2"
+completed_phase: "3"
 human_review: false
 human_review_items: []
 message_to_agent: >-
-    Phase 2 is complete; begin Phase 3. Mapping-only parsing, typed diagnostics,
-    shared duplicate-key rejection, and RuntimeState batch groundwork are in
-    place. Executor wiring was added to keep the migrated corpus green, but
-    Phase 3 must still perform its dedicated snapshot/atomicity/result audit
-    and remove the remaining legacy single-key executor helper and dispatch arm.
+    Phase 3 is complete; begin Phase 4. Snapshot evaluation, atomic batch
+    publication, prior-value result semantics, and the full execution matrix
+    are green. The legacy positional executor branch and single-key helper are
+    removed. The initialization blocker repair carried full bootstrap state and
+    RuntimeState writes into loop preparation; preserve its CLI regression.
 ---
 
 # Implementation Log for 2026-09-16-better-spec-syntax (5 phases)
@@ -459,3 +483,148 @@ The final GitNexus all-scope change analysis completed without truncation. It
 reported 53 dirty-worktree files, 30 changed symbols, no affected indexed
 process, and LOW risk; the larger file count includes the author's unrelated
 pre-existing worktree changes. The Phase 2 scoped diff contains 36 files.
+
+## Phase 3 resume blocker repair
+
+The migrated handoff mapping exposed two initialization defects before Phase 3
+could launch: `set.epilog` rejected an absent `message_to_agent`, and the loop's
+failure handler then lacked the derived `plan` field because it received only
+the loop-control seed. Initialization also had no shared RuntimeState, so its
+successful `set` writes could disappear before body preparation.
+
+The repair keeps full bootstrap frontmatter separate from the loop-control
+seed, shares initialization's live state with its catch handlers, and carries
+initialization writes through the invocation RuntimeState. A mapping's absent
+destination keys are known null bindings in its pre-write snapshot; existing
+values retain snapshot semantics. Whole-value null stays typed null and renders
+empty when embedded in text. Unrelated unknown names still fail validation.
+
+Regression coverage includes absent/null/present handoff values, a fake-provider
+CLI run through phases 3 and 4, a deliberate initialization error whose failure
+handler reads `plan` and an earlier mutation, and the shipped implementation
+route with a populated phase-2 handoff log. Phase 3's remaining dedicated audit
+and legacy-helper removal are still pending.
+
+Validation on macOS: `just test` passed 7,271 tests (9 tier-filtered skips),
+including the router/handoff regression; `just lint` passed all area packages.
+The first concurrent build/test runs timed out under compilation load; both
+checks passed when rerun after the release build. The shipped fixture and its
+Darkmatter hash pin were synchronized with the current prompt, and the stale
+schema-test expectation for the updated staging command was corrected.
+The optimized binary was installed at `/Users/ken/.cargo/bin/claudine`; an
+isolated smoke check against that installed executable verified phases 3 and 4,
+null interpolation, persisted initialization writes, and failure-context
+preservation without launching a real provider. No formatting or commits ran.
+
+## Phase 3
+
+### Test-design map — before implementation
+
+- Snapshot evaluation: executor tests will run the exact `left`/`right` swap in
+  both mapping orders and assert the runtime mutations, live working map, and
+  returned prior-value object. A separate two-action case will prove that a
+  later action observes the earlier action's committed values.
+- Atomic expression failure: one mapping will resolve an otherwise valid first
+  entry and then fail on an unknown expression. Tests will exercise both a
+  shared `RuntimeState` and the no-runtime-cell path, asserting that neither
+  runtime mutations nor the live/working map publishes the valid prefix.
+- Atomic destination validation: one mapping will contain a valid first entry
+  followed by a reserved or dotted destination. Tests will assert the same two
+  state layers remain unchanged, including the task-side-effect outer
+  write-back path that copies its caller-owned working map after dispatch.
+- Suppression and immutable views: a `no_error: true` dispatch failure will
+  continue to the next action without exposing any write, while attempts to
+  assign `state`, `previous`, or `next` will leave those authored views and the
+  runtime layer unchanged.
+- Result semantics: executor and sequence-task tests will assert the complete
+  prior-value object for multiple keys, explicit runtime null over a non-null
+  document value, and an empty mapping; event/setup/teardown result discard
+  remains covered by their observable state and output behavior.
+- Visibility and persistence: existing cross-event, cross-iteration,
+  serial/parallel task, and no-file-write tests remain the broader regression
+  boundary. The exact reported implementation-prompt mapping is already pinned
+  by the library parser/executor regression, while the passive shipped-prompt
+  corpus and hermetic normal CLI route added in Phase 2 remain the required
+  artifact-level coverage.
+- Removed execution compatibility: production-source audit will require the
+  legacy positional `verb == "set"` dispatch and `apply_runtime_set` helper to
+  be absent. Observable removed-form failures remain covered at the public
+  parser/diagnostic boundary rather than by testing executor internals.
+
+All new tests are L1: they use in-process lifecycle/sequence fixtures and no
+terminal, browser, network service, or real provider.
+
+### Pre-edit impact and implementation
+
+GitNexus could not resolve `dispatch_side_effect`, `set_batch`,
+`dispatch_task_side_effect`, or `is_side_effect_action` as indexed symbols and
+returned `risk: UNKNOWN` for each. Text search therefore supplied the required
+caller confirmation: mapping actions enter both event-stack and task
+side-effect dispatch, sequence classification explicitly accepts
+`RuntimeSet`, and `RuntimeState::set_batch` is shared with the single-key Rust
+API while parallel-group merge continues through `RuntimeState::set`. No HIGH
+or CRITICAL result was returned.
+
+The executor now routes lifecycle mappings only through
+`dispatch_runtime_set`. The remaining positional `verb == "set"` branch and
+`apply_runtime_set` helper were deleted, leaving no execution compatibility
+path for removed lifecycle syntax. `RuntimeState::set_batch` validates the
+whole update before locking, then publishes cloned values with infallible map
+insertion under one mutex acquisition. Working/live state is updated only
+after that commit succeeds.
+
+### Targeted execution coverage
+
+- `mapping_set_swaps_values_in_either_destination_order` proves both authored
+  destination orders resolve from one pre-action snapshot and asserts the
+  prior-value object, runtime mutations, and live working map.
+- `consecutive_set_actions_observe_each_others_updates` proves a second action
+  sees the first action's commit while retaining its own snapshot boundary.
+- `failed_expression_publishes_no_part_of_the_mapping_with_or_without_runtime`
+  covers a valid prefix followed by an unknown-expression failure in
+  both runtime-cell configurations.
+- `late_invalid_destination_publishes_no_part_of_the_task_side_effect` covers
+  reserved and dotted destinations after a valid entry, with and without a
+  shared runtime cell, including the task dispatcher’s outer write-back seam.
+- `no_error_suppresses_a_batch_refusal_without_exposing_a_partial_write`
+  proves suppressed dispatch continues against unchanged state.
+- `mapping_result_reports_all_priors_and_preserves_explicit_runtime_null`
+  covers multiple keys, absent prior values, an explicit runtime null over a
+  non-null document value, and the empty-object result.
+- `set_refuses_every_reserved_root_key` now seeds every authored reserved view
+  and proves `state`, `previous`, `next`, `outputs`, and `sequence_id` remain
+  byte-for-value unchanged after refusal.
+
+The focused mapping/runtime/sequence selection passed 29/29 tests, including
+the reported implementation mapping, mapping parser variants, runtime batch
+read/write/read coverage, serialized side-effect results, parallel-group
+isolation, and no-file-write behavior. A source audit found no remaining
+`verb == "set"` or `apply_runtime_set` production site; the parser's two `set`
+comparisons are the required mapping-only routing and removed-form diagnostic
+boundaries.
+
+### Phase 3 verification
+
+- `just test` in `claudine/`: pass, 7,276/7,276 tests with 9 tier-filtered
+  tests skipped. This includes `shipped_prompt_corpus_parses_frontmatter` and
+  `shipped_implement_plan_launches_without_a_sibling_spec`, so the passive
+  shipped-artifact corpus and hermetic normal-invocation route remain green.
+- `just lint` in `claudine/`: pass for `claudine-catalog-types`, `claudine`,
+  `claudine-contract`, `claudine-cli`, and `claudine-gen`; the error-guard and
+  lifecycle-doc-facets prerequisite checks also passed.
+- The L1 build emitted the existing macOS compact-unwind-size linker warning;
+  it did not fail the gate. No targeted, package, or lint failure remains.
+- No L2, browser, real-provider, or cross-OS run was needed: Phase 3 changes
+  in-memory map evaluation/publication and has no platform-conditional, path,
+  process, terminal, or shell behavior. Linux, native Windows, and WSL2 remain
+  covered by the ordinary CI matrix.
+
+The runtime cell is in-memory rather than persisted storage, so the existing
+repeated snapshot read/write/read test is the applicable round trip. No
+terminal or browser window opened, no formatting command ran, and no file was
+staged or committed.
+
+GitNexus `detect-changes --scope all` completed without partial or truncated
+output: 20 changed tracked files, 16 changed symbols, zero affected indexed
+processes, and LOW risk. The changed-file count excludes the new untracked CLI
+regression until it is added by the author’s later staging workflow.
