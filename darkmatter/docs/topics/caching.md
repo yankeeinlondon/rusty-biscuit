@@ -33,6 +33,7 @@ The implemented cache includes:
 - Persistent composed document cores
 - Persistent operation results for `::code` and `::toc-linking`
 - Dependency-aware closure-hash validation for composed documents
+- Context-closure identity for composed documents, so a descendant's context change re-keys its ancestors
 - Freshness policy handling for persistent reads
 - In-memory retention of loaded document snapshots to avoid repeated manifest reads
 - Concurrent run-local maps for low-contention cache access
@@ -247,14 +248,19 @@ This makes persistent compose reuse sensitive to inherited state that affects ch
 
 ### Context hash
 
-`context_hash()` hashes only stable output-relevant context:
+`context_hash()` hashes the request context a composed source was rendered from:
 
-- `today`
-- `yesterday`
-- `tomorrow`
+- Every captured context value, excluding volatile per-second clock fields (`now`, `now_utc`, `utc`, `time`, `time_military`, `timestamp`, `timestamp_ms`) and volatile system state (`memory_used`, `memory_avail`)
 - Sorted environment variables
 
-It intentionally excludes volatile time fields that would destroy cache usefulness.
+A transcluded child's context is finalized before its key is computed: the child's referenced `ctx.*` groups are added to the request context first (see [Context Variables](./context-variables.md#the-request-context-and-its-authority)), and the lookup and the write both use that one post-extension hash. When a child names no group its parent lacks, the parent's phase-wide hash is reused unchanged.
+
+### Context closure hash
+
+A child's own key covers only the groups its own text names. A grandchild can read a group the child never names, so the child's composed output can still depend on it. Each composed-document manifest therefore also records its context closure:
+
+- `context_closure_groups`: every context group read anywhere in the entry's subtree, including groups recorded by nested cache hits
+- `context_closure_hash`: `context_groups_hash()` of those groups' non-volatile values when the entry was written
 
 ### Options hash
 
@@ -291,8 +297,9 @@ This means a persistent compose hit depends on:
 - Which child source was transcluded
 - The child's current snapshot body hash
 - Effective inherited state
-- Runtime context
+- Runtime context, after the child's own groups were added
 - Output-affecting compose options
+- The recorded context closure, which must hash the same under the current request (checked after the manifest is read)
 
 Parent-only cheap transforms are intentionally outside this persistent key:
 
@@ -383,6 +390,16 @@ This gives Merkle-style invalidation:
 4. The parent's stored dependency ref no longer matches current dependency state
 5. The parent is treated as stale
 
+### Context closure check
+
+After a composed-document manifest is read, and before any freshness check, Darkmatter grows the request context to cover the manifest's `context_closure_groups`, then compares `context_closure_hash`. Growing it is the same growth composing the child would perform, and it is subject to the same authority.
+
+- A hash mismatch is a **miss**, not a stale entry, so no freshness mode can serve it: not `Fallback`, `Optimistic`, or `Forced`.
+- A caller-supplied (frozen) request that has not captured a recorded group also misses. Recomputation then reports `ContextNotCaptured`, so a cache hit cannot bypass the missing-capture failure.
+- Manifests written before the closure fields existed fail to deserialize and are misses. They are rewritten on the next compose.
+
+Run-local hits need no closure check: one request has one context.
+
 ### Revalidation behavior
 
 When Darkmatter reads a composed-document manifest in strict or fallback freshness modes, it checks:
@@ -444,10 +461,10 @@ Today, `Forced` only affects persistent read validation. It does not add special
 
 For `::file`:
 
-1. Build a run-local key from source/state/context/options
+1. Add the child's referenced context groups to the request context, then build a run-local key from source/state/context/options
 2. Check run-local single-flight slots
 3. If persistent caching is enabled, resolve the compose entry key from the current snapshot
-4. Read and validate the composed manifest and blob
+4. Read the composed manifest, check its context closure, and validate the manifest and blob
 5. If fresh, return the cached core
 6. If stale and mode is `Fallback`, remember the stale payload as backup
 7. Compute a fresh child compose if needed

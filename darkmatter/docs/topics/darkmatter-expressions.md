@@ -937,6 +937,30 @@ let expr = Expr::Variable("name".to_string());
 assert_eq!(evaluate(&expr, &lookup).unwrap(), json!("Alice"));
 ```
 
+`evaluate` reads variables through `EvaluationLookup::get_checked`. Its default
+wraps `get` and never fails, so a custom lookup needs only `get`. Darkmatter's
+own lookups override it, so composition never evaluates a cataloged `ctx.*`
+variable to a silent `null`:
+
+- If the request's context never captured the variable's group, evaluation
+  fails with `ExpressionError::ContextNotCaptured`. Composition never captures
+  a group at the point of use. A document's groups are added when the document
+  becomes reachable (the root, or a transcluded child), and only when the
+  options' `ContextAuthority` allows growth. `ComposeOptions::new()` allows it,
+  while `new_with_context` and `with_context` freeze the supplied context.
+- If the group was captured but omitted the key, evaluation fails with
+  `ExpressionError::ContextProjectionInvariant`, which is a Darkmatter bug.
+
+Both are fatal on every compose surface, including lenient
+(`fail_fast: false`) mode and a lenient transclusion, whose failing child would
+otherwise become a notice. Only an evaluated reference fails: an unchosen
+ternary branch, a short-circuited operand, a `{{{ … }}}` literal, and content a
+false `::block` removed raise nothing. A captured `null`, `""`, `[]`, or `{}` is
+a real value and raises nothing. Unknown `ctx.*` names keep the
+unknown-variable warning path. A caller finds either error through
+`MarkdownError::missing_runtime_context`, which walks the typed cause chain of
+condition, `$()` ternary, and interpolation errors.
+
 ### Lazy `ctx.*` Resolution
 
 Context capture is **lazy**: only the context groups actually referenced by

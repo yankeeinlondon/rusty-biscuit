@@ -18,12 +18,41 @@ Context variables are variables which Darkmatter provides to the **Interpolation
 
 ## Timing in Compose
 
-When composing a document graph, we calculate the context once and reuse it across the full graph of documents.
+When composing a document graph, Darkmatter uses one request context for the whole graph.
 
 - This is more efficient
 - It also ensures that we have the same date/time info throughout the composed document
 
-However, context capture is also **demand-driven**: the document is scanned for `ctx.*` references and only the groups actually referenced are captured. If a document uses only `{{ ctx.today }}`, no git discovery, OS detection, or hardware probing occurs. Within a captured group, all properties in that group are computed; the laziness is at the group boundary, not per-property.
+Context capture is **demand-driven**: a document is scanned for `ctx.*` references and only the groups it references are captured. If a document uses only `{{ ctx.today }}`, no git discovery, OS detection, or hardware probing occurs. Within a captured group, all properties in that group are computed; the laziness is at the group boundary, not per-property.
+
+### The request context and its authority
+
+`ComposeOptions` is the context authority for a composition. It carries the captured `ComposeContext` and a `ContextAuthority` that decides whether that context may grow:
+
+| Authority | Constructed by | When a document names a group the context lacks |
+|-----------|----------------|--------------------------------------------------|
+| `DarkmatterOwned` | `ComposeOptions::new()`; the `md` CLI | Darkmatter captures the missing group at the context's retained anchor and environment |
+| `CallerExtended` | a caller with its own retained request evidence (Claudine) | the caller's `ContextExtension` populates the missing group |
+| `CallerSupplied` | `ComposeOptions::new_with_context(..)`, `with_context(..)` | nothing; the context is frozen |
+
+Growth happens at a fixed point, never during expression evaluation:
+
+- the root document's referenced groups are added before its first expression stage;
+- each transcluded child (local, remote, or nested) has its referenced groups added when it becomes reachable, before its first expression stage and before its cache identity is computed. A child behind a false `when=` condition never becomes reachable and captures nothing.
+
+Growth adds only missing groups and never overwrites a captured one. A group is captured at most once per request, and every document that reads it reads that one capture. Ambient context never re-anchors at the current working directory or re-reads the environment mid-request.
+
+A caller-supplied context never falls back to ambient discovery. If a document reads a known `ctx.*` variable whose group that context never captured, composition fails with `ContextNotCaptured`, naming the variable, its group, and the source document. To avoid it, capture the group up front (for example `ComposeContext::capture_for_document`) or pass an extendable authority with `with_context_authority(..)`.
+
+### Captured absence is not a missing capture
+
+A captured group can legitimately project `null`, `""`, or an empty list: `ctx.branch` outside a repository, `ctx.gpu` on a host with no device. Those values render with their normal semantics and produce no error. Only a group that was never captured is a failure. The other absence states keep their own diagnostics:
+
+- an unknown name such as `ctx.oss` produces the unknown-context-variable warning and its suggestion;
+- a requested capture that could not obtain its evidence produces `PartialRuntimeCapture` and a typed empty/null projection;
+- a captured group that fails to project one of its cataloged keys is a Darkmatter bug, reported as `ContextProjectionInvariant`.
+
+Cached composition follows the same rules: a cache entry's identity includes the context it was rendered from, so a cache hit cannot hide a missing capture. See [Caching](./caching.md#context-hash).
 
 ### Capture Groups
 

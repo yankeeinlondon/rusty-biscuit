@@ -187,6 +187,80 @@ ambient compatibility APIs and use the same `populate_*` code. Ambient capture
 snapshots the environment once and reuses its original `GitRepo` handle for
 file changes rather than discovering the repository a second time.
 
+### Checked `ctx.*` lookup
+
+`context/checked.rs` classifies each `ctx.<key>` read into one of four
+outcomes: `Present`, `NotCaptured`, `ProjectionMissing`, or `Unknown`.
+Classification uses only `ContextGroup::for_key`/`projected_keys` and the
+snapshot's `capture_requirements()`. Expression evaluation reads through
+`EvaluationLookup::get_checked`, which `EffectiveState`, `ResolvingLookup`,
+`FrontmatterSeedState`, `LayeredLookup`, `ShortcutLookup`, and `CtxLookup`
+override.
+
+- A captured group must project every key it owns, with `null` for absence.
+  `ProjectionMissing` raises `ExpressionError::ContextProjectionInvariant`
+  (authoring-fatal).
+- `NotCaptured` raises `ExpressionError::ContextNotCaptured`, which is
+  authoring-fatal.
+- Both errors stay typed through every wrapper:
+  - `ConditionError::Eval` and `TransclusionError::ConditionEval` carry a
+    `cause`.
+  - `$()` ternary evaluation uses `ShellExpansionError::ExpressionEvaluation`.
+  - Body interpolation errors carry the on-disk document.
+  - `MarkdownError::missing_runtime_context()` finds either error in the chain.
+  - Lenient transclusion treats either error as structural, so no notice
+    replaces the child.
+- Pre-flight discovery does not own the verdict:
+  - Each document it walks reads `ComposeOptions::extended_for(document)`,
+    and its children inherit that context.
+  - Its inline body compose sets `defer_missing_runtime_context`.
+  - A `$()` value left raw by a missing capture reports that error, not
+    `DynamicCommandShape`.
+- A `$()` ternary prepares both branches before evaluating its condition, so
+  both branches are checked.
+- Growth is decided by `ContextAuthority`, set on `ComposeOptions`:
+  - `CallerSupplied` is frozen. It is the default for `new_with_context` and
+    `with_context`.
+  - `DarkmatterOwned` uses `ComposeContext::extend_ambient`, which discovers
+    at the retained anchor and never reads CWD. It is the default for
+    `ComposeOptions::new()`, and the `md` CLI sets it on its launch capture.
+  - `CallerExtended(Arc<dyn ContextExtension>)` grows the context from the
+    caller's retained evidence. Claudine passes
+    `InvocationContext`/`DocumentEpoch::compose_context_authority()`.
+- The request epoch (`context/authority.rs`, `RequestContextEpoch`):
+  - It lives on `PipelineRuntime` and is shared by `clone_for_child`. The root
+    seeds it after `extend_context_for`.
+  - `render_markdown_transclusion` (and the remote arm) hand each child
+    `context_for_source`. That is the parent's snapshot plus the child's own
+    `for_document` groups (after the `set` overlay), adopted from the epoch.
+  - Every group is captured once per request, under a write lock.
+  - A child's group set depends only on its path from the root, never on the
+    order siblings resolve in.
+- Child compose-cache identity:
+  - The key's `context_hash` is the hash of the child's snapshot. The hoisted
+    phase hash is reused when the child named no new group.
+  - `ComposeResult` records the subtree's context-group closure, and
+    `ComposedDocumentManifest` persists it as `context_closure_groups` plus
+    `context_closure_hash` (`hashing::context_groups_hash`).
+  - A persistent read whose closure the request cannot cover, or whose values
+    differ, is a miss in every freshness mode, never a stale fallback.
+  - Manifests without the closure fields fail to deserialize, so they are
+    misses.
+- User-facing contract: `docs/topics/context-variables.md` (authority, epoch,
+  captured absence) and `docs/topics/caching.md` (context and closure hash).
+- A captured `null`/`""`/`[]` projection is `Present` and renders normally.
+  Only a never-captured group is `NotCaptured`; unknown names keep the
+  unknown-variable warning.
+- A graph that names no discovery-backed group must capture none. That is
+  guarded end to end by
+  `request_context_epoch::a_graph_naming_no_discovery_backed_group_captures_none`.
+- Authored `ctx:` values never satisfy an uncaptured group.
+- A bare-name fallback (`when="repo"`) with an uncaptured group is an undefined
+  name, not a missing capture.
+- Test fixtures must stay well formed: `fixed_for_testing_with` marks each
+  inserted key's group captured. Build a malformed snapshot with
+  `with_projection_key_removed`.
+
 ## Text Replacement
 
 The `replace:` frontmatter key enables literal string replacement.
