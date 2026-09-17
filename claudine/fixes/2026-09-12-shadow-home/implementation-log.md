@@ -397,6 +397,7 @@ message_to_agent: |
        repo-isolation.md and mcp-mode.md (docs + skill mirror) with the code.
 implementation_2: "2026-09-16T15:30:56-07:00"
 implementation_3: "2026-09-16T19:38:20-07:00"
+implementation_4: "2026-09-16T20:16:31-07:00"
 ---
 
 # Implementation Log — Preserve Provider Overlays Without Replacing the User Home
@@ -2904,3 +2905,34 @@ The implementation of review cycle 3 has completed successfully in 18m 30s (19:3
         - CLI tests: `claudine/cli/tests/level1_provider_overlay_home.rs`
         - docs and skills: `claudine/docs/topics/repo-isolation.md`, `.claude/skills/claudine/architecture.md`
 - final gates (macOS, from `claudine/`): `just test --no-fail-fast` → 7199 passed, 9 skipped; `just lint` → clean; `just check-windows` → clean
+
+## Implementation of Review Findings #4
+
+> **started at:** 2026-09-16T20:16:31-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis/claudine/fixes/2026-09-12-shadow-home/review-4.md'
+- this is iteration 4 of the review-to-implement cycle
+- starting the work on 'Finding 1: Unwritable-storage L1 test silently passes when its premise is unavailable' at 20:16:41
+        - discovered: `claudine/cli/tests/level1_provider_overlay_home.rs` is binary-gated `#![cfg(unix)]`, so the `PermissionsExt` import is correctly gated and gating was left unchanged
+        - discovered: the permission restore to `0o755` already ran before the premise check, so it stays ahead of the new assertion and a failure cannot leave an unremovable temp dir
+        - discovered: the library has no test that makes materialization itself fail; the closest deterministic coverage is `provider_overlay::tests::a_materialization_failure_projects_its_stage_and_publishes_its_cause` (typed projection only), while the privilege-independent end-to-end failure is the sibling CLI test `a_failed_overlay_stops_the_launch_without_a_null_home` (a regular file where the storage root must go)
+        - discovered: this was the only `eprintln!("skipping...")` plus `return` premise escape in the file; no other false-green test found
+        - changed: replaced the `eprintln!` plus early `return` with an `assert!(!writable, "test premise unavailable: ...")` matching `a_rotated_token_that_cannot_be_written_back_stays_recoverable`, pointing at those two real tests rather than claiming cross-platform library coverage
+        - non-vacuity: with the `set_permissions(0o555)` call temporarily removed, the test failed at the new assertion with the premise message (1 run, 1 failed); the file was restored with a plain write plus `touch`, `cmp` matched the backup, and `git diff` shows only the intended 8-insertion/4-deletion change
+        - gate: `just test-cli --test level1_provider_overlay_home` passed 33 of 33, 0 skipped
+        - gate: `just test` passed 7200 of 7200 (5 slow), 9 skipped
+        - gate: `just lint` exited 0 with no warnings or errors
+- work completed for 'Finding 1: Unwritable-storage L1 test silently passes when its premise is unavailable' at 20:29:23
+        - orchestrator verification: both referenced tests exist (`claudine/cli/tests/level1_provider_overlay_home.rs:312`, `claudine/lib/src/provider_overlay/tests.rs:563`); the premise message is present at line 1353; the test-file change had been staged in the index outside this session by the time of verification, so `git diff` (unstaged) was empty while `git diff --cached` holds it
+
+### Successful Completion
+
+The implementation of review cycle 4 has completed successfully in 13m 23s (20:16:31 → 20:29:54). During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no finding was deferred
+- residual items recorded against the fixed finding (not deferrals of the finding itself):
+        - the test file is `#![cfg(unix)]`, so this premise check only runs on macOS, Linux, and WSL2; no `cfg(windows)` code was touched, so no native cross-OS run was made
+        - no deterministic library test makes materialization itself fail; the privilege-independent end-to-end case is `a_failed_overlay_stops_the_launch_without_a_null_home`
+- the files changed by this cycle:
+        - CLI tests: `claudine/cli/tests/level1_provider_overlay_home.rs`
+- final gates (macOS, from `claudine/`): `just test-cli --test level1_provider_overlay_home` → 33 passed, 0 skipped; `just test` → 7200 passed, 9 skipped; `just lint` → clean
