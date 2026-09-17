@@ -1,19 +1,72 @@
 ---
 total_phases: 5
 created: 2026-09-15
-phase: 1
+phase: 3
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
 implemented: false
-implemented_by: "claude/default"
+implemented_by: "codex/gpt-5.6-sol"
 source_files_during_phase_1: []
-docs_updated_during_phase_1: []
+docs_updated_during_phase_1:
+    - claudine/fixes/2026-09-16-better-spec-syntax/spec.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/plan.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-human_review: true
-human_review_items:
-  - "Confirm Rulings 1, 3, 4, and 5 before Phase 2."
-message_to_agent: "Resume Phase 1, not Phase 2. Storage is restored, but baseline and graph impact evidence are missing. Ruling 2 is approved: reject duplicate YAML mapping keys in Darkmatter. Read implementation-log.md and obtain confirmation of Rulings 1, 3, 4, and 5."
+source_files_during_phase_2:
+    - claudine/cli/tests/compose_caller_file_provenance.rs
+    - claudine/cli/tests/composition_outputs.rs
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/inline_completion_lifecycle.rs
+    - claudine/cli/tests/level2_sequence_task_stream_capture.rs
+    - claudine/cli/tests/sequence_groups.rs
+    - claudine/cli/tests/sequence_jit.rs
+    - claudine/cli/tests/shipped_prompt_contract.rs
+    - claudine/cli/tests/shipped_prompts.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/source_map.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/runtime_state/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - darkmatter/cli/tests/get_set_rm.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - prompts/_implement/implement-plan.md
+docs_updated_during_phase_2:
+    - claudine/fixes/2026-09-16-better-spec-syntax/spec.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/plan.md
+    - claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/SKILL.md
+packages:
+    - claudine
+    - claudine-cli
+    - darkmatter
+    - darkmatter-cli
+completed_phase: "2"
+human_review: false
+human_review_items: []
+message_to_agent: >-
+    Phase 2 is complete; begin Phase 3. Mapping-only parsing, typed diagnostics,
+    shared duplicate-key rejection, and RuntimeState batch groundwork are in
+    place. Executor wiring was added to keep the migrated corpus green, but
+    Phase 3 must still perform its dedicated snapshot/atomicity/result audit
+    and remove the remaining legacy single-key executor helper and dispatch arm.
 ---
 
 # Plan: Mapping-Only Claudine Lifecycle `set` Syntax
@@ -106,26 +159,20 @@ against.
 
 ### Recovery status — 2026-09-17
 
-Phase 1 is **incomplete**. The previous attempt stopped with ENOSPC on
-`/private/tmp` and `/Volumes/coding`; the author has restored storage.
-The three completed spikes are recorded from the agent's handoff in
-[implementation-log.md](implementation-log.md), not independently rerun in
-this documentation update. No source changes were reported.
-
-The startup `implemented: true` did not represent completed implementation
-and is corrected to `false`. Phase stays at 1; no `completed_phase` is set.
-Empty phase file lists describe implementation deliverables, excluding
-plan/log bookkeeping. Baseline and refreshed graph evidence remain missing;
-Ruling 2 is approved; Rulings 1, 3, 4, and 5 remain unconfirmed. **Do not begin Phase 2 until the Phase 1
-checkpoint is satisfied.**
+Phase 1 is complete. The recovered spikes were validated against the current
+tree, all five rulings are binding, the graph impact refresh is recorded, and
+the required Claudine and Darkmatter baselines were captured. No production
+source was modified. The one red Claudine L1 test is a pre-existing mismatch
+between an adjacent edit to the shipped implementation prompt and that test's
+expected command list; the exact evidence is in
+[implementation-log.md](implementation-log.md).
 
 ### Necessary Rules
 
-The following rulings are required before Phase 2 begins. Checked rulings record author-approved decisions; unchecked rulings remain
-recommendations for the author to confirm or override.
+The following rulings are binding for Phase 2 and later phases.
 
-- [ ] **Ruling 1 — Where reserved-key validation happens for the mapping.**
-  Recommendation: structural malformation (non-mapping payload, non-string /
+- [x] **Ruling 1 — Where reserved-key validation happens for the mapping.**
+  Structural malformation (non-mapping payload, non-string /
   empty / interpolation-bearing keys, `set: "{{mapping}}"` whole-span form)
   fails at **parse time**, including under a false `when` (R1's "statically
   well-formed"). Reserved-root-key refusal (`state`, `previous`, `next`,
@@ -148,7 +195,7 @@ recommendations for the author to confirm or override.
   documents relying on last-wins behavior must be corrected. Run shared
   parser impact analysis, establish Darkmatter baselines, and validate
   shipped artifacts and normal CLI invocation alongside Claudine coverage.
-- [ ] **Ruling 3 — Action representation.** Recommendation: a dedicated
+- [x] **Ruling 3 — Action representation.** Use a dedicated
   `LifecycleActionKind` variant (e.g. `RuntimeSet`) holding an
   order-preserving `IndexMap<String, …>` of a recursive typed value tree —
   a `ProxyWithValue`-shaped enum (`Scalar(Expr)` / `Null` / `Array` /
@@ -159,16 +206,16 @@ recommendations for the author to confirm or override.
   generalize `ProxyWithValue` into one shared authored-value type or add a
   sibling type; prefer whichever leaves one definition (Rule 2), but do not
   rename `ProxyWith`'s public surface in this change.
-- [ ] **Ruling 4 — `no_error` as a sibling of the single-key object.**
+- [x] **Ruling 4 — `no_error` as a sibling of the single-key object.**
   `{set: {…}, no_error: true}` currently falls into the multi-key ambiguity
   error in `parse_stack_item_action_object` (`parse.rs:751-783`).
-  Recommendation: extend that disambiguation to treat `no_error` as the one
+  Extend that disambiguation to treat `no_error` as the one
   universal modifier key permitted beside a single verb key, parsed with the
   existing boolean check, so the spec's sibling-modifier example parses
   (`{proxy, with}` already established the precedent of a verb-scoped
   exception; this one is verb-universal per R1).
-- [ ] **Ruling 5 — Diagnostics strategy.** Which `CompositionError` variants
-  are new versus reused: recommendation — new variants for (a) removed
+- [x] **Ruling 5 — Diagnostics strategy.** The `CompositionError` variants
+  use new variants for (a) removed
   positional form, (b) removed `action: set` long form, (c) non-mapping
   payload, each carrying source path + semantic action path + canonical
   rewrite; reuse the `proxy.with` diagnostic family's path-building pattern
@@ -218,7 +265,7 @@ recommendations for the author to confirm or override.
 
 ### Tasks
 
-- [ ] **Graph impact refresh**
+- [x] **Graph impact refresh**
   - Re-run `just gitnexus`, then upstream impact for
     `parse_lifecycle_config`, `parse_positional_action`,
     `dispatch_side_effect`, `RuntimeState::set`, `dispatch_task_side_effect`,
@@ -232,7 +279,7 @@ recommendations for the author to confirm or override.
     own tests **plus `sequence/task/group.rs:406`**, which merges parallel
     group results. The original inventory missed this second production
     caller. Planning findings do not substitute for refreshed evidence.
-- [ ] **Baseline capture**
+- [x] **Baseline capture**
   - Run `just test` and `just test-l2` in the claudine package area and
     record the pre-change pass/fail baseline (any pre-existing failures
     must be distinguishable from regressions introduced by this change).
@@ -242,7 +289,7 @@ recommendations for the author to confirm or override.
   - The interrupted L1 run exited nonzero during a from-scratch build,
     likely but not conclusively due to disk exhaustion. No L2 or lint log
     survived; none of these attempts counts as passing baseline evidence.
-- [ ] **Recovery cleanup**
+- [x] **Recovery cleanup**
   - Review `/tmp/bss-spike` (scratch crate/build output) and
     `/tmp/bss-baseline` (partial logs), preserving useful evidence before
     cleanup. Storage is restored; if more build-space reclamation is
@@ -261,7 +308,7 @@ pass at the end of this phase.
 
 ### Tasks
 
-- [ ] **Typed value tree** (prerequisite for all other Phase 2 tasks)
+- [x] **Typed value tree** (prerequisite for all other Phase 2 tasks)
   - Introduce the recursive authored-value tree per Ruling 3
     (`Scalar(Expr)` / `Null` / `Array` / `Object`), order-preserving for
     mappings, following the `ProxyWithValue` typing rules
@@ -270,7 +317,7 @@ pass at the end of this phase.
     object values assign as complete values (no implicit merge).
   - Constructor rejects interpolation-bearing destination keys (analogous to
     `ProxyWithError::DynamicKey`).
-- [ ] **Mapping-only `set` parsing**
+- [x] **Mapping-only `set` parsing**
   - In `parse_stack_item_action_object` / `parse_positional_action`
     (`parse.rs:734`, `action_shape.rs:1`): special-case verb `set` — the
     payload must be a mapping (empty allowed); build the new action kind
@@ -287,7 +334,7 @@ pass at the end of this phase.
     happens; no eager value evaluation).
   - Rely on the shared Darkmatter duplicate-key rejection below; do not
     add a second frontmatter parsing pass in Claudine.
-- [ ] **Shared Darkmatter duplicate-key rejection** (approved Ruling 2)
+- [x] **Shared Darkmatter duplicate-key rejection** (approved Ruling 2)
   - Enforce duplicate rejection before conversion can collapse mapping
     entries, consistently across all `parse_yaml_with_fallbacks` strategies.
     Preserve existing value typing, ordering, expression handling, typed
@@ -299,7 +346,7 @@ pass at the end of this phase.
   - Add passive shipped-artifact coverage and a hermetic normal-invocation
     CLI regression. Correct active artifacts that depended on last-wins
     parsing; preserve completed historical specs unless executable inputs.
-- [ ] **Removed-form diagnostics**
+- [x] **Removed-form diagnostics**
   - `set: [key, value]` positional, `{action: set, key: …, value: …}`
     long-form, and any formerly accepted lifecycle call spelling of `set`
     fail with typed errors identifying the source document and a stable
@@ -314,7 +361,7 @@ pass at the end of this phase.
     (`composition/error/tests.rs`) updated in the same change.
   - Do not reuse the current "avoid object values" instruction
     (`LifecycleObjectDataThroughInterpolationPositional`'s hint) for `set`.
-- [ ] **Lib test migration and parse coverage**
+- [x] **Lib test migration and parse coverage**
   - Migrate `executor/tests/runtime_set.rs`, `sequence/task/tests.rs`,
     and `sequence/preflight/tests.rs` (plus any other lib test the
     Spike 3 inventory lists) to the mapping form; keep every existing
@@ -328,10 +375,10 @@ pass at the end of this phase.
 
 ### Work-Group A (concurrent after the typed value tree lands)
 
-- [ ] Removed-form + payload diagnostics and their render/facets/catalog
+- [x] Removed-form + payload diagnostics and their render/facets/catalog
   guard tests (independent of executor work; needs only the new error
   variants and parse seam).
-- [ ] Runtime batch API groundwork on `RuntimeState` (validate-then-commit
+- [x] Runtime batch API groundwork on `RuntimeState` (validate-then-commit
   under one lock; key-presence prior selection) — compiles independently of
   the parser; its executor wiring lands in Phase 3.
 

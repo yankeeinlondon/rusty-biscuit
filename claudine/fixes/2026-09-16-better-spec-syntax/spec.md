@@ -4,7 +4,8 @@ status: proposed
 reviewed: true
 reviewed_by: codex/gpt-5.6-sol
 reviewed_on: 2026-09-15
-implemented: false
+implemented: true
+implemented_by: "codex/gpt-5.6-sol"
 area: claudine
 packages:
     - claudine
