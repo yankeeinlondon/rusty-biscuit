@@ -94,11 +94,35 @@ use crate::render::{ImageRef, Link};
 use compose::ComposeSource;
 
 /// A markdown document with frontmatter support.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Markdown {
     frontmatter: Frontmatter,
     content: String,
     source: Option<ComposeSource>,
+    /// The source text exactly as parsed, retained so a compose request's
+    /// document identity (`ctx.hash`, `ctx.id`) describes the loaded revision
+    /// even after this value is mutated or the file changes on disk.
+    loaded: Option<std::sync::Arc<LoadedSource>>,
+}
+
+/// Provenance captured once when a document is parsed from text or a file.
+#[derive(Debug)]
+pub(crate) struct LoadedSource {
+    pub(crate) text: std::sync::Arc<str>,
+    /// Canonical native path, for a document read through `TryFrom<&Path>`.
+    pub(crate) canonical_path: Option<std::path::PathBuf>,
+    /// Modification time read from the same handle the text was read from.
+    pub(crate) modified: Option<std::time::SystemTime>,
+}
+
+/// Equality compares document state only: two documents with the same
+/// frontmatter, body, and source are equal however their text was loaded.
+impl PartialEq for Markdown {
+    fn eq(&self, other: &Self) -> bool {
+        self.frontmatter == other.frontmatter
+            && self.content == other.content
+            && self.source == other.source
+    }
 }
 
 impl Markdown {
@@ -108,6 +132,7 @@ impl Markdown {
             frontmatter: Frontmatter::new(),
             content: content.into(),
             source: None,
+            loaded: None,
         }
     }
 
@@ -117,6 +142,7 @@ impl Markdown {
             frontmatter,
             content: content.into(),
             source: None,
+            loaded: None,
         }
     }
 
@@ -266,6 +292,21 @@ impl Markdown {
         }
     }
 
+    /// The source text and file provenance retained when this document was
+    /// parsed, if it was parsed rather than constructed.
+    pub(crate) fn loaded_source(&self) -> Option<&LoadedSource> {
+        self.loaded.as_deref()
+    }
+
+    fn with_loaded_text(mut self, text: String) -> Self {
+        self.loaded = Some(std::sync::Arc::new(LoadedSource {
+            text: text.into(),
+            canonical_path: None,
+            modified: None,
+        }));
+        self
+    }
+
     /// Sets the compose source, returning the modified document.
     pub fn with_source(mut self, source: ComposeSource) -> Self {
         self.source = Some(source);
@@ -298,7 +339,7 @@ impl Markdown {
             content.as_str(),
         );
         let (frontmatter, remaining) = frontmatter::parse_frontmatter(&content, ctx)?;
-        Ok(Self::with_frontmatter(frontmatter, remaining))
+        Ok(Self::with_frontmatter(frontmatter, remaining).with_loaded_text(content))
     }
 
     /// Extracts typed links from document content.
@@ -959,12 +1000,13 @@ impl From<String> for Markdown {
             std::path::PathBuf::from("unknown"),
             content.as_str(),
         );
-        match frontmatter::parse_frontmatter(&content, ctx) {
+        let document = match frontmatter::parse_frontmatter(&content, ctx) {
             Ok((frontmatter, remaining_content)) => {
                 Self::with_frontmatter(frontmatter, remaining_content)
             }
-            Err(_) => Self::new(content),
-        }
+            Err(_) => Self::new(content.clone()),
+        };
+        document.with_loaded_text(content)
     }
 }
 
@@ -978,7 +1020,14 @@ impl TryFrom<&Path> for Markdown {
     type Error = MarkdownError;
 
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
-        let content = std::fs::read_to_string(path)?;
+        use std::io::Read;
+
+        // Text and modification time come from one open handle, so the
+        // retained identity cannot pair one revision's bytes with another's mtime.
+        let mut file = std::fs::File::open(path)?;
+        let modified = file.metadata().and_then(|metadata| metadata.modified()).ok();
+        let mut content = String::new();
+        file.read_to_string(&mut content)?;
         // Parse with a path-aware context so a frontmatter error names the
         // offending file. `try_from_content` would build an "unknown" context,
         // and `with_source` only runs on success — so without this the path is
@@ -991,6 +1040,14 @@ impl TryFrom<&Path> for Markdown {
         );
         let (frontmatter, remaining) = frontmatter::parse_frontmatter(&content, ctx)?;
         let md = Self::with_frontmatter(frontmatter, remaining);
+        let md = Self {
+            loaded: Some(std::sync::Arc::new(LoadedSource {
+                text: content.into(),
+                canonical_path: biscuit_file::canonicalize_simplified(path).ok(),
+                modified,
+            })),
+            ..md
+        };
         Ok(md.with_source(ComposeSource::infer_from_path(path)))
     }
 }

@@ -336,6 +336,20 @@ pub enum ExpressionError {
         group: ContextGroup,
     },
 
+    /// `ctx.id` or `ctx.sid` was read, but the operating system could not
+    /// supply the per-execution nonce they hash. Never replaced by a fixed or
+    /// time-derived nonce, which would break per-execution uniqueness.
+    #[error(
+        "context variable `ctx.{key}` is unavailable: its per-execution random \
+         nonce could not be drawn ({detail})"
+    )]
+    ExecutionNonceUnavailable {
+        /// `id` or `sid`.
+        key: String,
+        /// The entropy source's failure.
+        detail: String,
+    },
+
     /// Migration catch-all for the long tail of pure builtins not yet
     /// individually classified. Always carries the function name, so it is never
     /// *less* informative than today's string.
@@ -411,7 +425,8 @@ impl ExpressionError {
             ExpressionError::UnknownFunction { .. } => true,
             ExpressionError::Provider { .. } => true,
             ExpressionError::ContextNotCaptured { .. }
-            | ExpressionError::ContextProjectionInvariant { .. } => true,
+            | ExpressionError::ContextProjectionInvariant { .. }
+            | ExpressionError::ExecutionNonceUnavailable { .. } => true,
             // A present file reference that fails to resolve is fatal (see the
             // doc comment for the WHY). `RemoteNotEnabled` is deliberately *not*
             // in this set: it is a v1 capability gap, not a reference mistake.
@@ -426,18 +441,21 @@ impl ExpressionError {
     }
 
     /// Whether this is a missing runtime context failure
-    /// ([`ContextNotCaptured`] or [`ContextProjectionInvariant`]).
+    /// ([`ContextNotCaptured`], [`ContextProjectionInvariant`], or
+    /// [`ExecutionNonceUnavailable`]).
     ///
     /// Such a failure means the request snapshot cannot answer a known
     /// `ctx.*` read, so no stage may tolerate it into partial output.
     ///
     /// [`ContextNotCaptured`]: ExpressionError::ContextNotCaptured
     /// [`ContextProjectionInvariant`]: ExpressionError::ContextProjectionInvariant
+    /// [`ExecutionNonceUnavailable`]: ExpressionError::ExecutionNonceUnavailable
     pub fn is_missing_runtime_context(&self) -> bool {
         matches!(
             self,
             ExpressionError::ContextNotCaptured { .. }
                 | ExpressionError::ContextProjectionInvariant { .. }
+                | ExpressionError::ExecutionNonceUnavailable { .. }
         )
     }
 

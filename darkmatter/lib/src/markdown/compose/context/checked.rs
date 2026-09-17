@@ -24,6 +24,8 @@ pub(crate) enum CtxLookupOutcome {
     ProjectionMissing { key: String, group: ContextGroup },
     /// No group owns the key; the unknown-context-variable path owns this case.
     Unknown,
+    /// Document identity was captured without its execution nonce.
+    NonceUnavailable { key: String, detail: String },
 }
 
 impl CtxLookupOutcome {
@@ -62,6 +64,9 @@ impl CtxLookupOutcome {
             Self::NotCaptured { key, group } => Err(ExpressionError::ContextNotCaptured { key, group }),
             Self::ProjectionMissing { key, group } => {
                 Err(ExpressionError::ContextProjectionInvariant { key, group })
+            }
+            Self::NonceUnavailable { key, detail } => {
+                Err(ExpressionError::ExecutionNonceUnavailable { key, detail })
             }
         }
     }

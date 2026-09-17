@@ -53,10 +53,12 @@ pub(super) fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value
             }),
         );
 
+        // A top-level package's `""` area has no directory of its own.
         values.insert(
             "package_area_root".into(),
             cap.current_package_area
                 .as_ref()
+                .filter(|area| !area.is_empty())
                 .map_or(Value::Null, |area| {
                     let root = repo.unwrap().root.join(area);
                     Value::String(portable_dir(&root))
@@ -80,26 +82,22 @@ pub(super) fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value
             .unwrap_or_default();
         values.insert("package_areas".into(), string_array(areas));
 
-        values.insert(
-            "current_package".into(),
-            cap.current_package
-                .as_ref()
-                .map_or(Value::Null, |p| Value::String(p.name.clone())),
-        );
-        values.insert(
-            "current_package_area".into(),
-            cap.current_package_area
-                .as_ref()
-                .map_or(Value::Null, |a| Value::String(a.clone())),
-        );
     } else {
         values.insert("package_root".into(), Value::Null);
         values.insert("package_area_root".into(), Value::Null);
         values.insert("packages".into(), Value::Null);
         values.insert("package_areas".into(), Value::Null);
-        values.insert("current_package".into(), Value::Null);
-        values.insert("current_package_area".into(), Value::Null);
     }
+
+    // `""` is the one spelling of "no package / no area" (R25).
+    values.insert(
+        "current_package".into(),
+        Value::String(cap.current_package.as_ref().map(|p| p.name.clone()).unwrap_or_default()),
+    );
+    values.insert(
+        "current_package_area".into(),
+        Value::String(cap.current_package_area.clone().unwrap_or_default()),
+    );
 
     populate_monorepo_area(cap, values);
 }
@@ -130,7 +128,7 @@ pub(super) fn populate_monorepo_area(cap: &ContextCapture, values: &mut Map<Stri
             format!("{} package", pkg.name),
             portable_dir(&pkg.path),
         )
-    } else if let Some(area_name) = cap.current_package_area.as_deref().filter(|a| *a != "root") {
+    } else if let Some(area_name) = cap.current_package_area.as_deref().filter(|a| !a.is_empty()) {
         // Inside a package area but not a package folder.
         let area_path = cap
             .repo_root

@@ -40,7 +40,7 @@ pub fn repository_scope_catalog(
 }
 
 fn package_area_root(repository_root: &Path, area: &str) -> Option<PathBuf> {
-    if area == "root" || area.is_empty() {
+    if area.is_empty() {
         None
     } else {
         Some(repository_root.join(area))
@@ -67,7 +67,7 @@ mod tests {
             is_monorepo: true,
             root: observed_root.to_path_buf(),
             packages: Some(vec![
-                package(observed_root, "root-tool", "tools", "root"),
+                package(observed_root, "root-tool", "tools", ""),
                 package(observed_root, "area-lib", "area/lib", "area"),
                 package(observed_root, "nested", "area/lib/nested", "area"),
             ]),

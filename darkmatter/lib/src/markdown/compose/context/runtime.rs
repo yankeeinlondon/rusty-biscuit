@@ -32,6 +32,9 @@ struct ComposeContextInner {
     /// [`ComposeContext::extend_with_evidence`] populates only the groups
     /// missing from this set.
     captured: ContextRequirements,
+    /// The request's root document. `None` projects the absent-document
+    /// identity (`ctx.self`, `ctx.last_updated`, `ctx.hash` null).
+    root: Option<std::sync::Arc<super::capture::RootDocument>>,
     now: String,
     now_utc: String,
     today: String,
@@ -222,13 +225,30 @@ impl ComposeContext {
     /// This is the correct method when composing a full document, since
     /// frontmatter values may contain `ctx.*` references that are absent
     /// from the body.
+    ///
+    /// `doc` becomes the request's root document: `ctx.self`, `ctx.hash`, and
+    /// `ctx.id` describe the text it was loaded from.
     pub fn capture_for_document(
         base_dir: &std::path::Path,
         doc: &crate::markdown::Markdown,
     ) -> Self {
-        let fm_json = serde_json::to_string(doc.frontmatter().as_map()).unwrap_or_default();
-        let combined = format!("{}\n{}", fm_json, doc.content());
-        Self::capture_for_content(base_dir, &combined)
+        let requirements = super::capture::ContextRequirements::for_document(doc);
+        let root = super::capture::RootDocument::from_markdown(doc);
+        let (values, capture_diagnostics, timings, environment) =
+            super::capture::capture_runtime_context_for_seeded_requirements(
+                base_dir,
+                &requirements,
+                super::capture::DocumentSeed { root: Some(&root), timestamp_ms: None },
+            );
+        Self::from_values(
+            values,
+            capture_diagnostics,
+            timings,
+            environment,
+            base_dir.to_path_buf(),
+            requirements,
+        )
+        .with_root(root)
     }
 
     /// Captures exactly `requirements` from request-owned evidence.
@@ -241,20 +261,34 @@ impl ComposeContext {
         requirements: &super::capture::ContextRequirements,
         evidence: &super::capture::ContextCaptureEvidence,
     ) -> Self {
+        Self::capture_with_evidence_seeded(base_dir, requirements, evidence, None)
+    }
+
+    fn capture_with_evidence_seeded(
+        base_dir: &std::path::Path,
+        requirements: &super::capture::ContextRequirements,
+        evidence: &super::capture::ContextCaptureEvidence,
+        root: Option<std::sync::Arc<super::capture::RootDocument>>,
+    ) -> Self {
         let (values, diagnostics, timings, environment) =
             super::capture::capture_runtime_context_with_evidence(
                 base_dir,
                 requirements,
                 evidence,
+                super::capture::DocumentSeed { root: root.as_deref(), timestamp_ms: None },
             );
-        Self::from_values(
+        let context = Self::from_values(
             values,
             diagnostics,
             timings,
             environment,
             base_dir.to_path_buf(),
             requirements.clone(),
-        )
+        );
+        match root {
+            Some(root) => context.with_root(root),
+            None => context,
+        }
     }
 
     /// Demand-driven supplied capture for one content fragment.
@@ -268,13 +302,37 @@ impl ComposeContext {
     }
 
     /// Demand-driven supplied capture over authored frontmatter and body.
+    ///
+    /// `document` becomes the request's root document, as for
+    /// [`capture_for_document`](Self::capture_for_document).
     pub fn capture_for_document_with_evidence(
         base_dir: &std::path::Path,
         document: &crate::markdown::Markdown,
         evidence: &super::capture::ContextCaptureEvidence,
     ) -> Self {
         let requirements = super::capture::ContextRequirements::for_document(document);
-        Self::capture_with_evidence(base_dir, &requirements, evidence)
+        let root = super::capture::RootDocument::from_markdown(document);
+        Self::capture_with_evidence_seeded(base_dir, &requirements, evidence, Some(root))
+    }
+
+    fn with_root(mut self, root: std::sync::Arc<super::capture::RootDocument>) -> Self {
+        std::sync::Arc::make_mut(&mut self.inner).root = Some(root);
+        self
+    }
+
+    /// Makes `document` this snapshot's root document unless it already has
+    /// one or has projected document identity without one.
+    ///
+    /// A projected identity is never re-described, so every source of one
+    /// request keeps reading the values captured first (R1).
+    pub(crate) fn attach_root_document(&mut self, document: &crate::markdown::Markdown) {
+        if self.inner.root.is_some()
+            || self.inner.captured.contains(super::capture::ContextGroup::Document)
+        {
+            return;
+        }
+        let root = super::capture::RootDocument::from_markdown(document);
+        std::sync::Arc::make_mut(&mut self.inner).root = Some(root);
     }
 
     /// Build a `ComposeContext` from pre-computed values.
@@ -298,6 +356,7 @@ impl ComposeContext {
             inner: std::sync::Arc::new(ComposeContextInner {
                 anchor,
                 captured,
+                root: None,
                 now: get_str("now"),
                 now_utc: get_str("now_utc"),
                 today: get_str("today"),
@@ -360,8 +419,8 @@ impl ComposeContext {
         required: &ContextRequirements,
         evidence: &super::capture::ContextCaptureEvidence,
     ) -> bool {
-        self.extend_missing_with(required, |anchor, missing| {
-            super::capture::capture_runtime_context_with_evidence(anchor, missing, evidence)
+        self.extend_missing_with(required, |anchor, missing, seed| {
+            super::capture::capture_runtime_context_with_evidence(anchor, missing, evidence, seed)
         })
     }
 
@@ -375,8 +434,8 @@ impl ComposeContext {
     /// overwritten. It is how a Darkmatter-owned request context grows when a
     /// transcluded source first names a group.
     pub fn extend_ambient(&mut self, required: &ContextRequirements) -> bool {
-        self.extend_missing_with(required, |anchor, missing| {
-            super::capture::capture_runtime_context_for_requirements(anchor, missing)
+        self.extend_missing_with(required, |anchor, missing, seed| {
+            super::capture::capture_runtime_context_for_seeded_requirements(anchor, missing, seed)
         })
     }
 
@@ -417,14 +476,22 @@ impl ComposeContext {
     fn extend_missing_with(
         &mut self,
         required: &ContextRequirements,
-        capture: impl FnOnce(&std::path::Path, &ContextRequirements) -> super::capture::CaptureResult,
+        capture: impl FnOnce(
+            &std::path::Path,
+            &ContextRequirements,
+            super::capture::DocumentSeed<'_>,
+        ) -> super::capture::CaptureResult,
     ) -> bool {
         let missing = self.missing_requirements(required);
         if missing.iter().next().is_none() {
             return false;
         }
+        let seed = super::capture::DocumentSeed {
+            root: self.inner.root.as_deref(),
+            timestamp_ms: self.inner.values.get("timestamp_ms").and_then(serde_json::Value::as_i64),
+        };
         let (mut values, mut diagnostics, mut timings, environment) =
-            capture(&self.inner.anchor, &missing);
+            capture(&self.inner.anchor, &missing, seed);
         // The Agent group derives from the environment the snapshot already
         // carries, so compose-time overrides remain the effective identity.
         if missing.contains(super::capture::ContextGroup::Agent) {
@@ -463,11 +530,32 @@ impl ComposeContext {
     /// A present value is the effective one (compose-time `AGENT`/`MODEL`
     /// overrides applied), matching [`Self::get_effective`].
     pub(crate) fn classify_ctx_key(&self, key: &str) -> super::checked::CtxLookupOutcome {
-        super::checked::CtxLookupOutcome::classify(
+        use super::checked::CtxLookupOutcome;
+
+        match CtxLookupOutcome::classify(
             key,
             |group| self.inner.captured.contains(group),
             |key| self.get_effective(key),
-        )
+        ) {
+            CtxLookupOutcome::ProjectionMissing { key, group: super::capture::ContextGroup::Document } => {
+                let nonce_failure = self.inner.capture_diagnostics.iter().find_map(|diagnostic| match diagnostic {
+                    super::ContextMergeDiagnostic::PartialRuntimeCapture { area, detail }
+                        if *area == super::capture::NONCE_AREA =>
+                    {
+                        Some(detail.clone())
+                    }
+                    _ => None,
+                });
+                match nonce_failure {
+                    Some(detail) => CtxLookupOutcome::NonceUnavailable { key, detail },
+                    None => CtxLookupOutcome::ProjectionMissing {
+                        key,
+                        group: super::capture::ContextGroup::Document,
+                    },
+                }
+            }
+            outcome => outcome,
+        }
     }
 
     /// Looks up a value after applying compose-time environment overrides.
@@ -577,6 +665,7 @@ impl ComposeContext {
             inner: std::sync::Arc::new(ComposeContextInner {
                 anchor: PathBuf::new(),
                 captured: ContextRequirements::from_groups([super::capture::ContextGroup::DateTime]),
+                root: None,
                 now: get_str("now"),
                 now_utc: get_str("now_utc"),
                 today: get_str("today"),

@@ -571,6 +571,9 @@ impl ComposeOptions {
         if !self.context_authority.is_extendable() {
             return;
         }
+        // The first document composed under a growable context is the
+        // request's root, unless the caller captured the context for one.
+        self.context.attach_root_document(document);
         let requirements = super::capture::ContextRequirements::for_document(document);
         self.context_authority.extend(&mut self.context, &requirements);
     }

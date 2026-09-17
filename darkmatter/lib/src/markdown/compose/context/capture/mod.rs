@@ -4,11 +4,13 @@ mod agent;
 mod changes;
 mod datetime;
 mod docs;
+mod document;
 mod git;
 mod groups;
 mod host;
 mod invocation;
 mod languages;
+mod network;
 mod repo;
 mod snapshot;
 
@@ -28,6 +30,17 @@ pub(super) type CaptureResult = (
     HashMap<String, String>,
 );
 
+/// Request-level inputs the `Document` group projects from, which no capture
+/// group observes: the retained root and the snapshot's clock reading.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct DocumentSeed<'a> {
+    pub(crate) root: Option<&'a RootDocument>,
+    /// `ctx.timestamp_ms` of the snapshot being extended, when it already
+    /// captured date/time.
+    pub(crate) timestamp_ms: Option<i64>,
+}
+
+pub(crate) use document::{NONCE_AREA, RootDocument};
 pub use groups::{ContextGroup, ContextRequirements};
 pub use snapshot::ContextCaptureEvidence;
 pub(crate) use datetime::populate_datetime;
@@ -88,10 +101,19 @@ pub(crate) fn capture_runtime_context_for_requirements(
     base_dir: &Path,
     requirements: &ContextRequirements,
 ) -> CaptureResult {
+    capture_runtime_context_for_seeded_requirements(base_dir, requirements, DocumentSeed::default())
+}
+
+pub(crate) fn capture_runtime_context_for_seeded_requirements(
+    base_dir: &Path,
+    requirements: &ContextRequirements,
+    seed: DocumentSeed<'_>,
+) -> CaptureResult {
     capture_runtime_context_for_requirements_with_cwd(
         base_dir,
         requirements,
         Ok(base_dir.to_path_buf()),
+        seed,
     )
 }
 
@@ -99,27 +121,30 @@ fn capture_runtime_context_for_requirements_with_cwd(
     base_dir: &Path,
     requirements: &ContextRequirements,
     invocation_cwd: std::io::Result<std::path::PathBuf>,
+    seed: DocumentSeed<'_>,
 ) -> CaptureResult {
     let environment = std::env::vars().collect();
     let groups: Vec<_> = requirements.iter().collect();
     let cap = snapshot::ContextCapture::new(base_dir, &groups, invocation_cwd);
-    populate_capture(cap, requirements, environment)
+    populate_capture(cap, requirements, environment, seed)
 }
 
 pub(super) fn capture_runtime_context_with_evidence(
     base_dir: &Path,
     requirements: &ContextRequirements,
     evidence: &ContextCaptureEvidence,
+    seed: DocumentSeed<'_>,
 ) -> CaptureResult {
     let groups: Vec<_> = requirements.iter().collect();
     let cap = snapshot::ContextCapture::from_evidence(base_dir, &groups, evidence);
-    populate_capture(cap, requirements, evidence.environment().clone())
+    populate_capture(cap, requirements, evidence.environment().clone(), seed)
 }
 
 fn populate_capture(
-    cap: snapshot::ContextCapture,
+    mut cap: snapshot::ContextCapture,
     requirements: &ContextRequirements,
     environment: HashMap<String, String>,
+    seed: DocumentSeed<'_>,
 ) -> CaptureResult {
     let mut values = Map::new();
 
@@ -133,6 +158,10 @@ fn populate_capture(
 
     if requirements.contains(ContextGroup::Git) {
         git::populate_git(&cap, &mut values);
+    }
+
+    if requirements.contains(ContextGroup::GitHistory) {
+        git::populate_git_history(&cap, &mut values);
     }
 
     if requirements.contains(ContextGroup::Repo) {
@@ -169,6 +198,21 @@ fn populate_capture(
         agent::populate_agent(&environment, &mut values);
     }
 
+    if requirements.contains(ContextGroup::Network) {
+        network::populate_network(&cap, &mut values);
+    }
+
+    if requirements.contains(ContextGroup::Document) {
+        // One clock reading per snapshot: the id hashes the same
+        // `ctx.timestamp_ms` the document can read.
+        let timestamp_ms = values
+            .get("timestamp_ms")
+            .and_then(Value::as_i64)
+            .or(seed.timestamp_ms)
+            .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+        document::populate_document(&mut cap, seed.root, timestamp_ms, &mut values);
+    }
+
     (values, cap.diagnostics, cap.timings, environment)
 }
 
@@ -197,6 +241,7 @@ mod tests {
             outside.path(),
             &requirements,
             Ok(outside.path().to_path_buf()),
+            DocumentSeed::default(),
         );
 
         let cwd = values.get("cwd").and_then(Value::as_str).expect("ctx.cwd");
@@ -215,6 +260,7 @@ mod tests {
             outside.path(),
             &requirements,
             Err(std::io::Error::other("forced current directory failure")),
+            DocumentSeed::default(),
         );
 
         assert_eq!(values.get("cwd"), Some(&Value::Null));

@@ -1061,27 +1061,47 @@ impl InvocationContext {
                     }
                 }
                 ContextGroup::Os => {
-                    if let Ok(os) = self
-                        .inner
-                        .os
-                        .get_or_init(|| {
-                            captured = true;
-                            // Deliberately the same request Darkmatter's ambient
-                            // capture issues, so a supplied `ctx.os*` costs the
-                            // same and reads the same as an ambient one. Locale
-                            // and timezone are unread by `populate_os` and their
-                            // probes are not free — locale shells out to
-                            // PowerShell on a Windows host with no `LC_*` set.
-                            let request = OsRequest::full()
-                                .include_locale(false)
-                                .include_timezone(false)
-                                .include_ntp_status(false);
-                            sniff::os::detect_os_with_request(&request).map_err(Arc::new)
-                        })
-                        .as_ref()
-                    {
+                    if let Ok(os) = self.cached_os(&mut captured) {
                         evidence = evidence.with_os(Some(os.clone()));
                     }
+                }
+                // Document identity hashes the host name and repository name.
+                // The root document itself is retained by the Darkmatter
+                // context, never supplied as evidence.
+                ContextGroup::Document => {
+                    if let Ok(os) = self.cached_os(&mut captured) {
+                        evidence = evidence.with_os(Some(os.clone()));
+                    }
+                    if repository.failure().is_none() {
+                        evidence = evidence.with_git(repository.git_info.clone());
+                    }
+                }
+                ContextGroup::GitHistory => {
+                    if repository.failure().is_none() {
+                        captured = true;
+                        match repository_root {
+                            Some(root) => {
+                                if let Ok(set) =
+                                    sniff::filesystem::git::get_recent_commits_by_count(root, 10)
+                                {
+                                    evidence = evidence.with_recent_commits(Some(set.commits));
+                                }
+                            }
+                            None => evidence = evidence.with_recent_commits(None),
+                        }
+                    }
+                }
+                ContextGroup::Network => {
+                    captured = true;
+                    evidence = evidence
+                        .with_network_interfaces(
+                            sniff::network::detect_network_with_request(
+                                &sniff::request::NetworkRequest::interfaces_only(),
+                            )
+                            .ok()
+                            .map(|network| network.interfaces),
+                        )
+                        .with_gateways(sniff::network::detect_default_gateways().ok());
                 }
                 ContextGroup::Hardware => {
                     if let Ok(hardware) = self
@@ -1117,6 +1137,24 @@ impl InvocationContext {
             }
         }
         evidence
+    }
+
+    /// The invocation's OS observation, detected at most once.
+    ///
+    /// Deliberately the same request Darkmatter's ambient capture issues, so a
+    /// supplied `ctx.os*` costs the same and reads the same as an ambient one.
+    /// Locale and timezone are unread by `populate_os` and their probes are not
+    /// free — locale shells out to PowerShell on a Windows host with no `LC_*`
+    /// set.
+    fn cached_os(&self, captured: &mut bool) -> &Result<OsInfo, Arc<sniff::SniffError>> {
+        self.inner.os.get_or_init(|| {
+            *captured = true;
+            let request = OsRequest::full()
+                .include_locale(false)
+                .include_timezone(false)
+                .include_ntp_status(false);
+            sniff::os::detect_os_with_request(&request).map_err(Arc::new)
+        })
     }
 
     /// Resolve the repository entry enclosing an authored source directory.
@@ -1419,6 +1457,7 @@ fn context_group_name(group: darkmatter::markdown::compose::ContextGroup) -> &'s
         ContextGroup::Invocation => "invocation",
         ContextGroup::DateTime => "datetime",
         ContextGroup::Git => "git",
+        ContextGroup::GitHistory => "git_history",
         ContextGroup::Repo => "repo",
         ContextGroup::FileChanges => "file_changes",
         ContextGroup::Languages => "languages",
@@ -1427,6 +1466,8 @@ fn context_group_name(group: darkmatter::markdown::compose::ContextGroup) -> &'s
         ContextGroup::Hardware => "hardware",
         ContextGroup::Gpu => "gpu",
         ContextGroup::Agent => "agent",
+        ContextGroup::Document => "document",
+        ContextGroup::Network => "network",
     }
 }
 
