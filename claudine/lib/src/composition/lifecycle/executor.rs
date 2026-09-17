@@ -1310,7 +1310,9 @@ impl StackExecutionContext<'_> {
     /// through DM2 (preserving whole-value typing), matching the literal-with-
     /// interpolation rule of communication bodies. A frontmatter-mutating verb
     /// that targets the document mirrors its change onto `working` so a later
-    /// action in the same stack reads the mutated value.
+    /// action in the same stack reads the mutated value. Lifecycle `set`
+    /// mappings use [`Self::dispatch_runtime_set`] instead of this positional
+    /// Darkmatter-effect path.
     fn dispatch_side_effect(
         &self,
         verb: &str,
@@ -1356,22 +1358,6 @@ impl StackExecutionContext<'_> {
                 .ok_or_else(|| dispatch_err(format!("`{verb}` is missing a required argument")))
         };
 
-        // `set` is the in-memory counterpart of `set_frontmatter`: it targets
-        // the runtime mutation layer rather than a file, so it takes
-        // `(key, value)` instead of `(file, prop, value)` and never reaches the
-        // effect engine's path-based verbs below.
-        if verb == "set" {
-            let key = s(0)?;
-            let value = v(1)?;
-            let prior = self
-                .apply_runtime_set(&key, value.clone(), working)
-                .map_err(|error| {
-                    ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(verb, &error))
-                })?;
-            working.insert(key, value);
-            return Ok(prior);
-        }
-
         let result = match verb {
             "set_frontmatter" => engine.set_frontmatter(&s(0)?, &s(1)?, v(2)?),
             "merge_frontmatter" => engine.merge_frontmatter(&s(0)?, v(1)?),
@@ -1403,13 +1389,17 @@ impl StackExecutionContext<'_> {
         Ok(out)
     }
 
-    /// Resolve and commit one mapping-based runtime mutation action.
+    /// Resolve against the pre-write snapshot; an absent destination is a
+    /// declared null, so optional values can be copied before being reset.
     fn dispatch_runtime_set(
         &self,
         set: &RuntimeSet,
         working: &mut Map<String, Value>,
     ) -> Result<Value, ActionFailure> {
-        let snapshot = working.clone();
+        let mut snapshot = working.clone();
+        for (key, _) in set.iter() {
+            snapshot.entry(key.clone()).or_insert(Value::Null);
+        }
         let mut updates = IndexMap::with_capacity(set.len());
         for (key, value) in set.iter() {
             let resolved = self.resolve_with_value(value, &snapshot).map_err(|(suffix, error)| {
@@ -1485,26 +1475,6 @@ impl StackExecutionContext<'_> {
                 })?,
         };
         Ok(path.to_string_lossy().into_owned())
-    }
-
-    /// Apply one `set` write to the invocation-local runtime layer and report
-    /// the value it replaced.
-    ///
-    /// Without a runtime cell the write is still key-checked — an author must
-    /// get the same typed refusal for a reserved destination whether or not
-    /// the caller wired an accumulator — and the prior value is read from the
-    /// caller's working state.
-    fn apply_runtime_set(
-        &self,
-        key: &str,
-        value: Value,
-        working: &Map<String, Value>,
-    ) -> Result<Value, super::super::runtime_state::RuntimeMutationError> {
-        let state = match self.runtime_state {
-            Some(state) => return state.set(self.effect_engine, key, value, working),
-            None => super::super::runtime_state::RuntimeState::new(),
-        };
-        state.set(self.effect_engine, key, value, working)
     }
 
     /// Mirror a successful frontmatter-verb mutation onto the in-memory

@@ -37,13 +37,49 @@ fn config(value: Value) -> LifecycleConfig {
     parse_lifecycle_config(&value, Path::new("t.md")).unwrap()
 }
 
-/// The mapping form writes the runtime layer and a later action in the same
-/// stack reads the new value.
+fn set_action(entries: Vec<(&str, Value)>, no_error: bool) -> LifecycleAction {
+    let authored = entries
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect();
+    LifecycleAction {
+        kind: LifecycleActionKind::RuntimeSet(RuntimeSet::new(authored).unwrap()),
+        no_error,
+    }
+}
+
 #[test]
-fn set_is_visible_to_a_later_action_in_the_same_stack() {
+fn set_can_read_an_absent_destination_as_null() {
+    let config = config(json!({"initialize": {"stack": [{"action": [
+        {"set": {"epilog": "{{message_to_agent}}", "message_to_agent": null}},
+        {"message": "handoff=[{{epilog}}]"}
+    ]}]}}));
+    for base in [map(json!({})), map(json!({"message_to_agent": null})),
+        map(json!({"message_to_agent": "continue phase 3"}))] {
+        let expected = base.get("message_to_agent").cloned().unwrap_or(Value::Null);
+        let live = std::sync::Mutex::new(base.clone());
+        let runtime = RuntimeState::new();
+        let (_dir, engine) = temp_engine();
+        let (outcome, events) = run_event(
+            &config, LifecycleSignal::Initialize, &base, &live, &runtime, &engine,
+        );
+        assert_eq!(outcome, LifecycleEventOutcome::default());
+        assert_eq!(runtime.snapshot().mutations.get("epilog"), Some(&expected));
+        assert_eq!(runtime.snapshot().mutations.get("message_to_agent"), Some(&Value::Null));
+        assert_eq!(events, vec![Emitted::Message(format!(
+            "handoff=[{}]", expected.as_str().unwrap_or("")
+        ))]);
+    }
+}
+
+/// Consecutive actions observe successful commits, while each mapping still
+/// resolves from its own pre-action snapshot.
+#[test]
+fn consecutive_set_actions_observe_each_others_updates() {
     let config = config(json!({"success": {"stack": [{"action": [
         {"set": {"phase": "build"}},
-        {"message": "phase={{phase}}"}
+        {"set": {"observed": "{{phase}}", "phase": "ship"}},
+        {"message": "observed={{observed}},phase={{phase}}"}
     ]}]}}));
     let base = map(json!({"phase": "plan"}));
     let live = std::sync::Mutex::new(base.clone());
@@ -60,8 +96,201 @@ fn set_is_visible_to_a_later_action_in_the_same_stack() {
     );
 
     assert_eq!(outcome, LifecycleEventOutcome::default());
-    assert_eq!(events, vec![Emitted::Message("phase=build".to_string())]);
-    assert_eq!(runtime.snapshot().mutations.get("phase"), Some(&json!("build")));
+    assert_eq!(
+        events,
+        vec![Emitted::Message("observed=build,phase=ship".to_string())]
+    );
+    let mutations = runtime.snapshot().mutations;
+    assert_eq!(mutations.get("observed"), Some(&json!("build")));
+    assert_eq!(mutations.get("phase"), Some(&json!("ship")));
+}
+
+#[test]
+fn mapping_set_swaps_values_in_either_destination_order() {
+    for entries in [
+        vec![("left", json!("{{right}}")), ("right", json!("{{left}}"))],
+        vec![("right", json!("{{left}}")), ("left", json!("{{right}}"))],
+    ] {
+        let base = map(json!({"left": "A", "right": "B"}));
+        let live = std::sync::Mutex::new(base.clone());
+        let runtime = RuntimeState::new();
+        let (_dir, engine) = temp_engine();
+        let shell = MockShell::new(0);
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let context = ctx_with_runtime(
+            LifecycleSignal::Success,
+            &base,
+            &live,
+            &runtime,
+            &engine,
+            &shell,
+            &recorder,
+            &harness,
+            Path::new("t.md"),
+        );
+
+        let prior = context.dispatch_task_side_effect(&set_action(entries, false)).unwrap();
+
+        assert_eq!(prior, json!({"left": "A", "right": "B"}));
+        let mutations = runtime.snapshot().mutations;
+        assert_eq!(mutations.get("left"), Some(&json!("B")));
+        assert_eq!(mutations.get("right"), Some(&json!("A")));
+        assert_eq!(*live.lock().unwrap(), map(json!({"left": "B", "right": "A"})));
+    }
+}
+
+#[test]
+fn failed_expression_publishes_no_part_of_the_mapping_with_or_without_runtime() {
+    let action = set_action(
+        vec![("valid", json!("resolved")), ("bad", json!("{{unknown_root}}"))],
+        false,
+    );
+    let base = map(json!({"stable": "kept"}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+
+    let live = std::sync::Mutex::new(base.clone());
+    let runtime = RuntimeState::new();
+    let context = ctx_with_runtime(
+        LifecycleSignal::Success,
+        &base,
+        &live,
+        &runtime,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+    assert!(context.dispatch_task_side_effect(&action).is_err());
+    assert!(runtime.snapshot().mutations.is_empty());
+    assert_eq!(*live.lock().unwrap(), base);
+
+    let live = std::sync::Mutex::new(base.clone());
+    let context = ctx_with_live(
+        LifecycleSignal::Success,
+        &base,
+        &live,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+    assert!(context.dispatch_task_side_effect(&action).is_err());
+    assert_eq!(*live.lock().unwrap(), base);
+}
+
+#[test]
+fn late_invalid_destination_publishes_no_part_of_the_task_side_effect() {
+    for invalid in ["outputs", "a.b"] {
+        let action = set_action(
+            vec![("valid", json!("resolved")), (invalid, json!("refused"))],
+            false,
+        );
+        let base = map(json!({"stable": "kept"}));
+        let live = std::sync::Mutex::new(base.clone());
+        let runtime = RuntimeState::new();
+        let (_dir, engine) = temp_engine();
+        let shell = MockShell::new(0);
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let context = ctx_with_runtime(
+            LifecycleSignal::Success,
+            &base,
+            &live,
+            &runtime,
+            &engine,
+            &shell,
+            &recorder,
+            &harness,
+            Path::new("t.md"),
+        );
+
+        assert!(context.dispatch_task_side_effect(&action).is_err());
+        assert!(runtime.snapshot().mutations.is_empty(), "{invalid} published a runtime prefix");
+        assert_eq!(*live.lock().unwrap(), base, "{invalid} leaked through outer write-back");
+
+        let live = std::sync::Mutex::new(base.clone());
+        let context = ctx_with_live(
+            LifecycleSignal::Success,
+            &base,
+            &live,
+            &engine,
+            &shell,
+            &recorder,
+            &harness,
+            Path::new("t.md"),
+        );
+        assert!(context.dispatch_task_side_effect(&action).is_err());
+        assert_eq!(*live.lock().unwrap(), base, "{invalid} changed no-runtime working state");
+    }
+}
+
+#[test]
+fn no_error_suppresses_a_batch_refusal_without_exposing_a_partial_write() {
+    let config = config(json!({"success": {"stack": [{"action": [
+        {"set": {"stable": "changed", "outputs": "refused"}, "no_error": true},
+        {"message": "stable={{stable}}"}
+    ]}]}}));
+    let base = map(json!({"stable": "kept"}));
+    let live = std::sync::Mutex::new(base.clone());
+    let runtime = RuntimeState::new();
+    let (_dir, engine) = temp_engine();
+
+    let (outcome, events) = run_event(
+        &config,
+        LifecycleSignal::Success,
+        &base,
+        &live,
+        &runtime,
+        &engine,
+    );
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(events, vec![Emitted::Message("stable=kept".to_string())]);
+    assert!(runtime.snapshot().mutations.is_empty());
+    assert_eq!(*live.lock().unwrap(), base);
+}
+
+#[test]
+fn mapping_result_reports_all_priors_and_preserves_explicit_runtime_null() {
+    let base = map(json!({"left": "A", "nullable": "document fallback"}));
+    let live = std::sync::Mutex::new(base.clone());
+    let runtime = RuntimeState::new();
+    let (_dir, engine) = temp_engine();
+    runtime.set(&engine, "nullable", Value::Null, &base).unwrap();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx_with_runtime(
+        LifecycleSignal::Success,
+        &base,
+        &live,
+        &runtime,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+
+    let prior = context
+        .dispatch_task_side_effect(&set_action(
+            vec![("left", json!("B")), ("absent", json!(1)), ("nullable", json!("now set"))],
+            false,
+        ))
+        .unwrap();
+    assert_eq!(prior, json!({"left": "A", "absent": null, "nullable": null}));
+    assert_eq!(
+        context
+            .dispatch_task_side_effect(&set_action(Vec::new(), false))
+            .unwrap(),
+        json!({}),
+    );
 }
 
 /// A one-property mapping writes the runtime layer.
@@ -197,7 +426,13 @@ fn set_refuses_every_reserved_root_key() {
         let config = config(json!({"success": {"stack": [
             {"action": {"set": Value::Object(destinations)}}
         ]}}));
-        let base = map(json!({}));
+        let base = map(json!({
+            "state": {"id": "authored"},
+            "previous": {"id": "before"},
+            "next": {"id": "after"},
+            "outputs": ["kept"],
+            "sequence_id": "sequence-1"
+        }));
         let live = std::sync::Mutex::new(base.clone());
         let runtime = RuntimeState::new();
         let (_dir, engine) = temp_engine();
@@ -220,7 +455,7 @@ fn set_refuses_every_reserved_root_key() {
             error.msg
         );
         assert!(runtime.snapshot().mutations.is_empty());
-        assert!(live.lock().unwrap().get(key).is_none(), "{key} must not leak into live state");
+        assert_eq!(*live.lock().unwrap(), base, "{key} changed an authored reserved view");
     }
 }
 

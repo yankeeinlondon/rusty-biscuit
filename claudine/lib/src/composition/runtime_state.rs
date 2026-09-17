@@ -6,7 +6,7 @@
 //! lifecycle action, loop rematerialization, and (from phase 8) every sequence
 //! step. It owns the two things that outlive a single provider attempt:
 //!
-//! - **accumulated mutations** — what the `set` side effect writes
+//! - **accumulated mutations** — what lifecycle `set:` mappings write
 //! - **`outputs`** — the append-only task-output accumulator
 //!
 //! Neither touches the process environment, the process working directory, or
@@ -108,7 +108,7 @@ impl RuntimeState {
         self.inner.lock().expect(POISONED).clone()
     }
 
-    /// Apply one `set` write and return the value it replaced.
+    /// Apply one programmatic runtime write and return the value it replaced.
     ///
     /// `prior_base` supplies the effective document state so the returned prior
     /// value is what the author would have read *before* this write — the
@@ -165,7 +165,7 @@ impl RuntimeState {
                     .or_else(|| prior_base.get(key).cloned())
                     .unwrap_or(Value::Null),
             );
-            engine.set(&mut next, key, value.clone())?;
+            next.insert(key.clone(), value.clone());
         }
         inner.mutations = next;
         Ok(prior)
