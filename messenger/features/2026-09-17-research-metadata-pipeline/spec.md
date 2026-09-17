@@ -85,7 +85,7 @@ Proposed artifacts, relative to `messenger/`:
 | `docs/research/platforms/catalog.json` | Deterministic generated snapshot of validated facts, including unknowns and provenance |
 | `docs/research/summary/platforms.md` | Cross-provider comparison and implementation guidance derived from accepted research |
 | `docs/research/CHANGELOG.md` | Concise accepted research changes, affected platforms/facts, evidence, uncertainty, and review conclusions |
-| Separate review artifacts; paths to be defined | Full deterministic comparisons and structured independent evidence reviews; candidate and rejected results remain separate from accepted history |
+| Separate review artifacts; paths chosen during implementation planning | Durable repository records needed to explain accepted changes; local candidate, rejected, failed, and routine-renewal records remain separate from accepted history |
 | `.claude/skills/messenger/platform-metadata.md` at repository root | Published summary with links back to detailed research |
 
 The roster owns identity and coverage; research owns external facts; Rust adapters own implemented behavior. Generated artifacts must identify their inputs and must not be edited manually.
@@ -425,7 +425,7 @@ An unchanged factual result can be a successful refresh if the run records newly
 ### Three research passes
 
 1. **Independent discovery.** Start a fresh worker with the provider's main website, an optional API URL, the interface identification, and the shared research questions and schema. Do not provide previous prose or curated research links. The researcher must discover the sources needed to answer the questions, including developer discussions on social platforms. End this pass with suggested valuable source URLs and an explanation of what each contributed. Discovery suggestions are research leads, not automatically accepted evidence or curated sources.
-2. **Curated-source review and reconciliation.** Provide the discovery output, the curated source URLs, and previous research. Review each curated source thoroughly and iteratively fill out and validate the prose and final metadata. Reconcile findings with prior history and stable identities, preserving useful explanations and recording evidence-backed changes or unresolved conflicts. The curated list is a research base, not a restriction on finding further sources or citing evidence.
+2. **Curated-source review and reconciliation.** Provide the discovery output, the curated source URLs, and previous research. Document a review attempt for every curated source, review accessible sources thoroughly, and iteratively fill out and validate the prose and final metadata. Record inaccessible sources and the attempts made. Reconcile findings with prior history and stable identities, preserving useful explanations and recording evidence-backed changes or unresolved conflicts. The curated list is a research base, not a restriction on finding further sources or citing evidence.
 3. **Source-list maintenance.** Evaluate the suggested URLs and propose selective changes to the curated list stored as an attribute of each platform's YAML roster entry. Use a configurable maximum of 10 URLs initially per platform, shared across its interfaces. This cap applies only to the Pass 2 starting list, not discovery or evidence citations. Every retained URL includes an explanation of its contribution. A human maintainer approves changes to the list.
 
 Judge curated URLs qualitatively by source authority, relevance to the researched interfaces and versions, currency, accessibility, and distinct coverage. Community sources may be valuable leads, subject to the existing evidence restrictions. At capacity, adding a source requires replacing another and explaining the coverage gained and lost. Broken, obsolete, and redundant links are removal candidates; retaining a link requires a useful contribution, not merely its presence in an earlier roster.
@@ -451,6 +451,8 @@ Preserve accepted prose during an unchanged renewal. Proposed rewrites, substant
 For future implementation and operation within the configured limits, preauthorized work includes reading unauthenticated public sources, including public developer discussions; using existing configured agents; creating local candidates and sanitized fixtures; running validation; and installing necessary documented project dependencies. These authorizations do not initiate live research during specification clarification.
 
 Authenticated source access, live probes, posting messages, creating accounts or credentials, adding external services, global installations, and purchases require separate approval. Source discovery must not silently cross those boundaries. Publication follows the approval and unchanged-renewal rules above.
+
+An inaccessible source must be reported rather than counted as successfully rechecked. A failed source check prevents automatic unchanged renewal. A completed investigation with an accountable gap may still receive human acceptance under the completion criteria; a budget-exhausted run remains incomplete. Inaccessibility does not authorize authenticated access or create a requirement that every source must be fetched successfully before any human-reviewed result can be accepted.
 
 ### Research operating limits
 
@@ -482,7 +484,13 @@ The independent agent's assessment is evidence for review, not approval authorit
 
 Publish concise summaries of accepted research changes to `messenger/docs/research/CHANGELOG.md`, identifying affected platforms and facts, supporting evidence, remaining uncertainty, and review conclusions. Keep full machine comparisons and complete structured evidence reviews in separate review artifacts, with references from summaries where useful. Candidate and rejected results remain separate from the accepted change history.
 
-Retain safe structured findings and evidence references rather than raw agent transcripts. Verified unchanged renewals update observation dates and maintenance records but do not add no-change entries to the CHANGELOG. Review-artifact paths and retention periods remain open.
+Keep structured evidence reviews needed to explain accepted changes durably in the repository alongside the research CHANGELOG. Candidate, rejected, failed, and routine-renewal records remain local. Verified unchanged renewals update observation dates and maintenance records but do not add no-change entries to the CHANGELOG. Repository retention does not authorize automatically committing or pushing changes.
+
+Store links, necessary attribution, concise findings, fingerprints, and structured review conclusions. Do not retain raw agent transcripts or wholesale social-platform threads; retain personal details only when necessary to the evidence. Full source snapshots are not required. Evidence needed by accepted documents and review conclusions must remain durably available rather than pointing only to local records eligible for cleanup.
+
+Provide explicit cleanup of local records using a configurable age threshold, initially 30 days. Preview the exact proposed removals before deletion, protect active runs and candidates awaiting review, and perform no unattended deletion. Removing failed-run records may remove the ability to resume those attempts; make that consequence visible in the cleanup preview. Cleanup must not remove evidence necessary to explain accepted research.
+
+The `messenger` library owns the structured records; `messenger-cli` owns storage-location reporting, inspection, and explicit cleanup; Claudine produces working records. Implementation planning chooses the concrete repository and local paths.
 
 Corrections should normally update the prompt, schema, or research with stronger evidence. When a durable override is necessary, key it to a fact and scope, include evidence, reason, author, and an expiration/review date. Apply overrides explicitly after validation, expose both researched and effective values, and fail on expired, orphaned, or incompatible overrides. Never hide a correction in generated output.
 
@@ -567,14 +575,19 @@ The implementation must work on macOS, Linux, native Windows, and WSL2. Use port
 32. Implementation-assessment fixtures reuse reviewed per-adapter mappings when relevant input fingerprints match, retain revision provenance without invalidating on unrelated commits, and mark affected mappings `unassessed` when assessed inputs change. Proposed assessments cannot become accepted implementation claims without review or change runtime capability values.
 33. Run-configuration fixtures reject missing elapsed-time or invocation limits. Fake-agent lifecycle tests count every pass, reviewer, and recovery invocation against one per-platform budget, process only one platform at a time, and stop further dispatch at exhaustion. They preserve incomplete-stage diagnostics and resumable candidates without refreshing accepted data, treating incomplete work as a completed unknown, or silently resetting the budget.
 34. Access-policy fixtures distinguish public unauthenticated research and documented project dependencies from actions requiring separate approval. Unchanged-renewal fixtures preserve accepted prose; proposed rewrites do not bypass review. Interrupted-publication checks demonstrate that a usable, internally consistent accepted snapshot remains available.
+35. Retention fixtures keep accepted explanatory evidence durable while candidate, rejected, failed, and routine-renewal records remain local. Cleanup previews identify the exact removals under the configured age threshold, initially 30 days, and disclose lost resumability. Explicit cleanup protects active runs, awaiting-review candidates, and necessary accepted evidence; it performs neither unattended deletion nor automatic Git publication.
+36. Source-access fixtures record attempts for every curated source and distinguish successful review from inaccessible sources. Failed checks prevent automatic renewal, completed accountable gaps remain eligible for human review, and exhaustion remains incomplete. Stored fixtures and review records contain only the necessary attribution and structured findings, without raw transcripts or wholesale social threads.
 
 Keep deterministic research checks within existing test coverage unless a distinct CI question justifies a new cell. Live fleet research is an explicit maintenance operation, not a CI dependency. Implementation ends ready for review; the author owns moving this feature to `_completed`.
 
-## Pending Clarifications
+## Implementation Planning and Verification Items
 
-The decisions confirmed during clarification do not close the following questions:
+No known human rulings remain from clarification; risk assessment and final review may identify additional questions. The following implementation choices and verification work remain:
 
-- **Source availability and privacy:** Define how inaccessible sources affect completion and renewal, and storage/privacy expectations beyond the existing prohibitions on secrets and private message contents. Public access and separate-approval boundaries are established above.
-- **Review-artifact retention:** Choose review-artifact paths, maintenance-record storage, and retention periods for accepted, candidate, and rejected structured findings.
+- Verify that existing orchestration can isolate discovery inputs, account for all agent invocations, enforce shared time limits, and report cancellation limits accurately.
+- Select a publication mechanism that preserves an internally consistent accepted snapshot across interruptions and supports compatible prior-platform reuse.
+- Choose repository review-artifact paths and local working-record locations, including inspection and previewed cleanup that protects accepted evidence and pending review.
+- Supply explicit time and invocation limits before any live research run; no such numeric values have been selected during clarification.
+- Exercise the schema and reviewed implementation mappings against the planned provider pilots, including explicit uncertainty and relevant-input fingerprint invalidation.
 
-These are pending human decisions, not implementation defaults. Further review may identify additional clarifications before the document is finalized.
+These items do not authorize starting live research during this clarification task. The document remains awaiting risk assessment and finalization.
