@@ -305,7 +305,12 @@ pub(super) fn build_template_preflight_options(
     for (key, value) in env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
+    let authority = match document_epoch.as_ref() {
+        Some(epoch) => epoch.compose_context_authority(),
+        None => darkmatter::markdown::compose::ContextAuthority::DarkmatterOwned,
+    };
     let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx.clone())
+        .with_context_authority(authority)
         .with_source_file(source_path)
         // Defer the lifecycle event keys (DM1), matching the main prepare pass.
         // The preflight compose exists only to discover template `::shell`

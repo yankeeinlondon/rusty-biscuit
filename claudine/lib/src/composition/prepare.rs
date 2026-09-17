@@ -218,8 +218,22 @@ fn canonical_compose_options(
     options: &PrepareOptions,
     schema_phase: Option<SchemaPhase>,
 ) -> ComposeOptions {
+    // A transcluded source may name a group the root did not. The snapshot
+    // grows from the evidence that produced it: the invocation's launch
+    // evidence for a prepared snapshot, host discovery for the ambient fallback
+    // `derive_compose_context` captured.
+    let authority = match (
+        options.prepared_context.is_some(),
+        options.document_epoch.as_ref(),
+        options.invocation_context.as_ref(),
+    ) {
+        (false, _, _) => darkmatter::markdown::compose::ContextAuthority::DarkmatterOwned,
+        (true, Some(epoch), _) => epoch.compose_context_authority(),
+        (true, None, Some(invocation)) => invocation.compose_context_authority(),
+        (true, None, None) => darkmatter::markdown::compose::ContextAuthority::CallerSupplied,
+    };
     let mut compose_opts = bind_agent_workspace(
-        ComposeOptions::new_with_context(ctx.clone()),
+        ComposeOptions::new_with_context(ctx.clone()).with_context_authority(authority),
         source_path,
         options.shell_working_directory.as_deref(),
     )

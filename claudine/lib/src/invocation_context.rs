@@ -552,15 +552,22 @@ impl DocumentEpoch {
         &self,
         context: &mut darkmatter::markdown::compose::ComposeContext,
         requirements: &darkmatter::markdown::compose::ContextRequirements,
-    ) {
-        if self
+    ) -> bool {
+        let extended = self
             .invocation
-            .extend_launch_context(context, requirements)
-        {
+            .extend_launch_context(context, requirements);
+        if extended {
             self.work
                 .launch_context_extensions
                 .fetch_add(1, Ordering::Relaxed);
         }
+        extended
+    }
+
+    /// Lets composition grow this epoch's launch context when a transcluded
+    /// source names a group the snapshot lacks, from the same launch evidence.
+    pub fn compose_context_authority(&self) -> darkmatter::markdown::compose::ContextAuthority {
+        darkmatter::markdown::compose::ContextAuthority::CallerExtended(Arc::new(self.clone()))
     }
 
     /// Record a production seam that consumed this epoch's populated context.
@@ -921,6 +928,12 @@ impl InvocationContext {
         } else {
             false
         }
+    }
+
+    /// Lets composition grow a launch context when a transcluded source names
+    /// a group the snapshot lacks, from this invocation's launch evidence.
+    pub fn compose_context_authority(&self) -> darkmatter::markdown::compose::ContextAuthority {
+        darkmatter::markdown::compose::ContextAuthority::CallerExtended(Arc::new(self.clone()))
     }
 
     /// The launch repository root projected into the launch directory's
@@ -1519,5 +1532,26 @@ fn absolutize(path: &Path) -> PathBuf {
     }
 }
 
+impl darkmatter::markdown::compose::ContextExtension for InvocationContext {
+    fn extend(
+        &self,
+        context: &mut darkmatter::markdown::compose::ComposeContext,
+        required: &darkmatter::markdown::compose::ContextRequirements,
+    ) -> bool {
+        self.extend_launch_context(context, required)
+    }
+}
+
+impl darkmatter::markdown::compose::ContextExtension for DocumentEpoch {
+    fn extend(
+        &self,
+        context: &mut darkmatter::markdown::compose::ComposeContext,
+        required: &darkmatter::markdown::compose::ContextRequirements,
+    ) -> bool {
+        self.extend_launch_context(context, required)
+    }
+}
+
 #[cfg(test)]
 mod tests;
+

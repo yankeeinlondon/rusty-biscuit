@@ -623,6 +623,7 @@ pub(crate) fn prepare_and_run_active_document(
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(
             prepared_context.clone(),
         )
+        .with_context_authority(document_epoch.compose_context_authority())
         .with_source_file(&source.resolved_path)
         .with_file_resolution_context(file_resolution_context.clone())
         // Lifecycle subtrees remain deferred because their file references

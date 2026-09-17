@@ -99,6 +99,7 @@ fn approve_preflight_graph(
         let mut context = graph_context.clone();
         invocation.extend_launch_context(&mut context, &requirements);
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
+            .with_context_authority(invocation.compose_context_authority())
             .with_source_file(path)
             .with_file_resolution_context(source_context.file_resolution_context().clone())
             .with_deferred_schema_verdict(true)
