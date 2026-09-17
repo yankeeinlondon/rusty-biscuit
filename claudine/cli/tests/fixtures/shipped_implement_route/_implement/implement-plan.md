@@ -59,7 +59,6 @@ initialize:
                     message_to_agent: null
 
                   
-                  
 start:
     message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
 success: 
@@ -69,7 +68,7 @@ success:
         - when: "ctx.dirty_files && !commit_message"
           action:
             - message: |-
-                staging all files from phase **#{{phase}}** in preparation for the git commit:
+                staging dirty files [{{ length(ctx.dirty_files) }}] from phase **#{{phase}}** in preparation for the git commit:
 
                 {{ as_unordered_list(ctx.dirty_files) }}
         - when: "ctx.dirty_files && commit_message"
