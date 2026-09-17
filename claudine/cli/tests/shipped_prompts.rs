@@ -117,6 +117,7 @@ fn shipped_lifecycle_artifacts_use_mapping_only_set() {
         root.join("claudine/gen/tests/fixtures"),
         root.join("claudine/schemas"),
         root.join("claudine/docs/schemas"),
+        root.join("darkmatter/dmls/tests/fixtures/sequence_descent"),
     ];
     let mut files = Vec::new();
     for artifact_root in &roots {
