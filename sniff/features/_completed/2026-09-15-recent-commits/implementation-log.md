@@ -112,6 +112,8 @@ skills_files_updated_during_phase_5:
 - .claude/skills/sniff/cli.md
 packages:
 - sniff
+implementation_1: "2026-09-17T16:53:09-07:00"
+implementation_2: "2026-09-17T20:20:11-07:00"
 human_review: true
 message_to_agent: 'All 6 phases are implemented and ready for author review; read ''## Phase 6'' in implementation-log.md.
   Phase 6 fixed two defects: the InvalidPeriod message now names the count form (CLI regression test),
@@ -1473,3 +1475,205 @@ Agent: claude/opus. Validation and review handoff; no feature code was planned f
     (pre-existing).
 - The feature directory stays active. The implementation is complete and
   ready for review.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-17T16:53:09-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-sniff/sniff/features/2026-09-15-recent-commits/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- the review contains five findings, all priority **high**:
+        - Hash-bounded walks can omit descendants in a skewed merge history
+        - Valid breaking-change Conventional Commits are treated as non-conventional
+        - Large duration scopes panic instead of returning InvalidPeriod
+        - SourceHut and Azure SSH remotes receive invalid commit URLs
+        - The Level 2 test does not prove the normative style-to-span mapping
+- findings are implemented serially, each by a dedicated subagent using the 'rust', 'rust-testing', and 'sniff' agent skills
+- testing and linting is scoped to the `sniff/` package area, which is the only area named by the specification
+
+### Finding 1 — Hash-bounded walks can omit descendants in a skewed merge history
+
+- starting the work on 'hash-bounded walk graph membership' at 16:53:43-07:00
+        - confirmed the review's diagnosis in the source: `collect.rs` resolved the hash to a single `hash_target` and broke the `ByCommitTime` frontier walk as soon as that id was yielded, which is unsound in a merge DAG because commit times are not monotonic
+        - fixed by graph membership rather than walk position: added `hash_boundary` in `sniff/lib/src/filesystem/git/recent_commits/collect.rs`, which resolves the hash through the existing `resolve_ancestor` and returns the boundary commit's parents, then passes those to `gix::rev_walk(...).with_hidden(...)`
+                - this expresses the `<hash>^@..<tip>` range, so the boundary stays inclusive and its ancestors stay excluded
+                - the `reached_target` break was deleted; the walk now breaks only on a count limit
+                - a root boundary produces an empty hidden set, which `gix` skips entirely, so non-hash selections and their work counters are unchanged
+        - added the L1 library integration regression `selection::hash_bounds_the_range_by_graph_membership_not_by_commit_time` in `sniff/lib/tests/recent_commits.rs` with the review's topology and timestamps (2030 boundary, 2021/2022 children, 2023 merge), extended with a 2020-dated root so the test also pins exclusion of the boundary's ancestor
+        - proved the regression non-vacuous: with the old stop-at-target behavior temporarily restored it fails with `["merge side", "side descendant", "target base"]`, the exact omission the review reported
+        - recorded that output order for a hash selection is the lazy commit-time _frontier_ order, not a global sort, so the 2030 boundary lands third; that is pre-existing behavior shared with the clock-skew case and was left alone under Rule 3
+        - no shipped-CLI case was added: the CLI builds `Selection::Hash` into `RecentCommitsOptions` and calls the same public `RecentCommits::collect` the new test drives, and `test_recent_commits_hash_period_walks_back_to_the_hash` already covers that wiring
+        - GitNexus: pre-edit upstream impact LOW for both `resolve_ancestor` and `collect_from`, no HIGH/CRITICAL; post-edit `detect-changes --scope all` reports 2 changed symbols, 0 affected processes, low risk
+        - gates (sniff area only): `just test` = 2,736 passed, 0 failed, 24 skipped; `just lint`, `cargo clippy -p sniff --all-targets -- -D warnings`, and `cargo clippy -p sniff-cli --all-targets -- -D warnings` all clean
+- work completed for 'hash-bounded walk graph membership' at 17:15:04-07:00
+
+### Finding 2 — Valid breaking-change Conventional Commits are treated as non-conventional
+
+- starting the work on 'breaking-change conventional commit parsing' at 17:15:10-07:00
+        - extended `CONVENTIONAL_COMMIT_RE` in `sniff/lib/src/filesystem/git/types.rs` with `!?` after the optional scope group, so Conventional Commits 1.0.0 breaking-change subjects (`feat!: …` and `feat(api)!: …`) parse with their operation and scope retained instead of falling through to the non-conventional branch
+                - satisfies spec Decision 3 (operation filter accepts any conventional operation) and Decision 15 (the conventional prefix is stripped before the heading is derived)
+                - scoped strictly to acceptance: no `breaking` field was added to the payload, and the `!` marker is consumed rather than retained on any field
+        - updated the `///` docs on `ConventionalCommit` and `ConventionalCommit::parse` in the same change, per the authoring-discipline rule
+        - added four parser unit tests in a new `conventional_commit_tests` module in `types.rs`, covering both breaking forms plus two negative cases that pin unchanged behavior — `!feat:` / `feat!(api):` stay non-conventional, and a `!` inside the description is left alone
+        - added `filters::breaking_change_marker_is_filterable_and_stripped_from_the_payload` to `sniff/lib/tests/recent_commits.rs`, asserting operation filtering, scope filtering, and the projected `operation`/`scope`/`heading` payload fields rather than only the parser return value
+        - added `test_recent_commits_operation_filter_accepts_breaking_change_commits` to `sniff/cli/tests/cli.rs`, exercising the real shipped binary end to end: `--operation feat` now returns both breaking commits (previously `[]`), with `scope` null for the unscoped form
+        - proved the regressions non-vacuous by temporarily restoring the old regex: all four behavior tests failed, including the CLI test failing with the exact empty-array symptom the review described, while the two unchanged-behavior tests stayed green
+        - GitNexus upstream impact on `ConventionalCommit` returned `risk: UNKNOWN` with zero resolved callers; a confirming text search established the real consumer set as sniff lib (2 call sites) and sniff-cli (3 call sites) only
+                - no Darkmatter or Worktree usage, so no downstream package gates were needed
+                - `detect-changes` reported `critical` on flows in homelab and unchained-ai, which is name-collision noise on the generic `parse` symbol rather than real blast radius
+        - reviewed the sniff CLI and topic docs for drift: all describe the operation/scope filters by reference to Conventional Commits generically and none enumerated a grammar that excluded `!`, so no doc edits were warranted
+        - gates (sniff area only): `just test` = 2,742 passed, 0 failed, 24 skipped; `just lint`, `just doctest`, and both `--all-targets -D warnings` clippy runs clean
+- work completed for 'breaking-change conventional commit parsing' at 17:32:51-07:00
+
+### Finding 3 — Large duration scopes panic instead of returning InvalidPeriod
+
+- starting the work on 'checked duration parsing' at 17:32:58-07:00
+        - duration-scope parsing no longer uses chrono's panicking `Duration::hours/days/weeks` constructors or unchecked month/year multiplication: `parse_duration` now resolves the unit to a seconds multiplier, applies `i64::checked_mul`, and builds through `Duration::try_seconds`
+        - `parse_duration` returns a private `DurationScope { Parsed, OutOfRange, NoMatch }` rather than `Option<Duration>`
+                - the distinction is load-bearing: `d` is a hex digit, so a `None` for `9223372036854775807d` would have fallen through to the hash branch and become a `Selection::Hash` instead of an input error
+        - the unit is matched before the count so an unrecognized suffix stays a non-match whatever its digits; an all-digit count that overflows `parse::<i64>()` (`18446744073709551615d`) is now `InvalidPeriod` instead of being claimed by the hash form
+        - a second live panic was found and fixed in the same scope: `Selection::time_window` subtracted the duration from `now` with the panicking `Sub` impl, so an accepted-but-huge duration such as `292471208y` aborted at window construction
+                - it now uses `checked_sub_signed`, clamping to `DateTime::<Utc>::MIN_UTC` ("all of history"), matching the existing `MAX_UTC` fallback in `single_day`
+        - the `InvalidPeriod` message is unchanged, so the Phase 6 count-form guidance ("positive count (e.g., 10)") does not regress; only `Selection::parse`'s `## Errors` rustdoc was extended to name the too-large case
+        - boundary coverage added per unit at the largest accepted and first rejected count, derived from `Duration`'s ±`i64::MAX` ms range: `2562047788015h`, `106751991167d`, `15250284452w`, `3558399705mo`, `292471208y`, each with `+1`, `i64::MAX`, and `u64::MAX` rejected
+        - new tests: `options.rs` unit tests `each_unit_accepts_its_largest_representable_count`, `each_unit_rejects_counts_past_its_largest_representable_one`, and `a_duration_longer_than_history_starts_at_the_earliest_instant`; L1 CLI test `test_commit_family_rejects_oversized_duration_scopes` covering all five finding inputs × all three commit-family subcommands, asserting non-101 exit, no panic text, empty stdout, and the typed message
+        - verified through the actually built debug binary: all five finding inputs exit 1 with empty stdout and the typed `invalid period specifier` message, and the largest accepted value for each unit exits 0 without panicking
+        - GitNexus upstream impact on `parse_duration`: LOW, exact, 3 impacted symbols, 0 processes; no HIGH/CRITICAL
+        - `sniff/docs/cli/repo_recent-commits.md` already described an invalid period as a non-zero exit with empty stdout, so no documentation drift needed repair
+        - gates (sniff area only): `just test` = 2,746 passed, 0 failed, 24 skipped; `just lint` and both `--all-targets -D warnings` clippy runs clean
+- work completed for 'checked duration parsing' at 17:47:36-07:00
+
+### Finding 4 — SourceHut and Azure SSH remotes receive invalid commit URLs
+
+- starting the work on 'provider transport normalization for commit links' at 17:47:43-07:00
+        - added `commit_links::canonical_repository_url(provider, remote_url)` as the one transport→HTTPS mapping, per Decision 9's "one consolidated URL authority"
+                - Azure DevOps `v3/{org}/{project}/{repo}` SSH → `https://dev.azure.com/{org}/{project}/_git/{repo}`
+                - SourceHut → the `git.sr.ht` service host
+                - AWS CodeCommit → its `v1/repos/` endpoint (still no browser URL, so no `commit_url`)
+                - everything else → its provider browser base
+        - `remote_observation::provider_https_git_url` now reads that same function and lost its duplicate per-flavor URL builder and its duplicate `remote_git_path` parser, so ref advertisement and browser links cannot drift
+                - its existing canonical-endpoint test still passes unchanged, which is the cross-consumer proof
+                - the provider gate is now keyed on `GitHostingProvider::from_url(&remote.fetch_url)` rather than the stored `api_flavor`; `api_flavor` is itself derived from that same call, so production behavior is identical
+        - corrected `GitHostingProvider::SourceHut`'s `browser_base_url` from `https://sr.ht` to `https://git.sr.ht`; the site root serves no repository page, and leaving the metadata wrong would have re-created the same drift
+        - Azure DevOps HTTP(S) remotes keep their configured origin, so the legacy `{org}.visualstudio.com` form links to itself instead of losing the organization; an Azure SSH path that is not the three-segment `v3` collection form now yields no URL rather than a fabricated one
+        - added a 21-row table-driven unit test `every_provider_transport_form_builds_its_repository_and_commit_url` covering every recognized provider × transport form (repository page and commit route), plus `azure_ssh_paths_outside_the_v3_collection_form_have_no_url`
+        - added L1 `linking::ssh_only_provider_remotes_link_to_their_canonical_web_urls` in `sniff/lib/tests/recent_commits.rs`, exercising SourceHut and Azure SSH remotes through `RecentCommits::collect` so containment and URL selection are proven together
+        - the Azure and SourceHut `/commit/<sha>` routes come from the pre-existing `GitHostingProvider::commit_path_segment` table and were **not** independently confirmed; no network calls were made to verify them
+        - GitNexus reported CRITICAL upstream risk for `parse_remote_identity` and `provider_https_git_url`, but both verdicts resolve to misindexed files in Darkmatter and Claudine; confirming text searches established the real caller sets inside the Sniff area, and `parse_remote_identity`'s behavior is unchanged
+        - not addressed, flagged for the author: `RepositoryLink::owner_repo` still reports the raw `v3/...` path for Azure SSH remotes; `parse_org_repo` still reports `22` as the org for `ssh://…:22/…` (the pre-existing defect the review noted); Gitea/Forgejo/Codeberg still produce no commit URL
+        - gates (sniff area only): `just test` = 2,748 passed, 0 failed, 24 skipped; `cargo nextest run -p sniff --features remote` = 1,902 passed, 0 failed, 15 skipped; `just lint`, `just doctest` (96 passed), and both `--all-targets -D warnings` clippy runs clean
+- work completed for 'provider transport normalization for commit links' at 18:03:51-07:00
+
+### Finding 5 — The Level 2 test does not prove the normative style-to-span mapping
+
+- starting the work on 'level 2 style-to-span mapping' at 18:03:58-07:00
+        - split the recent-commits Level 2 coverage into two tests in `sniff/cli/tests/level2_recent_commits_rendering.rs`
+                - the existing 60-column test keeps word-boundary wrapping and markup-leak coverage
+                - the new `level2_recent_commits_styles_and_links_map_to_their_spans_in_tmux` proves the normative style-to-span mapping in a 200-column pane, where the linked header fits on one row so per-row decoding is meaningful
+        - added a captured-row decoder to that test binary: each tmux row is decoded into cells carrying the SGR attributes (bold/dim/italic/foreground, including the bright and 256-color spellings of blue) and the OSC8 target in force at that character
+                - assertions therefore name a token and the style it must carry, rather than matching escape spellings that tmux re-emits at its own discretion
+        - gave the new test a fixture repository with a configured `origin` URL and a locally written `refs/remotes/origin/main`, which is all the linking path needs — containment is decided from local Git data, so the report gains a `commit_url` with no network access
+                - the previous fixture had no containing remote ref, so the commit-hash link path had never been exercised at Level 2
+        - the new test pins the styling table in `sniff/docs/topics/repo/recent-commits.md` § Styling span by span: exactly two bold runs on the header (short hash, then the whole `{time} {day}` label), exactly one italic run (`at`), exactly one blue run (`feat(cli)`), exactly one dim run (`cli`), unstyled brackets, and `Details:` / `Files Impacted:` bold with their indent unstyled
+                - dim and italic had no Level 2 coverage at all before
+        - both link targets are now proved against the exact URL and anchored to their own span — the commit URL immediately around the bold hash, the `file://` URL on the `src/main.rs` path — in whichever form the backend supports (OSC8, or the documented `[text](url)` fallback tmux takes)
+                - the capability gate records which branch ran and asserts two proofs were made, so it cannot quietly reduce the test to nothing
+        - removed the three superseded assertions from the wrapping test (a bold SGR anywhere in the frame, a blue SGR anywhere in the frame, and any OSC8 or any `](file` anywhere in the frame)
+        - non-vacuity verified by perturbing `recent_commits/render.rs` nine ways and restoring after each: hash not bold, hash-link path disabled, operation not blue, scope losing `<dim>`, `at` bold instead of italic, time label not bold, section labels not bold, file-link path disabled, and bold additionally applied to the heading
+                - all nine turned the new test red; the deleted whole-frame assertions would have stayed green under at least seven of them
+        - gates (sniff area only): `just test-l2 --test level2_recent_commits_rendering` = 2 passed, 0 skipped (real tmux 3.7b, not a gated skip); full `just test-l2` = 6 passed; `just test` = 2,748 passed, 0 failed, 24 skipped; `just lint` clean; `cargo clippy -D warnings --all-targets` clean for `sniff`, `sniff-cli`, and `sniff-cli --features test-fixtures` (the last is the configuration that actually compiles the L2 target)
+- work completed for 'level 2 style-to-span mapping' at 18:29:48-07:00
+
+### Consolidated Verification
+
+- after all five findings were implemented serially, the whole set was re-verified together from `sniff/`, because each subagent had gated against a different intermediate state
+        - `just test` — 2,748 passed, 0 failed, 24 skipped
+        - `cargo nextest run -p sniff --features remote` — 1,902 passed, 0 failed, 15 skipped
+        - `just test-l2` — 6 passed, 0 failed, 855 skipped (both recent-commits L2 tests ran for real against tmux)
+        - `just lint` — clean
+        - `cargo clippy -p sniff --all-targets -- -D warnings` — clean
+        - `cargo clippy -p sniff-cli --all-targets -- -D warnings` — clean
+        - `cargo clippy -p sniff-cli --features test-fixtures --all-targets -- -D warnings` — clean; this is the configuration that actually compiles the L2 target
+- the three known pre-existing `redundant_closure` warnings in `lib/tests/remote_observation.rs` and `lib/tests/focused_provider.rs` that the review recorded as unrelated lint debt did not surface in any gate and were not touched
+- testing stayed on the local macOS host; no OS-specific code paths were introduced by these findings
+        - the hash-range, duration, and conventional-commit fixes are platform-neutral
+        - the commit-link normalization is pure string handling over Git remote URLs, which are not path-shaped
+        - the Level 2 test decodes terminal output through the existing tmux harness, which already carries its own platform gating
+        - native Windows and WSL2 runtime evidence remains pending CI, unchanged from the Phase 6 handoff
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 1 hour 41 minutes. During this implementation all 5 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 5 were fixed, 0 were deferred.
+
+No finding required a performance measurement, so no measurement was deferred for CPU-load reasons and `deferred_perf_measurement` stays unset.
+
+The files changed by this review cycle are:
+
+- `sniff/lib/src/filesystem/git/recent_commits/collect.rs` — hash range built by graph membership (finding 1)
+- `sniff/lib/src/filesystem/git/recent_commits/options.rs` — checked duration parsing and non-panicking window subtraction (finding 3)
+- `sniff/lib/src/filesystem/git/types.rs` — breaking-change `!` in the conventional-commit grammar (finding 2) and SourceHut's corrected browser base (finding 4)
+- `sniff/lib/src/filesystem/git/commit_links.rs` — `canonical_repository_url`, the single transport-form normalization (finding 4)
+- `sniff/lib/src/filesystem/git/remote_observation.rs` — reads that shared normalization instead of duplicating it (finding 4)
+- `sniff/lib/tests/recent_commits.rs` — L1 regressions for findings 1, 2, and 4
+- `sniff/cli/tests/cli.rs` — shipped-CLI regressions for findings 2 and 3
+- `sniff/cli/tests/level2_recent_commits_rendering.rs` — the style-to-span and link-target Level 2 proof (finding 5)
+
+Three items were deliberately left for the author rather than fixed here, each recorded under its finding above: `RepositoryLink::owner_repo` still reports the raw `v3/...` path for Azure SSH remotes, `parse_org_repo` still reports `22` as the org for `ssh://…:22/…` (the pre-existing defect the review itself flagged), and Gitea/Forgejo/Codeberg still produce no commit URL. None of them is a review finding; all three are adjacent scope this cycle did not own.
+
+The implementation is complete and ready for review.
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-09-17T20:20:11-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-sniff/sniff/features/2026-09-15-recent-commits/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- the review contains one finding, so the orchestrator runs a single subagent serially rather than a parallel fan-out
+- starting the work on 'Encoded Azure SSH path segments are double-encoded in commit URLs' at 20:21:18
+        - orchestrator read of the code confirms the review's trace: `parse_remote_identity` keeps `url::Url::path()` escapes, and only the Azure DevOps branch of `canonical_repository_url` re-encodes segments, so the fix is local to that branch
+        - the other providers splice the path verbatim, so they already carry exactly one encoding layer and are not touched
+        - delegated to a single `rust-developer` subagent that owns the log entries for this finding
+        - GitNexus upstream impact on `canonical_repository_url` (CLI fallback): risk LOW, epistemic exact, 7 impacted symbols; direct callers are `repository_link` (commit_links.rs) and `provider_https_git_url` (remote_observation.rs), with `commit_url` and `branch_exists_on_remote_at` downstream; one affected process (`branch_exists_on_remote_at → unsupported_provider_git_endpoint`)
+                - confirmed by grep: `canonical_repository_url` has exactly those two call sites, both already inside the existing test tables
+        - tests were written first and run against the unfixed code, and all three sites went red with the review's exact output
+                - `commit_links::tests::urls::every_provider_transport_form_builds_its_repository_and_commit_url`: `left: Some("https://dev.azure.com/acme/My%2520Project/_git/My%2520Repo")`, `right: Some("https://dev.azure.com/acme/My%20Project/_git/My%20Repo")` for `ssh://git@ssh.dev.azure.com/v3/acme/My%20Project/My%20Repo`
+                - `recent_commits::linking::encoded_azure_ssh_remote_path_is_not_double_encoded`: `left: "https://dev.azure.com/acme/My%2520Project/_git/My%2520Repo/commit/<sha>"` from a real `RecentCommits::collect` against a fixture repository with that remote and a containing `refs/remotes/origin/main`
+                - `remote_observation::tests::ssh_only_providers_map_to_canonical_https_git_endpoints`: `left: "https://dev.azure.com/acme/My%2520Project/_git/My%2520Repo"` through the HTTPS Git endpoint consumer
+        - fix: inside the Azure DevOps branch of `canonical_repository_url`, each of the three `v3/{organization}/{project}/{repository}` segments is percent-decoded with `urlencoding::decode` before the single `urlencoding::encode`; a decode error (an escape that is not valid UTF-8) falls back to encoding the segment as raw, so nothing panics
+                - decoding a raw SCP-style segment is an identity, so one path serves both transport forms; the WHY comment at the decode line records that Azure DevOps forbids `%` in organization, project, and repository names, which is what makes decoding safe on raw input
+                - `parse_remote_identity`, `repository_link`, the non-Azure providers, and `remote_observation.rs` behavior were not changed
+                - the `canonical_repository_url` doc gained one clause stating that Azure segments carry exactly one percent-encoding layer whether the remote is URL-form or SCP-style
+        - files changed
+                - `sniff/lib/src/filesystem/git/commit_links.rs` — the decode-then-encode fix, the doc clause, and five new rows in `every_provider_transport_form_builds_its_repository_and_commit_url`: URL form with `%20`, SCP form with raw spaces, `vs-ssh.visualstudio.com:22` URL form with `%20`, URL form with `Proj%C3%A9`, and SCP form with raw `Projé`; every expected value is an exact string so `%20` cannot be confused with `%2520`
+                - `sniff/lib/tests/recent_commits.rs` — `encoded_azure_ssh_remote_path_is_not_double_encoded` beside `ssh_only_provider_remotes_link_to_their_canonical_web_urls`, using the review's exact remote, asserting `remote == true`, the exact `commit_url`, and that the string contains no `%25`
+                - `sniff/lib/src/filesystem/git/remote_observation.rs` — one added case in the `ssh_only_providers_map_to_canonical_https_git_endpoints` table (test-only; no behavior change in that file)
+        - gates (sniff area only, from `sniff/`)
+                - `cargo nextest run -p sniff --features remote --lib commit_links` — 15 passed, 0 failed
+                - `cargo nextest run -p sniff --features remote --test recent_commits` — 34 passed, 0 failed
+                - `cargo nextest run -p sniff --features remote --lib remote_observation::tests::ssh_only_providers_map_to_canonical_https_git_endpoints` — 1 passed
+                - `just test` — 2,749 passed, 0 failed, 24 skipped (one more than the 2,748 of cycle 1: the new `recent_commits` regression)
+                - `just lint` — exit 0, no warnings
+                - `cargo clippy -p sniff --all-targets -- -D warnings` — exit 0; `cargo clippy -p sniff-cli --all-targets -- -D warnings` — exit 0
+        - adjacent scope noticed and deliberately not fixed: `RepositoryLink::owner_repo` still reports the raw `v3/…` path for Azure SSH remotes (recorded in cycle 1 as left for the author), and with encoded names that path is now transport-dependent too — `v3/acme/My%20Project/My%20Repo` from the URL form versus `v3/acme/My Project/My Repo` from the SCP form; not a review finding
+        - no formatter was run; the new code matches the surrounding style by hand
+- work completed for 'Encoded Azure SSH path segments are double-encoded in commit URLs' at 20:30:35
+- orchestrator verification after the subagent returned at 20:31:52
+        - re-ran `cargo nextest run -p sniff --features remote --test recent_commits` (34 passed, 0 failed, including `linking::encoded_azure_ssh_remote_path_is_not_double_encoded`) and `--lib commit_links` (15 passed, 0 failed)
+        - read the diff: the behavior change is the decode-then-encode closure inside the Azure DevOps arm of `canonical_repository_url`; `parse_remote_identity` and every other provider arm are untouched
+        - no OS-specific risk: the change is pure string handling over Git remote URLs, so no `just cross-check` run was made and cross-platform evidence stays with CI as in cycle 1
+
+### Successful Completion
+
+The implementation of review cycle 2 has completed successfully in 11 minutes. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no finding was deferred, and no finding required a performance measurement, so `deferred_perf_measurement` stays unset
+
+The files changed by this review cycle are:
+
+- `sniff/lib/src/filesystem/git/commit_links.rs` — Azure DevOps SSH segments are percent-decoded before the single encode, plus five encoded and raw-name rows in the provider transport table
+- `sniff/lib/tests/recent_commits.rs` — `encoded_azure_ssh_remote_path_is_not_double_encoded`, the `RecentCommits::collect` regression on the review's exact remote
+- `sniff/lib/src/filesystem/git/remote_observation.rs` — one encoded Azure case in the HTTPS Git endpoint table (test-only)
+
+`RepositoryLink::owner_repo` still reports the raw `v3/…` path for Azure SSH remotes, now transport-dependent for encoded names; this was already recorded as author-owned adjacent scope in cycle 1 and is not a review finding.
+
+The implementation is complete and ready for review.
