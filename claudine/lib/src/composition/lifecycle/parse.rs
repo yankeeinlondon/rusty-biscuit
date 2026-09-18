@@ -380,8 +380,11 @@ pub fn parse_task_action_stack_with_order(
 /// Parse a single action written in the standard positional/key-value grammar.
 ///
 /// A task's `side_effect:` value is one action rather than a stack, so it is
-/// parsed here instead of through [`parse_task_action_stack`]. `property` names
-/// the authoring key in diagnostics.
+/// parsed here instead of through [`parse_task_action_stack`]. `property` is
+/// the source-rooted path of the action value itself (`tasks[0].side_effect`,
+/// or a bare `side_effect` in an external `kind: task` document). Diagnostics
+/// hang directly off it — `tasks[0].side_effect.set` — with no `action[0]`
+/// segment, because the author wrote no action list to index into.
 ///
 /// ## Errors
 ///
@@ -422,6 +425,114 @@ pub(crate) fn parse_single_action_with_order(
         0,
         authored_set_order,
     )
+    .map_err(|error| root_single_action_error(error, property))
+}
+
+/// Drop the `action[0]` segment the shared object parser prefixes onto a
+/// value path, re-rooting it at the single action's own `property`.
+fn root_single_action_error(err: CompositionError, property: &str) -> CompositionError {
+    const INDEXED: &str = "action[0].";
+    let unindex = |path: String| match path.strip_prefix(INDEXED) {
+        Some(rest) => rest.to_string(),
+        None => path,
+    };
+    match err {
+        CompositionError::LifecycleActionInvalidLongForm {
+            source_path,
+            property: owner,
+            action,
+            message,
+            source,
+        } => {
+            let message = match message.strip_prefix(&format!("`{INDEXED}")) {
+                Some(rest) if action == "set" => format!("`{property}.{rest}"),
+                _ => message,
+            };
+            CompositionError::LifecycleActionInvalidLongForm {
+                source_path,
+                property: owner,
+                action,
+                message,
+                source,
+            }
+        }
+        CompositionError::LifecycleProxyWithNotMapping {
+            source_path,
+            property,
+            path,
+            actual,
+        } => CompositionError::LifecycleProxyWithNotMapping {
+            source_path,
+            property,
+            path: unindex(path),
+            actual,
+        },
+        CompositionError::LifecycleProxyWithWholeMapping {
+            source_path,
+            property,
+            path,
+            raw,
+        } => CompositionError::LifecycleProxyWithWholeMapping {
+            source_path,
+            property,
+            path: unindex(path),
+            raw,
+        },
+        CompositionError::LifecycleProxyWithDynamicKey {
+            source_path,
+            property,
+            path,
+            key,
+        } => CompositionError::LifecycleProxyWithDynamicKey {
+            source_path,
+            property,
+            path: unindex(path),
+            key,
+        },
+        CompositionError::LifecycleSetPositionalRemoved {
+            source_path,
+            property,
+            path,
+        } => CompositionError::LifecycleSetPositionalRemoved {
+            source_path,
+            property,
+            path: unindex(path),
+        },
+        CompositionError::LifecycleSetLongFormRemoved {
+            source_path,
+            property,
+            path,
+        } => CompositionError::LifecycleSetLongFormRemoved {
+            source_path,
+            property,
+            path: unindex(path),
+        },
+        CompositionError::LifecycleSetNotMapping {
+            source_path,
+            property,
+            path,
+            actual,
+        } => CompositionError::LifecycleSetNotMapping {
+            source_path,
+            property,
+            path: unindex(path),
+            actual,
+        },
+        CompositionError::LifecycleSetInvalidKey {
+            source_path,
+            property,
+            path,
+            key,
+            message,
+        } => CompositionError::LifecycleSetInvalidKey {
+            source_path,
+            property,
+            path: unindex(path),
+            key,
+            message,
+        },
+        other => other,
+    }
 }
 
 /// Parse a raw stack (`Vec<Value>`) into typed form for the given event.

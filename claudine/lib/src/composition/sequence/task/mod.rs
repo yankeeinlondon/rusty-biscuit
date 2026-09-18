@@ -704,14 +704,14 @@ impl TaskExecution<'_> {
             LifecycleSignal::Start,
             action,
             &self.task.origin_path,
-            "side_effect",
+            &self.task.diagnostic.action_property,
             authored_set_order,
         ) {
             Ok(parsed) => parsed,
             Err(error) => {
                 return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
                     TaskStage::Primary,
-                    &error,
+                    &self.with_owning_excerpt(error),
                 ));
             }
         };

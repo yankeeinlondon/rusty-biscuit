@@ -2626,6 +2626,68 @@ mod authored_set_order {
     }
 
     #[test]
+    fn a_json_task_document_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "task.json",
+            concat!(
+                "{\"kind\": \"task\", \"side_effect\": {\"set\": {",
+                "\"z_last_lexically\": true, \"a_first_lexically\": false",
+                "}}}\n",
+            ),
+        );
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.json" }));
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
+    fn a_json5_task_document_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "task.json5",
+            concat!(
+                "{\n",
+                "  kind: 'task',\n",
+                "  side_effect: {set: {\n",
+                "    z_last_lexically: true,\n",
+                "    a_first_lexically: false,\n",
+                "  }},\n",
+                "}\n",
+            ),
+        );
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.json5" }));
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
+    fn a_json_group_member_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "group.json",
+            concat!(
+                "{\"kind\": \"group\", \"name\": \"bundle\", \"tasks\": [",
+                "{\"side_effect\": {\"set\": {",
+                "\"z_last_lexically\": true, \"a_first_lexically\": false",
+                "}}}]}\n",
+            ),
+        );
+        let source = one_step_source(
+            dir.path(),
+            json!({ "name": "alpha", "group": "group.json" }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
     fn a_referenced_formal_sequence_retains_authored_order() {
         let dir = TempDir::new().unwrap();
         write_authored(
@@ -3069,6 +3131,98 @@ mod task_stack_diagnostics {
             Path::new(&source),
             "tasks[0].group.tasks[0].setup[0].action[0].set.metadata.files[0]",
             Some("{{unknown_root}}"),
+        );
+        assert!(runtime.snapshot().mutations.is_empty());
+    }
+    /// A primary `side_effect:` is one action, not a stack, so its parse
+    /// failure hangs off the task's own `side_effect` property with no
+    /// `action[0]` segment — the same root its evaluation failures use.
+    #[test]
+    fn a_malformed_primary_side_effect_mapping_is_rejected_at_the_task_rooted_property() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    side_effect:\n",
+                "      set: ready\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, _) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].side_effect.set",
+            Some("set: ready"),
+        );
+        assert_eq!(outcome.error.as_ref().unwrap().stage, TaskStage::Primary);
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+    }
+
+    #[test]
+    fn a_removed_primary_side_effect_form_in_a_group_member_is_rejected_at_its_nested_root() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    group:\n",
+                "      name: bundle\n",
+                "      tasks:\n",
+                "        - side_effect:\n",
+                "            set: [ready, \"yes\"]\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, _) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].group.tasks[0].side_effect.set",
+            Some("set: [ready, \"yes\"]"),
+        );
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+    }
+
+    /// An external `kind: task` document is its own root, so the property is a
+    /// bare `side_effect.set` in *that* file, and a YAML data document has no
+    /// frontmatter block to excerpt.
+    #[test]
+    fn a_malformed_external_task_side_effect_names_the_owning_document() {
+        let dir = TempDir::new().unwrap();
+        let task_path = dir.path().join("task.yaml");
+        write_authored(
+            dir.path(),
+            "task.yaml",
+            concat!("kind: task\n", "side_effect:\n", "  set: ready\n"),
+        );
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.yaml" }));
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, _) = run(&mut fixture);
+
+        assert_stack_failure(&outcome, &task_path, "side_effect.set", None);
+        assert!(
+            !failure_message(&outcome).contains("seq.md"),
+            "the invoking sequence is not the authoring document: {}",
+            failure_message(&outcome),
         );
         assert!(runtime.snapshot().mutations.is_empty());
     }

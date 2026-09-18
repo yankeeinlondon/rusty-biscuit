@@ -193,6 +193,9 @@ pub use toml as toml_crate;
 #[cfg(feature = "yaml")]
 pub use serde_yaml_ng;
 
+#[cfg(feature = "json5")]
+pub use json_five;
+
 /// YAML value type for direct manipulation.
 #[cfg(feature = "yaml")]
 pub use serde_yaml_ng::Value as YamlValue;

@@ -275,11 +275,21 @@ impl RuntimeSet {
     }
 
     /// Type a lifecycle `set:` mapping with order retained by the frontmatter parser.
+    ///
+    /// Entries are put in authored order before any check runs, so the error
+    /// returned for a mapping with several invalid keys or values names the
+    /// first authored one rather than the first in `authored`'s own order.
     pub fn new_with_order(
         mut authored: IndexMap<String, serde_json::Value>,
         authored_order: Option<&[String]>,
     ) -> Result<Self, RuntimeSetError> {
-        for key in authored.keys() {
+        let mut ordered: Vec<_> = authored_order
+            .into_iter()
+            .flatten()
+            .filter_map(|key| authored.shift_remove_entry(key))
+            .collect();
+        ordered.extend(authored);
+        for (key, _) in &ordered {
             if key.is_empty() {
                 return Err(RuntimeSetError::EmptyKey);
             }
@@ -287,12 +297,6 @@ impl RuntimeSet {
                 return Err(RuntimeSetError::DynamicKey(key.clone()));
             }
         }
-        let mut ordered: Vec<_> = authored_order
-            .into_iter()
-            .flatten()
-            .filter_map(|key| authored.shift_remove_entry(key))
-            .collect();
-        ordered.extend(authored);
         let mut typed = IndexMap::with_capacity(ordered.len());
         for (key, value) in ordered {
             let value = type_with_value(&value, &key).map_err(|error| match error {

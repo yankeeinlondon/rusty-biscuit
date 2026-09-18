@@ -63,11 +63,12 @@ impl SourceFormat {
 
 /// A loaded data document plus the authored key order of its mappings.
 ///
-/// [`Self::orders`] is populated only for YAML, the authoring format for
-/// `kind: task` / `kind: group` / `kind: group-catalog` documents. The other
-/// formats record no key order — JSON objects are unordered by definition and a
-/// line-delimited file's root is the list — so their index is empty and every
-/// consumer keeps the canonical `serde_json::Map` order it already had.
+/// [`Self::orders`] is populated for YAML, JSON, and JSON5 — every format a
+/// `kind: task` / `kind: group` / `kind: group-catalog` document may be
+/// authored in — so a lifecycle `set:` keeps its source order whichever one
+/// the author chose. A line-delimited file records no order: its root is the
+/// list and it cannot author a task or group document, so its index is empty
+/// and consumers keep canonical `serde_json::Map` order.
 #[derive(Debug, Clone, Default)]
 pub struct LoadedDocument {
     /// The document in the common value model.
@@ -110,9 +111,19 @@ pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
                     source: SequenceLoadCause::Json5(e),
                 }
             })?;
+            // `value` is built by the same parser from the same text, so the
+            // order pass cannot fail where the value parse succeeded.
+            let orders = biscuit_file::json_five::from_str(json5.raw()).map_err(|e| {
+                CompositionError::SequenceExternalLoad {
+                    context: context(),
+                    source: SequenceLoadCause::Json5(biscuit_file::Json5Error::Parse(
+                        e.to_string(),
+                    )),
+                }
+            })?;
             Ok(LoadedDocument {
                 value: json5.as_json_value().clone(),
-                orders: MappingOrders::default(),
+                orders,
             })
         }
         SourceFormat::LineDelimited => Ok(LoadedDocument {

@@ -831,9 +831,10 @@ pub enum CompositionError {
     LifecycleSetPositionalRemoved {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event or indexed stack item.
+        /// Owning event, indexed stack item, or task `side_effect` property.
         property: String,
-        /// Path within the stack item, rooted at `action[N].set`.
+        /// Path within the stack item, rooted at `action[N].set`; a task's single
+        /// `side_effect` action has no index, so its path is rooted at `set`.
         path: String,
     },
 
@@ -846,9 +847,10 @@ pub enum CompositionError {
     LifecycleSetLongFormRemoved {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event or indexed stack item.
+        /// Owning event, indexed stack item, or task `side_effect` property.
         property: String,
-        /// Path within the stack item, rooted at `action[N].set`.
+        /// Path within the stack item, rooted at `action[N].set`; a task's single
+        /// `side_effect` action has no index, so its path is rooted at `set`.
         path: String,
     },
 
@@ -861,9 +863,10 @@ pub enum CompositionError {
     LifecycleSetNotMapping {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event or indexed stack item.
+        /// Owning event, indexed stack item, or task `side_effect` property.
         property: String,
-        /// Path within the stack item, rooted at `action[N].set`.
+        /// Path within the stack item, rooted at `action[N].set`; a task's single
+        /// `side_effect` action has no index, so its path is rooted at `set`.
         path: String,
         /// The authored payload type or named unsupported whole-value form.
         actual: String,
@@ -878,7 +881,7 @@ pub enum CompositionError {
     LifecycleSetInvalidKey {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event or indexed stack item.
+        /// Owning event, indexed stack item, or task `side_effect` property.
         property: String,
         /// The deepest representable `set` path.
         path: String,

@@ -2168,6 +2168,43 @@ fn runtime_set_invalid_keys_fail_even_below_a_false_guard() {
     parse_lifecycle_config(&valid, dummy_path()).expect("values are not evaluated while parsing");
 }
 
+/// Each case authors its invalid keys in the reverse of their lexical order,
+/// so validating the canonical map would diagnose the other key.
+#[test]
+fn runtime_set_diagnoses_the_first_authored_invalid_key() {
+    let cases = [
+        (
+            "\x20             \"z_{{ one }}\": 1\n\
+             \x20             \"a_{{ two }}\": 2\n",
+            "z_{{ one }}",
+        ),
+        (
+            "\x20             \"z_$(printf one)\": 1\n\
+             \x20             \"\": 2\n",
+            "z_$(printf one)",
+        ),
+    ];
+
+    for (mapping, expected_key) in cases {
+        let markdown = format!(
+            "---\n\
+             start:\n\
+             \x20 stack:\n\
+             \x20   - action:\n\
+             \x20       - set:\n\
+             {mapping}\
+             ---\nbody\n"
+        );
+
+        let error = lifecycle_from_markdown(&markdown).unwrap_err();
+
+        let CompositionError::LifecycleSetInvalidKey { key, .. } = &error else {
+            panic!("expected an invalid-key error, got {error:?}");
+        };
+        assert_eq!(key, expected_key);
+    }
+}
+
 #[test]
 fn runtime_set_reports_the_full_nested_value_path() {
     let fm = json!({"start": {"stack": [{
