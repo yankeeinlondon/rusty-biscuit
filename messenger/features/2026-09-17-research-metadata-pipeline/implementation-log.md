@@ -237,6 +237,14 @@ docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
     - .claude/skills/messenger/SKILL.md
     - .claude/skills/messenger/research-contract.md
+source_files_during_phase_7: []
+docs_updated_during_phase_7:
+    - messenger/features/2026-09-17-research-metadata-pipeline/plan.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/implementation-log.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spec.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/messenger/research-contract.md
 packages:
     - messenger
     - messenger-cli
@@ -1289,3 +1297,94 @@ documented, as the corpus test requires for every `Rule`).
 
 - Package-area `just` recipes for refresh/publish/cleanup: Phase 8 Wave 21.
 - The skill projection `platform-metadata.md`: Phase 8.
+
+## Phase 7
+
+### Outcome: blocked on required human input
+
+No Phase 7 task is complete, and none is checked off in the plan. Every wave
+(16–20) needs a live research run, and the checkpoint needs a person to
+approve the first baseline. The specification makes both conditional on
+things only a person can supply:
+
+- "Before live research starts, require configured per-platform limits for
+  elapsed time and agent invocations" and "No numeric time or invocation
+  defaults are established by this specification; values must be supplied
+  before a live run." (spec, execution budget)
+- "A human maintainer must approve substantive changes … The initial baseline
+  requires this approval." (spec, review)
+
+The Phase 6 `human_review_items` asking for those limits and an approver's
+name were still unanswered at the start of this phase: the spec had no
+ruling, and the git history since Phase 6 has no decision. This session is
+non-interactive, so they cannot be obtained here. Inventing limits, running
+agents without them, or writing the platform documents by hand would each
+skip the budget, the three-pass workflow, or the human approval the spec
+requires. None was done. No live research ran, no budget was consumed, and
+nothing was written to `messenger/.research-state/` or to accepted research.
+
+### Readiness work done instead (nothing live, nothing persisted)
+
+Goal: make sure that once limits and an approver are given, the first live
+run is not lost to a tooling problem.
+
+- **Read-only checks in the worktree** (binaries built from this worktree):
+  - `messenger research runs`: no runs.
+  - `messenger research prepare --dry-run`: all five platforms are due
+    (`no accepted document`).
+  - `messenger research validate`: the shipped legacy documents fail
+    `SR-SCHEMA-BINDING`. Expected: they are reconciliation input only.
+- **Rehearsal in a throwaway Git repository** under `/tmp`, holding a copy of
+  `messenger/docs`. It was deleted afterwards, and the worktree has no state
+  area. The limits used (60 s, 1 invocation) were placeholders for this
+  rehearsal only; they are not proposed values.
+  - `prepare <platform>` for all five platforms: exit 0. Each run has a
+    non-empty `identification.md`, `_fleet.md`, `curated-sources.md` (4–6
+    sources), `previous.md` (legacy prose), and per-pass prompts. No host
+    paths appear in any input.
+  - `claudine budget init …` exactly as printed, all five platforms: exit 0.
+    Each ledger reads `stopped, 0/1 invocations, 0.0/60.0 s`.
+  - `claudine sequence --yolo --dry-run run.md`, all five platforms: all six
+    steps compose (discovery → reconcile → sources → validation → review →
+    review-check). The `validation` shell step then correctly failed each
+    run: outputs are missing, so the run is marked `failed`, which shows
+    that stages are judged by their outputs, not by exit codes.
+
+### Findings (recorded in the messenger skill's research-contract.md)
+
+1. **The installed `claudine` is too old.** `~/.cargo/bin/claudine` has no
+   `budget` subcommand, so the printed `claudine budget init` fails unless
+   this worktree's `target/debug` comes first on PATH. The Phase 6 note
+   already required this for `messenger`; it applies to `claudine` too.
+2. **`run.md` names no agent.** Claudine's live sequence path refuses an
+   unresolved agent when no terminal is attached (`AgentResolutionFailed`,
+   `claudine/cli/src/commands/wrap/sequence/mod.rs`). With a terminal it
+   opens a picker, and the wait is charged to the budget. Adding a provider
+   flag fixes this: with `--claude`, the dry-run resolves to `Claude / opus`
+   for every step. Which agent and model research the fleet is an operator
+   choice the spec does not make, so it was added as a review item instead
+   of being hard-coded.
+3. **`sequence --dry-run` runs `shell:` steps.** It is not side-effect free
+   for a prepared run: `check-run` marks the run `failed`. Rehearse only in a
+   throwaway copy.
+
+No code changed. Findings 1 and 3 are procedure. Finding 2 could become a
+`prepare --agent` option, pending the ruling (see spec `human_review_items`).
+
+### Requirement-to-test mapping (Phase 7)
+
+This phase has no code or schema change, so no new tests were added. Phase 7
+is covered by evidence, not by tests: each wave needs one live run, with
+agent outputs, validation, delta and evidence review, and human approval.
+None of this could be produced here. The tooling it depends on is already
+covered by the Phase 6 suites (`research_refresh`,
+`research_lifecycle_cli`), which pass. The rehearsal above exercised the real
+shipped roster, contract, and prompts through the normal invocation path
+(`prepare` → `budget init` → `sequence`).
+
+### Gates (macOS)
+
+- `just test` in `messenger/`: 658 passed, 2 skipped (both skips predate this
+  phase).
+- `just lint` in `messenger/`: exit 0.
+- No cross-OS runs: nothing platform-sensitive changed.

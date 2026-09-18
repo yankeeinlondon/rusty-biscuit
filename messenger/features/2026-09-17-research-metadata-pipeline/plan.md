@@ -238,6 +238,14 @@ docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
     - .claude/skills/messenger/SKILL.md
     - .claude/skills/messenger/research-contract.md
+source_files_during_phase_7: []
+docs_updated_during_phase_7:
+    - messenger/features/2026-09-17-research-metadata-pipeline/plan.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/implementation-log.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spec.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/messenger/research-contract.md
 packages:
     - messenger
     - messenger-cli

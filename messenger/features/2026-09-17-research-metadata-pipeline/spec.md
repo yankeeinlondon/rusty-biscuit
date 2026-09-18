@@ -38,22 +38,36 @@ references:
 human_review: true
 human_review_items:
     - |-
-        **Supply the time and agent limits for live research, and confirm who approves the first baseline.**
+        **Phase 7 has not started: supply the research limits and name the approver.** Still unanswered since Phase 6; this is now the blocker.
 
-        **Why decide now:** Phase 7 is the first phase that runs real research agents. The specification forbids a live run until a person gives two numbers for each platform: the most wall-clock time a platform's research may use, and the most agent launches it may use. There are deliberately no defaults. The Phase 6 tooling refuses to start without both (`messenger research prepare --max-seconds N --max-invocations N`). Phase 7 also ends with a person approving all five platforms' research; the approver's name is written into the committed review records.
+        **Why decide now:** Phase 7 builds the first reviewed research for Discord, Telegram, Slack, WhatsApp, and Signal. Each platform's research is a run of AI research agents. The specification forbids starting a run until a person sets two numbers for that platform: the most wall-clock time the run may use, and the most agent launches it may use. There are deliberately no defaults. The specification also requires a named person to approve the first published research. The Phase 7 session was non-interactive, so it could not ask. It ran no research, spent no budget, and changed no research files. It checked the tooling offline instead, and the tooling is ready (see the Phase 7 log).
 
         Options:
-        - **A. Give per-platform limits now** (for example 3600 seconds and 12 agent launches per platform, the same for all five).
-          - Pros: Phase 7 can start immediately; one number to reason about.
-          - Cons: Signal and WhatsApp may need less, Discord and Slack more; unused allowance is simply not spent.
-        - **B. Give different limits per platform.**
+        - **A. Same limits for every platform** (for example 3600 seconds and 12 agent launches each).
+          - Pros: Phase 7 can start at once; one pair of numbers to reason about.
+          - Cons: may be too much for Signal and WhatsApp or too little for Discord and Slack. Unused allowance is not spent, and a run that runs out can be given more later.
+        - **B. Different limits per platform.**
           - Pros: tighter cost control.
-          - Cons: more to decide up front, with little evidence yet about how long each platform takes.
-        - **C. Run one platform first (Discord) with small limits, then set the rest from what it used.**
-          - Pros: real data before committing to numbers; the budget ledger records exactly what was used.
-          - Cons: slower start; Discord alone cannot be published (the first publication needs all five platforms together), so its result waits in local state.
+          - Cons: little evidence yet about what each platform needs.
+        - **C. Run Discord first with small limits, then set the rest from what it actually used.**
+          - Pros: measured usage instead of guesses; the budget ledger records exactly what was used.
+          - Cons: slower start; Discord's result waits in local state because the first publication needs all five platforms.
 
-        **Recommendation: C.** It costs one small run and replaces guesses with measured usage. Please also name the maintainer who will approve the baseline.
+        **Recommendation: C.** One small run replaces guesses with measurements. Please also give the name to record as the approver.
+    - |-
+        **Choose which AI agent (and optionally which model) runs the research.**
+
+        **Why decide now:** the prepared research runs name no agent. Tested on 2026-09-18: when nobody is at the terminal, Claudine stops before the first step with "agent resolution failed". When someone is at the terminal, it asks which agent to use, and the time spent waiting on that question is charged to the platform's time limit. The agent and model are also recorded in every research document. The specification does not choose one.
+
+        Options:
+        - **A. Add the agent to the command by hand** (for example `claudine sequence --claude …`). Tested; with it, every step resolves to Claude (model opus).
+          - Pros: no code change; the operator chooses on each run.
+          - Cons: easy to forget; the command `prepare` prints does not work unattended as written.
+        - **B. Add an `--agent` option to `messenger research prepare`** that records the choice in the run and writes it into the printed commands.
+          - Pros: the printed commands work unattended; the choice is saved with the run and reused on resume.
+          - Cons: a small code change and tests before Phase 7 starts.
+
+        **Recommendation: B**, with Claude as the operator's choice unless you prefer another agent. A research run that stops at its first step wastes a turn and can wrongly look like a research failure.
     - |-
         **Approve the research commands as built**, including three details the design record did not list.
 
@@ -88,17 +102,14 @@ human_review_items:
 
         **Recommendation: A.** Phase 8 requires this evidence anyway, and it is cheaper to find Windows problems before Phase 7's live research depends on them.
 message_to_agent: |-
-    Phase 6 built the refresh and review lifecycle. Read "## Phase 6" in `implementation-log.md` and the "Refresh and review" section of `.claude/skills/messenger/research-contract.md` first.
-    - A live run needs operator limits and a named approver (see human_review_items). Never invent limits.
-    - Per platform: `messenger research prepare <platform> --max-seconds N --max-invocations N` creates `messenger/.research-state/runs/<platform>/<run_id>/` and prints two commands: `claudine budget init ...` and `claudine sequence --yolo --budget-ledger ... run.md`. Run them from the repository root. The sequence's `shell:` steps call `messenger research check-run`, so a `messenger` binary built from this worktree must be first on PATH.
-    - After a run, `messenger research runs` shows its state. Resume a failed stage with `prepare --resume RUN_ID` (at most 2 times, same budget). Claudine exit 76 means exhausted: the run is `exhausted`, never a finished result; only an operator `claudine budget grant` allows resuming.
-    - The first publication needs all five platforms together: `messenger research promote RUN_A RUN_B RUN_C RUN_D RUN_E --approved-by NAME`. Promoting one run alone is refused (it lists the missing platforms) and writes nothing. Leave finished runs `awaiting_review` until all five are ready.
-    - The shipped legacy documents at `messenger/docs/research/platforms/*.md` are reconciliation input only (`previous.md`); they are not a baseline and do not validate.
-    - `promote` never edits the roster. A Pass 3 source-list proposal lands in the review record; applying it to `messenger/docs/platforms.yaml` is a separate human edit.
-    - Commit `publication.json` together with every artifact it lists, which now includes `docs/research/CHANGELOG.md` and `docs/research/reviews/*.json`.
-    - Agents write only into the run directory. If an agent edits an accepted document directly, `generate`, `report`, and `promote` refuse the snapshot until it is restored.
-    - GitNexus: `just gitnexus` timed out behind another analyze (pid 78755) in Phases 5 and 6. Run it, then `detect-changes --scope all`, before committing.
-    - Disk: `/Volumes/coding` ran out mid-build in Phase 6; `just sweep` recovered 79 GiB. Check `df -h /Volumes/coding` before large builds.
+    Phase 7 was attempted on 2026-09-18 and is NOT done: no limits, approver, or agent choice had been supplied, so no live research ran. Before touching Phase 7, read "## Phase 7" in `implementation-log.md` and the "Launching a live run" bullet in `.claude/skills/messenger/research-contract.md`.
+    - Start only once the human_review_items give per-platform limits, an approver, and an agent choice. Never invent them, and never write platform documents by hand in place of a run.
+    - Build `messenger-cli` and `claudine-cli` from this worktree and put `target/debug` first on PATH. The installed `~/.cargo/bin/claudine` has no `budget` subcommand.
+    - Pass a provider flag (for example `--claude`) to the printed `claudine sequence` command, or implement `prepare --agent` if the ruling chooses option B. Without one, a sequence with no terminal stops with `AgentResolutionFailed`.
+    - `claudine sequence --dry-run` still runs the `shell:` steps, which marks a real run `failed`. Rehearse only in a throwaway Git repository holding a copy of `messenger/docs`.
+    - Everything in the Phase 6 message still holds: the first publication is one `promote` with all five run IDs plus `--approved-by`; legacy documents are `previous.md` input only; commit `publication.json` together with every artifact it lists.
+    - GitNexus (`just gitnexus`) was blocked by another analyze in Phases 5 and 6. Run it, then `detect-changes --scope all`, before committing.
+
 ---
 
 # Provider Research Metadata Pipeline
