@@ -94,6 +94,15 @@ Platform research is becoming typed, reviewed metadata (feature
   comes from the newest published review record or local renewal record; a
   generate-only snapshot has neither, so every platform reads
   `no_review_record`.
+- **Selection fails closed**: `StateArea::list` keys each run on the platform
+  directory holding it and returns unreadable records (and records whose
+  platform or run ID disagree with their directory) as errors. Selection turns
+  those into `Skip::UnreadableRun { path, error }` for that platform, never
+  into "no open run". `prepare` and `prepare --resume` hold
+  `runs/prepare.lock` (an OS `File::try_lock`, released on process exit, so no
+  stale lock) across selection and creation; a concurrent second one gets
+  `RefreshError::PrepareBusy` (CLI exit `3`, like the publication lock).
+  It is separate from Claudine's `runs/fleet.lock`.
 - **Integrity rules** (in `check`, beyond validation): same platform, same
   `created`, every chronology ID kept, removed IDs listed in `changes`,
   `last_updated` moves only with a successful check, and a curated source's
@@ -103,6 +112,14 @@ Platform research is becoming typed, reviewed metadata (feature
   `agent`, `model`, and `sources[*].retrieved`; same body hash; no curated
   change; same prompt and schema fingerprints as the last review/renewal; no
   inaccessible check; every URL source rechecked on its recorded date.
+- **Decision inputs**: `refresh::input::{Maintainer, DecisionReason}` are
+  trimmed and never blank. A `Maintainer` also holds no control character
+  (`char::is_control`), because the CHANGELOG renders it on one Markdown line.
+  A `DecisionReason` may span lines: it lives only as JSON in `run.json`.
+  `promote::Request::Human` and `promote::reject` take them, so the library
+  cannot record an unnamed decision. Review and run records deserialize
+  through the same constructors, so an invalid persisted name fails to load.
+  The CLI maps `RefreshError::Input` to exit `2`.
 - **History**: a human promotion adds `docs/research/reviews/{date}-{platform}-
   {run_id}.json` to the same publication; `generate` carries every review
   record forward and renders `CHANGELOG.md` from them (rule `SR-REVIEW`).

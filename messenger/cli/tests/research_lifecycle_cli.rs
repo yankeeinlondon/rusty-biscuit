@@ -265,6 +265,51 @@ fn a_run_goes_from_preparation_to_promotion_through_the_binary() {
 }
 
 #[test]
+fn invalid_decision_inputs_exit_2_before_any_decision_or_publication() {
+    let fleet = Fleet::published();
+    let on = "2026-09-18";
+    let prepared = json_out(&fleet.research(on, &["prepare", "discord", "--max-seconds", "600", "--max-invocations", "8", "--json"]));
+    let run_id = prepared["runs"][0]["run_id"].as_str().expect("run id").to_string();
+    let run_dir = fleet.path(prepared["runs"][0]["run_dir"].as_str().expect("run dir"));
+    fake_passes(&fleet, &run_dir, on);
+    assert_eq!(code(&fleet.research(on, &["check-run", &run_id, "--through", "validation"])), 0);
+    fake_review(&run_dir);
+    assert_eq!(code(&fleet.research(on, &["check-run", &run_id])), 0);
+    let docs = fleet.docs();
+    let run_json = fs::read(run_dir.join("run.json")).expect("run.json");
+
+    for (args, expect) in [
+        (vec!["promote", run_id.as_str(), "--approved-by", ""], "maintainer name is empty"),
+        (vec!["promote", run_id.as_str(), "--approved-by", "   "], "maintainer name is empty"),
+        (vec!["promote", run_id.as_str(), "--approved-by", "Ken\n- approved by mallory"], "control character"),
+        (vec!["promote", run_id.as_str(), "--approved-by", "Ken\tSnyder"], "control character"),
+        (vec!["reject", run_id.as_str(), "--by", "Ken\n- rejected by mallory", "--reason", "duplicate"], "control character"),
+        (vec!["reject", run_id.as_str(), "--by", "", "--reason", "duplicate"], "maintainer name is empty"),
+        (vec!["reject", run_id.as_str(), "--by", " \t ", "--reason", "duplicate"], "maintainer name is empty"),
+        (vec!["reject", run_id.as_str(), "--by", "maintainer", "--reason", ""], "decision reason is empty"),
+        (vec!["reject", run_id.as_str(), "--by", "maintainer", "--reason", "  "], "decision reason is empty"),
+    ] {
+        let output = fleet.research(on, &args);
+        assert_eq!(code(&output), 2, "{args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(expect), "{args:?}: {stderr}");
+        let mut json_args = args.clone();
+        json_args.push("--json");
+        let refused = fleet.research(on, &json_args);
+        assert_eq!(code(&refused), 2, "{json_args:?}");
+        assert!(json_out(&refused)["refused"].as_str().expect("refusal").contains(expect), "{json_args:?}");
+        assert_eq!(fleet.docs(), docs, "{args:?}: nothing is published");
+        assert_eq!(fs::read(run_dir.join("run.json")).expect("run.json"), run_json, "{args:?}: no decision is recorded");
+    }
+
+    let promoted = fleet.research(on, &["promote", &run_id, "--approved-by", "  Ken Snyder  ", "--json"]);
+    assert_eq!(code(&promoted), 0, "{}", String::from_utf8_lossy(&promoted.stderr));
+    let review = json_out(&promoted)["promoted"][0]["review"].as_str().expect("review path").to_string();
+    let record: Value = serde_json::from_slice(&fs::read(fleet.path(&review)).expect("review record")).expect("json");
+    assert_eq!(record["approval"]["by"], "Ken Snyder", "the approver is trimmed");
+}
+
+#[test]
 fn cleanup_previews_by_default_and_deletes_only_with_apply() {
     let fleet = Fleet::published();
     let prepared = json_out(&fleet.research("2026-08-01", &["prepare", "slack", "--force", "--max-seconds", "60", "--max-invocations", "2", "--json"]));
@@ -295,4 +340,65 @@ fn cleanup_previews_by_default_and_deletes_only_with_apply() {
     assert_eq!(applied["removed"], json!([run_dir.clone()]));
     assert!(!fleet.path(&run_dir).exists());
     assert_eq!(fleet.docs(), docs, "cleanup never touches accepted research");
+}
+
+/// The run directories under `runs/<platform>/`.
+fn run_dirs(fleet: &Fleet, platform: PlatformId) -> usize {
+    fs::read_dir(fleet.path(&format!("{STATE}/runs/{platform}"))).map_or(0, |entries| entries.count())
+}
+
+/// Review-1 regression: a corrupt `run.json` for an active run once let
+/// `prepare` start a second run for the platform with a fresh budget.
+#[test]
+fn a_corrupt_active_run_record_blocks_prepare_and_names_its_path() {
+    for (name, corrupt) in [("truncated", "{\n  \"format\": \"messenger-research-run/1\",\n  \"run_"), ("invalid JSON", "not json at all\n")] {
+        let fleet = Fleet::published();
+        let prepared = json_out(&fleet.research("2026-09-18", &["prepare", "discord", "--max-seconds", "600", "--max-invocations", "8", "--json"]));
+        let run_dir = prepared["runs"][0]["run_dir"].as_str().expect("run dir").to_string();
+        fleet.write(&format!("{run_dir}/run.json"), corrupt);
+
+        let dry = fleet.research("2026-09-18", &["prepare", "discord", "--force", "--dry-run", "--json"]);
+        assert_eq!(code(&dry), 0, "{name}");
+        let skip = &json_out(&dry)["selections"][0]["skip"];
+        assert_eq!(skip["reason"], "unreadable_run", "{name}: {skip}");
+        assert_eq!(skip["path"], run_dir.as_str(), "{name}: portable repository-relative path");
+        let human = stdout(&fleet.research("2026-09-18", &["prepare", "discord", "--force", "--dry-run"]));
+        // Styled output wraps long paths; the JSON above pins the exact path.
+        assert!(human.contains("discord: blocked") && human.contains("repair or remove"), "{name}: {human}");
+
+        let again = fleet.research("2026-09-18", &["prepare", "discord", "--force", "--max-seconds", "600", "--max-invocations", "8", "--json"]);
+        assert_eq!(code(&again), 0, "{name}");
+        assert!(String::from_utf8_lossy(&again.stderr).contains(&run_dir), "{name}: a script reading only runs is warned");
+        let again = json_out(&again);
+        assert_eq!(again["runs"], json!([]), "{name}");
+        assert_eq!(again["selections"][0]["skip"]["reason"], "unreadable_run", "{name}");
+        assert_eq!(run_dirs(&fleet, PlatformId::Discord), 1, "{name}: no second run or ledger");
+
+        // `runs --platform` still lists the unreadable record under its platform.
+        let runs = json_out(&fleet.research("2026-09-18", &["runs", "--platform", "discord", "--json"]));
+        assert_eq!(runs["runs"][0]["path"], run_dir.as_str(), "{name}: {runs}");
+        assert_eq!(runs["runs"][0]["platform_id"], "discord", "{name}");
+        assert!(runs["runs"][0]["error"].as_str().is_some_and(|error| error.contains("run.json")), "{name}: {runs}");
+    }
+}
+
+/// A second `prepare` process is refused while another holds the preparation
+/// lock, and the lock does not outlive its holder.
+#[test]
+fn prepare_is_refused_while_another_process_holds_the_prepare_lock() {
+    let fleet = Fleet::published();
+    let lock = fleet.path(&format!("{STATE}/runs/prepare.lock"));
+    fs::create_dir_all(lock.parent().expect("runs dir")).expect("mkdir");
+    let holder = fs::File::create(&lock).expect("lock file");
+    holder.try_lock().expect("hold the lock");
+    let args = ["prepare", "discord", "--force", "--max-seconds", "600", "--max-invocations", "8", "--json"];
+    let refused = fleet.research("2026-09-18", &args);
+    // Exit 3, like a held publication lock: the command could not run.
+    assert_eq!(code(&refused), 3);
+    let message = json_out(&refused)["error"].as_str().expect("error").to_string();
+    assert!(message.contains(&format!("{STATE}/runs/prepare.lock")), "{message}");
+    assert_eq!(run_dirs(&fleet, PlatformId::Discord), 0);
+    drop(holder);
+    assert_eq!(code(&fleet.research("2026-09-18", &args)), 0, "a released lock never wedges the platform");
+    assert_eq!(run_dirs(&fleet, PlatformId::Discord), 1);
 }

@@ -3,9 +3,10 @@
 //! Layout under `messenger/.research-state/` (architecture record, "Local
 //! state area"): `runs/<platform>/<run_id>/` holds `run.json`, Claudine's
 //! `budget.json` ledger, the prepared `inputs/`, pass `outputs/`, the
-//! `candidate/`, `source-checks.json`, and the check results; `renewals/`
-//! holds routine unchanged-renewal records. Nothing here is committed, and
-//! every record is written by atomic replacement with LF line endings.
+//! `candidate/`, `source-checks.json`, and the check results;
+//! `runs/prepare.lock` serializes preparation; `renewals/` holds routine
+//! unchanged-renewal records. Nothing here is committed, and every record is
+//! written by atomic replacement with LF line endings.
 
 use std::fs;
 use std::io;
@@ -14,6 +15,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::config::RunLimits;
+use super::input::{DecisionReason, Maintainer};
 use crate::research::canonical::xxh64_digest;
 use crate::research::model::{Date, PlatformId};
 use crate::research::paths::Workspace;
@@ -154,9 +156,9 @@ pub struct BaselineRef {
 pub struct Decision {
     /// `human`, `renewal`, or `rejected`.
     pub kind: String,
-    pub by: Option<String>,
+    pub by: Option<Maintainer>,
     pub on: Date,
-    pub reason: Option<String>,
+    pub reason: Option<DecisionReason>,
 }
 
 /// `run.json`: identity, configuration, stage results, and outcome.
@@ -245,6 +247,7 @@ pub struct StateArea {
 
 pub(crate) const RUNS: &str = "messenger/.research-state/runs";
 pub(crate) const RENEWALS: &str = "messenger/.research-state/renewals";
+pub(crate) const PREPARE_LOCK: &str = "prepare.lock";
 
 impl StateArea {
     pub fn new(workspace: &Workspace) -> Self {
@@ -270,6 +273,13 @@ impl StateArea {
     /// The lock file every ledger shares, so one platform runs at a time.
     pub fn fleet_lock(&self) -> PathBuf {
         self.runs_dir().join("fleet.lock")
+    }
+
+    /// The lock `prepare` (and `prepare --resume`) holds from selection until
+    /// its runs exist, so two preparations cannot both find a platform
+    /// without an open run.
+    pub fn prepare_lock(&self) -> PathBuf {
+        self.runs_dir().join(PREPARE_LOCK)
     }
 
     pub fn run_dir(&self, platform: PlatformId, run_id: &RunId) -> PathBuf {
@@ -321,9 +331,12 @@ impl StateArea {
         Err(StateError::UnknownRun(run_id.to_string()))
     }
 
-    /// Every run directory, sorted by platform then run ID; unreadable
-    /// records are returned as errors, never skipped.
-    pub fn list(&self) -> Vec<(String, Result<RunRecord, StateError>)> {
+    /// Every run directory with the platform whose directory holds it and its
+    /// repository-relative path, sorted by platform then run ID. Unreadable
+    /// records are returned as errors, never skipped; so is a record whose
+    /// platform or run ID disagrees with the directory holding it, because
+    /// callers key the platform on the directory, not on the record.
+    pub fn list(&self) -> Vec<(PlatformId, String, Result<RunRecord, StateError>)> {
         let mut out = Vec::new();
         for platform in PlatformId::ALL {
             let Ok(entries) = fs::read_dir(self.runs_dir().join(platform.as_str())) else { continue };
@@ -335,8 +348,19 @@ impl StateArea {
             names.sort();
             for name in names {
                 let relative = format!("{RUNS}/{platform}/{name}");
+                let display = format!("{relative}/run.json");
                 let path = self.runs_dir().join(platform.as_str()).join(&name).join("run.json");
-                out.push((relative.clone(), read_run(&path, &format!("{relative}/run.json"))));
+                let record = read_run(&path, &display).and_then(|record| {
+                    if record.platform_id == *platform && record.run_id.as_str() == name {
+                        Ok(record)
+                    } else {
+                        Err(StateError::Corrupt {
+                            path: display,
+                            message: format!("it records run {} of {}, not its directory", record.run_id, record.platform_id),
+                        })
+                    }
+                });
+                out.push((*platform, relative, record));
             }
         }
         out

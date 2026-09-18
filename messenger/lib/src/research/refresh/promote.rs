@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use super::RefreshError;
+use super::input::{DecisionReason, Maintainer};
 use super::approval::{Decision as Policy, decide};
 use super::check::{Evaluation, evaluate};
 use super::records::CheckOutcome;
@@ -33,7 +34,7 @@ use crate::research::publish::Options;
 pub enum Request {
     /// A named maintainer approves; a run that qualifies as a verified
     /// unchanged renewal is still recorded as a renewal.
-    Human { by: String },
+    Human { by: Maintainer },
     /// Automatic acceptance; refused unless the run is a verified unchanged renewal.
     Renewal,
 }
@@ -151,7 +152,7 @@ pub fn promote(loader: &Loader, run_ids: &[String], request: &Request, today: &D
     let updates: BTreeMap<_, _> = planned.iter().map(|p| (p.record.platform_id, p.text.clone())).collect();
     let mut reviews = BTreeMap::new();
     for plan in planned.iter().filter(|p| !p.renewal) {
-        let by = by.as_deref().expect("only a human request reaches a human-approved change");
+        let by = by.as_ref().expect("only a human request reaches a human-approved change");
         let review = review_record(&plan.record, &plan.eval, plan.accepted.clone(), by, today);
         reviews.insert(review_path(today, plan.record.platform_id, &plan.record.run_id), review.to_bytes());
     }
@@ -177,7 +178,7 @@ pub fn promote(loader: &Loader, run_ids: &[String], request: &Request, today: &D
     Ok(done)
 }
 
-fn review_record(record: &RunRecord, eval: &Evaluation, accepted: AcceptedHashes, by: &str, today: &Date) -> ReviewRecord {
+fn review_record(record: &RunRecord, eval: &Evaluation, accepted: AcceptedHashes, by: &Maintainer, today: &Date) -> ReviewRecord {
     let delta = eval.delta.as_ref().expect("an eligible run has a delta");
     let review = eval.review.clone().expect("an eligible run has an evidence review");
     let proposal = eval.proposal.clone().expect("an eligible run has a proposal");
@@ -187,7 +188,7 @@ fn review_record(record: &RunRecord, eval: &Evaluation, accepted: AcceptedHashes
         format: REVIEW_FORMAT.to_string(),
         run_id: record.run_id.clone(),
         platform_id: record.platform_id,
-        approval: Approval { by: by.to_string(), on: today.clone() },
+        approval: Approval { by: by.clone(), on: today.clone() },
         researched_under: record.researched_under.clone(),
         accepted,
         summary: summarize(delta, &review, &proposal),
@@ -255,7 +256,7 @@ fn finish_existing(
         kind: kind.to_string(),
         by: approver,
         on: today.clone(),
-        reason: Some("publication completed before the run was marked accepted".to_string()),
+        reason: Some(DecisionReason::new("publication completed before the run was marked accepted").expect("a fixed reason is not blank")),
     });
     state.save(record)?;
     Ok(Promoted {
@@ -274,7 +275,7 @@ fn finish_existing(
 /// ## Errors
 ///
 /// [`RefreshError::WrongStatus`] for an active or decided run.
-pub fn reject(loader: &Loader, run_id: &str, by: &str, reason: &str, today: &Date) -> Result<RunRecord, RefreshError> {
+pub fn reject(loader: &Loader, run_id: &str, by: &Maintainer, reason: &DecisionReason, today: &Date) -> Result<RunRecord, RefreshError> {
     let state = StateArea::new(loader.workspace());
     let mut record = state.load(run_id)?;
     let ledger = state.ledger(&record)?;
@@ -288,7 +289,7 @@ pub fn reject(loader: &Loader, run_id: &str, by: &str, reason: &str, today: &Dat
         });
     }
     record.status = RunStatus::Rejected;
-    record.decision = Some(Decision { kind: "rejected".to_string(), by: Some(by.to_string()), on: today.clone(), reason: Some(reason.to_string()) });
+    record.decision = Some(Decision { kind: "rejected".to_string(), by: Some(by.clone()), on: today.clone(), reason: Some(reason.clone()) });
     state.save(&record)?;
     Ok(record)
 }

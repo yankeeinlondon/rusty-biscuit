@@ -20,13 +20,13 @@ use messenger::research::refresh::prepare::{self, PreparedRun};
 use messenger::research::refresh::promote::{self, Promoted, Request};
 use messenger::research::refresh::select::{self, Reason, Skip};
 use messenger::research::refresh::state::{LedgerView, StageStatus};
-use messenger::research::refresh::{RefreshError, RunLimits, Stage, StateArea};
+use messenger::research::refresh::{DecisionReason, Maintainer, RefreshError, RunLimits, Stage, StateArea};
 use serde::Serialize;
 use serde_json::json;
 
 use super::research::{EXIT_FINDINGS, EXIT_OK, parse_platform};
 
-/// Invalid arguments, including missing run limits.
+/// Invalid arguments, including missing run limits and blank decision inputs.
 pub const EXIT_USAGE: i32 = 2;
 
 #[derive(Debug, Args)]
@@ -90,7 +90,7 @@ pub struct PromoteArgs {
     /// active platform.
     #[arg(value_name = "RUN_ID", required = true)]
     pub run_ids: Vec<String>,
-    /// The maintainer approving this change.
+    /// The maintainer approving this change (not blank).
     #[arg(long, value_name = "NAME", required_unless_present = "renewal", conflicts_with = "renewal")]
     pub approved_by: Option<String>,
     /// Accept automatically; refused unless the run is a verified unchanged renewal.
@@ -103,8 +103,10 @@ pub struct PromoteArgs {
 #[derive(Debug, Args)]
 pub struct RejectArgs {
     pub run_id: String,
+    /// The maintainer rejecting the run (not blank).
     #[arg(long, value_name = "NAME")]
     pub by: String,
+    /// Why the run is rejected (not blank).
     #[arg(long)]
     pub reason: String,
     #[arg(long)]
@@ -146,7 +148,7 @@ fn list(items: Vec<String>, term: &Terminal) -> String {
 /// back to the caller as exit 3.
 fn refusal(error: RefreshError, json: bool) -> Result<i32, String> {
     let code = match &error {
-        RefreshError::Config(_) => EXIT_USAGE,
+        RefreshError::Config(_) | RefreshError::Input(_) => EXIT_USAGE,
         RefreshError::WrongStatus { .. }
         | RefreshError::NotEligible { .. }
         | RefreshError::RecoveryLimit { .. }
@@ -200,6 +202,7 @@ pub fn prepare(loader: &Loader, args: PrepareArgs, today: &Date) -> Result<i32, 
             selections.retain(|s| args.platforms.contains(&s.platform_id));
         }
         if args.json {
+            warn_blocked(&selections);
             println!("{}", pretty(&json!({ "selections": selections, "runs": [] })));
         } else {
             print!("{}", render_selections(&selections, &Terminal::default()));
@@ -241,6 +244,9 @@ fn render_selections(selections: &[select::Selection], term: &Terminal) -> Strin
                 format!("{}: skipped, current (last updated {last_updated}, due {refresh_due})", selection.platform_id)
             }
             Some(Skip::OpenRun { run_id, status }) => format!("{}: skipped, run {run_id} is {status}", selection.platform_id),
+            Some(Skip::UnreadableRun { path, error }) => {
+                format!("{}: blocked, {error}; repair or remove {path}", selection.platform_id)
+            }
             None => format!(
                 "{}: due ({})",
                 selection.platform_id,
@@ -251,8 +257,20 @@ fn render_selections(selections: &[select::Selection], term: &Terminal) -> Strin
     format!("{}{}", prose("<b>Refresh selection</b>", term), list(items, term))
 }
 
+/// Names each platform an unreadable run record blocks on stderr, so a
+/// script reading only `runs` from the JSON does not mistake it for a
+/// platform with nothing due.
+fn warn_blocked(selections: &[select::Selection]) {
+    for selection in selections {
+        if let Some(Skip::UnreadableRun { path, error }) = &selection.skip {
+            eprintln!("warning: {} is blocked: {error}; repair or remove {path}", selection.platform_id);
+        }
+    }
+}
+
 fn emit_prepared(selections: &[select::Selection], runs: &[PreparedRun], json: bool) {
     if json {
+        warn_blocked(selections);
         println!("{}", pretty(&json!({ "selections": selections, "runs": runs })));
         return;
     }
@@ -312,7 +330,8 @@ fn render_check(report: &CheckReport, term: &Terminal) -> String {
 struct RunRow {
     path: String,
     run_id: Option<String>,
-    platform_id: Option<PlatformId>,
+    /// The platform directory holding the run, even when its record is unreadable.
+    platform_id: PlatformId,
     status: Option<String>,
     created: Option<Date>,
     next_stage: Option<Stage>,
@@ -325,12 +344,12 @@ struct RunRow {
 pub fn runs(loader: &Loader, args: RunsArgs) -> Result<i32, String> {
     let state = StateArea::new(loader.workspace());
     let mut rows = Vec::new();
-    for (path, record) in state.list() {
+    for (platform, path, record) in state.list() {
         let row = match record {
             Err(error) => RunRow {
                 path,
                 run_id: None,
-                platform_id: None,
+                platform_id: platform,
                 status: None,
                 created: None,
                 next_stage: None,
@@ -345,7 +364,7 @@ pub fn runs(loader: &Loader, args: RunsArgs) -> Result<i32, String> {
                 RunRow {
                     path,
                     run_id: Some(record.run_id.to_string()),
-                    platform_id: Some(record.platform_id),
+                    platform_id: record.platform_id,
                     status: Some(record.status.to_string()),
                     created: Some(record.created.clone()),
                     next_stage: record.next_stage(),
@@ -356,7 +375,7 @@ pub fn runs(loader: &Loader, args: RunsArgs) -> Result<i32, String> {
                 }
             }
         };
-        if args.platform.is_none_or(|platform| row.platform_id == Some(platform)) {
+        if args.platform.is_none_or(|platform| row.platform_id == platform) {
             rows.push(row);
         }
     }
@@ -389,7 +408,7 @@ pub fn runs(loader: &Loader, args: RunsArgs) -> Result<i32, String> {
                 if let Some(reason) = &row.stop_reason {
                     facts.push(reason.clone());
                 }
-                format!("{} {run_id}: {}", row.platform_id.map(|p| p.to_string()).unwrap_or_default(), facts.join("; "))
+                format!("{} {run_id}: {}", row.platform_id, facts.join("; "))
             }
             (None, None) => row.path.clone(),
         })
@@ -404,8 +423,9 @@ pub fn runs(loader: &Loader, args: RunsArgs) -> Result<i32, String> {
 // ---- promote / reject ------------------------------------------------------------
 
 pub fn promote(loader: &Loader, args: PromoteArgs, today: &Date) -> Result<i32, String> {
-    let request = match args.approved_by {
-        Some(by) => Request::Human { by },
+    let request = match args.approved_by.as_deref().map(Maintainer::new) {
+        Some(Ok(by)) => Request::Human { by },
+        Some(Err(error)) => return refusal(error.into(), args.json),
         None => Request::Renewal,
     };
     let promoted: Vec<Promoted> = match promote::promote(loader, &args.run_ids, &request, today, Options::default()) {
@@ -436,7 +456,12 @@ pub fn promote(loader: &Loader, args: PromoteArgs, today: &Date) -> Result<i32, 
 }
 
 pub fn reject(loader: &Loader, args: RejectArgs, today: &Date) -> Result<i32, String> {
-    match promote::reject(loader, &args.run_id, &args.by, &args.reason, today) {
+    let inputs = Maintainer::new(&args.by).and_then(|by| Ok((by, DecisionReason::new(&args.reason)?)));
+    let (by, reason) = match inputs {
+        Ok(inputs) => inputs,
+        Err(error) => return refusal(error.into(), args.json),
+    };
+    match promote::reject(loader, &args.run_id, &by, &reason, today) {
         Ok(record) => {
             if args.json {
                 println!("{}", pretty(&json!({ "run_id": record.run_id, "status": record.status })));

@@ -789,7 +789,7 @@ messenger research prepare --dry-run                        # which platforms ar
 
 Arguments before `--` go to `prepare` (platforms, `--force`, `--observed-version IFACE=VER`). Arguments after it go to each `claudine sequence`. Name the agent there (for example `--claude`): the prepared sequence names none, and without a terminal Claudine stops before the first step. The recipe builds `messenger` and `claudine` from this checkout and puts them first on `PATH`, because the sequence's check steps call `messenger research check-run`. It needs `jq`.
 
-A platform is due when its accepted document is missing, expired, or invalid, or was researched under an older prompt or schema. An observed version that the accepted research does not know also makes it due, as does `--force`. A platform with an open run is skipped until that run is resumed, promoted, or rejected.
+A platform is due when its accepted document is missing, expired, or invalid, or was researched under an older prompt or schema. An observed version that the accepted research does not know also makes it due, as does `--force`. A platform with an open run is skipped until that run is resumed, promoted, or rejected. A platform with an unreadable run record (for example a truncated `run.json` after a crash) is blocked, and `prepare` names the run directory: repair the record or remove the directory before the platform can be prepared again. Only one `prepare` runs at a time; a second one exits `3` while the first holds `messenger/.research-state/runs/prepare.lock`, and that lock is released when its holder exits, even by crashing.
 
 **Source access.** Research reads public sources only. Authenticated access, live probes, posting messages, creating accounts or credentials, adding services, global installations, and purchases each need separate approval and are never done silently. An inaccessible source is recorded as such, never counted as rechecked, and it rules out automatic renewal.
 
@@ -803,7 +803,7 @@ messenger research promote 2026-09-18-1a2b3c4d --renewal    # verified unchanged
 messenger research reject 2026-09-18-1a2b3c4d --by "Ada Maintainer" --reason "unsupported claim"
 ```
 
-A named maintainer approves every substantive change, and every initial baseline. The first publication needs one reviewed run for **every** platform, promoted together in one command. `--renewal` accepts only a run whose facts, gaps, evidence, prose, prompt, schema, and curated list are unchanged and whose sources were all rechecked. Promotion writes a review record under `docs/research/reviews/`, and the CHANGELOG is generated from those records. Renewals and rejected runs never appear there. Nothing is committed for you.
+A named maintainer approves every substantive change, and every initial baseline. The approver name, the rejecting maintainer, and the rejection reason must not be blank. A maintainer name must also be a single line with no control characters such as newlines or tabs. Surrounding whitespace is trimmed, and an invalid value exits `2` without recording anything. The first publication needs one reviewed run for **every** platform, promoted together in one command. `--renewal` accepts only a run whose facts, gaps, evidence, prose, prompt, schema, and curated list are unchanged and whose sources were all rechecked. Promotion writes a review record under `docs/research/reviews/`, and the CHANGELOG is generated from those records. Renewals and rejected runs never appear there. Nothing is committed for you.
 
 ### Partial failures and recovery
 
@@ -812,6 +812,7 @@ A named maintainer approves every substantive change, and every initial baseline
 - **Budget exhausted** (Claudine exit `76`): the run stays incomplete, never finished. Record more allowance with `claudine budget grant`, then resume.
 - **Runner killed:** the next Claudine command marks the ledger `interrupted`. Run `claudine budget resume` on the ledger, then resume the run.
 - **Prepared but never started:** the run stays active until its printed `claudine sequence` command runs.
+- **Unreadable run record:** `prepare` blocks the platform and names the run directory; `messenger research runs` lists it with the error. Repair the record or remove the directory.
 - **Publication interrupted:** `generate` and `promote` refuse until `messenger research recover` completes or undoes it. The previous snapshot stays selected until then.
 
 ### Clean up

@@ -63,13 +63,16 @@ messenger research check-run RUN_ID [--through validation|review] [--json]
 messenger research runs [--platform P] [--json]         # local runs, stages, budget ledgers
 messenger research promote RUN_ID… --approved-by NAME   # publish reviewed runs together
 messenger research promote RUN_ID --renewal             # verified unchanged renewal only
-messenger research reject RUN_ID --by NAME --reason TEXT
+messenger research reject RUN_ID --by NAME --reason TEXT  # neither may be blank; NAME is one line
 messenger research cleanup [--older-than DAYS] [--apply]  # preview by default (30 days)
 ```
 
 `prepare` selects platforms that are missing, expired, forced, invalid, or
 researched under an older prompt or schema (or with an observed version the
-accepted research does not know), and skips the rest with a reason. Both
+accepted research does not know), and skips the rest with a reason. A
+platform with an open run is skipped; one with an unreadable run record is
+blocked, naming the run directory to repair or remove, because that record
+might be its open run. Both
 limits are required and have no default; they are checked before anything is
 written. Each run gets its own directory under
 `messenger/.research-state/runs/<platform>/<run_id>/` with separately prepared

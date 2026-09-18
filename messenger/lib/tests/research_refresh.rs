@@ -21,8 +21,8 @@ use messenger::research::refresh::promote::{self, Request as Approve};
 use messenger::research::refresh::records::unsafe_content;
 use messenger::research::refresh::review::{CHANGELOG, ReviewRecord};
 use messenger::research::refresh::select::{self, Reason, Request, Skip};
-use messenger::research::refresh::state::{RunRecord, StageStatus};
-use messenger::research::refresh::{RefreshError, RunLimits, RunStatus, Stage, StateArea};
+use messenger::research::refresh::state::{RunRecord, StageStatus, StateError};
+use messenger::research::refresh::{DecisionReason, InputError, Maintainer, RefreshError, RunLimits, RunStatus, Stage, StateArea};
 use messenger::research::{Loader, Workspace};
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -305,8 +305,19 @@ fn first_interface(platform: PlatformId) -> &'static str {
 }
 
 fn approve(repo: &Repo, runs: &[&PreparedRun], today: &str) -> Result<Vec<promote::Promoted>, RefreshError> {
+    approve_as(repo, runs, today, "maintainer")
+}
+
+fn approve_as(repo: &Repo, runs: &[&PreparedRun], today: &str, by: &str) -> Result<Vec<promote::Promoted>, RefreshError> {
     let ids: Vec<String> = runs.iter().map(|run| run.run_id.to_string()).collect();
-    promote::promote(&repo.loader, &ids, &Approve::Human { by: "maintainer".to_string() }, &day(today), Options::default())
+    let by = Maintainer::new(by).expect("a named maintainer");
+    promote::promote(&repo.loader, &ids, &Approve::Human { by }, &day(today), Options::default())
+}
+
+fn reject(repo: &Repo, run_id: &str, by: &str, reason: &str, on: &Date) -> Result<RunRecord, RefreshError> {
+    let by = Maintainer::new(by).expect("a named maintainer");
+    let reason = DecisionReason::new(reason).expect("a stated reason");
+    promote::reject(&repo.loader, run_id, &by, &reason, on)
 }
 
 fn renew(repo: &Repo, run: &PreparedRun, today: &str) -> Result<Vec<promote::Promoted>, RefreshError> {
@@ -613,6 +624,56 @@ fn a_reviewed_change_publishes_with_its_review_record_and_changelog_entry() {
 }
 
 #[test]
+fn decisions_name_a_trimmed_maintainer_and_invalid_persisted_names_do_not_load() {
+    for blank in ["", "   ", "\t\n"] {
+        assert_eq!(Maintainer::new(blank), Err(InputError::BlankMaintainer), "{blank:?}");
+        assert_eq!(DecisionReason::new(blank), Err(InputError::BlankReason), "{blank:?}");
+    }
+    assert_eq!(Maintainer::new("Ken\n- approved by mallory"), Err(InputError::ControlInMaintainer));
+    let repo = Repo::published();
+    let on = "2026-09-18";
+    let before = repo.tree();
+
+    let rejected = repo.prepare(PlatformId::Discord, &day(on));
+    let agent = Agent { repo: &repo, run: &rejected };
+    agent.complete(&raised(on), &agent.checks(on, &[]), false, &day(on));
+    reject(&repo, rejected.run_id.as_str(), " Rejecting Maintainer\t", "  duplicate run \n", &day(on)).expect("reject");
+    let decision = repo.run(&rejected).decision.expect("rejection decision");
+    assert_eq!(decision.by.as_ref().map(Maintainer::as_str), Some("Rejecting Maintainer"));
+    assert_eq!(decision.reason.as_ref().map(DecisionReason::as_str), Some("duplicate run"));
+    assert_eq!(repo.tree(), before, "a rejection publishes nothing");
+
+    let run = repo.prepare(PlatformId::Discord, &day(on));
+    let agent = Agent { repo: &repo, run: &run };
+    agent.complete(&raised(on), &agent.checks(on, &[]), false, &day(on));
+    let promoted = approve_as(&repo, &[&run], on, "  Ken Snyder \t").expect("approve");
+    let review_path = promoted[0].review.clone().expect("review record");
+    let review_text = repo.read(&review_path).expect("review record");
+    let record = ReviewRecord::parse(review_text.as_bytes()).expect("parse");
+    assert_eq!(record.approval.by.as_str(), "Ken Snyder");
+    assert!(repo.read(CHANGELOG).expect("changelog").contains("approved by Ken Snyder\n"));
+    assert_eq!(repo.run(&run).decision.expect("decision").by.as_ref().map(Maintainer::as_str), Some("Ken Snyder"));
+
+    // Reading back applies the same validation: a blank or multi-line approver
+    // in a review record, or a blank name in a local run record, is refused on load.
+    for (approver, expect) in [(r#""  ""#, "maintainer name is empty"), (r#""Ken\n- approved by mallory""#, "control character")] {
+        let tampered = review_text.replace(r#""by": "Ken Snyder""#, &format!(r#""by": {approver}"#));
+        assert_ne!(tampered, review_text, "the fixture edit applies");
+        let error = ReviewRecord::parse(tampered.as_bytes()).expect_err(approver);
+        assert!(error.contains(expect), "{approver}: {error}");
+    }
+    let run_json = repo.run_dir(&run).join("run.json");
+    let run_text = fs::read_to_string(&run_json).expect("run.json");
+    let blank_run = run_text.replace(r#""by": "Ken Snyder""#, r#""by": """#);
+    assert_ne!(blank_run, run_text, "the fixture edit applies");
+    fs::write(&run_json, blank_run).expect("write run.json");
+    match repo.state().load(run.run_id.as_str()) {
+        Err(StateError::Corrupt { message, .. }) => assert!(message.contains("maintainer name is empty"), "{message}"),
+        other => panic!("expected a corrupt run record, got {other:?}"),
+    }
+}
+
+#[test]
 fn a_verified_unchanged_renewal_is_accepted_without_a_changelog_entry() {
     let repo = Repo::published();
     reviewed_discord(&repo, "2026-09-18");
@@ -674,7 +735,7 @@ fn automatic_renewal_is_refused_unless_everything_substantive_is_unchanged_and_r
         assert!(report.passed, "{name}: {:#?}", report.stages);
         let refused = reasons(renew(&repo, &run, on).expect_err(name));
         assert!(refused.iter().any(|r| r.contains(reason)), "{name}: {refused:?}");
-        promote::reject(&repo.loader, run.run_id.as_str(), "maintainer", "test case", &day(on)).expect("reject");
+        reject(&repo, run.run_id.as_str(), "maintainer", "test case", &day(on)).expect("reject");
     }
     // A rejected run never reaches the CHANGELOG and cannot be promoted.
     let changelog = repo.read(CHANGELOG).expect("changelog");
@@ -829,7 +890,7 @@ fn a_sequence_that_stops_before_its_checks_leaves_a_resumable_or_rejectable_run(
     // the way forward, so the run stays active.
     agent.write("budget.json", &ledger(0, "initialized"));
     assert!(active(prepare::resume(&repo.loader, id).map(|_| ())));
-    assert!(active(promote::reject(&repo.loader, id, "Maintainer", "unused", &on).map(|_| ())));
+    assert!(active(reject(&repo, id, "Maintainer", "unused", &on).map(|_| ())));
     assert!(discord_is_open(&repo));
 
     // Claudine refused the first step (no agent named, no terminal); the ledger
@@ -850,7 +911,7 @@ fn a_sequence_that_stops_before_its_checks_leaves_a_resumable_or_rejectable_run(
 
     // The relaunched sequence is stopped by Ctrl+C before any check ran.
     agent.write("budget.json", &ledger(2, "interrupted by the operator"));
-    let rejected = promote::reject(&repo.loader, id, "Maintainer", "wrong agent", &on).expect("a stopped run is rejectable");
+    let rejected = reject(&repo, id, "Maintainer", "wrong agent", &on).expect("a stopped run is rejectable");
     assert_eq!(rejected.status, RunStatus::Rejected);
     assert_eq!(repo.run(&run).status, RunStatus::Rejected, "the decision is persisted");
     assert!(!discord_is_open(&repo), "a rejected run no longer blocks selection");
@@ -876,7 +937,7 @@ fn an_interrupted_promotion_recovers_to_one_consistent_snapshot_and_completes_on
         let agent = Agent { repo: &repo, run: &run };
         agent.complete(&raised("2026-09-18"), &agent.checks("2026-09-18", &[]), false, &day("2026-09-18"));
         let ids = [run.run_id.to_string()];
-        let approval = Approve::Human { by: "maintainer".to_string() };
+        let approval = Approve::Human { by: Maintainer::new("maintainer").expect("a named maintainer") };
         let options = Options { interrupt_at: Some(point), ..Options::default() };
         assert!(promote::promote(&repo.loader, &ids, &approval, &day("2026-09-18"), options).is_err(), "{point}");
         assert_eq!(repo.run(&run).status, RunStatus::AwaitingReview, "{point}: not accepted before publication completes");

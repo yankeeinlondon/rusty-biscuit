@@ -15,6 +15,7 @@ use std::fmt::Write as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::input::Maintainer;
 use super::records::{EvidenceReview, SourceCheck, SourceProposal, Verdict};
 use super::state::{ResearchedUnder, RunId};
 use crate::research::model::{Date, PlatformId};
@@ -43,7 +44,7 @@ pub fn is_review_path(path: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Approval {
-    pub by: String,
+    pub by: Maintainer,
     pub on: Date,
 }
 

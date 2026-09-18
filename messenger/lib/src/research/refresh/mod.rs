@@ -22,6 +22,7 @@ pub mod approval;
 pub mod check;
 pub mod cleanup;
 pub mod config;
+pub mod input;
 pub mod prepare;
 pub mod promote;
 pub mod records;
@@ -30,6 +31,7 @@ pub mod select;
 pub mod state;
 
 pub use config::{RunConfigError, RunLimits};
+pub use input::{DecisionReason, InputError, Maintainer};
 pub use state::{RunId, RunRecord, RunStatus, Stage, StateArea};
 
 use super::error::ResearchError;
@@ -51,6 +53,8 @@ pub enum RefreshError {
     Generate(Box<GenerateError>),
     #[error(transparent)]
     Config(#[from] RunConfigError),
+    #[error(transparent)]
+    Input(#[from] InputError),
     #[error("run {run_id} is {status}; {action} needs {needs}")]
     WrongStatus { run_id: String, status: RunStatus, action: &'static str, needs: &'static str },
     #[error("run {run_id} cannot be promoted: {}", reasons.join("; "))]
@@ -59,6 +63,8 @@ pub enum RefreshError {
     RecoveryLimit { run_id: String },
     #[error("run {run_id}'s budget ledger is {state}: {guidance}")]
     Ledger { run_id: String, state: String, guidance: &'static str },
+    #[error("another `messenger research prepare` holds {path}; run it again once that one finishes")]
+    PrepareBusy { path: String },
     #[error("{platform} is not an active roster platform")]
     NotInRoster { platform: String },
     #[error("the roster does not load cleanly; run `messenger research validate`")]
