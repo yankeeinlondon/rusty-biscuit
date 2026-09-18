@@ -439,7 +439,7 @@ fn initialize_shells_are_forbidden_even_with_yolo_across_entry_paths() {
         let effect = staged.fixture.workspace_path().join("forbidden.txt");
         staged.write_doc("target.md", &format!(
             "---\nprompt: Do the task\n{}initialize:\n  stack:\n    - when: 'false'\n      action: {{shell: \"touch {}\"}}\n---\nBody\n",
-            if looping { "loop:\n  count: 2\n" } else { "" }, effect.display(),
+            if looping { "loop:\n  until: 'true'\n  max: 2\n" } else { "" }, effect.display(),
         ));
         staged.write_doc("router.md", "---\nprompt: Route the task\ninitialize:\n  stack:\n    - action: {proxy: './target.md'}\n---\nRouter\n");
         staged.write_doc("seq.md", "---\nsequence:\n  - name: one\n    prompt: router.md\n---\nSequence\n");
@@ -508,6 +508,46 @@ fn early_catch_shells_cannot_run_or_enable_another_catch_shell() {
             };
             assert_eq!(staged.events(), expected, "{trigger}: {output}");
             assert!(!staged.prompt.exists(), "provider launched: {output}");
+        }
+    }
+}
+
+/// Review 1's reproduction: a non-shell `initialize`, a still-missing body
+/// include, and plain shell actions in `blocked`/`finalize`. It once ran both
+/// shells before any approval. Each entry that reaches the shared staged boot —
+/// direct, an adopted proxy target, and a loop-owning target — must refuse
+/// both, route each catch once, and never launch the provider.
+#[test]
+fn the_reviewed_early_catch_shell_trigger_is_refused_on_every_entry_path() {
+    const LOOP: &str = "phase: 1\nloop:\n  until: 'phase > 1'\n  action: 'increment(phase)'\n  max: 5\n";
+    for (entry, looping) in [("doc.md", false), ("router.md", false), ("doc.md", true), ("router.md", true)] {
+        for yolo in [false, true] {
+            let staged = Staged::new("reviewed-early-catch-shell");
+            staged.install_compose_provider();
+            let blocked = staged.fixture.workspace_path().join("unapproved-blocked");
+            let finalize = staged.fixture.workspace_path().join("unapproved-finalize");
+            staged.write_doc("doc.md", &format!(
+                "---\n{}initialize:\n  stack:\n    - action: {{ensure_file: marker.md}}\n\
+                 blocked:\n  stack:\n    - action: {{append_line: ['events.log', 'blocked']}}\n    \
+                 - action: {{shell: \"touch {}\"}}\n\
+                 finalize:\n  stack:\n    - action: {{append_line: ['events.log', 'finalize']}}\n    \
+                 - action: {{shell: \"touch {}\"}}\n---\n::file ./missing.md\n",
+                if looping { LOOP } else { "" }, blocked.display(), finalize.display(),
+            ));
+            staged.write_doc("router.md", "---\ninitialize:\n  stack:\n    - action: {proxy: './doc.md'}\n---\nRouter\n");
+            let mut args = vec!["compose", entry, "--claude"];
+            if yolo {
+                args.push("-y");
+            }
+
+            let (success, output) = staged.run(&args);
+
+            let case = format!("{entry}, looping={looping}, yolo={yolo}");
+            assert!(!success, "{case}: {output}");
+            assert_eq!(output.matches("shell commands are forbidden").count(), 2, "{case}: {output}");
+            assert!(!blocked.exists() && !finalize.exists(), "{case}: a catch shell ran:\n{output}");
+            assert_eq!(staged.events(), ["blocked", "finalize"], "{case}: {output}");
+            assert!(!staged.prompt.exists(), "{case}: provider launched:\n{output}");
         }
     }
 }
