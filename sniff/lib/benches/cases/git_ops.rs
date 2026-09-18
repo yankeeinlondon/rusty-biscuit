@@ -11,12 +11,12 @@
 //! timed iterations; the commit-graph variants skip with a clear message when
 //! no `git` executable is available.
 
-use chrono::DateTime;
 use criterion::{BenchmarkId, Criterion, Throughput, black_box};
 
 use sniff::filesystem::detect_git_with_request;
-use sniff::filesystem::git::get_recent_commits_in_range;
-use sniff::filesystem::git::{GitRepo, get_commit_files_with_cache, get_recent_commits_by_count};
+use sniff::filesystem::git::{
+    GitRepo, RecentCommits, RecentCommitsOptions, get_commit_files_with_cache,
+};
 use sniff::request::GitRequest;
 
 use crate::support::{fixtures, util};
@@ -158,18 +158,19 @@ fn register_request_levels(c: &mut Criterion) {
 
     group.finish();
 }
-/// time-gated range walk that stops at a cutoff versus a full count walk. Each
-/// runs against a commit-graph-absent and (when `git` is available) a
-/// commit-graph-present fixture so the gix port can show the graph win.
+
+/// `git_ops/revwalk_recent_gated` and `git_ops/revwalk_recent_full` — a
+/// bounded recent-commits collection that stops at a mid-history commit versus
+/// a count collection over the whole history. Each runs against a
+/// commit-graph-absent and (when `git` is available) a commit-graph-present
+/// fixture so the gix port can show the graph win.
+///
+/// Since the recent-commits redesign both IDs measure the unified
+/// `RecentCommits::collect` pipeline, which also diffs and links every
+/// selected commit; baselines saved before that change are not comparable.
 fn register_revwalk(c: &mut Criterion) {
     let mut group = util::configure_slow_group(c, "git_ops");
     let depth = history_depth();
-
-    // The fixture stamps commit i at epoch + 1000 + 60*i seconds. Cutting at the
-    // midpoint makes the gated walk process roughly the newer half before the
-    // time gate prunes the rest.
-    let since = DateTime::from_timestamp(1000 + 60 * (depth as i64) / 2, 0).unwrap();
-    let until = DateTime::from_timestamp(1000 + 60 * (depth as i64) + 1, 0).unwrap();
 
     let variants: &[(&str, bool)] = &[("nograph", false), ("graph", true)];
     for &(label, with_graph) in variants {
@@ -179,19 +180,36 @@ fn register_revwalk(c: &mut Criterion) {
             );
             continue;
         };
+        let repo = GitRepo::discover(fixture.path())
+            .expect("discover revwalk fixture")
+            .expect("revwalk fixture is a repository");
+        // The midpoint commit gates the walk to roughly the newer half.
+        let midpoint = {
+            let gix_repo = gix::open(fixture.path()).expect("open revwalk fixture with gix");
+            let head = gix_repo.head_id().expect("fixture has a HEAD commit");
+            gix_repo
+                .rev_walk(Some(head.detach()))
+                .all()
+                .expect("walk fixture history")
+                .nth(depth / 2)
+                .expect("fixture is deeper than its midpoint")
+                .expect("readable fixture commit")
+                .id
+                .to_string()
+        };
+        let gated = RecentCommitsOptions::new().hash(midpoint);
+        let full = RecentCommitsOptions::new().count(depth);
 
         group.bench_function(BenchmarkId::new("revwalk_recent_gated", label), |b| {
             b.iter(|| {
-                let set =
-                    get_recent_commits_in_range(black_box(fixture.path()), since, until, "gated")
-                        .unwrap();
+                let set = RecentCommits::collect(black_box(&repo), black_box(&gated)).unwrap();
                 black_box(set);
             });
         });
 
         group.bench_function(BenchmarkId::new("revwalk_recent_full", label), |b| {
             b.iter(|| {
-                let set = get_recent_commits_by_count(black_box(fixture.path()), depth).unwrap();
+                let set = RecentCommits::collect(black_box(&repo), black_box(&full)).unwrap();
                 black_box(set);
             });
         });

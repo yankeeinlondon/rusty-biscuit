@@ -69,8 +69,12 @@ required-features = ["test-fixtures"]
 name = "level2_git_status_styling"
 required-features = ["test-fixtures"]
 
+[[test]]
+name = "level2_perf_tree_rendering"
+required-features = ["test-fixtures"]
+
 # CI policy: the L1 suite runs with the `test-fixtures` feature, and sniff-cli
-# owns the area's tmux-driven L2 tests (CI/CD status-cell styling).
+# owns the area's tmux-driven L2 tests (the `level2_*` targets above).
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux"]

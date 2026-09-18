@@ -1064,7 +1064,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     base_dir.as_deref(),
                     cli.json,
                     cli.plain,
-                    cli.verbose,
                     &perf,
                 );
             }

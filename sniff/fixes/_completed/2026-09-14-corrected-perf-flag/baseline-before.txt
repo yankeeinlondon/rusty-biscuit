@@ -1,0 +1,249 @@
+# Baseline — `sniff --perf` BEFORE the corrected-perf-flag fix
+
+Captured on macOS (Darwin 27.0.0, arm64) from the `feat/better-sniff`
+worktree with a `cargo build -p sniff-cli` debug binary, 2026-09-15.
+Repository under observation: `rusty-biscuit` itself.
+
+## Invocations
+
+| Command | stdout | stderr |
+|---|---|---|
+| `sniff --perf` | clap help text; **no `## Performance` section at all** | empty |
+| `sniff --json --perf` | one JSON document (5,607,808 bytes) with a `performance` field | `## Performance` human report (4,072 bytes) |
+| `sniff filesystem --perf` | report + `## Performance` appended (10,506 bytes) | empty |
+| `sniff os --perf --plain` | report + `## Performance` appended (931 bytes) | empty |
+
+Bare `sniff --perf` with no subcommand short-circuits to the help screen and
+emits no performance section. Any Phase 4 CLI test must name a subcommand (or
+`--json`) to exercise the renderer.
+
+## Full-detection report shape (`sniff --json --perf`)
+
+- `total_duration_ms`: 722.7065
+- stage keys: 33
+- counter keys: 34
+- maximum dotted depth (stages + counters): 4
+- longest single stage segment: `embedded_language_hint` (22 chars)
+- longest single counter segment: `classified_embedded_language_hint` (33 chars)
+- longest full stage key: `filesystem.file_inventory.classify.embedded_language_hint` (57 chars)
+- longest full counter key: `filesystem.file_inventory.classified_embedded_language_hint` (59 chars)
+
+### Live stage keys
+
+| stage | total ms | calls |
+|---|---:|---:|
+| `filesystem.shared_walk.docs` | 1483.78 | 4286 |
+| `detect.total` | 722.70 | 1 |
+| `detect.filesystem` | 721.29 | 1 |
+| `filesystem.git` | 676.65 | 1 |
+| `filesystem.file_inventory.walk.entry` | 527.95 | 10000 |
+| `filesystem.file_inventory.classify.fallback` | 478.56 | 1604 |
+| `filesystem.repo` | 378.34 | 1 |
+| `detect.hardware` | 277.60 | 1 |
+| `hardware.audio` | 275.67 | 1 |
+| `filesystem.shared_walk` | 241.48 | 1 |
+| `detect.network` | 89.07 | 1 |
+| `network.wan_ip` | 88.46 | 1 |
+| `filesystem.file_inventory.classify.hyperpolyglot` | 86.10 | 1548 |
+| `hardware.storage` | 27.55 | 1 |
+| `filesystem.docs` | 22.28 | 1 |
+| `filesystem.file_inventory.classify.extension` | 8.61 | 8080 |
+| `detect.os` | 7.59 | 1 |
+| `network.local_interfaces` | 5.63 | 1 |
+| `filesystem.inventory` | 3.96 | 1 |
+| `os.package_managers` | 3.76 | 1 |
+| `hardware.gpu` | 2.50 | 1 |
+| `filesystem.file_inventory.classify.framework` | 2.36 | 15 |
+| `filesystem.file_inventory.classify.embedded_language_hint` | 2.34 | 14 |
+| `os.command_exists_in_path.port` | 1.99 | 1 |
+| `hardware.core` | 1.84 | 1 |
+| `os.time` | 1.83 | 1 |
+| `os.locale` | 0.69 | 1 |
+| `filesystem.file_inventory.classify.exact_filename` | 0.55 | 299 |
+| `filesystem.file_inventory.classify.binary_signature` | 0.22 | 1 |
+| `filesystem.formatting` | 0.20 | 1 |
+| `os.command_exists_in_path.fink` | 0.13 | 1 |
+| `filesystem.file_inventory.classify.shebang` | 0.12 | 2 |
+| `os.identity` | 0.05 | 1 |
+
+### Live counter keys
+
+| counter | value |
+|---|---:|
+| `filesystem.io.bytes_read` | 63028365 |
+| `git.commit_visits` | 21865 |
+| `filesystem.walk.entries_visited` | 13059 |
+| `filesystem.file_inventory.files_accepted` | 10000 |
+| `filesystem.file_inventory.files_classified` | 10000 |
+| `filesystem.docs.documents_parsed` | 8572 |
+| `filesystem.file_inventory.classified_extension` | 8080 |
+| `filesystem.io.file_opens` | 7612 |
+| `filesystem.io.metadata_probes` | 6544 |
+| `filesystem.file_inventory.classified_fallback` | 1604 |
+| `filesystem.file_inventory.files_classified_by_content` | 1551 |
+| `filesystem.io.canonicalizations` | 882 |
+| `filesystem.file_inventory.entries_over_cap` | 776 |
+| `filesystem.file_inventory.classified_exact_filename` | 299 |
+| `filesystem.io.read_dirs` | 189 |
+| `os.path.directories_scanned` | 106 |
+| `filesystem.repo.manifest_parses` | 84 |
+| `filesystem.repo.package_enrichments` | 80 |
+| `git.blob_loads` | 27 |
+| `filesystem.file_inventory.classified_embedded_language_hint` | 14 |
+| `filesystem.file_inventory.classified_shebang` | 2 |
+| `filesystem.repo.lockfile_parses` | 2 |
+| `git.status_walks` | 2 |
+| `os.path.command_misses` | 2 |
+| `filesystem.file_inventory.classified_binary_signature` | 1 |
+| `filesystem.repo.root_config_probes` | 1 |
+| `filesystem.walk.walks_started` | 1 |
+| `git.file_diffs` | 1 |
+| `git.ref_walks` | 1 |
+| `git.repository_discoveries` | 1 |
+| `git.repository_opens` | 1 |
+| `network.wan_ip.cache_misses` | 1 |
+| `network.wan_ip.endpoint_attempts` | 1 |
+| `process.spawns` | 1 |
+
+## Structural facts that bear on the Phase 1 rulings
+
+- **R-2 is live.** `filesystem.shared_walk` is measured (241.48 ms) *and* is a
+  prefix of `filesystem.shared_walk.docs` (1483.78 ms). A measured node that is
+  also a parent is not hypothetical on this host.
+- **R-2 second case is live.** `filesystem.file_inventory`,
+  `filesystem.file_inventory.classify`, and `filesystem.file_inventory.walk`
+  are all unmeasured synthetic intermediates.
+- **R-3 holds on a full run.** `detect.os`, `detect.hardware`, `detect.network`,
+  and `detect.filesystem` are all present, so every `os.*`, `hardware.*`,
+  `network.*`, and `filesystem.*` key re-parents. No stage is literally named
+  `detect.<domain>.<rest>`, so re-parenting collides with nothing.
+- **R-3's absent-`detect.<domain>` branch is also live.** `sniff os --perf`
+  emits `detect.os` but no `detect.filesystem`/`detect.network`/
+  `detect.hardware`, and focused non-detection commands emit total-only
+  reports.
+- **Shares legitimately exceed 1.0.** `filesystem.shared_walk.docs` accumulates
+  1483.78 ms against a 722.71 ms wall clock (4286 repeated calls). The
+  projection must not clamp; `MetricShare::Of` caps *display* at 99%.
+- **HOT will land on a nested leaf,** not on a domain: the greatest measured
+  non-root total is `filesystem.shared_walk.docs`.
+- **No counter key collides with a stage key,** but the near-miss the spec
+  anticipated is real: stage `…classify.extension` vs counter
+  `…classified_extension`. Two separate trees (R3) keeps them apart.
+
+## Verbatim human report from `sniff --json --perf` (stderr)
+
+```text
+
+## Performance
+
+Total: 722.71 ms
+
+Stages:
+- filesystem.shared_walk.docs: 1483.78 ms total (4286 calls, max 14.22 ms, last 2.68 ms)
+- detect.total: 722.70 ms total (1 call, max 722.70 ms, last 722.70 ms)
+- detect.filesystem: 721.29 ms total (1 call, max 721.29 ms, last 721.29 ms)
+- filesystem.git: 676.65 ms total (1 call, max 676.65 ms, last 676.65 ms)
+- filesystem.file_inventory.walk.entry: 527.95 ms total (10000 calls, max 6.07 ms, last 0.00 ms)
+- filesystem.file_inventory.classify.fallback: 478.56 ms total (1604 calls, max 6.07 ms, last 0.25 ms)
+- filesystem.repo: 378.34 ms total (1 call, max 378.34 ms, last 378.34 ms)
+- detect.hardware: 277.60 ms total (1 call, max 277.60 ms, last 277.60 ms)
+- hardware.audio: 275.67 ms total (1 call, max 275.67 ms, last 275.67 ms)
+- filesystem.shared_walk: 241.48 ms total (1 call, max 241.48 ms, last 241.48 ms)
+- detect.network: 89.07 ms total (1 call, max 89.07 ms, last 89.07 ms)
+- network.wan_ip: 88.46 ms total (1 call, max 88.46 ms, last 88.46 ms)
+- filesystem.file_inventory.classify.hyperpolyglot: 86.10 ms total (1548 calls, max 2.81 ms, last 0.03 ms)
+- hardware.storage: 27.55 ms total (1 call, max 27.55 ms, last 27.55 ms)
+- filesystem.docs: 22.28 ms total (1 call, max 22.28 ms, last 22.28 ms)
+- filesystem.file_inventory.classify.extension: 8.61 ms total (8080 calls, max 0.30 ms, last 0.00 ms)
+- detect.os: 7.59 ms total (1 call, max 7.59 ms, last 7.59 ms)
+- network.local_interfaces: 5.63 ms total (1 call, max 5.63 ms, last 5.63 ms)
+- filesystem.inventory: 3.96 ms total (1 call, max 3.96 ms, last 3.96 ms)
+- os.package_managers: 3.76 ms total (1 call, max 3.76 ms, last 3.76 ms)
+- hardware.gpu: 2.50 ms total (1 call, max 2.50 ms, last 2.50 ms)
+- filesystem.file_inventory.classify.framework: 2.36 ms total (15 calls, max 0.32 ms, last 0.16 ms)
+- filesystem.file_inventory.classify.embedded_language_hint: 2.34 ms total (14 calls, max 0.32 ms, last 0.16 ms)
+- os.command_exists_in_path.port: 1.99 ms total (1 call, max 1.99 ms, last 1.99 ms)
+- hardware.core: 1.84 ms total (1 call, max 1.84 ms, last 1.84 ms)
+- os.time: 1.83 ms total (1 call, max 1.83 ms, last 1.83 ms)
+- os.locale: 0.69 ms total (1 call, max 0.69 ms, last 0.69 ms)
+- filesystem.file_inventory.classify.exact_filename: 0.55 ms total (299 calls, max 0.14 ms, last 0.00 ms)
+- filesystem.file_inventory.classify.binary_signature: 0.22 ms total (1 call, max 0.22 ms, last 0.22 ms)
+- filesystem.formatting: 0.20 ms total (1 call, max 0.20 ms, last 0.20 ms)
+- os.command_exists_in_path.fink: 0.13 ms total (1 call, max 0.13 ms, last 0.13 ms)
+- filesystem.file_inventory.classify.shebang: 0.12 ms total (2 calls, max 0.07 ms, last 0.05 ms)
+- os.identity: 0.05 ms total (1 call, max 0.05 ms, last 0.05 ms)
+
+Counters:
+- filesystem.io.bytes_read: 63028365
+- git.commit_visits: 21865
+- filesystem.walk.entries_visited: 13059
+- filesystem.file_inventory.files_accepted: 10000
+- filesystem.file_inventory.files_classified: 10000
+- filesystem.docs.documents_parsed: 8572
+- filesystem.file_inventory.classified_extension: 8080
+- filesystem.io.file_opens: 7612
+- filesystem.io.metadata_probes: 6544
+- filesystem.file_inventory.classified_fallback: 1604
+- filesystem.file_inventory.files_classified_by_content: 1551
+- filesystem.io.canonicalizations: 882
+- filesystem.file_inventory.entries_over_cap: 776
+- filesystem.file_inventory.classified_exact_filename: 299
+- filesystem.io.read_dirs: 189
+- os.path.directories_scanned: 106
+- filesystem.repo.manifest_parses: 84
+- filesystem.repo.package_enrichments: 80
+- git.blob_loads: 27
+- filesystem.file_inventory.classified_embedded_language_hint: 14
+- filesystem.file_inventory.classified_shebang: 2
+- filesystem.repo.lockfile_parses: 2
+- git.status_walks: 2
+- os.path.command_misses: 2
+- filesystem.file_inventory.classified_binary_signature: 1
+- filesystem.repo.root_config_probes: 1
+- filesystem.walk.walks_started: 1
+- git.file_diffs: 1
+- git.ref_walks: 1
+- git.repository_discoveries: 1
+- git.repository_opens: 1
+- network.wan_ip.cache_misses: 1
+- network.wan_ip.endpoint_attempts: 1
+- process.spawns: 1
+```
+
+## Verbatim human report from `sniff os --perf --plain` (stdout)
+
+```text
+
+Operating System:
+
+Name: macOS 27.0
+Distribution: macos
+Kernel: 27.0.0
+Hostname: Mac.home.ken.net
+Uptime: 3 days, 2 hours, 1 minute
+
+Package Managers: Primary: brew (2 detected)
+
+Locale: en_US.UTF-8 (UTF-8)
+
+Timezone: America/Los_Angeles (PDT, UTC-07:00)
+
+
+## Performance
+
+Total: 0.63 ms
+
+Stages:
+- detect.total: 0.63 ms total (1 call, max 0.63 ms, last 0.63 ms)
+- detect.os: 0.51 ms total (1 call, max 0.51 ms, last 0.51 ms)
+- os.package_managers: 0.34 ms total (1 call, max 0.34 ms, last 0.34 ms)
+- os.command_exists_in_path.port: 0.21 ms total (1 call, max 0.21 ms, last 0.21 ms)
+- os.time: 0.10 ms total (1 call, max 0.10 ms, last 0.10 ms)
+- os.command_exists_in_path.fink: 0.07 ms total (1 call, max 0.07 ms, last 0.07 ms)
+- os.locale: 0.02 ms total (1 call, max 0.02 ms, last 0.02 ms)
+- os.identity: 0.00 ms total (1 call, max 0.00 ms, last 0.00 ms)
+
+Counters:
+- os.path.directories_scanned: 106
+- os.path.command_misses: 2
+```
