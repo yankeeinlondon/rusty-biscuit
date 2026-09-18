@@ -5,7 +5,10 @@ human_review: false
 reviewed_by: codex/default
 created: 2026-09-17T02:21:47-07:00
 spec: 2026-09-15-initialize-after-proxy/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: claudine/fixes/2026-09-15-initialize-after-proxy/implementation-log.md
+next: 2026-09-15-initialize-after-proxy/review-2.md
 description: A **fix** review of `2026-09-15-initialize-after-proxy/spec.md`
 fix: 2026-09-15-initialize-after-proxy/review-1.md
 findings:

@@ -99,6 +99,7 @@ docs_created_during_phase_7:
     - claudine/fixes/2026-09-15-initialize-after-proxy/evidence.md
 skills_files_updated_during_phase_7: []
 human_review: false
+implementation_1: "2026-09-18T01:48:15-07:00"
 message_to_agent: |-
     Phase 8 is complete; implementation is ready for author review, and the fix remains in its active directory.
     This phase changed documentation/skills and comments only (loop_control.rs and composition/preflight.rs).
@@ -1154,3 +1155,47 @@ tests, 4/4 corrected terminal regressions, and package lint pass. The evidence a
 earlier fixture failures, and ten unrelated full-suite failures rather than
 claiming a green full-area run. No formatting, commit, or `_completed` move
 was performed. Implementation complete, ready for a new review of amended R2.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-18T01:48:15-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis/claudine/fixes/2026-09-15-initialize-after-proxy/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- the review contains one finding: `[high] Staged failure handlers execute shell commands before approval`
+        - spec R2 (binding ruling, 2026-09-17) and `shell-free-ruling.md` supersede the review's approval-gate remedy: early failure/finalize catches must be shell-free regardless of approval
+        - that amendment was implemented in `29f77f05a` ("make initialize shell-free with parsing, executor, and runtime backstop"); this cycle verifies the finding's trigger is closed and its requested regression coverage exists, adding tests only where a gap remains
+- starting the work on '[high] Staged failure handlers execute shell commands before approval' at 01:48:37
+        - source verification: every lifecycle catch dispatched before `start` runs without a shell runner
+                - `LifecycleRunGuard::run_event_stack` (`lib/src/composition/lifecycle/mod.rs`) swaps in `DisabledShellRunner` until `start` is recorded; `reset_for_proxy` and `reset_for_next_iteration` clear `start_emitted`, so adopted targets and loop iterations re-enter the boundary
+                - every stack-execution site routes through that guard (`looping/engine.rs`, `wrap/composition/pipeline.rs`, `staged_boot.rs` via `route_initialize`, `harness_orch/loop_control/error_routing.rs`); the one direct `execute_stack_for_signal` caller, `run_lifecycle_stack_only`, applies the same swap
+                - `emit_preflight_blocked_and_finalize_in_context` (`wrap/composition/preflight.rs`), which `route_stabilized_failure` uses, also passes `DisabledShellRunner` explicitly
+                - `run_shell_action` (`lifecycle/executor.rs`) rejects `initialize` shells independently and reports `BeforePreflight` as an evaluation error, so `no_error` cannot suppress it
+        - executable probe of review 1's exact trigger with the current debug binary, cleared environment, fake `claude`, and closed stdin, without and with `-y`
+                - direct `compose`, `compose` of a router that proxies the document, a loop-owning target reached directly and through the router, and `inline-compose` direct: both shells refused, no marker files, `events.log` = `blocked`, `finalize`, no provider launch
+                - `inline-compose` of the router with `-y` launched the provider and ran the `finalize` shell. This is not a gap: `inline-compose` does not compose the body, so the missing include does not block the run, and `finalize` fires after `start`, where R2 allows approved shells. Without `-y`, the preflight audit denies the shells and the catches are refused
+                - observation, not changed: the catch's shell refusal is a catch evaluation error. Under the existing catch protocol, that error outranks the cause. The rendered diagnostic therefore names the two refusals, and the original `TransclusionError` / `File not found` is not shown. Its prose also calls the refusal a "crashed expression". Changing either needs an author decision on the catch protocol and diagnostic wording, so this cycle leaves both unchanged
+        - existing L1 `CliProcessFixture` coverage in `claudine/cli/tests/compose_initialize_staged_boot.rs` (fake provider, isolated home and cwd, silent audio)
+                - `early_catch_shells_cannot_run_or_enable_another_catch_shell` puts `no_error` shells in `blocked`, `failure`, and `finalize`, with and without `-y`, and asserts no shell marker, exact event lists, and no provider launch. It covers (a) `missing`, (b) `error`, (c) `proxy` to a missing target, (d) `schema`, `audit`, and the stabilized reread (`missing`), (e) `evaluation`, where a `blocked` evaluation error routes to `failure`, and sequence-harness adoption (`adopted`)
+                - `approved_start_shell_runs_once_after_shell_free_initialization` is the positive counterpart: a non-shell `initialize` plus an approved `start` shell that runs once. The non-shell catches are asserted to run exactly once by the event lists above
+                - `initialize_shells_are_forbidden_even_with_yolo_across_entry_paths` covers the initialization shell itself across compose, inline-compose, proxy, loop, and sequence
+        - gaps found and closed (test-only; no production change was needed)
+                - the early-catch test used only `no_error` shells and adopted targets only through `sequence`. Nothing reproduced the review's plain-shell trigger or reached it through a direct `compose` proxy or a loop-owning target. Added `the_reviewed_early_catch_shell_trigger_is_refused_on_every_entry_path`, which covers direct, router-proxied, loop-owning, and proxied loop-owning entries, without and with `-y`. It asserts exactly two refusals, no marker files, `blocked`, `finalize` once each, and no provider launch
+                - the `looping` row of `initialize_shells_are_forbidden_even_with_yolo_across_entry_paths` used an invalid `loop.count` key. The initialization refusal happens to fire first, so the row still passed, but it could not exercise a valid loop-owning document. Changed it to `until: 'true'`, `max: 2`
+                - non-vacuous proof: with both backstops neutered (the guard's runner swap and the explicit `DisabledShellRunner` in `preflight.rs`), the new test and `early_catch_shells_cannot_run_or_enable_another_catch_shell` both failed. The sources were restored with a fresh mtime, and `git diff` shows no source change
+                - `cargo nextest run -p claudine-cli --test compose_initialize_staged_boot --test compose_initialize_acceptance`: 37/37 passed
+        - `just test --no-fail-fast` (from `claudine/`): 7,330 run, 7,320 passed, 10 failed, 9 skipped. Every initialization and early-catch test passed
+                - all ten failures are shipped-prompt contract or drift checks against `prompts/`, and none involves the lifecycle shell boundary: `composition::resolve::tests::cross_platform_prompt_composes_cleanly` (`prompts/cross-platform.md` is missing after the layout reorganization), `composition::schema::tests::shipped_implement_plan_{preserves_supplied_commit_message_in_preflight_command,prepares_with_unset_optional_commit_message}`, `shipped_prompt_route_drift::{fixture_body_matches_the_shipped_body,fixture_preserves_the_shipped_schema_and_loop_semantics,shipped_implement_prompts_have_not_drifted_from_their_fixture}`, `shipped_prompt_contract::{shipped_prompts_have_parseable_schemas_and_expressions,shipped_implement_plan_launches_without_a_sibling_spec}` (the latter reports an unparsable `link(^prompt/implement.md)`), `shipped_prompts::shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch`, and `compose_caller_file_provenance::shipped_implement_router_refuses_an_archived_case_through_its_own_error`
+                - they come from `prompts/` commits after `29f77f05a` (for example `41f9adeb8` "reorganize prompt template layout" and `85b97ac6d`). This cycle changed only `claudine/cli/tests/compose_initialize_staged_boot.rs`, a separate test binary, so the unchanged tree fails the same way
+                - the earlier run's seven HOME-overlay failures did not recur; this run inherited `HOME=/Users/ken`
+        - `just lint` (from `claudine/`): passed with exit 0 (clippy for `claudine`, `claudine-contract`, `claudine-cli`, and `claudine-gen`, plus the 8 `error_guards` checks)
+- work completed for '[high] Staged failure handlers execute shell commands before approval' at 02:00:42
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 13 minutes. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- the finding was fixed under the superseding shell-free ruling (spec R2), not the review's approval-gate remedy; the production fix landed in `29f77f05a`, and this cycle added verification and regression coverage
+- open for author decision (outside this finding's scope): the rendered diagnostic for an early catch shell refusal hides the original `TransclusionError` cause and calls the refusal a "crashed expression"
+- the files changed in this cycle are `claudine/cli/tests/compose_initialize_staged_boot.rs` and this log
