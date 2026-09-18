@@ -39,6 +39,10 @@ tempfile = "3.15"
 wiremock = "0.6"
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
+# Research-contract corpus (`tests/research_corpus.rs`): library schema
+# validation plus darkmatter's test-only effect counters. A dev-dependency
+# never enters the send path's normal dependency graph.
+darkmatter = { path = "../../darkmatter/lib", features = ["effects-instrumentation"] }
 
 [features]
 default = ["discord", "slack"]

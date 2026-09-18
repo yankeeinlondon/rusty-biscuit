@@ -1,0 +1,20 @@
+---
+# An override past its review date.
+# Schema-valid by design; the Rust rule rejects it.
+# expect-rule: SR-OVERRIDE
+$schema: ../../../../../../docs/research/platforms/_overrides.schema.yaml
+schema_version: 1
+overrides:
+- id: ovr.fx
+  platform_id: discord
+  fact: c.fx.content
+  field: value
+  effective_value: '1900'
+  target_hash: xxh64:0123456789abcdef
+  schema_hash: xxh64:0123456789abcdef
+  evidence:
+  - src.fx.docs
+  reason: r
+  author: a
+  review_by: 2025-09-17
+---

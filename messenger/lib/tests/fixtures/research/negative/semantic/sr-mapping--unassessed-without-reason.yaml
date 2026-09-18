@@ -1,0 +1,32 @@
+---
+# An unassessed mapping without a stale reason.
+# Schema-valid by design; the Rust rule rejects it.
+# expect-rule: SR-MAPPING
+$schema: ../../../../../../docs/research/implementation/_schema.yaml
+schema_version: 1
+inspected_revision: d57faf7e8
+fingerprint_algorithm: xxh64
+assessments:
+- id: map.fx
+  adapter: discord
+  category: constraints
+  platform_id: discord
+  facts:
+  - c.fx.content
+  status: unassessed
+  summary: s
+  code_refs:
+  - messenger/lib/src/provider/discord.rs
+  test_refs: []
+  assessed_revision: d57faf7e8
+  fingerprints:
+  - input: messenger/lib/src/provider/discord.rs
+    kind: code_file
+    digest: xxh64:0123456789abcdef
+  review:
+    status: accepted
+    proposed_by: agent
+    reviewed_by: m
+    reviewed_on: 2026-09-17
+  requires_messenger_update: false
+---

@@ -63,6 +63,11 @@
 - `messenger/lib` uses `test-toolkit` only as a development dependency so its
   desktop-stub resolver tests restore `MESSENGER_STUB_BIN_DIR` safely while
   serializing process-environment mutation.
+- `messenger/lib` uses `darkmatter` (with `effects-instrumentation`) only as a
+  development dependency for `tests/research_corpus.rs`, which validates the
+  provider research contract and fixtures through Darkmatter's library schema
+  validation and asserts that validation builds no effect engine and attempts
+  no network access. Ordinary send builds do not depend on Darkmatter.
 - `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
   stores deterministic ahead/behind and clean-merge results under the user cache
   directory, keyed by canonical repo-root xxHash plus branch tip SHAs.

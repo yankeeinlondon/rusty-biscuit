@@ -1,0 +1,61 @@
+---
+# Reviewed implementation mappings: an accepted partial assessment and a
+# proposed, stale (`unassessed`) one, each scoped to an adapter and category
+# with xxh64 fingerprints. Criterion 32. Expect: valid.
+$schema: ../../../../../docs/research/implementation/_schema.yaml
+schema_version: 1
+inspected_revision: d57faf7e8
+fingerprint_algorithm: xxh64
+assessments:
+- id: map.fx.discord.constraints
+  adapter: discord
+  category: constraints
+  platform_id: discord
+  facts:
+  - c.fx.content.service_max
+  status: partial
+  summary: Content is truncated; embeds are not budgeted.
+  code_refs:
+  - messenger/lib/src/provider/discord.rs
+  test_refs:
+  - messenger/lib/src/tests/discord.rs
+  assessed_revision: d57faf7e8
+  fingerprints:
+  - input: messenger/lib/src/provider/discord.rs
+    kind: code_file
+    digest: xxh64:0123456789abcdef
+  - input: messenger/lib/src/tests/discord.rs
+    kind: test_file
+    digest: xxh64:1123456789abcdef
+  - input: discord#c.fx.content.service_max
+    kind: research_fact
+    digest: xxh64:2123456789abcdef
+  review:
+    status: accepted
+    proposed_by: agent
+    reviewed_by: maintainer
+    reviewed_on: 2026-09-17
+  requires_messenger_update: true
+  follow_up: Truncation broadening.
+- id: map.fx.telegram.formatting
+  adapter: telegram
+  category: formatting
+  platform_id: telegram
+  facts:
+  - fmt.fx.html
+  status: unassessed
+  stale_reason: fingerprint_changed
+  summary: Renderer changed since review.
+  code_refs:
+  - messenger/lib/src/markdown/telegram.rs
+  test_refs: []
+  assessed_revision: e178f0263
+  fingerprints:
+  - input: messenger/lib/src/markdown/telegram.rs
+    kind: code_file
+    digest: xxh64:3123456789abcdef
+  review:
+    status: proposed
+    proposed_by: agent
+  requires_messenger_update: false
+---

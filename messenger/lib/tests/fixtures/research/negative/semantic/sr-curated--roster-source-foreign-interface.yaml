@@ -1,0 +1,31 @@
+---
+# A curated source attributed to an interface of another platform.
+# Schema-valid by design; the Rust rule rejects it.
+# expect-rule: SR-CURATED
+$schema: ../../../../../../docs/platforms.schema.yaml
+roster_version: 1
+refresh_interval_days: 30
+curated_source_cap: 10
+platforms:
+- platform_id: discord
+  name: Discord
+  status: active
+  file: discord.md
+  website: https://discord.com
+  interfaces:
+  - interface_id: discord_bot_api
+    role: sending_adapter
+    api_identity: Discord HTTP API
+    adapters:
+    - discord
+    identification_url: https://docs.example.com/discord
+  curated_sources:
+  - url: https://docs.example.com/source-1
+    contribution: Distinct coverage 1.
+    interfaces:
+    - slack_web_api
+    review: approved
+    approved_by: maintainer
+    approved_on: 2026-09-17
+excluded: []
+---
