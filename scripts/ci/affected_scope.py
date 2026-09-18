@@ -2688,6 +2688,24 @@ def matrix_record(
             or (testing and {"node-22", "pnpm-10"} & set(record["runner_tools"]))
             else []
         ),
+        # A `requires-toolchain` suite drives `cargo`/`rustc` itself, and its
+        # binaries arrive in an archive that carries no toolchain. Where the
+        # environment claims `cargo_toolchain`, the consumer must provision the
+        # pinned toolchain once, before any test runs: a hosted runner's rustup
+        # proxy otherwise auto-installs the pin on first use, and concurrent
+        # tests racing that install corrupted rustup's download directory (run
+        # 35326800778, `repo-deps`, `test-toolkit`). Where the environment
+        # lacks the capability, the L1 cell is a governed gap instead.
+        "toolchain_environments": (
+            [
+                environment["name"]
+                for environment in native_environments(environments)
+                if capability(environment, "cargo_toolchain")
+                and runs(environment["name"], "L1")
+            ]
+            if testing and record.get("requires_toolchain", False)
+            else []
+        ),
         "wsl": testing
         and any(
             capability(environment, "archive_only") and runs(environment["name"], "L1")
@@ -3289,6 +3307,7 @@ def calculate_scope(
             "archive_includes": record["archive_includes"],
             "sidecars": record["sidecars"],
             "l1_include_slow": record["l1_include_slow"],
+            "requires_toolchain": record["requires_toolchain"],
             "native": native_closure(package_id, metadata, packages, policy),
             "input_paths": closure_directories(
                 package_id, root, metadata, packages

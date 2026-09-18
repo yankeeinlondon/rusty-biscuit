@@ -1028,6 +1028,55 @@ class MatrixRecordTests(unittest.TestCase):
             environments=environments_for_tests(),
         )
         self.assertEqual(record["node_environments"], ["ubuntu-latest"])
+
+    def test_toolchain_environments_follow_the_declaration_and_the_capability(self) -> None:
+        # Run 35326800778: `repo-deps` and `test-toolkit` shell out to cargo
+        # from an archive whose consumer had no pinned toolchain, and the
+        # concurrent rustup auto-installs the tests triggered raced each other.
+        # The consumer provisions the pin once, on exactly the L1 hosts the
+        # declaration reaches; the WSL2 guest stays a governed gap instead.
+        environments = environments_for_tests()
+        record = matrix_record(
+            plan_package(package="repo-deps", requires_toolchain=True),
+            environments=environments,
+        )
+        self.assertEqual(
+            record["toolchain_environments"],
+            [
+                environment["name"]
+                for environment in environments
+                if not capability(environment, "archive_only")
+                and capability(environment, "cargo_toolchain")
+            ],
+        )
+        self.assertNotIn("wsl2-ubuntu", record["toolchain_environments"])
+
+        # Narrowed to hosted execution: a cell a receipt already satisfied
+        # schedules no runner and so provisions nothing.
+        narrowed = matrix_record(
+            plan_package(package="repo-deps", requires_toolchain=True),
+            environments=environments,
+            executing={("ubuntu-latest", "L1")},
+        )
+        self.assertEqual(narrowed["toolchain_environments"], ["ubuntu-latest"])
+
+        # A package that never shells out provisions nothing anywhere, and a
+        # declaration without a test gate (check-only) provisions nothing.
+        self.assertEqual(
+            matrix_record(plan_package(package="a"), environments=environments)[
+                "toolchain_environments"
+            ],
+            [],
+        )
+        self.assertEqual(
+            matrix_record(
+                plan_package(package="repo-deps", requires_toolchain=True, gates=["check"]),
+                environments=environments,
+                gates={"check"},
+            )["toolchain_environments"],
+            [],
+        )
+
     def test_a_companion_suite_host_is_never_satisfied_by_local_evidence(self) -> None:
         # A companion suite is not in any local receipt, so its CI host must
         # still run even when the package's Rust half was validated locally.

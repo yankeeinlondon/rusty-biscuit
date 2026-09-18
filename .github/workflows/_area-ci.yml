@@ -102,6 +102,7 @@ jobs:
       l2-environments: ${{ toJSON(matrix.l2_environments) }}
       browser-environments: ${{ toJSON(matrix.browser_environments) }}
       node-environments: ${{ toJSON(matrix.node_environments) }}
+      toolchain-environments: ${{ toJSON(matrix.toolchain_environments) }}
       backends: ${{ toJSON(matrix.l2_backends) }}
       runner-tools: ${{ toJSON(matrix.runner_tools) }}
       companion-suites: ${{ toJSON(matrix.companion_suites) }}

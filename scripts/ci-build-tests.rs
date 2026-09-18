@@ -876,6 +876,11 @@ fn the_javascript_publisher_reads_a_fixture_generated_from_this_report() {
 /// `pub(crate)` because the archive fixtures drive the same shipped binary; a
 /// second resolver would be a second chance to test something other than what
 /// ships.
+///
+/// Cargo is resolved at run time, never through `env!("CARGO")`: that value
+/// is the PRODUCER's toolchain path, and this suite runs from an archive on a
+/// consumer that provisions its own (run 35326800778 failed 14 fixtures here
+/// with `NotFound` for the baked path).
 pub(crate) fn shipped_wrapper() -> PathBuf {
     let exe = env::current_exe().expect("the test binary has a path");
     let profile_dir = exe
@@ -885,7 +890,7 @@ pub(crate) fn shipped_wrapper() -> PathBuf {
         .to_path_buf();
     let binary = profile_dir.join(format!("ci-build{}", env::consts::EXE_SUFFIX));
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
-    let status = Command::new(env!("CARGO"))
+    let status = Command::new(cargo_bin())
         .arg("build")
         .arg("--quiet")
         .args(["--no-default-features", "--features", "build-tools"])
@@ -909,6 +914,13 @@ pub(crate) fn shipped_wrapper() -> PathBuf {
 /// directory` — a flake whose message names neither the wrapper nor the race.
 /// A hard link survives it: Cargo writes the new build to a new inode, and this
 /// name keeps resolving to the complete bytes the caller verified.
+/// The `cargo` this process should drive: the run-time `CARGO` when the runner
+/// set one, else the `cargo` on PATH, which the rustup proxy resolves through
+/// the repository's pinned toolchain.
+pub(crate) fn cargo_bin() -> std::ffi::OsString {
+    env::var_os("CARGO").unwrap_or_else(|| "cargo".into())
+}
+
 fn private_handle(profile_dir: &Path, binary: &Path) -> PathBuf {
     let links = profile_dir.join(".ci-build-wrappers");
     if fs::create_dir_all(&links).is_err() {
@@ -959,7 +971,7 @@ fn measured_build(
     counters: &Path,
     configuration: &str,
 ) {
-    let status = Command::new(env!("CARGO"))
+    let status = Command::new(cargo_bin())
         .arg("build")
         .arg("--quiet")
         .arg("--offline")
@@ -1100,7 +1112,7 @@ fn two_tier_configurations_compile_the_same_package_twice_and_are_reported_apart
     );
 
     let before = report["events_read"].as_u64().unwrap();
-    let status = Command::new(env!("CARGO"))
+    let status = Command::new(cargo_bin())
         .arg("build")
         .arg("--quiet")
         .arg("--offline")

@@ -116,6 +116,10 @@ on:
         description: "JSON array of environments where Node + pnpm are provisioned for a declared companion suite that needs them. Empty when the package declares none."
         type: string
         default: '[]'
+      toolchain-environments:
+        description: "JSON array of environments whose L1 cell provisions the pinned Rust toolchain before running, because the package declares `requires-toolchain` and the environment claims `cargo_toolchain`. Empty for every package whose suite never shells out to cargo or rustc."
+        type: string
+        default: '[]'
       native:
         description: "JSON map of runner OS -> system packages, the union of `native` requirements across this package's dependency closure."
         type: string
@@ -419,12 +423,24 @@ jobs:
         uses: extractions/setup-just@v4
       # Which build record this cell consumes. Every executing L1/L2/browser
       # cell references exactly one, so this either names it or refuses: a
-      # consumer installs no toolchain, restores no Cargo cache, and has no
-      # compiler to fall back to.
+      # consumer restores no Cargo cache and has no compiler to fall back to.
+      # The one toolchain it may hold is the step below, and that is for the
+      # SUITE to drive, never for the recipe to compile a replacement with.
       - name: Resolve this cell's build record
         id: build
         shell: bash
         run: just _ci_build_consumer '${{ inputs.builds }}' '${{ matrix.environment }}' L1
+      # A `requires-toolchain` package's tests shell out to `cargo` and `rustc`
+      # themselves (`cargo metadata`, fixture builds, `rustc -vV`). The archive
+      # brings no toolchain, and a hosted runner's rustup proxy would otherwise
+      # install the pinned one on first use — from inside however many tests
+      # reach it at once, which corrupted rustup's download directory on run
+      # 35326800778. Install it once, up front, on the environments the
+      # planner derived from `requires-toolchain` × `cargo_toolchain`. Every
+      # other package's cell stays toolchain-free.
+      - name: Set up the pinned Rust toolchain
+        if: ${{ contains(fromJSON(inputs.toolchain-environments), matrix.environment) }}
+        run: rustup show
       - name: Install native prerequisites
         shell: bash
         env:

@@ -546,13 +546,19 @@ would silently exempt a package and miss its first test.
 | `companion-suites` | string[] | `[]` | non-Cargo suites this package owns; the closed vocabulary is `SUITE_REGISTRY`'s companion half in `affected_scope.py` |
 | `archive-includes` | string[] | `[]` | build outputs the producer must add to this package's archive, relative to the profile output directory |
 | `sidecars` | string[] | `[]` | named build sidecars from [`sidecars.json`](sidecars.json) — another package's binaries, compiled by the producer |
-| `requires-toolchain` | bool | `false` | this package's L1 shells out to `cargo` or `just`, so an environment without `cargo_toolchain` renders a governed `ACCEPTED GAP` rather than a red cell |
+| `requires-toolchain` | bool | `false` | this package's L1 shells out to `cargo` or `just`, so its consumer provisions the pinned toolchain where the environment has `cargo_toolchain`, and an environment without it renders a governed `ACCEPTED GAP` rather than a red cell |
 
 `requires-toolchain` is for the minority of suites that test the repository's
 own tooling — they open the workspace with `cargo metadata` or drive real
 `just` recipes in a scratch tree. Declaring it is not a way to opt out of an
 environment: the cell still appears, still names the capability it lacks, and
-still carries an owner and expiry.
+still carries an owner and expiry. Where the capability IS present, the
+declaration is what makes the consumer run `rustup show` before the suite
+(`toolchain_environments` in the matrix record): the archive brings no
+toolchain, and a hosted runner's rustup proxy would otherwise install the pin
+from inside whichever tests reach `cargo` first — concurrently, which corrupted
+rustup's download directory on run 35326800778. That toolchain is for the
+suite to drive; the recipe still compiles nothing.
 
 `[package.metadata.ci.native]`: a map of runner OS (`ubuntu-latest`,
 `windows-latest`, `macos-latest`) → system packages needed to build/test. The
@@ -800,7 +806,8 @@ unrelated area or environment proceeds untouched, and a real test result
 outranks the plumbing diagnostic.
 
 **Consumers verify, then run.** A tier whose `{environment, gate}` appears in a
-record's `consumers` installs no toolchain, restores no Cargo cache, downloads
+record's `consumers` installs no toolchain (except the one a
+`requires-toolchain` suite drives itself), restores no Cargo cache, downloads
 the artifact, and runs `ci-build verify` — plan key, realized digest, source
 identity, producer/execution compatibility, archive and sidecar checksums,
 expected binaries, and the host's own runtime ABI — *before* anything is
@@ -1054,8 +1061,10 @@ covers both the workspace and `scripts/` in one action invocation, because
 step would race the first's post-job save.
 
 **No test tier has a cache key at all.** A cell that consumes an archive
-restores no Cargo cache and installs no toolchain: it has nothing to compile,
-and a restored cache is the one thing that can make a silent rebuild look fast.
+restores no Cargo cache and installs no toolchain for the recipe's own use: it
+has nothing to compile, and a restored cache is the one thing that can make a
+silent rebuild look fast. (A `requires-toolchain` package's L1 cell installs
+the pin for its suite to drive, still without a cache.)
 Task 6.5 deleted the `package-ci-<package>-test-<environment>` key with the
 toolchain setup it accompanied; check and lint keep theirs, because they are
 deliberately separate compile configurations.

@@ -49,6 +49,7 @@
       "sidecars": true,
       "l1_include_slow": true,
       "native": true,
+      "requires_toolchain": false,
       "exclusion": false,
       "input_paths": false,
       "dependent_seam": false

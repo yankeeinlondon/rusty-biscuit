@@ -457,6 +457,7 @@ fn the_package_matrix_is_scope_derived_not_static() {
         "l2_environments",
         "browser_environments",
         "node_environments",
+        "toolchain_environments",
         "l2_backends",
         "runner_tools",
         "companion_suites",
@@ -1634,6 +1635,61 @@ fn l2_runs_on_every_environment_with_a_provisioned_backend() {
         environments.contains("\"tmux\": {") && environments.contains("POLICY GAP")
             || read("scripts/ci/affected_scope.py").contains("POLICY GAP"),
         "an unhostable L2 tier must be governed as a policy gap"
+    );
+}
+
+/// A `requires-toolchain` suite (`repo-deps`, `test-toolkit`) drives `cargo`
+/// and `rustc` itself, but its binaries arrive in an archive that brings no
+/// toolchain. On run 35326800778 the hosted consumer's rustup proxy installed
+/// the pin from inside the first tests to reach it, concurrently, and the race
+/// corrupted the download directory. The pin is installed once, up front, on
+/// exactly the environments the planner derives from the declaration crossed
+/// with `cargo_toolchain`.
+#[test]
+fn a_declared_toolchain_requirement_is_provisioned_once_before_the_suite_runs() {
+    let policy = read("scripts/ci/affected_scope.py");
+    assert!(
+        policy.contains("\"toolchain_environments\""),
+        "affected_scope.py must derive the toolchain environments from `requires-toolchain` \
+         and the capability table"
+    );
+
+    let area = workflow("_area-ci.yml");
+    assert_eq!(
+        area.matches("toolchain-environments: ${{ toJSON(matrix.toolchain_environments) }}")
+            .count(),
+        1,
+        "the package fan-out must forward the derived toolchain environments"
+    );
+
+    let test_job = job_block("_package-ci.yml", "  test:");
+    let all = steps(&test_job);
+    let step = step_named(&all, "Set up the pinned Rust toolchain")
+        .expect("the L1 consumer must provision the pinned toolchain in a named step");
+    assert!(
+        step.contains(
+            "if: ${{ contains(fromJSON(inputs.toolchain-environments), matrix.environment) }}"
+        ),
+        "the toolchain step must gate on the derived list, never on a runner label"
+    );
+    assert!(
+        step.contains("run: rustup show"),
+        "the step installs the pin `rust-toolchain.toml` names, nothing else"
+    );
+    let index = |name: &str| {
+        all.iter()
+            .position(|step| step.starts_with(&format!("      - name: {name}\n")))
+            .unwrap_or_else(|| panic!("the L1 job must define the `{name}` step"))
+    };
+    assert!(
+        index("Set up the pinned Rust toolchain") < index("L1 tests"),
+        "the toolchain must be provisioned before the suite starts, not repaired after"
+    );
+    assert_eq!(
+        all.iter().filter(|step| step.contains("rustup")).count(),
+        1,
+        "no other step in the consumer may touch rustup: a second one would be a toolchain \
+         the recipe could compile a replacement with"
     );
 }
 
@@ -4986,18 +5042,39 @@ fn an_archive_consumer_verifies_first_and_never_reaches_a_compiler() {
             "{header}: verification must precede the tier, not follow it"
         );
 
-        // The toolchain and the Cargo cache belong to a cell that compiles, and
-        // a test tier no longer is one: Task 6.5 deleted both steps with the
-        // compile-in-place path they served. A restored Cargo cache here would
-        // also be the one thing that can make a silent rebuild look fast.
-        for step in [
-            "Set up the pinned Rust toolchain",
-            "Swatinem/rust-cache@v2",
-            "rustup show",
-        ] {
+        // The Cargo cache belongs to a cell that compiles, and a test tier no
+        // longer is one: Task 6.5 deleted it with the compile-in-place path it
+        // served. A restored cache here would be the one thing that can make
+        // a silent rebuild look fast.
+        assert!(
+            !job.contains("Swatinem/rust-cache@v2"),
+            "{header}: a Cargo cache belongs to a cell that compiles; this one consumes an archive"
+        );
+        // So does a toolchain, with one exception: the L1 cell of a
+        // `requires-toolchain` package installs the pin for its SUITE to
+        // drive, gated on the planner's derived list and never on a runner
+        // label (`a_declared_toolchain_requirement_is_provisioned_once_before_the_suite_runs`).
+        // L2 and browser cells have no such declaration and never install one.
+        let toolchain_steps: Vec<&String> = all
+            .iter()
+            .filter(|step| step.contains("rustup") || step.contains("Rust toolchain"))
+            .collect();
+        if header == "  test:" {
+            assert_eq!(
+                toolchain_steps.len(),
+                1,
+                "{header}: exactly one step may install a toolchain, and only for the suite's own use"
+            );
             assert!(
-                !job.contains(step),
-                "{header}: `{step}` belongs to a cell that compiles; this one consumes an archive"
+                toolchain_steps[0].contains(
+                    "if: ${{ contains(fromJSON(inputs.toolchain-environments), matrix.environment) }}"
+                ),
+                "{header}: the toolchain step must be gated on `toolchain-environments`"
+            );
+        } else {
+            assert!(
+                toolchain_steps.is_empty(),
+                "{header}: a toolchain belongs to a cell that compiles; this one consumes an archive"
             );
         }
 
@@ -5413,6 +5490,11 @@ fn every_consumer_resolves_its_bound_sidecars_under_their_windows_names() {
 /// archive. A tier that grew one back would rebuild the very tools the
 /// producer already shipped it, and on a toolchain-free consumer it would not
 /// even fail honestly: the build would simply not be there.
+///
+/// The one toolchain a tier may still install is not a compile path: a
+/// `requires-toolchain` package's L1 cell provisions the pin for its suite to
+/// drive, gated on the planner's `toolchain-environments`, and the recipe
+/// still compiles nothing with it.
 #[test]
 fn no_test_tier_carries_a_compile_in_place_path() {
     for header in ["  test:", "  test-l2:", "  test-browser:"] {
@@ -5422,11 +5504,18 @@ fn no_test_tier_carries_a_compile_in_place_path() {
             "Build the darkmatter md fixture",
             "!steps.build.outputs.archive",
             "Swatinem/rust-cache@v2",
-            "rustup show",
         ] {
             assert!(
                 !job.contains(retired),
                 "{header}: `{retired}` is a compile-in-place path and this job consumes an archive"
+            );
+        }
+        for step in steps(&job).iter().filter(|step| step.contains("rustup")) {
+            assert!(
+                step.contains(
+                    "if: ${{ contains(fromJSON(inputs.toolchain-environments), matrix.environment) }}"
+                ),
+                "{header}: an ungated toolchain install is a compile-in-place path:\n{step}"
             );
         }
         // The one Cargo invocation a tier may still make, and only under the

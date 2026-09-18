@@ -325,6 +325,12 @@ PACKAGE_FIELDS: dict[str, bool] = {
     #: through the legacy matrix; it is projected, never re-read.
     "l1_include_slow": True,
     "native": True,
+    #: The package's `requires-toolchain` policy: its L1 drives `cargo`/`rustc`
+    #: itself, so the consumer provisions the pinned toolchain where the
+    #: environment has `cargo_toolchain`. Projected into the matrix, never
+    #: re-read from the checkout. Optional (absent reads as false) so a plan
+    #: written before the field existed still projects.
+    "requires_toolchain": False,
     #: The governance of a `gates = false` package: exclusion class, owner,
     #: reason, expiry. Present exactly when `gates` is empty, because the
     #: rollup's policy document is projected from the plan and reads it there.

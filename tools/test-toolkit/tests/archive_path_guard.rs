@@ -91,7 +91,11 @@ const SKIPPED_DIRS: &[(&str, &str)] = &[
     (".gitnexus", "index, not source"),
     (
         "scripts",
-        "a separate Cargo workspace; CI builds and runs its tests in place, never from an archive",
+        "`repo-deps` runs from an archive like every other member, but its baked \
+         `CARGO_MANIFEST_DIR` sites resolve on every hosted native consumer because those \
+         share the producer's checkout path; `ci-rollup-tests.rs::repo_root` already falls \
+         back to the run-time checkout, and the rest are the WSL2 leg's problem, not a \
+         pull request's",
     ),
     (
         "examples",
