@@ -223,10 +223,14 @@ fn shipped_roster_maps_every_chat_adapter_exactly_once() {
 
 /// Every roster document either declares the research schema and validates,
 /// or is unmigrated legacy prose whose prompt delegates to the shared fleet
-/// instructions instead of carrying its own copy of the contract.
+/// instructions instead of carrying its own copy of the contract. The legacy
+/// allowance ends with the first publication (`publication.json`); from then
+/// on `typed::shipped_publication_is_accepted_and_drift_free` holds every
+/// document to accepted scope.
 #[test]
 fn shipped_platform_documents_validate_or_delegate_to_the_fleet() {
     let dir = messenger_dir().join("docs/research/platforms");
+    let published = messenger_dir().join("docs/research/publication.json").exists();
     for id in ["discord", "slack", "telegram", "whatsapp", "signal"] {
         let path = dir.join(format!("{id}.md"));
         let markdown = load(&path);
@@ -236,6 +240,7 @@ fn shipped_platform_documents_validate_or_delegate_to_the_fleet() {
             assert!(report.valid, "{id}: {}", describe(&report));
             continue;
         }
+        assert!(!published, "{id} is legacy prose, but the accepted baseline is already published");
         let prompt: String = markdown
             .frontmatter()
             .get("prompt")
@@ -555,14 +560,18 @@ fn research_corpus_is_sanitized() {
 ///   reaches the executable projection.
 #[cfg(feature = "research")]
 mod typed {
-    use std::collections::BTreeSet;
-    use std::path::Path;
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::path::{Path, PathBuf};
     use std::sync::OnceLock;
 
+    use darkmatter::markdown::Markdown;
     use messenger::research::canonical::schema_fingerprint;
-    use messenger::research::model::{Date, Mappings, Overrides, PlatformDocument, Roster};
+    use messenger::research::generate::{check, generate};
+    use messenger::research::model::{Date, Mappings, Overrides, PlatformDocument, PlatformId, Roster};
+    use messenger::research::paths::CATALOG;
+    use messenger::research::publish::Options;
     use messenger::research::{
-        Context, Diagnostic, DocumentValidation, Loaded, Loader, Rule, Scope, ValidatedDocument,
+        Context, Diagnostic, DocumentValidation, Loaded, Loader, RepoPath, Rule, Scope, ValidatedDocument,
         Workspace, validate_document, validate_mappings, validate_overrides, validate_roster,
     };
 
@@ -884,5 +893,144 @@ mod typed {
             let (prefix, _) = stem.split_once("--").expect("rule prefix");
             assert!(families.contains(&prefix), "{stem} is not covered by a rule-family test");
         }
+    }
+
+    // ---- the published baseline ------------------------------------------
+
+    /// Why the research tree under `root` is not an accepted, drift-free
+    /// published baseline; `None` before its first publication, when there is
+    /// nothing to hold to accepted scope yet.
+    ///
+    /// Once published, every active roster document must declare the schema
+    /// (legacy prose no longer qualifies) and pass the Accepted-scope rules,
+    /// and `generate --check` must find neither drift nor a hand edit.
+    fn published_baseline_findings(root: &Path) -> Option<Vec<String>> {
+        let loader = Loader::new(Workspace::new(root).expect("absolute root"));
+        let workspace = loader.workspace();
+        if !workspace.manifest().exists() {
+            return None;
+        }
+        let mut findings = Vec::new();
+        let roster = loader.load_roster(&workspace.roster()).expect("roster");
+        let Some(record) = roster.record.as_ref().filter(|_| roster.is_clean()) else {
+            return Some(vec![format!("roster: {}", show(&roster.diagnostics))]);
+        };
+        for platform in record.active_platforms() {
+            let id = platform.platform_id;
+            let path = workspace.document(id);
+            let declared = Markdown::try_from(path.as_path())
+                .ok()
+                .and_then(|markdown| markdown.frontmatter().get::<String>("$schema").ok().flatten());
+            if declared.is_none() {
+                findings.push(format!("{id}: legacy prose (no $schema) after publication"));
+                continue;
+            }
+            let loaded = match loader.load_document(&path) {
+                Ok(loaded) => loaded,
+                Err(error) => {
+                    findings.push(format!("{id}: {error}"));
+                    continue;
+                }
+            };
+            let result = validate_document(&loaded, &Context { roster: Some(record), scope: Scope::Accepted });
+            findings.extend(result.diagnostics.iter().map(|d| format!("{id}: {d}")));
+        }
+        match check(&loader, &today()) {
+            Ok(None) => {}
+            Ok(Some(drift)) => findings.push(format!("generate --check: {drift:?}")),
+            Err(error) => findings.push(format!("generate --check: {error}")),
+        }
+        Some(findings)
+    }
+
+    /// Vacuous until the accepted baseline is published; see
+    /// `published_baseline_findings` and the fixture-tree tests below for
+    /// the post-publication branch.
+    #[test]
+    fn shipped_publication_is_accepted_and_drift_free() {
+        let Some(findings) = published_baseline_findings(&repo_root()) else {
+            let catalog = loader().workspace().resolve(&RepoPath::from_portable(CATALOG));
+            assert!(!catalog.exists(), "{CATALOG} exists without a publication manifest");
+            eprintln!("VACUOUS: no publication.json yet; the accepted-baseline guard activates on first publication");
+            return;
+        };
+        assert!(findings.is_empty(), "published baseline:\n  {}", findings.join("\n  "));
+    }
+
+    /// A temporary repository holding the shipped schemas, roster, and fleet
+    /// prompt, with the accepted-fleet fixture published through `generate`.
+    /// Overrides and mappings are omitted: they name facts in the shipped
+    /// documents, which the fixture replaces.
+    fn published_fixture_tree() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = Workspace::new(dir.path()).expect("absolute root");
+        let source = loader().workspace();
+        let inputs: [fn(&Workspace) -> PathBuf; 6] = [
+            Workspace::roster,
+            Workspace::roster_schema,
+            Workspace::document_schema,
+            Workspace::types_schema,
+            Workspace::overrides_schema,
+            Workspace::fleet_prompt,
+        ];
+        for input in inputs {
+            let to = input(&target);
+            std::fs::create_dir_all(to.parent().expect("parent")).expect("mkdir");
+            std::fs::copy(input(source), to).expect("copy shipped input");
+        }
+        for platform in PlatformId::ALL {
+            let fixture = fixtures_dir().join(format!("lifecycle/fleet/{platform}.md"));
+            let text = std::fs::read_to_string(fixture)
+                .expect("fleet fixture")
+                .replace("$schema: ../../../../../../docs/research/platforms/_schema.yaml", "$schema: ./_schema.yaml");
+            std::fs::write(target.document(*platform), text).expect("write document");
+        }
+        generate(&Loader::new(target), &BTreeMap::new(), &today(), Options::default()).expect("fixture publishes");
+        dir
+    }
+
+    fn findings_mentioning(root: &Path, needle: &str) -> Vec<String> {
+        let findings = published_baseline_findings(root).expect("the fixture is published");
+        assert!(!findings.is_empty(), "the guard accepted a defective baseline");
+        findings.into_iter().filter(|f| f.contains(needle)).collect()
+    }
+
+    #[test]
+    fn published_baseline_guard_accepts_a_clean_published_fleet() {
+        let tree = published_fixture_tree();
+        let findings = published_baseline_findings(tree.path()).expect("the fixture is published");
+        assert!(findings.is_empty(), "{}", findings.join("\n  "));
+    }
+
+    #[test]
+    fn published_baseline_guard_rejects_legacy_prose() {
+        let tree = published_fixture_tree();
+        let legacy = "---\nprompt: |-\n    Refresh the Discord research document (`platform_id: discord`) per\n    \
+                      `messenger/docs/research/platforms/_fleet.md`, Pass 2.\n---\n# Discord\n";
+        std::fs::write(Workspace::new(tree.path()).expect("root").document(PlatformId::Discord), legacy).expect("write");
+        let legacy_findings = findings_mentioning(tree.path(), "legacy prose");
+        assert_eq!(legacy_findings, vec!["discord: legacy prose (no $schema) after publication".to_string()]);
+    }
+
+    #[test]
+    fn published_baseline_guard_rejects_drifted_generated_artifacts() {
+        let tree = published_fixture_tree();
+        let catalog = Workspace::new(tree.path()).expect("root").resolve(&RepoPath::from_portable(CATALOG));
+        let original = std::fs::read_to_string(&catalog).expect("catalog");
+
+        // Stale: an input changed after publication, so regeneration differs.
+        let roster = tree.path().join("messenger/docs/platforms.yaml");
+        let text = std::fs::read_to_string(&roster).expect("roster");
+        assert!(text.contains("refresh_interval_days: 30"), "edit target not found");
+        std::fs::write(&roster, text.replacen("refresh_interval_days: 30", "refresh_interval_days: 45", 1)).expect("write");
+        let stale = findings_mentioning(tree.path(), "generate --check");
+        assert!(stale.iter().any(|f| f.contains("Changed") && f.contains(CATALOG)), "{stale:?}");
+        std::fs::write(&roster, text).expect("restore roster");
+        assert_eq!(published_baseline_findings(tree.path()), Some(Vec::new()));
+
+        // Hand-edited: the published catalog no longer matches its manifest.
+        std::fs::write(&catalog, original.replace("\"discord\"", "\"Discord\"")).expect("write");
+        let edited = findings_mentioning(tree.path(), "generate --check");
+        assert!(edited.iter().any(|f| f.contains(CATALOG) && f.contains("does not match")), "{edited:?}");
     }
 }
