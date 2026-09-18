@@ -28,6 +28,12 @@
 - `scripts/ci/affected_scope.py` emits **one** canonical resolved plan with a
   `{package, environment, gate}` cell per unit of work. Every consumer reads
   that document; nothing recalculates scope.
+- **Environments are scheduled by event** (`events` in
+  `.github/ci/environments.json`, decided 2026-09-18): a pull request proves
+  Linux and macOS, a push to `main` adds Windows, the nightly schedule adds
+  WSL2, and `lint`/`check` run on Linux only. Windows and WSL2 failures are
+  found after merge and fixed forward. The `ci:all-os` label opts a pull
+  request back into every environment.
 - **Compile coverage is per target kind.** L1 covers `lib`, `bin`, and `test`; a
   `check` cell exists where `example` or `bench` targets are declared, and on
   `ubuntu-latest` for a package with unchanged direct reverse dependencies,

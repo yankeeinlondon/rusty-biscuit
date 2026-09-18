@@ -184,9 +184,19 @@ Run the hook's local regression suite with
 
 ### Layer 2 — Dependency-scoped CI
 
-`ci.yml` runs on pull requests and pushes to `main`. Its first job validates the canonical recipe
-surface, obtains the changed file set from the event's exact base and head SHAs, verifies every
-published local receipt per cell, and resolves the plan.
+`ci.yml` runs on pull requests, pushes to `main`, and a nightly schedule. Its first job validates
+the canonical recipe surface, obtains the changed file set from the event's exact base and head
+SHAs, verifies every published local receipt per cell, and resolves the plan.
+
+**Environments are scheduled by event.** Each record in `.github/ci/environments.json` names the
+GitHub events that schedule it, and the planner plans nothing for an environment the event does
+not schedule (recorded as `deferred_environments`). As decided on 2026-09-18
+(`fixes/2026-09-18-ci-cadence`): a pull request proves `ubuntu-latest` and `macos-latest`, the
+latter normally from the pre-push hook's local evidence; a push to `main` adds `windows-latest`;
+the nightly run (08:00 UTC) plans the full workspace for `ubuntu-latest`, `windows-latest`, and
+`wsl2-ubuntu`; `workflow_dispatch` plans every environment. A push to `main` whose pull request
+validation is reused plans only the environments the push adds. The `ci:all-os` label plans every
+environment for a pull request from its next push.
 
 `ci.yml` defines **exactly six top-level jobs**, and a contract test pins the set: `validation`
 (does successful PR validation cover this tree?), `scope` (source the plan), `preflight`
@@ -218,7 +228,7 @@ contract change.
 A source-changed package receives lint, L1 across its environments, and its declared higher tiers.
 Compile-check is no longer blanket: the planner reads each package's declared Cargo targets from
 `cargo metadata`, credits the L1 build with the `lib`, `bin`, and `test` kinds, and schedules a
-`check` cell on each native environment where `example` or `bench` targets exist, with
+`check` cell on `ubuntu-latest` alone where `example` or `bench` targets exist, with
 explicit `--examples`/`--benches` selectors in place of `--all-targets`. A package with unchanged
 direct reverse dependents also owns a `check` cell on `ubuntu-latest`, which compiles them against
 its public API as a second step (Open Question 1, Option B): the dependents get no area, job, or
@@ -579,9 +589,11 @@ remain owned by that action.
 
 What a reviewer can rely on when approving a PR:
 
-1. **Every affected gating package passed its configured environment matrix** against the exact
-   pinned Rust version in `rust-toolchain.toml`. Native L1 runs on Linux,
-   Windows, and macOS; `wsl2-ubuntu` is a distinct archive-based L1 cell.
+1. **Every affected gating package passed the environments its event schedules** against the
+   exact pinned Rust version in `rust-toolchain.toml`. A pull request proves Linux and macOS;
+   the push to `main` after it adds Windows; the nightly run adds `wsl2-ubuntu`, a distinct
+   archive-based L1 cell. Windows and WSL2 failures are therefore found after merge and fixed
+   forward, by decision (`fixes/2026-09-18-ci-cadence`).
 2. **`just check-canonical` confirms the area structure is well-formed** — no `justfile`
    recipe drift snuck in.
 
@@ -602,11 +614,11 @@ What a reviewer can rely on when approving a PR:
 What CI explicitly does **not** guarantee:
 
 - **Compile coverage inside the WSL2 guest.** L1 compiles and runs the `lib`, `bin`, and `test`
-    kinds on each native environment; the guest only runs the `ubuntu-latest` archive. A `check`
-    cell on each native environment compiles `example` and `bench` through explicit
+    kinds on each scheduled native environment; the guest only runs the `ubuntu-latest` archive.
+    A `check` cell on `ubuntu-latest` alone compiles `example` and `bench` through explicit
     `--examples`/`--benches` selectors, and it is scheduled for packages that declare those
-    kinds; a package with neither gets a check job only on `ubuntu-latest`, and only to compile
-    its unchanged direct reverse dependents.
+    kinds; a package with neither gets a check job only to compile its unchanged direct reverse
+    dependents. Example and bench kinds are never compiled on Windows or macOS.
 
 - **Performance regressions blocking merge.** Bench results are tracked in Bencher but not gated.
 - **External-resource (L4 `test-real`) tests passing.** Those tiers are explicitly excluded from

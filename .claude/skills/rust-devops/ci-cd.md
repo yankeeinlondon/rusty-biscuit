@@ -34,18 +34,37 @@ expression text.
 `scripts/ci/affected_scope.py` is the canonical deterministic calculator for
 local and hosted runs. Its package policy is deliberately narrow:
 
+- **Environments are scheduled by event** (fixes/2026-09-18-ci-cadence). Each
+  record in `environments.json` names the GitHub events that schedule it; the
+  planner takes `--event`, plans nothing (no cell, build, or preflight runner)
+  for an environment the event does not schedule, and records it in the
+  plan's `deferred_environments`. Policy as of 2026-09-18: a pull request
+  proves `ubuntu-latest` and `macos-latest` (the latter normally from the
+  hook's local evidence); a push to `main` adds `windows-latest`; the nightly
+  `schedule` (`0 8 * * *`, its own concurrency group) plans the full
+  workspace for `ubuntu-latest`, `windows-latest`, and `wsl2-ubuntu`;
+  `workflow_dispatch` plans everything. The `ci:all-os` label plans every
+  environment for a pull request and takes effect on the next push. A push
+  whose pull request validation is reused plans with `--proven-event
+  pull_request`: the proven environments land in `proven_environments`, so
+  only Windows runs, and an empty plan skips everything as before. The hook
+  plans `push` for `main` and `pull_request` for every other branch, and
+  `scope-verify --event` refuses a receipt planned for another event
+  (`scope-event-mismatch`). Without `--event`, every environment is planned.
 - A package owning changed source receives lint, L1, and its declared higher
   tiers — and `check` when it declares `example` or `bench` targets or has
   unchanged direct reverse dependents. The L1 build already compiles the
   `lib`, `bin`, and `test` kinds, so a separate compile job exists for the
-  kinds no test gate produces: one check cell per native environment, running
-  `cargo check -p <pkg>` with explicit `--examples`/`--benches` selectors
-  (`check_args`), never `--all-targets`. A check cell is satisfied by the
-  package's passing per-cell L1 receipt on the same environment
-  (`check_evidence`), so the host that just built and tested the package is
-  not compile-checked again. The reused cell links that receipt with no test
-  counts; a version-1 whole-environment note never satisfies it, and the
-  `ubuntu-latest` cell that compiles unchanged dependents is never reusable.
+  kinds no test gate produces: one check cell on `CHECK_ENVIRONMENT`
+  (`ubuntu-latest`, like lint), running `cargo check -p <pkg>` with explicit
+  `--examples`/`--benches` selectors (`check_args`), never `--all-targets`.
+  A plan that does not carry that environment lints and checks nowhere. The
+  check cell is satisfied by the package's passing per-cell L1 receipt on the
+  same environment (`check_evidence`), so a host that just built and tested
+  the package there is not compile-checked again. The reused cell links that
+  receipt with no test counts; a version-1 whole-environment note never
+  satisfies it, and the cell that compiles unchanged dependents is never
+  reusable.
   `_wsl-ci.yml` declares no archive selector at all — the guest is handed the
   plan's build records and downloads one — so a check selector has nowhere to
   leak into. Every cell records `target_kinds` and `compile_coverage_from`, and
@@ -731,7 +750,12 @@ A receipt from an **older head** is reusable only when the cell's gate-input
 identity is unchanged — the `git ls-tree` entries of the tested package's build
 closure (dev-dependencies included, and the lockfile) plus that gate's global
 inputs. Verification recomputes that over both trees rather than trusting the
-identity the receipt stored. `schema_version: 1` notes are exact-tree,
+identity the receipt stored. The planner's orchestration files
+(`ORCHESTRATION_PATHS`: `ci.yml`, `_package-ci.yml`, `_wsl-ci.yml`,
+`environments.json`, `affected_scope.py`, `.github/actions/`) are **not**
+gate inputs: they decide what CI runs, never what a local gate produces, so a
+workflow edit leaves every published cell reusable. Before that rule one such
+edit invalidated 38 cells and cost a 45-minute pre-push. `schema_version: 1` notes are exact-tree,
 pass-only, whole-environment, never upgraded in place, and render their
 measurements as `not recorded (v1 receipt)`.
 

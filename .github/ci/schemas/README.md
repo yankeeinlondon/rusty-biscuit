@@ -92,6 +92,15 @@ identity** of every cell, artifact, baseline entry, and receipt. **Area is a
 derived grouping field** carried alongside it for presentation and outcome
 ownership. A cell whose `area` disagrees with its package record is invalid.
 
+- `event`, `deferred_environments`, `proven_environments` — optional, absent
+  rather than empty, so a plan resolved without an event is byte-identical to
+  one from before they existed and the version stays at 4 (R9). `event` is
+  the GitHub event the plan was resolved for; `deferred_environments` lists
+  the table's environments that event does not schedule, each with the
+  `events` that do; `proven_environments` lists the environments an earlier
+  run of another event already validated for this tree (a push to `main`
+  after a reused pull request validation plans only the rest). Neither list
+  may name an environment the plan also carries in `environments`.
 - `change_inventory` — the changed paths, normalized to one repository-relative
   POSIX spelling, de-duplicated, and sorted into exactly one of
   `configuration`, `documentation`, `source`, `other`, with per-bucket and
@@ -274,11 +283,14 @@ is the verifier's, in R3's order: schema, head, tree, base, then structure.
 CI reads it from the event head only and, on a hit, writes both documents out
 in place of running the planner; verified validation evidence is then applied
 to the carried plan (`affected_scope.py --apply-to`) and the projection is
-re-derived from the result, still without selection. Its miss codes are
-`SCOPE_REJECTIONS`
+re-derived from the result, still without selection. A plan schedules the
+environments of the event it was planned for (its optional `event`), so
+`scope-verify --event` refuses a receipt planned for another event, or for
+none. Its miss codes are `SCOPE_REJECTIONS`
 (`scope-missing`, `scope-schema`, `scope-head-mismatch`, `scope-tree-mismatch`,
-`scope-base-mismatch`, `scope-malformed`), kept apart from the cell rejections
-below because they refuse a whole document rather than one outcome.
+`scope-base-mismatch`, `scope-event-mismatch`, `scope-malformed`), kept apart
+from the cell rejections below because they refuse a whole document rather
+than one outcome.
 
 ## Rejection vocabulary
 

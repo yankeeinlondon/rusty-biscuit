@@ -34,8 +34,8 @@ and a failure lands on the changed package's area.
 ## Reusing PR validation after a merge
 
 PRs always run dependency-aware CI. A push to `main` first runs a lightweight
-verification job (`scripts/ci/reuse_validation.py`). It skips the expensive
-grid only when all of these conditions hold:
+verification job (`scripts/ci/reuse_validation.py`). It treats the pull
+request's environments as proven only when all of these conditions hold:
 
 - GitHub associates the pushed commit with a merged PR targeting this
   repository's `main`, and the PR's merge commit is the pushed commit.
@@ -66,11 +66,15 @@ pushes without a matching merged PR also run normal CI. `workflow_dispatch`
 always runs the full grid and is the way to force fresh validation, including
 when investigating changes to external dependencies or hosted runners.
 
-On reuse, `scope`, `preflight`, the whole `area-ci` fan-out (which needs
-`scope`), and every rollup are skipped; `ci-gate` folds those skipped results
-and passes, and advisory `ci-reporting` links the original PR run. The `ci`
-workflow still completes on `main`, preserving Release-plz's existing
-successful-CI trigger. Runs predating receipt publication cannot be reused.
+On reuse, `scope` still runs, with `--proven-event pull_request`: the
+environments the pull request event schedules are recorded in the plan's
+`proven_environments` and planned nowhere, and only the environments the push
+event adds (Windows, per `environments.json`) receive cells. When the two
+events agree the plan is empty, `preflight`, the `area-ci` fan-out, and every
+rollup skip, and `ci-gate` folds those skipped results and passes. Advisory
+`ci-reporting` links the original PR run in either case. The `ci` workflow
+still completes on `main`, preserving Release-plz's existing successful-CI
+trigger. Runs predating receipt publication cannot be reused.
 
 Validate this boundary with `python3 scripts/ci/test_reuse_validation.py`,
 `actionlint .github/workflows/ci.yml`, and the `ci_workflow_contracts` nextest
@@ -159,7 +163,7 @@ the package for. A package owning a changed source file carries `lint` and
 `test` always, and `check` when it declares example or bench targets or has
 unchanged direct reverse dependents to compile: the L1 build already compiles
 the library, binary, and test targets, so a separate compile job is scheduled
-for the kinds no test gate produces and, on `ubuntu-latest` only, for the
+on `ubuntu-latest` only, for the kinds no test gate produces and for the
 dependents' seam. Unchanged reverse dependents, their dependencies, and
 transitive reverse dependencies are not selected. Documentation, manifests, lockfiles, Just recipes, workflows,
 and other CI configuration select no package jobs; CI tooling has its own
@@ -344,10 +348,10 @@ membership.
 
 ## `environments.json`
 
-One versioned, schema-validated table (`schema_version: 2`). It defines, for
+One versioned, schema-validated table (`schema_version: 3`). It defines, for
 each environment: the `runner` that hosts it, the `native_key` that maps it to a
-native-package installer, a `build` compile contract (below), and a
-`capabilities` map over a closed vocabulary:
+native-package installer, the `events` that schedule it (below), a `build`
+compile contract (below), and a `capabilities` map over a closed vocabulary:
 
 | capability | meaning |
 |---|---|
@@ -356,6 +360,28 @@ native-package installer, a `build` compile contract (below), and a
 | `node_pnpm` | whether Node 22 + pnpm 10 are provisioned here |
 | `cargo_toolchain` | whether a runnable `cargo`/`rustc` is present, for suites that shell out to one |
 | `archive_only` | whether this environment runs from a prebuilt nextest archive (no Cargo) |
+
+### Environments are scheduled by event
+
+`events` names the GitHub events (`pull_request`, `push`, `schedule`,
+`workflow_dispatch`) that schedule the environment. The planner takes
+`--event`; an environment the event does not schedule contributes no cell, no
+build record, and no preflight runner, and is recorded in the plan's
+`deferred_environments` with the events that will run it. The shipped policy
+(fixes/2026-09-18-ci-cadence, decided 2026-09-18 while the repository has no
+users): `ubuntu-latest` on every event; `macos-latest` on `pull_request`,
+`push`, and `workflow_dispatch`, since the development Mac proves it on every
+push through the hook; `windows-latest` on `push`, `schedule`, and
+`workflow_dispatch`; `wsl2-ubuntu` on `schedule` and `workflow_dispatch` only.
+So a pull request proves Linux and macOS, a push to `main` adds Windows, and
+the nightly `schedule` (08:00 UTC, `ci.yml`) adds WSL2 over the full
+workspace. The `ci:all-os` label plans every environment for a pull request;
+it is read from the event payload, so it takes effect on the next push.
+
+`lint` and `check` are single-environment gates hosted on `ubuntu-latest`, so
+a plan that does not carry Linux (a push whose pull request validation proved
+it) lints and checks nowhere. Without `--event` (a developer's
+`just ci-local --plan`) every environment is planned.
 
 `cargo_toolchain` and `archive_only` are distinct questions that happen to
 share an answer today. `archive_only` says *how* a cell executes;
@@ -1056,8 +1082,8 @@ A compile-check job exists for the target kinds no test gate produces and for
 the seam with unchanged direct reverse dependents. The planner reads each
 package's declared Cargo targets from `cargo metadata` and records them on its
 plan record; the L1 build is credited with `lib`, `bin`, and `test`, so a
-check cell is scheduled on every native environment where `example` or `bench`
-targets exist. Every cell states which gate its compile coverage came from, and
+check cell is scheduled on `ubuntu-latest` where `example` or `bench` targets
+exist. Every cell states which gate its compile coverage came from, and
 an archive-only environment names the runner that built its archive rather than
 claiming to have compiled anything.
 
@@ -1079,9 +1105,11 @@ check cells, this half included.
 The check job runs `cargo check -p <package>` with an explicit selector per
 uncovered kind — `--examples`, `--benches`, or both — plus the declared feature
 flags, never `--all-targets`; the planner renders that string as `check_args`.
-It runs on every native environment (Linux, Windows, macOS): the WSL2 guest
-compiles nothing, and its L1 cell names the `ubuntu-latest` archive build as
-its compile coverage. There is no per-package canonical check recipe. The job
+It runs on `ubuntu-latest` only, like lint (fixes/2026-09-18-ci-cadence,
+decision 3): compiling the example and bench kinds once is the coverage, and
+the WSL2 guest, which compiles nothing, names that same `ubuntu-latest`
+archive build as its compile coverage. There is no per-package canonical
+check recipe. The job
 deliberately does **not** deny warnings; `lint` does, through clippy, where
 `just lint` enforces the same bar locally.
 
