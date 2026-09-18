@@ -247,7 +247,7 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Maintain the offline provider research contract (validate, generate, report, recover).
+    /// Maintain the offline provider research contract (validate, generate, report, refresh runs, promote).
     Research(research::ResearchArgs),
     /// Show shell completions setup instructions.
     #[command(after_help = COMPLETIONS_HELP)]

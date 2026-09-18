@@ -1,6 +1,7 @@
 //! `messenger research` — offline maintenance of the provider research
 //! contract: validation, deterministic generation and drift checking,
-//! reporting, and recovery of an interrupted publication.
+//! reporting, recovery of an interrupted publication, and the refresh and
+//! review lifecycle (`research_lifecycle`).
 //!
 //! Human output uses `TerminalRenderable` components; `--json` prints exactly
 //! one JSON document on stdout with no presentation escapes. Nothing here
@@ -23,6 +24,8 @@ use messenger::research::{Context, Diagnostic, Loader, ResearchError, Scope, Wor
 use serde::Serialize;
 use serde_json::json;
 
+use super::research_lifecycle::{self as lifecycle, CheckRunArgs, CleanupArgs, PrepareArgs, PromoteArgs, RejectArgs, RunsArgs};
+
 /// Success.
 pub const EXIT_OK: i32 = 0;
 /// Findings, drift, or a refused generation.
@@ -34,8 +37,9 @@ pub const EXIT_UNAVAILABLE: i32 = 3;
 const RESEARCH_HELP: &str = "\
 EXIT STATUS
   0  success
-  1  validation findings, drift, or a refused generation
-  2  invalid arguments
+  1  validation findings, drift, a refused generation, or a refused
+     lifecycle step (wrong run status, not eligible for promotion)
+  2  invalid arguments, including missing run limits
   3  cannot run: no published snapshot, recovery required, lock held,
      a published artifact failed verification, or an input is unreadable";
 
@@ -101,6 +105,18 @@ pub enum ResearchCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Select due platforms and prepare budgeted refresh runs (requires limits).
+    Prepare(PrepareArgs),
+    /// Judge a run's stage outputs, validate its candidate, and compute its delta.
+    CheckRun(CheckRunArgs),
+    /// List local refresh runs, their stages, and their budget ledgers.
+    Runs(RunsArgs),
+    /// Publish a reviewed run: human approval, or a verified unchanged renewal.
+    Promote(PromoteArgs),
+    /// Reject a run; it stays local and never reaches the CHANGELOG.
+    Reject(RejectArgs),
+    /// Preview (or, with --apply, remove) old local run and renewal records.
+    Cleanup(CleanupArgs),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -115,7 +131,7 @@ fn parse_date(text: &str) -> Result<Date, String> {
     Date::parse(text).ok_or_else(|| format!("`{text}` is not a YYYY-MM-DD date"))
 }
 
-fn parse_platform(text: &str) -> Result<PlatformId, String> {
+pub(crate) fn parse_platform(text: &str) -> Result<PlatformId, String> {
     PlatformId::ALL
         .iter()
         .copied()
@@ -133,6 +149,12 @@ pub fn run(args: ResearchArgs) -> i32 {
         | ResearchCommand::Generate { json, .. }
         | ResearchCommand::Report { json, .. }
         | ResearchCommand::Recover { json } => *json,
+        ResearchCommand::Prepare(args) => args.json,
+        ResearchCommand::CheckRun(args) => args.json,
+        ResearchCommand::Runs(args) => args.json,
+        ResearchCommand::Promote(args) => args.json,
+        ResearchCommand::Reject(args) => args.json,
+        ResearchCommand::Cleanup(args) => args.json,
     };
     match execute(args) {
         Ok(code) => code,
@@ -161,6 +183,12 @@ fn execute(args: ResearchArgs) -> Result<i32, String> {
             report(&loader, &Filter { platform, interface, operation }, &today, json)
         }
         ResearchCommand::Recover { json } => recover(&loader, json),
+        ResearchCommand::Prepare(args) => lifecycle::prepare(&loader, args, &today),
+        ResearchCommand::CheckRun(args) => lifecycle::check(&loader, args, &today),
+        ResearchCommand::Runs(args) => lifecycle::runs(&loader, args),
+        ResearchCommand::Promote(args) => lifecycle::promote(&loader, args, &today),
+        ResearchCommand::Reject(args) => lifecycle::reject(&loader, args, &today),
+        ResearchCommand::Cleanup(args) => lifecycle::cleanup(&loader, args, &today),
     }
 }
 
