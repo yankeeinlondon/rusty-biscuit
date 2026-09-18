@@ -80,9 +80,11 @@ the default.
 profile alone leaves the local budget in effect. L1, sanity, and real-resource
 recipes preserve explicit `NEXTEST_TEST_THREADS` and otherwise export this
 default. Direct local Nextest runs use `.config/nextest.toml`'s
-`test-threads = -2`. Cargo build-job limits are unchanged. Existing CI-profile
-groups still cap Claudine L1 at four, Claudine CLI L1 at one, and Sniff L1 on
-Windows at one, even when the overall budget is larger. See the
+`test-threads = -2`. Cargo build-job limits are unchanged. Resource-specific
+CI-profile groups still cap Claudine L1 at four and Sniff L1 on Windows at one.
+Do not add a package-wide Claudine CLI L1 group: its former
+`max-threads = 1` cap overrode the OS-aware budget and serialized 2,500+ tests
+on every 3–4-core public runner. See the
 [central policy](../../../docs/topics/ci-cd.md#layer-1--local-pre-push-hook).
 
 Keep two claims distinct:

@@ -156,9 +156,10 @@ change a local host's budget. L1, sanity, and real-resource recipes export
 runs inherit `test-threads = -2` from `.config/nextest.toml`. Cargo build-job
 limits are unchanged.
 
-Existing CI-profile test groups remain narrower limits: Claudine L1 allows
-four concurrent tests, Claudine CLI L1 allows one, and Sniff L1 on Windows
-allows one. These caps still apply when the overall worker budget is larger.
+Resource-specific CI-profile test groups remain narrower limits: Claudine L1
+allows four concurrent tests and Sniff L1 on Windows allows one. Claudine CLI
+L1 inherits the OS-aware worker budget; a fixed package-wide cap would silently
+defeat the public runners' available concurrency.
 
 `RUSTY_BISCUIT_PRE_PUSH_AREAS` (package names or area directories) replaces the computed scope with
 a fixed selection. Install the hook dispatcher with:

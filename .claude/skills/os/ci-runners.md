@@ -87,10 +87,13 @@ none are recorded here (see "Noise" below).
   through four and subtracts two above four. CI means `CI=true`,
   `GITHUB_ACTIONS=true`, or nonempty `BISCUIT_CI_ENVIRONMENT`, not merely the
   Nextest `ci` profile. Worker counts do not set CPU affinity, reserve cores,
-  or change Cargo build jobs. Explicit thread settings and narrower CI-profile
-  groups remain effective: Claudine L1 is capped at four, Claudine CLI L1 at
-  one, and Sniff Windows L1 at one. Shared-resource L2 stays serial; isolated
-  suites use the `l2-parallel-self-spawn` marker. See the
+  or change Cargo build jobs. Explicit thread settings and narrower
+  resource-specific CI-profile groups remain effective: Claudine L1 is capped
+  at four and Sniff Windows L1 at one. Claudine CLI L1 deliberately has no
+  package-wide group cap; an old `max-threads = 1` override serialized all
+  2,500+ tests even on the 3–4-core public runners and overrode this policy.
+  Shared-resource L2 stays serial; isolated suites use the
+  `l2-parallel-self-spawn` marker. See the
   [central policy](../../../docs/topics/ci-cd.md#layer-1--local-pre-push-hook)
   for override and direct Nextest behavior.
 

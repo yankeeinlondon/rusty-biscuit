@@ -68,6 +68,17 @@ fn ci_profile_disables_all_retries() {
     );
 }
 
+/// Package-wide L1 caps must not defeat the OS-aware worker budget exported by
+/// the canonical recipes. Resource-specific exceptions remain test-scoped.
+#[test]
+fn ci_profile_does_not_serialize_claudine_cli_l1() {
+    let config = nextest_config();
+    assert!(
+        !config.contains("claudine-cli-ci-l1"),
+        "Claudine CLI L1 must inherit the runner's worker budget instead of a fixed test group"
+    );
+}
+
 /// Slow fixture that sleeps past the `default` profile's `slow-timeout` period
 /// (5 s). The verifier below pins that profile explicitly, so this sleep does
 /// not have to track the `ci` profile's period, which is deliberately far
