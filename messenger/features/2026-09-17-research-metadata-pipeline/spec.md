@@ -35,6 +35,64 @@ references:
     spikes/orchestration/findings.md: >-
         Records native Claudine worker-input separation and per-child timeout observations.
         Distinguishes those observations from a limited retained-budget prototype and identifies untested production behavior.
+human_review: true
+human_review_items:
+    - |-
+        **Approve the extra `messenger research` commands** (plus `validate`, `generate`, `generate --check`, and `report`, which the spec already requires).
+
+        **Why decide now:** the plan's Phase 1 checkpoint requires maintainer review of any added lifecycle command. Phase 2 writes the shared research prompt and recipes, which will name these commands, so changing them later means rewriting that work.
+
+        The research workflow also needs to prepare a run, list runs, accept (promote) a reviewed result, repair an interrupted publication, and delete old local records. The spec gives run setup, inspection, and cleanup to `messenger-cli`, and forbids hiding these steps inside `generate`.
+
+        Options:
+        - **A. Five explicit subcommands:** `prepare` (checks time and agent-launch limits and builds a run's inputs), `runs` (lists runs and where they are stored), `promote` (the only command that changes accepted research, and only with a recorded approval or a verified unchanged renewal), `recover` (repairs an interrupted publication), and `cleanup` (preview by default; `--apply` deletes).
+          - Pros: each state change is visible and explicit, and each command maps to one spec rule.
+          - Cons: five more commands to document and test.
+        - **B. Fewer, grouped commands,** e.g. `research run prepare|list` and `research publish promote|recover`, with `cleanup` separate.
+          - Pros: a smaller top-level help screen.
+          - Cons: same behavior with deeper nesting, and it differs from the flat style of the existing `messenger` commands.
+        - **C. `just` recipes only, no new commands.**
+          - Pros: no CLI surface.
+          - Cons: not workable. Recipes need a binary to call, and the spec puts run configuration, inspection, and cleanup in `messenger-cli`.
+
+        **Recommendation: A.** It is the smallest design that keeps every change to accepted research explicit and auditable. Details are in `architecture.md`, section "CLI and recipe surfaces".
+    - |-
+        **Approve five file-layout additions** beyond the artifact table in the spec:
+        1. `docs/research/platforms/_types.yaml`, beside `_schema.yaml`.
+        2. A committed snapshot manifest, `docs/research/publication.json`.
+        3. A reviewed file of code-assessment mappings, `docs/research/implementation/mappings.yaml`.
+        4. Review records under `docs/research/reviews/`.
+        5. A git-ignored local working folder, `messenger/.research-state/`.
+
+        **Why decide now:** Phase 2 creates the schema files, and Phases 3 and 4 build loading and publishing around these paths. Moving them later means rework across three phases.
+
+        **Why each addition is needed:**
+        - **Schema split:** Darkmatter's schema format leaks named types into the top level of every document unless they live in a separate file, so the schema is split in two.
+        - **Manifest:** readers use it to tell a complete published set from a half-written one. The spike proved this on macOS, Linux, and Windows.
+        - **Mappings:** kept apart from the research documents, because they describe Messenger's code rather than the platforms.
+        - **Local folder:** holds unreviewed candidates, failed runs, and in-progress publication state, so none of it reaches git.
+
+        Options:
+        - **A. Accept all five as proposed.**
+          - Pros: proven by the spikes; clear ownership; nothing unreviewed gets committed.
+          - Cons: two schema files where the spec names one, plus one more committed file to keep in sync. The manifest must be committed in the same commit as the files it lists.
+        - **B. Accept, but keep a single schema file.**
+          - Pros: matches the spec's artifact table exactly.
+          - Cons: stray type names become accepted document keys unless custom code rejects them, which weakens schema-only validation and gives worse error messages.
+        - **C. Pause Phase 2 until Darkmatter adds a "strict" top-level option and fixes the related schema-loading bugs.**
+          - Pros: a cleaner single schema file later.
+          - Cons: blocks this feature on another team's work, with no date.
+
+        **Recommendation: A.** The extra file costs little, and the alternatives either weaken validation or delay the feature. Details are in `architecture.md`, sections "Artifacts: authored versus generated" and "Schema and type boundaries".
+message_to_agent: |-
+    Phase 1 produced design records, not product code. Read `architecture.md` first; it overrides the pilots where they differ (the pilots used dotted interface IDs and SHA-256; production uses snake_case interface IDs and xxh64 via biscuit-hash).
+    - IDs: adapter IDs are exactly `ProviderKind::as_str()` (`discord`, `discord-webhook`, `slack`, `slack-webhook`, `telegram`, `whatsapp`, `signal`); sending interface IDs are `discord_bot_api`, `discord_webhook`, `slack_web_api`, `slack_incoming_webhook`, `telegram_bot_api`, `whatsapp_cloud_api`, `signal_cli_jsonrpc`.
+    - Schema: start from `spikes/schema-pilots/_schema.yaml` + `_types.yaml`. Keep types one-line (multi-line inline objects fail to load from standalone schema files, pilot L6), close the root with the `"<pattern::^(prompt|hash)$>": any` key (L1), keep records flat (no arrays of unions, L3–L5), fence YAML data files with `---` (L10), and adopt the vocabulary additions listed in architecture.md. Add dedicated attribution/location/expression binding records per the spec; the pilot's generic `capabilities` record is not carried forward.
+    - The `SR-*` rule list in `spikes/schema-pilots/findings.md` is the Rust-side validator backlog for Phase 3; the negative samples there are a starting corpus for `messenger/lib/tests/fixtures/research/` (see `fixture-matrix.md`).
+    - `just test`/`just lint` in messenger build the library with only `desktop`; add explicit `--features research` and `--all-features` checks (fixture-matrix.md). The "no maintenance deps in send builds" check must use no-default/default/desktop, because `--all-features` already pulls YAML crates via sniff.
+    - Human review is pending on the extra lifecycle subcommands and layout additions (spec `human_review_items`); do not implement CLI surfaces in Phase 2 in a way that assumes the answer.
+    - Evidence gaps: WSL2 was unreachable for both spikes (build-win SSH reset; W: nearly full); Claudine itself was not run on native Windows. The working tree's Claudine crates did not compile during Phase 1 because of another effort's uncommitted edits in `claudine/cli/src/commands/wrap/sequence/task_run.rs`; do not touch those files. GitNexus was mid-reindex, so Phase 5 must re-run impact after `just gitnexus`.
+    - Suspected runtime defects (Slack webhook response parsing, Signal group-send method name, Telegram 429 `retry_after` loss) are recorded in the surface inventory as research priorities only; this feature must not change delivery behavior.
 ---
 
 # Provider Research Metadata Pipeline

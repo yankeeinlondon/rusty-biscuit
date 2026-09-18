@@ -1,0 +1,4 @@
+$schema:
+    Item: "{ id: string(required) }"
+    items: "Item[](required)@this"
+    "<pattern::^(prompt|hash)$>": any

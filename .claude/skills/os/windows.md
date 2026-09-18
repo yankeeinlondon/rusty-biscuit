@@ -141,6 +141,16 @@ Compare against that, never against `to_string_lossy()`.
   reader or host scanner during `MoveFileExW(REPLACE_EXISTING)`. Retry those
   two errors for a short bounded interval while preserving atomic replacement;
   never delete the destination first.
+- **`std::fs::rename` and `tempfile::persist` differ against open readers.**
+  Rust std opens files with `FILE_SHARE_DELETE`, and `std::fs::rename` over a
+  destination held by such a handle succeeds (the holder keeps the old bytes).
+  `tempfile::NamedTempFile::persist` over the same holder fails with error 5.
+  A holder opened *without* delete sharing (CRT `_wopen`, editors, scanners)
+  blocks both with error 5; error 32 was not observed. Renaming a directory
+  that contains an open file also fails with error 5. Prefer `std::fs::rename`
+  plus the bounded retry above for replace-in-place. Measured on
+  build-win-native (NTFS), 2026-09-17; see
+  `messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/findings.md`.
 - **Ctrl+C and the exit-130 contract are Unix-only in Claudine today.** The
   Windows termination path is a bare `child.wait()` with no console control
   handler, and the child sits in `CREATE_NEW_PROCESS_GROUP`. Do not accept a

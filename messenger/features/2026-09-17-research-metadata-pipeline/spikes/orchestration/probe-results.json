@@ -1,0 +1,905 @@
+{
+  "generated": "2026-09-17",
+  "reproduce": {
+    "unix": "CLAUDINE_BIN=<claudine> SOURCE_REVISION=<sha> python3 probe_budget.py --out <file>",
+    "windows": "python probe_tree_windows.py"
+  },
+  "macos": {
+    "binary": "<build-tmp>/target/debug/claudine",
+    "binary_version": "claudine 0.1.0",
+    "source_revision": "d57faf7e83860f8b44ecc716deebadf92c7120ae",
+    "host": "Darwin Mac.home.ken.net 27.0.0 Darwin Kernel Version 27.0.0: Tue Aug 11 21:05:48 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T6041 arm64",
+    "native": {
+      "isolation_repo_launch": {
+        "command": [
+          "compose",
+          "--goose",
+          "discovery.md"
+        ],
+        "code": 0,
+        "elapsed_seconds": 0.23,
+        "stderr_tail": [
+          "\u2503 DISCOVERY provider.example questions schema",
+          "",
+          "\u2713 the file reference was resolved to <tmp>/repo/work/discovery.md\u001b\\discovery.md\u001b]8;;\u001b\\ file on this host"
+        ],
+        "worker": [
+          {
+            "cwd": "<tmp>/repo",
+            "argv_flags": [
+              "-t",
+              "--system"
+            ],
+            "prompt_has_prior_marker": false,
+            "prompt_mentions_document_path": false,
+            "instruction_files_visible": [
+              "<tmp>/repo/CLAUDE.md",
+              "<tmp>/repo/AGENTS.md"
+            ],
+            "prior_marker_files_under_cwd": [
+              "research/prior.md"
+            ],
+            "env_keys": [
+              "AGENT",
+              "AGENT_CWD",
+              "AGENT_PARAMS",
+              "CLAUDINE_INTERACTIVE",
+              "CLAUDINE_PID",
+              "CLAUDINE_RENDEZVOUS_REPORT",
+              "CLAUDINE_SESSION_ID",
+              "GIT_CONFIG_GLOBAL",
+              "HOME",
+              "INTERACTIVE",
+              "LANG",
+              "NO_COLOR",
+              "PATH",
+              "PLAYA_DRY_RUN",
+              "PLAYA_SPOOL_DIR",
+              "PROBE_RECORDS",
+              "PWD",
+              "TERM",
+              "USERPROFILE",
+              "YOLO",
+              "__CF_USER_TEXT_ENCODING"
+            ],
+            "seq": null,
+            "tag": "DISCOVERY"
+          }
+        ]
+      },
+      "isolation_scratch_launch": {
+        "command": [
+          "compose",
+          "--goose",
+          "discovery.md"
+        ],
+        "code": 0,
+        "elapsed_seconds": 0.2,
+        "stderr_tail": [
+          "\u2503 DISCOVERY provider.example questions schema",
+          "",
+          "\u2713 the file reference was resolved to <tmp>/scratch/discovery.md\u001b\\discovery.md\u001b]8;;\u001b\\ file on this host"
+        ],
+        "worker": [
+          {
+            "cwd": "<tmp>/scratch",
+            "argv_flags": [
+              "-t",
+              "--system"
+            ],
+            "prompt_has_prior_marker": false,
+            "prompt_mentions_document_path": false,
+            "instruction_files_visible": [],
+            "prior_marker_files_under_cwd": [],
+            "env_keys": [
+              "AGENT",
+              "AGENT_CWD",
+              "AGENT_PARAMS",
+              "CLAUDINE_INTERACTIVE",
+              "CLAUDINE_PID",
+              "CLAUDINE_RENDEZVOUS_REPORT",
+              "CLAUDINE_SESSION_ID",
+              "GIT_CONFIG_GLOBAL",
+              "HOME",
+              "INTERACTIVE",
+              "LANG",
+              "NO_COLOR",
+              "PATH",
+              "PLAYA_DRY_RUN",
+              "PLAYA_SPOOL_DIR",
+              "PROBE_RECORDS",
+              "PWD",
+              "TERM",
+              "USERPROFILE",
+              "YOLO",
+              "__CF_USER_TEXT_ENCODING"
+            ],
+            "seq": null,
+            "tag": "DISCOVERY"
+          }
+        ]
+      },
+      "isolation_scratch_repo_flag": {
+        "command": [
+          "compose",
+          "--goose",
+          "--repo",
+          "discovery.md"
+        ],
+        "code": 1,
+        "elapsed_seconds": 0.03,
+        "stderr_tail": [
+          "\u2503 Goose cannot satisfy repo_resources through a provider-owned selector:",
+          "\u2503 run Goose without --repo; repository-scoped isolation has no verified",
+          "\u2503 provider-owned mechanism for this provider"
+        ],
+        "worker": []
+      },
+      "inline_compose_refresh": {
+        "command": [
+          "inline-compose",
+          "--goose",
+          "platform.md"
+        ],
+        "code": 0,
+        "elapsed_seconds": 0.24,
+        "stderr_tail": [
+          "\u2713 Goose agent completed successfully",
+          "\u2713 The agent updated research/platform.md",
+          "\u2713 Stamped hash and last_updated"
+        ],
+        "worker": [
+          {
+            "cwd": "<tmp>/repo",
+            "argv_flags": [
+              "-t",
+              "--system"
+            ],
+            "prompt_has_prior_marker": false,
+            "prompt_mentions_document_path": true,
+            "instruction_files_visible": [
+              "<tmp>/repo/CLAUDE.md",
+              "<tmp>/repo/AGENTS.md"
+            ],
+            "prior_marker_files_under_cwd": [
+              "research/platform.md",
+              "research/prior.md"
+            ],
+            "env_keys": [
+              "AGENT",
+              "AGENT_CWD",
+              "AGENT_PARAMS",
+              "CLAUDINE_INTERACTIVE",
+              "CLAUDINE_PID",
+              "CLAUDINE_RENDEZVOUS_REPORT",
+              "CLAUDINE_SESSION_ID",
+              "GIT_CONFIG_GLOBAL",
+              "GOOSE_MODE",
+              "HOME",
+              "INTERACTIVE",
+              "LANG",
+              "NO_COLOR",
+              "PATH",
+              "PLAYA_DRY_RUN",
+              "PLAYA_SPOOL_DIR",
+              "PROBE_RECORDS",
+              "PWD",
+              "TERM",
+              "USERPROFILE",
+              "YOLO",
+              "__CF_USER_TEXT_ENCODING"
+            ],
+            "seq": null,
+            "tag": "INLINE",
+            "inline_document_token": "<tmp>/repo/research/platform.md",
+            "inline_document_readable_with_prior": true
+          }
+        ]
+      },
+      "tree_cancel": {
+        "command": [
+          "compose",
+          "--goose",
+          "--timeout",
+          "1s",
+          "tree.md"
+        ],
+        "code": 143,
+        "elapsed_seconds": 11.34,
+        "stderr_tail": [
+          "",
+          "\u2713 the file reference was resolved to <tmp>/scratch/tree.md\u001b\\tree.md\u001b]8;;\u001b\\ file on this host",
+          "\u292b provider timed out (wall-clock limit 1s)"
+        ],
+        "survivors": {
+          "worker": false,
+          "grandchild_same_group": false,
+          "grandchild_new_session": true
+        }
+      },
+      "term_ignored_grace": {
+        "command": [
+          "compose",
+          "--goose",
+          "--timeout",
+          "1s",
+          "ignore.md"
+        ],
+        "code": 137,
+        "elapsed_seconds": 3.43,
+        "stderr_tail": [
+          "",
+          "\u2713 the file reference was resolved to <tmp>/scratch/ignore.md\u001b\\ignore.md\u001b]8;;\u001b\\ file on this host",
+          "\u292b provider timed out (wall-clock limit 1s)"
+        ],
+        "worker_alive_after": false
+      },
+      "wrapper_sigkill": {
+        "worker_launched": true,
+        "worker_alive_after_wrapper_sigkill": true
+      },
+      "retry_with_delay": {
+        "command": [
+          "compose",
+          "--goose",
+          "--timeout",
+          "5s",
+          "retry.md"
+        ],
+        "code": 7,
+        "elapsed_seconds": 2.4,
+        "stderr_tail": [
+          "\u26a0 lifecycle retry: re-running the agent (attempt 3)",
+          "\u2713 the file reference was resolved to <tmp>/scratch/retry.md\u001b\\retry.md\u001b]8;;\u001b\\ file on this host",
+          "\u292b agent exited with error code 7 (attempt 3)"
+        ],
+        "launches": 3,
+        "launch_gaps_seconds": [
+          1.09,
+          1.09
+        ]
+      },
+      "sequence_restart": [
+        {
+          "command": [
+            "sequence",
+            "--goose",
+            "seq.md"
+          ],
+          "code": 1,
+          "elapsed_seconds": 0.36,
+          "stderr_tail": [
+            "  probe-rq228oqm/scratch/two.md` in step 2 (`two`) exited with code 7",
+            "",
+            "\u292b Sequence finished: 1 succeeded, 1 failed"
+          ],
+          "steps": [
+            [
+              "STEP_ONE",
+              "91696b488ad71305"
+            ],
+            [
+              "STEP_TWO",
+              "91696b488ad71305"
+            ]
+          ]
+        },
+        {
+          "command": [
+            "sequence",
+            "--goose",
+            "seq.md"
+          ],
+          "code": 1,
+          "elapsed_seconds": 0.39,
+          "stderr_tail": [
+            "  probe-rq228oqm/scratch/two.md` in step 2 (`two`) exited with code 7",
+            "",
+            "\u292b Sequence finished: 1 succeeded, 1 failed"
+          ],
+          "steps": [
+            [
+              "STEP_ONE",
+              "44683127c6f26b35"
+            ],
+            [
+              "STEP_TWO",
+              "44683127c6f26b35"
+            ]
+          ]
+        }
+      ],
+      "private_home_files_after_runs": [
+        ".claudine/config.json",
+        ".claudine/state/system_prompts/447a5743a150965d.txt",
+        ".claudine/state/system_prompts/c98fb49d98fa469b.txt"
+      ]
+    },
+    "prototype_ledger_only": {
+      "retry_and_backoff": {
+        "codes": [
+          7,
+          0
+        ],
+        "used": {
+          "invocations": 2,
+          "active_seconds": 1.5473480224609375
+        },
+        "backoff_charged": true
+      },
+      "suspension": {
+        "launch_while_suspended": {
+          "admitted": false,
+          "reason": "state:suspended"
+        },
+        "resumed": true,
+        "charged_during_suspension": 0.23
+      },
+      "crash": {
+        "used_before_recovery": {
+          "invocations": 4,
+          "active_seconds": 2.955474853515625
+        },
+        "used_after_recovery": {
+          "invocations": 4,
+          "active_seconds": 3.455474853515625
+        },
+        "orphan_alive_before_recovery": true,
+        "orphan_alive_after_recovery": false,
+        "state": "interrupted",
+        "event": {
+          "kind": "crash_recovered",
+          "in_flight_invocation": 4,
+          "orphan_group": "killed",
+          "last_heartbeat": 1789693423.931275
+        }
+      },
+      "restart_refused_until_resumed": {
+        "admitted": false,
+        "reason": "state:interrupted"
+      },
+      "exhaustion": {
+        "state": "exhausted",
+        "used": {
+          "invocations": 5,
+          "active_seconds": 3.5705957412719727
+        },
+        "limits": {
+          "invocations": 5,
+          "active_seconds": 30
+        }
+      },
+      "relaunch_after_exhaustion": {
+        "admitted": false,
+        "reason": "state:exhausted"
+      },
+      "after_grant": {
+        "admitted": true,
+        "code": 0,
+        "remaining_at_launch": 26.43
+      },
+      "final": {
+        "schema": 1,
+        "platform": "fixture",
+        "state": "active",
+        "limits": {
+          "invocations": 5,
+          "active_seconds": 30
+        },
+        "grants": [
+          {
+            "operator": "fixture-operator",
+            "invocations": 1,
+            "active_seconds": 0,
+            "at": 1789693424.2265332
+          }
+        ],
+        "used": {
+          "invocations": 6,
+          "active_seconds": 3.6323039531707764
+        },
+        "segment": {
+          "opened_at": 1789693424.2274659,
+          "heartbeat_at": 1789693424.289174
+        },
+        "in_flight": null
+      },
+      "event_kinds": [
+        "suspended",
+        "active",
+        "crash_recovered",
+        "active",
+        "exhausted",
+        "active"
+      ]
+    }
+  },
+  "linux": {
+    "binary": "/home/build/ci-verification/rusty-biscuit/target/debug/claudine",
+    "binary_version": "claudine 0.1.0",
+    "source_revision": "standing-clone 3efdbe450 (+possible cross-check patch); binary built 2026-09-13",
+    "host": "Linux build-linux 7.0.14-6-pve #1 SMP PREEMPT_DYNAMIC PMX 7.0.14-6 (2026-07-20T14:45Z) x86_64",
+    "native": {
+      "isolation_repo_launch": {
+        "command": [
+          "compose",
+          "--goose",
+          "discovery.md"
+        ],
+        "code": 0,
+        "elapsed_seconds": 0.21,
+        "stderr_tail": [
+          "\u2503 DISCOVERY provider.example questions schema",
+          "",
+          "\u2713 the file reference was resolved to <tmp>/repo/work/discovery.md\u001b\\discovery.md\u001b]8;;\u001b\\ file on this host"
+        ],
+        "worker": [
+          {
+            "cwd": "<tmp>/repo",
+            "argv_flags": [
+              "-t",
+              "--system"
+            ],
+            "prompt_has_prior_marker": false,
+            "prompt_mentions_document_path": false,
+            "instruction_files_visible": [
+              "<tmp>/repo/CLAUDE.md",
+              "<tmp>/repo/AGENTS.md"
+            ],
+            "prior_marker_files_under_cwd": [
+              "research/prior.md"
+            ],
+            "env_keys": [
+              "AGENT",
+              "AGENT_CWD",
+              "AGENT_PARAMS",
+              "CLAUDINE_INTERACTIVE",
+              "CLAUDINE_PID",
+              "CLAUDINE_RENDEZVOUS_REPORT",
+              "CLAUDINE_SESSION_ID",
+              "GIT_CONFIG_GLOBAL",
+              "HOME",
+              "INTERACTIVE",
+              "LANG",
+              "NO_COLOR",
+              "PATH",
+              "PLAYA_DRY_RUN",
+              "PLAYA_SPOOL_DIR",
+              "PROBE_RECORDS",
+              "PWD",
+              "TERM",
+              "USERPROFILE",
+              "YOLO"
+            ],
+            "seq": null,
+            "tag": "DISCOVERY"
+          }
+        ]
+      },
+      "isolation_scratch_launch": {
+        "command": [
+          "compose",
+          "--goose",
+          "discovery.md"
+        ],
+        "code": 0,
+        "elapsed_seconds": 0.13,
+        "stderr_tail": [
+          "\u2503 DISCOVERY provider.example questions schema",
+          "",
+          "\u2713 the file reference was resolved to <tmp>/scratch/discovery.md\u001b\\discovery.md\u001b]8;;\u001b\\ file on this host"
+        ],
+        "worker": [
+          {
+            "cwd": "<tmp>/scratch",
+            "argv_flags": [
+              "-t",
+              "--system"
+            ],
+            "prompt_has_prior_marker": false,
+            "prompt_mentions_document_path": false,
+            "instruction_files_visible": [],
+            "prior_marker_files_under_cwd": [],
+            "env_keys": [
+              "AGENT",
+              "AGENT_CWD",
+              "AGENT_PARAMS",
+              "CLAUDINE_INTERACTIVE",
+              "CLAUDINE_PID",
+              "CLAUDINE_RENDEZVOUS_REPORT",
+              "CLAUDINE_SESSION_ID",
+              "GIT_CONFIG_GLOBAL",
+              "HOME",
+              "INTERACTIVE",
+              "LANG",
+              "NO_COLOR",
+              "PATH",
+              "PLAYA_DRY_RUN",
+              "PLAYA_SPOOL_DIR",
+              "PROBE_RECORDS",
+              "PWD",
+              "TERM",
+              "USERPROFILE",
+              "YOLO"
+            ],
+            "seq": null,
+            "tag": "DISCOVERY"
+          }
+        ]
+      },
+      "isolation_scratch_repo_flag": {
+        "command": [
+          "compose",
+          "--goose",
+          "--repo",
+          "discovery.md"
+        ],
+        "code": 0,
+        "elapsed_seconds": 0.13,
+        "stderr_tail": [
+          "\u2503 DISCOVERY provider.example questions schema",
+          "",
+          "\u2713 the file reference was resolved to <tmp>/scratch/discovery.md\u001b\\discovery.md\u001b]8;;\u001b\\ file on this host"
+        ],
+        "worker": [
+          {
+            "cwd": "<tmp>/scratch",
+            "argv_flags": [
+              "-t",
+              "--system"
+            ],
+            "prompt_has_prior_marker": false,
+            "prompt_mentions_document_path": false,
+            "instruction_files_visible": [],
+            "prior_marker_files_under_cwd": [],
+            "env_keys": [
+              "AGENT",
+              "AGENT_CWD",
+              "AGENT_PARAMS",
+              "CLAUDINE_INTERACTIVE",
+              "CLAUDINE_PID",
+              "CLAUDINE_RENDEZVOUS_REPORT",
+              "CLAUDINE_SESSION_ID",
+              "GIT_CONFIG_GLOBAL",
+              "HOME",
+              "INTERACTIVE",
+              "LANG",
+              "NO_COLOR",
+              "PATH",
+              "PLAYA_DRY_RUN",
+              "PLAYA_SPOOL_DIR",
+              "PROBE_RECORDS",
+              "PWD",
+              "TERM",
+              "USERPROFILE",
+              "YOLO"
+            ],
+            "seq": null,
+            "tag": "DISCOVERY"
+          }
+        ]
+      },
+      "inline_compose_refresh": {
+        "command": [
+          "inline-compose",
+          "--goose",
+          "platform.md"
+        ],
+        "code": 0,
+        "elapsed_seconds": 0.15,
+        "stderr_tail": [
+          "\u2713 Goose agent completed successfully",
+          "\u2713 The agent updated research/platform.md",
+          "\u2713 Stamped hash and last_updated"
+        ],
+        "worker": [
+          {
+            "cwd": "<tmp>/repo",
+            "argv_flags": [
+              "-t",
+              "--system"
+            ],
+            "prompt_has_prior_marker": false,
+            "prompt_mentions_document_path": true,
+            "instruction_files_visible": [
+              "<tmp>/repo/CLAUDE.md",
+              "<tmp>/repo/AGENTS.md"
+            ],
+            "prior_marker_files_under_cwd": [
+              "research/platform.md",
+              "research/prior.md"
+            ],
+            "env_keys": [
+              "AGENT",
+              "AGENT_CWD",
+              "AGENT_PARAMS",
+              "CLAUDINE_INTERACTIVE",
+              "CLAUDINE_PID",
+              "CLAUDINE_RENDEZVOUS_REPORT",
+              "CLAUDINE_SESSION_ID",
+              "GIT_CONFIG_GLOBAL",
+              "GOOSE_MODE",
+              "HOME",
+              "INTERACTIVE",
+              "LANG",
+              "NO_COLOR",
+              "PATH",
+              "PLAYA_DRY_RUN",
+              "PLAYA_SPOOL_DIR",
+              "PROBE_RECORDS",
+              "PWD",
+              "TERM",
+              "USERPROFILE",
+              "YOLO"
+            ],
+            "seq": null,
+            "tag": "INLINE",
+            "inline_document_token": "<tmp>/repo/research/platform.md",
+            "inline_document_readable_with_prior": true
+          }
+        ]
+      },
+      "tree_cancel": {
+        "command": [
+          "compose",
+          "--goose",
+          "--timeout",
+          "1s",
+          "tree.md"
+        ],
+        "code": 143,
+        "elapsed_seconds": 11.19,
+        "stderr_tail": [
+          "",
+          "\u2713 the file reference was resolved to <tmp>/scratch/tree.md\u001b\\tree.md\u001b]8;;\u001b\\ file on this host",
+          "\u292b provider timed out (wall-clock limit 1s)"
+        ],
+        "survivors": {
+          "worker": false,
+          "grandchild_same_group": false,
+          "grandchild_new_session": true
+        }
+      },
+      "term_ignored_grace": {
+        "command": [
+          "compose",
+          "--goose",
+          "--timeout",
+          "1s",
+          "ignore.md"
+        ],
+        "code": 137,
+        "elapsed_seconds": 3.2,
+        "stderr_tail": [
+          "",
+          "\u2713 the file reference was resolved to <tmp>/scratch/ignore.md\u001b\\ignore.md\u001b]8;;\u001b\\ file on this host",
+          "\u292b provider timed out (wall-clock limit 1s)"
+        ],
+        "worker_alive_after": false
+      },
+      "wrapper_sigkill": {
+        "worker_launched": true,
+        "worker_alive_after_wrapper_sigkill": true
+      },
+      "retry_with_delay": {
+        "command": [
+          "compose",
+          "--goose",
+          "--timeout",
+          "5s",
+          "retry.md"
+        ],
+        "code": 7,
+        "elapsed_seconds": 2.3,
+        "stderr_tail": [
+          "\u26a0 lifecycle retry: re-running the agent (attempt 3)",
+          "\u2713 the file reference was resolved to <tmp>/scratch/retry.md\u001b\\retry.md\u001b]8;;\u001b\\ file on this host",
+          "\u292b agent exited with error code 7 (attempt 3)"
+        ],
+        "launches": 3,
+        "launch_gaps_seconds": [
+          1.09,
+          1.09
+        ]
+      },
+      "sequence_restart": [
+        {
+          "command": [
+            "sequence",
+            "--goose",
+            "seq.md"
+          ],
+          "code": 1,
+          "elapsed_seconds": 0.25,
+          "stderr_tail": [
+            "  in step 2 (`two`) exited with code 7",
+            "",
+            "\u292b Sequence finished: 1 succeeded, 1 failed"
+          ],
+          "steps": [
+            [
+              "STEP_ONE",
+              "f0012d56448b15e8"
+            ],
+            [
+              "STEP_TWO",
+              "f0012d56448b15e8"
+            ]
+          ]
+        },
+        {
+          "command": [
+            "sequence",
+            "--goose",
+            "seq.md"
+          ],
+          "code": 1,
+          "elapsed_seconds": 0.24,
+          "stderr_tail": [
+            "  in step 2 (`two`) exited with code 7",
+            "",
+            "\u292b Sequence finished: 1 succeeded, 1 failed"
+          ],
+          "steps": [
+            [
+              "STEP_ONE",
+              "b6f69e84e98c8e43"
+            ],
+            [
+              "STEP_TWO",
+              "b6f69e84e98c8e43"
+            ]
+          ]
+        }
+      ],
+      "private_home_files_after_runs": [
+        ".claudine/config.json",
+        ".claudine/state/system_prompts/0b9918016b817d4e.txt",
+        ".claudine/state/system_prompts/6cff09fd7e51d8fa.txt"
+      ]
+    },
+    "prototype_ledger_only": {
+      "retry_and_backoff": {
+        "codes": [
+          7,
+          0
+        ],
+        "used": {
+          "invocations": 2,
+          "active_seconds": 1.5017590522766113
+        },
+        "backoff_charged": true
+      },
+      "suspension": {
+        "launch_while_suspended": {
+          "admitted": false,
+          "reason": "state:suspended"
+        },
+        "resumed": true,
+        "charged_during_suspension": 0.15
+      },
+      "crash": {
+        "used_before_recovery": {
+          "invocations": 4,
+          "active_seconds": 2.6720523834228516
+        },
+        "used_after_recovery": {
+          "invocations": 4,
+          "active_seconds": 3.1720523834228516
+        },
+        "orphan_alive_before_recovery": true,
+        "orphan_alive_after_recovery": false,
+        "state": "interrupted",
+        "event": {
+          "kind": "crash_recovered",
+          "in_flight_invocation": 4,
+          "orphan_group": "killed",
+          "last_heartbeat": 1789693466.9898107
+        }
+      },
+      "restart_refused_until_resumed": {
+        "admitted": false,
+        "reason": "state:interrupted"
+      },
+      "exhaustion": {
+        "state": "exhausted",
+        "used": {
+          "invocations": 5,
+          "active_seconds": 3.2226710319519043
+        },
+        "limits": {
+          "invocations": 5,
+          "active_seconds": 30
+        }
+      },
+      "relaunch_after_exhaustion": {
+        "admitted": false,
+        "reason": "state:exhausted"
+      },
+      "after_grant": {
+        "admitted": true,
+        "code": 0,
+        "remaining_at_launch": 26.78
+      },
+      "final": {
+        "schema": 1,
+        "platform": "fixture",
+        "state": "active",
+        "limits": {
+          "invocations": 5,
+          "active_seconds": 30
+        },
+        "grants": [
+          {
+            "operator": "fixture-operator",
+            "invocations": 1,
+            "active_seconds": 0,
+            "at": 1789693467.2760122
+          }
+        ],
+        "used": {
+          "invocations": 6,
+          "active_seconds": 3.273087501525879
+        },
+        "segment": {
+          "opened_at": 1789693467.2760913,
+          "heartbeat_at": 1789693467.3265078
+        },
+        "in_flight": null
+      },
+      "event_kinds": [
+        "suspended",
+        "active",
+        "crash_recovered",
+        "active",
+        "exhausted",
+        "active"
+      ]
+    }
+  },
+  "windows_native": {
+    "host": "BUILD-WIN",
+    "python": "3.13.14",
+    "terminate_job": {
+      "assigned": true,
+      "survivors": {
+        "child": false,
+        "grandchild": false
+      },
+      "breakaway_error": "[WinError 5] Access is denied"
+    },
+    "job_handle_close_only": {
+      "assigned": true,
+      "survivors": {
+        "child": false,
+        "grandchild": false
+      },
+      "breakaway_error": "[WinError 5] Access is denied"
+    },
+    "late_assignment_race": {
+      "assigned": true,
+      "survivors": {
+        "child": false,
+        "grandchild": true,
+        "breakaway": true
+      },
+      "breakaway_error": null
+    },
+    "wrapper_terminated": {
+      "survivors": {
+        "child": false,
+        "grandchild": false
+      }
+    },
+    "os_version": "Microsoft Windows NT 10.0.26200.0",
+    "kind": "OS-semantics mirror of windows_wait_loop via Python ctypes; not a Claudine binary run"
+  },
+  "wsl2": {
+    "status": "unreachable",
+    "attempts": [
+      "ssh BatchMode to BUILD_WSL x2: kex_exchange_identification connection reset",
+      "ssh BUILD_WIN 'wsl.exe -d Ubuntu-26.04 -e bash -lc ...': execvpe(bash) I/O error",
+      "ssh BUILD_WIN 'wsl.exe -d Ubuntu-26.04 -e /usr/bin/uname -a': exit 11, no output"
+    ]
+  }
+}
