@@ -1756,3 +1756,37 @@ fleet prompt plus `lib/tests/fixtures/research/lifecycle/fleet/`. Script:
   was not touched here.
 - A shell `cd` into `messenger/lib/src/research/…` hung twice for 120 s,
   apparently a directory-change hook on this host. Absolute paths avoided it.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-18T01:45:22-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis/messenger/features/2026-09-17-research-metadata-pipeline/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- starting the work on 'The accepted five-platform baseline and its generated publications do not exist' at 01:45:45
+        - the live three-pass research run, independent evidence review, and human approval cannot be performed in this non-interactive session (no agent/model choice, no per-platform budgets, no named approver; see Phase 7); that portion is deferred
+        - the passive Level 1 corpus assertion recommended by the review is in scope and delegated to a subagent
+        - added a passive Level 1 guard in `messenger/lib/tests/research_corpus.rs`:
+                - `typed::published_baseline_findings(root)` returns `None` before `messenger/docs/research/publication.json` exists; once it exists, it reports every active roster document that is legacy prose (no `$schema`) or fails accepted-scope validation, plus snapshot drift from the library's own `generate::check`
+                - `shipped_publication_is_accepted_and_drift_free` runs the guard on the real tree; today it passes vacuously and prints a `VACUOUS:` notice to stderr rather than skipping silently
+                - three fixture-tree tests (built with a real `generate` over the `lifecycle/fleet` fixtures) prove the post-publication branch: a clean fleet passes, legacy prose fails, and a drifted or hand-edited catalog fails
+                - `shipped_platform_documents_validate_or_delegate_to_the_fleet` now withdraws the legacy-prose allowance once a publication exists
+                - the guard was confirmed to fire against the real tree by temporarily adding a placeholder `publication.json` (removed afterwards)
+        - discovered: `research_publication.rs` and `research_refresh.rs` each keep their own `SHIPPED` list and `fleet_text` helper, and the lists already differ (only the refresh list includes `_rules.md`); a shared test helper is a candidate follow-up
+        - gates: messenger `just test` 663 passed / 2 skipped; `just lint` clean
+        - blocked (unchanged): the live five-platform research, evidence review, human approval, and first publication still require the maintainer's decisions listed in the review's `human_review_items`
+- work completed for 'The accepted five-platform baseline and its generated publications do not exist' at 01:50:25 (passive guard only; the live baseline is deferred)
+- starting the work on 'An empty approver name satisfies the human-approval gate' at 01:50:25
+        - design: new `messenger/lib/src/research/refresh/input.rs` adds validated `Maintainer` and `DecisionReason` newtypes; each constructor trims surrounding whitespace and refuses blank input, and serde loads both through the same constructor (`try_from = "String"`), so the on-disk format is unchanged but a blank or invalid identity cannot be represented or loaded
+                - `promote::Request::Human { by: Maintainer }` and `promote::reject(…, &Maintainer, &DecisionReason, …)` make the library boundary the enforcement point, and `Approval.by`, `Decision.by`, and `Decision.reason` use the same types
+                - new `InputError { BlankMaintainer, BlankReason, ControlInMaintainer }` reaches callers as `RefreshError::Input`; the CLI exits 2 (`EXIT_USAGE`) with a message, or with a `{"refused": …}` object under `--json`, before anything is written
+                - `reject --by` uses the same validation, and `--reason` must not be blank
+        - follow-up raised during review of the subagent's work: maintainer names are interpolated into single-line CHANGELOG Markdown, so names containing control characters (newline, tab, CR, ESC, C1) are now rejected to prevent Markdown injection; rejection reasons may still span lines because they are stored only as JSON and never rendered
+        - persisted review records and `run.json` files with a blank or multi-line name now fail to load (`ReviewRecord::parse` / `StateError::Corrupt`); none exist yet, since the feature is unreleased
+        - tests: `input.rs` unit tests (`blank_inputs_are_refused_and_valid_ones_are_trimmed`, `deserialization_applies_the_same_validation`, `a_maintainer_name_holds_no_control_character_but_a_reason_may_span_lines`); library L1 `decisions_name_a_trimmed_maintainer_and_invalid_persisted_names_do_not_load`; real-CLI L1 `invalid_decision_inputs_exit_2_before_any_decision_or_publication` (asserts `messenger/docs/` and `run.json` are unchanged byte for byte)
+        - docs updated: `messenger/docs/user-guide.md`, `messenger/cli/README.md`, and the "Decision inputs" bullet in `.claude/skills/messenger/research-contract.md`
+        - discovered: U+2028/U+2029 are not control characters and remain allowed in names; CommonMark does not treat them as line breaks
+        - GitNexus: `Decision`, `Approval`, and `refusal` LOW; library `promote`/`reject`/`Request`/`RefreshError` UNKNOWN, with callers confirmed by text search to be only the CLI lifecycle module and `research_refresh.rs`
+        - gates: messenger `just test` 668 passed / 2 skipped; `just lint` clean
+- work completed for 'An empty approver name satisfies the human-approval gate' at 02:03:25
+- starting the work on 'Impossible calendar dates are accepted as research evidence dates' at 02:03:25
