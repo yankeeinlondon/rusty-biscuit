@@ -1980,17 +1980,16 @@ fn render_verdict(verdict: &Verdict, term: &Terminal) -> String {
         .render(term),
     );
     out.push('\n');
-    let columns = ["Code", "Detail"]
-        .into_iter()
-        .map(TableColumn::new)
-        .collect::<Vec<_>>();
-    let data = verdict
-        .rejections
-        .iter()
-        .map(|rejection| vec![rejection.code.clone().into(), rejection.detail.clone().into()])
-        .collect::<Vec<_>>();
-    out.push_str(&Table::new().with_columns(columns).with_data(data).render(term));
-    out.push('\n');
+    // One wrapped line per rejection rather than a table: a `Table` that
+    // cannot fit its detail column renders its own width complaint in place
+    // of the rows, and the WSL2 guest's non-TTY shell is 80 columns wide.
+    // The first hosted run lost every refusal reason that way.
+    for rejection in &verdict.rejections {
+        out.push_str(
+            &Prose::new(format!("**{}** — {}", rejection.code, rejection.detail)).render(term),
+        );
+        out.push('\n');
+    }
     out
 }
 

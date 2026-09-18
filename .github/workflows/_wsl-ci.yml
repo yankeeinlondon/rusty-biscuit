@@ -661,13 +661,19 @@ jobs:
           }
           $report | Tee-Object -FilePath wsl-diag/host-postmortem.txt
       - name: Upload WSL2 diagnostics
-        if: ${{ !cancelled() && steps.l1.outcome == 'failure' }}
+        # A refused build skips the test step, so the verdict document — the
+        # only machine-readable record of WHY the guest refused — has to ride
+        # along on a verification failure too. The status artifact carries
+        # only the outcome.
+        if: ${{ !cancelled() && (steps.l1.outcome == 'failure' || steps.verified.outcome == 'failure') }}
         uses: actions/upload-artifact@v6
         with:
           # A prefix `ci-rollup` does not walk: this is evidence for a human
           # reading a failure, never an input to a cell's verdict.
           name: wsl-diag-${{ inputs.package }}-wsl2-ubuntu
-          path: wsl-diag
+          path: |
+            wsl-diag
+            wsl-timing/verdict.json
           if-no-files-found: ignore
           retention-days: 3
       # `L1`, not `wsl`: `ci-rollup` keys a status by TIER, and this job produces
