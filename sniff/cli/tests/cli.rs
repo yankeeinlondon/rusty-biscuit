@@ -5625,6 +5625,36 @@ fn test_commit_family_invalid_inputs_are_typed_failures() {
     }
 }
 
+/// A duration scope too large for `chrono::Duration` used to abort the binary
+/// inside a panicking constructor; it must read as ordinary invalid input.
+#[test]
+fn test_commit_family_rejects_oversized_duration_scopes() {
+    let (_dir, path) = create_test_repo();
+
+    for period in [
+        "9223372036854775807h",
+        "9223372036854775807d",
+        "9223372036854775807w",
+        "9223372036854775807mo",
+        "9223372036854775807y",
+    ] {
+        for subcommand in COMMIT_FAMILY_SUBCOMMANDS {
+            let args = [subcommand, period, "--json"];
+            let output = run_repo(&path, &args);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
+            assert!(!output.status.success(), "{args:?} must fail");
+            assert_ne!(output.status.code(), Some(101), "{args:?} panicked: {stderr}");
+            assert!(!stderr.contains("panicked"), "{args:?} stderr: {stderr}");
+            assert!(output.stdout.is_empty(), "{args:?} stdout: {:?}", output.stdout);
+            assert!(
+                stderr.contains("invalid period specifier") && stderr.contains(period),
+                "{args:?} stderr: {stderr}"
+            );
+        }
+    }
+}
+
 #[test]
 fn test_recent_commits_plain_output_is_the_library_plain_report() {
     let (_dir, path) = create_test_repo();
@@ -5773,6 +5803,27 @@ fn test_recent_commits_filters_run_through_the_library() {
     // Count selection is satisfied by matching commits found during the walk.
     let last_source = run_commit_json(&path, &["recent-commits", "2", "--source-code", "--json"]);
     assert_eq!(headings(&last_source), ["repair c", "simplify b"]);
+}
+
+#[test]
+fn test_recent_commits_operation_filter_accepts_breaking_change_commits() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(&path, "src/a.rs", "a", "feat!: breaking without scope");
+    test_commit_file_with_message(&path, "src/b.rs", "b", "feat(api)!: breaking with scope");
+    test_commit_file_with_message(&path, "src/c.rs", "c", "fix: unrelated");
+
+    let breaking = run_commit_json(&path, &["recent-commits", "--operation", "feat", "--json"]);
+    assert_eq!(
+        headings(&breaking),
+        ["breaking with scope", "breaking without scope"]
+    );
+    assert_eq!(breaking[0]["operation"], Value::from("feat"));
+    assert_eq!(breaking[0]["scope"], Value::from("api"));
+    assert_eq!(breaking[1]["operation"], Value::from("feat"));
+    assert_eq!(breaking[1]["scope"], Value::Null);
+
+    let scoped = run_commit_json(&path, &["recent-commits", "--scope", "api", "--json"]);
+    assert_eq!(headings(&scoped), ["breaking with scope"]);
 }
 
 #[test]
