@@ -167,3 +167,118 @@ expression `:131`, loop expression `:218`, loop actions `:221`, dispatch templat
 Darkmatter/Claudine migration even though current transitive graph counts are
 unreliable. Their domain policies remain separate; the shared richer resolver
 must reach all of them.
+
+## D4 investigation: prepared source and ordinary interpolation
+
+**Recommendation, not a confirmed decision:** use a small immutable Darkmatter
+prepared representation shared by passive validation and execution. It retains
+source form, parsed/spanned expressions, reference/context-requirement metadata,
+and schema-location/policy identity. It contains no resolved values, providers,
+environment observations, context snapshots, or lazy cache. Runtime execution
+still takes a fresh session at the existing lookup-operation boundary under D2.
+
+Graph-first `context interpolate_value`, explicitly bound to the absolute
+worktree path, identified `interpolation/rewrite.rs` and its calls to
+`whole_value_span`, `eval_json`, and `interpolate_text`; direct source confirmed
+these relationships. No index rebuild or impact claim was needed for this
+read-only investigation.
+
+### Existing primitives to reuse
+
+- `expression/lexer.rs:41–73`: `ExpressionLocation`, `InterpolationLiteral`,
+  and `ExpressionScanResult` already distinguish executable spans from triple
+  brace literals. `ExpressionFinder::scan_plain` supplies the frontmatter scan.
+- `expression/ast.rs:256,356`: `SpannedExpr` and its `erase` projection already
+  provide a source-aware AST and the runtime AST shape. The parser supports
+  separate interpolation and condition modes; retain that distinction.
+- `expression/lint.rs:100`: `whole_value_span` classifies an exactly-one-span
+  trimmed string independently of whether its expression parses successfully.
+  Preparation must not turn a malformed whole-value expression into literal data.
+- `interpolation/rewrite.rs:99–281`: existing string and value interpolation
+  are the execution authority. No general reusable prepared source/session
+  artifact was found in these expression/interpolation modules.
+- `lifecycle/action_shape.rs:347`: Claudine currently lowers authored operands
+  to `Expr`. Whole-value spans become expression ASTs while ordinary/mixed text
+  becomes a string literal. This loses the source-form distinction once a
+  whole-value expression itself produces a string literal or template-looking
+  result; execution then compensates by inspecting result braces.
+
+### Semantics a prepared representation must preserve
+
+`interpolate_value` routes a whole-value expression to **one typed evaluation**
+and returns its value without rescanning. An object/array result is data, not a
+new authored subtree. Mixed strings route through `interpolate_text`, which
+rescans its rewritten output using the existing bounded loop (currently ten
+passes), preserves multiline replacement indentation, and converts triple-brace
+literals **after the final interpolation pass**. Generated mixed-string spans
+can therefore require runtime parsing; preparation cannot promise all future
+parsing is eliminated. Preserve this existing pass count and depth-limit policy
+rather than inventing a new stopping/error rule.
+
+Triple braces are excluded from executable references and finally reduce to
+literal double braces. `\{{ ... }}` and `\{\{ ... }}` are not executable spans;
+composition preserves their backslashes. They need not produce byte-identical
+output to triple braces to satisfy ordinary semantics. Scanner tests at
+`expression/lexer.rs:1233` cover odd/even backslash parity and escaped openers;
+`expression/lint.rs:680` covers whole-value classification, including malformed
+spans and exclusions. Existing `composition/interpolation_conformance.rs:97–181`
+covers scalar/container whole values, mixed strings, two spans, explicit doc,
+functions, and quoted escapes; it needs the specified three literal forms added
+as shared consumer fixtures. Its loop JSON-reparse divergence remains outside
+this change's scope.
+
+For passive all-reference checking, traverse every executable AST branch,
+including inactive branches. Do **not** recursively scan quoted string literals
+inside a whole-value/direct expression as if they were a second expression
+program: their braces are successful literal output. For mixed strings,
+runtime-introduced spans follow only the existing rescan mechanism and inherit
+the applicable restriction context. Runtime checks cover references unavailable
+to passive source analysis; preparation must neither evaluate branches nor
+invoke providers to discover them.
+
+`Evaluator::eval` (`interpolation/evaluator.rs:247`) has a variable fast path
+that directly calls `get` and sometimes `get_string`, bypassing `evaluate`.
+D1 integration must route this path through richer resolution too. The prepared
+artifact does not by itself repair that bypass.
+
+### Material alternatives
+
+| Choice | Benefits | Costs and limitations |
+| --- | --- | --- |
+| Shared classifier/validator; callers keep parsing independently | Smallest public addition; can reuse current scanner/parser immediately. | Repeated parsing and loss of authored form remain easy; callers must consistently preserve spans, parse mode, context requirements and policy. Does not adequately remove existing source/result confusion without an additional tagged representation. |
+| Immutable prepared source plus fresh runtime session **(recommended)** | One source classification and parsed reference model serves validation/execution; retains spans and policy identity; prevents whole-value output re-evaluation by construction. | Requires migrating lifecycle operands from bare AST-only storage; mixed runtime rescans still need parsing; schema generation changes require revalidation. |
+
+Simplicity favors the second option because it consolidates already duplicated
+mechanics without introducing an invocation-wide cache or a second evaluator.
+There is no useful third alternative unless the human wants a different API
+boundary; a combined prepared/evaluated snapshot would contradict D2 and timing
+preservation.
+
+An illustrative minimal shape (names not proposed as settled API):
+
+```rust
+enum PreparedInput {
+    Expression { mode: ParseMode, expression: SpannedExpr },
+    Value(PreparedValue), // literal, whole-value span, mixed template, array, map
+}
+
+// Pure preparation/validation; declarations contain no runtime providers.
+fn prepare(input: SourceInput, location: SchemaLocation) -> Result<PreparedInput, PrepareError>;
+fn validate(input: &PreparedInput, declarations: &BindingDeclarations,
+            policy: &EffectiveSchemaPolicy) -> Result<(), ValidationError>;
+fn evaluate(input: &PreparedInput, session: &EvaluationSession,
+            policy: &EffectiveSchemaPolicy) -> Result<Value, EvaluationError>;
+```
+
+The artifact may carry policy identity/provenance, but a mutable editor registry
+index alone is insufficient: it must be tied to the effective schema generation
+or an immutable policy snapshot, so a refresh cannot silently reinterpret an old
+artifact. Exact restriction propagation through moved/generated values is a
+separate outstanding decision, not settled by this illustration.
+
+Context requirement metadata records what may be needed; Claudine still decides
+when and from which invocation/source to capture it. Do not precompute runtime
+availability, property existence, branches, or values. Do not widen one existing
+leaf evaluation's cache to an entire event simply because a prepared subtree is
+reusable. Schemas and source may be prepared once, then evaluated against changing
+document state with appropriate fresh sessions.

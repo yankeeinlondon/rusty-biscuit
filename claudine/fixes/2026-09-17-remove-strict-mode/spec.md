@@ -182,7 +182,7 @@ Resolution follows this order:
 1. The reserved `doc`, `ctx`, and `env` namespaces resolve through their
    respective lookup surfaces. Caller globals cannot replace these namespaces.
 2. An explicitly registered global owns its exact root. Claudine's
-   lifecycle globals such as `err`, `timing`, `current`, and `current_env`
+   lifecycle globals such as `err`, `timing`, `current`, and `group`
    are examples.
 3. Every other bare root resolves as a property of the current document.
 
@@ -316,8 +316,8 @@ sufficient.
 
 Claudine owns:
 
-- the catalog of lifecycle globals such as `err`, `timing`, `current`,
-  `current_env`, and `group`;
+- the catalog of lifecycle globals such as `err`, `timing`, `current`, and
+  `group`;
 - the event or execution scope in which each global is available;
 - construction and capture timing of their eager or lazy values;
 - lifecycle flow, action dispatch, and mutation atomicity;
@@ -329,6 +329,16 @@ Claudine owns:
 Claudine provides those declarations to Darkmatter. It must not independently
 decide identifier validity, traverse Darkmatter ASTs to find unavailable
 bindings, or recreate evaluator short-circuit rules.
+
+Scope clarification agreed 2026-09-18: this fix retains the existing
+event-captured `current.ctx.*` and `current.env.*` snapshots and introduces no
+independent `current_env` global. Laziness continues to defer snapshot
+materialization, not observation of context or environment. The separate
+[more-context specification](../../../../darkmatter/features/2026-09-09-more-context/spec.md)
+owns the coherent future migration to Darkmatter built-ins across all expression
+surfaces, the direct `current.*` and `current_env.*` mirrors, and reference-time
+freshness. This clarification does not reverse that feature's agreed destination
+or introduce interim aliases.
 
 During preparation, Darkmatter must reject every reference that is definitely
 forbidden in the declared event or scope, including references in inactive
@@ -812,9 +822,11 @@ the confirmed requirements:
    depending on Claudine or duplicating its lifecycle catalog. Schema source
    ownership is settled by R11; generation integration and editor discovery or
    distribution still need concrete designs.
-6. Whether `current_env` is already represented as an independent global in
-   every relevant surface or is projected through another snapshot; the final
-   catalog and docs must agree.
+6. Verify the retained event-captured `current.ctx.*` and `current.env.*`
+   representation across relevant consumers and keep this fix's catalog and
+   documentation consistent with it. This fix introduces no independent
+   `current_env`; the future built-in/direct-mirror/freshness migration belongs
+   to more-context as clarified above.
 7. Handling generated or moved values under `no-shell-expansion`. Existing
    constrained named-type syntax can preserve narrow key/value typing; the
    keyword requires new support. Descendant inheritance and non-relaxation are

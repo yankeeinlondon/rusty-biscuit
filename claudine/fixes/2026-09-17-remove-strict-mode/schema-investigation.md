@@ -179,3 +179,166 @@ source precedence, and failure-state granularity. The trigger-kind mismatch
 needs an explicit scope/compatibility ruling. A trustworthy refreshed graph is
 still required before reporting current impact findings. None of these open
 items should be delegated to the future implementation plan.
+
+## D5 follow-up: deferred, generated, and moved values
+
+Investigation dated 2026-09-18. D1–D4 were reported confirmed by the design
+orchestrator: additive resolution, immutable binding declarations with runtime
+sessions at existing lookup-operation boundaries, preservation of current
+`current.ctx`/`current.env` snapshots, and shared immutable prepared source.
+The recommendations below address D5 only and remain unconfirmed.
+
+Graph-first queries used the exact absolute worktree path rather than a
+potentially unstable alias. Queries for movement flows and contexts for
+`resolve_typed_value`, `commit_proxy`, `compose_step`, and `DocumentOverlay`
+provided useful source locations. They do not establish clean current impact:
+the previously reported graph inconsistency has not been independently cleared,
+and some responses were truncated. All findings below were checked in source.
+
+### Concrete movement boundaries
+
+| Boundary | Current source evidence | Required policy treatment |
+| --- | --- | --- |
+| Deferred lifecycle extraction | `claudine/lib/src/composition/prepare.rs:238` excludes lifecycle keys from normal composition; `:482` extracts effective frontmatter; `:694` parses lifecycle configuration from those raw values. | Capture restrictions and source location when prepared source is extracted. Exclusion from evaluation must not exclude passive feature checks or discard restriction provenance. |
+| Lifecycle shell preflight | `claudine/lib/src/composition/prepare.rs:707` resolves shell commands in parsed lifecycle structures and stamps approved bytes back. | Policy must accompany prepared and replaced command content; replacement is not permission to lose origin restrictions. Preserve byte parity and the runtime initialization backstop. |
+| `proxy.with` evaluation | `claudine/lib/src/composition/lifecycle/executor.rs:1739` captures fallback context once; `:1771` resolves each mapping entry; `:1801` recursively resolves arrays/maps; `:1843` resolves scalar expressions. | Validate/evaluate using source-location restrictions before committing any handoff. Return complete typed values with stage/provenance metadata where subsequent existing composition stages can consume them. Do not add a new expression pass. |
+| Proxy transport and refresh | `claudine/lib/src/composition/coordinator/handoff.rs:145` stores the evaluated overlay as `IndexMap<String, Value>`; `coordinator/document.rs:23` stores the immutable document overlay; `:104` adopts it into the prepared target. Existing coordinator tests at `tests.rs:548` preserve the overlay across refresh. | Keep relevant metadata beside immutable overlay values across target adoption and retry/resume refresh. Recompute target-location restrictions and union with retained origin restrictions for any remaining executable stage. Preserve value redaction. |
+| Batched lifecycle `set` | `lifecycle/executor.rs:1457` resolves values against one pre-write snapshot before `RuntimeState::set_batch`; `runtime_state.rs:71` stores mutations and outputs as JSON; `:143` validates all keys and atomically commits a clone. | Values and metadata must commit atomically together. A rejected batch publishes neither. Snapshot cloning and parallel-task state cloning must carry both. |
+| Runtime re-entry layering | `runtime_state.rs:235` merges user setters, runtime mutations, outputs, then reserved overlay into plain JSON. `prepare.rs:245` passes resulting overrides into Darkmatter. | Layering must move a winning value's provenance with that value and discard overwritten value provenance. A single policy bit on the whole merged object would incorrectly restrict unrelated siblings. |
+| Sequence params and overrides | `sequence/task/mod.rs:810` resolves each parameter; `:831` layers params/setters/mutations/overlay; `:863` resolves authored values through `SubtreeCompose`. `claudine/cli/src/commands/wrap/sequence/jit.rs:89` folds step overrides and `:148` prepares the target. | Preserve policy on transferred values still eligible for a normal later stage; apply fresh destination policy at the target. Step/runtime data must not become newly executable merely because it contains braces. |
+| Schema layering | `darkmatter/lib/src/markdown/schemas/resolve.rs:1729` merges schemas with whole-property replacement; `schemas/mod.rs:733` retains effective schema and origin information. | Accumulate restrictions independently of replacement, including ancestor container restrictions. Effective type replacement does not grant permission to remove restrictions. |
+
+The inspected paths primarily clone and merge JSON in memory; they do not
+already provide a typed feature-policy carrier. No claim is made that every
+JSON serialization site in the monorepo was audited. The design must close the
+listed crossings rather than rely on an unverified belief that JSON is always
+terminal data.
+
+### Recommended alternative: prepared source plus sparse value-tree metadata
+
+Use D4's immutable prepared representation for executable source. Associate
+each prepared unit with a Darkmatter-owned policy context: source/schema
+identity, the applicable restriction set, and the existing evaluation-stage
+state. When values cross an overlay, mutation, or deferred subtree boundary,
+carry a value-tree envelope with sparse subtree metadata. Ordinary JSON nodes
+stay ordinary JSON; metadata records only boundaries where policy or
+evaluation state differs from the inherited context.
+
+Illustrative responsibilities, not a final public signature:
+
+```rust
+struct CompositionValue {
+    value: serde_json::Value,
+    provenance: ValueProvenance,
+}
+
+struct ValueProvenance {
+    // Sparse subtree records; paths are segments, not dotted strings.
+    entries: Vec<SubtreeProvenance>,
+}
+
+struct SubtreeProvenance {
+    path: ValuePath,
+    source: SourceIdentity,
+    restrictions: FeatureRestrictions,
+    evaluation: EvaluationStageState,
+}
+```
+
+Names are illustrative. Do not add a generic feature catalog for this change:
+the restriction currently required is only `no-shell-expansion`. Use segment
+paths or escaped JSON pointers so dots in property names and array indices
+cannot alias. Darkmatter owns the operations that select a subtree, remap it
+into a destination, merge layers, and propagate stage/policy provenance;
+Claudine supplies lifecycle and action identities but does not reconstruct
+those mechanics with its own expression traversal.
+
+For executable content at destination `d`, the governing prohibition is the
+union of retained source restrictions, applicable destination/ancestor schema
+restrictions, and any enclosing execution prohibition. The initialization
+execution backstop remains independent of this data. A newly generated child
+inherits the generating unit's applicable context plus its destination policy.
+Moving one subtree moves only that subtree's records. Replacing one value does
+not transfer restrictions from discarded content into unrelated new content;
+schema-location restrictions still apply independently to the replacement.
+
+The carrier lives as long as the value can participate in a remaining normal
+composition stage: across deferred lifecycle execution, a proxy overlay's
+document lifetime, and runtime mutation snapshots across sequence/loop/retry
+preparations. Immutable source identities may be retained without retaining a
+lazy binding session. D2's session lifetime is unchanged. A new preparation
+gets a fresh destination schema generation; it combines that generation's
+restrictions with retained source restrictions rather than treating an old
+generation number as authorization.
+
+Construction from authored input, fully evaluated data, and moved/deferred
+input must be distinct operations. The carrier must not silently serialize as
+bare `Value` and then be accepted as equivalent executable input. The listed
+in-memory paths should keep it intact. If a required transfer actually crosses
+serialization, encode its provenance in an internal envelope/sidecar with the
+value or finish the allowed stages before exporting plain data. Generic
+presentation/persistence APIs may export plain JSON intentionally; export
+does not preserve an invocation's executable provenance or authorize automatic
+re-entry as deferred source. No new persistent public format is recommended
+without evidence that this feature needs one.
+
+### Literal data and existing evaluation stages
+
+`resolve_typed_value` currently performs a string-follow-up operation and then
+rejects surviving spans. The specification removes the rejection and places
+ordinary interpolation mechanics in Darkmatter. Metadata must record what
+Darkmatter actually finished, rather than deducing completion from text that
+contains `{{` or `$(`. Escaped braces and expression-produced template text
+remain valid literal data. A complete value is never reparsed merely to
+propagate restrictions or because it moved to another JSON property.
+
+This is not a blanket promise to skip existing ordinary composition stages.
+If a value is intentionally still pending a stage that Darkmatter already
+performs, that stage runs at its existing timing with origin-plus-destination
+restrictions. The prepared representation must distinguish that state from
+completed output. In particular, an existing shell expansion stage must check
+policy before executing newly materialized shell syntax; it must not be
+invented merely because a completed lifecycle result contains shell-looking
+text. No extra evaluation pass, blanket brace ban, eager lazy-provider capture,
+or per-document memoization is introduced.
+
+### Alternative: provenance on every internal value node
+
+A complete annotated value tree gives every scalar/container a source,
+restriction set, and evaluation state. Selection and movement naturally carry
+metadata, making accidental loss harder; heterogeneous generated containers
+are straightforward. It is a reasonable choice if the existing value pipeline
+already needs broad provenance beyond this fix.
+
+Its cost here is substantial: all `Value`/frontmatter operations, effect
+bridges, mutation cells, and overlay interfaces must accommodate another tree
+representation, with conversion adapters at most boundaries. Unrelated plain
+data consumers pay complexity. It still needs explicit serialization rules and
+cannot determine whether string output is executable by inspecting braces.
+
+Prefer sparse subtree metadata because restrictions inherit through containers
+and the concrete movements are concentrated at prepared-source and overlay
+boundaries. Simplicity is a strong factor, but not a reason to retain bare JSON
+at a boundary that can resume evaluation. A carrier only on the original
+prepared expression, with all output metadata discarded, is not a sufficient
+third alternative for the current re-entry paths.
+
+### D5 verification implications
+
+- Move a restricted deferred subtree into an unrestricted location and retain
+  the prohibition; move unrestricted executable content into a restricted
+  destination and acquire it. Include arrays and same-named nested keys.
+- Preserve unrelated sibling behavior when one overlaid subtree is restricted;
+  preserve non-relaxation under descendant schemas and whole-property overrides.
+- Prove a generated value is checked immediately before its existing expansion
+  stage and no prohibited shell runs, including initialization recovery routes.
+- Exercise proxy refresh, batched set failure/commit, runtime snapshot cloning,
+  sequence parameter layering, and deferred lifecycle extraction with provenance.
+- Prove resolved whole values and all supported literal escapes survive those
+  transfers without added interpolation, brace rejection, or type loss.
+- If any covered transfer serializes, test value-plus-metadata round trips and
+  reject the accidental loss of provenance at that executable boundary.
+
+The unresolved technical ruling is carrier granularity and transfer discipline.
+This investigation recommends the sparse envelope; it does not record agreement
+or modify the functional specification.

@@ -40,10 +40,14 @@ integration, artifact layout, and descriptor representation remain open.
 The supporting [lifecycle investigation](lifecycle-investigation.md) and
 [schema/editor investigation](schema-investigation.md) record source locations,
 current behavior, and explicitly unconfirmed recommendations. Their graph-first
-navigation attempts found stale and malformed GitNexus records. The requested
-refresh timed out while waiting for an existing analyzer. Current graph callers,
-process counts, and impact risk are therefore **unresolved**; neither historical
-specification counts nor unusable graph results establish present impact.
+navigation attempts found stale and malformed GitNexus records. The initial
+refresh timed out while waiting for an existing analyzer. Subsequent refreshed
+index results remained inconsistent: the repository identifier changed to
+`rusty`, an expected lookup implementation set was returned, but malformed
+symbol candidates remained. The [initial review](design-review-1.md) records
+that follow-up evidence. Current graph callers, process counts, and impact risk
+remain **unresolved**; neither historical specification counts nor partially
+recovered graph results establish a clean current impact assessment.
 
 Direct source inspection following those unsuccessful graph queries established:
 
@@ -57,8 +61,8 @@ Direct source inspection following those unsuccessful graph queries established:
 - `LifecycleCurrent` currently captures context and environment at event time,
   exposes them through `current.ctx` and `current.env`, and delays serialization
   through a lazy closure. An independent `current_env` global is not currently
-  injected. Published guidance describes a different intended projection; shape
-  and timing must be resolved explicitly.
+  injected. Published guidance describes a different intended projection;
+  D3 below assigns that migration to the more-context feature.
 - Lifecycle error transport loses original typed causes in diagnostic projection;
   proxy overlay evaluation has an additional earlier conversion to text.
 - DMLS currently retains a last-good trigger registry after scan failure, and
@@ -112,8 +116,11 @@ typing, interpolation, escaping, or platform behavior.
 ## D2 — Separate binding declarations from runtime values and caches
 
 **Human decision:** confirmed 2026-09-18, option **B**. Keep immutable binding
-declarations separate from a runtime evaluation session. Give each evaluation
-a fresh lazy-value cache, preserving the existing per-lookup cache lifetime.
+declarations separate from a runtime evaluation session. Give each existing
+lookup operation a fresh lazy-value cache, preserving its current lifetime.
+One `SubtreeCompose::compose` operation creates one lookup and shares that
+session across recursive leaves, including multiple expression-bearing values.
+This is not a new per-expression or per-key cache boundary.
 
 **Recommendation presented:** option B, so preparation and DMLS can consume
 the complete binding declarations without carrying or invoking runtime providers.
@@ -125,7 +132,7 @@ The agreed semantic contract is:
 | Immutable declarations | Classify a global as definitely available, definitely unavailable with a structured reason, or execution-dependent. These declarations support shared passive and runtime classification. |
 | Runtime entries | Supply an eager value, a lazy provider, or an unavailable state. A real `null` value is available data and must never be treated as unavailability. |
 | Checked association | Associate declarations and runtime entries through a checked boundary. Invalid configuration produces structured errors; association and passive validation do not invoke lazy providers. |
-| Runtime session | Own the evaluation's memoized lazy values. Reusable declarations do not share a lazy cache across separate evaluations, actions, or events. |
+| Runtime session | Own one existing lookup operation's memoized lazy values, including all recursive leaves of one subtree compose. Reusable declarations do not extend that cache across separately constructed lookups, actions, or events. |
 
 Passive validation can reject definitely forbidden references in inactive
 branches using declarations alone. Execution-dependent availability remains a
@@ -147,7 +154,96 @@ The declaration serialization/distribution format remains open.
 This decision does not choose exact Rust type or method names, final error
 variants, or the prepared-expression API. It also does not settle the
 `current`/`current_env` projection or change when context and environment are
-observed. Lazy materialization and observation timing remain distinct.
+observed. D3 supplies that scope ruling. Lazy materialization and observation
+timing remain distinct; the more-context feature's future per-key freshness
+and memoization contracts are not decided by D2.
+
+## D3 — Keep the coherent live-global migration in more-context
+
+**Human decision:** confirmed 2026-09-18, option **A**. This fix retains the
+existing event-captured `current.ctx.*` and `current.env.*` representation and
+introduces no independent `current_env` global. The
+[more-context specification](../../../../darkmatter/features/2026-09-09-more-context/spec.md)
+owns the coherent future migration to Darkmatter built-ins, direct mirrors
+across expression surfaces, and reference-time freshness.
+
+**Recommendation presented:** option A, preserving this fix's scope and capture
+timing without reversing the separately agreed more-context destination.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Retain current snapshots here; more-context owns the migration **(confirmed)** | Keeps the binding fix focused and preserves current observation timing. | This fix continues to expose the existing nested lifecycle representation until the separate migration. |
+| B: Bring the coherent live-global migration into this fix | Delivers the future public representation together with the binding changes. | Broadens scope to every expression surface and requires new provider, invocation-evidence, per-key freshness, and memoization rulings. |
+
+The existing lazy `current` provider materializes an already-captured event
+snapshot; it does not observe fresh environment or context on reference. This
+fix must keep that distinction across its consumers and descriptors. No interim
+direct-mirror alias or lifecycle-only `current_env` is introduced. Future
+built-ins will supersede the lifecycle injection under the separate feature.
+
+The human also authorized the narrow, dated clarification in this fix's
+specification: remove `current_env` from its catalog examples, record retained
+snapshot behavior and future ownership, and align the technical checkpoint with
+that boundary. No other functional requirements or review metadata change.
+
+## D4 — Share an immutable prepared representation
+
+**Human decision:** confirmed 2026-09-18, option **B**. Darkmatter owns an
+immutable prepared representation used by both passive validation and runtime
+execution. Runtime values and observations remain outside that representation.
+
+**Recommendation presented:** option B, preserving authored source form and
+centralizing mechanics that Claudine currently repeats. Reuse Darkmatter's
+existing parser, interpolation scanners, and `SpannedExpr` (the source-aware
+expression tree); do not introduce a second evaluator.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Share classification and validation but let callers parse independently | Smaller immediate API addition. | Repeated parsing and source-form handling remain; callers can still confuse authored templates with successful result text. |
+| B: Share immutable prepared source plus a fresh runtime session **(confirmed)** | Preserves source identity and supplies one reference model to validation and execution. | Lifecycle operands must retain more than a bare AST; generated mixed-string spans still require runtime parsing. |
+
+The prepared representation retains authored source form, source locations,
+parsed expression trees, reference metadata, and context requirements. Its
+source forms distinguish direct expressions and their parse mode, whole-value
+expressions, mixed templates, literal data, and subtree containers. Context
+requirements describe what may be needed; they do not capture values, observe
+the host, determine runtime property existence, or select branches. Claudine
+retains authority over observation timing and invocation/source context.
+
+Passive validation uses the shared declarations and effective schema to classify
+every authored executable reference, including inactive expression branches.
+It preserves schema-provided static types for absent document properties and
+defers execution-dependent availability. It does not invoke providers or treat
+quoted strings inside expressions as additional expression programs.
+
+Runtime execution binds the prepared input to current document values and a
+fresh session at the existing lookup-operation boundary defined in D2. Reusing
+prepared input must not widen the cache to an event or request. Runtime
+short-circuit behavior remains authoritative for evaluated branches.
+
+Whole-value expressions evaluate once and return their typed result, including
+objects, arrays, and strings containing braces. Mixed strings retain only the
+existing Darkmatter interpolation passes and stopping policy. New executable
+content introduced by those existing passes receives runtime parsing and
+validation; preparation does not claim to discover it by evaluating authored
+expressions. Successful literal output is never subjected to an arbitrary
+result rescan. Existing escape handling remains the authority for triple braces
+and escaped openers.
+
+Schema-policy identifiers retained by prepared input must refer to an immutable
+schema generation or policy snapshot. A mutable editor-registry index alone is
+insufficient: refresh must not silently reinterpret previously prepared input.
+Exact propagation of restrictions through moved/generated values remains a
+separate decision.
+
+The [lifecycle investigation](lifecycle-investigation.md) records the reusable
+scanner/parser primitives and whole-value versus mixed-string behavior. It also
+identifies a variable fast path in the interpolation evaluator that currently
+calls `get`/`get_string`; this must use D1's richer resolution contract. A
+prepared artifact alone does not repair that bypass.
+
+This decision settles the shared representation and behavior, not final Rust
+names, error enums, serialized artifact syntax, or policy movement semantics.
 
 ## Remaining decisions and design completion work
 
@@ -157,9 +253,9 @@ sequencing.
 | Priority | Open subject | Consequence to resolve before planning |
 | --- | --- | --- |
 | 1 | Binding interface details | Specify the richer result, passive descriptor API, structured reason/error shapes, and checked-association invariants within D1 and D2. |
-| 2 | Shared classification and prepared evaluation | Specify passive all-reference validation, runtime-dependent availability, context requirements, and typed results/errors without provider invocation during preparation. |
-| 3 | Lifecycle catalog and live environment projection | Reconcile current implementation and intended `current`/`current_env` shape; preserve or explicitly agree any observable change to capture timing. |
-| 4 | Evaluation and restriction retention | Preserve ordinary whole-value, mixed-string, and escape behavior; define restriction retention through deferred, generated, and moved values without extra evaluation passes. |
+| 2 | Prepared interface details | Make D4's inputs, outputs, source provenance, schema-generation association, and typed error boundaries concrete without adding runtime observations to preparation. |
+| 3 | Lifecycle catalog details | Specify event/scope declarations for the retained globals under D3; do not introduce future built-ins or change event capture timing. |
+| 4 | Restriction retention | Define restriction retention through deferred, generated, and moved values within D4's confirmed evaluation and literal-output behavior. |
 | 5 | Descriptors, generation, and distribution | Select schema-associated descriptor format, runtime artifact representation, cycle-free generator integration, source identity, and drift verification. |
 | 6 | Generic activation and source precedence | Resolve trigger-kind mismatch, workspace-fact syntax/anchors, explicit source precedence and deduplication, and origin versus applicability scope. |
 | 7 | Refresh, isolation, and recovery | Define current-generation dependency/failure states and shared suppression of dependent diagnostics, hover, and completion; cover missing dependencies and newly created sources. |
@@ -171,6 +267,9 @@ from the agreed contracts to the specification's acceptance tests. Cross-platfor
 path and watcher behavior must cover macOS, Linux, native Windows, and WSL2.
 Responsiveness verification remains qualitative; no numeric threshold is added.
 
-Independent review of the completed design remains pending. Open rulings,
+The [initial independent review](design-review-1.md) found D1 and D2 faithful to
+the confirmed choices and requested the cache-boundary and graph-evidence
+clarifications incorporated above. It was not approval for planning. Independent
+review of the completed design remains pending. Open rulings,
 unresolved graph evidence, and the incomplete migration inventory prevent a
 claim that this design is ready for implementation planning.
