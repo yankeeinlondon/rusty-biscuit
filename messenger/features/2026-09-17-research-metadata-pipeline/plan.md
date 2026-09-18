@@ -203,6 +203,7 @@ skills_files_updated_during_phase_5:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/messenger/SKILL.md
     - .claude/skills/messenger/research-contract.md
+    - .claude/skills/os/macos.md
 packages:
     - messenger
     - messenger-cli
@@ -625,10 +626,10 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Phase 5 Checkpoint
 
-- [ ] Run `just test` and `just lint` in `claudine/`, plus the relevant sequence
+- [x] Run `just test` and `just lint` in `claudine/`, plus the relevant sequence
   and process-termination tests on macOS and each available cross-platform build
   host.
-- [ ] Confirm existing `claudine sequence` behavior is unchanged when no research
+- [x] Confirm existing `claudine sequence` behavior is unchanged when no research
   budget configuration is supplied, while the Messenger fleet rejects missing
   limits before launching a worker.
 

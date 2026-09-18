@@ -40,31 +40,31 @@ human_review_items:
     - |-
         **Unblock the three shared test machines** (Linux, native Windows, and Windows' Linux subsystem, WSL2).
 
-        **Why decide now:** Phase 5 changes how Claudine stops a research worker and everything it started. That behavior is operating-system specific; on Windows it relies on a Windows-only mechanism. Phase 4's snapshot publication also depends on Windows file-replacement rules. Both need real runs on each system. Today:
+        **Why decide now:** Phase 5 is now built. It changes how Claudine stops a research worker and everything that worker started, and how it cleans up after a crash. That behavior is operating-system specific; on Windows it relies on a Windows-only mechanism. Phase 4's snapshot publication also depends on Windows file-replacement rules. Phase 6 builds the refresh workflow on top of both, so both need real runs on each system first. Phase 5 re-checked the hosts on 2026-09-17 and all three were still blocked:
         - `build-linux` is held by a lock left since 2026-09-14 by an unrelated job (`reward-20260914-c3e60d0`).
         - `build-win-native` has no free space on its `W:` drive, so nothing can be copied there.
         - `build-win` (WSL2) drops the SSH connection, which earlier phases traced to the same full `W:` drive.
 
-        Phases 3 and 4 fell back to Linux in Docker on this Mac plus Windows *compile-only* checks. Agents were told not to delete other people's data or locks, so this needs a person.
+        Phases 3, 4, and 5 fell back to Linux in Docker on this Mac plus Windows *compile-only* checks. Phase 5's budget tests are written to run unchanged on Windows, but they have never actually run there. Agents were told not to delete other people's data or locks, so this needs a person.
 
         Options:
         - **A. Free space on `W:` and clear the stale `build-linux` lock** (after confirming the 2026-09-14 job is dead).
-          - Pros: real evidence on all three systems before Phase 5 builds on it; later phases can use `just cross-check` as designed.
+          - Pros: real evidence on all three systems before Phase 6 builds on it; later phases can use `just cross-check` as designed.
           - Cons: a few minutes of manual host maintenance.
         - **B. Continue with Docker Linux plus Windows compile checks, and rely on CI for Windows and WSL2.**
           - Pros: no host work.
-          - Cons: Windows-only failures surface hours later in CI, and Phase 5's Windows process-stopping behavior would be untested until then.
-        - **C. Pause Phase 5 until the hosts are fixed.**
+          - Cons: Windows-only failures surface hours later in CI, and Phase 5's Windows process-stopping and crash-cleanup behavior stays untested until then.
+        - **C. Pause Phase 6 until the hosts are fixed.**
           - Pros: no risk of building on untested behavior.
           - Cons: stalls the feature on host maintenance.
 
-        **Recommendation: A.** It is small, and Phase 5 is the phase where Windows-specific behavior matters most.
+        **Recommendation: A.** It is small, and Phase 5 added the Windows-specific behavior that most needs a real Windows run.
     - |-
         **Approve the remaining research commands** (`prepare`, `runs`, `promote`, `cleanup`).
 
         **Status after Phase 4:** Phase 4 shipped the four commands the spec requires (`validate`, `generate`, `generate --check`, `report`) plus `recover`. `recover` repairs an interrupted publication, and publication cannot be operated without it: `generate` refuses to run until an interrupted publication is repaired, and the design forbids hiding that repair inside `generate`. The other four commands have not been built.
 
-        **Why decide now:** not needed for Phase 5 (Claudine), but Phase 6 builds them. Deciding now avoids a pause later.
+        **Why decide now:** Phase 6, the next phase, builds these commands. Phase 5 (Claudine) did not need them.
 
         Options:
         - **A. Four more flat subcommands** (`messenger research prepare`, `runs`, `promote`, `cleanup`), matching the `recover` command already shipped.
@@ -95,13 +95,16 @@ human_review_items:
 
         **Recommendation: A.**
 message_to_agent: |-
-    Phase 4 shipped the deterministic consumers in `messenger::research` and the `messenger research` CLI. Read "## Phase 4" in `implementation-log.md` and `.claude/skills/messenger/research-contract.md` ("Publication and consumers") first.
-    - Phase 5 is Claudine-only (budget ledger, admission, cancellation). Messenger must not depend on Claudine; the architecture record's ledger lives under `messenger/.research-state/runs/<platform>/<run_id>/budget.json`, which Messenger will only read (Phase 6).
-    - GitNexus's index predates the Phase 3/4 research files and returned `UNKNOWN` for every edited symbol. Per `architecture.md`, run `just gitnexus` before Phase 5's impact analysis of `execute_attempt_phase` / `execute_harness_attempt`; `isolate_into_process_group` is CRITICAL.
-    - Test hosts are still blocked (see human_review_items): `build-linux` stale lock (`reward-20260914-c3e60d0`), `build-win-native` `W:` full, `build-win` WSL SSH resets. Do not remove the lock or delete data. Linux evidence can come from Docker (`os/macos.md`: mounts under `$HOME`, `bash -c` not `bash -lc`, `cargo test --test <name>`); Windows compile evidence from `x86_64-pc-windows-gnu`.
-    - For Phase 6 (not Phase 5): promotion should call `research::generate::generate(loader, updates, today, options)` with the candidate text as `updates` (partial refresh is already implemented and tested); candidates must be judged with `Loader::load_document_text` at the accepted path so `$schema` resolves as it will after publication. Add CHANGELOG, review records, and the skill projection as further artifacts of the same manifest (`publish::Snapshot`). `delta::compare` and `publish::Options::interrupt_at` are ready for the lifecycle tests. Only `recover` of the five lifecycle commands exists; the rest await the human ruling.
-    - Tests use nextest's 30 s limit: `research_publication`'s interruption sweep is split in two (~5 s each in debug). Keep new sweeps split the same way.
-    - CLI tests must resolve the binary with `biscuit_test_harness::bin_exe!` (WSL2 archive leg), not `env!("CARGO_BIN_EXE_…")`.
+    Phase 5 shipped Claudine's shared budget. Read "## Phase 5" in `implementation-log.md`, `claudine/docs/cli/budget.md`, and the "Refresh budget (Claudine)" section of `.claude/skills/messenger/research-contract.md` first.
+    - Interface for Phase 6. Messenger cannot link Claudine, so it uses the CLI only. `claudine budget init <ledger> --run-id <id> --platform <p> --max-seconds N --max-invocations N [--exclusive-lock ../../fleet.lock] [--heartbeat 5s]` creates the ledger. Then `claudine sequence --budget-ledger <ledger> <run.md>` runs under it. Operate it with `claudine budget show --json | suspend | resume --operator | grant --operator --reason [--invocations N] [--seconds N]`. Point every platform's ledger at one shared `--exclusive-lock` to get one-platform-at-a-time.
+    - Messenger-side limit validation is still owed. Claudine refuses missing or zero limits (clap exit 2, no file written), but the Phase 5 checkpoint's "Messenger fleet rejects missing limits before launching a worker" is only proven at Claudine's boundary. Make `messenger research prepare` (architecture `run_config`) require both limits, with no defaults, before it calls `budget init`.
+    - Exit statuses: `0` means the run finished and the ledger rests `suspended` ("awaiting human review"). `76` means exhausted; the ledger keeps the incomplete `stage`, and the result must never be treated as finished or as an investigated unknown. `77` means blocked (suspended, interrupted, or the lock is held). After a crash the ledger still says `active`; the next `sequence` or `budget` command recovers it to `interrupted`, and an operator must `resume` it.
+    - Put validation and delta inside the sequence as `shell:` steps; only time inside a budgeted run is charged. Shell steps need approval without a terminal, via `--yolo` or a `.darkmatter-shell-whitelist`.
+    - Sequence progress is not persisted: a restarted sequence re-runs from step 1 and consumes more budget. Resuming a candidate mid-run is Messenger's job.
+    - Each pass is its own prompt document (`prompt: "./inputs/discovery/prompt.md"` step). Discovery must never be a step of a sequence whose root has a top-level `prompt:` (that turns every step into inline-compose). `sequence_budget.rs` shows the pattern with a portable Rust fake provider.
+    - The test hosts are still blocked (see human_review_items). Linux evidence came from Docker (`os/macos.md`), Windows from `just check-windows` in `claudine/` (compile only).
+    - Pre-existing and unrelated: 10 Claudine tests fail on drift between the shipped `prompts/` files and Claudine's fixtures (listed in the Phase 5 gates). `just test` in `claudine/` is not green for that reason.
+    - GitNexus: another analyze held the index lock during Phase 5, and every symbol came back `UNKNOWN`. Run `just gitnexus` and re-run `detect_changes` before committing.
 ---
 
 # Provider Research Metadata Pipeline

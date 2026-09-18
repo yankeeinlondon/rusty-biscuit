@@ -202,6 +202,7 @@ skills_files_updated_during_phase_5:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/messenger/SKILL.md
     - .claude/skills/messenger/research-contract.md
+    - .claude/skills/os/macos.md
 packages:
     - messenger
     - messenger-cli
@@ -1017,3 +1018,62 @@ hermetic.
   `__eh_frame` notice, which every build of this binary prints.
 - `test_placement` (the 800-line production and 300-line inline-test
   budgets): passes.
+- `just test` in `messenger/`: 634 passed, 2 skipped (both pre-existing).
+  `just lint` in `messenger/`: exit 0. This phase changed no messenger source;
+  these runs confirm that.
+
+### Cross-OS evidence
+
+- **Linux (real kernel, Docker `rust:1`, `linux/arm64`, kernel 6.18).**
+  Worktree copied to `~/.cache/rb-linux/src` (the `os/macos.md` procedure;
+  `rust:1` also needs `libasound2-dev` for `claudine-cli`, now recorded
+  there). `cargo test`, because the image has no nextest:
+  - `--bin claudine budget::`: 11/11;
+  - `--test sequence_budget`: 10/10. This includes crash recovery killing
+    the orphan's process group, and the shared fleet lock on Linux `flock`;
+  - `sequence_cli` 30/30, `sequence_groups` 20/20, `sequence_schema` 7/7,
+    and `wrap_watchdog_timeout` 6/6: existing sequence and timeout
+    termination behavior is unchanged.
+- **`build-linux`** (`just cross-check claudine-cli --os linux --test
+  sequence_budget`): gave up after the 1800 s wait. The stale lock
+  `reward-20260914-c3e60d0` has been held since 2026-09-14 and was not
+  removed.
+- **Native Windows.** `just check-windows` in `claudine/`
+  (`x86_64-pc-windows-gnu`, `claudine` and `claudine-cli` with `--tests`)
+  passes; neither warning is in budget code. `just cross-check … --os
+  windows` failed: `W:` on `build-win-native` is full (`scp … Failure`,
+  "No space left on device"). This is compile evidence only. The Windows
+  paths never ran: the `kill_tree` `TerminateProcess` branch, the Job Object
+  taking the worker down with a killed runner (the crash fixture accepts
+  "no longer running" on Windows), and `File::try_lock` on two handles.
+- **WSL2.** `just cross-check … --os wsl` failed with SSH connection resets to
+  `build-win`, as in Phases 1–4.
+- **OS risk review.**
+  - The fake provider is compiled Rust, not a shell script, so the fixtures
+    are portable.
+  - The ledger and lock paths are joined per component.
+  - Ledger JSON is LF-only.
+  - Locking uses `std::fs::File::try_lock` (per handle on Windows, per open
+    file description on Unix; both refuse a second holder).
+  - Atomic writes reuse Claudine's `atomic_write`, which retries the
+    transient Windows 5/32/2 errors.
+  - Process identity comes from `sysinfo` start time on every OS.
+  - Orphan termination: `kill(-pgid, SIGKILL)` on Unix, falling back to the
+    PID, and `TerminateProcess` on Windows. A `setsid` descendant escapes on
+    Unix, as documented.
+  - The validation `shell:` step is `echo`, which exists on all OSes.
+
+### Checkpoint notes
+
+- "Relevant sequence and process-termination tests on macOS and each
+  available cross-platform build host": no build host was available. macOS
+  ran the full suite, Linux ran in Docker, and Windows was compile-checked
+  (see above).
+- "The Messenger fleet rejects missing limits before launching a worker":
+  proven at Claudine's boundary. `budget init` without both positive limits
+  is a usage error and writes no file, and `sequence --budget-ledger` on a
+  missing ledger exits 1 with zero provider launches
+  (`init_requires_both_positive_limits_and_a_sequence_refuses_a_missing_ledger`).
+  Messenger's own `prepare` command (architecture `run_config`) does not exist
+  until Phase 6; the Phase 6 agent is told to validate both limits there.
+
