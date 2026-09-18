@@ -282,3 +282,214 @@ availability, property existence, branches, or values. Do not widen one existing
 leaf evaluation's cache to an entire event simply because a prepared subtree is
 reusable. Schemas and source may be prepared once, then evaluated against changing
 document state with appropriate fresh sessions.
+
+## Retained lifecycle catalog: scope matrix investigation
+
+This follow-up honors D3: the catalog here is `err`, `timing`, `current`, and
+`group`. It does not introduce `current_env` or alter capture timing. Graph-first
+`context can_carry_error` bound to the absolute worktree located
+`lifecycle/audio.rs:95`; source inspection confirmed its event classification.
+The following is a proposed declarative matrix, not an additional confirmed
+functional ruling.
+
+Legend: **A** means scope permits the global and orchestration supplies a value;
+**F** means definitely forbidden in the known scope; **D** means actual scope
+cannot yet be established from the available preparation/editor information.
+Unknown data fields within an available value remain ordinary null, not global
+unavailability.
+
+| Semantic surface | `err` | `timing` | `current` | `group` |
+| --- | --- | --- | --- | --- |
+| `initialize`, `start`, `success`, `loop` lifecycle content | F: event cannot carry an error | A: event snapshot | A: event snapshot with lazy serialization | A inside an established group; F outside; D if invocation scope unknown |
+| `blocked`, `failure` lifecycle content | A: active failure | A | A | Same lexical rule |
+| `finalize` lifecycle content | A: failure value or **available null** on successful completion, recommended below | A | A | Same lexical rule |
+| Task `setup` | F by its Start-like semantic surface | A from owning execution context | A from owning execution context | A for member task; F for known nonmember; D for standalone reusable task document |
+| Task `teardown` | A: primary failure or available null, recommended below | A from owning execution context | A from owning execution context | Same member rule |
+| Lifecycle command during early shell preflight | F: event-time data | F: event-time data | F: event-time data | Separate group preflight question below |
+| Sequence graph shell preflight | F: explicit unavailable-root rule | F: explicit unavailable-root rule | F: explicit unavailable-root rule | Not currently reserved by the shell-unavailable catalog; see below |
+
+Preparation of future lifecycle content uses the **target event's declarations**;
+it must not reject `timing` or `current` merely because those snapshots do not yet
+exist during preparation. By contrast an expression actually evaluated for early
+shell bytes uses the preflight scope, where those event-time roots are forbidden.
+
+Verified supply evidence:
+
+- `lifecycle/audio.rs:87–97` classifies Blocked/Failure/Finalize as error-capable,
+  explicitly documenting optional error on Finalize. The validator forbids bare
+  `err` in the remaining four events.
+- Library loop initialization supplies `Some(&init_timing)` and
+  `Some(&init_current)` (`looping/engine.rs:370`), and loop gate supplies fresh
+  snapshots (`:829`). CLI staged boot, pipeline, early catch preflight, and
+  harness lifecycle event helpers similarly supply snapshots. Public context
+  fields being `Option` does not establish a forbidden event scope.
+- `sequence/task/mod.rs:395–428` runs setup without a primary error and passes
+  the primary failure, if any, into teardown. Parsing labels setup Start and
+  teardown Finalize (`:791`); execution uses `self.stack` and `with_error`
+  without necessarily changing its signal (`:457`). Declaration selection must
+  use the authored semantic surface, not blindly the context's signal field.
+- `sequence/task/group.rs:105–117` resolves variables before entering group
+  scope. It passes `with_group` into member execution and copies the variables
+  into member EffectiveState (`:470`) and child prompt overlay (`:503`). An empty
+  group map is available data. Group variables are not in scope while computing
+  that same group's variable definitions. Contexts outside this lexical scope
+  use `group: None`; the no-leak regression is `task/tests.rs:4078`.
+
+### Points requiring explicit agreement or narrower follow-up
+
+1. **Optional error is not necessarily unavailable.** Current successful
+   finalize omits the injection, so `err` normally evaluates null but can
+   accidentally fall through to a document property. Recommend explicit
+   available-null in successful finalize and successful task teardown: this
+   preserves the documented `when: err` guard and removes the forbidden
+   document fallback. Treating successful finalize as runtime-unavailable would
+   introduce failures in that authored pattern. Blocked/failure missing their
+   required error is instead invalid runtime association; do not silently invent
+   null there. Confirm this matrix distinction before generation.
+2. **Missing timing/current inputs in public library contexts.** Production
+   supplies them; many fixtures omit them. Recommend structured missing-runtime
+   association errors where declarations promise availability, or explicitly
+   documented available-null bindings for intentionally snapshotless contexts.
+   The choice is not established merely by their current `Option` fields.
+3. **Group policy must span consumers.** Task values and child prompt overlays
+   currently carry `group` as document data as well as the stack's injection.
+   The design must make its binding classification consistent, preserving
+   `doc.group` as document access. Whether reusable standalone prompt/task files
+   are group members is execution-dependent; an editor cannot infer definite
+   prohibition from file location alone.
+4. **Group and shell preflight require a ruling.** Lifecycle preflight rejects
+   `LATE_BINDING_ROOTS = err,timing,current`; sequence preflight's
+   `SHELL_UNAVAILABLE_ROOTS` adds `outputs`, not `group` (`preflight/mod.rs:142`).
+   Group variables resolve only at execution (`task/group.rs:435`), after graph
+   preflight. Automatically adding group to every late-binding shell ban would
+   be a policy change, while allowing a same-named document property to stand in
+   for the runtime group violates the new reserved-global contract. Preserve
+   approved stored bytes, and explicitly settle whether known group-dependent
+   shell commands are prohibited at this boundary or get another existing
+   source of stable values; do not invent dynamic reapproval.
+
+These scope conditions need structured reasons such as event-forbidden,
+preflight-unavailable, outside-group, or missing-required-runtime-entry, with
+event/surface identity supplied by Claudine. Darkmatter should not contain
+event names in its policy logic. DMLS may know event identity but lack invocation
+membership; those are different facts and require different declarations.
+
+### Lazy-provider failure contract
+
+Current `InjectedGlobal::Lazy` is `Fn() -> Value`; lifecycle `current` serializes
+an already-captured value and is infallible. There is no existing returned
+provider error to preserve, and no need to add a fallible-provider feature for
+these lifecycle values. If the human chooses a generic fallible callback now,
+its typed error transport and whether failures are memoized need explicit
+agreement; they must not be inferred from D1/D2. An unavailable runtime entry
+is distinct from a provider failing to produce an available value.
+
+## Group-dependent shell approval: bounded follow-up
+
+Graph-first `context resolve_group_variables` using the absolute worktree path
+identified `run_group` as its caller and `resolve_value` as its callee; current
+source confirms this. The ordering is decisive:
+
+1. `sequence/preflight/mod.rs:659–709` stores authored group `variables`, then
+   loads every member task using the **unchanged outer effective state**. It
+   passes group defaults, not evaluated group variables.
+2. Primary task commands resolve and enter the approval inventory at
+   `preflight/mod.rs:842`. Setup/teardown shell strings are also resolved against
+   that same preflight state at `:869`. No group-variable evaluation occurs here.
+3. `task/group.rs:105` evaluates group variables when the group runs, through
+   `resolve_value` at `:434–446`. Only afterward does it install `with_group`,
+   member document-state projection, and prompt overlays.
+4. Primary shell tasks execute the preflight-stored command strings unchanged
+   (`task/mod.rs:583–594`). Referenced prompt tasks compose just in time with
+   overlays and the existing approved set (`cli/.../sequence/task_run.rs:386–435`).
+   Thus values available at JIT preparation are not necessarily the values used
+   to approve the sequence earlier.
+
+There is **no sanctioned early evaluation of group variables** in the current
+graph loader. Even literal group values are stored without projection into the
+state used for member shell approval. Existing sequence policy explicitly makes
+runtime-mutated values unavailable to early shell approval: see
+`claudine/features/2026-07-11-sequence-plus/spec.md:387`: its “Shell approval with
+strict byte-parity” clause states early-only approval and routes output-dependent
+work through prompt/side-effect tasks.
+
+### Concrete failure/collision shape
+
+```yaml
+group: { label: outer-document }
+sequence:
+  - group:
+      name: bundle
+      variables: { label: actual-group }
+      tasks:
+        - shell: "echo {{ group.label }}"
+```
+
+Where the sequence source's effective document contains the shown `group`
+property, current sequence command preflight can resolve `outer-document`, not
+the lexical group's `actual-group`. With no document `group` property it instead
+fails the old strict-root check; after removing strictness without explicit
+reservation it would silently produce empty text. This illustrates why neither
+omission nor same-named document lookup can represent unavailable group scope.
+The example is a source-derived illustration, not an executed test/prototype.
+
+Setup/teardown additionally deserve migration attention: `collect_lifecycle_shell`
+collects resolved bytes without rewriting the stored authored stack, while
+`TaskExecution::parse_stacks` parses that stored stack later. A runtime `group`
+can then change the evaluated command. This is an existing approval-parity seam;
+the design must retain resolved command artifacts for these surfaces rather than
+depend on reparsing/re-evaluating their authored strings. Do not add dynamic
+reapproval to conceal the mismatch.
+
+### Two genuine options
+
+**A — Reject group-dependent commands at sequence-wide approval (recommended).**
+Declare lexical `group` unavailable while resolving any command whose approved
+bytes must be established before group entry, including member primary commands,
+setup/teardown commands, and group-dependent commands in referenced prompts.
+An explicit `doc.group` still selects document data under normal early-state
+rules; it must not be rewritten to mean the future lexical group. This preserves
+group evaluation timing, requires no second approval, and fits the existing
+early-only shell contract. Non-shell runtime values can continue using `group`.
+
+The declaration should be tied to the **approval phase**, not an unconditional
+claim that `group` is event-derived like `err`. Ordinary lifecycle preflight with
+an already-established lexical group could possess stable values; it must still
+honor the earlier sequence approval restriction when part of that sequence.
+
+**B — Support an explicitly bounded early-stable group subset.** Permit shell
+references only to group values provably fixed without runtime evaluation (for
+example literal-only definitions), install that same immutable projection at
+approval and execution, and reject all other group dependencies. This can retain
+byte parity without reapproval. It needs a precise stability rule, dependency
+closure, collision policy, child-prompt transfer, and agreement about whether
+other expressions can mutate or replace those values. Arbitrary expressions,
+file reads, earlier task outputs, or runtime-mutated state cannot be evaluated
+early and assumed equivalent later. This adds a new capability absent from the
+current implementation and is substantially larger than A.
+
+Freezing **all** group-variable expressions at preflight is not a third
+scope-preserving option: it changes group observation timing and what prior
+task mutations/output they can observe. Keeping today's outer-document fallback
+is not a valid alternative under the reserved-global contract.
+
+### Scope and specification precision
+
+Reservation belongs only to callers installing the Claudine lifecycle/sequence
+binding catalog. Do not add `group` to Darkmatter's built-in namespaces or to
+unrelated loop-expression and dispatch lookups. A lifecycle `loop` event using
+that catalog can declare group forbidden outside group scope, while the
+independent loop expression lookup retains its own domain contract. Reusable
+task/prompt documents whose invocation membership is unknown use execution-
+dependent group availability in passive editor validation; known group shells
+at early sequence approval are definitely unavailable there.
+
+Option A should receive explicit human agreement and a narrow specification
+clarification: “Lexical group bindings are unavailable when resolving shell
+bytes for sequence-wide preflight, including member task and referenced-prompt
+commands. Same-named document data is accessible only through `doc.*`; approval
+does not pre-evaluate group-variable definitions or add reapproval. Runtime
+non-shell group use retains its existing timing and scope.” This closes a
+previously unspecified corner; it must not be silently presented as existing
+implemented behavior. Option B would require a broader functional amendment
+defining the early-stable subset.

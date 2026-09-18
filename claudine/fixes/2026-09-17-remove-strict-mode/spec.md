@@ -496,6 +496,17 @@ atomic: resolve the complete value before dispatch or mutation. A genuine
 evaluation error still prevents partial effects. A missing document property
 is a successfully resolved `null`, not a partial failure.
 
+Scope clarification agreed 2026-09-18: lexical `group` bindings are unavailable
+when resolving shell bytes for sequence-wide preflight, including member task
+primary and setup/teardown commands and referenced-prompt commands covered by
+that approval. Same-named document data remains accessible through `doc.group`.
+Approval does not pre-evaluate group-variable definitions or add reapproval;
+runtime non-shell group use retains its existing timing and scope. Reusable
+documents whose group membership is unknown retain execution-dependent group
+availability in passive validation. This reservation applies to the Claudine
+lifecycle/sequence binding catalog, not unrelated Darkmatter, loop-expression,
+or dispatch lookups.
+
 ### R7. Static diagnostics consume the shared binding model
 
 DMLS may warn when a bare document property is absent from both authored
@@ -782,6 +793,15 @@ either of these accidental semantics:
 
 Both behaviors conflict with the namespace contract and must be removed rather
 than preserved behind compatibility flags.
+
+Compatibility clarification agreed 2026-09-18: the canonical trigger envelope
+is `kind: schema-trigger`. Migrate active parser, schema, fixture, test,
+documentation, and skill usage directly from `trigger-schema`, without an
+accepted alias. The shared Darkmatter parser reports the old spelling as a
+structured error naming `schema-trigger` as its replacement; discovery must not
+silently ignore it. DMLS treats such a broken legacy rule as incomplete
+validation within its possible discovery scope under R12. Historical
+specifications remain unchanged.
 
 `EvaluationLookup` has a materially larger blast radius than strict mode
 itself. If its public contract changes, migrate every implementation in one

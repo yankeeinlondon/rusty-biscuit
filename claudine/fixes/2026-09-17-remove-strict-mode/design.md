@@ -69,8 +69,8 @@ Direct source inspection following those unsuccessful graph queries established:
   trigger scanning resolves payloads transactionally. Both conflict with the
   required failure isolation and no-stale-assistance behavior.
 - Trigger parsing currently recognizes `trigger-schema`, while repository kind
-  guidance uses `schema-trigger`. This needs an explicit compatibility/scope
-  ruling before activation artifacts are designed.
+  guidance uses `schema-trigger`. D10 below resolves the canonical spelling and
+  migration behavior.
 - `claudine-gen` already depends on Darkmatter and forbids a dependency on the
   Claudine library or CLI. It is a candidate for generation, not yet a confirmed
   choice. Darkmatter's current `include_str!` embedding is not code generation.
@@ -233,8 +233,8 @@ and escaped openers.
 Schema-policy identifiers retained by prepared input must refer to an immutable
 schema generation or policy snapshot. A mutable editor-registry index alone is
 insufficient: refresh must not silently reinterpret previously prepared input.
-Exact propagation of restrictions through moved/generated values remains a
-separate decision.
+Propagation of restrictions through moved/generated values is settled by D5
+below; exact API names remain open.
 
 The [lifecycle investigation](lifecycle-investigation.md) records the reusable
 scanner/parser primitives and whole-value versus mixed-string behavior. It also
@@ -243,7 +243,280 @@ calls `get`/`get_string`; this must use D1's richer resolution contract. A
 prepared artifact alone does not repair that bypass.
 
 This decision settles the shared representation and behavior, not final Rust
-names, error enums, serialized artifact syntax, or policy movement semantics.
+names, error enums, or serialized artifact syntax. D5 supplies policy movement
+semantics.
+
+## D5 — Carry sparse policy and stage provenance with values
+
+**Human decision:** confirmed 2026-09-18, option **B**. Use a Darkmatter-owned
+value envelope containing ordinary JSON plus sparse subtree policy and stage
+provenance. Claudine carries the complete envelope through overlays, runtime
+mutation, sequence transfer, and retries whenever evaluation can resume.
+
+**Recommendation presented:** option B, retaining metadata at the concrete
+boundaries that need it without replacing every ordinary JSON node with a new
+recursive value type.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Recursive policy-bearing value tree | Each node naturally carries metadata through selection and movement. | Changes ordinary value operations and bridges throughout the pipeline, including consumers that need only plain data. |
+| B: Ordinary JSON with sparse subtree provenance **(confirmed)** | Keeps ordinary data representation and records inherited restrictions and pending stages where needed. | Every boundary that can resume execution must carry the envelope atomically; bare-JSON conversion can otherwise lose policy. |
+
+Deferred executable units retain their origin restrictions. At execution,
+Darkmatter unions those restrictions with applicable destination/ancestor
+restrictions and enclosing execution prohibitions; descendants and overrides
+cannot relax the result. Generated executable descendants inherit the
+generating operation's restrictions and their destination policy. This is
+provenance for executable units and their remaining stages, not general taint
+tracking of every value used as an operand.
+
+The envelope records which existing composition stages remain. Successfully
+completed output remains data, including expression-looking strings and escaped
+templates; moving it does not add scanning or evaluation passes. A genuinely
+pending ordinary stage still executes at its existing point, subject to the
+combined restrictions. Policy checks occur before a prohibited feature runs.
+The independent Claudine initialization shell backstop remains in force.
+
+Darkmatter owns atomic selection, replacement, merge, and move operations for
+the value and its metadata. Sparse locations must distinguish property names
+from array indices without aliasing dotted keys. Selecting or moving a subtree
+materializes inherited ancestor restriction and stage metadata at the selected
+subtree's root before rebasing its sparse records. Copying only records located
+inside the subtree would lose inherited policy. Replacing discarded content does not contaminate
+unrelated replacement data with its provenance. Destination schema restrictions
+still apply to the replacement. Claudine supplies domain identities and chooses
+operations, but does not reconstruct policy propagation by traversing expression
+trees.
+
+The envelope survives while normal evaluation stages can resume, including
+deferred lifecycle extraction, proxy refresh, batched `set`, mutation snapshots,
+sequence layering, and retry preparation. It retains source restrictions without
+retaining a lazy session. Re-preparation uses the new destination schema generation
+and retained source restrictions; an old generation identifier is not permission
+to bypass current policy. D2's cache lifetime remains unchanged.
+
+The main integration risk is an executable transfer that silently strips the
+envelope to plain JSON. Covered in-memory transfers must preserve it. If such a
+transfer crosses serialization, provenance must accompany the value in an
+internal representation, or the allowed stages must finish before plain-data
+export. This decision introduces no new public persistence format and does not
+authorize plain exported JSON to re-enter automatically as deferred source.
+
+Verification must cover movement in both directions between restricted and
+unrestricted locations, arrays and ambiguous-looking property names, sibling
+isolation, descendant overrides, generated executable content, and initialization
+recovery. Proxy, mutation, sequence, and retry transfers must retain provenance
+and atomicity. Whole-value typing and all supported literal escapes must survive
+the same transfers without extra evaluation. Any required serialized transfer
+needs a value-plus-provenance round-trip check. The
+[schema investigation](schema-investigation.md) records the transfer analysis
+and these contracts.
+
+Final Rust field names, internal serialization syntax where needed, and error
+variants remain open; the carrier granularity and retention rules are confirmed.
+
+## D6 — Put declarative bindings in the existing schema envelope
+
+**Human decision:** confirmed 2026-09-18, option **A**. Add an optional generic
+`bindings` section to the existing `kind: schema` envelope. Claudine owns one
+authoritative YAML catalog; Darkmatter owns its shared format, parsing, and
+binding mechanics.
+
+**Recommendation presented:** option A, keeping declarations beside the schemas
+that use them without a second document format and required companion-file
+association.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Optional `bindings` section on `kind: schema` **(confirmed)** | Keeps schema and binding policy together and gives runtime/editor consumers one authoritative source. | Extends the generic schema envelope and requires explicit scope/use-site semantics. |
+| B: Referenced companion binding document | Separately reusable declarations and smaller schema documents. | Adds a document format, dependency edge, and association that loaders and authors must maintain. |
+
+The catalog contains root names, static types, documentation, and default
+availability. Opaque named scopes declare availability overrides and structured
+unavailability reasons. Use-site schema locations select those scopes; runtime
+callers can also select a named scope explicitly, such as for shell preflight.
+Claudine gives scope names their lifecycle meaning. Darkmatter interprets the
+generic declarations without knowing what an event means.
+
+Importing a reusable type does not automatically select a lifecycle event scope.
+That association belongs to the location using the type or to an explicit
+runtime selection. This keeps common action/type definitions reusable across
+events with different availability rules. The exact nested use-site syntax,
+scope-conflict/merge rules, and complete lifecycle matrix still require design
+agreement.
+
+Declarations contain no value providers or executable predicates. Runtime
+generation consumes this same YAML catalog, and Claudine associates the resulting
+declarations with its eager/lazy/unavailable runtime entries through D2's checked
+boundary. DMLS dynamically reads the original YAML through Darkmatter; it neither
+depends on Claudine nor keeps a separate catalog. Serialization layout and the
+generated artifact format remain open.
+
+Malformed binding metadata and invalid reserved-root registrations produce
+structured errors from the shared Darkmatter authority. Failure of a required
+editor catalog marks dependent validation and assistance incomplete under the
+specification's isolation/recovery rules. Mandatory runtime declarations and
+restrictions remain independent of optional editor activation.
+
+## D7 — Require complete runtime registrations
+
+**Human decision:** confirmed 2026-09-18, option **A**. A runtime session must
+have an explicit eager, lazy, or unavailable entry for every declared global.
+Darkmatter checks completeness and configuration before evaluation without
+invoking lazy providers. It must not infer a null-valued or unavailable entry
+from an omitted registration.
+
+**Recommendation presented:** option A, making lifecycle construction mistakes
+visible at the binding boundary instead of letting expression branch selection
+determine whether an incomplete session is detected.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Complete, checked runtime entries **(confirmed)** | Deterministic configuration failures before evaluation; preserves available-null versus unavailable distinctions. | Callers explicitly construct entries even for declared globals an expression does not reference. |
+| B: Sparse entries checked only on reference | Less runtime registration work for unused globals. | Missing-registration defects become branch-dependent and are easier to confuse with intentional unavailability. |
+
+This completeness rule applies to sessions with a declared global catalog.
+Ordinary lookups without a catalog retain D1's lightweight default. Editor and
+other passive consumers need only declarations and never construct providers to
+satisfy runtime completeness.
+
+The confirmed `err` availability is:
+
+| Lifecycle scope | Declaration and runtime entry |
+| --- | --- |
+| `initialize`, `start`, `success`, `loop`, task `setup` | Definitely unavailable with a structured scope-forbidden reason; explicit unavailable runtime entry. |
+| `blocked`, `failure` | Available, with the required error value supplied. |
+| `finalize`, task teardown | Available, with the error value when present or an explicit eager `null` when no error exists. |
+
+An unavailable `err` never falls back to a same-named document property;
+`doc.err` remains explicit document access. A missing required `err`, `timing`,
+or `current` entry is a configuration error, not automatic null inference.
+The caller must intentionally supply the available-null case where allowed.
+
+Tests must distinguish complete unavailable entries from omitted entries,
+exercise each confirmed `err` scope through passive validation and runtime
+resolution, and prove invalid configuration fails before any provider invocation
+even when the missing global would lie in an inactive branch. Finalize and task
+teardown must accept explicit null while same-named document properties cannot
+hide unavailability or missing registration. Ordinary no-catalog lookups and
+provider-free editor validation retain their separate contracts.
+
+This decision does not by itself settle group lexical scope or shell-preflight
+binding policy; D8 supplies the sequence-wide approval ruling.
+
+## D8 — Keep lexical group unavailable at sequence-wide shell approval
+
+**Human decision:** confirmed 2026-09-18, option **A**. Lexical `group` is
+unavailable while resolving shell bytes for sequence-wide approval, including
+member primary commands, task setup/teardown commands, and referenced-prompt
+commands covered by that earlier approval.
+
+**Recommendation presented:** option A, preserving group observation timing and
+the existing approval boundary without introducing early evaluation or another
+approval phase.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Make lexical group unavailable at sequence-wide approval **(confirmed)** | Preserves execution-entry group evaluation and one approval of fixed command bytes. | Group-dependent shell commands cannot use lexical group values at that early boundary. |
+| B: Permit a bounded early-stable group subset | Could allow commands using provably fixed group values. | Requires new stability/dependency rules and an immutable projection shared by approval and execution; expands behavior beyond this fix. |
+
+This restriction belongs to the approval phase. Group-variable definitions
+continue to evaluate at execution entry; approval neither evaluates them early
+nor adds reapproval. `doc.group` remains explicit document data under ordinary
+early-state rules. Non-shell runtime group use retains existing scope and
+timing. Reusable documents whose eventual group membership is unknown declare
+that availability execution-dependent during passive validation.
+
+Only callers installing the Claudine lifecycle/sequence catalog reserve `group`.
+It does not become a Darkmatter built-in or a reserved name in unrelated loop
+expression or dispatch lookups. An already-established group later in execution
+does not override an earlier sequence-wide shell-approval restriction.
+
+Resolved approved command artifacts must reach setup/teardown execution as well
+as primary command execution. Re-parsing an authored stack and re-evaluating its
+shell string against later group state cannot replace the approved bytes. This
+preserves the specification's existing byte-parity requirement; no dynamic
+reapproval mechanism is introduced. The
+[lifecycle investigation](lifecycle-investigation.md) identifies the current
+setup/teardown artifact-transfer gap.
+
+The human authorized the narrow corresponding clarification in R6 of the
+specification. Remaining scope composition, binding-association details, and
+concrete command artifact interfaces still require completion.
+
+## D9 — Generate checked-in Rust schema constructors
+
+**Human decision:** confirmed 2026-09-18, option **A**. Extend the existing
+`claudine-gen` generation/check workflow with `schemas` generation, producing
+checked-in Rust constructors at
+`claudine/lib/src/composition/schema/generated.rs`. The constructors build a
+shared Darkmatter semantic schema definition bundle from authoritative
+`claudine/schemas` YAML.
+
+**Recommendation presented:** option A, using the existing independent generator
+and Rust's type checking without creating a serialized compiled-schema format
+or build-time generation step.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Checked-in Rust constructors **(confirmed)** | Reviewable generated output, compile-time checking, and reuse of the existing generation/check workflow. | Generator must emit all semantic fields deterministically and adapt with shared Rust types. |
+| B: Compiled JSON bundle | Compact data artifact and potential use outside Rust. | Introduces a serialization/versioning contract and loader validation for a representation not otherwise needed by this fix. |
+
+The generated bundle preserves resolved types, binding declarations, named
+scopes, feature restrictions, and portable source origins. It does not contain
+compiled validator instances, live value providers, or developer-machine
+absolute paths. Darkmatter constructs process-local validators from the shared
+definitions. Mandatory Claudine runtime validation needs no repository schema
+files on disk.
+
+Dependency direction remains `claudine-gen` → Darkmatter and Claudine runtime →
+Darkmatter. The generator must not depend on the Claudine library or CLI, and
+normal builds do not run a schema-generation build script. DMLS continues to
+load original YAML dynamically through the same Darkmatter schema engine,
+without embedding Claudine's generated artifact or depending on Claudine.
+
+The existing generator Level 1 verification includes deterministic generation
+drift checking and semantic equivalence between the original YAML and generated
+bundle. Verification must cover binding/scope and restriction metadata as well
+as ordinary schema types; byte equality alone cannot establish runtime/editor
+agreement. This joins existing package verification without a new CI matrix
+cell.
+
+D9 settles generation integration and artifact layout. It does not settle the
+remaining binding syntax, scope-conflict rules, activation grammar, or source
+precedence.
+
+## D10 — Use the canonical `schema-trigger` kind directly
+
+**Human decision:** confirmed 2026-09-18, option **A**. Adopt
+`kind: schema-trigger` as the canonical trigger envelope spelling and migrate
+active parser, schema, fixture, test, documentation, and skill usage directly.
+Do not accept `trigger-schema` as an alias. Historical specifications remain
+unchanged.
+
+**Recommendation presented:** option A, aligning the implemented grammar with
+the repository kind catalog without maintaining two names for one document kind.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Direct migration to `schema-trigger` **(confirmed)** | One canonical spelling across parsing, schemas, and active guidance. | Existing legacy files need correction before they can activate. |
+| B: Accept `trigger-schema` as an alias | Existing legacy files continue to load. | Preserves competing spellings and adds compatibility behavior without an established external-user requirement. |
+
+The shared Darkmatter parser recognizes the old spelling as invalid and returns
+a structured diagnostic naming `schema-trigger` as the replacement. Discovery
+must not silently ignore a legacy trigger as an unrelated document. In DMLS a
+broken legacy rule produces incomplete validation within its possible discovery
+scope, using the same dependency suppression and recovery contract as other
+broken activation definitions.
+
+Tests must cover successful canonical parsing, the typed legacy-spelling error
+and replacement guidance, active-artifact migration, and consumer-facing
+incomplete validation with automatic sibling isolation and explicit-source
+scope. No compatibility alias or silent loss of the rule is acceptable.
+
+The human authorized the corresponding narrow compatibility clarification in
+this fix's specification. Activation condition syntax and source precedence
+remain separate pending decisions.
 
 ## Remaining decisions and design completion work
 
@@ -252,12 +525,12 @@ sequencing.
 
 | Priority | Open subject | Consequence to resolve before planning |
 | --- | --- | --- |
-| 1 | Binding interface details | Specify the richer result, passive descriptor API, structured reason/error shapes, and checked-association invariants within D1 and D2. |
+| 1 | Binding interface details | Specify the richer result, passive descriptor API, structured reason/error shapes, and remaining checked-association invariants within D1, D2, and D7. |
 | 2 | Prepared interface details | Make D4's inputs, outputs, source provenance, schema-generation association, and typed error boundaries concrete without adding runtime observations to preparation. |
-| 3 | Lifecycle catalog details | Specify event/scope declarations for the retained globals under D3; do not introduce future built-ins or change event capture timing. |
-| 4 | Restriction retention | Define restriction retention through deferred, generated, and moved values within D4's confirmed evaluation and literal-output behavior. |
-| 5 | Descriptors, generation, and distribution | Select schema-associated descriptor format, runtime artifact representation, cycle-free generator integration, source identity, and drift verification. |
-| 6 | Generic activation and source precedence | Resolve trigger-kind mismatch, workspace-fact syntax/anchors, explicit source precedence and deduplication, and origin versus applicability scope. |
+| 3 | Lifecycle catalog details | Complete D6's event/scope matrix and nested use-site syntax/conflict rules within D3's capture timing, D7's `err` mapping, and D8's sequence-approval restriction. |
+| 4 | Provenance interface and transfer inventory | Specify D5's envelope operations and enumerate every executable transfer, including any required internal serialization boundary. |
+| 5 | Shared semantic bundle details | Complete the shared definition fields and portable origin representation needed by D9, alongside D6's still-open binding payload details. |
+| 6 | Generic activation and source precedence | Specify workspace-fact syntax/anchors, explicit source precedence and deduplication, and origin versus applicability scope using D10's canonical trigger kind. |
 | 7 | Refresh, isolation, and recovery | Define current-generation dependency/failure states and shared suppression of dependent diagnostics, hover, and completion; cover missing dependencies and newly created sources. |
 | 8 | Typed error transport and ownership audit | Specify owned causes through lifecycle/recovery/proxy paths and complete the state/context/binding/evaluation/validation/error DRY audit, including reasons for retained duplication. |
 
@@ -270,6 +543,11 @@ Responsiveness verification remains qualitative; no numeric threshold is added.
 The [initial independent review](design-review-1.md) found D1 and D2 faithful to
 the confirmed choices and requested the cache-boundary and graph-evidence
 clarifications incorporated above. It was not approval for planning. Independent
-review of the completed design remains pending. Open rulings,
+review of the completed design remains pending. The
+[second review](design-review-2.md) prompted two incorporated clarifications:
+D5 selection/movement materializes inherited ancestor metadata, and D7 names
+the `loop` event distinctly from task `setup`. Concrete envelope operations,
+scope composition, and remaining checked-association contracts are still open.
+Open rulings,
 unresolved graph evidence, and the incomplete migration inventory prevent a
 claim that this design is ready for implementation planning.

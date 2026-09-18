@@ -342,3 +342,504 @@ third alternative for the current re-entry paths.
 The unresolved technical ruling is carrier granularity and transfer discipline.
 This investigation recommends the sparse envelope; it does not record agreement
 or modify the functional specification.
+
+## D6 follow-up: declarative binding catalog
+
+Investigation dated 2026-09-18. D5's sparse policy/stage provenance was reported
+confirmed by the orchestrator. This section proposes the next catalog decision;
+its syntax and recommendations are not confirmed.
+
+### Source evidence and limitations
+
+Graph-first queries used the absolute worktree and returned lifecycle injection,
+standalone-envelope, and group-variable locations. Context for
+`lifecycle_injected_globals` and `resolve_group_variables` reported an index
+three commits behind HEAD; a broader query still contained unrelated symbol
+associations. No current risk assessment is claimed. Relevant source was read.
+
+- `darkmatter/lib/src/markdown/schemas/simplified/standalone.rs:143` accepts
+  tagged documents with exactly `kind` and `types`; pure documents have exactly
+  one `$schema` key. Neither currently permits binding metadata. Extending the
+  envelope must change the shared parser/source mapping, not merely a loader.
+- `StandaloneSchemaDocument` currently retains a declaration, path, structural
+  source map, and suggestion lints, but no extra descriptor payload.
+- `darkmatter/lib/src/markdown/schemas/resolve.rs:1286` imports named types by
+  returning `shape.properties`. Descriptor metadata would be lost if carried
+  only on a parsed envelope and then discarded during resolution.
+- `darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs:35` defines
+  a small function-parameter `DataType`; it intentionally excludes schema
+  unions, literals, and other schema types. Function descriptors contain
+  static strings and slices and are not a suitable dynamic binding-type wire
+  format. Use shared schema property/type definitions for globals instead.
+- `claudine/lib/src/composition/lifecycle/validate.rs:707` allows `err` in
+  error-capable events and rejects it elsewhere; context documentation names
+  `blocked`, `failure`, and optional-error `finalize`. The current constructor
+  at `context.rs:566` only injects `err` when an actual error exists.
+- `lifecycle/executor.rs:813` injects `group` only when the host has group
+  variables. `sequence/task/group.rs:434` resolves group variables once at
+  group start; `:475` additionally projects them into member frontmatter and
+  the member overlay. Editor analysis of an independently opened prompt cannot
+  infer whether it will later be invoked by a group.
+- Current `darkmatter/docs/schemas/err.yaml` contains `$schema`, `name`, and
+  `description` beside tagged `types`, violating the actual parser's allowed
+  keys. Its placeholder dependency is already identified in the specification.
+  Correct this artifact during the approved schema migration; do not copy it
+  into generated data and assume it is valid.
+
+### Recommended alternative: metadata in the schema envelope
+
+Extend the existing `kind: schema` envelope with a `bindings` payload. Keep
+`types`' existing interpretation; do not introduce a new kind or silently
+change whole-file/named-import semantics. Claudine's whole-document schema can
+use tagged `types` for the same root-property mapping its current pure
+`$schema` contains. Helper type files retain their existing role. Runtime and
+editor loaders both receive a resolved schema-definition bundle carrying the
+schema and binding catalog together.
+
+Use one catalog of named globals, an explicit finite table of opaque scope
+IDs, and use-site document-location assignments. Each global has a shared
+schema type, documentation, and an availability declaration for each relevant
+scope (a default plus explicit scope overrides is sufficient). Availability
+is one of `available`, `unavailable` with a stable reason code and explanatory
+metadata, or `execution-dependent` with a stable reason for the runtime check.
+No expressions, callbacks, filesystem conditions, or event-name semantics are
+part of that grammar.
+
+Illustrative excerpt, intentionally incomplete rather than a proposed final
+catalog (the named `error-context` type would be supplied by the migrated type
+source):
+
+```yaml
+kind: schema
+types:
+    initialize: lifecycle-event(no-shell-expansion)@./claudine-types.yaml
+    failure: lifecycle-event@./claudine-types.yaml
+bindings:
+    globals:
+        err:
+            type: error-context@./err.yaml
+            description: The active lifecycle failure.
+            availability:
+                default:
+                    state: execution-dependent
+                    reason:
+                        code: claudine.error_presence
+                        description: Availability depends on the active failure.
+                scopes:
+                    lifecycle.initialize:
+                        state: unavailable
+                        reason:
+                            code: claudine.event_has_no_error
+                            description: This event cannot carry an error.
+    scopes:
+        lifecycle.initialize: {}
+        lifecycle.failure: {}
+    locations:
+        /initialize: lifecycle.initialize
+        /failure: lifecycle.failure
+```
+
+Scope IDs are opaque to Darkmatter; their readable spelling is Claudine data.
+Claudine selects a scope from the generated catalog for an execution boundary.
+Darkmatter uses the location table to select that same scope during passive
+document checks. Location entries identify instance-path subtrees, including
+their descendants, with longest explicit ancestor selection. The catalog must
+reject ambiguous duplicate assignments and unknown scope IDs. A document root
+default supplies the scope outside more-specific assignments. Do not use
+dotted path strings: literal keys and array indices must remain unambiguous.
+
+The final syntax needs to cover location assignments within reusable imported
+object/array schemas. Prefer assigning a scope at a schema use site, propagated
+structurally to matching instance descendants, rather than enumerating every
+array index or building a second path-pattern language. In the example, the
+root property `initialize` determines the scope; importing the reusable
+`lifecycle-event` type does not inherently mean initialization. A shared event
+type used under `failure`, `start`, task setup, and task teardown keeps its
+shape while the consuming location selects its scope. Exact source syntax for
+such use-site annotations remains a detail to settle with D6, not an implicit
+permission to add new expression grammar.
+
+`err` is definitely unavailable for the existing non-error event scopes.
+Error-capable scopes allow passive references but use runtime availability
+where an error may be absent. `group` is execution-dependent whenever the
+document alone cannot prove invocation membership; host-known non-group
+preparation may select a definitely unavailable scope. DMLS must not infer
+group availability from document properties named `group` or from filesystem
+placement. `timing` and `current` follow actual host availability and existing
+capture timing. Under D3 this catalog describes `current.ctx` and
+`current.env`; it must not introduce the future `current_env` root.
+
+The runtime supplies eager/lazy values against these descriptors and resolves
+execution-dependent entries to available/unavailable without reparsing policy.
+Available `null` stays available. Runtime construction checks registrations,
+types/association invariants, and missing required provider associations
+through shared Darkmatter validation. The enum of states does not itself
+execute providers. Generation may provide typed scope/global identifiers to
+prevent Rust string spelling drift; it must not create a second manually
+authored policy table.
+
+Loading a schema definition activates its associated catalog only when that
+definition applies. Importing a helper named type resolves its type and origin;
+it must not accidentally activate unrelated global catalogs belonging to the
+helper's entire file. Bindings attached to the selected schema definition are
+explicitly retained in the resolved bundle. Type references resolve relative
+to the declaring catalog file through the same source-aware file mechanism as
+schema imports. Missing imports and invalid descriptors are typed required
+dependency failures of an active definition, including source span and cause.
+The mandatory runtime bundle bypasses optional trigger activation entirely.
+
+### Alternative: referenced companion catalog
+
+Keep the schema and catalog in separate YAML files, with an explicit reference
+from the schema envelope. The companion is parsed as a generic binding payload;
+it needs no new `kind`. Runtime generation and DMLS follow the same reference
+and dependency identity. The companion may be useful if several independent
+schemas genuinely share the same large catalog or separate ownership.
+
+Benefits: smaller schema documents, catalog reuse, and focused diffs. Costs:
+another required file/import edge, another missing-dependency failure mode,
+more origin bookkeeping, and the same shared schema-envelope extension needed
+to connect it. It does not avoid defining the catalog grammar. Prefer inline
+metadata initially because the catalog is small and owned beside Claudine's
+schema; add a reference form only if demonstrated reuse justifies it.
+
+Trigger-only metadata is not a viable equivalent alternative: Claudine must
+enforce the same catalog even when editor activation is absent or disabled.
+Embedding a catalog only in Rust or teaching DMLS Claudine event names would
+likewise violate the confirmed ownership/source contract.
+
+### Open details before calling D6 complete
+
+- Choose inline metadata versus a required companion reference.
+- Settle use-site scope annotation syntax for imported object/array types;
+  the simple location table above demonstrates the concept but alone does not
+  specify dynamic array descendants or imported nested layouts.
+- Define descriptor conflict behavior when multiple applicable schemas claim
+  the same global. Silent replacement can erase reservation/availability; an
+  explicit duplicate/conflicting declaration error is the simplest initial
+  rule, while identical declarations can be deduplicated by source identity.
+- Finish the complete host scope/provider matrix, especially definite
+  early-shell unavailability and execution-dependent group/error membership.
+- For generation, the existing schema AST and function descriptor structures
+  do not derive a general serialization contract. A generated runtime artifact
+  requires a deliberate resolved-bundle representation rather than assuming
+  JSON Schema or current static function descriptors contain everything.
+
+No prototype is needed: source inspection establishes the present parser and
+runtime seams. This follow-up changes no implementation or functional scope.
+
+## D9 follow-up: schema generation and embedded artifacts
+
+Investigation dated 2026-09-18. D6 inline binding metadata and subsequent
+scope/availability decisions are confirmed in the current design; this section
+does not replace them with earlier provisional examples. D9 remains unconfirmed.
+
+### Verified integration points
+
+- `claudine/gen/Cargo.toml:8` forbids depending on Claudine library/CLI and
+  already includes Darkmatter and biscuit-file. The generator can use new shared
+  schema APIs without introducing a reverse dependency or another crate.
+- `claudine/gen/src/main.rs:39` has explicit generation/check subcommands;
+  generation supports report-only and explicit write behavior. Schema commands
+  can be their own family without coupling regeneration to provider research.
+- `claudine/gen/src/emit/mod.rs:1` emits checked-in Rust source from validated
+  data. Formatting is deliberately deterministic and hand-rolled; no formatter
+  invocation is part of the emitter contract.
+- `claudine/gen/tests/drift.rs:1` shares production generation/check functions
+  with CLI checks. The existing tests compare generated bytes against committed
+  artifacts. They are a direct model for schema drift coverage.
+- `claudine/justfile:113` includes the generator in normal `just test`; `:219`
+  includes it in lint. No new CI cell or build dependency is necessary.
+- `darkmatter/lib/src/markdown/schemas/simplified/types.rs:22` and
+  `resolve.rs:52` expose semantic schema types without Serde derives. Rust
+  constructors and a compiled blob both require deliberate new output support;
+  there is no existing general schema serialization format to reuse.
+- `darkmatter/lib/src/markdown/schemas/mod.rs:733` shows `EffectiveSchema`
+  includes process-local validators and captured file-resolution context.
+  Neither belongs in generated definitions. Origin records currently contain
+  paths, so generation must normalize source identity explicitly.
+
+The graph-first generation query used the absolute worktree path and returned
+empty processes plus visibly corrupted unrelated paths. The findings above
+come from current source inspection after that failed query. No current impact
+claim is made.
+
+### Recommended option: checked-in Rust constructors
+
+Extend the existing generator with `schemas generate` and `schemas check`.
+Emit `claudine/lib/src/composition/schema/generated.rs`, with a generated-file
+header and a function constructing a Darkmatter-owned semantic schema-definition
+bundle. The artifact contains resolved schema definitions and the associated
+binding catalog, scopes, restrictions, and source-relative origin records.
+It does not contain runtime binding providers, evaluator sessions, filesystem
+observations, compiled validators, or developer-machine paths.
+
+The bundle should be the same semantic product the disk-backed resolver hands
+to the shared schema engine. Preserve complete schema semantics: typed literal
+values, null/presence information, property/root unions, pattern dictionaries,
+constraints, authored declaration ordering, type information, and declaration
+provenance. Preserve D6's inline bindings and the agreed scope declarations.
+Named imports are resolved during generation; runtime loading the mandatory
+bundle must not read the repository schema tree. Shared Darkmatter lowering
+derives JSON Schema, feature-policy projections, and process-local validators
+from these definitions. Do not maintain an independently generated policy
+interpretation in Claudine.
+
+Claudine's hand-written schema module caches the immutable definition bundle
+using the existing once-initialization pattern and supplies it as mandatory
+runtime input to Darkmatter. Runtime values/providers remain constructed at
+the confirmed D2/D3 boundaries. DMLS continues loading original repository YAML
+through Darkmatter and never links or embeds this artifact. Equivalent resolved
+definitions produce equivalent runtime/editor semantics.
+
+Proposed developer commands, not commands run during this investigation:
+
+```sh
+cargo run -p claudine-gen -- --area claudine schemas generate --yes
+cargo run -p claudine-gen -- --area claudine schemas check
+```
+
+Package-area convenience recipes may be `just schemas-generate` and
+`just schemas-check`, calling the same functions/commands. A generator L1 drift
+test calls `check_schemas` and therefore runs under existing `just test`.
+`just test-gen` should include it automatically through the generator suite.
+Do not attach schema generation to provider-only regeneration or regenerate
+silently in `build.rs`.
+
+Generation inputs are explicit runtime entry definitions plus their transitive
+schema/type/binding dependencies. Enumeration and output ordering are stable.
+The entry-point inventory is loader configuration, not a second hand-authored
+schema. The mandatory runtime schema must not merge every file in
+`claudine/schemas` indiscriminately: `review.yaml` remains an independently
+applicable schema. Validate the shipped schema corpus separately, including
+files that are not mandatory runtime roots. Record all actual generation
+dependencies so a changed imported definition cannot evade drift detection.
+
+Source origins use logical package/repository-relative identities and portable
+separators, plus retained spans where available. An embedded origin is
+diagnostic identity, not a host filesystem path to probe. DMLS retains real
+disk origins for dynamic imports. Equal declarations should compare after
+normalizing this transport difference, without dropping origin attribution.
+No generated timestamps or ambient machine state enter output bytes.
+
+Benefits: the generated artifact is compiler-checked, follows an established
+repository pattern, and introduces no new serialized compatibility protocol.
+Costs: the emitter must cover the schema-definition variants exhaustively and
+generated constructors are more verbose than compiled data. Keep that emitter
+mechanical: it prints shared parsed values, never reimplements grammar,
+matching, restriction inheritance, or type resolution. Ordinary Rust source
+API changes and generator drift checks keep constructor output synchronized.
+
+### Alternative: embedded compiled data bundle
+
+The same generator could emit deterministic
+`claudine/lib/src/composition/schema/generated.json`, embedded with
+`include_bytes!` and decoded by Darkmatter. Darkmatter must own the codec and
+semantic validation, since Claudine and DMLS cannot independently reconstruct
+schema meaning. Store the same resolved semantic definitions, not merely
+lowered JSON Schema and not an `EffectiveSchema` object. Validators are built
+after decoding.
+
+Benefits: simpler emission, compact data, and easy round-trip tests. Costs:
+new serialization coverage over the complete semantic representation, runtime
+decode failures, and a format identity/version check so mismatched generated
+data fails explicitly. This can remain an internal build artifact with no
+backward compatibility or migration machinery; there is no justification for
+designing a general portable wire protocol. It is reasonable if the shared
+semantic bundle soon needs serialization for another concrete consumer.
+
+Either option satisfies generated runtime definitions from authoritative YAML.
+Prefer Rust constructors here when minimizing new formats is the primary
+simplicity criterion; prefer the data bundle if mechanical emitter maintenance
+proves more costly. Source inspection does not establish a need for a spike.
+
+### Source bundle and build-time generation
+
+A generated bundle of original YAML strings is technically another embedding
+strategy, but it retains runtime YAML parsing and requires embedded import
+resolution/source tracking. A source-only `include_str!` change is not the
+specified generation pipeline. A real source-bundle generator would still need
+validation, deterministic dependency bundling, and runtime/editor equivalence
+checks, providing less benefit than either resolved option above.
+
+A build script could generate artifacts into `OUT_DIR`, but invoking a
+Darkmatter-dependent schema generator from Claudine's build dependencies
+enlarges the build graph and makes output less directly reviewable. Explicit
+generation plus checked-in artifacts preserves the established independent
+bootstrap tool: broken Claudine generated code cannot stop the generator from
+building and repairing it.
+
+### Verification contract
+
+Use the same production resolver for generation and disk-backed editor schemas.
+Check deterministic regenerated bytes and compare the generated semantic bundle
+against the YAML-resolved bundle after source-origin normalization. Exercise
+actual validation, descriptor classification, and restriction inheritance
+through both forms; byte equality alone cannot prove that the emitter retained
+every field. Ensure mandatory runtime behavior works without the source-tree
+schema directory and remains independent of editor activation. Unknown variants
+or invalid bindings fail generation; malformed generated definitions fail typed
+initialization rather than silently dropping policy. No new CI matrix cell,
+new public artifact compatibility promise, formatter run, or implementation
+change is proposed by this investigation.
+
+## D11 follow-up: filesystem facts in activation rules
+
+Investigation dated 2026-09-18. D10 confirms `schema-trigger` as the canonical
+kind and structured rejection of the obsolete spelling. Examples below use
+that confirmed spelling. D11 syntax and anchor recommendations remain open.
+
+### Existing grammar and boundaries
+
+Graph-first queries for trigger matching/discovery returned empty processes and
+unrelated symbol associations; current source was inspected directly afterward.
+No reliable current graph-impact claim is made.
+
+`triggers/grammar.rs:32` explicitly reserves future non-property predicates to
+dollar-prefixed names. `MatchExpr` already supports `all`, `any`, `none`,
+`min-match`, frontmatter property tests, and `$path`. A `match` sequence is
+outer OR; structural sibling keys are AND; mixing structural and property
+conditions in one mapping is rejected (`grammar.rs:193`). `matcher.rs:58`
+evaluates those nodes without I/O. `lint.rs` requires a positive presence/path
+gate in every viable OR arm, preventing accidental universal activation.
+
+`schemas/mod.rs:411` accepts explicit document and discovery-boundary paths;
+the library forbids ambient-CWD discovery. Composition supplies its captured
+boundary (`compose/schema_validation.rs:153`). The CLI schema validator uses a
+captured repository root (`cli/src/commands/schema/validate.rs:145`). DMLS
+currently selects the nearest containing opened workspace folder
+(`dmls/src/overlay/schema.rs:941`); its comment about repository narrowing is
+not implemented. Root selection and marker anchors therefore must be specified
+separately instead of inferred from that stale comment.
+
+Claudine configuration guidance/source references include repository
+`.claudine/config.json` (`claudine/lib/src/config/`), but this investigation
+does not select it as an activation marker. Presence of a particular Claudine
+file remains data in an eventual consumer-owned trigger, never engine policy.
+
+### Recommended grammar: one reserved match leaf
+
+Add a single `$exists` predicate to the existing match tree:
+
+```yaml
+kind: schema-trigger
+match:
+    $exists:
+        root: workspace
+        path: .example/config.yaml
+$schema: ./example.yaml
+```
+
+The path is one literal relative path, not an expression or glob. Both `root`
+and `path` are explicit. Reject absolute paths, URI/reference shorthand, and
+parent traversal; marker facts are anchored queries, not schema import search.
+Use portable slash-separated authored paths and the existing shared
+source-aware path authority when the host resolves them. The passive parser
+only validates syntax and records the fact request; it does not resolve or
+probe filesystem state.
+
+Presence of one filesystem entry is sufficient; directory/file content is not
+read and marker content does not execute. A precise final-entry/symlink policy
+must be pinned in the host fact observer and cross-platform tests rather than
+hidden behind `Path::exists`, which also discards I/O errors. The minimal
+interpretation is final directory-entry presence, including a symlink entry,
+without reading/following its final target. If the human instead wants regular
+file existence, name the predicate `$file-exists` and specify that explicitly;
+do not silently make the two meanings interchangeable.
+
+Existing frontmatter-only rules are unchanged. Conjunction uses existing `all`:
+
+```yaml
+match:
+    all:
+        - $exists: { root: workspace, path: .example/config.yaml }
+        - kind: literal(task; required)
+```
+
+OR arms retain their current meaning:
+
+```yaml
+match:
+    - $exists: { root: workspace, path: .example/config.yaml }
+    - kind: literal(task; required)
+```
+
+The latter deliberately means either condition, not marker AND all document
+arms. Multiple marker requirements use ordinary `all`/`any`; there is no
+marker-specific list shorthand or second condition language. The positive
+`$exists` leaf counts as a gate for vacuity checking. `none` of marker presence
+alone should retain the current prohibition on unguarded universal activation;
+combine it with a positive document/path gate where needed.
+
+### Anchor recommendation and exact scope
+
+Separate these identities in the trigger's captured host context:
+
+1. **Schema source origin:** actual file location; relative `$schema` and named
+   imports stay relative to this origin, including external `SCHEMA_DIR`.
+2. **Workspace anchor:** the nearest containing opened LSP workspace folder for
+   this document. With multiple/nested opened folders, choose the most specific
+   containing folder deterministically. A library/CLI host supplies its explicit
+   equivalent root; the matcher never derives it from CWD.
+3. **Applicability scope anchor:** for automatic discovery, the directory owning
+   that `schemas/` directory; for explicit `SCHEMA_DIR`, the selected document's
+   workspace anchor. This determines the meaning of `root: scope`.
+4. **Discovery boundary:** the upper limit of the ancestor search, independently
+   chosen according to repository/opened-tree discovery policy.
+
+Permit exactly `root: workspace` and `root: scope`. Workspace-root markers can
+enable rules across a workspace, but they never widen a nested automatic rule's
+document scope. A package rule using `root: scope` checks that package's marker.
+An explicit external source using `root: scope` checks the workspace, not the
+external directory and not its containing package. The same source discovered
+automatically and explicitly can therefore have distinct applicability/anchor
+contexts even when its parsed bytes are shared.
+
+For documents outside all opened workspaces, retain no automatic discovery.
+For a non-repository opened tree, the opened root is the discovery boundary and
+workspace anchor. For an opened repository root, both roots coincide. For an
+opened subdirectory inside a repository, a consequential difference remains:
+current DMLS stops at the opened folder, while R12 requires repository-root
+schema discovery. Recommend allowing the captured repository root to be the
+discovery boundary, while keeping `root: workspace` anchored to the actual
+opened folder. An automatically discovered repository-level rule can use
+`root: scope` to check the repository root. The checked document must still
+belong to the opened workspace, and automatically discovered nested rules
+cannot affect siblings. This root-discovery clarification needs agreement;
+do not conflate the two roots under a misleading single `workspace` field.
+
+### Pure evaluation and failure facts
+
+Darkmatter parses the rule and enumerates marker requests. The host observes
+those requests into a snapshot: `Present`, `Absent`, or a structured observation
+failure. Successful nonexistence is false; permission/I/O failure is unknown,
+not false. Darkmatter combines those facts with document match conditions and
+returns matched/not-matched/undetermined plus dependent failures. For example,
+`all(false, unknown)` is definitively false, while `all(true, unknown)` is
+undetermined. The existing OR/combinator equivalents follow the same bounded
+three-valued logic. A malformed rule still has unknown applicability across its
+possible scope because no trustworthy parsed tree exists.
+
+The snapshot is request/generation-scoped and contains no callable providers.
+Filesystem observation performs metadata reads only; matching executes no
+actions, shell expansion, lazy providers, content expressions, or network I/O.
+Facts include missing entries so create/delete events can invalidate them.
+Marker changes and ancestor directory creation/removal refresh dependent
+documents through the agreed loader/watch strategy. A marker failure cannot
+silently deactivate an active extension or retain stale dependent assistance.
+
+### Alternative: separate top-level activation gate
+
+An optional top-level `activate` (or `workspace`) payload could carry marker
+facts, implicitly ANDed with the existing `match` document expression.
+Benefits: clear visual separation between filesystem facts and document tests,
+and no additional `MatchExpr` leaf. Costs: marker-only rules need optional
+`match`, combined OR rules need another composition convention, and matching,
+explanation, vacuity checking, dependency extraction, and errors now cross two
+condition surfaces. It also expands the trigger envelope beyond the kind change.
+
+Prefer the reserved leaf because the current grammar explicitly anticipates
+this extension, existing boolean constructs express all required examples, and
+`$` avoids collisions with ordinary unprefixed document property conditions.
+No arbitrary expression language, marker-content parser, extra root aliases, or
+hardcoded Claudine configuration filename is needed.
