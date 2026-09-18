@@ -148,6 +148,23 @@ belong here.
   can recover the blob (`git cat-file -p <hash>` shows the file;
   `git cat-file -t <hash>` confirms `blob`); the reflog only retains
   the post-`--only` blob because the index-update is not a ref update.
+- **Staged-vs-working-tree swap for an `AM`/`MM` path with draft
+  follow-up work.** When the staged set contains an `AM`/`MM` path whose
+  working-tree delta is *draft* work for a future cycle (e.g. an
+  `implementation-log.md` records cycle N as complete and cycle N+1 as
+  "starting work", and the working tree carries cycle N+1 in-progress
+  edits that must NOT ship yet), prefer a staged-to-working-tree swap
+  over temp-index plumbing. Capture both: `git show :<p> > /tmp/<p>-staged`
+  for the staged blob, `cp <p> /tmp/<p>-wt` for the working tree, then
+  `cp /tmp/<p>-staged <p>` so the working tree matches the index, then
+  `git commit --only -F <msg> -- <paths>` (commits staged), then
+  `cp /tmp/<p>-wt <p>` to restore the draft. This sidesteps the
+  temp-index lost-files side effect in a sequential flow (every
+  subsequent `--only` commit would otherwise build on a sparse tree and
+  drop files) while still keeping the working tree's draft intact. The
+  swap is identical to `--only` with a transient working-tree
+  replacement; verify with `git status --short <p>` showing ` M` after
+  the restore.
 
 ## Signing
 
