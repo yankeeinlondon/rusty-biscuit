@@ -13,7 +13,9 @@
 | Daemon service | launchd agent (macOS) / systemd user unit (Linux) |
 
 `kache doctor` prints the resolved store and Cargo wiring. Use it rather than guessing, especially
-if the home directory or Cargo config is synced across hosts.
+if the home directory or Cargo config is synced across hosts. Before accepting its report that the
+wrapper is absent, inspect the process's effective `HOME` and `CARGO_HOME`: an agent or sandbox can
+shadow `~/.cargo/config.toml` while the real host config remains correct.
 
 ## Host policy versus repository policy
 
@@ -149,6 +151,33 @@ Consequences worth planning around:
 Use `kache why-miss <crate>` when something you expected to hit didn't — it names the differing key
 component instead of leaving you to guess.
 
+### Diagnosing poor reuse
+
+Do not collapse every successful store interaction into a "hit":
+
+- A **hit** avoids compilation by restoring an existing artifact.
+- A **duplicate** (`dup`) compiles first and only then discovers that the produced content already
+  exists. It saves physical storage, not compiler time.
+- A **passthrough** is an unsupported or deliberately uncached compiler shape.
+- A **miss** compiles and stores a new key.
+
+When one crate accumulates many recent entries with zero hits, investigate key proliferation before
+changing the store cap. Compare rustc versions, target triples, profiles and codegen flags, feature
+sets and Cargo feature unification, generated inputs, and dependency hashes. Concurrent worktrees
+often expose this because nominally similar package selections can resolve different build graphs.
+
+Dependency-level explanations must be recorded before the reproduction:
+
+```toml
+[cache]
+explain_miss = true
+```
+
+Enable this temporarily, reproduce the expected hit, then run `kache why-miss <crate>`. Without the
+recorded explanation data, a generic key mismatch cannot identify the dependency cascade. Reading a
+large event history on every miss has overhead, so disable it after diagnosis unless continuous
+attribution is worth that cost.
+
 ## Observability
 
 ```bash
@@ -162,6 +191,9 @@ kache report --format perfetto -o trace.json     # build trace for profiling
 
 `report` also emits `json`, `chrome-trace`, `github` and `text`, with `--top N` and `--root <path>`
 to scope to one build tree.
+
+`stats --last-build` is a session view, not necessarily one Cargo command. Read
+[versions.md](versions.md) before using it to reconcile a live-monitor count with historical stats.
 
 For an adoption review, record the weighted hit rate and estimated time saved alongside store size,
 representative target size, free space, worktree count, and remote status. A young cache may deserve
