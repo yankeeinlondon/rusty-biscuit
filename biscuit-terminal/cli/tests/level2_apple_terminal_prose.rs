@@ -57,6 +57,18 @@ const SHELL_READY_MS: u64 = 2500;
 /// intentionally owns its own instance to exercise Drop cleanup.
 static SHARED_APPLE: SharedHarness<AppleTerminalHarness> = SharedHarness::new();
 
+/// Returns the rendered text between the printed `__BT_START__` and
+/// `__BT_END__` sentinels, or `None` until both have been printed.
+///
+/// The shell's echo of the command line also carries both sentinel names,
+/// but with the literal two characters `\n` rather than a newline, so
+/// matching on real newlines skips the echo and waits for the output.
+fn bounded_output(plain: &str) -> Option<&str> {
+    let after_start = plain.split("__BT_START__\n").nth(1)?;
+    let (bounded, _rest) = after_start.split_once("\n__BT_END__")?;
+    Some(bounded)
+}
+
 // ------------------------------------------------------------------
 // AC-1 — OSC8 link fallback is visible in Apple Terminal
 // ------------------------------------------------------------------
@@ -104,17 +116,15 @@ fn level2_apple_terminal_link_fallback_visible() {
             .as_bytes(),
         )
         .expect("send_text failed");
-    harness.settle();
-    std::thread::sleep(Duration::from_millis(400));
+    // Wait for the closing sentinel rather than a fixed interval: `bt` runs
+    // its real capability probes against Terminal.app here, and on a loaded
+    // host its output landed after a 400 ms sleep, so a single capture saw
+    // `__BT_START__` and nothing else.
+    let frame = common::capture_until(harness, Duration::from_secs(10), |frame| {
+        bounded_output(&frame.plain).is_some()
+    });
 
-    let frame = harness.capture().expect("capture failed");
-
-    let bounded = frame
-        .plain
-        .split("__BT_START__\n")
-        .nth(1)
-        .and_then(|s| s.split("\n__BT_END__").next())
-        .unwrap_or("");
+    let bounded = bounded_output(&frame.plain).unwrap_or("");
 
     assert!(
         !bounded.is_empty(),
@@ -187,16 +197,14 @@ fn level2_apple_terminal_styled_link_fallback_escapes_bracket() {
             .as_bytes(),
         )
         .expect("send_text failed");
-    harness.settle();
-    std::thread::sleep(Duration::from_millis(400));
-
-    let frame = harness.capture().expect("capture failed");
-    let bounded = frame
-        .plain
-        .split("__BT_START__\n")
-        .nth(1)
-        .and_then(|s| s.split("\n__BT_END__").next())
-        .unwrap_or("");
+    // Wait for the closing sentinel rather than a fixed interval: `bt` runs
+    // its real capability probes against Terminal.app here, and on a loaded
+    // host its output landed after a 400 ms sleep, so a single capture saw
+    // `__BT_START__` and nothing else.
+    let frame = common::capture_until(harness, Duration::from_secs(10), |frame| {
+        bounded_output(&frame.plain).is_some()
+    });
+    let bounded = bounded_output(&frame.plain).unwrap_or("");
 
     assert!(
         !bounded.is_empty(),
@@ -278,17 +286,15 @@ fn level2_apple_terminal_double_underline_plain_text_visible() {
             .as_bytes(),
         )
         .expect("send_text failed");
-    harness.settle();
-    std::thread::sleep(Duration::from_millis(400));
+    // Wait for the closing sentinel rather than a fixed interval: `bt` runs
+    // its real capability probes against Terminal.app here, and on a loaded
+    // host its output landed after a 400 ms sleep, so a single capture saw
+    // `__BT_START__` and nothing else.
+    let frame = common::capture_until(harness, Duration::from_secs(10), |frame| {
+        bounded_output(&frame.plain).is_some()
+    });
 
-    let frame = harness.capture().expect("capture failed");
-
-    let bounded = frame
-        .plain
-        .split("__BT_START__\n")
-        .nth(1)
-        .and_then(|s| s.split("\n__BT_END__").next())
-        .unwrap_or("");
+    let bounded = bounded_output(&frame.plain).unwrap_or("");
 
     assert!(
         !bounded.is_empty(),
