@@ -176,33 +176,10 @@ pub fn evaluate(loader: &Loader, record: &RunRecord, today: &Date) -> Result<Eva
         (vec!["waits for a complete reconciliation pass".to_string()], true)
     } else {
         let text = eval.candidate_text.clone().expect("reconciliation is complete");
-        let loaded = loader.load_document_text(&workspace.document(record.platform_id), text.clone())?;
-        let validation = validate_document(&loaded, &context);
-        eval.diagnostics = validation.diagnostics.clone();
-        let mut findings: Vec<String> = validation.diagnostics.iter().map(ToString::to_string).collect();
-        let now = published.as_deref().map(text_fingerprint);
-        if now != record.baseline.as_ref().map(|b| b.xxh64.clone()) {
-            findings.push("the accepted document changed since this run was prepared; start a new run".to_string());
+        match loader.load_document_text(&workspace.document(record.platform_id), text.clone()) {
+            Err(error) => (vec![format!("the candidate cannot be read: {error}")], false),
+            Ok(loaded) => candidate_findings(loader, &mut eval, record, &loaded, &text, baseline_record.as_ref(), platform, &context, published.as_deref(), today)?,
         }
-        if let Some(candidate) = &loaded.record {
-            let checks = eval.checks.as_ref().expect("reconciliation is complete");
-            findings.extend(integrity(record, candidate, baseline_record.as_ref(), checks, platform, today));
-        }
-        if let Some(validated) = validation.validated {
-            match AcceptedDocument::new(validated, &text) {
-                Ok(candidate) => {
-                    let mappings = if workspace.mappings().exists() {
-                        loader.load_mappings(&workspace.mappings())?.record
-                    } else {
-                        None
-                    };
-                    eval.delta = Some(delta::compare(eval.baseline.as_ref(), &candidate, mappings.as_ref()));
-                    eval.candidate = Some(candidate);
-                }
-                Err(message) => findings.push(message),
-            }
-        }
-        (findings, false)
     };
     eval.stages.push(result(Stage::Validation, findings, pending));
 
@@ -223,6 +200,47 @@ pub fn evaluate(loader: &Loader, record: &RunRecord, today: &Date) -> Result<Eva
     };
     eval.stages.push(result(Stage::Review, findings, pending));
     Ok(eval)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn candidate_findings(
+    loader: &Loader,
+    eval: &mut Evaluation,
+    record: &RunRecord,
+    loaded: &crate::research::load::Loaded<PlatformDocument>,
+    text: &str,
+    baseline_record: Option<&PlatformDocument>,
+    platform: &crate::research::model::RosterPlatform,
+    context: &Context<'_>,
+    published: Option<&str>,
+    today: &Date,
+) -> Result<(Vec<String>, bool), RefreshError> {
+    let workspace = loader.workspace();
+    let validation = validate_document(loaded, context);
+    eval.diagnostics = validation.diagnostics.clone();
+    let mut findings: Vec<String> = validation.diagnostics.iter().map(ToString::to_string).collect();
+    if published.map(text_fingerprint) != record.baseline.as_ref().map(|b| b.xxh64.clone()) {
+        findings.push("the accepted document changed since this run was prepared; start a new run".to_string());
+    }
+    if let Some(candidate) = &loaded.record {
+        let checks = eval.checks.as_ref().expect("reconciliation is complete");
+        findings.extend(integrity(record, candidate, baseline_record, checks, platform, today));
+    }
+    if let Some(validated) = validation.validated {
+        match AcceptedDocument::new(validated, text) {
+            // The integrity findings already name a platform mismatch; a
+            // delta across platforms is meaningless.
+            Ok(candidate) if candidate.validated.platform_id() != record.platform_id => {}
+            Ok(candidate) => {
+                let mappings =
+                    if workspace.mappings().exists() { loader.load_mappings(&workspace.mappings())?.record } else { None };
+                eval.delta = Some(delta::compare(eval.baseline.as_ref(), &candidate, mappings.as_ref()));
+                eval.candidate = Some(candidate);
+            }
+            Err(message) => findings.push(message),
+        }
+    }
+    Ok((findings, false))
 }
 
 fn integrity(

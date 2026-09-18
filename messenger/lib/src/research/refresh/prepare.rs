@@ -368,7 +368,9 @@ fn yaml_single(text: &str) -> String {
 /// The sequence document for `stages`. Validation and the review check are
 /// `shell:` steps so their time is charged to the run's ledger.
 fn write_sequence(loader: &Loader, dir: &Path, record: &RunRecord, stages: &[Stage]) -> Result<(), RefreshError> {
-    let root = loader.workspace().repo_root().display().to_string();
+    // Forward slashes: Windows accepts them, and a backslash inside the
+    // quoted argument could otherwise be read as an escape by the tokenizer.
+    let root = loader.workspace().repo_root().display().to_string().replace('\\', "/");
     let check = |through: Stage| {
         yaml_single(&format!("messenger research check-run {} --through {through} --root \"{root}\"", record.run_id))
     };
