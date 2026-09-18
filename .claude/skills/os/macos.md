@@ -28,8 +28,9 @@ conditions that masquerade as repository defects.
 - **Real Linux runs:** Docker Desktop provides a `linux/arm64` kernel. `open
   -a Docker`, poll `docker info` (about 20 s), then run the package tests in a
   container. PTY-backed L2 tests pass there too. Mount the source as a copy
-  (`rsync -a --exclude=target/ --exclude=.git`) because a worktree's `.git`
-  is a file pointing outside the container. Two traps: keep
+  (`rsync -a --exclude=target/ --exclude=.git --exclude=.gitnexus/`) because a worktree's `.git`
+  is a file pointing outside the container. Excluding `.gitnexus/` is required: its
+  parsed-file store churns during indexing, so rsync exits 23 on vanished files. Two traps: keep
   `CARGO_TARGET_DIR` on a host mount (`-v /tmp/x-target:/t -e
   CARGO_TARGET_DIR=/t`), since the VM overlay is small and fills; and a
   whole-package `cargo nextest run` OOM-kills the linker in the default VM,
