@@ -2,6 +2,11 @@
 
 ## Recent Dependency Notes
 
+- `claudine-cli` adds a direct `sysinfo = "0.38.2"` edge (2026-09-17, research
+  metadata pipeline Phase 5). The crate was already in the graph through
+  `sniff`, so the lockfile gains one edge and no package. Budget-ledger crash
+  recovery uses it to check a recorded worker's process start time before
+  signaling that PID. See [`claudine/docs/dependencies.md`](claudine/docs/dependencies.md).
 - `scripts/` (package `repo-deps`) is a **root Cargo workspace member**. It
   carried a nested `[workspace]` stanza and its own `scripts/Cargo.lock` until
   the 2026-09-13 cicd-redundancies fix; both are deleted, `"scripts"` is in the
