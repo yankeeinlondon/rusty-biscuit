@@ -5,7 +5,7 @@ clarified: true
 reviewed: true
 needs_rulings: false
 clarified_by: codex/gpt-6-astra
-reviewed_by: "review_clarified_draft (codex/gpt-6-astra)"
+reviewed_by: "review_refined_spec (codex/gpt-6-astra)"
 reviewed_on: 2026-09-17
 review_iterations: 0
 implemented: false
@@ -44,7 +44,8 @@ packages:
 ## Outcome
 
 Darkmatter has one expression language and one variable-resolution model. A
-bare identifier that is not an explicitly registered global is a document
+bare identifier that is neither a reserved namespace nor an explicitly
+registered global is a document
 frontmatter property, equivalent to the same property beneath `doc`. Lookup of
 an absent property is valid and evaluates to `null` at runtime. Its static type
 comes from the schema when declared; otherwise its static type is unknown. It
@@ -178,12 +179,18 @@ language's namespace and null semantics and must not vary by caller.
 
 Resolution follows this order:
 
-1. An explicitly registered global owns its exact root. Claudine's
+1. The reserved `doc`, `ctx`, and `env` namespaces resolve through their
+   respective lookup surfaces. Caller globals cannot replace these namespaces.
+2. An explicitly registered global owns its exact root. Claudine's
    lifecycle globals such as `err`, `timing`, `current`, and `current_env`
    are examples.
-2. The reserved `doc`, `ctx`, and `env` namespaces resolve through their
-   respective lookup surfaces.
 3. Every other bare root resolves as a property of the current document.
+
+Darkmatter rejects caller global registrations named exactly `doc`, `ctx`, or
+`env` with a structured configuration error before evaluation or lazy-provider
+invocation. DMLS reports the same invalid registration through shared
+Darkmatter validation. Ordinary globals retain their precedence over
+same-named document properties.
 
 There is no implicit fallback from a missing bare document property to a
 same-named `ctx` property. Authors use `ctx.<name>` for runtime context and
@@ -204,10 +211,11 @@ with the same root. An out-of-scope reserved lifecycle global remains an error;
 it must not silently fall back to a document property. `doc.err` remains the
 explicit way to read a document property named `err`.
 
-### Missing properties are valid unknown values
+### Missing properties are valid lookups
 
-An absent document property is statically unknown and evaluates to JSON
-`null`. Existing null propagation, truthiness, interpolation, comparison,
+An absent document property evaluates to JSON `null`. Its static type comes
+from the effective schema when declared; otherwise its static type is unknown.
+Existing null propagation, truthiness, interpolation, comparison,
 member access, and indexing rules remain authoritative. In particular:
 
 ```text
@@ -376,6 +384,13 @@ properties, reserved namespaces, available globals, and unavailable globals.
 It must preserve a real `null` global value as distinct from an unavailable
 global and an absent document property.
 
+Reject caller global registrations named exactly `doc`, `ctx`, or `env` with a
+structured configuration error before evaluation or lazy-provider invocation.
+The shared passive validation operation must expose this error to DMLS as
+well. Explicit document access through `doc.err`, `doc.doc`, `doc.ctx`, and
+`doc.env` remains valid regardless of same-named document properties or ordinary
+global declarations.
+
 An unavailable global is still reserved. It must not fall through to a
 same-named document property. For example, if `err` is unavailable during
 `initialize`, bare `err` raises the typed unavailable-global error even when
@@ -493,7 +508,8 @@ from runtime global precedence or availability. Claudine-specific lifecycle
 descriptors may be supplied as an extension, but the classification and
 validation machinery remain Darkmatter-owned.
 
-DMLS must also show authors error diagnostics for schema feature violations,
+DMLS must also show authors error diagnostics for schema feature violations
+under the applicable schemas and binding descriptors,
 such as shell expansion prohibited in `initialize`, and references to lifecycle
 globals definitely unavailable in the declared event or scope. These are
 actual defects, distinct from advisory reports for valid but undeclared
@@ -510,6 +526,13 @@ consume that same source. DMLS dynamically activates generic schema data as
 specified in R12. Distribution or registration details and the format and
 availability of lifecycle-global descriptors remain design decisions; no
 Claudine dependency, hardcoded detection, or separate catalog is authorized.
+
+When the optional lifecycle extension is absent or inactive, DMLS validates
+against the Darkmatter baseline and other applicable schemas and descriptors;
+it does not promise Claudine-specific lifecycle checks. A missing required
+dependency of an active extension instead follows the incomplete-validation
+policy in R12. Optional editor activation does not control Claudine's mandatory
+embedded runtime policies.
 
 ### R8. Do not patch authored prompts
 
@@ -693,6 +716,21 @@ The loader, environment read timing, and change-monitoring strategy are
 implementation choices; this specification does not require eager scanning of
 every subtree rather than discovery as documents become relevant.
 
+If an applicable schema, trigger, import, or global descriptor fails to load
+or refresh, DMLS must report that validation is incomplete and identify the
+failing source and cause. Suspend checks that depend on the failed definition
+and continue independent checks. Do not present dependent diagnostics from an
+earlier successful load as current, report partial validation as complete, or
+fall back to stale definitions. A successful refresh restores dependent checks
+and clears the corresponding failure diagnostic. This policy does not decide
+hover or completion behavior during a loading failure.
+
+Intentional removal or nonactivation of an optional schema or extension is
+distinct from failure to load a required dependency. In the former case,
+validate using the baseline and remaining applicable definitions; in the
+latter, report incomplete validation for the active definitions that depend on
+it. Claudine's embedded runtime validation remains mandatory in either case.
+
 Activation and refresh must remain responsive during editing. The human has
 chosen a loose initial performance requirement, without numeric latency or
 scale targets. Record representative responsiveness observations during
@@ -810,6 +848,10 @@ Add focused tests proving:
   valid expression lookups; a separate required-property schema violation
   remains a blocking error;
 - an explicitly injected global shadows a same-named document property;
+- registrations named exactly `doc`, `ctx`, and `env` each fail with a
+  structured configuration error before evaluation or lazy-provider invocation;
+- `doc.err`, `doc.doc`, `doc.ctx`, and `doc.env` read the corresponding
+  document properties while built-in namespaces remain reserved;
 - an unavailable reserved global raises a typed error and never falls through
   to a same-named document property;
 - an available global whose value is `null` remains distinguishable from an
@@ -851,11 +893,15 @@ Add or update tests proving:
 - a schema-declared property receives schema type information even when unset;
 - a runtime-supplied property is not treated as a parser error;
 - unknown functions remain distinct hard expression defects;
-- prohibited shell expansion in `initialize` produces a schema feature error;
-- definitely unavailable lifecycle globals produce error diagnostics,
+- with the lifecycle extension active and valid, prohibited shell expansion
+  in `initialize` produces a schema feature error;
+- with the lifecycle extension active and valid, definitely unavailable
+  lifecycle globals produce error diagnostics,
   including references in inactive branches;
 - those diagnostics agree with Darkmatter preparation validation and remain
   distinct from undeclared-document-property advisories;
+- invalid global registrations named exactly `doc`, `ctx`, and `env` produce
+  the shared structured configuration error;
 - editor validation executes no actions or shell expansion, causes no file
   side effects, and invokes no lazy providers;
 - execution-dependent availability is deferred rather than guessed;
@@ -877,7 +923,18 @@ Add or update tests proving:
   explicitly selected through `SCHEMA_DIR`, but only when its triggers match;
 - relative imports from an explicit source retain that source's origin;
 - startup and create/update/delete changes refresh applicable schemas,
-  including newly created `schemas/` directories at supported roots.
+  including newly created `schemas/` directories at supported roots;
+- startup and refresh failures for applicable schemas, triggers, imports, and
+  global descriptors identify the failing source and cause, mark validation
+  incomplete, suspend dependent checks, and continue independent checks;
+- stale dependent diagnostics are not presented as current and stale
+  definitions are not used as a fallback; successful refresh restores checks
+  and clears the corresponding failure diagnostic without evaluating authored
+  expressions or invoking lazy providers;
+- an absent or inactive optional lifecycle extension leaves baseline and other
+  applicable validation available without promising Claudine-specific checks;
+  a missing required dependency of an active extension instead reports
+  incomplete validation. Neither case disables Claudine runtime policies.
 
 ### Claudine Level 1
 
@@ -955,7 +1012,12 @@ and is covered by the affected packages' existing gates.
 1. `SubtreeStrictness`, its builder methods, its convenience-function
    argument, strict-root validation, and the lookup root-membership hook no
    longer exist.
-2. Every non-global bare identifier resolves as a document property.
+2. Every bare identifier other than a reserved namespace or registered global
+   resolves as a document property. Caller registrations named exactly `doc`,
+   `ctx`, or `env` fail with a structured configuration error before evaluation
+   or provider invocation, and DMLS reports that shared validation error.
+   Ordinary globals shadow document properties; explicit `doc.err`, `doc.doc`,
+   `doc.ctx`, and `doc.env` access remains valid.
 3. An absent document property evaluates to `null` and never raises an
    unknown-root or undefined-variable runtime error.
 4. Bare document lookup never falls through to `ctx`; context access requires
@@ -979,8 +1041,12 @@ and is covered by the affected packages' existing gates.
     property, limits any report to an advisory diagnostic, and consumes shared
     Darkmatter binding descriptors rather than a separate root catalog. It
     also reports schema feature violations and definitely unavailable lifecycle
-    globals as errors through the same passive Darkmatter validation used in
-    preparation, without guessing runtime-dependent availability.
+    globals under applicable schemas and descriptors as errors through the
+    same passive Darkmatter validation used in preparation, without guessing
+    runtime-dependent availability. An absent or inactive optional lifecycle
+    extension leaves baseline and other applicable checks available without
+    promising Claudine-specific checks; mandatory runtime policies remain
+    independent of editor activation.
 11. The reported `prompts/implement.md` route reaches its authored routing error
    without a lifecycle evaluation crash and without changing the prompt to add
    fallback guards.
@@ -1031,6 +1097,15 @@ and is covered by the affected packages' existing gates.
     validation use the same Darkmatter schema engine. Representative
     responsiveness observations are recorded without an invented numeric
     threshold.
+22. Failed loading or refresh of an applicable schema, trigger, import, or
+    global descriptor reports incomplete validation with the failing source
+    and cause. Dependent checks are suspended, independent checks continue,
+    and stale definitions or dependent diagnostics are not presented as
+    current. Successful refresh restores dependent checks and clears the
+    corresponding failure. Intentional optional-schema removal or
+    nonactivation is distinct from a missing required dependency of an active
+    definition. Editor recovery remains passive and does not weaken runtime
+    validation requirements.
 
 ## Non-Goals
 
