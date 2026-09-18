@@ -416,7 +416,7 @@ jobs:
         shell: bash
         run: echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
 
-      - name: Record the tested PR merge
+      - name: Record the tested PR head
         id: receipt
         if: github.event_name == 'pull_request'
         run: python3 scripts/ci/reuse_validation.py record
@@ -594,6 +594,7 @@ jobs:
       # duckdb and gix — out of the producer tool. Same shape as the coverage
       # audit's `ci-rollup` build.
       - name: Build the producer tool
+        shell: bash
         run: |
           cargo build --release \
             -p repo-deps \
