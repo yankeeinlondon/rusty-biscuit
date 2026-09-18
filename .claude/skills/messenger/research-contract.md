@@ -113,6 +113,17 @@ Platform research is becoming typed, reviewed metadata (feature
   (reconcile when validation failed), at most twice, with the same ledger. It
   refuses an exhausted, suspended, interrupted, or active ledger until the
   operator acts in Claudine.
+- **Launching a live run** (checked 2026-09-18 on the shipped roster):
+  - Put this worktree's `target/debug` first on PATH. An older installed
+    `claudine` has no `budget` subcommand, and the `shell:` steps call
+    `messenger research check-run`.
+  - `run.md` has no `agent` hint. With no terminal, `claudine sequence` fails
+    with `AgentResolutionFailed` before the first step. With a terminal, it
+    opens a picker, and that wait is charged to the budget. Pass a provider
+    flag (for example `--claude`) to the printed sequence command.
+  - `sequence --dry-run` still runs the `shell:` steps. `check-run` then marks
+    the run `failed` because it has no outputs. Rehearse only in a throwaway
+    Git repository holding a copy of `messenger/docs`, never on a real run.
 
 ## Gotchas
 
