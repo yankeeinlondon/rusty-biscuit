@@ -487,6 +487,19 @@ belong here.
   `_completed` — `planning(<area>):` is correct, NOT `chore:` or
   `docs(<area>):`. See `5aff59c38` for the
   2026-09-15-initialize-after-proxy Phase 8 example.
+- A `planning(<area>):` phase close can land as "Outcome: blocked on
+  required human input" rather than "shipped deliverables" when the spec
+  gates the next phase on operator-supplied values that have not been
+  supplied (per-platform time/invocation limits, approver name, agent
+  choice, etc.). The shape differs from the deliverable close in three
+  ways: do NOT flip any wave checkboxes (no forward progress was made);
+  carry forward prior unanswered `human_review_items` and ADD new ones
+  for gating that emerged during this phase rather than merging them; and
+  push procedural findings (PATH ordering, dry-run side effects, agent
+  hints) into the skill surface as a separate `docs(<area>):` commit
+  keyed on the relevant `research-contract` / SKILL section so the
+  findings survive the wait for operator input. See `58b946717` for the
+  2026-09-17-research-metadata-pipeline Phase 7 example.
 - Pre-flight a `docs(repo):` rename by listing BOTH endpoints in
   `git ls-files -s <old> <new>` — the rename is a single index fact
   but the index holds independent `D` + `A` entries, and the
