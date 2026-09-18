@@ -317,3 +317,30 @@ programmatically. The Phase 4 publication tests own round trips.
   features, and `--features desktop`: no `darkmatter`, `biscuit-file`, or
   YAML crate (the dev-dependency does not leak).
 - `md schema validate` sweep: 0 unexpected results over 170 fixtures.
+
+### Cross-OS evidence (`just cross-check messenger … research_corpus`)
+
+None of the three remote legs produced a test result. All failures are host
+availability problems, not test failures:
+
+- **windows** (`build-win-native`): `scp` to `W:` failed, then `git fetch`
+  failed with `No space left on device`. The `W:` volume is full (Phase 1
+  noted it was nearly full). Not cleaned: freeing space on a shared host
+  deletes other people's data and needs a human decision (see the
+  `storage-strategy` skill).
+- **wsl** (`build-win`): `kex_exchange_identification: Connection reset by
+  peer`, the same SSH reset Phase 1 hit.
+- **linux** (`build-linux`): queued behind a stale host lock held since
+  2026-09-14T18:25Z by `reward-20260914-c3e60d0` (`nightly-reward-spike`,
+  branch `feat-nightly-perf`). The script never removes a foreign lock, and
+  neither did this phase; the queued waiter was stopped after about 25
+  minutes.
+
+OS-risk assessment for what Phase 2 changed: the only code is a test that
+reads repository files. It uses a runtime `CARGO_MANIFEST_DIR` (for the WSL
+archive leg), `Path::join` with relative segments (portable), and `str::lines`
+(which also strips `\r`). `.gitattributes` forces `eol=lf`. Darkmatter's
+relative `$schema` and `Name@../platforms/_types.yaml` resolution on native
+Windows is the one unproven path; CI's `windows-latest` leg covers it, and
+the next phase with host access should run `just cross-check messenger --os
+windows research_corpus`.
