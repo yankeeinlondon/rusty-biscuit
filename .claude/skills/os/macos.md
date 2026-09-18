@@ -35,6 +35,12 @@ conditions that masquerade as repository defects.
   whole-package `cargo nextest run` OOM-kills the linker in the default VM,
   so use `--memory=7g`, `CARGO_BUILD_JOBS=2`, and targeted `--lib` /
   `--test <name>` runs. podman's VM does not start on this host.
+  On 2026-09-17, bind mounts under `/tmp` failed ("error while creating mount
+  source path '/private/tmp/…': mkdir /private: read-only file system"): the
+  host's Docker file sharing does not cover `/private/tmp`. Put both the
+  source copy and the target dir under `$HOME` (for example
+  `~/.cache/rb-linux/{src,target}`). `rust:1` needs
+  `apt-get install libdbus-1-dev pkg-config` for `messenger --features desktop`.
 - **Windows compile evidence:** the `x86_64-pc-windows-gnu` target; details
   and the msvc prohibition are in [windows.md](windows.md).
 - **Behavioral Windows and WSL2 evidence:** the build hosts
