@@ -81,3 +81,89 @@ The prepared representation should distinguish authored templates from already-e
 - Specify the lifecycle descriptor payload and schema-location linkage with the schema/editor investigation.
 
 No implementation, prototype, plan, specification edit, commit, provider launch, or audio activity was performed.
+
+## 2026-09-18 follow-up: current lookup inventory and graph recheck
+
+Read the confirmed D1 and D2 decisions in `design.md`: an additive richer
+resolver with an ordinary default, and immutable declarations separated from
+runtime sessions with fresh per-evaluation caches. The dispositions below apply
+those decisions; they do not select the still-open result/error types.
+
+The initial source revision was `488b8b2e9cf4eebc02625ba33bc01afcf392fa1a`.
+External commits advanced HEAD during inspection (including
+`b3f69d2ba74fbd05ddd4c3ef14d89480132453a1`). A comparison from `488b8b2` to
+that HEAD found no changes under the inspected Darkmatter compose/test or
+Claudine composition/dispatch paths. The index metadata identified this exact
+worktree and last indexed commit `488b8b2`, indexed at
+`2026-09-18T07:40:37.164Z`, but later also recorded incremental work in progress.
+
+The CLI no longer recognized the `better-static-analysis` alias; subsequent
+calls explicitly used `/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis`.
+`context EvaluationLookup` returned 17 implementation references, all matching
+source. However, upstream `impact` remained inconsistent: its first response
+reported **CRITICAL**, 12 affected symbols, one direct implementation and six
+processes; a subsequent absolute-path call reported **CRITICAL**, 7,786 symbols
+and `partial: true`; a bounded depth-one retry reported **CRITICAL**, one direct
+implementation and 31 processes. The walks included unrelated imports/processes
+and disagreed with the context operation's 17 direct implementations. The
+CRITICAL warning must not be waived using `riskSharedAxes`, but these counts and
+process lists are **not trustworthy impact evidence**. A current metadata stamp
+did not resolve graph consistency. No clean graph-impact claim is made.
+
+### Complete source implementation inventory
+
+The source inventory contains **21 actual implementation blocks**, plus two
+rustdoc `SimpleLookup` examples. The historical 17 is also the context query's
+count, not the complete source count. The four additional source entries are
+the two Darkmatter integration-test `Lookup` types and Claudine lifecycle's
+`MapLookup`/`EmptyLookup` fixtures.
+
+Paths below are repository-relative. “Ordinary default” means the confirmed D1
+resolver default, not preservation of forbidden bare-context fallback or an
+additional lifecycle-global catalog.
+
+| Implementation | Location | Migration disposition |
+| --- | --- | --- |
+| `EffectiveState` | `darkmatter/lib/src/markdown/compose/context/effective_state.rs:352` | Ordinary default over corrected document-only bare lookup; remove underlying context fallback, preserve reserved namespaces and custom string coercion. |
+| `ResolvingLookup` | Same file, line 411 | Forward richer resolution to wrapped state, retaining borrowed/owned file-resolution context and string coercion; never flatten typed outcomes into `Option`. |
+| `FrontmatterSeedState` | `darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs:96` | Ordinary default; preserve seed-state namespace routing, invocation environment snapshot, and named-object display coercion. |
+| `ShortcutLookup` | `darkmatter/lib/src/markdown/compose/conditions.rs:345` | Ordinary default after removing explicit bare-name retry as `ctx.{path}`; keep explicit lazy `ctx` capture and environment behavior. |
+| `CtxLookup` | `darkmatter/lib/src/markdown/compose/expression/ctx.rs:82` | Ordinary default; remains an explicit `ctx`-only provider, returning missing for other paths without lifecycle globals. |
+| `LayeredLookup` | `darkmatter/lib/src/markdown/compose/subtree.rs:213` | Rich resolver implementation: checked declarations/runtime association, namespace precedence, explicit unavailable outcomes and per-session memoization under D2. Remove root-membership hook. |
+| `LoopExpressionLookup` | `claudine/lib/src/composition/looping/expression.rs:139` | Preserve loop ambient values as explicit non-lifecycle globals, document state and existing context/environment timing; use shared classification rather than infer globals from failed document lookup. |
+| `SizedLookup` | `claudine/lib/src/composition/looping/actions.rs:248` | Must forward richer resolution through its `dyn EvaluationLookup`; its existing `get`/`get_string`-only forwarding would otherwise erase typed binding failures. Preserve unrelated loop action JSON reparsing. |
+| `SourceExpressionLookup` | `claudine/lib/src/composition/sequence/expr.rs:75` | Ordinary sequence namespace; correct reserved namespace precedence and explicit `doc` routing while preserving ordinary item-field-over-document precedence. No lifecycle-global injection. |
+| `EventMetaExpressionLookup` | `claudine/lib/src/dispatch/expression.rs:85` | Ordinary default over event-as-document projection; retain deliberate absence of `ctx` on template/matcher surfaces and existing event/environment aliases. No lifecycle globals. |
+| `EventMetaConditionLookup` | Same file, line 169 | Route explicit `ctx` through its provider and forward other richer resolutions to inner event lookup; preserve hook-working-directory read-side context. |
+| `TestLookup` | `darkmatter/lib/src/markdown/compose/expression/mod.rs:833` | Ordinary default; preserve exact-key test fixtures and missing/null behavior. |
+| `FsLookup` | `darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs:554` | Ordinary default; preserve filesystem function context, no globals. |
+| `FixtureLookup` | Same file, line 885 | Ordinary default; preserve exact-key fixture data and function resolution context. |
+| `MapLookup` | Same file, line 1078 | Ordinary default; preserve catalog-example values and rendering checks. |
+| `FixtureLookup` | `darkmatter/lib/src/markdown/compose/expression/semantics.rs:810` | Ordinary default; retain dotted traversal and existing null propagation. |
+| `MapLookup` | `claudine/lib/src/composition/looping/actions/tests.rs:12` | Ordinary default; retain loop action fixtures without lifecycle policy. |
+| `MapLookup` | `claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs:1410` | Ordinary default; retain literal/action-shape data fixture. Availability tests should instead construct real declarations/session fixtures. |
+| `EmptyLookup` | Same file, line 1418 | Ordinary default; missing stays null. |
+| `Lookup` | `darkmatter/lib/tests/more_is_more_literals_and_indexes.rs:11` | Ordinary default; preserve explicit `ctx.limit` fixture and read-side context. |
+| `Lookup` | `darkmatter/lib/tests/predict_conflicts.rs:147` | Ordinary default; preserve empty data and borrowed resolution context. |
+
+The two rustdoc examples at `expression/mod.rs:176` and `:379` can retain their
+small `get` implementations and inherit the ordinary default. Update their
+explanatory contract if the surrounding documentation changes; they do not need
+to reproduce classification or lifecycle policy.
+
+The wrapper audit must include runtime evaluation and interpolation consumers
+that call `get_string`: retaining coercion is necessary, but no display helper
+may bypass an unavailable-global error by falling back to the old `get` path.
+That is a contract concern for the selected additive design, not a reason to
+introduce lifecycle semantics into ordinary fixtures.
+
+### Consumer scope reverified
+
+The four production `SubtreeCompose::new` sites remain lifecycle executor
+`:917`, lifecycle preflight `:412`, sequence preflight `:941`, and sequence task
+`:874`. Direct expression evaluation remains lifecycle executor `:893`, sequence
+expression `:131`, loop expression `:218`, loop actions `:221`, dispatch template
+`:493`, matcher `:160`, and runner `:115`. These paths establish the coordinated
+Darkmatter/Claudine migration even though current transitive graph counts are
+unreliable. Their domain policies remain separate; the shared richer resolver
+must reach all of them.

@@ -102,11 +102,52 @@ lifecycle concepts. This is not a compatibility mode for obsolete strictness
 behavior; the specification still requires its direct removal and coordinated
 consumer migration.
 
-D1 **does not settle** the resolver result type, passive descriptor API,
+D1 alone does not settle the resolver result type, passive descriptor API,
 provider representation, lazy cache scope, error enums, or prepared-evaluation
-representation. Those consequential contracts remain subject to agreement.
+representation. D2 below settles the declaration/session separation and cache
+lifetime; the remaining contracts still require agreement.
 It authorizes no change to observation timing, short-circuit behavior, whole-value
 typing, interpolation, escaping, or platform behavior.
+
+## D2 — Separate binding declarations from runtime values and caches
+
+**Human decision:** confirmed 2026-09-18, option **B**. Keep immutable binding
+declarations separate from a runtime evaluation session. Give each evaluation
+a fresh lazy-value cache, preserving the existing per-lookup cache lifetime.
+
+**Recommendation presented:** option B, so preparation and DMLS can consume
+the complete binding declarations without carrying or invoking runtime providers.
+
+The agreed semantic contract is:
+
+| Surface | States and responsibilities |
+| --- | --- |
+| Immutable declarations | Classify a global as definitely available, definitely unavailable with a structured reason, or execution-dependent. These declarations support shared passive and runtime classification. |
+| Runtime entries | Supply an eager value, a lazy provider, or an unavailable state. A real `null` value is available data and must never be treated as unavailability. |
+| Checked association | Associate declarations and runtime entries through a checked boundary. Invalid configuration produces structured errors; association and passive validation do not invoke lazy providers. |
+| Runtime session | Own the evaluation's memoized lazy values. Reusable declarations do not share a lazy cache across separate evaluations, actions, or events. |
+
+Passive validation can reject definitely forbidden references in inactive
+branches using declarations alone. Execution-dependent availability remains a
+runtime check. The existing specification requirement to reject registrations
+named exactly `doc`, `ctx`, or `env` before evaluation or provider invocation
+applies to this checked boundary as well.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Combine declarations, providers, and cache in one object | Fewer distinct objects and a direct runtime construction path. | Static consumers must avoid runtime-bearing fields; reuse can accidentally extend provider/cache lifetime. |
+| B: Immutable declarations plus a runtime session **(confirmed)** | Keeps passive consumers provider-free and makes cache lifetime explicit. | Requires checked association between the declarations and runtime entries. |
+
+Simplicity here means separating data with different lifetimes and consumers,
+not introducing a second policy catalog. Darkmatter owns the shared contracts
+and validation mechanics; Claudine supplies its lifecycle declarations and
+runtime values. DMLS consumes the declarative form without depending on Claudine.
+The declaration serialization/distribution format remains open.
+
+This decision does not choose exact Rust type or method names, final error
+variants, or the prepared-expression API. It also does not settle the
+`current`/`current_env` projection or change when context and environment are
+observed. Lazy materialization and observation timing remain distinct.
 
 ## Remaining decisions and design completion work
 
@@ -115,7 +156,7 @@ sequencing.
 
 | Priority | Open subject | Consequence to resolve before planning |
 | --- | --- | --- |
-| 1 | Binding declarations versus runtime values/cache | Decide between a combined declaration/provider object and immutable descriptors with a runtime session. The latter is the current recommendation, **not confirmed**. Define eager/lazy/unavailable values, structured reasons, and memoization lifetime. |
+| 1 | Binding interface details | Specify the richer result, passive descriptor API, structured reason/error shapes, and checked-association invariants within D1 and D2. |
 | 2 | Shared classification and prepared evaluation | Specify passive all-reference validation, runtime-dependent availability, context requirements, and typed results/errors without provider invocation during preparation. |
 | 3 | Lifecycle catalog and live environment projection | Reconcile current implementation and intended `current`/`current_env` shape; preserve or explicitly agree any observable change to capture timing. |
 | 4 | Evaluation and restriction retention | Preserve ordinary whole-value, mixed-string, and escape behavior; define restriction retention through deferred, generated, and moved values without extra evaluation passes. |
