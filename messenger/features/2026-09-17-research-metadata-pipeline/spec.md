@@ -1,9 +1,30 @@
 ---
-status: draft
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
 created: 2026-09-17
 updated: 2026-09-17
 area: messenger
 clarified: true
+reviewed: true
+review_note: "the clarification process served as a review"
 needs_rulings: false
 clarified_by: codex/default
 packages:
@@ -22,7 +43,7 @@ references:
 
 Turn Messenger's platform research into a repeatable, evidence-backed source of typed provider knowledge. Message length constraints are the first consumer, but the contract must also describe formatting, attachments, delivery capabilities, API errors, and operational restrictions that affect portable outbound messages, together with inbound and interactive capabilities needed for future conversations.
 
-Adopt the pattern described in [Agentic Research as a Typed Knowledge Pipeline](docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md): a shared roster, reusable fleet prompt, schema-validated research documents, deterministic consumers, reviewed refreshes, and a compact publication into the Messenger agent skill.
+Adopt the pattern described in [Agentic Research as a Typed Knowledge Pipeline](^docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md): a shared roster, reusable fleet prompt, schema-validated research documents, deterministic consumers, reviewed refreshes, and a compact publication into the Messenger agent skill.
 
 “Self-learning” means that refreshed evidence exposes changed facts, schema gaps, and implementation gaps, which feed subsequent research and reviewed changes. It does not mean that a research agent can silently change delivery behavior or promote its own claims into runtime policy.
 
