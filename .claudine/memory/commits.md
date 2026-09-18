@@ -241,6 +241,16 @@ belong here.
   reserved for code that actually ships — and the frontmatter `area` is
   the scope, so `area: darkmatter` becomes `planning(darkmatter):` even
   though the path lives under `features/`.
+- When `review-1.md` is a feature's FIRST independent review, no review
+  cycle exists to close — the `close cycle N, open cycle N+1` shape does
+  not apply. Use `planning(<area>): add review 1 for <feature>` for the
+  `A review-1.md` plus the `review_iterations: 0→1` spec bump, even when
+  the feature's phase-based execution close already landed at HEAD. See
+  `0cee5151f` (research-metadata-pipeline review 1 after Phase 8 close).
+  Design-phase `M`-only edits recording human-confirmed rulings together
+  with follow-up investigation sections are likewise one `planning(<area>):`
+  commit, subject shaped `confirm <decisions> and record <investigations>`
+  (see `44b5fcfe0`, following the `538734269` precedent).
 - In cycle-close bodies quote what the diff says; do not paraphrase into
   claims the staged text did not make ("smoke test failed" vs. "smoke attempt
   interrupted by host load").
