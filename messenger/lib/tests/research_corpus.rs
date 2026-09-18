@@ -287,6 +287,13 @@ fn diagnostic_fixtures_validate() {
     assert_all_valid("diagnostics", 6);
 }
 
+/// The accepted-fleet publication baseline (`lifecycle/fleet/`): one
+/// document per roster platform.
+#[test]
+fn fleet_fixtures_validate() {
+    assert_all_valid("lifecycle/fleet", 5);
+}
+
 /// The ported pilots are the schema-version-1 freeze gate: all four must
 /// pass, and the investigated-gap fixture proves every category can record
 /// an investigated gap.
@@ -504,7 +511,7 @@ fn research_corpus_is_sanitized() {
     for name in ["_schema.yaml", "_types.yaml", "_overrides.schema.yaml", "_rules.md", "_fleet.md"] {
         paths.push(research.join(name));
     }
-    for dir in ["contract", "interaction", "diagnostics", "negative/schema", "negative/semantic"] {
+    for dir in ["contract", "interaction", "diagnostics", "lifecycle/fleet", "negative/schema", "negative/semantic"] {
         paths.extend(files_in(&root.join(dir)));
     }
     for path in &paths {
@@ -632,6 +639,17 @@ mod typed {
             let result = validate(&path, Scope::Fragment);
             assert!(result.diagnostics.is_empty(), "{}:\n  {}", path.display(), show(&result.diagnostics));
             assert!(result.validated.is_some(), "{} did not validate", path.display());
+        }
+    }
+
+    /// The fleet fixture is complete accepted research, not a fragment.
+    #[test]
+    fn fleet_documents_pass_the_semantic_rules_as_accepted_research() {
+        let files = files_in(&fixtures_dir().join("lifecycle/fleet"));
+        assert_eq!(files.len(), 5);
+        for path in files {
+            let result = validate(&path, Scope::Accepted);
+            assert!(result.diagnostics.is_empty(), "{}:\n  {}", path.display(), show(&result.diagnostics));
         }
     }
 

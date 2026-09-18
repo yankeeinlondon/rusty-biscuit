@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use biscuit_file::{FileReference, FileResolutionContext};
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationProblemCode};
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
@@ -178,16 +179,34 @@ impl Loader {
     pub fn load<T: ContractFile>(&self, path: &Path) -> Result<Loaded<T>, ResearchError> {
         let absolute = normalize(&self.absolute(path));
         let repo_path = self.workspace.repo_path(&absolute)?;
-        std::fs::metadata(&absolute).map_err(|source| ResearchError::Io {
+        let text = std::fs::read_to_string(&absolute).map_err(|source| ResearchError::Io {
             path: repo_path.clone(),
             source,
         })?;
-        let markdown = Markdown::try_from(absolute.as_path()).map_err(|error| {
-            ResearchError::Frontmatter {
+        self.load_text_at(&absolute, repo_path, text)
+    }
+
+    /// Loads `text` as the platform document it would be at `path`: file
+    /// references (`$schema`) resolve from `path`, so a candidate is judged
+    /// exactly as it will read once published there. `path` need not exist.
+    ///
+    /// ## Errors
+    ///
+    /// See [`Loader::load`].
+    pub fn load_document_text(&self, path: &Path, text: impl Into<String>) -> Result<Loaded<PlatformDocument>, ResearchError> {
+        let absolute = normalize(&self.absolute(path));
+        let repo_path = self.workspace.repo_path(&absolute)?;
+        self.load_text_at(&absolute, repo_path, text.into())
+    }
+
+    fn load_text_at<T: ContractFile>(&self, absolute: &Path, repo_path: RepoPath, text: String) -> Result<Loaded<T>, ResearchError> {
+        let markdown = Markdown::try_from_content(text)
+            .map_err(|error| ResearchError::Frontmatter {
                 path: repo_path.clone(),
                 message: self.scrub(&error.to_string()),
-            }
-        })?;
+            })?
+            .with_source(ComposeSource::infer_from_path(absolute));
+        let absolute = absolute.to_path_buf();
 
         let mut frontmatter: Map<String, Value> = markdown
             .frontmatter()

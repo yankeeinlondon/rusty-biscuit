@@ -273,7 +273,7 @@ pub(super) fn check_overrides(
 // ---- completeness summary ----------------------------------------------------
 
 /// Coverage of one category for one interface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CoverageState {
     Researched,

@@ -91,6 +91,37 @@ impl ValidatedDocument {
     pub fn record(&self, id: &str) -> Option<&Value> {
         record_json(&self.frontmatter, id)
     }
+
+    /// The authored frontmatter (without `$schema`).
+    pub fn frontmatter(&self) -> &Value {
+        &self.frontmatter
+    }
+
+    /// Every fact-bearing record with its authored JSON, in document order.
+    pub fn fact_records(&self) -> Vec<FactRecord<'_>> {
+        fact_ids(&self.document)
+            .into_iter()
+            .filter_map(|(pointer, id)| {
+                let record = self.frontmatter.pointer(&pointer)?;
+                let array = pointer
+                    .split('/')
+                    .filter(|segment| !segment.is_empty() && !segment.bytes().all(|b| b.is_ascii_digit()))
+                    .collect::<Vec<_>>()
+                    .join(".");
+                Some(FactRecord { array, id, record })
+            })
+            .collect()
+    }
+}
+
+/// One fact-bearing record of a validated document.
+#[derive(Debug, Clone)]
+pub struct FactRecord<'a> {
+    /// The frontmatter array holding it, e.g. `constraints`, or
+    /// `format_profiles.fixtures` for a nested format fixture.
+    pub array: String,
+    pub id: &'a str,
+    pub record: &'a Value,
 }
 
 /// Per-interface, per-category completeness of an authored document, valid

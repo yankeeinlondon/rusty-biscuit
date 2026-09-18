@@ -13,11 +13,16 @@
 
 pub mod assess;
 pub mod canonical;
+pub mod delta;
 pub mod diagnostics;
 pub mod error;
+pub mod generate;
 pub mod load;
 pub mod model;
 pub mod paths;
+pub mod project;
+pub mod publish;
+pub mod report;
 pub mod validate;
 
 pub use diagnostics::{Diagnostic, Rule, sort_diagnostics};
@@ -25,6 +30,6 @@ pub use error::ResearchError;
 pub use load::{ContractFile, ContractKind, Loaded, Loader};
 pub use paths::{RepoPath, Workspace};
 pub use validate::{
-    Context, DocumentValidation, Scope, ValidatedDocument, coverage_summary, validate_document, validate_fleet,
+    Context, DocumentValidation, FactRecord, Scope, ValidatedDocument, coverage_summary, validate_document, validate_fleet,
     validate_mappings, validate_overrides, validate_roster,
 };

@@ -27,6 +27,34 @@ Platform research is becoming typed, reviewed metadata (feature
   `lib/tests/research_validation.rs` pins targeted behavior with variants
   written into a temp workspace that copies the shipped schemas.
 
+## Publication and consumers
+
+- **Snapshot** = the five accepted documents, `docs/research/platforms/catalog.json`,
+  and the generated region of `docs/research/summary/platforms.md`, selected by
+  the committed manifest `docs/research/publication.json` (`research::publish`,
+  a port of the Phase 1 manifest + journal spike). Journal and staging live in
+  the gitignored `messenger/.research-state/publication/`.
+- `research::generate::{generate, check}` drive it: fleet load →
+  `Fleet::validate` (Accepted scope) → `Fleet::snapshot` → `publish`. With a
+  published snapshot, documents come **only** from verified bytes or explicit
+  `updates` (partial refresh); without one, the fixed paths are the initial
+  baseline. Refusal, interruption, or a pending journal leaves the previous
+  snapshot selected; writers refuse with `RecoveryRequired` until `recover`.
+- `research::project` builds the catalog (serialization-only DTOs; sorted by
+  spelled IDs; no clock, no host paths; `refresh_due` recorded as a date so
+  staleness is judged by readers). `research::report` reads the published
+  catalog through `CatalogView` (reason codes only, so no executable type can be
+  deserialized) and stays available when today's validation fails.
+  `research::delta` is the mechanical fact-level comparison with the six fixed
+  flags. `report::emitted_surfaces` is Messenger's own surface list per
+  adapter and must change with the adapter code.
+- CLI: `messenger research validate|generate [--check]|report|recover`
+  (`--root`, `--today`, `--json`; exit 0 / 1 findings-drift-refusal / 2 usage /
+  3 cannot run). Tests: `lib/tests/research_publication.rs` (fault injection at
+  every step), `lib/tests/research_lifecycle.rs` (delta),
+  `cli/tests/research_cli.rs` (real binary). Baseline fixture:
+  `lib/tests/fixtures/research/lifecycle/fleet/`.
+
 ## Gotchas
 
 SimplifiedSchema types must be one line and regex groups need
@@ -45,3 +73,18 @@ exposed several Phase 2 fixture defects (duplicated matrices, dangling IDs).
 When adding a fixture, run the typed corpus test, not only `md schema
 validate`. Header conventions: `# expect-rule`, `# validate-scope: accepted`,
 `# expect-ineligible: <fact> <reason>`.
+
+The summary artifact is hashed by its generated region only
+(`ArtifactScope::GeneratedRegions`), so maintainers may edit the prose around
+it; editing inside the markers is a verification failure. Any other artifact
+is whole-file. Manifest and journal paths are checked with
+`paths::is_portable` before use: a hostile manifest could otherwise make
+publication remove files outside the repository.
+
+`Loader::load_document_text` judges a candidate's text *as if* it sat at the
+accepted path, so a relative `$schema` resolves the way it will after
+publication. Load candidates this way, not from their state-area location.
+
+Dense `Table`s cannot render at narrow widths ("Table could not be rendered in
+N columns"); the human report uses word-wrapped `UnorderedList`s instead, and
+`UnorderedList` items are plain text (do not `Prose::escape_text` them).

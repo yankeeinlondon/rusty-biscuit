@@ -16,7 +16,7 @@ use super::model::{
     AdapterId, Assessment, Category, FingerprintKind, ImplementationStatus, Mappings, ReviewStatus,
     StaleReason,
 };
-use super::paths::{RepoPath, Workspace};
+use super::paths::{RepoPath, Workspace, is_portable as portable};
 use super::validate::ValidatedDocument;
 
 pub(crate) fn check_mappings(mappings: &Mappings, documents: &[&ValidatedDocument], findings: &mut Findings) {
@@ -96,15 +96,6 @@ pub(crate) fn check_mappings(mappings: &Mappings, documents: &[&ValidatedDocumen
             }
         }
     }
-}
-
-/// Forward-slash, relative, without `.`/`..` segments.
-fn portable(path: &str) -> bool {
-    !path.is_empty()
-        && !path.starts_with('/')
-        && !path.contains('\\')
-        && !path.contains(':')
-        && path.split('/').all(|segment| !segment.is_empty() && segment != "." && segment != "..")
 }
 
 /// One input whose recorded fingerprint no longer matches.

@@ -103,6 +103,26 @@ impl Workspace {
         self.join("messenger/docs/research/implementation/mappings.yaml")
     }
 
+    /// `messenger/docs/research/platforms/_fleet.md`, the shared research prompt.
+    pub fn fleet_prompt(&self) -> PathBuf {
+        self.join(FLEET_PROMPT)
+    }
+
+    /// The accepted document of `platform`, `messenger/docs/research/platforms/{platform}.md`.
+    pub fn document(&self, platform: super::model::PlatformId) -> PathBuf {
+        self.join(&document_path(platform))
+    }
+
+    /// `messenger/docs/research/publication.json`, the snapshot selection point.
+    pub fn manifest(&self) -> PathBuf {
+        self.join(MANIFEST)
+    }
+
+    /// `messenger/.research-state/`, the gitignored per-worktree state area.
+    pub fn state_dir(&self) -> PathBuf {
+        self.join(STATE_DIR)
+    }
+
     /// The repository-relative spelling of a path inside the workspace.
     ///
     /// ## Errors
@@ -138,6 +158,32 @@ impl Workspace {
             .split('/')
             .fold(self.repo_root.clone(), |acc, segment| acc.join(segment))
     }
+}
+
+/// The committed snapshot manifest.
+pub const MANIFEST: &str = "messenger/docs/research/publication.json";
+/// The generated catalog.
+pub const CATALOG: &str = "messenger/docs/research/platforms/catalog.json";
+/// The cross-provider summary: generated regions inside authored prose.
+pub const SUMMARY: &str = "messenger/docs/research/summary/platforms.md";
+/// The shared research prompt (a manifest input).
+pub const FLEET_PROMPT: &str = "messenger/docs/research/platforms/_fleet.md";
+/// The gitignored local state area.
+pub const STATE_DIR: &str = "messenger/.research-state";
+
+/// The accepted-document path of `platform`.
+pub fn document_path(platform: super::model::PlatformId) -> String {
+    format!("messenger/docs/research/platforms/{platform}.md")
+}
+
+/// Forward-slash, relative, without `.`/`..` segments, drive letters, or
+/// backslashes: a path that cannot leave the repository on any OS.
+pub fn is_portable(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.contains('\\')
+        && !path.contains(':')
+        && path.split('/').all(|segment| !segment.is_empty() && segment != "." && segment != "..")
 }
 
 /// Lexically removes `.` and resolves `..` without touching the filesystem,
