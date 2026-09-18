@@ -5,7 +5,10 @@ human_review: false
 reviewed_by: codex/gpt-5.6-sol
 created: 2026-09-17T18:50:47-07:00
 spec: 2026-09-16-better-spec-syntax/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
+next: 2026-09-16-better-spec-syntax/review-5.md
 description: A **fix** review of `2026-09-16-better-spec-syntax/spec.md`
 fix: 2026-09-16-better-spec-syntax/review-4.md
 previous: 2026-09-16-better-spec-syntax/review-3.md

@@ -5,6 +5,7 @@ implemented_by: "codex/gpt-5.6-sol"
 implementation_1: "2026-09-17T11:11:26-07:00"
 implementation_2: "2026-09-17T12:16:17-07:00"
 implementation_3: "2026-09-17T16:42:23-07:00"
+implementation_4: "2026-09-17T19:07:22-07:00"
 started_phase: "5"
 implemented: true
 source_code:
@@ -1328,3 +1329,35 @@ The implementation of review cycle 3 has completed successfully in 2 hours 7 min
         - non-vacuity: with both production edits temporarily reverted, all four new claudine tests fail (`left: "a_{{ two }}"`; `{"a_first_lexically":null,"z_last_lexically":null}`); restored, the focused slice passes
         - note: another session ran a worktree-wide `git add` while the temporary revert was on disk, staging the reverted `actions.rs`/`data.rs`; re-staged both files with the correct content (index now matches the working tree for them)
         - docs: added the authored-order promise (YAML/JSON/JSON5, diagnosis and prior-value serialization) to the lifecycle `set` paragraph in `claudine/docs/topics/lifecycle.md` and its skill snapshot `.claude/skills/claudine/lifecycle.md`; no existing doc described YAML-only ordering, so nothing had drifted
+        - revised (b): `just lint`'s `no_unallowlisted_typed_error_collapses` guard rejected stringifying the json-five error inside claudine, so the `json_five` re-export was replaced by a typed `biscuit_file::Json5::deserialize_raw<T>` (re-reads the retained source text; errors are the existing `Json5Error::Parse`) plus a biscuit-file unit test; `load_document` now calls `json5.deserialize_raw::<MappingOrders>()` and wraps the typed `Json5Error`
+        - docs drift fixed: `AuthoredOrder`'s `///` in `claudine/lib/src/composition/authored_order.rs` listed JSON5 as a format that records no key order; now only JSONL/NDJSON
+        - `just lint`: claudine passed, darkmatter passed, biscuit-file passed
+        - `just test --no-fail-fast` (claudine/): 7,308 run, 7,298 passed, 10 failed, 9 skipped; the 9 shipped implement-plan failures are the known `has_skill(ctx.area)` / implement-plan fixture drift and `cross_platform_prompt_composes_cleanly` fails on the moved `prompts/cross-platform.md` (both unrelated work by another session); no new failures
+        - `just test` (darkmatter/): 7,947 run, 7,947 passed, 7 skipped; `just test` (biscuit-file/): 814 run, 814 passed
+        - note: commit `8c8b2eb8b` (made outside this subagent) captured an intermediate state of this finding (the since-removed `biscuit_file::json_five` re-export and the `json_five::from_str` call in `load_document`, which trips the typed-error-collapse lint guard); the finished work is the uncommitted delta in `biscuit-file/lib/src/{lib.rs,json5/types.rs}`, `claudine/lib/src/composition/{sequence/data.rs,authored_order.rs}`, `darkmatter/lib/src/markdown/mapping_orders.rs`, and the two `lifecycle.md` docs
+- work completed for 'Authored order is not consistently applied before validation or in JSON/JSON5 task documents' at 19:53:00
+- cross-OS consideration: both fixes are pure in-memory parsing and diagnostic-path logic (no filesystem path comparison, process, or `#[cfg]` code), so no OS-specific risk was identified and no `just cross-check` run was needed; CI covers the other OSes
+- note for the reviewer: commit `8c8b2eb8b` (made outside this cycle while it was in flight) captured an intermediate state of Finding 2 that still used a `json_five` re-export rejected by the claudine lint guard; the final, lint-clean state is uncommitted in the working tree and needs a follow-up commit
+
+### Successful Completion
+
+The implementation of review cycle 4 has completed successfully in 46 minutes. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- No review findings were deferred. Neither finding required a performance measurement, so no deferred performance test was recorded.
+- The files changed for the review findings were:
+        - `claudine/lib/src/composition/lifecycle/parse.rs`
+        - `claudine/lib/src/composition/lifecycle/actions.rs`
+        - `claudine/lib/src/composition/error/mod.rs`
+        - `claudine/lib/src/composition/authored_order.rs`
+        - `claudine/lib/src/composition/sequence/data.rs`
+        - `claudine/lib/src/composition/sequence/task/mod.rs`
+        - `claudine/lib/src/composition/sequence/task/tests.rs`
+        - `claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs`
+        - `darkmatter/lib/src/markdown/mapping_orders.rs`
+        - `biscuit-file/lib/src/json5/types.rs`
+        - `biscuit-file/lib/src/lib.rs`
+        - `claudine/docs/topics/lifecycle.md`
+        - `.claude/skills/claudine/lifecycle.md`
+        - `claudine/fixes/2026-09-16-better-spec-syntax/review-4.md`
+        - `claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md`
+- No formatting command was run and no commit was made by this cycle.
