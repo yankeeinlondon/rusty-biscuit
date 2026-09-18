@@ -47,13 +47,18 @@ grid only when all of these conditions hold:
 - That run has an unexpired `ci-validation-v1-<tree>-<base>-<head>` artifact
   matching the pushed Git tree, pre-push `main` commit, and PR head.
 
-The scope job records the receipt from its actual synthetic merge checkout
-and verifies both parents against the PR event. The entire Git tree must
-match, including workflows, toolchain, lockfiles, package policies, and test
-configuration. The base comparison prevents a stale PR validation from
-covering a different integration base or an untested batch of pushes. Merge,
-squash, and rebase commits can have different commit IDs; reuse depends on
-their file content and recorded integration base.
+The scope job checks out the PR head (`TESTED_REVISION`, the revision the
+plan names and `ci-build` binds every archive to) rather than GitHub's
+synthetic merge, verifies that checkout against the event's head, and records
+the receipt from its tree. The entire Git tree must match, including
+workflows, toolchain, lockfiles, package policies, and test configuration. The
+base comparison prevents a stale PR validation from covering a different
+integration base or an untested batch of pushes. Merge, squash, and rebase
+commits can have different commit IDs; reuse depends on their file content and
+recorded integration base. A merge commit's tree equals the tested head's tree
+only when the PR was already up to date with `main`; a PR that was behind
+`main` gets normal CI after the merge, because the merged tree was never
+tested.
 
 Receipts are retained for seven days. Searches are bounded, and absent,
 expired, malformed, or inaccessible evidence schedules normal CI. Direct
