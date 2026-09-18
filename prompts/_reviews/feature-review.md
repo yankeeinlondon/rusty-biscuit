@@ -19,14 +19,14 @@ spec_name: "{{ parent_dir(spec) }}"
 
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
-    message: "🏃‍♂️ starting {{feature_or_fix}} review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area || ctx.repo}}** {{ctx.area_description}}_)"
+    message: "🏃‍♂️ starting review #{{iteration}} of `{{parent_dir(spec)}}` (_{{feature_or_fix}} in the **{{ctx.area || ctx.repo}}**_)"
 success:
     stack:
         - when: "frontmatter(review,'ready') == true"
           action:
               - success: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in **{{ctx.area}}** finished and deemed code to be **production ready**"
               - message: |-
-                    ✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully (_**production ready**_)
+                    ✅  review #{{iteration}} of `{{parent_dir(spec)}}` in **{{ctx.area || ctx.repo}}** completed successfully (_**production ready**_)
               - effect: small-group-cheer
         - when: "frontmatter(review,'ready') == true && frontmatter(review,'human_review') == true"
           action:
@@ -35,7 +35,7 @@ success:
 
                     {{ as_ordered_list(frontmatter(review,"human_review_items") || []) }}    
               - info: |-
-                    {{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- _while production ready_ -- requires human review ({{length(frontmatter(review, 'human_review_items') || [])}} items):
+                    review #{{iteration}} of `{{ upper(feature_or_fix) + ' ' + parent_dir(spec) }}` -- _while production ready_ -- requires human review ({{length(frontmatter(review, 'human_review_items') || [])}} items):
     
                     {{ as_ordered_list(frontmatter(review, 'human_review_items') || []) }}
         - when: "frontmatter(review,'ready') != true"

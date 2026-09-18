@@ -32,7 +32,8 @@ initialize:
               - stop
 start:
     message: |-
-        🗳️  starting the **git commit** process in {{ ctx.area || ctx.repo }} while in the **{{ctx.branch}}** branch {{ ctx.is_monorepo ? '\n    **packages impacted:** _' + as_csv(ctx.dirty_packages) + '_' : '' }}
+        🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** 
+        {{ ctx.is_monorepo ? '\n    **packages impacted:** _' + as_csv(ctx.dirty_packages) + '_' : '' }}
 success:
     message: |-
         🗳️  staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}}** branch, have been **committed to git** (_but not pushed_)
