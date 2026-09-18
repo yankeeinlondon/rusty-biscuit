@@ -251,6 +251,18 @@ belong here.
   with follow-up investigation sections are likewise one `planning(<area>):`
   commit, subject shaped `confirm <decisions> and record <investigations>`
   (see `44b5fcfe0`, following the `538734269` precedent).
+- A review-to-implement iteration — an `implementation-log.md` section
+  "Implementation of Review Findings #N" recording the fixes applied to a
+  review's findings — is `planning(<area>): record review-to-implement
+  iteration N`, not `close cycle N, open cycle N+1` (no new review exists
+  yet, and no `review-N.md` flips in it). It lands before the per-finding
+  `fix:`/`test:` commits it documents; each finding's code, tests, and its
+  "docs updated" files (user guide, README, skill surface) ship in that
+  finding's own commit keyed on the finding's primary subject. When the
+  findings' test hunks interleave in one shared test file, the earlier
+  finding's commit carries the file minus the later finding's contiguous
+  test block and the later finding's commit carries the full staged file;
+  verify by reinserting the block back into the earlier version.
 - In cycle-close bodies quote what the diff says; do not paraphrase into
   claims the staged text did not make ("smoke test failed" vs. "smoke attempt
   interrupted by host load").
@@ -332,6 +344,13 @@ belong here.
   `status`, and `commit`; re-dispatching never catches a stable snapshot.
   Detect via mtime / repeated `MM`, then commit it directly from the
   orchestrator in one shell when the working tree is a clean superset.
+- A brief's claim that a /tmp snapshot was "pre-saved by the orchestrator"
+  is unverified input: the agent should check the file exists before relying
+  on it. When it is missing, re-capturing via `git show :<path>` is faithful
+  only while no `--only` commit has touched that path since the brief was
+  written — `--only` rewrites the index entry to the blob it just committed,
+  so a later re-capture returns the previous commit's content, not the
+  original staged snapshot.
 
 ## Verification
 
