@@ -77,6 +77,7 @@ pub(crate) fn run_kimi_wire_session(
     let mut child = command.spawn()?;
     let captured_pid = child.id();
     *child_spawned = true;
+    crate::budget::record_child(captured_pid);
     Span::current().record("child_pid", tracing::field::display(captured_pid));
 
     let stdin = child

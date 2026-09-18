@@ -50,6 +50,9 @@ thiserror = "2.0"
 dirs = "6"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 uuid = { version = "1", features = ["v4"] }
+# Process start time for verifying a budget ledger's recorded orphan before
+# signaling it (PIDs are reused). Already in the graph through `sniff`.
+sysinfo = "0.38.2"
 tempfile = "3"
 ignore = "0.4"
 globset = "0.4"

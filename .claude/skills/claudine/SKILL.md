@@ -171,6 +171,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | `claudine compose <file> [key=value ...]` | Compose a Markdown file and send the result as a prompt (no file mutation) |
 | `claudine inline-compose <file> [key=value ...]` | Launch the agent **on the document itself** using frontmatter `prompt`; the agent writes the body and any requested frontmatter, Claudine restores `prompt`/`hash`/`last_updated`, updates `last_updated`, and stamps a Darkmatter `Simple` `hash:` |
 | `claudine sequence <file> [key=value ...]` | Run an ordered list of steps — static preflight over the whole task graph, then just-in-time composition at each step's turn; tasks, groups (serial/parallel), and the `outputs` accumulator |
+| `claudine budget init\|show\|suspend\|resume\|grant <ledger>` | Create and operate a persisted run budget; `sequence --budget-ledger <ledger>` enforces it across every launch, retry, restart, and crash (exit `76` exhausted, `77` blocked) — [Shared execution budgets](../../../claudine/docs/cli/budget.md) |
 
 **Administration**
 
@@ -203,6 +204,7 @@ An empty `ctx.area` at the repository root is expected.
 | Argv pre-parsing | `argv::normalize` rewrites composition-subcommand argv before clap (provider booleans → `--provider`, `--help` hoisting) | [CLI Pre-Parsing](cli-pre-parsing.md) |
 | System prompt | File-backed `--append-system-prompt`/`--asp` + `--replace-system-prompt`/`--rsp`, launch-CWD `system-prompt.md` discovery, per-provider delivery; direct wrappers also take `--edit` | [System Prompt](system-prompt.md) |
 | Timeouts | Two rules only — `timeout` (wall-clock, opt-in) and `step_timeout` (stream-silence, default `30m`) | [Timeouts](timeouts.md) |
+| Run budgets | `sequence --budget-ledger` debits each agent launch before spawn in `execute_attempt_phase` and caps its `timeout` at the remaining active time, rounded **up** to whole seconds (the wall-clock timer has 1 s resolution); step boundaries, retry backoff, settle, and a heartbeat thread check exhaustion. The run is installed process-wide (`budget::run`), so every hook is a no-op without a ledger | [Shared execution budgets](../../../claudine/docs/cli/budget.md) |
 | Runaway content guards | Three volume backstops — `exit_expressions`, `runaway_repetition` (≥30 cycles), `runaway_volume` (50k lines / 32 MiB) — mapping to `Aborted`/`AgentFailure`, never a retry | [Timeouts § Content guards](timeouts.md#content-guards-runaway-output) |
 | OpenCode stalled-generation | Live-but-dead backstop: trips only on retry churn **and** progress silence (`stall_timeout`, default `10m`); not a third timeout | [Timeouts § Stall](timeouts.md#opencode-stalled-generation-backstop) · [OpenCode Event Sources](opencode-event-sources.md) |
 | Signals | One signal-aware wait loop across every spawn path; per-press stderr feedback, `SIGTERM → SIGKILL` ladder, `_exit(130)` second-press guard, Windows parity | [Signal Handling](signal-handling.md) |

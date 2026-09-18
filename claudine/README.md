@@ -103,7 +103,7 @@ Three canonical commands:
 
 - **`claudine compose <file-ref> [key=value ...]`** — compose a Markdown file and send it as a prompt (no file mutation)
 - **`claudine inline-compose <file-ref> [key=value ...]`** — use the frontmatter `prompt` property to generate content and replace the document body, preserving frontmatter byte-for-byte
-- **`claudine sequence <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in one document, with a shared shell approval cache and `FAIL_FAST` propagation on failure
+- **`claudine sequence <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in one document, with a shared shell approval cache and `FAIL_FAST` propagation on failure. `--budget-ledger <path>` caps the whole run with a persisted invocation and active-time budget that `claudine budget` creates and operates ([Shared execution budgets](docs/cli/budget.md))
 
 **Inline Shorthand.** You can override frontmatter values using `key=value` positional arguments. Values are parsed as JSON5 first (supporting numbers, booleans, arrays) and fall back to plain strings. These shorthand overrides win over `--set` JSON blobs.
 

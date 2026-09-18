@@ -263,6 +263,9 @@ pub(crate) fn execute_sequence(
         }
     };
 
+    // A budgeted run stops through the same flag when its budget runs out.
+    crate::budget::attach_stop_flag(&interrupted);
+
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
 

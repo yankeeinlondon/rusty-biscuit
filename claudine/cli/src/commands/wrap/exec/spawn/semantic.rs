@@ -137,6 +137,7 @@ pub(crate) fn run_child_stream_semantic(
     let mut child = command.spawn()?;
     let captured_pid = child.id();
     *child_spawned = true;
+    crate::budget::record_child(captured_pid);
     Span::current().record("child_pid", tracing::field::display(captured_pid));
 
     // Terminal-local renderer for OutputText (stdout markdown). Wrapped

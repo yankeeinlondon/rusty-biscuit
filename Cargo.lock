@@ -2240,6 +2240,7 @@ dependencies = [
  "signal-hook 0.4.4",
  "sniff",
  "syn 2.0.117",
+ "sysinfo",
  "tempfile",
  "test-toolkit",
  "thiserror 2.0.18",

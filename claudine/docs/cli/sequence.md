@@ -145,6 +145,10 @@ The `sequence` command inherits all shared composition flags:
 - **Output Control**: `--output <FORMAT>`, `--quiet` (`-q`), `--silent`.
 - **Overrides**: `--set <JSON>`, `--model <MODEL>`.
 
+`sequence` also accepts `--budget-ledger <PATH>`. It enforces one shared
+invocation and active-time budget across every agent launch, retry, and wait
+in the run. See [Shared execution budgets](budget.md).
+
 ### Performance Reporting
 
 `claudine sequence --perf` emits a single aggregated performance report at the end of the run, after the sequence summary. The report includes:
