@@ -2,6 +2,8 @@
 spec: "claudine/fixes/2026-09-16-better-spec-syntax/spec.md"
 plan: "claudine/fixes/2026-09-16-better-spec-syntax/plan.md"
 implemented_by: "codex/gpt-5.6-sol"
+implementation_1: "2026-09-17T11:11:26-07:00"
+implementation_2: "2026-09-17T12:16:17-07:00"
 started_phase: "5"
 implemented: true
 source_code:
@@ -1001,3 +1003,145 @@ with no production callers.
   concurrent prompt and Messenger edits, which were not modified or included
   in the Phase 5 inventory.
 - No formatting command was run.
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-09-17T12:16:17-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis/claudine/fixes/2026-09-16-better-spec-syntax/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- starting the work on 'Global preserve-order activation breaks established Claudine serialization contracts' at 12:17:19
+        - GitNexus classified Darkmatter's validated YAML conversion as LOW risk with one direct caller, six total upstream symbols, and no indexed process; `RuntimeSet` and `RuntimeState::set_batch` returned UNKNOWN, so text search confirmed their lifecycle parser/executor, sequence task, and focused-test consumers before editing.
+        - Removed Claudine's graph-wide `serde_json/preserve_order` activation. Darkmatter now retains nested YAML mapping-key order as frontmatter metadata during its existing duplicate-rejecting parse, while ordinary `serde_json::Map` behavior remains unchanged.
+        - Lifecycle event parsing and inline sequence side-effect normalization carry only the relevant `set` mapping order into `RuntimeSet`; the atomic prior-value batch uses an `IndexMap` and serializes directly at the sequence text boundary.
+        - The Darkmatter metadata regression passed. Four focused Claudine regressions passed: authored order through real lifecycle YAML, authored order through a real sequence document, insertion-order-independent OpenCode permission serialization, and the canonical provider field inventory.
+        - The final focused Claudine slice passed all 6 selected regressions, including atomic prior-value behavior and explicit runtime-null coverage. Darkmatter's full Level 1 suite passed all 7,942 tests.
+        - Full Claudine Level 1 passed 1,427 tests before fail-fast stopped only on the two known unrelated shipped-prompt failures: `shipped_implement_plan_preserves_supplied_commit_message_in_preflight_command` and `shipped_implement_plan_prepares_with_unset_optional_commit_message`. Both receive a path in `has_skill(ctx.area)` from concurrent dirty prompt edits, while every ordering regression passed.
+        - `just lint` completed successfully in both the Claudine and Darkmatter package areas, including Darkmatter's CLI, DMLS, and Zed WASM extension checks. Cargo's resolved feature graph confirms `serde_json/preserve_order` is absent.
+        - GitNexus `detect-changes --scope all --limit 500` completed with LOW risk, zero affected processes, 29 shared-worktree files, and 26 changed symbols. The finding's scoped diff passes `git diff --check`; the repository-wide check reports only trailing whitespace in unrelated concurrent prompt edits.
+        - The implementation is platform-neutral parsing and serialization logic with no OS-specific code or path comparison behavior. No formatting command was run.
+- work completed for 'Global preserve-order activation breaks established Claudine serialization contracts' at 12:48:49
+- starting the work on 'Group-member set failures report a non-source-rooted document and task path' at 12:49:34
+        - GitNexus resolved `PreflightTask` with an implausible CRITICAL cross-repository blast radius and could not resolve the private loader/executor methods, so the result was treated as unresolved. Text search bounded the real callers to sequence preflight construction, task/group execution, the CLI's exhaustive task scan, and their Level 1 tests.
+        - `PreflightTask` now carries preflight-authored diagnostic provenance: the owning source document and the exact source-rooted executable property. Inline members retain their enclosing task/group path, external group members restart at the group document's `tasks` root, and externalized tasks restart at the task document's executable root.
+        - Serial and parallel group scheduling now execute each member's lifecycle side effect with that member's source document. Runtime `set` failures append their nested value suffix to the carried property instead of rediscovering a flattened graph index by pointer identity.
+        - Focused Level 1 tests passed for top-level, inline-group, external-group, and externalized group-task failures. The group tests assert the authoring file, exact property, terminal/`err.*`/machine projection parity, and all-or-nothing rollback; the CLI's exhaustive `PreflightTask` scan test also passed.
+        - Full Claudine Level 1 executed 1,424 tests before fail-fast: 1,422 passed, including every provenance regression, and only the two known unrelated shipped-prompt tests failed because concurrent prompt edits pass a path to `has_skill(ctx.area)`.
+        - `just lint` completed successfully for the Claudine package area, including all diagnostic guards, the lifecycle documentation guard, and all five package lint stages.
+        - GitNexus `detect-changes --scope all --limit 500` completed without a partial or truncated result: 30 shared-worktree files, 28 changed symbols, zero affected indexed processes, and LOW aggregate risk. The finding's scoped diff passes `git diff --check`.
+        - The change is platform-neutral provenance and string-path handling with no OS-specific branches or path comparison behavior. No formatting command was run.
+- work completed for 'Group-member set failures report a non-source-rooted document and task path' at 13:06:35
+- starting the work on 'Runtime set evaluation errors cannot attach the required frontmatter excerpt' at 13:07:09
+        - GitNexus could not resolve the private excerpt selector, source locator, sequence dispatcher, snapshot, or restoration symbols and reported UNKNOWN risk with no indexed processes. Text search bounded the selector to frontmatter enrichment, the dispatcher to one task-execution call, and the snapshot/restoration boundary to lifecycle `err.*`, sequence results, launch detection, MCP/reporting, and their tests.
+        - `LifecycleEvaluationError` now selects its exact source-rooted property for the existing frontmatter enrichment seam. The source locator recognizes indexed YAML sequences and accepts a unique semantic-path suffix when a sequence task's diagnostic root differs from its enclosing frontmatter root; it still uses the captured source text and does not introduce another YAML parser.
+        - Sequence runtime-set failures now enrich the typed diagnostic from the owning task document before crossing the intentional snapshot boundary. The snapshot retains the excerpt only for in-process restored rendering and excludes it from serialization, preserving terminal/`err.*`/machine diagnostic identity and the existing privacy boundary.
+        - The event-stack regression parses real Markdown/YAML frontmatter and asserts the exact nested array-value line and excerpt. Inline-group coverage asserts that the excerpt survives snapshot restoration; external YAML group/task sources correctly retain typed identity without inventing a Markdown frontmatter block.
+        - Three discriminating tests passed, then a six-test provenance/restoration slice passed, followed by 56 focused Level 1 tests covering all frontmatter excerpt helpers, runtime-set execution, sequence side-effect tasks, group provenance, and restored diagnostics.
+        - Full Claudine Level 1 compiled all five packages and ran 1,386 tests before fail-fast: 1,383 passed, including every finding regression. The two known unrelated shipped-prompt tests failed because concurrent prompt edits pass a path to `has_skill(ctx.area)`. One shell-process test reported a leaked handle while fail-fast cancelled the run and passed immediately in an isolated rerun.
+        - `just lint` completed successfully for the Claudine package area, including all eight diagnostic guards, the lifecycle documentation guard, and every package lint stage.
+        - GitNexus `detect-changes --scope all --limit 500` completed without a partial or truncated result. It reports CRITICAL shared-worktree risk across 37 files and 51 processes because it includes unrelated concurrent Claudine, Darkmatter, Messenger, and prompt work; the finding's scoped diff passes `git diff --check`.
+        - The change is platform-neutral source-text traversal and diagnostic transport with no OS-specific branches or path comparison behavior. No formatting command was run.
+- work completed for 'Runtime set evaluation errors cannot attach the required frontmatter excerpt' at 13:19:37
+
+### Successful Completion
+
+The implementation of review cycle 2 has completed successfully in 1 hour 5 minutes 57 seconds. During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 3 were fixed, 0 were deferred (see reasons below):
+
+- No review findings were deferred.
+- The files changed for the review findings were:
+        - `claudine/cli/src/commands/wrap/sequence/task_run.rs`
+        - `claudine/lib/src/composition/error/mod.rs`
+        - `claudine/lib/src/composition/frontmatter_excerpt.rs`
+        - `claudine/lib/src/composition/lifecycle/action_shape.rs`
+        - `claudine/lib/src/composition/lifecycle/actions.rs`
+        - `claudine/lib/src/composition/lifecycle/context.rs`
+        - `claudine/lib/src/composition/lifecycle/context/tests.rs`
+        - `claudine/lib/src/composition/lifecycle/executor.rs`
+        - `claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs`
+        - `claudine/lib/src/composition/lifecycle/mod.rs`
+        - `claudine/lib/src/composition/lifecycle/parse.rs`
+        - `claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs`
+        - `claudine/lib/src/composition/prepare.rs`
+        - `claudine/lib/src/composition/runtime_state.rs`
+        - `claudine/lib/src/composition/runtime_state/tests.rs`
+        - `claudine/lib/src/composition/sequence/mod.rs`
+        - `claudine/lib/src/composition/sequence/model.rs`
+        - `claudine/lib/src/composition/sequence/normalize.rs`
+        - `claudine/lib/src/composition/sequence/preflight/mod.rs`
+        - `claudine/lib/src/composition/sequence/preflight/shape.rs`
+        - `claudine/lib/src/composition/sequence/task/group.rs`
+        - `claudine/lib/src/composition/sequence/task/mod.rs`
+        - `claudine/lib/src/composition/sequence/task/tests.rs`
+        - `claudine/lib/src/diagnostics/restored.rs`
+        - `claudine/lib/src/diagnostics/restored/tests.rs`
+        - `claudine/lib/src/diagnostics/snapshot.rs`
+        - `claudine/lib/src/reporting/types.rs`
+        - `darkmatter/lib/src/markdown/frontmatter.rs`
+        - `claudine/fixes/2026-09-16-better-spec-syntax/review-2.md`
+        - `claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md`
+- Full Darkmatter Level 1 and both package-area lint gates passed. Full Claudine Level 1 remained blocked only by two unrelated dirty shipped-prompt failures; all review-cycle regressions passed in focused and broad runs.
+- No formatting command was run.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-17T11:11:26-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis/claudine/fixes/2026-09-16-better-spec-syntax/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- starting the work on 'Lifecycle set discards authored assignment order before result serialization' at 11:12:33
+        - GitNexus classified `parse_runtime_set` and sequence `run_side_effect` as LOW risk, with one and three upstream callers respectively and no indexed execution processes.
+        - Darkmatter's top-level `FrontmatterMap` is already an ordered `IndexMap`; authored order is lost only in nested `serde_json::Value::Object` mappings because `serde_json` is compiled without `preserve_order`.
+        - The new sequence regression failed before the fix with lexical output order (`a_first_lexically`, then `z_last_lexically`), proving it detects the reviewed defect.
+        - Full Claudine L1 exposed one stale `proxy.with` test that explicitly locked the old nested-map sorting behavior and anticipated a future `preserve_order` decision. GitNexus could not resolve the test symbol (`UNKNOWN`); text search confirmed it has no references. The stale comment was removed and the assertion now verifies authored order.
+        - After that correction, full Claudine L1 reached 1,363 passes before fail-fast stopped on the two known unrelated shipped-prompt failures caused by concurrent dirty edits to `prompts/implement.md`; both fail on `has_skill(ctx.area)` receiving a path. The changed order regressions pass.
+        - An exploratory Darkmatter-wide `preserve_order` activation exposed unrelated JSON5, strict-hash, and schema-snapshot ordering changes. That broad representation change was rejected and fully reverted; the feature is enabled only by Claudine, where Cargo feature unification lets the unchanged shared Darkmatter parser produce ordered nested objects for Claudine without changing standalone Darkmatter behavior.
+        - Final focused nextest verification passed both order regressions: the multi-key sequence case preserves exact textual output and the appended output value, and the lifecycle `proxy.with` overlay preserves authored order.
+        - `just lint` completed successfully for the Claudine package area, including all error guards and the `claudine-catalog-types`, `claudine`, `claudine-contract`, `claudine-cli`, and `claudine-gen` lint stages.
+        - GitNexus `detect-changes --scope all --limit 500` completed with all six changed symbols represented. It reports CRITICAL repository-wide risk and 46 affected processes because the shared worktree also contains unrelated concurrent prompt and Messenger edits; the implementation itself changes only Claudine dependency features and regression tests, with no production symbol body edited.
+        - The implementation is platform-neutral dependency configuration and serialization coverage; it adds no OS-specific code or path behavior.
+- work completed for 'Lifecycle set discards authored assignment order before result serialization' at 11:40:05
+- starting the work on 'Runtime set failures do not retain the required full semantic value path' at 11:40:52
+        - GitNexus could not resolve the private runtime-set methods and reported their enclosing impl blocks as `UNKNOWN`; text search confirmed the complete caller set. No HIGH or CRITICAL symbol risk was reported.
+        - The recursive resolver already returns the exact nested object/array suffix. The loss occurs when `dispatch_runtime_set` flattens that suffix into prose before the event catch point attaches its coarser action location, while sequence task dispatch supplies no authored task root.
+        - Runtime `set` evaluation failures now enter the existing `composition.lifecycle_invalid` diagnostic as typed errors at the failure site. Their semantic property is source-rooted before propagation, and the same property is retained by terminal rendering, `err.detail.property`, and the diagnostic snapshot's machine detail.
+        - New Level 1 regressions cover nested object and array traversal in both an event stack and a sequence side-effect task. They assert the source, exact semantic path, catalog code, projection parity, and that neither runtime mutations nor task output are committed.
+        - The two new regressions passed together, then the 30-test runtime-set and sequence-side-effect focused slice passed in full.
+        - Full Claudine Level 1 reached 2,513 passes before fail-fast stopped on the two known unrelated shipped-prompt failures caused by concurrent dirty edits to `prompts/implement.md`; both fail because `has_skill(ctx.area)` receives a path. The same run timed out one unrelated preflight reference-spelling test while the shared Cargo target directory was under heavy contention; its isolated rerun passed in 4.900 seconds after the build lock cleared.
+        - `just lint` completed successfully for the Claudine package area: all eight transport error guards, the lifecycle documentation facet guard, and the `claudine-catalog-types`, `claudine`, `claudine-contract`, `claudine-cli`, and `claudine-gen` lint stages passed.
+        - GitNexus `detect-changes --scope all --limit 500` completed without partial or truncated output. It reports LOW shared-worktree risk, zero affected processes, 16 changed files, and 15 changed symbols; the extra files belong to concurrent unrelated work.
+        - The implementation adds no OS-specific code or path comparison behavior, and the scoped diff passes `git diff --check`.
+- work completed for 'Runtime set failures do not retain the required full semantic value path' at 12:00:43
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 52 minutes 4 seconds. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- No review findings were deferred.
+- The files changed for the review findings were:
+        - `claudine/lib/Cargo.toml`
+        - `claudine/lib/src/composition/error/mod.rs`
+        - `claudine/lib/src/composition/error/render/mod.rs`
+        - `claudine/lib/src/composition/lifecycle/executor.rs`
+        - `claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs`
+        - `claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs`
+        - `claudine/lib/src/composition/sequence/task/mod.rs`
+        - `claudine/lib/src/composition/sequence/task/tests.rs`
+        - `claudine/fixes/2026-09-16-better-spec-syntax/review-1.md`
+        - `claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md`
+- No formatting command was run.
+
+## Implementation of Review Findings #3
+
+> **started at:** 2026-09-17T16:42:23-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis/claudine/fixes/2026-09-16-better-spec-syntax/review-3.md'
+- this is iteration 3 of the review-to-implement cycle
+- the review contains 2 findings, both rated **high**:
+        - Finding 1 — authored `set` order is still lost outside top-level inline side-effect steps
+        - Finding 2 — task `setup`/`teardown` `set` failures still lose source-rooted diagnostics and excerpts
+- orchestration plan: the two findings share the same plumbing seams (`PreflightTask`, `TaskDiagnosticProvenance`, `parse_task_action_stack`, and the shared stack executor), so they are implemented serially by one subagent each, Finding 1 first, to avoid conflicting edits to the same files
+- pre-implementation reading established the design surfaces:
+        - authored order is captured today only by `Frontmatter::mapping_orders` (`darkmatter/lib/src/markdown/frontmatter.rs`), keyed by JSON Pointer, and read at exactly two sites — `parse_lifecycle_stack_item` for event stacks and `sequence/mod.rs:182-196` for a top-level inline `side_effect`
+        - external task and group documents load through `composition::sequence::data::load_document`, which never collects order metadata, so every recursively loaded task starts at `authored_set_order: None`
+        - `TaskDiagnosticProvenance` records only the executable property, so `setup`/`teardown` have no source-rooted root to rebase onto
+- starting the work on 'Finding 1 — authored set order is still lost outside top-level inline side-effect steps' at 16:45:01
