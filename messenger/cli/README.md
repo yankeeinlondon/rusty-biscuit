@@ -4,18 +4,59 @@
 
 ## Commands
 
-The CLI currently exposes four subcommands:
+The CLI exposes these subcommands:
 
 ```bash
 messenger send <message> [options]
+messenger replace <receipt> [message]
+messenger dismiss <receipt>
 messenger setup [provider]
 messenger init [provider]
+messenger info [--json]
+messenger install [--yes] [--helper <name>…] [--dry-run]
+messenger research <validate|generate|report|recover> [options]
 messenger completions
 ```
 
 `init` is an alias for `setup`.
 
 `completions` prints setup instructions only. Actual shell completion is driven dynamically through the `COMPLETE` environment variable.
+
+## Research Maintenance
+
+`messenger research` maintains the offline provider research contract
+(`messenger/docs/platforms.yaml` and `messenger/docs/research/`). It never
+reaches the network, starts a research agent, or changes delivery behavior.
+Every command takes `--root <DIR>` (default: the Git repository containing the
+current directory) and `--today <YYYY-MM-DD>` (default: today, UTC; decides
+freshness and override expiry).
+
+```bash
+messenger research validate [--json]                    # roster, documents, overrides, mappings, coverage
+messenger research validate [--scope fragment] <file>…  # judge candidate documents
+messenger research generate [--json]                    # validate, then publish catalog + summary tables
+messenger research generate --check [--json]            # read-only drift check against the published snapshot
+messenger research report [--platform P] [--interface I] [--operation O] [--json]
+messenger research recover [--json]                     # complete or undo an interrupted publication
+```
+
+`generate` publishes a snapshot selected by the committed manifest
+`messenger/docs/research/publication.json`: the five accepted platform
+documents, `docs/research/platforms/catalog.json`, and the generated region of
+`docs/research/summary/platforms.md` (prose outside that region is authored and
+kept). Identical inputs produce byte-identical files. Invalid inputs, a
+missing baseline document, or an interruption leave the previous snapshot
+selected; an interrupted publication blocks `generate` until
+`messenger research recover` runs. Commit `publication.json` together with the
+artifacts it lists: `report` and `generate` refuse a snapshot whose files do
+not match it (hand edits included). Local journal and staging state lives in
+the gitignored `messenger/.research-state/`.
+
+Exit status: `0` success, `1` findings, drift, or a refused generation, `2`
+invalid arguments, `3` the command could not run (no published snapshot,
+recovery required, lock held, verification failure, unreadable input).
+`--json` prints exactly one JSON document on stdout with no escape sequences;
+human output is styled for the terminal.
 
 ## Send Examples
 

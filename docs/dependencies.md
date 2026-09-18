@@ -71,6 +71,12 @@
   `tests/research_corpus.rs` can assert that research validation builds no
   effect engine and attempts no network access. Ordinary send builds
   (no-default, default, and `desktop` features) depend on none of them.
+- `messenger/cli` enables `messenger`'s `research` feature unconditionally for
+  the `messenger research` maintenance commands, so the `messenger` binary
+  carries those four crates; the library's send-only builds are unchanged. Its
+  `tests/research_cli.rs` uses the workspace `biscuit-test-harness` as a
+  development dependency for `bin_exe!`, so the binary resolves on the WSL2
+  nextest-archive leg. No new external crate was added.
 - `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
   stores deterministic ahead/behind and clean-merge results under the user cache
   directory, keyed by canonical repo-root xxHash plus branch tip SHAs.

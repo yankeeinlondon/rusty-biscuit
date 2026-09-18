@@ -26,7 +26,7 @@ Examples:
   COMPLETE=0
 "#;
 
-use messenger_cli::{config, info, install, receipt_store, setup};
+use messenger_cli::{config, info, install, receipt_store, research, setup};
 
 use config::{Config, RouteConfig, RouteProvider, RouteUrgency};
 
@@ -247,6 +247,8 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Maintain the offline provider research contract (validate, generate, report, recover).
+    Research(research::ResearchArgs),
     /// Show shell completions setup instructions.
     #[command(after_help = COMPLETIONS_HELP)]
     Completions,
@@ -377,6 +379,9 @@ async fn main() -> Result<()> {
                 helpers: helper,
                 dry_run,
             })?;
+        }
+        Commands::Research(args) => {
+            std::process::exit(research::run(args));
         }
         Commands::Completions => {
             print!("{}", COMPLETIONS_HELP.trim_start());

@@ -7983,6 +7983,7 @@ name = "messenger-cli"
 version = "0.1.0"
 dependencies = [
  "biscuit-terminal",
+ "biscuit-test-harness",
  "clap 4.6.1",
  "clap_complete",
  "color-eyre",
