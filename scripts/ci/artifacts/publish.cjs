@@ -40,8 +40,10 @@ async function publish({plan, producer, out, verifier, upload, jobStatus, queueS
         if (toolError) throw toolError;
         const manifestPath = path.join(out, `${artifact}.manifest.json`);
         const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+        // A sidecar entry is `NamedFile` in `ci-build-archive.rs`: its `FileRecord`
+        // is `#[serde(flatten)]`ed, so `file` sits beside `name`, not under `record`.
         const files = [manifestPath, path.join(out, manifest.archive.file), tool,
-          ...manifest.sidecars.map(s => path.join(out, s.record.file))];
+          ...manifest.sidecars.map(s => path.join(out, s.file))];
         if (manifest.compiler_work) {
           const counters = path.join(out, `${artifact}.compiler-work.json`);
           await fs.writeFile(counters, JSON.stringify({record: manifest.compiler_work, owner}));

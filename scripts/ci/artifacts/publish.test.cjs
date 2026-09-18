@@ -91,6 +91,37 @@ test('partial owners retain package identities, isolate uploads, and account for
   } finally { await fs.rm(out, {recursive: true, force: true}); }
 });
 
+test('a declared sidecar is uploaded beside the archive, read from the manifest shape ci-build writes', async () => {
+  const out = await fs.mkdtemp(path.join(os.tmpdir(), 'ci-artifacts-'));
+  try {
+    const verifier = path.join(out, 'ci-build');
+    await fs.writeFile(verifier, 'verifier');
+    const record = {package: 'darkmatter', producer: 'linux', key: 'k', artifact: 'build-darkmatter-linux-k', consumers: []};
+    // `NamedFile` flattens its `FileRecord`, so `file`, `bytes`, and `blake3`
+    // sit beside `name`. Run 35326800778 published nine sidecar-declaring
+    // packages as `stage=upload` failures by reading a nested `record.file`.
+    const sidecar = {name: 'darkmatter-md', file: 'sidecars/md', bytes: 7, blake3: 'digest'};
+    await fs.writeFile(path.join(out, `${record.artifact}.status.json`), JSON.stringify({...record, result: 'success'}));
+    await fs.writeFile(path.join(out, `${record.artifact}.manifest.json`),
+      JSON.stringify({archive: {file: `${record.artifact}.tar.zst`}, sidecars: [sidecar]}));
+    await fs.writeFile(path.join(out, `${record.artifact}.tar.zst`), 'archive');
+    await fs.mkdir(path.join(out, 'sidecars'), {recursive: true});
+    await fs.writeFile(path.join(out, sidecar.file), 'sidecar');
+    const uploads = [];
+    const ok = await publish({plan: {builds: [record]}, producer: 'linux', out, verifier, jobStatus: 'success',
+      upload: async (name, files, root, options) => {
+        const bodies = await Promise.all(files.map(f => fs.readFile(f, 'utf8')));
+        uploads.push({name, files: files.map(f => path.relative(root, f)), bodies, options});
+      }});
+    assert.equal(ok, true);
+    const archive = uploads.find(u => u.name === record.artifact);
+    assert(archive.files.includes(sidecar.file), `sidecar missing from ${JSON.stringify(archive.files)}`);
+    assert.equal(archive.bodies[archive.files.indexOf(sidecar.file)], 'sidecar');
+    const status = JSON.parse(uploads.find(u => u.name.startsWith('build-status-')).bodies[0]);
+    assert.equal(status.result, 'success');
+  } finally { await fs.rm(out, {recursive: true, force: true}); }
+});
+
 test("the owner aggregate is the sum of its records' producer-written compiler work", async () => {
   const {out, ok, records, measurement} = await publishMeasured({
     works: [documents.alpha, documents.beta, null],
