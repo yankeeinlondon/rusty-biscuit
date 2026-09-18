@@ -407,8 +407,9 @@ validation must not invoke lazy providers or effects.
 Do not require every lightweight `EvaluationLookup` implementor to reproduce
 the classification manually. Supply defaults or adapters where ordinary
 `None` means a missing document property, and require richer behavior only for
-surfaces that declare reserved globals. The implementation plan must inventory
-and migrate all lookup implementations before changing the public trait.
+surfaces that declare reserved globals. The technical design must inventory
+all lookup implementations and record their migration or compatibility
+disposition before planning the coordinated change to the public trait.
 
 ### R3. Bare lookup never falls through to `ctx`
 
@@ -606,8 +607,8 @@ the parser already supports them.
 
 This change requires `no-shell-expansion`; it does not require a catalog of
 additional feature restrictions. Handling generated or moved values remains a
-planning detail subject to the confirmed inheritance and non-relaxation rules,
-narrow initialization typing, and initialization prohibition.
+technical design choice subject to the confirmed inheritance and non-relaxation
+rules, narrow initialization typing, and initialization prohibition.
 
 ### R11. Repository YAML owns schemas and generates runtime embedding
 
@@ -646,11 +647,11 @@ cell.
 Darkmatter currently embeds schema text with `include_str!` and parses it at
 runtime; that is not an existing schema code generation pipeline. The existing
 `claudine-gen` package generates provider catalogs, so schema generation needs
-new integration. The plan must avoid dependencies that create a cycle between
-the generator, Claudine library, and CLI.
+new integration. The technical design must avoid dependencies that create a
+cycle between the generator, Claudine library, and CLI.
 
-Generation integration and artifact layout are planning choices. DMLS already
-supports generic runtime schema triggers: it discovers schema files in ancestor
+Generation integration and artifact layout are technical design choices. DMLS
+already supports generic runtime schema triggers: it discovers schema files in ancestor
 `schemas` directories within the nearest workspace and passes its trigger
 registry to Darkmatter's effective-schema resolution. Document changes,
 configuration changes, and watched schema-file changes refresh the applicable
@@ -721,9 +722,28 @@ or refresh, DMLS must report that validation is incomplete and identify the
 failing source and cause. Suspend checks that depend on the failed definition
 and continue independent checks. Do not present dependent diagnostics from an
 earlier successful load as current, report partial validation as complete, or
-fall back to stale definitions. A successful refresh restores dependent checks
-and clears the corresponding failure diagnostic. This policy does not decide
-hover or completion behavior during a loading failure.
+fall back to stale definitions. Withhold hover type information and completion
+suggestions that depend on the failed definitions, while retaining independent
+editor assistance. A successful refresh restores dependent checks and editor
+assistance and clears the corresponding failure diagnostic; stale definitions
+must not supply a fallback for hover or completion.
+
+When a failed activation rule prevents DMLS from determining which documents
+it applies to, report incomplete validation for documents being checked within
+the rule's possible discovery scope. Continue checks demonstrably independent
+of that rule. An automatically discovered nested rule cannot affect sibling
+scopes; a rule supplied through `SCHEMA_DIR` has a possible scope covering the
+workspace. Do not assume that an unreadable rule is inactive.
+
+For example, consider a hypothetical `payments/schemas/` directory with an
+activation rule intended to select documents whose frontmatter declares
+`kind: task`. If that rule becomes unreadable, DMLS can no longer establish
+which documents it selects. It reports incomplete validation for documents
+being checked in the `payments` scope while continuing independent Markdown
+checks. Documents in a sibling `shipping` scope remain unaffected by this
+automatically discovered rule. If the same directory was explicitly selected
+through `SCHEMA_DIR`, its possible scope would instead cover the workspace.
+This example does not prescribe trigger syntax or add repository files.
 
 Intentional removal or nonactivation of an optional schema or extension is
 distinct from failure to load a required dependency. In the former case,
@@ -760,12 +780,20 @@ lifecycle globals. Do not force an invasive trait break when a Darkmatter-owned
 adapter or additive resolution method can provide the richer binding result
 without semantic duplication.
 
-## Design Work Required Before Implementation
+## Technical Design Checkpoint Before Planning
 
-The functional requirements are settled and no human rulings remain. Concrete
-API names, catalog representations, marker syntax, and integration details are
-implementation-planning work. The plan must record the following technical
-choices and findings within the confirmed requirements:
+The functional requirements are settled and no functional rulings remain.
+Resolve consequential technical choices in a companion `design.md` beside this
+specification and review those decisions with the human before creating the
+implementation plan. The later `plan.md` organizes agreed work through
+sequencing, dependencies, checkpoints, and verification; it is not the place
+to resolve outstanding technical rulings. If design work exposes a change to
+observable behavior or the agreed scope, bring that decision back to the human
+and update this specification before proceeding. Routine implementation
+details can remain with the implementer.
+
+The design must record the following technical choices and findings within
+the confirmed requirements:
 
 1. Whether the richer result belongs directly on `EvaluationLookup`, on an
    additive resolver method with a compatibility default, or in a composed
@@ -791,6 +819,9 @@ choices and findings within the confirmed requirements:
    constrained named-type syntax can preserve narrow key/value typing; the
    keyword requires new support. Descendant inheritance and non-relaxation are
    decided; deferred evaluation must retain restrictions.
+8. The schema-generation integration and artifact layout, generic activation
+   syntax, and refresh mechanisms that satisfy R11 and R12, including passive
+   failure recovery and the confirmed limits on discovery scope.
 
 ### Risk assessment outcome
 
@@ -831,7 +862,7 @@ create a broad abstraction that merely hides different behavior. Keep a seam
 duplicated when the two sides own genuinely different policy, and document why
 the duplication is intentional. Any proposed consolidation must identify its
 owner, inputs, outputs, error boundary, snapshot timing, and affected callers
-before implementation begins.
+at the design checkpoint before planning begins.
 
 ## Verification
 
@@ -931,6 +962,14 @@ Add or update tests proving:
   definitions are not used as a fallback; successful refresh restores checks
   and clears the corresponding failure diagnostic without evaluating authored
   expressions or invoking lazy providers;
+- hover type information and completion suggestions dependent on failed
+  definitions are withheld without a stale fallback, independent assistance
+  remains available, and successful refresh restores dependent assistance;
+- when an activation-rule failure leaves applicability uncertain, documents
+  checked within its possible discovery scope report incomplete validation
+  while demonstrably independent checks continue; automatically discovered
+  nested rules leave sibling scopes unaffected, while explicit `SCHEMA_DIR`
+  rules have a possible scope covering the workspace;
 - an absent or inactive optional lifecycle extension leaves baseline and other
   applicable validation available without promising Claudine-specific checks;
   a missing required dependency of an active extension instead reports
@@ -1053,9 +1092,12 @@ and is covered by the affected packages' existing gates.
 12. Current documentation and Claudine skill snapshots contain no active
     guidance describing strict mode or requiring fallbacks to legalize optional
     document properties.
-13. The binding API design decisions are recorded before implementation, and
-    the 17 direct `EvaluationLookup` implementations are inventoried with a
-    migration or compatibility disposition.
+13. Consequential technical design decisions, including the binding API, are
+    recorded in the companion `design.md` and reviewed with the human before
+    `plan.md` organizes implementation. The 17 direct `EvaluationLookup`
+    implementations are inventoried with a migration or compatibility
+    disposition. Any resulting change to observable behavior or scope is
+    explicitly agreed with the human and reflected in this specification.
 14. The Darkmatter–Claudine expression seam has a documented DRY audit covering
     state, context, bindings, evaluation, validation, descriptors, and error
     projection; every retained duplication has an explicit ownership reason.
@@ -1102,7 +1144,14 @@ and is covered by the affected packages' existing gates.
     and cause. Dependent checks are suspended, independent checks continue,
     and stale definitions or dependent diagnostics are not presented as
     current. Successful refresh restores dependent checks and clears the
-    corresponding failure. Intentional optional-schema removal or
+    corresponding failure. Dependent hover type information and completion
+    suggestions are withheld without a stale fallback; independent assistance
+    remains available and successful refresh restores dependent assistance.
+    When a failed activation rule leaves applicability uncertain, documents
+    checked within its possible discovery scope report incomplete validation
+    while demonstrably independent checks continue. Automatic nested discovery
+    cannot affect sibling scopes; explicit `SCHEMA_DIR` rules have a possible
+    scope covering the workspace. Intentional optional-schema removal or
     nonactivation is distinct from a missing required dependency of an active
     definition. Editor recovery remains passive and does not weaken runtime
     validation requirements.
