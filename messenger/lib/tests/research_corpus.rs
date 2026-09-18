@@ -14,10 +14,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
 use messenger::ProviderKind;
 use serde_json::Value;
 
@@ -61,19 +61,41 @@ fn schemas() -> &'static DarkmatterSchemas {
     SCHEMAS.get_or_init(DarkmatterSchemas::new)
 }
 
+/// Resolved schemas by canonical `$schema` path. `DarkmatterSchemas::validate`
+/// re-resolves a schema's imports for every document (about 100 ms each in
+/// debug builds), which pushed these tests toward nextest's termination
+/// limit under full-suite load; the validator itself is the same.
+fn effective(markdown: &Markdown, schema: &Path) -> Arc<EffectiveSchema> {
+    static CACHE: OnceLock<Mutex<BTreeMap<PathBuf, Arc<EffectiveSchema>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Mutex::default);
+    let key = schema.canonicalize().unwrap_or_else(|e| panic!("resolve {}: {e}", schema.display()));
+    if let Some(found) = cache.lock().expect("cache").get(&key) {
+        return Arc::clone(found);
+    }
+    let resolved = schemas()
+        .effective_for(markdown)
+        .unwrap_or_else(|e| panic!("schema error for {}: {e}", schema.display()))
+        .expect("a declared schema");
+    let resolved = Arc::new(resolved);
+    cache.lock().expect("cache").insert(key, Arc::clone(&resolved));
+    resolved
+}
+
 /// Validates one file; a schema that fails to load is a test failure, not a
 /// validation problem.
 fn validate(path: &Path) -> ValidationReport {
     let markdown = load(path);
-    let report = schemas()
-        .validate(&markdown)
-        .unwrap_or_else(|e| panic!("schema error for {}: {e}", path.display()));
-    assert!(
-        markdown.frontmatter().get::<String>("$schema").ok().flatten().is_some(),
-        "{} declares no $schema, so validation would be vacuous",
-        path.display()
-    );
-    report
+    let declared = markdown
+        .frontmatter()
+        .get::<String>("$schema")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| panic!("{} declares no $schema, so validation would be vacuous", path.display()));
+    let schema = path.parent().expect("parent").join(declared);
+    let mut frontmatter: serde_json::Map<String, Value> =
+        markdown.frontmatter().as_map().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    frontmatter.remove("$schema");
+    effective(&markdown, &schema).validate(&Value::Object(frontmatter))
 }
 
 fn describe(report: &ValidationReport) -> String {
@@ -510,6 +532,339 @@ fn research_corpus_is_sanitized() {
                     );
                 }
             }
+        }
+    }
+}
+
+// ---- typed loading and semantic validation (feature `research`) ----------
+
+/// The same corpus through `messenger::research`: the typed loader (which
+/// runs the Darkmatter schema pass itself) and the Rust-owned semantic
+/// rules. Fixture headers drive expectations:
+/// - `# expect-rule: SR-*` — every finding carries that rule;
+/// - `# validate-scope: accepted` — clean as a fragment, rejected only when
+///   judged as accepted research (full roster coverage, investigated gaps);
+/// - `# expect-ineligible: <fact> <reason>` — valid, but the fact never
+///   reaches the executable projection.
+#[cfg(feature = "research")]
+mod typed {
+    use std::collections::BTreeSet;
+    use std::path::Path;
+    use std::sync::OnceLock;
+
+    use messenger::research::canonical::schema_fingerprint;
+    use messenger::research::model::{Date, Mappings, Overrides, PlatformDocument, Roster};
+    use messenger::research::{
+        Context, Diagnostic, DocumentValidation, Loaded, Loader, Rule, Scope, ValidatedDocument,
+        Workspace, validate_document, validate_mappings, validate_overrides, validate_roster,
+    };
+
+    use super::{files_in, fixtures_dir, header_value, messenger_dir};
+
+    pub(super) fn repo_root() -> std::path::PathBuf {
+        messenger_dir().parent().expect("repository root").to_path_buf()
+    }
+
+    pub(super) fn loader() -> &'static Loader {
+        static LOADER: OnceLock<Loader> = OnceLock::new();
+        LOADER.get_or_init(|| Loader::new(Workspace::new(repo_root()).expect("absolute root")))
+    }
+
+    pub(super) fn shipped_roster() -> &'static Roster {
+        static ROSTER: OnceLock<Roster> = OnceLock::new();
+        ROSTER.get_or_init(|| {
+            let loaded = loader().load_roster(&messenger_dir().join("docs/platforms.yaml")).expect("roster");
+            assert!(loaded.is_clean(), "shipped roster: {:?}", loaded.diagnostics);
+            loaded.record.expect("typed roster")
+        })
+    }
+
+    pub(super) fn today() -> Date {
+        Date::parse("2026-09-17").expect("date")
+    }
+
+    pub(super) fn current_schema_fingerprint() -> String {
+        let read = |name: &str| {
+            std::fs::read_to_string(messenger_dir().join("docs/research/platforms").join(name)).expect("schema")
+        };
+        schema_fingerprint(&read("_schema.yaml"), &read("_types.yaml"))
+    }
+
+    pub(super) fn load_document(path: &Path) -> Loaded<PlatformDocument> {
+        loader().load_document(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    }
+
+    pub(super) fn validate(path: &Path, scope: Scope) -> DocumentValidation {
+        let context = Context { roster: Some(shipped_roster()), scope };
+        validate_document(&load_document(path), &context)
+    }
+
+    pub(super) fn validated(name: &str) -> ValidatedDocument {
+        let result = validate(&fixtures_dir().join(name), Scope::Fragment);
+        assert!(result.diagnostics.is_empty(), "{name}: {}", show(&result.diagnostics));
+        result.validated.expect("validated")
+    }
+
+    /// Companion documents for cross-file fixtures: the facts named by the
+    /// override and mapping fixtures live in these contract documents.
+    pub(super) fn companions() -> &'static [ValidatedDocument] {
+        static COMPANIONS: OnceLock<Vec<ValidatedDocument>> = OnceLock::new();
+        COMPANIONS.get_or_init(|| {
+            vec![validated("contract/constraints-field.md"), validated("contract/bindings-mode-switch.md")]
+        })
+    }
+
+    pub(super) fn show(diagnostics: &[Diagnostic]) -> String {
+        diagnostics.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n  ")
+    }
+
+    fn rules(diagnostics: &[Diagnostic]) -> BTreeSet<Rule> {
+        diagnostics.iter().map(|d| d.rule).collect()
+    }
+
+    fn assert_clean_documents(dir: &str, min: usize) {
+        let files: Vec<_> = files_in(&fixtures_dir().join(dir))
+            .into_iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "md"))
+            .collect();
+        assert!(files.len() >= min, "{dir} shrank to {}", files.len());
+        for path in files {
+            let result = validate(&path, Scope::Fragment);
+            assert!(result.diagnostics.is_empty(), "{}:\n  {}", path.display(), show(&result.diagnostics));
+            assert!(result.validated.is_some(), "{} did not validate", path.display());
+        }
+    }
+
+    #[test]
+    fn contract_documents_pass_the_semantic_rules() {
+        assert_clean_documents("contract", 38);
+    }
+
+    #[test]
+    fn interaction_documents_pass_the_semantic_rules() {
+        assert_clean_documents("interaction", 12);
+    }
+
+    #[test]
+    fn diagnostic_documents_pass_the_semantic_rules() {
+        assert_clean_documents("diagnostics", 6);
+    }
+
+    #[test]
+    fn shipped_roster_is_a_complete_accepted_roster() {
+        let loaded = loader().load_roster(&messenger_dir().join("docs/platforms.yaml")).expect("roster");
+        let diagnostics = validate_roster(&loaded, Scope::Accepted);
+        assert!(diagnostics.is_empty(), "{}", show(&diagnostics));
+    }
+
+    #[test]
+    fn positive_roster_overrides_and_mappings_fixtures_are_clean() {
+        let contract = fixtures_dir().join("contract");
+        let roster = loader().load_roster(&contract.join("roster-cap-10.yaml")).expect("roster");
+        let diagnostics = validate_roster(&roster, Scope::Fragment);
+        assert!(diagnostics.is_empty(), "roster-cap-10: {}", show(&diagnostics));
+
+        let companions = companions();
+        let documents: Vec<&ValidatedDocument> = companions.iter().collect();
+        let overrides = loader().load_overrides(&contract.join("overrides-valid.yaml")).expect("overrides");
+        let diagnostics = validate_overrides(&overrides, &documents, &current_schema_fingerprint(), &today());
+        assert!(diagnostics.is_empty(), "overrides-valid: {}", show(&diagnostics));
+
+        let mappings = loader().load_mappings(&contract.join("mappings-valid.yaml")).expect("mappings");
+        let diagnostics = validate_mappings(&mappings, &documents);
+        assert!(diagnostics.is_empty(), "mappings-valid: {}", show(&diagnostics));
+    }
+
+    /// Validates one semantic-negative fixture by its kind and returns the
+    /// findings, checking the scope and eligibility headers along the way.
+    fn semantic_findings(path: &Path) -> Vec<Diagnostic> {
+        let name = path.file_name().and_then(|n| n.to_str()).expect("name").to_string();
+        let schema = std::fs::read_to_string(path).expect("read");
+        let companions = companions();
+        let documents: Vec<&ValidatedDocument> = companions.iter().collect();
+        if schema.contains("platforms.schema.yaml") {
+            let loaded: Loaded<Roster> = loader().load(path).expect("roster");
+            return validate_roster(&loaded, Scope::Fragment);
+        }
+        if schema.contains("_overrides.schema.yaml") {
+            let loaded: Loaded<Overrides> = loader().load(path).expect("overrides");
+            return validate_overrides(&loaded, &documents, &current_schema_fingerprint(), &today());
+        }
+        if schema.contains("implementation/_schema.yaml") {
+            let loaded: Loaded<Mappings> = loader().load(path).expect("mappings");
+            return validate_mappings(&loaded, &documents);
+        }
+        let fragment = validate(path, Scope::Fragment);
+        if let Some(ineligible) = header_value(path, "expect-ineligible") {
+            let (fact, reason) = ineligible.split_once(' ').expect("fact and reason");
+            assert!(fragment.diagnostics.is_empty(), "{name} must validate:\n  {}", show(&fragment.diagnostics));
+            let eligibility = fragment.validated.expect("validated").eligibility();
+            let entry = eligibility.iter().find(|e| e.id() == fact).unwrap_or_else(|| panic!("{name}: no {fact}"));
+            assert!(entry.executable().is_none(), "{name}: {fact} reached the executable projection");
+            assert!(
+                entry.reasons().iter().any(|r| r.code() == reason),
+                "{name}: {fact} is ineligible for {:?}, not {reason}",
+                entry.reasons()
+            );
+            return Vec::new();
+        }
+        if header_value(path, "validate-scope").as_deref() == Some("accepted") {
+            assert!(
+                fragment.diagnostics.is_empty(),
+                "{name} must be clean as a fragment:\n  {}",
+                show(&fragment.diagnostics)
+            );
+            return validate(path, Scope::Accepted).diagnostics;
+        }
+        fragment.diagnostics
+    }
+
+    fn assert_semantic_rules(prefixes: &[&str], min: usize) {
+        let mut checked = 0;
+        for path in files_in(&fixtures_dir().join("negative/semantic")) {
+            let stem = path.file_name().and_then(|n| n.to_str()).expect("name").to_string();
+            if !prefixes.iter().any(|p| stem.starts_with(&format!("{p}--"))) {
+                continue;
+            }
+            checked += 1;
+            let expected = header_value(&path, "expect-rule").expect("expect-rule");
+            let diagnostics = semantic_findings(&path);
+            if header_value(&path, "expect-ineligible").is_some() {
+                continue;
+            }
+            assert!(!diagnostics.is_empty(), "{stem} produced no finding");
+            let found = rules(&diagnostics);
+            let expected_rule = Rule::from_code(&expected).unwrap_or_else(|| panic!("{expected} is not a rule"));
+            let accepted = header_value(&path, "validate-scope").as_deref() == Some("accepted");
+            if accepted {
+                assert!(found.contains(&expected_rule), "{stem}: expected {expected}, got\n  {}", show(&diagnostics));
+            } else {
+                assert_eq!(
+                    found,
+                    BTreeSet::from([expected_rule]),
+                    "{stem}: expected only {expected}, got\n  {}",
+                    show(&diagnostics)
+                );
+            }
+            for diagnostic in &diagnostics {
+                assert!(
+                    !diagnostic.path.as_str().contains('\\') && !diagnostic.path.as_str().starts_with('/'),
+                    "{stem}: non-portable path {}",
+                    diagnostic.path
+                );
+            }
+        }
+        assert!(checked >= min, "{prefixes:?}: only {checked} fixtures");
+    }
+
+    #[test]
+    fn identity_rules_reject_their_fixtures() {
+        assert_semantic_rules(&["sr-roster", "sr-curated", "sr-unique", "sr-ref", "sr-evidence", "sr-strict-scalars"], 17);
+    }
+
+    #[test]
+    fn constraint_rules_reject_their_fixtures() {
+        assert_semantic_rules(
+            &["sr-state-value", "sr-condition", "sr-applicability", "sr-aggregate", "sr-kind-unit", "sr-enforceable"],
+            12,
+        );
+    }
+
+    #[test]
+    fn coverage_rules_reject_their_fixtures() {
+        assert_semantic_rules(&["sr-coverage", "sr-gap", "sr-change", "sr-override", "sr-mapping"], 14);
+    }
+
+    #[test]
+    fn binding_rules_reject_their_fixtures() {
+        assert_semantic_rules(&["sr-format", "sr-image", "sr-attribution", "sr-location", "sr-expression"], 14);
+    }
+
+    #[test]
+    fn interaction_rules_reject_their_fixtures() {
+        assert_semantic_rules(&["sr-interactivity"], 9);
+    }
+
+    #[test]
+    fn error_rules_reject_their_fixtures() {
+        assert_semantic_rules(&["sr-envelope", "sr-match", "sr-match-overlap", "sr-origin-phase", "sr-fixtures"], 8);
+    }
+
+    /// The typed loader and every rule family are as passive as schema
+    /// validation: no effect engine, no network attempt, no file mutation.
+    #[test]
+    fn typed_loading_and_validation_are_passive() {
+        let root = fixtures_dir();
+        let mut documents = Vec::new();
+        for name in ["composition-allowlist.md", "pilot-discord.md", "pilot-telegram.md", "pilot-slack.md", "pilot-signal.md"] {
+            documents.push(root.join("contract").join(name));
+        }
+        documents.extend(files_in(&root.join("diagnostics")));
+        documents.extend(files_in(&root.join("interaction")).into_iter().take(4));
+        let others = [
+            messenger_dir().join("docs/platforms.yaml"),
+            root.join("contract/overrides-valid.yaml"),
+            root.join("contract/mappings-valid.yaml"),
+        ];
+        let all: Vec<_> = documents.iter().chain(others.iter()).cloned().collect();
+        let before: Vec<Vec<u8>> = all.iter().map(|p| std::fs::read(p).expect("read")).collect();
+        let engines = darkmatter::effects::engine_build_count();
+        let network = darkmatter::effects::network_attempt_count();
+
+        for path in &documents {
+            let result = validate(path, Scope::Fragment);
+            assert!(result.diagnostics.is_empty(), "{}", show(&result.diagnostics));
+            let _ = validate(path, Scope::Accepted);
+        }
+        let _ = validate_roster(&loader().load_roster(&others[0]).expect("roster"), Scope::Accepted);
+        let companions = companions();
+        let refs: Vec<&ValidatedDocument> = companions.iter().collect();
+        let overrides = loader().load_overrides(&others[1]).expect("overrides");
+        let _ = validate_overrides(&overrides, &refs, &current_schema_fingerprint(), &today());
+        let mappings = loader().load_mappings(&others[2]).expect("mappings");
+        let _ = validate_mappings(&mappings, &refs);
+
+        assert_eq!(darkmatter::effects::engine_build_count(), engines, "research validation built an effect engine");
+        assert_eq!(darkmatter::effects::network_attempt_count(), network, "research validation attempted network access");
+        for (path, bytes) in all.iter().zip(before) {
+            assert_eq!(std::fs::read(path).expect("reread"), bytes, "{} changed", path.display());
+        }
+    }
+
+    /// Adapter IDs are persisted identifiers (receipts, routes): the typed
+    /// vocabulary must be exactly the chat `ProviderKind::as_str()` values.
+    #[test]
+    fn adapter_ids_are_the_persisted_provider_kind_spellings() {
+        use messenger::ProviderKind;
+        use messenger::research::model::AdapterId;
+        let chat = [
+            ProviderKind::Discord,
+            ProviderKind::DiscordWebhook,
+            ProviderKind::Slack,
+            ProviderKind::SlackWebhook,
+            ProviderKind::Telegram,
+            ProviderKind::WhatsApp,
+            ProviderKind::Signal,
+        ];
+        let typed: Vec<&str> = AdapterId::ALL.iter().map(|a| a.as_str()).collect();
+        let persisted: Vec<&str> = chat.into_iter().map(ProviderKind::as_str).collect();
+        assert_eq!(typed, persisted);
+    }
+
+    /// Every semantic fixture belongs to exactly one rule-family test above.
+    #[test]
+    fn every_semantic_fixture_is_exercised_by_a_rule_family() {
+        let families = [
+            "sr-roster", "sr-curated", "sr-unique", "sr-ref", "sr-evidence", "sr-strict-scalars", "sr-state-value",
+            "sr-condition", "sr-applicability", "sr-aggregate", "sr-kind-unit", "sr-enforceable", "sr-coverage",
+            "sr-gap", "sr-change", "sr-override", "sr-mapping", "sr-format", "sr-image", "sr-attribution",
+            "sr-location", "sr-expression", "sr-interactivity", "sr-envelope", "sr-match", "sr-match-overlap",
+            "sr-origin-phase", "sr-fixtures",
+        ];
+        for path in files_in(&fixtures_dir().join("negative/semantic")) {
+            let stem = path.file_name().and_then(|n| n.to_str()).expect("name");
+            let (prefix, _) = stem.split_once("--").expect("rule prefix");
+            assert!(families.contains(&prefix), "{stem} is not covered by a rule-family test");
         }
     }
 }

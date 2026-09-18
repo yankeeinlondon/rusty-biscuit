@@ -95,7 +95,8 @@ coverage:
       status: gap
       gap: gap.fx.scope
     errors:
-      status: researched
+      status: gap
+      gap: gap.fx.scope
 api_versions: []
 chronology: []
 constraints:

@@ -12,7 +12,7 @@ assessments:
   category: constraints
   platform_id: discord
   facts:
-  - c.fx.content
+  - c.fx.content.service_max
   status: implemented
   summary: s
   code_refs:

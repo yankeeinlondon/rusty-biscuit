@@ -155,56 +155,6 @@ coverage:
     errors:
       status: gap
       gap: gap.fx.scope
-- interface: discord_gateway
-  categories:
-    versions:
-      status: gap
-      gap: gap.fx.scope
-    constraints:
-      status: gap
-      gap: gap.fx.scope
-    formatting:
-      status: gap
-      gap: gap.fx.scope
-    text_bindings:
-      status: gap
-      gap: gap.fx.scope
-    images:
-      status: gap
-      gap: gap.fx.scope
-    attachments:
-      status: gap
-      gap: gap.fx.scope
-    addressing:
-      status: gap
-      gap: gap.fx.scope
-    receipts:
-      status: gap
-      gap: gap.fx.scope
-    attribution:
-      status: gap
-      gap: gap.fx.scope
-    location:
-      status: gap
-      gap: gap.fx.scope
-    expression:
-      status: gap
-      gap: gap.fx.scope
-    interactivity:
-      status: gap
-      gap: gap.fx.scope
-    delivery_controls:
-      status: gap
-      gap: gap.fx.scope
-    eligibility:
-      status: gap
-      gap: gap.fx.scope
-    rate_limits:
-      status: gap
-      gap: gap.fx.scope
-    errors:
-      status: gap
-      gap: gap.fx.scope
 api_versions: []
 chronology: []
 constraints: []

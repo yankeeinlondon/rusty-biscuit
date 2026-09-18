@@ -7,7 +7,7 @@ schema_version: 1
 overrides:
 - id: ovr.fx
   platform_id: discord
-  fact: c.fx.content
+  fact: c.fx.content.service_max
   field: value
   effective_value: '1900'
   target_hash: xxh64:0123456789abcdef

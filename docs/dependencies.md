@@ -63,11 +63,14 @@
 - `messenger/lib` uses `test-toolkit` only as a development dependency so its
   desktop-stub resolver tests restore `MESSENGER_STUB_BIN_DIR` safely while
   serializing process-environment mutation.
-- `messenger/lib` uses `darkmatter` (with `effects-instrumentation`) only as a
-  development dependency for `tests/research_corpus.rs`, which validates the
-  provider research contract and fixtures through Darkmatter's library schema
-  validation and asserts that validation builds no effect engine and attempts
-  no network access. Ordinary send builds do not depend on Darkmatter.
+- `messenger/lib` depends on `darkmatter`, `biscuit-file` (only
+  `file-reference`), `biscuit-hash`, and `serde_path_to_error` only through its
+  opt-in `research` feature (`messenger::research`: typed loading and semantic
+  validation of the provider research contract). Darkmatter is also a
+  development dependency with `effects-instrumentation`, so
+  `tests/research_corpus.rs` can assert that research validation builds no
+  effect engine and attempts no network access. Ordinary send builds
+  (no-default, default, and `desktop` features) depend on none of them.
 - `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
   stores deterministic ahead/behind and clean-merge results under the user cache
   directory, keyed by canonical repo-root xxHash plus branch tip SHAs.
@@ -1032,6 +1035,12 @@ This is a Rust workspace with the following modules:
     _Fast JSON serialization/deserialization using serde._
 
     _Tags: json, serialization_
+
+- [serde_path_to_error](https://github.com/dtolnay/path-to-error) _v0.1_ [📄](https://docs.rs/serde_path_to_error)
+
+    _Reports the JSON path of a Serde deserialization failure. Used by `messenger`'s `research` feature to point strict-scalar findings at the offending field._
+
+    _Tags: serde, diagnostics_
 
 - [serde_yaml](https://github.com/dtolnay/serde-yaml) _v0.9_
 

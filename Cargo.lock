@@ -7947,6 +7947,8 @@ name = "messenger"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "biscuit-file",
+ "biscuit-hash",
  "bytes",
  "darkmatter",
  "futures",
@@ -7960,6 +7962,7 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "serial_test",
  "sniff",
  "tempfile",

@@ -118,9 +118,8 @@ envelopes:
   interface: discord_bot_api
   operations:
   - create_message
-  origin: service
-  body_format: json
-  code_locator: /code
+  origin: sdk
+  body_format: sdk_error
   knowledge:
     state: known
     evidence:
@@ -136,8 +135,7 @@ errors:
   outcome: failure
   category: invalid_content
   match:
-    http_status: 400
-    native_code_number: 50035
+    sdk_error_variant: ValidationError
   delivery_certainty: rejected
   recovery: after_correction
   replay_safety: unknown

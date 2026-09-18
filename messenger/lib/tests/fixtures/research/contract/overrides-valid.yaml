@@ -10,8 +10,8 @@ overrides:
   fact: c.fx.content.service_max
   field: unit
   effective_value: unicode_scalars
-  target_hash: xxh64:0123456789abcdef
-  schema_hash: xxh64:fedcba9876543210
+  target_hash: xxh64:e411ea8353eb4024
+  schema_hash: xxh64:dcdb3d338874ed6d
   evidence:
   - src.fx.sdk
   reason: SDK evidence resolves the unit.

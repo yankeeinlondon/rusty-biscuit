@@ -1,7 +1,7 @@
 ---
 # Schema- and semantically-valid, but `unspecified_characters` must never reach the executable projection (criterion 5). Phase 3 asserts ineligibility, not rejection.
-# Schema-valid by design; the Rust rule rejects it.
 # expect-rule: SR-ENFORCEABLE
+# expect-ineligible: c.fx.content unresolved_unit
 $schema: ../../../../../../docs/research/platforms/_schema.yaml
 schema_version: 1
 platform_id: discord

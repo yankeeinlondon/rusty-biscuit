@@ -45,6 +45,7 @@ interfaces:
   - kind: hosting_mode
     equals: daemon_http
   - kind: bridge_version
+    gap: gap.signal.versions
   operations:
   - send
   - send_group_message
@@ -128,6 +129,7 @@ constraints:
   overflow_behavior: unknown
   applies_when:
   - kind: bridge_version
+    gap: gap.signal.versions
   knowledge:
     state: unknown
     evidence:
@@ -341,7 +343,7 @@ changes:
   kind: unresolved
   facts:
   - c.signal.send.message
-  - cap.signal.attachments
+  - att.signal.send
   summary: Pilot records only; key facts remain unresolved.
 gaps:
 - id: gap.signal.text_limit
@@ -417,6 +419,6 @@ requires_messenger_update: false
 Pilot record only; not research. Nearly every fact is `unknown`: the pilot
 checks that the contract can say so precisely. The interface is signal-cli
 JSON-RPC, not the REST wrapper the older prose also describes. Bridge-version
-conditions appear with no operands (`{ kind: bridge_version }`): the schema
-accepts them, and the semantic pass must treat them as unresolved conditions
-that make the record ineligible for enforcement.
+conditions carry no operand, only the gap that investigates them
+(`{ kind: bridge_version, gap: gap.signal.versions }`), which makes their
+records ineligible for enforcement (SR-CONDITION).

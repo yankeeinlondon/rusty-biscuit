@@ -22,6 +22,13 @@ twilight-util = { version = "0.17", optional = true, features = ["builder"] }
 jsonwebtoken = { version = "9", optional = true }
 sniff = { path = "../../sniff/lib", optional = true }
 tokio = { version = "1", features = ["process", "time"], optional = true }
+# Provider-research maintenance (`research` feature only): passive schema
+# validation, file-reference resolution, and xxh64 fingerprints. Never part of
+# an ordinary send build.
+darkmatter = { path = "../../darkmatter/lib", optional = true }
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"], optional = true }
+biscuit-hash = { path = "../../biscuit-hash/lib", optional = true }
+serde_path_to_error = { version = "0.1", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 notify-rust = { version = "4", optional = true }
@@ -62,6 +69,10 @@ desktop = [
 ]
 apns = ["dep:reqwest", "dep:jsonwebtoken"]
 fcm = ["dep:reqwest"]
+# Typed loading and semantic validation of the provider research contract
+# (`messenger::research`). Maintenance consumers only; see
+# `features/2026-09-17-research-metadata-pipeline/architecture.md`.
+research = ["dep:darkmatter", "dep:biscuit-file", "dep:biscuit-hash", "dep:serde_path_to_error"]
 
 # Helper-stub binaries used by the desktop helper integration tests.
 # They are tiny (only `std`) and only built when the `desktop` feature is
@@ -117,7 +128,7 @@ bench = false
 
 [package.metadata.ci.tests]
 all-features = true
-local-features = ["desktop"]
+local-features = ["desktop", "research"]
 runner-tools = ["messenger-desktop-stubs"]
 
 [package.metadata.ci.native]

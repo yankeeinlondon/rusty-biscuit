@@ -384,8 +384,7 @@ text_bindings:
     - HTML
     - MarkdownV2
     - Markdown
-    default: '(absent: plain text)'
-    default_state: documented
+    default_state: absent
   relationships:
   - kind: mutually_exclusive
     target: tb.telegram.send_message.entities
@@ -844,7 +843,7 @@ gaps:
   status: open
   question: Is author geolocation ever attached automatically?
   facts:
-  - cap.telegram.location.author_geolocation
+  - geo.telegram.bot_api.author
   next_investigation: Read sendLocation and Message.location.
   kind: research
 - id: gap.telegram.interactivity

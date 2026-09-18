@@ -575,7 +575,6 @@ image_bindings:
   sources:
   - upload_bytes
   collection: provider_selected
-  alt_text_binding: tb.discord.bot.attachment_description
   supplied_by: caller_supplied
   knowledge:
     state: known
@@ -874,6 +873,15 @@ changes:
   - err.discord.bot.sdk_validation
   summary: Pilot records only.
 gaps:
+- id: gap.discord.embed_budget_preflight
+  kind: requires_messenger_update
+  status: open
+  question: Should the Discord adapters preflight the aggregate embed budget before sending?
+  interface: discord_bot_api
+  category: constraints
+  facts:
+  - c.discord.bot.embeds_total
+  next_investigation: Review the constraints assessment for both Discord adapters.
 - id: gap.discord.versions
   status: open
   question: Which preview API versions exist and when was v10 released?

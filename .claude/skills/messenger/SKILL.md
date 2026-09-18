@@ -155,6 +155,7 @@ messenger/
     src/
       provider/  # Discord, Discord-Webhook, Slack, Slack-Webhook, Signal, WhatsApp, Telegram, Desktop, APNs, FCM adapters
       markdown/  # AST, parser, per-provider renderers
+      research/  # `research` feature: typed research contract loader + semantic rules
       tests/     # Unit + wiremock integration tests
   cli/           # messenger binary (send, setup, completions)
     src/
@@ -166,10 +167,10 @@ messenger/
   docs/research/ # Provider research and API design notes
 ```
 
-Local L1 enables only the `desktop` feature used by the package-area contract.
-CI retains `all-features` coverage for every provider; the separate
-`local-features` metadata prevents root local testing from inheriting that
-provider-wide graph.
+Local L1 enables only the `desktop` and `research` features used by the
+package-area contract. CI retains `all-features` coverage for every provider;
+the separate `local-features` metadata prevents root local testing from
+inheriting that provider-wide graph.
 
 ## Detailed Documentation
 

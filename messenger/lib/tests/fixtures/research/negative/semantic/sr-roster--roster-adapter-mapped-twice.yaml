@@ -50,14 +50,14 @@ platforms:
   - url: https://docs.example.com/source-1
     contribution: Distinct coverage 1.
     interfaces:
-    - discord_bot_api
+    - slack_web_api
     review: approved
     approved_by: maintainer
     approved_on: &id002 2026-09-17
   - url: https://docs.example.com/source-2
     contribution: Distinct coverage 2.
     interfaces:
-    - discord_bot_api
+    - slack_web_api
     review: approved
     approved_by: maintainer
     approved_on: *id002

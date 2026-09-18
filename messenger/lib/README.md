@@ -55,10 +55,13 @@ Available features:
 - `whatsapp`
 - `telegram`
 - `desktop`
+- `research` (maintenance only; not a provider)
 
 Default features: `discord`, `slack`
 
 The `desktop` feature pulls in platform-specific dependencies per target: `notify-rust` on Linux, `winrt-notification` on Windows, and `objc2-foundation` + `objc2-user-notifications` on macOS.
+
+The `research` feature adds `messenger::research`, the typed, offline loader and validator for the provider research contract (`messenger/docs/platforms.yaml` and `messenger/docs/research/`). It checks each file against its shipped schema through Darkmatter's library, applies the semantic rules listed in `docs/research/platforms/_rules.md`, derives which constraints are executable, and decides whether reviewed implementation assessments can be reused. It never changes `CapabilitySet` or delivery behavior, and send builds without the feature carry none of its dependencies (`darkmatter`, `biscuit-file`, `biscuit-hash`, `serde_path_to_error`).
 
 ## Core Types
 
@@ -297,6 +300,7 @@ cargo nextest run -p messenger --features desktop
 - `thiserror` for the public error type
 - `serde` / `serde_json` for typed receipts and reply references
 - `notify-rust` (Linux), `winrt-notification` (Windows), `objc2-foundation` + `objc2-user-notifications` (macOS), and `uuid` (shared) for the `desktop` feature
+- `darkmatter`, `biscuit-file`, `biscuit-hash`, and `serde_path_to_error` for the `research` feature
 
 ## Lessons Learned
 

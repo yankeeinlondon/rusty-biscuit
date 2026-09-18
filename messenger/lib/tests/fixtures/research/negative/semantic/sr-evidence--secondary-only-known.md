@@ -1,7 +1,8 @@
 ---
 # A known bound supported only by a secondary source is visible but never executable.
-# Schema-valid by design; the Rust rule rejects it.
+# Schema-valid and semantically valid; the eligibility projection excludes it.
 # expect-rule: SR-EVIDENCE
+# expect-ineligible: c.fx.content secondary_evidence_only
 $schema: ../../../../../../docs/research/platforms/_schema.yaml
 schema_version: 1
 platform_id: discord

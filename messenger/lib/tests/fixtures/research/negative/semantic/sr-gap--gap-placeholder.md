@@ -2,6 +2,7 @@
 # Coverage resting on an open gap: a placeholder unknown does not satisfy baseline completion (criterion 28).
 # Schema-valid by design; the Rust rule rejects it.
 # expect-rule: SR-GAP
+# validate-scope: accepted
 $schema: ../../../../../../docs/research/platforms/_schema.yaml
 schema_version: 1
 platform_id: discord

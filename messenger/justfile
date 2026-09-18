@@ -53,15 +53,15 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 #
-# `--features desktop` for the library only: messenger's default feature set
-# omits the desktop implementation its test contract covers (the same
-# special case `_test_workspace` encodes for the root `just test`).
+# `--features desktop,research` for the library only: messenger's default
+# feature set omits the desktop implementation and the research contract its
+# test contract covers (`local-features` in `lib/Cargo.toml`).
 sanity:
-    @just _sanity_all "messenger --features desktop; messenger-cli"
+    @just _sanity_all "messenger --features desktop,research; messenger-cli"
 
 # Test both library and CLI
 test *args="":
-    @just _test_all "messenger --features desktop; messenger-cli" {{ args }}
+    @just _test_all "messenger --features desktop,research; messenger-cli" {{ args }}
 
 # not applicable: messenger has no real-terminal (Level-2) tests
 test-l2:
@@ -82,8 +82,8 @@ test-real:
 
 # Lint both the library and CLI
 lint:
-    @echo "Linting {{ BOLD }}messenger{{ RESET }} (features: desktop)"
-    @cargo clippy -p messenger --features desktop --all-targets -- -D warnings
+    @echo "Linting {{ BOLD }}messenger{{ RESET }} (features: desktop, research)"
+    @cargo clippy -p messenger --features desktop,research --all-targets -- -D warnings
     @just _lint messenger-cli
 
 # not applicable: messenger has no criterion benches
@@ -97,7 +97,7 @@ coverage *args="":
 
 # Doctests for the library and CLI.
 doctest *args="":
-    @just _doctest {{ LIBRARY }} --features desktop {{ args }}
+    @just _doctest {{ LIBRARY }} --features desktop,research {{ args }}
     @just _doctest {{ CLI }} {{ args }}
 
 # not applicable: messenger has no cargo-fuzz targets
@@ -116,7 +116,7 @@ all:
 # ----------------------------------------------------------------------------
 
 lint-fix:
-    @cargo clippy -p messenger --features desktop --all-targets -- -D warnings || just _lint_fix messenger
+    @cargo clippy -p messenger --features desktop,research --all-targets -- -D warnings || just _lint_fix messenger
     @just _lint messenger-cli || just _lint_fix messenger-cli
 
 # Install the CLI (enables native playback on macOS/Windows; Linux requires libasound2-dev)
