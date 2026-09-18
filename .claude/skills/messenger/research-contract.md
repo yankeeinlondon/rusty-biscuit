@@ -55,6 +55,25 @@ Platform research is becoming typed, reviewed metadata (feature
   `cli/tests/research_cli.rs` (real binary). Baseline fixture:
   `lib/tests/fixtures/research/lifecycle/fleet/`.
 
+## Refresh budget (Claudine)
+
+- A platform refresh is one `claudine sequence --budget-ledger <ledger>` run.
+  Messenger cannot link Claudine (`claudine` depends on `messenger`), so it uses
+  the CLI only: `claudine budget init <ledger> --run-id --platform
+  --max-seconds --max-invocations [--exclusive-lock ../../fleet.lock]` (both
+  limits required, no defaults), then `show --json` / `suspend` / `resume` /
+  `grant`. Contract: [`claudine/docs/cli/budget.md`](../../../claudine/docs/cli/budget.md).
+- Put every charged activity inside the sequence (validation and delta as
+  `shell:` steps). Time outside a budgeted Claudine run is not observable.
+- A successful run ends `suspended` ("awaiting human review"). Exit `76` means
+  exhausted: the ledger keeps the incomplete `stage`, and this is never a
+  finished or unknown result. Exit `77` means blocked: suspended, interrupted,
+  or the fleet lock is held. A killed runner leaves `active`, and the next
+  command recovers it to `interrupted`.
+- The ledger does not persist sequence progress. A restarted sequence re-runs
+  from step 1 and consumes more allowance. Resuming a candidate mid-run is
+  Messenger's job (Phase 6).
+
 ## Gotchas
 
 SimplifiedSchema types must be one line and regex groups need

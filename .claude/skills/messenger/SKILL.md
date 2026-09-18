@@ -179,7 +179,7 @@ inheriting that provider-wide graph.
 - [Providers Reference](providers.md) - Provider trait, adapter implementations, config structs, capabilities
 - [Markdown Rendering](markdown-rendering.md) - AST, parser, per-provider renderers, supported constructs
 - [CLI Reference](cli-reference.md) - Commands, route resolution, config format, receipts, setup flow
-- [Research Contract](research-contract.md) - Provider research roster, frozen schema v1, fleet prompt, fixtures, snapshot publication, catalog/report/delta consumers, and gotchas
+- [Research Contract](research-contract.md) - Provider research roster, frozen schema v1, fleet prompt, fixtures, snapshot publication, catalog/report/delta consumers, the Claudine refresh budget, and gotchas
 - [User Guide](../../../messenger/docs/user-guide.md) - Platform setup walkthroughs, CLI config schema, library usage examples
 
 ## Related Packages
