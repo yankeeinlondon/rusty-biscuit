@@ -74,6 +74,46 @@ Platform research is becoming typed, reviewed metadata (feature
   from step 1 and consumes more allowance. Resuming a candidate mid-run is
   Messenger's job (Phase 6).
 
+## Refresh and review (`research::refresh`)
+
+- **Commands**: `prepare` (selection + limits + run dir + printed Claudine
+  commands; `--dry-run`, `--resume RUN_ID`), `check-run RUN_ID [--through
+  validation|review]` (the sequence's `shell:` steps), `runs`, `promote
+  RUN_ID… --approved-by NAME | --renewal`, `reject`, `cleanup [--apply]`.
+  Messenger never spawns Claudine; `prepare` prints `claudine budget init …`
+  and `claudine sequence --yolo --budget-ledger …`.
+- **Run layout** `messenger/.research-state/runs/<platform>/<run_id>/`:
+  `run.json`, `budget.json` (Claudine's), `run.md`, `inputs/{discovery,
+  reconcile,sources,review}/`, `outputs/{discovery.md, suggested-sources.json,
+  source-proposal.json, evidence-review.json}`, `candidate/<platform>.md` (with
+  schema copies so `md schema validate` works there), `source-checks.json`,
+  `validation.json`, `delta.json`. Renewal records go to `renewals/`.
+- **Selection reasons**: `missing`, `expired`, `forced`, `schema_invalid`,
+  `prompt_changed`, `schema_changed`, `no_review_record`, `version_changed`
+  (`--observed-version IFACE=VER`). What a document was "researched under"
+  comes from the newest published review record or local renewal record; a
+  generate-only snapshot has neither, so every platform reads
+  `no_review_record`.
+- **Integrity rules** (in `check`, beyond validation): same platform, same
+  `created`, every chronology ID kept, removed IDs listed in `changes`,
+  `last_updated` moves only with a successful check, and a curated source's
+  `retrieved` changes only with a successful check on that exact date.
+- **Approval**: `approval::decide` → `Ineligible` / `Renewal` /
+  `HumanRequired`. Renewal = frontmatter equal after dropping `last_updated`,
+  `agent`, `model`, and `sources[*].retrieved`; same body hash; no curated
+  change; same prompt and schema fingerprints as the last review/renewal; no
+  inaccessible check; every URL source rechecked on its recorded date.
+- **History**: a human promotion adds `docs/research/reviews/{date}-{platform}-
+  {run_id}.json` to the same publication; `generate` carries every review
+  record forward and renders `CHANGELOG.md` from them (rule `SR-REVIEW`).
+- **Initial baseline**: publication needs every active platform, so the first
+  promotion passes all five run IDs to one `promote`. One run alone is refused
+  (`GenerateError::Refused` with `missing`) and nothing is written.
+- **Recovery**: `prepare --resume` reruns from the first incomplete stage
+  (reconcile when validation failed), at most twice, with the same ledger. It
+  refuses an exhausted, suspended, interrupted, or active ledger until the
+  operator acts in Claudine.
+
 ## Gotchas
 
 SimplifiedSchema types must be one line and regex groups need
@@ -107,3 +147,12 @@ publication. Load candidates this way, not from their state-area location.
 Dense `Table`s cannot render at narrow widths ("Table could not be rendered in
 N columns"); the human report uses word-wrapped `UnorderedList`s instead, and
 `UnorderedList` items are plain text (do not `Prose::escape_text` them).
+
+`delta::compare` asserts both documents describe one platform; a worker can
+write another platform's document into the candidate slot, so `check` skips
+the delta on a platform mismatch and reports it as a finding. A candidate
+whose frontmatter does not parse is a validation finding, never a hard error.
+
+`promote` finishes a run whose candidate is already the published document
+(an interrupted publication rolled forward by `recover`) instead of refusing
+it as a stale baseline.

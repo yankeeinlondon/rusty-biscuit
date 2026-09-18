@@ -113,7 +113,7 @@ CLI commands for desktop notifications:
 - `messenger dismiss <receipt>` — dismiss a delivered desktop notification using a saved receipt
 - `messenger info [--json]` — show host OS, detected helpers, election order, and configured routes
 - `messenger install [--yes] [--helper <name>…] [--dry-run]` — install missing notification helpers via the host package manager
-- `messenger research validate|generate [--check]|report|recover` — offline research-contract maintenance (see [Research Contract](research-contract.md))
+- `messenger research validate|generate [--check]|report|recover` — offline research-contract maintenance; `prepare|check-run|runs|promote|reject|cleanup` — the refresh and review lifecycle (see [Research Contract](research-contract.md))
 
 Discord ships with two adapters behind a single `discord` feature: `DiscordProvider` (bot token, full capability) and `DiscordWebhookProvider` (webhook URL, notification-only). The webhook adapter rejects `reply_to` at plan time with `MessengerError::UnsupportedFeature { feature: "replies" }` — no network call is made.
 Both Discord adapters render Markdown through the same Discord renderer; the transport and capability differences live in the provider layer, not in a second markup dialect.
@@ -156,7 +156,7 @@ messenger/
     src/
       provider/  # Discord, Discord-Webhook, Slack, Slack-Webhook, Signal, WhatsApp, Telegram, Desktop, APNs, FCM adapters
       markdown/  # AST, parser, per-provider renderers
-      research/  # `research` feature: typed loader, semantic rules, catalog, delta, reports, snapshot publication
+      research/  # `research` feature: typed loader, semantic rules, catalog, delta, reports, snapshot publication, refresh lifecycle
       tests/     # Unit + wiremock integration tests
   cli/           # messenger binary (send, setup, completions)
     src/
@@ -166,6 +166,7 @@ messenger/
       setup.rs   # Interactive provider setup
       receipt_store.rs
       research.rs # `messenger research` maintenance commands
+      research_lifecycle.rs # prepare, check-run, runs, promote, reject, cleanup
   docs/research/ # Provider research and API design notes
 ```
 

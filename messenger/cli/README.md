@@ -14,7 +14,7 @@ messenger setup [provider]
 messenger init [provider]
 messenger info [--json]
 messenger install [--yes] [--helper <name>…] [--dry-run]
-messenger research <validate|generate|report|recover> [options]
+messenger research <validate|generate|report|recover|prepare|check-run|runs|promote|reject|cleanup> [options]
 messenger completions
 ```
 
@@ -26,7 +26,8 @@ messenger completions
 
 `messenger research` maintains the offline provider research contract
 (`messenger/docs/platforms.yaml` and `messenger/docs/research/`). It never
-reaches the network, starts a research agent, or changes delivery behavior.
+reaches the network, starts a research agent or Claudine, or changes delivery
+behavior.
 Every command takes `--root <DIR>` (default: the Git repository containing the
 current directory) and `--today <YYYY-MM-DD>` (default: today, UTC; decides
 freshness and override expiry).
@@ -52,8 +53,60 @@ artifacts it lists: `report` and `generate` refuse a snapshot whose files do
 not match it (hand edits included). Local journal and staging state lives in
 the gitignored `messenger/.research-state/`.
 
-Exit status: `0` success, `1` findings, drift, or a refused generation, `2`
-invalid arguments, `3` the command could not run (no published snapshot,
+### Refresh and review
+
+```bash
+messenger research prepare [PLATFORM…] --max-seconds N --max-invocations N [--force] [--observed-version IFACE=VER] [--json]
+messenger research prepare --dry-run [PLATFORM…]        # show which platforms are due, and why; writes nothing
+messenger research prepare --resume RUN_ID              # rerun a failed, interrupted, or exhausted run (max 2)
+messenger research check-run RUN_ID [--through validation|review] [--json]
+messenger research runs [--platform P] [--json]         # local runs, stages, budget ledgers
+messenger research promote RUN_ID… --approved-by NAME   # publish reviewed runs together
+messenger research promote RUN_ID --renewal             # verified unchanged renewal only
+messenger research reject RUN_ID --by NAME --reason TEXT
+messenger research cleanup [--older-than DAYS] [--apply]  # preview by default (30 days)
+```
+
+`prepare` selects platforms that are missing, expired, forced, invalid, or
+researched under an older prompt or schema (or with an observed version the
+accepted research does not know), and skips the rest with a reason. Both
+limits are required and have no default; they are checked before anything is
+written. Each run gets its own directory under
+`messenger/.research-state/runs/<platform>/<run_id>/` with separately prepared
+inputs per pass (discovery never sees previous research or curated sources)
+and a Claudine sequence document. `prepare` prints the `claudine budget init`
+and `claudine sequence --yolo --budget-ledger …` commands to run; one shared
+fleet lock keeps platforms one at a time. A resumption reuses the same ledger,
+so it never adds budget.
+
+`check-run` runs inside the sequence as a `shell:` step. It judges each pass
+by what it wrote, never by an exit code: discovery suggestions with their
+contributions, a check record for every curated source, a capped curated-list
+proposal, a candidate that validates as accepted research and keeps `created`,
+chronology, and stable IDs, observation dates backed by successful checks, and
+an independent evidence review covering every change. A passing review leaves
+the run awaiting human review.
+
+`promote` is the only command that changes accepted research. A named
+maintainer approves any substantive change (and every initial baseline);
+`--renewal` accepts only a verified unchanged renewal (identical facts, gaps,
+evidence sources, prose, schema, prompt, and curated list, with every source
+successfully rechecked). Several runs can be promoted together; the first
+publication needs one for every active platform. Promotion publishes the
+candidates with a review record per approved change under
+`docs/research/reviews/`, and `generate` renders `docs/research/CHANGELOG.md`
+from those records, so renewals and rejected runs never appear there. It never
+edits the roster or the reviewed mappings, and never commits.
+
+`cleanup` previews exactly which local run and renewal records at least the
+threshold old would be removed, and which removals end the ability to resume a
+run. It deletes only with `--apply`, and never touches active,
+awaiting-review, or interrupted runs, a run whose ledger lock is held, or
+anything under `docs/`.
+
+Exit status: `0` success, `1` findings, drift, a refused generation, or a
+refused lifecycle step (wrong run status, not eligible for promotion), `2`
+invalid arguments (including missing run limits), `3` the command could not run (no published snapshot,
 recovery required, lock held, verification failure, unreadable input).
 `--json` prints exactly one JSON document on stdout with no escape sequences;
 human output is styled for the terminal.

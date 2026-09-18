@@ -31,6 +31,8 @@ write. Those paths are the only files you may create or change.
   record a `requires_messenger_update` gap.
 - A zero exit code proves nothing. The run succeeds only when the expected
   artifacts exist, validate, and record the evidence you actually checked.
+  Each pass's prepared prompt names the exact output paths and JSON shapes;
+  `messenger research check-run` judges them after each pass.
 
 ## Access Policy
 
