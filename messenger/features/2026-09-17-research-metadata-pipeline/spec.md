@@ -38,64 +38,70 @@ references:
 human_review: true
 human_review_items:
     - |-
-        **Approve the extra `messenger research` commands** (beyond `validate`, `generate`, `generate --check`, and `report`, which the spec already requires).
+        **Unblock the three shared test machines** (Linux, native Windows, and Windows' Linux subsystem, WSL2).
 
-        **Status after Phase 3:** still undecided. Phase 3 built the library layer only (typed loading, validation, and assessment reuse in `messenger::research`) and added no commands, so nothing depends on this choice yet.
+        **Why decide now:** Phase 5 changes how Claudine stops a research worker and everything it started. That behavior is operating-system specific; on Windows it relies on a Windows-only mechanism. Phase 4's snapshot publication also depends on Windows file-replacement rules. Both need real runs on each system. Today:
+        - `build-linux` is held by a lock left since 2026-09-14 by an unrelated job (`reward-20260914-c3e60d0`).
+        - `build-win-native` has no free space on its `W:` drive, so nothing can be copied there.
+        - `build-win` (WSL2) drops the SSH connection, which earlier phases traced to the same full `W:` drive.
 
-        **Why decide now:** Phase 4 builds the maintenance CLI (Wave 10) and cannot start that wave without an answer.
-
-        The research workflow needs to prepare a run, list runs, accept (promote) a reviewed result, repair an interrupted publication, and delete old local records. The spec gives run setup, inspection, and cleanup to `messenger-cli`, and forbids hiding these steps inside `generate`.
+        Phases 3 and 4 fell back to Linux in Docker on this Mac plus Windows *compile-only* checks. Agents were told not to delete other people's data or locks, so this needs a person.
 
         Options:
-        - **A. Five explicit subcommands:** `prepare` (checks time and agent-launch limits and builds a run's inputs), `runs` (lists runs and where they are stored), `promote` (the only command that changes accepted research, and only with a recorded approval or a verified unchanged renewal), `recover` (repairs an interrupted publication), and `cleanup` (preview by default; `--apply` deletes).
-          - Pros: each state change is visible and explicit, and each command maps to one spec rule.
-          - Cons: five more commands to document and test.
-        - **B. Fewer, grouped commands,** e.g. `research run prepare|list` and `research publish promote|recover`, with `cleanup` separate.
-          - Pros: a smaller top-level help screen.
-          - Cons: same behavior with deeper nesting, and it differs from the flat style of the existing `messenger` commands.
-        - **C. `just` recipes only, no new commands.**
-          - Pros: no CLI surface.
-          - Cons: not workable. Recipes need a binary to call, and the spec puts run configuration, inspection, and cleanup in `messenger-cli`.
+        - **A. Free space on `W:` and clear the stale `build-linux` lock** (after confirming the 2026-09-14 job is dead).
+          - Pros: real evidence on all three systems before Phase 5 builds on it; later phases can use `just cross-check` as designed.
+          - Cons: a few minutes of manual host maintenance.
+        - **B. Continue with Docker Linux plus Windows compile checks, and rely on CI for Windows and WSL2.**
+          - Pros: no host work.
+          - Cons: Windows-only failures surface hours later in CI, and Phase 5's Windows process-stopping behavior would be untested until then.
+        - **C. Pause Phase 5 until the hosts are fixed.**
+          - Pros: no risk of building on untested behavior.
+          - Cons: stalls the feature on host maintenance.
 
-        **Recommendation: A.** It is the smallest design that keeps every change to accepted research explicit and auditable. Details are in `architecture.md`, section "CLI and recipe surfaces".
+        **Recommendation: A.** It is small, and Phase 5 is the phase where Windows-specific behavior matters most.
     - |-
-        **Confirm the file layout** (beyond the artifact table in the spec).
+        **Approve the remaining research commands** (`prepare`, `runs`, `promote`, `cleanup`).
 
-        **Status after Phase 3:** the code now depends on it. `messenger::research::Workspace` hard-codes these paths, and every research file must point its `$schema` at the matching shipped schema:
-        1. `docs/research/platforms/_types.yaml`, one shared file of named types used by every research schema.
-        2. `docs/research/platforms/_overrides.schema.yaml` and `docs/research/platforms/_rules.md` (the list of checks the schema cannot express).
-        3. `docs/platforms.schema.yaml`, the roster's schema.
-        4. `docs/research/implementation/_schema.yaml` and the future `mappings.yaml` (reviewed notes on how Messenger's code implements each researched fact).
+        **Status after Phase 4:** Phase 4 shipped the four commands the spec requires (`validate`, `generate`, `generate --check`, `report`) plus `recover`. `recover` repairs an interrupted publication, and publication cannot be operated without it: `generate` refuses to run until an interrupted publication is repaired, and the design forbids hiding that repair inside `generate`. The other four commands have not been built.
 
-        Still planned for Phase 4: the committed snapshot manifest `docs/research/publication.json`, review records under `docs/research/reviews/`, and the git-ignored local folder `messenger/.research-state/`.
-
-        **Why decide now:** Phase 4 builds publication around the manifest. Moving paths later means rework in code, tests, and fixtures; moving them now is a small change in one file (`messenger/lib/src/research/paths.rs`).
+        **Why decide now:** not needed for Phase 5 (Claudine), but Phase 6 builds them. Deciding now avoids a pause later.
 
         Options:
-        - **A. Keep the layout as built and planned.**
-          - Pros: proven by the spikes, and now exercised by about 50 automated tests; nothing unreviewed gets committed.
-          - Cons: more files than the spec's table names. The manifest must be committed in the same commit as the files it lists.
-        - **B. Collapse to a single schema file.**
-          - Pros: matches the spec's artifact table exactly.
-          - Cons: stray type names become accepted document keys unless custom code rejects them, which weakens schema-only validation and gives worse error messages.
-        - **C. Pause until Darkmatter adds a "strict" top-level option and fixes the related schema-loading bugs.**
-          - Pros: a cleaner single schema file later.
-          - Cons: blocks this feature on another team's work, with no date.
+        - **A. Four more flat subcommands** (`messenger research prepare`, `runs`, `promote`, `cleanup`), matching the `recover` command already shipped.
+          - Pros: every change to accepted research stays one explicit, visible command; consistent with what exists.
+          - Cons: four more commands to document and test.
+        - **B. Grouped commands** (`research run prepare|list`, `research publish promote|recover`).
+          - Pros: shorter top-level help.
+          - Cons: `recover` would have to move; deeper nesting than the rest of the `messenger` CLI.
+        - **C. `just` recipes only.**
+          - Pros: no new commands.
+          - Cons: not workable; recipes need a binary to call, and the spec puts run setup, inspection, and cleanup in `messenger-cli`.
 
-        **Recommendation: A.** It is built and tested, and the alternatives either weaken validation or delay the feature.
+        **Recommendation: A.** Smallest change, consistent with the shipped `recover`, and it keeps every change to accepted research explicit.
+    - |-
+        **Confirm the file layout**, which Phase 4 made more load-bearing.
+
+        **Status after Phase 4:** the code now writes and verifies `docs/research/publication.json` (the committed record that selects which set of research files is current), generates `docs/research/platforms/catalog.json` and `docs/research/summary/platforms.md`, and keeps its local working files in the git-ignored `messenger/.research-state/`. The summary is authored prose with one generated region; only that region is checked, so people can edit the prose freely. Earlier layout choices (the shared `_types.yaml`, the separate roster and mappings schemas) are unchanged.
+
+        **Why decide now:** Phase 6 adds the change log and review records to this layout. Moving paths is a one-file change today (`messenger/lib/src/research/paths.rs`) and gets more expensive with each phase.
+
+        Options:
+        - **A. Keep the layout as built.**
+          - Pros: implemented and covered by about 100 automated tests; no unreviewed file is ever committed by a tool.
+          - Cons: more files than the spec's table lists, and `publication.json` must be committed together with the files it lists.
+        - **B. Change paths now** (for example, move `publication.json` or the summary).
+          - Pros: the layout matches a different preference.
+          - Cons: rework in code, tests, and docs, with no functional gain.
+
+        **Recommendation: A.**
 message_to_agent: |-
-    Phase 3 shipped `messenger::research` (Cargo feature `research`, now in `local-features`, so `just test` and `just lint` in `messenger/` cover it). Read the "## Phase 3" section of `implementation-log.md` and `messenger/docs/research/platforms/_rules.md` first.
-    - API to build on: `Workspace` (fixed contract paths, `RepoPath` spelling), `Loader` (`load_document/roster/overrides/mappings`; caches the resolved schema per kind, so reuse ONE loader per command), `validate_document(&Loaded, &Context { roster, scope })` → `DocumentValidation { diagnostics, validated: Option<ValidatedDocument> }`, `validate_roster`, `validate_fleet`, `validate_overrides(.., schema_fingerprint, today)`, `validate_mappings`, `coverage_summary`, `ValidatedDocument::{eligibility, coverage, record}`, `assess::evaluate`, `canonical::{canonical_json, record_fingerprint, text_fingerprint, schema_fingerprint}`, and `validate::replay::classify`.
-    - Scopes: `Scope::Fragment` for fixtures and candidates; `Scope::Accepted` for accepted research and baselines (full roster interfaces; coverage and unknowns rest only on investigated gaps). The catalog and `generate` should validate accepted documents in `Accepted` scope.
-    - The library never reads the clock: the caller supplies `today` for override expiry. Findings are sorted and deduplicated; the `Diagnostic` field order is the sort order. Messages never echo fixture bodies.
-    - Executable types (`ExecutableConstraint`, `ExecutableCondition`) are `#[non_exhaustive]` and come only from `ValidatedDocument::eligibility()`. Ineligible facts keep their reasons (`IneligibleReason::code()`); the catalog must show them, never drop them or coerce them to 0 or infinity.
-    - Every model type derives `Serialize`, but serialized `Option`s emit `null`: the Phase 4 catalog DTOs should be separate types (the architecture record already says so), not the authored model.
-    - The manifest (`publication.json`) reader is not written; add it with the Phase 4 snapshot writer.
-    - Speed: do NOT call `DarkmatterSchemas::validate` per document. It re-resolves imports (~100 ms debug) and pushed tests past nextest's 30 s termination. Use the `Loader` or cache an `EffectiveSchema`.
-    - `contract/overrides-valid.yaml` and `sr-override--expired-override.yaml` pin the real xxh64 of `c.fx.content.service_max` and of `_schema.yaml` + `_types.yaml`. Editing either schema file makes them stale; refresh the hashes in the same change (`research_validation::overrides_fail_precisely_when_expired_orphaned_or_stale` prints the expected fact hash).
-    - Cross-OS: Linux evidence came from Docker (see `os/macos.md`; mounts must live under `$HOME`). `build-linux` has a stale lock from 2026-09-14 (`reward-20260914-c3e60d0`), `build-win-native`'s `W:` is full, and the WSL host `build-win` resets SSH. All three need a human; do not remove the lock or delete data. Windows has compile evidence only (`x86_64-pc-windows-gnu`).
-    - Pre-existing and not ours: messenger's lib unit tests do not compile with `--no-default-features` (`src/tests/validation.rs:447`).
-    - Human review is still pending on the lifecycle subcommands (Phase 4 Wave 10 needs it) and the file layout (now load-bearing in `paths.rs`).
+    Phase 4 shipped the deterministic consumers in `messenger::research` and the `messenger research` CLI. Read "## Phase 4" in `implementation-log.md` and `.claude/skills/messenger/research-contract.md` ("Publication and consumers") first.
+    - Phase 5 is Claudine-only (budget ledger, admission, cancellation). Messenger must not depend on Claudine; the architecture record's ledger lives under `messenger/.research-state/runs/<platform>/<run_id>/budget.json`, which Messenger will only read (Phase 6).
+    - GitNexus's index predates the Phase 3/4 research files and returned `UNKNOWN` for every edited symbol. Per `architecture.md`, run `just gitnexus` before Phase 5's impact analysis of `execute_attempt_phase` / `execute_harness_attempt`; `isolate_into_process_group` is CRITICAL.
+    - Test hosts are still blocked (see human_review_items): `build-linux` stale lock (`reward-20260914-c3e60d0`), `build-win-native` `W:` full, `build-win` WSL SSH resets. Do not remove the lock or delete data. Linux evidence can come from Docker (`os/macos.md`: mounts under `$HOME`, `bash -c` not `bash -lc`, `cargo test --test <name>`); Windows compile evidence from `x86_64-pc-windows-gnu`.
+    - For Phase 6 (not Phase 5): promotion should call `research::generate::generate(loader, updates, today, options)` with the candidate text as `updates` (partial refresh is already implemented and tested); candidates must be judged with `Loader::load_document_text` at the accepted path so `$schema` resolves as it will after publication. Add CHANGELOG, review records, and the skill projection as further artifacts of the same manifest (`publish::Snapshot`). `delta::compare` and `publish::Options::interrupt_at` are ready for the lifecycle tests. Only `recover` of the five lifecycle commands exists; the rest await the human ruling.
+    - Tests use nextest's 30 s limit: `research_publication`'s interruption sweep is split in two (~5 s each in debug). Keep new sweeps split the same way.
+    - CLI tests must resolve the binary with `biscuit_test_harness::bin_exe!` (WSL2 archive leg), not `env!("CARGO_BIN_EXE_…")`.
 ---
 
 # Provider Research Metadata Pipeline

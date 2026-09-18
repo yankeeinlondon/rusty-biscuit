@@ -126,8 +126,48 @@ skills_files_updated_during_phase_3:
     - .claude/skills/messenger/SKILL.md
     - .claude/skills/messenger/research-contract.md
     - .claude/skills/os/macos.md
+source_files_during_phase_4:
+    - .gitignore
+    - Cargo.lock
+    - messenger/cli/Cargo.toml
+    - messenger/cli/src/lib.rs
+    - messenger/cli/src/main.rs
+    - messenger/cli/src/research.rs
+    - messenger/cli/tests/research_cli.rs
+    - messenger/lib/src/research/mod.rs
+    - messenger/lib/src/research/assess.rs
+    - messenger/lib/src/research/load.rs
+    - messenger/lib/src/research/paths.rs
+    - messenger/lib/src/research/model/common.rs
+    - messenger/lib/src/research/validate/mod.rs
+    - messenger/lib/src/research/validate/coverage.rs
+    - messenger/lib/src/research/delta.rs
+    - messenger/lib/src/research/generate.rs
+    - messenger/lib/src/research/project.rs
+    - messenger/lib/src/research/report.rs
+    - messenger/lib/src/research/publish/mod.rs
+    - messenger/lib/src/research/publish/fsutil.rs
+    - messenger/lib/tests/research_corpus.rs
+    - messenger/lib/tests/research_lifecycle.rs
+    - messenger/lib/tests/research_publication.rs
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/discord.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/slack.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/telegram.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/whatsapp.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/signal.md
+docs_updated_during_phase_4:
+    - messenger/lib/README.md
+    - messenger/cli/README.md
+    - messenger/lib/tests/fixtures/research/README.md
+    - docs/dependencies.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/messenger/SKILL.md
+    - .claude/skills/messenger/research-contract.md
+    - .claude/skills/os/macos.md
 packages:
     - messenger
+    - messenger-cli
 ---
 
 # Provider Research Metadata Pipeline Implementation Plan
@@ -442,14 +482,14 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Wave 8 — Projection Engines
 
-- [ ] **Catalog Projection**
+- [x] **Catalog Projection**
   - Project all validated facts, explicit unknowns/conflicts, provenance,
     freshness, executable eligibility, and implementation gaps into a stable
     `catalog.json` model.
   - Sort every collection by documented stable keys, normalize repository paths,
     omit wall-clock generation timestamps, and bind output to schema/input hashes.
 
-- [ ] **Delta Engine**
+- [x] **Delta Engine**
   - Produce a full fact-level before/after comparison and fixed flags for removed
     constraints, raised limits, support reversals, changed units, conflicts, and
     unmappable values.
@@ -457,7 +497,7 @@ numeric order unless a task explicitly names a narrower dependency.
     values, preserve initial-baseline status, and keep mechanical conclusions
     distinct from independent-agent review.
 
-- [ ] **Report Models**
+- [x] **Report Models**
   - Build filterable report models for constraints, formatting/text/image
     bindings, attribution/location/effects, inbound/questions/forms,
     errors/recovery, eligibility/freshness, capabilities, and implementation gaps.
@@ -466,7 +506,7 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Wave 9 — Safe Publication
 
-- [ ] **Snapshot Writer**
+- [x] **Snapshot Writer**
   - Implement the Phase 1 snapshot protocol with staged validation, durable
     manifest/hash checks, atomic selection, rollback/recovery, and preservation of
     the previous usable snapshot on every error path.
@@ -474,7 +514,7 @@ numeric order unless a task explicitly names a narrower dependency.
     while rejecting missing initial baselines, schema incompatibility, or
     insufficient required coverage.
 
-- [ ] **Artifact Writers**
+- [x] **Artifact Writers**
   - Generate the catalog and machine-derived comparison tables without editing
     authored prose. Validate every input and all cross-artifact references before
     selecting the new snapshot.
@@ -483,7 +523,7 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Wave 10 — Maintenance CLI
 
-- [ ] **Research Commands**
+- [x] **Research Commands**
   - Add `messenger research validate`, `generate`, `generate --check`, and
     `report` with platform/interface/operation filters and JSON output.
   - Keep machine output escape-free on stdout; render human reports and
@@ -492,7 +532,7 @@ numeric order unless a task explicitly names a narrower dependency.
   - Expose any Phase 1-approved promotion/inspection operations explicitly and
     keep agentic refresh separate from deterministic generation.
 
-- [ ] **CLI Tests**
+- [x] **CLI Tests**
   - Test help, filters, JSON schema, exit codes, drift detection, stale reporting,
     invalid inputs, interrupted generation, and identical double generation in
     isolated fixtures.
@@ -501,10 +541,10 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Phase 4 Checkpoint
 
-- [ ] Run Messenger L1/lint and the explicit maintenance/all-provider feature
+- [x] Run Messenger L1/lint and the explicit maintenance/all-provider feature
   matrix; run `messenger research generate` twice and `generate --check` against
   the fixture corpus.
-- [ ] Manually inspect terminal output at narrow and normal widths and verify JSON
+- [x] Manually inspect terminal output at narrow and normal widths and verify JSON
   stdout contains no ANSI/OSC escapes or human status lines.
 
 ## Phase 5 — Add Shared Claudine Budgets

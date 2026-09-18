@@ -125,8 +125,48 @@ skills_files_updated_during_phase_3:
     - .claude/skills/messenger/SKILL.md
     - .claude/skills/messenger/research-contract.md
     - .claude/skills/os/macos.md
+source_files_during_phase_4:
+    - .gitignore
+    - Cargo.lock
+    - messenger/cli/Cargo.toml
+    - messenger/cli/src/lib.rs
+    - messenger/cli/src/main.rs
+    - messenger/cli/src/research.rs
+    - messenger/cli/tests/research_cli.rs
+    - messenger/lib/src/research/mod.rs
+    - messenger/lib/src/research/assess.rs
+    - messenger/lib/src/research/load.rs
+    - messenger/lib/src/research/paths.rs
+    - messenger/lib/src/research/model/common.rs
+    - messenger/lib/src/research/validate/mod.rs
+    - messenger/lib/src/research/validate/coverage.rs
+    - messenger/lib/src/research/delta.rs
+    - messenger/lib/src/research/generate.rs
+    - messenger/lib/src/research/project.rs
+    - messenger/lib/src/research/report.rs
+    - messenger/lib/src/research/publish/mod.rs
+    - messenger/lib/src/research/publish/fsutil.rs
+    - messenger/lib/tests/research_corpus.rs
+    - messenger/lib/tests/research_lifecycle.rs
+    - messenger/lib/tests/research_publication.rs
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/discord.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/slack.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/telegram.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/whatsapp.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/signal.md
+docs_updated_during_phase_4:
+    - messenger/lib/README.md
+    - messenger/cli/README.md
+    - messenger/lib/tests/fixtures/research/README.md
+    - docs/dependencies.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/messenger/SKILL.md
+    - .claude/skills/messenger/research-contract.md
+    - .claude/skills/os/macos.md
 packages:
     - messenger
+    - messenger-cli
 ---
 
 # Implementation Log for 2026-09-17-research-metadata-pipeline (8 phases)
@@ -583,3 +623,188 @@ Phase 4 owns persistence round trips.
   `\\?\` on both sides); fingerprints normalize CRLF; tests read
   `CARGO_MANIFEST_DIR` at run time for the WSL archive leg. The macOS `/var`
   symlinked tempdir already exercises the non-canonical workspace-root path.
+
+## Phase 4
+
+### What landed
+
+- `messenger::research` (feature `research`) gained five modules:
+  - `publish`: the Phase 1 strategy-A protocol (committed manifest
+    `docs/research/publication.json` + local journal under
+    `messenger/.research-state/publication/`), ported from the spike
+    with `publish`, `recover`, `read_verified`, `pending`, fault points
+    (`Options::interrupt_at`), `std::fs::rename` replacement with the bounded
+    Windows 5/32 retry, Unix directory fsync, and the `File::try_lock` lock.
+    Manifest hashes use the `xxh64:` spelling of `research::canonical`.
+  - `project`: the `catalog.json` DTOs (serialization only) and `project()`.
+  - `delta`: `compare(previous, candidate, mappings)`.
+  - `report`: `CatalogView` (read model of the published catalog), `build()`
+    with platform/interface/operation filters, eleven fact sections,
+    freshness, coverage, implementation gaps, and the seven-adapter
+    truncation and diagnostic handoffs; `emitted_surfaces()` is Messenger's
+    own per-adapter surface list (from the Phase 1 surface inventory).
+  - `generate`: `load_fleet`, `Fleet::{validate, snapshot}`, `generate`,
+    `check`, `published_catalog`.
+- Supporting changes: `Loader::load_document_text` (judge candidate text as
+  if it sat at the accepted path; `load` now reads text then shares that
+  path), `ValidatedDocument::{frontmatter, fact_records}`, `Date::{plus_days,
+  from_unix_days}`, `Workspace::{fleet_prompt, document, manifest,
+  state_dir}` plus path constants, `paths::is_portable` (moved from
+  `assess`, now shared with publication), and `CoverageState: Deserialize`.
+- `messenger-cli`: `messenger research validate|generate [--check]|report|recover`
+  (`cli/src/research.rs`), with `--root`, `--today`, `--json`, and exit
+  statuses 0 / 1 (findings, drift, refusal) / 2 (usage) / 3 (cannot run).
+  The CLI now enables `messenger`'s `research` feature.
+- Root `.gitignore`: `messenger/.research-state/` and `*.publish-tmp`.
+- Fixture: `lib/tests/fixtures/research/lifecycle/fleet/` — five
+  Accepted-scope documents (every roster interface, one investigated gap per
+  platform, Discord field/aggregate and Slack truncating constraints).
+
+### Decisions and rulings
+
+- **Wave 10 scope under pending human review.** The spec still has
+  `human_review: true` for the lifecycle subcommands. Only the four
+  spec-required commands plus `recover` were added. `recover` is exposed
+  because the snapshot protocol cannot be operated without it (writers refuse
+  with `RecoveryRequired`, and the architecture record forbids hiding recovery
+  inside `generate`). `prepare`, `runs`, `promote`, and `cleanup` belong to
+  Phase 6 and still need the ruling.
+- **Snapshot contents (Phase 4).** Artifacts are the five accepted documents
+  (byte for byte), `catalog.json`, and `summary/platforms.md`. CHANGELOG,
+  review records, and the skill projection are added by Phases 6 and 8 as
+  further artifacts of the same manifest.
+- **Baselines.** With a published snapshot, documents come only from its
+  verified bytes or from explicit `updates` (partial refresh); a document at
+  the fixed path that the manifest does not list is treated as missing. With
+  no snapshot, the fixed paths are the initial baseline. A hand edit of any
+  published artifact makes `generate`, `check`, and `report` refuse (exit 3)
+  until the file is restored or regenerated.
+- **Summary is authored prose + one generated region.** Its manifest entry
+  hashes only the generated region (`ArtifactScope::GeneratedRegions`, regions
+  joined by NUL), so maintainers can edit the prose without drift; editing
+  inside the markers is a verification failure. A summary without exactly one
+  well-formed region refuses generation.
+- **Freshness is a date, not a verdict.** The catalog stores `last_updated` and
+  `refresh_due` (roster interval); staleness is computed by the reader
+  (`--today`). Generation output therefore never changes merely because time
+  passed. Override expiry still depends on `today` (it is a validation rule).
+- **Reports read the published catalog, not re-validated inputs.** An expired
+  override makes `generate`/`check` refuse, yet `report` still works: the spec
+  requires expired accepted research to stay inspectable. `CatalogView` carries
+  eligibility as reason codes, so no executable type can be deserialized from
+  a file (the Phase 3 layering holds).
+- **Overrides are reported, never executed.** The catalog shows researched and
+  effective values; eligibility is computed from the researched value only.
+  Wiring overrides into the executable projection is left to the truncation
+  follow-up.
+- **Delta flags** (fixed set): `removed_constraint`, `raised_limit` (max up or
+  min down, same kind), `support_reversal` (any `…/support` crossing
+  `unsupported`), `changed_unit` (unit or measurement stage),
+  `conflicting_evidence` (newly `conflicting`), `new_unmappable_value` (a typed,
+  non-knowledge leaf becoming `unknown`/`unmapped`/`unspecified_characters`).
+  Record prose is `knowledge.explanation` and `note`; evidence references are
+  `knowledge.evidence`; everything else is a typed value. Initial research
+  reports `baseline: none` and still runs the flags over added records.
+- **Catalog ordering** is by the spelled `platform_id` (alphabetical), not
+  enum declaration order; a test caught the difference.
+- **Security:** manifest and journal paths must pass `is_portable` before use.
+  A hostile manifest could otherwise make publication delete files outside the
+  repository (test: `a_manifest_naming_paths_outside_the_repository_is_refused`).
+- **Human report layout.** Manual inspection at 60 and 120 columns showed
+  dense `Table`s failing ("Table could not be rendered in N columns") and
+  `Prose::escape_text` leaking backslashes into `UnorderedList` items. The
+  report now uses one small freshness `Table` and word-wrapped
+  `UnorderedList`s for everything else; list items are plain text.
+- **WSL archive leg:** `research_cli.rs` resolves the binary with
+  `biscuit_test_harness::bin_exe!` (new dev-dependency of `messenger-cli`)
+  instead of `env!("CARGO_BIN_EXE_messenger")`, per the `os` skill.
+- **Drift fixed in docs:** `messenger/cli/README.md` said "four subcommands"
+  and omitted `replace`, `dismiss`, `info`, and `install`; the list is now
+  complete.
+
+### Requirement-to-test mapping (Phase 4)
+
+| Behavior | Test(s) |
+|---|---|
+| Catalog: every fact, unknowns, ineligible reasons, provenance, freshness dates, sorted keys, no host paths | `research_publication::the_catalog_retains_unknowns_ineligibility_provenance_and_freshness`, `two_generations_from_identical_inputs_are_byte_identical` |
+| Output bound to schema/input hashes; a changed schema invalidates the projection | `a_changed_schema_invalidates_the_published_projection`; manifest input assertions in the catalog test |
+| Byte-identical double generation (library and real binary, and across two repositories) | `two_generations_from_identical_inputs_are_byte_identical`; `research_cli::generate_twice_is_byte_identical_and_check_detects_drift` |
+| `--check` drift (input change) without writing; hand edits refused | `check_reports_drift_for_changed_inputs_and_refuses_hand_edits`; CLI drift test (exit 1 / exit 3) |
+| Summary keeps authored prose; only the generated region is verified | `the_summary_keeps_authored_prose_and_regenerates_only_its_region`; `publish::tests::*` |
+| Invalid inputs refused, snapshot untouched; published catalog still inspectable; overrides researched vs effective | `invalid_inputs_are_refused_and_leave_the_snapshot_untouched`; `research_cli::invalid_inputs_are_refused_and_leave_the_snapshot_unchanged` |
+| Missing initial baseline refuses and writes nothing | `a_missing_initial_baseline_refuses_publication_and_writes_nothing` |
+| Only verified documents carry over | `a_published_snapshot_is_the_only_baseline_for_carried_documents` |
+| Partial refresh keeps prior documents byte for byte with their own dates | `a_partial_refresh_carries_prior_documents_with_their_own_dates` |
+| Schema-version mix and insufficient coverage block publication | `incompatible_or_incomplete_documents_block_a_partial_refresh` |
+| Interruption at every step (staging, journal, each of 7 replacements, manifest, selection, cleanup): verified reads see old, new, or refuse; recovery converges; follow-up succeeds; no leftovers | `a_generation_interrupted_before_selection_recovers_to_the_old_snapshot`, `a_generation_interrupted_after_selection_recovers_to_the_new_snapshot` |
+| Interrupted recovery, interrupted initial publication, corrupt journal/manifest, hostile manifest paths | `an_interrupted_recovery_is_repaired_by_running_recovery_again`, `an_interrupted_initial_publication_rolls_back_to_no_snapshot`, `recovery_refuses_a_manifest_matching_neither_side_of_the_journal`, `a_manifest_naming_paths_outside_the_repository_is_refused` |
+| Pending journal blocks CLI `generate`/`--check`/`report` until `recover` | `research_cli::an_interrupted_generation_requires_explicit_recovery` |
+| Lock and atomic replacement primitives | `publish::fsutil::tests::*` |
+| Delta: initial baseline, unchanged, raised/lowered limit, unit, removal, unmappable, support reversal, newly conflicting, same-URL evidence, prose-only (body and explanation), affected assessments, determinism | `research_lifecycle::*` (9) |
+| Truncation handoff for all seven adapters; every emitted surface has an enforceability reason (enforceable / not enforceable with reasons / no researched bound with gap), aggregates, service-side truncation | `reports_hand_off_every_emitted_surface_with_an_enforceability_reason`; `report::tests::every_chat_adapter_declares_a_body_surface` |
+| Diagnostic handoff (no envelope, unassessed handling) | same test |
+| Freshness boundary (stale on the refresh date) | same test; `research_cli::report_json_is_filterable_and_marks_stale_research` |
+| Filters (platform, interface, operation) | `report_filters_narrow_rows_and_handoffs`; CLI report test |
+| CLI help, usage errors, exit statuses, JSON-only stdout without escapes, human output | `research_cli::*` (8) |
+| Real shipped artifacts through the normal invocation path | `research_cli::validate_reports_the_shipped_legacy_documents_as_unbound` (exit 1, five `SR-SCHEMA-BINDING` findings) |
+| Passive corpus over the new fixtures | `research_corpus::fleet_fixtures_validate`, `typed::fleet_documents_pass_the_semantic_rules_as_accepted_research`, sanitization scan now includes `lifecycle/fleet` |
+| Date arithmetic | `project::tests::plus_days_crosses_months_years_and_leap_days` |
+
+Persisted round trip: generate → verified read → regenerate → identical bytes
+(`two_generations…`, CLI double generation), and publish → report reads the
+published `catalog.json` bytes back through `CatalogView`.
+
+### Gates (macOS)
+
+- `just test` in `messenger/`: 634 run, 634 passed, 2 skipped (pre-existing).
+  Re-run of `messenger-cli` after the `bin_exe!` change: 116/116.
+- `just lint` in `messenger/`: clean (exit 0).
+- `cargo nextest run -p messenger --features research`: 273 passed, 2 skipped.
+- `cargo nextest run -p messenger --all-features`: 546 passed, 2 skipped.
+- `cargo clippy -p messenger --all-features --all-targets -- -D warnings`: clean.
+- `cargo tree -p messenger -e normal` with `--no-default-features`, default,
+  and `--features desktop`: no `darkmatter`, `biscuit-file`, `biscuit-hash`,
+  `serde_path_to_error`, YAML, or Claudine crate.
+- Checkpoint run with the real binary on a copy of the fleet fixture tree:
+  `generate` published (exit 0), a second `generate` reported "already
+  current" with byte-identical catalog, summary, and manifest, `generate
+  --check` reported no drift, and `report --json` contained no ESC byte.
+- Manual inspection at 60 and 120 columns (`SHOW_RESEARCH_REPORT=1` on
+  `the_human_report_renders_at_narrow_and_normal_widths`): see the layout
+  ruling above.
+- The shipped repository: `messenger research validate` exits 1 with
+  `SR-SCHEMA-BINDING` for the five legacy documents (expected until Phase 7);
+  `report` and `generate --check` exit 3 (no published snapshot).
+- GitNexus `detect-changes --scope all`: 21 files, risk HIGH, all through
+  `messenger-cli`'s `main` and `Commands` (one new `Research` arm). The send,
+  replace, dismiss, setup, info, and install flows are unchanged, and all
+  116 CLI tests, including `main.rs`'s parser tests, pass. The index predates
+  the new research files, so they are not in the graph.
+
+### Cross-OS evidence
+
+- **Windows:** compile evidence. `cargo check -p messenger --features research
+  --tests` and `cargo check -p messenger-cli --tests` for
+  `x86_64-pc-windows-gnu` pass. `just cross-check messenger --os windows`
+  failed again: `W:` on `build-win-native` is full ("No space left on
+  device"). Not cleaned (shared-host decision).
+- **WSL:** `just cross-check messenger --os wsl` failed with an SSH connection
+  reset to `build-win`, as in Phases 1–3.
+- **Linux:** `just cross-check messenger --os linux` is still blocked by the
+  stale `build-linux` lock held since 2026-09-14 (`reward-20260914-c3e60d0`);
+  not removed. Docker evidence instead
+  (`rust:1`, `linux/arm64`, a copy of the worktree under
+  `~/.cache/rb-linux`, `cargo test` because the image has no nextest):
+  `research_corpus` 30/30, `research_lifecycle` 9/9, `research_publication`
+  19/19 (every fault point, recovery, and the lock on a Linux kernel),
+  `research_validation` 19/19, research lib unit tests 15/15, and
+  `messenger-cli` `research_cli` 8/8 plus its 2 unit tests (the real binary).
+  A first attempt used `bash -lc`, which drops `cargo` from `PATH` while the
+  pipeline still exits 0; recorded in `os/macos.md`.
+- OS risk review: publication uses `std::fs::rename` (POSIX semantics on
+  Windows, measured in Phase 1), a bounded retry for errors 5/32, `File::try_lock`,
+  and file reads that close immediately; repository paths are split on `/`
+  and joined per component; manifest and journal paths must be portable;
+  committed artifacts are LF (`.gitattributes` `eol=lf`) and generation emits
+  LF only; the CLI test binary resolves through `bin_exe!` for the WSL archive
+  leg; `CARGO_MANIFEST_DIR` is read at run time.
