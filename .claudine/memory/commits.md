@@ -496,3 +496,27 @@ belong here.
   was silently dropped and the prior `claudine/docs/topics/...` path
   remains tracked at HEAD. Verify with `git ls-files <old-glob>`
   before reporting success.
+- Hand-rolled CLI help registries are a hidden integration point.
+  A `feat:` that adds a new subcommand for a CLI whose `--help` is
+  built from a hand-rolled registry (e.g. `commands::help::groups()`
+  in claudine) MUST ship the registry row in the same atomic commit
+  as the subcommand code. The orchestrator's path-by-path semantic
+  grouping catches the obvious source/doc/test/snapshot rows but a
+  small `cmd("new-name", "…")` row in the registry can slip through
+  when the dominant paths are clearly the new subcommand's source
+  file, doc, and tests. The reconciliation pass then surfaces the
+  missed path as a still-staged `M `, and a single follow-up
+  `fix(<area>):` commit is the cheapest fix. Verify the registry
+  file's diff against the new subcommand name *before* dispatching
+  the feat's group agent — the registry edit is a 4-line addition
+  in the same module as other subcommand entries and is easy to
+  miss when the agent is briefed by file path rather than by
+  integration-point checklist.
+- A developer WIP can leave an ` M` (working-tree-only change) by
+  the time the orchestrator reconciles. The original staged-set
+  snapshot at the prompt's start is the working list; an ` M` path
+  that was NOT in the original list is the developer's active edit
+  and belongs to a future batch. Do not stage it, do not commit it,
+  do not flag it as a sibling-fix path; leave it alone and report
+  the presence of unrelated working-tree changes in the summary so
+  the operator knows it pre-dated the operation.
