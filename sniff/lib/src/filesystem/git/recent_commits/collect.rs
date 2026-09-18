@@ -111,9 +111,9 @@ fn collect_from(
     let Some(tip) = resolve_tip(gix, options.branch.as_deref())? else {
         return Ok(RecentCommits::default());
     };
-    let hash_target = match &options.selection {
-        Selection::Hash(hash) => Some(resolve_ancestor(gix, tip, hash)?),
-        _ => None,
+    let hidden = match &options.selection {
+        Selection::Hash(hash) => hash_boundary(gix, tip, hash)?,
+        _ => Vec::new(),
     };
     let count_limit = match options.selection {
         Selection::Count(count) => Some(count),
@@ -129,6 +129,7 @@ fn collect_from(
             gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
         ))
         .use_commit_graph(Some(true))
+        .with_hidden(hidden)
         .all()
         .map_err(|e| SniffError::git("revwalk", e))?;
     let mut diff_cache = gix
@@ -139,7 +140,6 @@ fn collect_from(
     for info_result in walk {
         let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
         performance::increment_counter(counters::GIT_COMMIT_VISITS, 1);
-        let reached_target = hash_target == Some(info.id);
 
         // Git commit times are whole seconds. `ByCommitTime` is a lazy
         // frontier walk, so an out-of-window commit may still precede in-window
@@ -177,7 +177,7 @@ fn collect_from(
             }
         }
 
-        if reached_target || count_limit.is_some_and(|limit| candidates.len() >= limit) {
+        if count_limit.is_some_and(|limit| candidates.len() >= limit) {
             break;
         }
     }
@@ -269,6 +269,27 @@ fn reference_tip(gix: &gix::Repository, full_name: &str) -> Result<Option<gix::O
         Ok(None) => Ok(None),
         Err(e) => Err(SniffError::git("find_reference", e)),
     }
+}
+
+/// The commits to hide so a hash selection yields the commit `hash` names plus
+/// everything reachable from `tip` that is not already behind it — the
+/// `<hash>^@..<tip>` range, inclusive of the boundary.
+///
+/// Hiding the boundary's parents makes the range a question of graph
+/// membership. Stopping the walk once the boundary is yielded would not:
+/// commit times are not monotonic across a merge, so a future-dated boundary
+/// can surface through one parent while an older descendant is still queued
+/// behind the other.
+fn hash_boundary(
+    gix: &gix::Repository,
+    tip: gix::ObjectId,
+    hash: &str,
+) -> Result<Vec<gix::ObjectId>> {
+    let target = resolve_ancestor(gix, tip, hash)?;
+    let commit = gix
+        .find_commit(target)
+        .map_err(|e| SniffError::git("commit", e))?;
+    Ok(commit.parent_ids().map(|id| id.detach()).collect())
 }
 
 /// Resolve `hash` to a commit that is `tip` or one of its ancestors.

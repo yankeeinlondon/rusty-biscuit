@@ -62,8 +62,8 @@ impl Selection {
     ///
     /// ## Errors
     ///
-    /// Returns [`SniffError::InvalidPeriod`] for a zero count or input matching
-    /// no form.
+    /// Returns [`SniffError::InvalidPeriod`] for a zero count, a duration or
+    /// count too large to represent, or input matching no form.
     pub fn parse(input: &str) -> Result<Self> {
         let trimmed = input.trim();
         let lower = trimmed.to_ascii_lowercase();
@@ -88,8 +88,12 @@ impl Selection {
             return Err(SniffError::InvalidPeriod(trimmed.to_string()));
         }
 
-        if let Some(duration) = parse_duration(&lower) {
-            return Ok(Self::Duration(duration));
+        match parse_duration(&lower) {
+            DurationScope::Parsed(duration) => return Ok(Self::Duration(duration)),
+            DurationScope::OutOfRange => {
+                return Err(SniffError::InvalidPeriod(trimmed.to_string()));
+            }
+            DurationScope::NoMatch => {}
         }
 
         if trimmed.len() >= 7 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -113,7 +117,11 @@ impl Selection {
         match self {
             Self::Count(_) | Self::Hash(_) => None,
             Self::Duration(duration) => Some(TimeWindow {
-                since: now - *duration,
+                // A duration reaching past the earliest representable instant
+                // covers all of history; plain subtraction would panic.
+                since: now
+                    .checked_sub_signed(*duration)
+                    .unwrap_or(DateTime::<Utc>::MIN_UTC),
                 until: WindowEnd::Inclusive(now),
             }),
             Self::NamedDate(NamedDate::Today) => Some(TimeWindow {
@@ -183,28 +191,59 @@ fn single_day(date: NaiveDate, timezone: FixedOffset) -> TimeWindow {
     }
 }
 
-fn parse_duration(input: &str) -> Option<Duration> {
+/// What reading a scope as a duration produced.
+enum DurationScope {
+    Parsed(Duration),
+    /// Duration-shaped, but beyond what [`Duration`] can represent. Distinct
+    /// from [`NoMatch`](Self::NoMatch) because the remaining selection forms
+    /// must not claim such an input — `9223372036854775807d` is every
+    /// character a hash allows.
+    OutOfRange,
+    /// Not duration-shaped; later selection forms may still match.
+    NoMatch,
+}
+
+fn parse_duration(input: &str) -> DurationScope {
     let input = input.trim();
 
     let (num_str, unit): (&str, &str) = if let Some((n, u)) = split_number_unit(input) {
         (n, u)
     } else {
-        let pos = input.find(char::is_alphabetic)?;
+        let Some(pos) = input.find(char::is_alphabetic) else {
+            return DurationScope::NoMatch;
+        };
         input.split_at(pos)
     };
+    let num_str = num_str.trim();
 
-    let count: i64 = num_str.trim().parse().ok()?;
+    // The unit is recognized before the count so that an unrecognized suffix
+    // stays a non-match whatever its digits are.
+    let seconds_per_unit: i64 = match unit.trim() {
+        "h" | "hour" | "hours" => 3_600,
+        "d" | "day" | "days" => 86_400,
+        "w" | "wk" | "week" | "weeks" => 604_800,
+        "mo" | "m" | "month" | "months" => 30 * 86_400,
+        "y" | "yr" | "year" | "years" => 365 * 86_400,
+        _ => return DurationScope::NoMatch,
+    };
+
+    let Ok(count) = num_str.parse::<i64>() else {
+        return if !num_str.is_empty() && num_str.chars().all(|c| c.is_ascii_digit()) {
+            DurationScope::OutOfRange
+        } else {
+            DurationScope::NoMatch
+        };
+    };
     if count <= 0 {
-        return None;
+        return DurationScope::NoMatch;
     }
 
-    match unit.trim() {
-        "h" | "hour" | "hours" => Some(Duration::hours(count)),
-        "d" | "day" | "days" => Some(Duration::days(count)),
-        "w" | "wk" | "week" | "weeks" => Some(Duration::weeks(count)),
-        "mo" | "m" | "month" | "months" => Some(Duration::days(count * 30)),
-        "y" | "yr" | "year" | "years" => Some(Duration::days(count * 365)),
-        _ => None,
+    match count
+        .checked_mul(seconds_per_unit)
+        .and_then(Duration::try_seconds)
+    {
+        Some(duration) => DurationScope::Parsed(duration),
+        None => DurationScope::OutOfRange,
     }
 }
 
@@ -520,6 +559,53 @@ mod tests {
             }
         }
 
+        /// Each unit's largest accepted count and its seconds per unit.
+        /// `Duration` tops out at `i64::MAX` milliseconds, so the accepted
+        /// counts are `i64::MAX / 1000 / seconds_per_unit`.
+        const DURATION_BOUNDS: [(&str, i64, i64); 5] = [
+            ("h", 2_562_047_788_015, 3_600),
+            ("d", 106_751_991_167, 86_400),
+            ("w", 15_250_284_452, 604_800),
+            ("mo", 3_558_399_705, 2_592_000),
+            ("y", 292_471_208, 31_536_000),
+        ];
+
+        #[test]
+        fn each_unit_accepts_its_largest_representable_count() {
+            for (unit, largest, seconds_per_unit) in DURATION_BOUNDS {
+                let input = format!("{largest}{unit}");
+                assert_eq!(
+                    Selection::parse(&input).unwrap(),
+                    Selection::Duration(Duration::try_seconds(largest * seconds_per_unit).unwrap()),
+                    "{input}"
+                );
+            }
+        }
+
+        #[test]
+        fn each_unit_rejects_counts_past_its_largest_representable_one() {
+            for (unit, largest, _) in DURATION_BOUNDS {
+                // `d` is also a hex digit, so an oversized day count must not
+                // fall through to the hash form. `u64::MAX` overflows the
+                // count's own `i64` parse, one step before the multiplication.
+                for count in [
+                    (largest + 1).to_string(),
+                    i64::MAX.to_string(),
+                    u64::MAX.to_string(),
+                ] {
+                    let input = format!("{count}{unit}");
+                    assert!(
+                        matches!(
+                            Selection::parse(&input),
+                            Err(SniffError::InvalidPeriod(ref value)) if *value == input
+                        ),
+                        "{input} parsed as {:?}",
+                        Selection::parse(&input)
+                    );
+                }
+            }
+        }
+
         #[test]
         fn short_hex_is_invalid_and_long_hex_is_a_hash() {
             assert!(Selection::parse("abc12").is_err());
@@ -747,6 +833,22 @@ mod tests {
 
             assert_eq!(selection.time_window(now, east(5, 30)), Some(expected));
             assert_eq!(selection.time_window(now, east(-8, 0)), Some(expected));
+        }
+
+        #[test]
+        fn a_duration_longer_than_history_starts_at_the_earliest_instant() {
+            let now = utc(2026, 9, 17, 12, 0, 0);
+            for input in ["2562047788015h", "106751991167d", "292471208y"] {
+                let window = Selection::parse(input)
+                    .unwrap()
+                    .time_window(now, east(0, 0))
+                    .unwrap();
+                assert_eq!(window.since, DateTime::<Utc>::MIN_UTC, "{input}");
+                assert_eq!(window.until, WindowEnd::Inclusive(now), "{input}");
+                assert!(window.contains(DateTime::<Utc>::MIN_UTC), "{input}");
+                assert!(window.contains(now), "{input}");
+                assert!(!window.contains(now + Duration::seconds(1)), "{input}");
+            }
         }
 
         #[test]

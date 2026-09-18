@@ -328,6 +328,39 @@ mod selection {
     }
 
     #[test]
+    fn hash_bounds_the_range_by_graph_membership_not_by_commit_time() {
+        // A 2020-dated root, a 2030-dated boundary, its 2021 and 2022 children,
+        // and their 2023 merge.
+        const BEFORE: i64 = 1_577_836_800;
+        const BASE: i64 = 1_893_456_000;
+        const MAIN: i64 = 1_609_459_200;
+        const SIDE: i64 = 1_640_995_200;
+        const MERGE: i64 = 1_672_531_200;
+
+        let fixture = Fixture::new();
+        fixture.write("before.txt", "before\n").commit_as("before base", ADA, BEFORE, 0);
+        let base = fixture.write("a.txt", "a\n").commit_as("target base", ADA, BASE, 0);
+        let main = fixture.write("main.txt", "main\n").commit_as("main descendant", ADA, MAIN, 0);
+        fixture.remove("main.txt").write("side.txt", "side\n");
+        let side = fixture.commit_on("refs/heads/side", "side descendant", ADA, SIDE, 0, &[base]);
+        fixture.write("main.txt", "main\n");
+        fixture.commit_on("HEAD", "merge side", ADA, MERGE, 0, &[main, side]);
+
+        let commits = fixture
+            .collect(&RecentCommitsOptions::new().hash(base.to_string()))
+            .unwrap();
+
+        // Commit time is not monotonic across the merge: the lazy frontier
+        // reaches the 2030 boundary before the 2021 leg, so a walk that stopped
+        // there would drop that leg.
+        assert_eq!(
+            headings(&commits),
+            ["merge side", "side descendant", "target base", "main descendant"],
+            "every descendant of the boundary survives, and its ancestor does not"
+        );
+    }
+
+    #[test]
     fn a_skewed_old_head_does_not_hide_in_window_ancestors() {
         let fixture = Fixture::new();
         let now = Utc::now().timestamp();
@@ -453,6 +486,38 @@ mod filters {
 
         assert_eq!(headings(&commits), ["typo", "roadmap"]);
         assert_eq!(commits.commits()[0].operation.as_deref(), Some("FIX"));
+    }
+
+    #[test]
+    fn breaking_change_marker_is_filterable_and_stripped_from_the_payload() {
+        let fixture = Fixture::new();
+        for message in [
+            "feat!: breaking without scope",
+            "feat(api)!: breaking with scope",
+            "feat: ordinary",
+        ] {
+            fixture.commit(message);
+        }
+
+        let commits = fixture
+            .collect(&RecentCommitsOptions::new().count(50).operation("feat"))
+            .unwrap();
+
+        assert_eq!(
+            headings(&commits),
+            ["ordinary", "breaking with scope", "breaking without scope"]
+        );
+        let with_scope = &commits.commits()[1];
+        assert_eq!(with_scope.operation.as_deref(), Some("feat"));
+        assert_eq!(with_scope.scope.as_deref(), Some("api"));
+        let without_scope = &commits.commits()[2];
+        assert_eq!(without_scope.operation.as_deref(), Some("feat"));
+        assert_eq!(without_scope.scope, None);
+
+        let scoped = fixture
+            .collect(&RecentCommitsOptions::new().count(50).scope("API"))
+            .unwrap();
+        assert_eq!(headings(&scoped), ["breaking with scope"]);
     }
 
     #[test]
@@ -836,6 +901,62 @@ mod linking {
 
         assert!(result.unwrap().is_empty());
         assert_eq!(counter(&counts, counters::GIT_REF_WALKS), 0, "{counts:?}");
+    }
+
+    /// SourceHut and Azure DevOps name a repository differently over SSH than
+    /// on the web, so containment and URL selection have to be proven together
+    /// on the transport form users actually configure.
+    #[test]
+    fn ssh_only_provider_remotes_link_to_their_canonical_web_urls() {
+        for (remote_url, repository_url) in [
+            ("git@git.sr.ht:~acme/project", "https://git.sr.ht/~acme/project"),
+            (
+                "git@ssh.dev.azure.com:v3/acme/widgets/project",
+                "https://dev.azure.com/acme/widgets/_git/project",
+            ),
+        ] {
+            let fixture = Fixture::new();
+            fixture.repo.remote("origin", remote_url).unwrap();
+            let pushed = fixture.write("a.txt", "a").commit("pushed");
+            fixture.set_ref("refs/remotes/origin/main", pushed);
+            let unpushed = fixture.write("b.txt", "b").commit("unpushed");
+
+            let json = fixture.collect(&RecentCommitsOptions::new()).unwrap().to_json();
+
+            assert_eq!(json[0]["hash"], json!(unpushed.to_string()), "{remote_url}");
+            assert_eq!(json[0]["remote"], json!(false), "{remote_url}");
+            assert!(json[0].get("commit_url").is_none(), "{remote_url}");
+            assert_eq!(json[1]["remote"], json!(true), "{remote_url}");
+            assert_eq!(
+                json[1]["commit_url"],
+                json!(format!("{repository_url}/commit/{pushed}")),
+                "{remote_url}"
+            );
+        }
+    }
+
+    /// Azure permits spaces in project and repository names, which a URL-form
+    /// remote must percent-escape; the commit URL has to keep that one layer
+    /// rather than escape the escapes.
+    #[test]
+    fn encoded_azure_ssh_remote_path_is_not_double_encoded() {
+        let fixture = Fixture::new();
+        fixture
+            .repo
+            .remote("origin", "ssh://git@ssh.dev.azure.com/v3/acme/My%20Project/My%20Repo")
+            .unwrap();
+        let pushed = fixture.write("a.txt", "a").commit("pushed");
+        fixture.set_ref("refs/remotes/origin/main", pushed);
+
+        let json = fixture.collect(&RecentCommitsOptions::new()).unwrap().to_json();
+
+        assert_eq!(json[0]["remote"], json!(true));
+        let commit_url = json[0]["commit_url"].as_str().unwrap();
+        assert_eq!(
+            commit_url,
+            format!("https://dev.azure.com/acme/My%20Project/_git/My%20Repo/commit/{pushed}")
+        );
+        assert!(!commit_url.contains("%25"), "{commit_url}");
     }
 
     #[test]

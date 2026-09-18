@@ -94,6 +94,91 @@ pub(crate) fn parse_remote_identity(
     (endpoint, namespace, repository)
 }
 
+/// The canonical HTTPS URL of the repository a configured remote names.
+///
+/// Providers whose Git transport form differs from the form they serve over
+/// HTTPS are normalized here: a SourceHut remote keeps the `git.sr.ht` service
+/// host rather than the site root, and the Azure DevOps SSH form
+/// `v3/{organization}/{project}/{repository}` becomes
+/// `{organization}/{project}/_git/{repository}` on `dev.azure.com`, its
+/// segments carrying exactly one percent-encoding layer whether the remote is
+/// URL-form or SCP-style. This module's browser links and the HTTPS Git endpoint
+/// `remote_observation::branch_exists_on_remote_at` advertises against both
+/// read this one mapping, so the two cannot normalize a provider differently.
+///
+/// ## Returns
+///
+/// `None` when the URL names no repository, when the provider publishes no
+/// canonical HTTPS location (self-managed servers, unknown hosts), or when the
+/// provider's required path shape is absent — an Azure DevOps SSH path that is
+/// not `{organization}/{project}/{repository}`, or an AWS CodeCommit path
+/// outside `v1/repos/`.
+pub(crate) fn canonical_repository_url(
+    provider: GitHostingProvider,
+    remote_url: &str,
+) -> Option<String> {
+    let (endpoint, namespace, repository) = parse_remote_identity(remote_url);
+    let repository = repository.filter(|name| !name.is_empty())?;
+    let endpoint = endpoint?;
+    let host = endpoint.host.to_ascii_lowercase();
+    let over_http = matches!(endpoint.scheme.as_str(), "http" | "https");
+    let path = match namespace {
+        Some(namespace) => format!("{namespace}/{repository}"),
+        None => repository,
+    };
+    match provider {
+        GitHostingProvider::AzureDevOps => {
+            let ssh_path = match path.strip_prefix("v3/") {
+                Some(ssh_path) => ssh_path,
+                // An HTTP(S) remote already spells the browsed path, including
+                // the legacy form that carries the organization in the host.
+                None if over_http => return Some(format!("https://{host}/{path}")),
+                // The SSH form always names the collection as `v3/…`; anything
+                // else locates no repository.
+                None => return None,
+            };
+            let segments = ssh_path
+                .split('/')
+                .filter(|segment| !segment.is_empty())
+                .collect::<Vec<_>>();
+            let [organization, project, repository] = segments.as_slice() else {
+                return None;
+            };
+            // A URL-form remote arrives with its path still percent-escaped
+            // while an SCP-style one carries names raw, so decode before the
+            // one encode. Azure DevOps forbids `%` in organization, project,
+            // and repository names, so decoding cannot corrupt a raw segment;
+            // an escape that is not valid UTF-8 is treated as a raw name.
+            let encode_once = |segment: &str| match urlencoding::decode(segment) {
+                Ok(decoded) => urlencoding::encode(&decoded).into_owned(),
+                Err(_) => urlencoding::encode(segment).into_owned(),
+            };
+            Some(format!(
+                "https://dev.azure.com/{}/{}/_git/{}",
+                encode_once(organization),
+                encode_once(project),
+                encode_once(repository)
+            ))
+        }
+        // CodeCommit's console page is region- and account-scoped and is not
+        // derivable from the remote; this is its HTTPS Git endpoint, which
+        // `browser_base_url` correctly refuses to present as a web page.
+        GitHostingProvider::AwsCodeCommit => path
+            .starts_with("v1/repos/")
+            .then(|| format!("https://{host}/{path}")),
+        GitHostingProvider::SourceHut => {
+            // A `*.sr.ht` remote already names the Git service host; the bare
+            // site root does not serve repositories.
+            if host.ends_with(".sr.ht") {
+                Some(format!("https://{host}/{path}"))
+            } else {
+                Some(format!("{}/{path}", provider.browser_base_url()?))
+            }
+        }
+        _ => Some(format!("{}/{path}", provider.browser_base_url()?)),
+    }
+}
+
 /// The repository identity and web page for a configured remote URL.
 ///
 /// ## Examples
@@ -120,9 +205,12 @@ pub fn repository_link(remote_url: &str) -> Option<RepositoryLink> {
         Some(namespace) => format!("{namespace}/{repository}"),
         None => repository,
     };
-    let browser_url = GitHostingProvider::from_url(remote_url)
+    let provider = GitHostingProvider::from_url(remote_url);
+    // A provider without a browser base has no web page even when it has a
+    // canonical HTTPS Git endpoint, as AWS CodeCommit does.
+    let browser_url = provider
         .browser_base_url()
-        .map(|base| format!("{base}/{owner_repo}"));
+        .and_then(|_| canonical_repository_url(provider, remote_url));
     Some(RepositoryLink {
         owner_repo,
         browser_url,
@@ -350,21 +438,160 @@ mod tests {
             assert_eq!(repository_link("not a url"), None);
         }
 
+        /// Every recognized provider in every transport form it publishes,
+        /// through the repository page and the commit route built on it.
+        ///
+        /// The SSH-only providers name the repository differently over their
+        /// transport than on the web; `remote_observation`'s
+        /// `ssh_only_providers_map_to_canonical_https_git_endpoints` pins the
+        /// same normalization from the other consumer.
         #[test]
-        fn commit_url_uses_the_provider_commit_segment() {
-            assert_eq!(
-                commit_url("git@github.com:o/r.git", "abc").as_deref(),
-                Some("https://github.com/o/r/commit/abc")
-            );
-            assert_eq!(
-                commit_url("https://gitlab.com/g/r.git", "abc").as_deref(),
-                Some("https://gitlab.com/g/r/-/commit/abc")
-            );
-            assert_eq!(
-                commit_url("https://bitbucket.org/w/r", "abc").as_deref(),
-                Some("https://bitbucket.org/w/r/commits/abc")
-            );
-            assert_eq!(commit_url("https://git.example.com/t/r", "abc"), None);
+        fn every_provider_transport_form_builds_its_repository_and_commit_url() {
+            const AZURE: &str = "https://dev.azure.com/acme/widgets/_git/project";
+            const SOURCE_HUT: &str = "https://git.sr.ht/~acme/project";
+            for (url, browser, commit) in [
+                (
+                    "https://github.com/o/r.git",
+                    Some("https://github.com/o/r"),
+                    Some("https://github.com/o/r/commit/abc"),
+                ),
+                (
+                    "git@github.com:o/r.git",
+                    Some("https://github.com/o/r"),
+                    Some("https://github.com/o/r/commit/abc"),
+                ),
+                (
+                    "ssh://git@github.com/o/r.git",
+                    Some("https://github.com/o/r"),
+                    Some("https://github.com/o/r/commit/abc"),
+                ),
+                (
+                    "git://github.com/o/r.git",
+                    Some("https://github.com/o/r"),
+                    Some("https://github.com/o/r/commit/abc"),
+                ),
+                (
+                    "https://gitlab.com/group/sub/r.git",
+                    Some("https://gitlab.com/group/sub/r"),
+                    Some("https://gitlab.com/group/sub/r/-/commit/abc"),
+                ),
+                (
+                    "git@gitlab.com:group/sub/r.git",
+                    Some("https://gitlab.com/group/sub/r"),
+                    Some("https://gitlab.com/group/sub/r/-/commit/abc"),
+                ),
+                (
+                    "https://bitbucket.org/w/r",
+                    Some("https://bitbucket.org/w/r"),
+                    Some("https://bitbucket.org/w/r/commits/abc"),
+                ),
+                (
+                    "git@bitbucket.org:w/r.git",
+                    Some("https://bitbucket.org/w/r"),
+                    Some("https://bitbucket.org/w/r/commits/abc"),
+                ),
+                (
+                    "https://dev.azure.com/acme/widgets/_git/project",
+                    Some(AZURE),
+                    Some("https://dev.azure.com/acme/widgets/_git/project/commit/abc"),
+                ),
+                (
+                    "git@ssh.dev.azure.com:v3/acme/widgets/project",
+                    Some(AZURE),
+                    Some("https://dev.azure.com/acme/widgets/_git/project/commit/abc"),
+                ),
+                (
+                    "ssh://acme@vs-ssh.visualstudio.com:22/v3/acme/widgets/project",
+                    Some(AZURE),
+                    Some("https://dev.azure.com/acme/widgets/_git/project/commit/abc"),
+                ),
+                // Azure permits spaces and non-ASCII in project and repository
+                // names; a URL-form remote escapes them, an SCP-style remote
+                // carries them raw, and the page carries one encoding layer.
+                (
+                    "ssh://git@ssh.dev.azure.com/v3/acme/My%20Project/My%20Repo",
+                    Some("https://dev.azure.com/acme/My%20Project/_git/My%20Repo"),
+                    Some("https://dev.azure.com/acme/My%20Project/_git/My%20Repo/commit/abc"),
+                ),
+                (
+                    "git@ssh.dev.azure.com:v3/acme/My Project/My Repo",
+                    Some("https://dev.azure.com/acme/My%20Project/_git/My%20Repo"),
+                    Some("https://dev.azure.com/acme/My%20Project/_git/My%20Repo/commit/abc"),
+                ),
+                (
+                    "ssh://acme@vs-ssh.visualstudio.com:22/v3/acme/My%20Project/My%20Repo",
+                    Some("https://dev.azure.com/acme/My%20Project/_git/My%20Repo"),
+                    Some("https://dev.azure.com/acme/My%20Project/_git/My%20Repo/commit/abc"),
+                ),
+                (
+                    "ssh://git@ssh.dev.azure.com/v3/acme/Proj%C3%A9/Repo",
+                    Some("https://dev.azure.com/acme/Proj%C3%A9/_git/Repo"),
+                    Some("https://dev.azure.com/acme/Proj%C3%A9/_git/Repo/commit/abc"),
+                ),
+                (
+                    "git@ssh.dev.azure.com:v3/acme/Projé/Repo",
+                    Some("https://dev.azure.com/acme/Proj%C3%A9/_git/Repo"),
+                    Some("https://dev.azure.com/acme/Proj%C3%A9/_git/Repo/commit/abc"),
+                ),
+                // The legacy HTTPS form carries the organization in the host
+                // and is already the browsed path.
+                (
+                    "https://acme.visualstudio.com/widgets/_git/project",
+                    Some("https://acme.visualstudio.com/widgets/_git/project"),
+                    Some("https://acme.visualstudio.com/widgets/_git/project/commit/abc"),
+                ),
+                (
+                    "git@git.sr.ht:~acme/project",
+                    Some(SOURCE_HUT),
+                    Some("https://git.sr.ht/~acme/project/commit/abc"),
+                ),
+                (
+                    "https://git.sr.ht/~acme/project",
+                    Some(SOURCE_HUT),
+                    Some("https://git.sr.ht/~acme/project/commit/abc"),
+                ),
+                (
+                    "git@sr.ht:~acme/project",
+                    Some(SOURCE_HUT),
+                    Some("https://git.sr.ht/~acme/project/commit/abc"),
+                ),
+                // CodeCommit has an HTTPS Git endpoint but no derivable page.
+                (
+                    "ssh://git-codecommit.us-west-2.amazonaws.com/v1/repos/project",
+                    None,
+                    None,
+                ),
+                (
+                    "https://git-codecommit.us-west-2.amazonaws.com/v1/repos/project",
+                    None,
+                    None,
+                ),
+                // Self-managed families have no provider-wide browser host.
+                ("https://codeberg.org/o/r.git", None, None),
+                ("git@gitea.example.com:o/r.git", None, None),
+                ("https://git.example.com/team/app.git", None, None),
+                ("not a url", None, None),
+            ] {
+                assert_eq!(
+                    repository_link(url)
+                        .and_then(|link| link.browser_url)
+                        .as_deref(),
+                    browser,
+                    "{url}"
+                );
+                assert_eq!(commit_url(url, "abc").as_deref(), commit, "{url}");
+            }
+        }
+
+        #[test]
+        fn azure_ssh_paths_outside_the_v3_collection_form_have_no_url() {
+            for url in [
+                "git@ssh.dev.azure.com:v3/acme/project",
+                "git@ssh.dev.azure.com:v3/acme/widgets/nested/project",
+                "git@ssh.dev.azure.com:acme/widgets/project",
+            ] {
+                assert_eq!(commit_url(url, "abc"), None, "{url}");
+            }
         }
     }
 

@@ -14,7 +14,7 @@ use super::recent_commits::{RecentCommits, RecentCommitsOptions};
 use super::worktree::WorktreeEntry;
 use crate::filesystem::repo::RepoInfo;
 
-const CONVENTIONAL_COMMIT_RE: &str = r"^([a-zA-Z0-9-]+)(?:\(([^)]*)\))?: (.+)$";
+const CONVENTIONAL_COMMIT_RE: &str = r"^([a-zA-Z0-9-]+)(?:\(([^)]*)\))?!?: (.+)$";
 
 /// Git user configuration.
 ///
@@ -60,7 +60,8 @@ pub struct GitConfig {
 /// Parsed conventional commit.
 ///
 /// Represents a commit message following the conventional commits spec:
-/// `type(scope): description`
+/// `type(scope): description`, where the scope and the breaking-change `!` are
+/// both optional.
 ///
 /// ## Examples
 ///
@@ -71,6 +72,11 @@ pub struct GitConfig {
 /// assert_eq!(commit.operation, Some("feat".to_string()));
 /// assert_eq!(commit.scope, Some("cli".to_string()));
 /// assert_eq!(commit.description, "add new flag");
+///
+/// let breaking = ConventionalCommit::parse("feat(api)!: drop the legacy route");
+/// assert_eq!(breaking.operation, Some("feat".to_string()));
+/// assert_eq!(breaking.scope, Some("api".to_string()));
+/// assert_eq!(breaking.description, "drop the legacy route");
 ///
 /// let plain = ConventionalCommit::parse("Regular commit message");
 /// assert_eq!(plain.operation, None);
@@ -92,6 +98,10 @@ impl ConventionalCommit {
     /// Only parses the first line of the message. If the message doesn't
     /// follow conventional commit format, returns a struct with only
     /// the description populated.
+    ///
+    /// A breaking-change `!` before the colon is accepted and consumed: the
+    /// operation and scope are reported as for the non-breaking form, and the
+    /// marker itself is not retained on any field.
     pub fn parse(message: &str) -> Self {
         let first_line = message.lines().next().unwrap_or("").trim();
 
@@ -404,7 +414,9 @@ impl GitHostingProvider {
                 symbol: "[sh]",
                 self_hosted: false,
                 host_based_detection_reliable: true,
-                browser_base_url: Some("https://sr.ht"),
+                // Git repositories are browsed under the `git.sr.ht` service
+                // host; the site root serves no repository page.
+                browser_base_url: Some("https://git.sr.ht"),
             },
             Self::SelfHosted => GitHostingProviderMetadata {
                 display_name: "Self-Hosted",
@@ -2060,6 +2072,48 @@ mod tests {
             .expect("current linked worktree is present");
         assert!(current.is_current);
         assert!(!current.sha.is_empty());
+    }
+
+    mod conventional_commit_tests {
+        use super::*;
+
+        #[test]
+        fn breaking_marker_without_scope_keeps_the_operation() {
+            let commit = ConventionalCommit::parse("feat!: breaking without scope");
+
+            assert_eq!(commit.operation.as_deref(), Some("feat"));
+            assert_eq!(commit.scope, None);
+            assert_eq!(commit.description, "breaking without scope");
+        }
+
+        #[test]
+        fn breaking_marker_after_scope_keeps_the_operation_and_scope() {
+            let commit = ConventionalCommit::parse("feat(api)!: breaking with scope");
+
+            assert_eq!(commit.operation.as_deref(), Some("feat"));
+            assert_eq!(commit.scope.as_deref(), Some("api"));
+            assert_eq!(commit.description, "breaking with scope");
+        }
+
+        #[test]
+        fn marker_outside_the_prefix_stays_non_conventional() {
+            for subject in ["!feat: leading", "feat!(api): before the scope"] {
+                let commit = ConventionalCommit::parse(subject);
+
+                assert_eq!(commit.operation, None, "{subject}");
+                assert_eq!(commit.scope, None, "{subject}");
+                assert_eq!(commit.description, subject, "{subject}");
+            }
+        }
+
+        #[test]
+        fn marker_inside_the_description_is_left_alone() {
+            let commit = ConventionalCommit::parse("feat(api): still! breaking");
+
+            assert_eq!(commit.operation.as_deref(), Some("feat"));
+            assert_eq!(commit.scope.as_deref(), Some("api"));
+            assert_eq!(commit.description, "still! breaking");
+        }
     }
 
     mod parse_commit_message_tests {
