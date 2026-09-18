@@ -85,7 +85,10 @@ contributions, a check record for every curated source, a capped curated-list
 proposal, a candidate that validates as accepted research and keeps `created`,
 chronology, and stable IDs, observation dates backed by successful checks, and
 an independent evidence review covering every change. A passing review leaves
-the run awaiting human review.
+the run awaiting human review. A sequence that stops before `check-run`
+decides the run (a failed step, Ctrl+C, or a refused first step) leaves it
+`failed`, so it can be resumed or rejected. A prepared run whose sequence
+never started stays active.
 
 `promote` is the only command that changes accepted research. A named
 maintainer approves any substantive change (and every initial baseline);

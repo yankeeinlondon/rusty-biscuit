@@ -119,6 +119,90 @@ lint-fix:
     @cargo clippy -p messenger --features desktop,research --all-targets -- -D warnings || just _lint_fix messenger
     @just _lint messenger-cli || just _lint_fix messenger-cli
 
+# --- Provider research (docs/user-guide.md#provider-research) ---------------
+#
+# Deterministic recipes (validate, generate, check, report, runs, publish,
+# cleanup) never reach the network or start an agent. Only `research-refresh`
+# runs research agents, and only within the limits it is given.
+
+# Validate the research roster, schemas, accepted documents, overrides, and mappings
+research-validate *args:
+    @cargo run -q -p messenger-cli -- research validate "$@"
+
+# Generate catalog.json and the summary tables, then publish the snapshot
+research-generate *args:
+    @cargo run -q -p messenger-cli -- research generate "$@"
+
+# Read-only drift check of the published research snapshot (fails on drift)
+research-check *args:
+    @cargo run -q -p messenger-cli -- research generate --check "$@"
+
+# Report constraints, gaps, freshness, and handoffs from the published catalog
+research-report *args:
+    @cargo run -q -p messenger-cli -- research report "$@"
+
+# List local refresh runs, their stages, and their budget ledgers
+research-runs *args:
+    @cargo run -q -p messenger-cli -- research runs "$@"
+
+# Refresh due platforms (all, or the named ones) with agents, one at a time, within the given limits
+research-refresh max_seconds max_invocations *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Every argument after the two limits goes to `prepare` (platforms,
+    # `--force`, `--observed-version`), except those after `--`, which go to
+    # each `claudine sequence` (for example `-- --claude`).
+    shift 2
+    prepare_args=()
+    sequence_args=()
+    while [[ $# -gt 0 ]]; do
+        if [[ "$1" == "--" ]]; then shift; sequence_args=("$@"); break; fi
+        prepare_args+=("$1"); shift
+    done
+    command -v jq >/dev/null || { echo "research-refresh: jq is required" >&2; exit 2; }
+    # The sequence's `shell:` steps call `messenger research check-run`, and an
+    # older installed `claudine` has no `budget` command: put this worktree's
+    # binaries first on PATH.
+    cargo build -q -p messenger-cli -p claudine-cli
+    target_dir="$(cargo metadata --no-deps --format-version 1 | jq -r .target_directory)"
+    # Git Bash on Windows: a `C:\...` entry would split PATH at the colon.
+    if command -v cygpath >/dev/null; then target_dir="$(cygpath -u "${target_dir}")"; fi
+    export PATH="${target_dir}/debug:${PATH}"
+    # The printed commands name paths relative to the repository root.
+    cd "$(git rev-parse --show-toplevel)"
+    plan="$(messenger research prepare --max-seconds "{{ max_seconds }}" --max-invocations "{{ max_invocations }}" --json ${prepare_args[@]+"${prepare_args[@]}"})"
+    runs="$(jq -r '.runs | length' <<<"${plan}")"
+    if [[ "${runs}" == "0" ]]; then
+        echo "No platform is due; nothing to refresh."
+        exit 0
+    fi
+    # A failed platform keeps its previous accepted research and does not stop
+    # the others; the recipe fails at the end if any run did.
+    failed=()
+    while IFS=$'\t' read -r run_id init_json sequence_json; do
+        eval "init=($(jq -r '@sh' <<<"${init_json}"))"
+        eval "sequence=($(jq -r '@sh' <<<"${sequence_json}"))"
+        echo -e "{{ BOLD }}${run_id}{{ RESET }}"
+        if ! "${init[@]}" || ! "${sequence[@]:0:2}" ${sequence_args[@]+"${sequence_args[@]}"} "${sequence[@]:2}"; then
+            failed+=("${run_id}")
+        fi
+    done < <(jq -r '.runs[] | [.run_id, (.commands[0] | tojson), (.commands[1] | tojson)] | @tsv' <<<"${plan}")
+    messenger research runs
+    if [[ ${#failed[@]} -gt 0 ]]; then
+        echo -e "{{ RED }}Runs that did not finish:{{ RESET }} ${failed[*]}" >&2
+        echo "Inspect with 'just research-runs'. Resume a failed run with 'messenger research prepare --resume <run_id>'" >&2
+        echo "or reject it; a run whose sequence never started stays active until its printed 'claudine sequence' command runs." >&2
+        exit 1
+    fi
+
+# Publish reviewed runs together under a named maintainer's approval
+research-publish approved_by +run_ids:
+    @cargo run -q -p messenger-cli -- research promote --approved-by "$1" "${@:2}"
+
+# Preview which old local run records cleanup would remove (add --apply to delete)
+research-cleanup *args:
+    @cargo run -q -p messenger-cli -- research cleanup "$@"
+
 # Install the CLI (enables native playback on macOS/Windows; Linux requires libasound2-dev)
 install *args="":
     @just build

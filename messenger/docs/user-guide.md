@@ -735,3 +735,90 @@ messenger send "phase **1** of *6* complete" --strip-markdown \
 Markdown is removed before sending; both the chat and the notification show plain text. Library callers use `Message::markdown_stripped(md)`.
 
 Providers without a notification/rich split (Telegram, Signal, Slack) receive a single rendered string per their native flavor; the summary half of `Summarized` is used by push providers (APNs, FCM) and flat-text providers (Signal, WhatsApp, Desktop).
+
+## Provider Research
+
+Messenger keeps typed, evidence-backed research about each chat platform: its length limits, formatting, attachments, errors, receipts, and interactive features. It lives in `messenger/docs/platforms.yaml` (the roster) and `messenger/docs/research/`. The research is maintenance data. Sending never reads it, and it never changes a provider's capabilities or delivery behavior: `messenger send` and the library work offline without it.
+
+Command flags are in the [CLI reference](../cli/README.md#research-maintenance). This section describes the workflow. Run the `just` recipes from `messenger/`.
+
+| Recipe | Command | Touches |
+|---|---|---|
+| `just research-validate` | `messenger research validate` | nothing |
+| `just research-generate` | `messenger research generate` | publishes the snapshot |
+| `just research-check` | `messenger research generate --check` | nothing |
+| `just research-report` | `messenger research report` | nothing |
+| `just research-refresh SECONDS INVOCATIONS [PLATFORM…]` | `prepare`, then Claudine per run | local runs only; runs agents |
+| `just research-runs` | `messenger research runs` | nothing |
+| `just research-publish NAME RUN_ID…` | `messenger research promote --approved-by NAME` | publishes the snapshot |
+| `just research-cleanup [--apply]` | `messenger research cleanup` | local runs (only with `--apply`) |
+
+Only `research-refresh` reaches the network or starts an agent. Every other recipe is deterministic and offline.
+
+### What is committed, and what is generated
+
+- **Authored:** the roster, schemas, fleet prompt (`docs/research/platforms/_fleet.md`), overrides, and reviewed implementation mappings.
+- **Accepted research:** one document per platform (`docs/research/platforms/<platform>.md`). It changes only through `promote`, never by hand.
+- **Generated:** `docs/research/platforms/catalog.json`, the region of `docs/research/summary/platforms.md` between the `BEGIN GENERATED` / `END GENERATED` markers, and `docs/research/CHANGELOG.md`. Each carries a "do not edit" notice. Prose outside the summary's markers is authored and kept.
+- **Selection:** `docs/research/publication.json` names the exact bytes of every published file. Commit it together with every file it lists; `report` and `generate` refuse a snapshot whose files do not match it (hand edits included).
+- **Local only (gitignored):** `messenger/.research-state/` holds refresh runs, budget ledgers, renewal records, and the publication journal.
+
+### Validate, generate, and check for drift
+
+```bash
+just research-validate            # roster, schemas, documents, overrides, mappings, coverage
+just research-generate            # validate, then publish catalog + summary + CHANGELOG
+just research-check               # read-only: fail if published files drifted from their inputs
+just research-report --platform telegram --json
+```
+
+Two generations from the same inputs are byte-identical. Invalid inputs, a missing platform, or an interruption leave the previous snapshot selected. Freshness is reported separately from validity: expired research stays inspectable, is marked stale, and never fails a build.
+
+### Refresh research
+
+A refresh re-researches one platform in three passes: independent discovery, reconciliation against the curated sources and previous research, and curated-source maintenance. An independent evidence review follows. Each platform run is one budgeted [Claudine](../../claudine/docs/cli/budget.md) sequence. Platforms run one at a time behind a shared fleet lock.
+
+Both limits are required and have no default. `SECONDS` caps elapsed agent time and `INVOCATIONS` caps agent launches, per platform run. Unused allowance is not spent.
+
+```bash
+just research-refresh 3600 12 discord -- --claude           # one platform
+just research-refresh 3600 12 -- --claude                   # every due platform (full fleet)
+just research-refresh 3600 12 discord --force -- --claude   # refresh even if current
+messenger research prepare --dry-run                        # which platforms are due, and why
+```
+
+Arguments before `--` go to `prepare` (platforms, `--force`, `--observed-version IFACE=VER`). Arguments after it go to each `claudine sequence`. Name the agent there (for example `--claude`): the prepared sequence names none, and without a terminal Claudine stops before the first step. The recipe builds `messenger` and `claudine` from this checkout and puts them first on `PATH`, because the sequence's check steps call `messenger research check-run`. It needs `jq`.
+
+A platform is due when its accepted document is missing, expired, or invalid, or was researched under an older prompt or schema. An observed version that the accepted research does not know also makes it due, as does `--force`. A platform with an open run is skipped until that run is resumed, promoted, or rejected.
+
+**Source access.** Research reads public sources only. Authenticated access, live probes, posting messages, creating accounts or credentials, adding services, global installations, and purchases each need separate approval and are never done silently. An inaccessible source is recorded as such, never counted as rechecked, and it rules out automatic renewal.
+
+### Review and publish
+
+A run that passes every check waits for human review (`just research-runs` shows `awaiting_review`). Review its `validation.json`, `delta.json`, and `outputs/evidence-review.json`, then either publish or reject it:
+
+```bash
+just research-publish "Ada Maintainer" 2026-09-18-1a2b3c4d
+messenger research promote 2026-09-18-1a2b3c4d --renewal    # verified unchanged renewal only
+messenger research reject 2026-09-18-1a2b3c4d --by "Ada Maintainer" --reason "unsupported claim"
+```
+
+A named maintainer approves every substantive change, and every initial baseline. The first publication needs one reviewed run for **every** platform, promoted together in one command. `--renewal` accepts only a run whose facts, gaps, evidence, prose, prompt, schema, and curated list are unchanged and whose sources were all rechecked. Promotion writes a review record under `docs/research/reviews/`, and the CHANGELOG is generated from those records. Renewals and rejected runs never appear there. Nothing is committed for you.
+
+### Partial failures and recovery
+
+- **One platform fails.** The others still publish. The failed platform keeps its previous accepted document with its original dates, so a failed attempt never looks newly verified.
+- **A run failed a check, or its sequence stopped** (a failed step, Ctrl+C, or no agent named): `messenger research prepare --resume RUN_ID` reruns it from the first incomplete stage within the same budget, at most twice. Or reject it and prepare a new run.
+- **Budget exhausted** (Claudine exit `76`): the run stays incomplete, never finished. Record more allowance with `claudine budget grant`, then resume.
+- **Runner killed:** the next Claudine command marks the ledger `interrupted`. Run `claudine budget resume` on the ledger, then resume the run.
+- **Prepared but never started:** the run stays active until its printed `claudine sequence` command runs.
+- **Publication interrupted:** `generate` and `promote` refuse until `messenger research recover` completes or undoes it. The previous snapshot stays selected until then.
+
+### Clean up
+
+```bash
+just research-cleanup                            # preview records at least 30 days old
+just research-cleanup --older-than 7 --apply     # delete them
+```
+
+The preview lists exactly what would be removed, and which removals end the ability to resume a run. Active, awaiting-review, and interrupted runs, runs whose ledger is locked, and everything under `docs/` are never removed.

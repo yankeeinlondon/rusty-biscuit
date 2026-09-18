@@ -830,7 +830,7 @@ platform.
   - Verify the summary, skill projection, catalog, accepted documents, and
     research CHANGELOG agree under the selected snapshot manifest.
 
-- [ ] **Workflow Documentation**
+- [x] **Workflow Documentation**
   - Document validation, single/full/forced refresh, required budget arguments,
     source access rules, review/promotion, partial failure recovery, generation,
     drift checking, and cleanup in Messenger's README/user documentation.
