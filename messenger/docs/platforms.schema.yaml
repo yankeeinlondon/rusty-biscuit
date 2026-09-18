@@ -1,0 +1,21 @@
+# Messenger research roster, schema version 1.
+#
+# Validates `messenger/docs/platforms.yaml`. The roster owns platform,
+# interface, and adapter identity, coverage, curated sources, and refresh
+# intervals; it never holds platform facts.
+#
+# Rules beyond this shape (exactly five active platforms, the seven adapters
+# each mapped once, companions with no adapters, a curated list no longer than
+# `curated_source_cap`) are owned by the Rust validator; see
+# research/platforms/_rules.md. Named types live in
+# research/platforms/_types.yaml.
+$schema:
+    roster_version: literal(1; required)
+    # Default refresh interval; a platform may set its own.
+    refresh_interval_days: number(integer; min(1); required)
+    # Configurable per-platform curated-source cap. The schema ceiling of 10
+    # is the initial cap; raising it is a reviewed schema change.
+    curated_source_cap: number(integer; min(1); max(10); required)
+    platforms: "RosterPlatform[](min(1); required)@./research/platforms/_types.yaml"
+    excluded: "RosterExclusion[](required)@./research/platforms/_types.yaml"
+    "<pattern::^(prompt|hash)$>": any

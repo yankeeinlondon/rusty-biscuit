@@ -1,0 +1,229 @@
+# Named types for the Messenger research contract, schema version 1.
+#
+# FROZEN at the Phase 2 checkpoint (2026-09-17), after the four schema pilots
+# passed and every category proved able to record an investigated gap. Any
+# change needs a new schema_version and migration of every accepted document;
+# publication refuses mixed versions.
+#
+# One vocabulary shared by four schemas, each importing `Name@<path>`:
+#   ./_schema.yaml                     platform research documents
+#   ./_overrides.schema.yaml           reviewed corrections (`_overrides.yaml`)
+#   ../../platforms.schema.yaml        the roster (`messenger/docs/platforms.yaml`)
+#   ../implementation/_schema.yaml     reviewed implementation mappings
+#
+# Why a separate file: every top-level entry of a standalone `$schema:`
+# envelope is also a document property, so types defined inside a document
+# schema would become accepted document keys (schema-pilot limitation L2).
+#
+# Authoring constraints (see the schema-pilot findings, L1-L13):
+# - every type is ONE line: multi-line inline objects fail to load from a
+#   standalone schema file (L6);
+# - regexes with groups are single-quoted inside `pattern('...')` (L7);
+# - descriptions inside `{ ... }` stop at the first comma (L8), so field notes
+#   live in these comments;
+# - there are no arrays of unions and no required union properties (L3-L5), so
+#   records are flat and state/value consistency is a Rust rule;
+# - Darkmatter coerces scalar types (L9); the Rust loader rejects string
+#   numbers and non-string versions itself.
+#
+# Every rule this file cannot express is listed, with its Rust owner, in
+# ./_rules.md.
+$schema:
+    # ---- identifiers and shared scalars ------------------------------------
+    # Stable IDs: lowercase segments joined by `.`, `_`, or `-`; compared
+    # byte-for-byte and never reused after removal.
+    Id: "string(pattern('^[a-z0-9]+(?:[._-][a-z0-9]+)*$'))"
+    PlatformId: enum(discord,slack,telegram,whatsapp,signal)
+    # Exactly `ProviderKind::as_str()`; already persisted in receipts and routes.
+    AdapterId: enum(discord,discord-webhook,slack,slack-webhook,telegram,whatsapp,signal)
+    # Provider-native operation in snake_case, e.g. `create_message`.
+    Operation: "string(pattern('^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$'))"
+    State: enum(known,unknown,conflicting,not_applicable)
+    Confidence: enum(high,medium,low)
+    Support: enum(supported,conditional,unsupported)
+    Fidelity: enum(exact,approximate,unmapped)
+    YesNo: enum(yes,no,unknown)
+    SourceKind: enum(official_docs,source_code,sdk_validator,observed_fixture,secondary)
+    Unit: enum(utf8_bytes,unicode_scalars,utf16_code_units,grapheme_clusters,items,unspecified_characters,bytes,unknown)
+    Stage: enum(field_value,parsed_text,serialized_payload,unknown)
+    # Research categories. The same list keys the per-interface coverage
+    # matrix and scopes implementation assessments.
+    Category: enum(versions,constraints,formatting,text_bindings,images,attachments,addressing,receipts,attribution,location,expression,interactivity,delivery_controls,eligibility,rate_limits,errors)
+    # Provider-neutral semantic surfaces. `rich_*` covers embed/card-style
+    # objects; collection surfaces (`rich_objects`, `blocks`, `media_group`,
+    # `attachments`) are the members and subjects of count/aggregate bounds.
+    Surface: "enum(body,summary,caption,attachment_description,alt_text,filename,notification_fallback,rich_title,rich_description,rich_field_name,rich_field_value,rich_footer_text,rich_author_name,rich_objects,rich_fields,block_text,blocks,attachments,attachment,media_group,request_payload,template_header,template_body,template_footer,template_parameter,interactive_header,interactive_body,interactive_footer,button_label,list_title,list_row_title,list_row_description,poll_question,poll_option,option_label,option_value,callback_data,location_label,location_address,sender_display_name)"
+    # A fixed-field locator: a JSON Pointer, a response header, the HTTP
+    # status, the whole plain-text body, or an SDK error variant path.
+    Locator: "string(pattern('^(/[^ ]*|header:[A-Za-z0-9-]+|http_status|body_text|sdk_variant:[A-Za-z0-9_:]+)$'))"
+    # Content fingerprint: biscuit-hash xxh64 as 16 lowercase hex digits.
+    Xxh64: "string(pattern('^xxh64:[0-9a-f]{16}$'))"
+    # A git revision (abbreviated or full object name).
+    Revision: "string(pattern('^[0-9a-f]{7,40}$'))"
+    # Partial release date when only a year or month is established (L13).
+    Period: "string(pattern('^[0-9]{4}(-[0-9]{2})?$'))"
+
+    # ---- knowledge and evidence --------------------------------------------
+    # `claims` hold the competing values of a `conflicting` record.
+    Claim: "{ statement: string(required), value: number, evidence: Id[](min(1); required)@this }"
+    # Every fact carries one knowledge block. `gap` names the gap record for
+    # `unknown` and `conflicting` states.
+    Knowledge: "{ state: State(required)@this, evidence: Id[](required)@this, confidence: Confidence@this, gap: Id@this, explanation: string, claims: Claim[]@this }"
+    # Exactly one of `url` or `location` (a repository-relative path).
+    # `retrieved` is the observation date, never a release date.
+    Source: "{ id: Id(required)@this, kind: SourceKind(required)@this, url: url(scheme(https)), location: string, locator: string, retrieved: date, revision: string, note: string }"
+    # A bounded, typed applicability condition. `kind` selects which operand is
+    # meaningful: `equals`, `min`/`max`, or `one_of`. A condition that cannot
+    # be expressed with an operand carries `gap` and makes its record
+    # non-executable.
+    Condition: "{ kind: enum(message_form,account_tier,api_version,sdk_version,bridge_version,hosting_mode,media_kind,recipient_client,conversation_type,permission_grant,release_age; required), equals: string, min: string, max: string, one_of: string[], gap: Id@this }"
+
+    # ---- interfaces ---------------------------------------------------------
+    Relationship: "{ kind: enum(receives_events_for,responds_to_interactions_from,requires_companion_interface; required), target: Id(required)@this, prerequisites: string[], authorization: string }"
+    # `sending_adapter` interfaces map one or more adapters; `research_only`
+    # companions map none and are never implemented adapters.
+    Interface: "{ interface_id: Id(required)@this, role: enum(sending_adapter,research_only; required), api_identity: string(required), classification: enum(official,community; required), direction: enum(send_only,receive_only,callback_only,bidirectional,unknown; required), adapters: AdapterId[](required)@this, operations: Operation[](required)@this, endpoint_template: string, api_version: string, sdk: string, sdk_version: string, bridge: string, bridge_version: string, relationships: Relationship[]@this, applies_when: Condition[]@this }"
+    # `researched` needs facts; `not_applicable` needs `explanation`; `gap`
+    # needs an investigated gap record.
+    CoverageCell: "{ status: enum(researched,not_applicable,gap; required), gap: Id@this, explanation: string }"
+    # Every category is a required key: an omitted category fails the schema
+    # instead of reading as unrestricted support.
+    CategoryMatrix: "{ versions: CoverageCell(required)@this, constraints: CoverageCell(required)@this, formatting: CoverageCell(required)@this, text_bindings: CoverageCell(required)@this, images: CoverageCell(required)@this, attachments: CoverageCell(required)@this, addressing: CoverageCell(required)@this, receipts: CoverageCell(required)@this, attribution: CoverageCell(required)@this, location: CoverageCell(required)@this, expression: CoverageCell(required)@this, interactivity: CoverageCell(required)@this, delivery_controls: CoverageCell(required)@this, eligibility: CoverageCell(required)@this, rate_limits: CoverageCell(required)@this, errors: CoverageCell(required)@this }"
+    InterfaceCoverage: "{ interface: Id(required)@this, categories: CategoryMatrix(required)@this }"
+
+    # ---- versions -----------------------------------------------------------
+    # `subject` keeps provider API versions apart from SDK and bridge releases.
+    # `unversioned` is an established finding; `unresearched` is not.
+    ApiVersionFinding: "{ id: Id(required)@this, interface: Id(required)@this, subject: enum(provider_api,sdk,bridge; required), name: string, versioning: enum(versioned,unversioned,unresearched; required), latest_stable: string, previews: string[], knowledge: Knowledge(required)@this }"
+    # Non-exhaustive known releases. `release_date` or `release_period` only
+    # when `release_date_state` is `known`.
+    ChronologyEntry: "{ id: Id(required)@this, interface: Id(required)@this, subject: enum(provider_api,sdk,bridge; required), name: string, version: string(required), stability: enum(stable,preview,deprecated,unknown; required), release_date: date, release_period: Period@this, release_date_state: State(required)@this, knowledge: Knowledge(required)@this }"
+
+    # ---- constraints --------------------------------------------------------
+    Member: "{ surface: Surface(required)@this, native_locator: string(required), repeated: boolean }"
+    # Logical key `(platform_id, interface, operation, id)`. `value` only for a
+    # `known` numeric bound. `recommended_max` names `recommended_by` (a
+    # source ID) and no `enforced_by`. `aggregate_max` needs `members` and
+    # `aggregation_scope`.
+    Constraint: "{ id: Id(required)@this, interface: Id(required)@this, operation: Operation(required)@this, surface: Surface(required)@this, native_locator: string(required), kind: enum(hard_max,hard_min,recommended_max,aggregate_max,item_count_max,item_count_min,payload_bytes_max; required), value: number(integer; min(0)), unit: Unit(required)@this, measurement_stage: Stage(required)@this, enforced_by: enum(service,sdk,bridge), recommended_by: Id@this, overflow_behavior: enum(reject,truncate,split,transform,unknown; required), overflow_details: string, overflow_errors: Id[]@this, applies_when: Condition[](required)@this, aggregation_scope: enum(message,request,rich_object,item), members: Member[]@this, knowledge: Knowledge(required)@this }"
+
+    # ---- formatting and text bindings --------------------------------------
+    ConstructSupport: "{ state: State(required)@this, support: Support@this, syntax: string, restriction: string }"
+    # All fourteen constructs are required keys, so a profile cannot omit one.
+    Constructs: "{ emphasis: ConstructSupport(required)@this, strong: ConstructSupport(required)@this, strikethrough: ConstructSupport(required)@this, underline: ConstructSupport(required)@this, inline_code: ConstructSupport(required)@this, fenced_code: ConstructSupport(required)@this, links: ConstructSupport(required)@this, images: ConstructSupport(required)@this, headings: ConstructSupport(required)@this, lists: ConstructSupport(required)@this, block_quotes: ConstructSupport(required)@this, tables: ConstructSupport(required)@this, spoilers: ConstructSupport(required)@this, mentions: ConstructSupport(required)@this }"
+    # `documentation_example` and `observed` stay distinguishable.
+    FormatFixture: "{ id: Id(required)@this, input: string(required), interpretation: string(required), provenance: enum(documentation_example,observed,constructed; required), evidence: Id[]@this }"
+    FormatProfile: "{ id: Id(required)@this, family: enum(plain_text,markdown,markdown_subset,html,html_subset,provider_markup; required), dialect: string, dialect_version: string, constructs: Constructs(required)@this, escaping: string, nesting: string, newlines: string, auto_interpretation: enum(links,mentions,links_and_mentions,none,unknown; required), malformed_behavior: enum(reject,literal,strip,transform,unknown; required), constraints: Id[]@this, errors: Id[]@this, fixtures: FormatFixture[]@this, knowledge: Knowledge(required)@this }"
+    Selector: "{ field: string(required), values: string[](required), default: string, default_state: enum(documented,absent,unknown; required) }"
+    FieldRelationship: "{ kind: enum(mutually_exclusive,required_together,optional_companion,fallback_for; required), target: Id(required)@this }"
+    # `packaging` answers how plain and formatted content are submitted;
+    # `visibility` separates visible content from notification/accessibility
+    # fallbacks that are not a second visible message.
+    TextBinding: "{ id: Id(required)@this, interface: Id(required)@this, operation: Operation(required)@this, surface: Surface(required)@this, native_locator: string(required), representation: enum(text,markup,entities,structured_blocks; required), content_role: enum(primary,notification_fallback,accessibility_fallback,compatibility_fallback; required), packaging: enum(single_field_mode_switch,separate_fields,structured_object,separate_operations,plain_only,unknown; required), visibility: enum(visible_content,notification_only,accessibility_only,not_displayed,unknown; required), profiles: Id[](required)@this, selector: Selector@this, entity_offset_unit: Unit@this, relationships: FieldRelationship[]@this, precedence: string, constraints: Id[]@this, knowledge: Knowledge(required)@this }"
+
+    # ---- images -------------------------------------------------------------
+    ImageRole: enum(inline_content,attachment,primary,thumbnail,accessory,author_icon,footer_icon,link_preview)
+    # One binding per (native slot, role). A slot serving several roles gets
+    # several bindings with distinguishing conditions.
+    ImageBinding: "{ id: Id(required)@this, interface: Id(required)@this, operation: Operation(required)@this, container_surface: Surface@this, role: ImageRole(required)@this, fidelity: Fidelity(required)@this, native_locator: string(required), placement: enum(inline_anchor,standalone_media,card_main,card_thumbnail,section_accessory,author_area,footer_area,preview; required), placement_control: enum(explicit,provider_selected,unknown; required), submissions: enum(markup_reference,request_field,multipart_part,upload_then_reference,separate_operation)[](min(1); required), sources: enum(remote_url,upload_bytes,provider_media_id,local_path)[](required), collection: enum(single,ordered_list,album,gallery,carousel,provider_selected; required), multiple_images: enum(repeated_objects,array_field,multiple_requests,not_supported,unknown; required), ordering: YesNo(required)@this, atomic: YesNo(required)@this, receipts: enum(single,per_item,unknown; required), min_items: number(integer; min(0)), max_items: number(integer; min(0)), shared_constraints: Id[]@this, caption_binding: Id@this, caption_scope: enum(per_item,shared,none,unknown), alt_text_binding: Id@this, mime_types: string[], animation: enum(supported,unsupported,unknown), transformations: string, supplied_by: enum(caller_supplied,provider_derived,account_scope,application_scope; required), applies_when: Condition[]@this, knowledge: Knowledge(required)@this }"
+    RoleCell: "{ state: State(required)@this, support: Support@this, fidelity: Fidelity@this, bindings: Id[](required)@this, gap: Id@this }"
+    # All eight canonical roles are required keys: a complete matrix per
+    # interface. Newly discovered native roles stay in `unmapped_native_roles`
+    # until the vocabulary is reviewed.
+    RoleMatrix: "{ inline_content: RoleCell(required)@this, attachment: RoleCell(required)@this, primary: RoleCell(required)@this, thumbnail: RoleCell(required)@this, accessory: RoleCell(required)@this, author_icon: RoleCell(required)@this, footer_icon: RoleCell(required)@this, link_preview: RoleCell(required)@this }"
+    RoleCoverage: "{ interface: Id(required)@this, roles: RoleMatrix(required)@this, unmapped_native_roles: string[] }"
+
+    # ---- attachments, addressing, receipts ---------------------------------
+    AttachmentBinding: "{ id: Id(required)@this, interface: Id(required)@this, operation: Operation(required)@this, media_kinds: enum(image,video,audio,voice,document,animation,sticker,other)[](required), upload_mechanisms: enum(multipart_part,upload_then_reference,remote_url,provider_media_id,base64_field,local_path)[](required), native_locator: string, mime_restrictions: string, constraints: Id[]@this, caption_binding: Id@this, alt_text_binding: Id@this, filename_control: enum(caller,provider,none,unknown), applies_when: Condition[]@this, knowledge: Knowledge(required)@this }"
+    AddressingFact: "{ id: Id(required)@this, interface: Id(required)@this, operation: Operation(required)@this, destination_kinds: enum(channel,direct_message,group,thread,user,phone_number,chat,webhook_bound,other)[](required), reply_support: Support@this, thread_support: Support@this, reference_fields: string[], returns_identifier: enum(always,conditional,never,unknown; required), identifier_locator: Locator@this, applies_when: Condition[]@this, knowledge: Knowledge(required)@this }"
+    # Accepted is not delivered; asynchronous states name their mechanism.
+    ReceiptFact: "{ id: Id(required)@this, interface: Id(required)@this, operation: Operation(required)@this, acceptance: enum(synchronous_response,none,unknown; required), identifier_locator: Locator@this, delivered_state: enum(synchronous,asynchronous_event,unavailable,unknown; required), read_state: enum(synchronous,asynchronous_event,unavailable,unknown; required), status_mechanism: string, status_interface: Id@this, warnings_locator: Locator@this, knowledge: Knowledge(required)@this }"
+
+    # ---- attribution, location, expression ---------------------------------
+    # `changes_sender` answers whether the field changes the attributed sender
+    # separately from whether the author can be described.
+    AttributionBinding: "{ id: Id(required)@this, interface: Id(required)@this, operation: Operation(required)@this, role: enum(sender_identity,sender_display_name,sender_avatar,content_author,signature,forwarded_origin,delegated_author; required), native_fields: string[](required), control: enum(platform_derived,account_configured,application_configured,caller_supplied,mixed; required), scope: enum(account,application,webhook,conversation,message; required), inclusion: enum(always,optional,conditional,unavailable; required), override_behavior: enum(honored,rejected,ignored,conditional,not_applicable,unknown; required), changes_sender: YesNo(required)@this, image_binding: Id@this, format_profile: Id@this, constraints: Id[]@this, provenance_presentation: string, applies_when: Condition[]@this, knowledge: Knowledge(required)@this }"
+    LocationField: "{ name: enum(latitude,longitude,coordinate_reference_system,accuracy,label,address,timestamp,heading,live_duration,other; required), locator: string(required), required: boolean(required), unit: string, constraint: Id@this }"
+    # Subject and origin describe provider behavior only; they never authorize
+    # Messenger to discover or transmit the host's location.
+    LocationBinding: "{ id: Id(required)@this, interface: Id(required)@this, operation: Operation(required)@this, role: enum(author_location,shared_place,live_location; required), subject: enum(author,device,place,unspecified; required), mode: enum(static,live; required), association: enum(platform_asserted,caller_asserted,unknown; required), origin: enum(caller_supplied,device_derived,account_derived,platform_derived; required), inclusion: enum(always,when_supplied,conditional,unavailable,unknown; required), representation: enum(structured_fields,dedicated_operation,structured_object,text_fallback; required), fields: LocationField[]@this, delivery: enum(same_message,replaces_text,separate_message,unknown; required), presentation: enum(map,place_card,link,text,unknown; required), coexists_with: string[], live_behavior: string, applies_when: Condition[]@this, knowledge: Knowledge(required)@this }"
+    # One per interface: whether the author's geolocation is exposed at all.
+    AuthorGeolocation: "{ id: Id(required)@this, interface: Id(required)@this, exposure: enum(automatically_exposed,optionally_supplied,unavailable,unknown; required), knowledge: Knowledge(required)@this }"
+    # `api_availability: app_only` is a research lead, never API support.
+    # `intent` describes caller intent, not the author's emotional state.
+    ExpressionBinding: "{ id: Id(required)@this, interface: Id(required)@this, operation: Operation(required)@this, mechanism: enum(message_effect,text_effect,reaction,emoji_content,sticker_content; required), support: Support@this, api_availability: enum(api,app_only,unknown; required), native_identifier: string, native_fields: string[], control: enum(caller_chosen,content_triggered,provider_selected,unknown; required), scope: enum(selected_text,message_bubble,conversation,provider_defined,not_applicable,unknown; required), discovery: enum(fixed_documented,dynamic_catalog,not_applicable,unknown; required), intent: enum(emphasis,celebration,joy,affection,anger,sadness,surprise,unmapped; required), intent_fidelity: Fidelity(required)@this, rendering: string, coexistence: string, applies_when: Condition[]@this, knowledge: Knowledge(required)@this }"
+
+    # ---- delivery controls, eligibility, rate limits -----------------------
+    DeliveryControl: "{ id: Id(required)@this, interface: Id(required)@this, operation: Operation(required)@this, control: enum(silent_delivery,link_preview,mention_control,edit,delete; required), support: Support@this, native_fields: string[], applies_when: Condition[]@this, knowledge: Knowledge(required)@this }"
+    EligibilityRequirement: "{ id: Id(required)@this, interface: Id(required)@this, kind: enum(authentication_scheme,required_scope,membership,registration,conversation_window,template_prerequisite,account_type,other; required), description: string(required), applies_when: Condition[]@this, knowledge: Knowledge(required)@this }"
+    # `basis` keeps documented, observed, and dynamic limits apart; a
+    # community estimate is never a service guarantee.
+    RateLimit: "{ id: Id(required)@this, interface: Id(required)@this, operations: Operation[](required)@this, scope: enum(global,route,resource,conversation,account,application,unknown; required), basis: enum(documented,observed,dynamic,unknown; required), rate: number(integer; min(0)), per_seconds: number(min(0)), burst: number(integer; min(0)), retry_after_locator: Locator@this, retry_after_unit: enum(seconds,milliseconds,unknown), errors: Id[]@this, idempotency: enum(supported,unsupported,unknown; required), knowledge: Knowledge(required)@this }"
+
+    # ---- errors and diagnostics --------------------------------------------
+    Origin: enum(service,sdk,bridge,transport)
+    Envelope: "{ id: Id(required)@this, interface: Id(required)@this, operations: Operation[](required)@this, origin: Origin(required)@this, body_format: enum(json,plain_text,empty,sdk_error,json_rpc,unknown; required), success_discriminator: Locator@this, code_locator: Locator@this, subcode_locator: Locator@this, message_locator: Locator@this, field_errors_locator: Locator@this, warnings_locator: Locator@this, correlation_id_locator: Locator@this, retry_after_locator: Locator@this, retry_after_unit: enum(seconds,milliseconds,unknown), knowledge: Knowledge(required)@this }"
+    # A conjunction: every present predicate must hold. Numeric and string
+    # native codes are distinct fields. Free-form substring or regex matching
+    # is outside the contract.
+    MatchSignature: "{ http_status: number(integer; min(100); max(599)), native_code_number: number(integer), native_code_string: string, native_subcode: string, discriminator_locator: Locator@this, discriminator_equals: string, exact_text_token: string, sdk_error_variant: string }"
+    # A known error needs `match`; an unknown error may carry only
+    # `candidate_match`, which is never executable.
+    ErrorRecord: "{ id: Id(required)@this, interface: Id(required)@this, operations: Operation[](required)@this, envelope: Id(required)@this, origin: Origin(required)@this, phase: enum(before_submission,response,delivery_event; required), outcome: enum(failure,warning; required), category: enum(authentication,permission,invalid_destination,invalid_content,content_too_large,unsupported_feature,delivery_policy,rate_limited,quota_exhausted,conflict,service_unavailable,transport,unknown; required), match: MatchSignature@this, candidate_match: MatchSignature@this, related_facts: Id[]@this, affected_fields: string[], delivery_certainty: enum(not_submitted,rejected,accepted,partial,unknown; required), recovery: enum(retry_candidate,after_correction,do_not_retry,unknown; required), replay_safety: enum(safe,unsafe,unknown; required), recovery_prerequisites: string, remediation: enum(refresh_credentials,grant_permission,correct_destination,shorten_content,change_format,wait,check_service,contact_operator,none,unknown; required), remediation_note: string, documentation: url(scheme(https)), diagnostic_fields: string[], applies_when: Condition[]@this, fixtures: Id[]@this, knowledge: Knowledge(required)@this }"
+    # Sanitized bodies only: no credentials, recipient IDs, message content,
+    # or terminal control sequences. `constructed_from_docs` verifies
+    # interpretation but is not evidence of observed service behavior.
+    # `expect: unknown` means replay must classify the response as unknown.
+    ErrorFixture: "{ id: Id(required)@this, envelope: Id(required)@this, operation: Operation(required)@this, provenance: enum(captured,constructed_from_docs,observed_in_repo; required), expect: enum(match,no_match,unknown; required), expected_error: Id@this, http_status: number(integer; min(100); max(599)), headers: string[], body: string, sdk_variant: string, note: string }"
+
+    # ---- interactivity ------------------------------------------------------
+    # Durations carry their unit in the field name.
+    Lifecycle: "{ ack_deadline_ms: number(integer; min(0)), response_token_seconds: number(integer; min(0)), answer_window_seconds: number(integer; min(0)), repeat_submissions: enum(allowed,rejected,replaces_previous,unknown), closable: YesNo@this, expiry: string, requires_user_action: YesNo@this, proactive: YesNo@this }"
+    InboundPayload: "{ text: Locator@this, sender: Locator@this, conversation: Locator@this, message_ref: Locator@this, event_id: Locator@this, timestamp: Locator@this, edits: Locator@this, deletions: Locator@this }"
+    InboundBinding: "{ id: Id(required)@this, interface: Id(required)@this, event: string(required), mechanism: enum(push_webhook,persistent_connection,long_poll,poll,local_event_stream,none; required), reach: enum(direct,groups,mentions,replies,commands_only,interactions_only,none,unknown)[](required), content: enum(full_text,partial_text,metadata_only,none,unknown; required), payload: InboundPayload@this, authentication: string, ack_deadline_ms: number(integer; min(0)), redelivery: YesNo@this, ordering: YesNo@this, dedup_locator: Locator@this, replay: string, retention: string, prerequisites: string[], reuses_send_identity: YesNo(required)@this, applies_when: Condition[]@this, knowledge: Knowledge(required)@this }"
+    ConfirmationMapping: "{ affirmative: string(required), negative: string(required) }"
+    QuestionKind: enum(confirmation,single_choice,multiple_choice,text_input)
+    # `native: application_managed` marks text interpretation or reactions:
+    # an approximate alternative, never native structured-question support.
+    # A `link_button` opens a URL and has `answer_type: none`.
+    QuestionBinding: "{ id: Id(required)@this, interface: Id(required)@this, kind: QuestionKind(required)@this, native: enum(native,application_managed; required), mechanism: enum(buttons,link_button,select_menu,native_poll,text_input,free_text_interpretation,reaction_interpretation,other; required), operation: Operation(required)@this, native_locator: string(required), companion_interface: Id@this, answer_event: string, answer_locator: Locator@this, answer_type: enum(boolean,option_id,option_id_array,string,none; required), confirmation_mapping: ConfirmationMapping@this, option_id_locator: Locator@this, options: enum(static,dynamic,unknown), option_label_constraint: Id@this, option_value_constraint: Id@this, min_selections: number(integer; min(0)), max_selections: number(integer; min(0)), defaults: Support@this, cancellation: enum(distinct_outcome,indistinguishable,not_available,unknown; required), responder_locator: Locator@this, correlation_locator: Locator@this, opaque_state_constraint: Id@this, responses: enum(attributable,anonymous,aggregate_only,conditional,unknown; required), validation: enum(provider,application,both,unknown; required), visibility: enum(public,private,ephemeral,conditional,unknown; required), lifecycle: Lifecycle@this, fidelity: Fidelity(required)@this, applies_when: Condition[]@this, knowledge: Knowledge(required)@this }"
+    FormField: "{ id: string(required), kind: QuestionKind(required)@this, required: boolean(required), native_locator: string(required), default: string }"
+    # Grouped controls in one message are `message_controls` with
+    # `per_field_events`; only a native container submits a field set in one
+    # event.
+    FormBinding: "{ id: Id(required)@this, interface: Id(required)@this, container: enum(modal,message_controls,native_form,sequential_application,external_form,none; required), opened_by: string, question_kinds: QuestionKind[](required)@this, fields: FormField[]@this, max_fields: number(integer; min(0)), submission: enum(single_event,per_field_events,both,sequential_application,external,unknown; required), partial_updates: YesNo@this, absent_vs_empty: enum(distinguishable,indistinguishable,unknown; required), cancellation: enum(distinct_outcome,indistinguishable,not_available,unknown; required), conditional_fields: Support@this, validation: enum(field,cross_field,both,none,unknown; required), navigation: enum(single_page,native_multi_page,not_applicable,unknown; required), companion_interface: Id@this, lifecycle: Lifecycle@this, applies_when: Condition[]@this, knowledge: Knowledge(required)@this }"
+    # Sanitized answer payloads replayed against a question or form binding.
+    # `expected_answer` is the canonical answer as JSON text.
+    InteractionFixture: "{ id: Id(required)@this, binding: Id(required)@this, provenance: enum(captured,constructed_from_docs,observed_in_repo; required), payload: string(required), expect: enum(answer,cancelled,dismissed,timeout,no_answer,stale_option,aggregate_only,not_an_answer; required), expected_answer: string, note: string }"
+
+    # ---- lifecycle ----------------------------------------------------------
+    # An `investigated` gap needs `searches`, `inspected_sources`,
+    # `unresolved_reason`, and `blocked_decision`; a bare "unknown" is not an
+    # investigation.
+    Gap: "{ id: Id(required)@this, kind: enum(research,requires_messenger_update,vocabulary; required), status: enum(open,investigated; required), question: string(required), interface: Id@this, category: Category@this, facts: Id[](required)@this, searches: string[], inspected_sources: Id[]@this, unresolved_reason: string, blocked_decision: string, next_investigation: string(required) }"
+    Change: "{ id: Id(required)@this, kind: enum(added,changed,removed,unresolved; required), facts: Id[](required)@this, evidence: Id[]@this, summary: string(required) }"
+
+    # ---- roster (messenger/docs/platforms.yaml) ----------------------------
+    RosterInterface: "{ interface_id: Id(required)@this, role: enum(sending_adapter,research_only; required), api_identity: string(required), adapters: AdapterId[](required)@this, identification_url: url(scheme(https); required), relationships: Relationship[]@this }"
+    # Every curated source explains its contribution; list changes need a
+    # human approval recorded in `review`.
+    CuratedSource: "{ url: url(scheme(https); required), contribution: string(required), interfaces: Id[](min(1); required)@this, review: enum(proposed,approved; required), approved_by: string, approved_on: date }"
+    # The curated list is capped at 10 per platform, shared across its
+    # interfaces. The cap covers only the reconciliation starting list, never
+    # discovery or evidence citations.
+    RosterPlatform: "{ platform_id: PlatformId(required)@this, name: string(required), status: enum(active,paused; required), file: string(pattern('^[a-z]+[.]md$'); required), website: url(scheme(https); required), api_url: url(scheme(https)), refresh_interval_days: number(integer; min(1)), interfaces: RosterInterface[](min(1); required)@this, curated_sources: CuratedSource[](max(10); required)@this, notes: string }"
+    RosterExclusion: "{ subject: string(required), kind: enum(platform,provider,interface; required), status: enum(excluded,paused; required), reason: string(required), existing_research: string }"
+
+    # ---- overrides (docs/research/platforms/_overrides.yaml) ---------------
+    # `target_hash` is the xxh64 of the targeted fact's canonical JSON when
+    # the override was reviewed; a different current hash makes it stale.
+    Override: "{ id: Id(required)@this, platform_id: PlatformId(required)@this, fact: Id(required)@this, field: string(required), effective_value: string(required), target_hash: Xxh64(required)@this, schema_hash: Xxh64(required)@this, evidence: Id[](min(1); required)@this, reason: string(required), author: string(required), review_by: date(required) }"
+
+    # ---- implementation mappings (docs/research/implementation/) -----------
+    # Code and test files hash after CRLF-to-LF normalization; research facts
+    # hash their canonical (key-sorted, compact) JSON.
+    Fingerprint: "{ input: string(required), kind: enum(code_file,test_file,research_fact; required), digest: Xxh64(required)@this }"
+    AssessmentReview: "{ status: enum(proposed,accepted,rejected; required), proposed_by: string(required), reviewed_by: string, reviewed_on: date }"
+    # Scoped to one adapter and category. Reuse requires fingerprint
+    # equality; `inspected_revision` is provenance, not a reuse key.
+    Assessment: "{ id: Id(required)@this, adapter: AdapterId(required)@this, category: Category(required)@this, platform_id: PlatformId(required)@this, facts: Id[](min(1); required)@this, status: enum(implemented,partial,missing,unassessed; required), stale_reason: enum(fingerprint_changed,never_reviewed,fact_removed), summary: string(required), code_refs: string[](min(1); required), test_refs: string[](required), assessed_revision: Revision(required)@this, fingerprints: Fingerprint[](min(1); required)@this, review: AssessmentReview(required)@this, requires_messenger_update: boolean(required), follow_up: string }"

@@ -1,0 +1,67 @@
+# Messenger platform research documents, schema version 1.
+#
+# FROZEN at the Phase 2 checkpoint (2026-09-17), after the four schema pilots
+# passed and every category proved able to record an investigated gap. Any
+# change needs a new schema_version and migration of every accepted document;
+# publication refuses mixed versions.
+#
+# Validates the frontmatter of `messenger/docs/research/platforms/{platform}.md`.
+# Named types live in ./_types.yaml; ./_rules.md lists the semantic rules that
+# the Rust validator owns because SimplifiedSchema cannot express them.
+#
+# Every category array is required but may be empty: coverage is proved by the
+# per-interface `coverage` matrix, never by the presence of a record. An empty
+# array therefore never means "no constraints" or "unrestricted support".
+#
+# Root closure: the `<pattern::...>` key admits only the composition-metadata
+# allowlist (`prompt`, `hash`) and closes the root (pilot L1). `$schema` is
+# stripped before validation. The Rust loader rejects unknown top-level keys
+# independently, so the contract does not rest on that behavior alone.
+$schema:
+    schema_version: literal(1; required)
+    platform_id: enum(discord,slack,telegram,whatsapp,signal; required)
+    created: date(required)
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+
+    sources: "Source[](min(1); required)@./_types.yaml"
+    interfaces: "Interface[](min(1); required)@./_types.yaml"
+    coverage: "InterfaceCoverage[](min(1); required)@./_types.yaml"
+
+    api_versions: "ApiVersionFinding[](required)@./_types.yaml"
+    chronology: "ChronologyEntry[](required)@./_types.yaml"
+
+    constraints: "Constraint[](required)@./_types.yaml"
+    format_profiles: "FormatProfile[](required)@./_types.yaml"
+    text_bindings: "TextBinding[](required)@./_types.yaml"
+    image_bindings: "ImageBinding[](required)@./_types.yaml"
+    role_coverage: "RoleCoverage[](required)@./_types.yaml"
+    attachment_bindings: "AttachmentBinding[](required)@./_types.yaml"
+    addressing: "AddressingFact[](required)@./_types.yaml"
+    receipts: "ReceiptFact[](required)@./_types.yaml"
+
+    attribution_bindings: "AttributionBinding[](required)@./_types.yaml"
+    location_bindings: "LocationBinding[](required)@./_types.yaml"
+    author_geolocation: "AuthorGeolocation[](required)@./_types.yaml"
+    expression_bindings: "ExpressionBinding[](required)@./_types.yaml"
+
+    delivery_controls: "DeliveryControl[](required)@./_types.yaml"
+    eligibility: "EligibilityRequirement[](required)@./_types.yaml"
+    rate_limits: "RateLimit[](required)@./_types.yaml"
+
+    envelopes: "Envelope[](required)@./_types.yaml"
+    errors: "ErrorRecord[](required)@./_types.yaml"
+    error_fixtures: "ErrorFixture[](required)@./_types.yaml"
+
+    inbound_bindings: "InboundBinding[](required)@./_types.yaml"
+    question_bindings: "QuestionBinding[](required)@./_types.yaml"
+    form_bindings: "FormBinding[](required)@./_types.yaml"
+    interaction_fixtures: "InteractionFixture[](required)@./_types.yaml"
+
+    changes: "Change[](required)@./_types.yaml"
+    gaps: "Gap[](required)@./_types.yaml"
+    requires_messenger_update: boolean(required)
+    reason: string
+
+    "<pattern::^(prompt|hash)$>": any
