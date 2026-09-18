@@ -853,6 +853,17 @@ was published and verified, the branch transfer can use `--no-verify` without
 repeating that validation. Otherwise, the absence of qualifying evidence leaves
 the corresponding CI cells scheduled. The flag itself excludes no environment.
 
+A hook run long enough to select the whole workspace (a workflow-file or
+`.config/nextest.toml` change; about 45 minutes on the development Mac,
+2026-09-17) can outlive the SSH transport Git opened before the hook started.
+The symptom is `Pre-push validation passed.` followed by `git push` exiting
+141 (SIGPIPE) with the branch ref unchanged on the remote, while the hook's
+own note push of the evidence went through on its own connection. The hook
+did not fail and nothing needs bypassing: run `git push` again. The published
+receipt already covers the head, so the hook reuses every cell and finishes in
+minutes, and the transfer completes. Confirm with `git ls-remote --heads
+origin <branch>` after every push rather than trusting the exit code.
+
 Mode intent is:
 
 | Mode | Push after local failure | Scope evidence | Complete host outcomes | CI host cells |

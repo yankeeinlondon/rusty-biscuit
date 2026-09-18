@@ -848,7 +848,7 @@ Open the topic file when the task matches:
 | Topic                                                                | File                                    |
 |----------------------------------------------------------------------|-----------------------------------------|
 | L2 WezTerm capture gotchas (SGR collapsing, semicolon vs colon form). For backend selection / harness API, load the `biscuit-test-harness` skill via the Skill tool. | `wezterm-harness-pitfalls.md`           |
-| L2 Apple Terminal pitfalls (`do script` reuse, focus-steal, **resolved:** orphan leaks, plain-text capture) | `apple-terminal-harness-pitfalls.md`    |
+| L2 Apple Terminal pitfalls (`do script` reuse, focus-steal, **resolved:** orphan leaks, plain-text capture, sentinel waits) | `apple-terminal-harness-pitfalls.md`    |
 | CLI output (channels, color modes, completions, snapshots)           | `cli-output-testing.md`                 |
 | TUI rendering and event/reducer tests                                | `tui-testing.md`                        |
 | Browser tests (computed-style assertions)                            | `browser-testing.md`                    |
