@@ -95,7 +95,12 @@ belong here.
   and the two endpoints can even hold different contents. Put BOTH endpoints
   in the brief, confirm with `git diff --cached -- <old> <new>` that the old
   side is a deletion of the expected blob, and check `git status --short`
-  afterwards for leftover `D` entries.
+  afterwards for leftover `D` entries. If the post-commit status shows a
+  staged ` D` on the old path, the rename was half-committed; record the
+  deletion in a follow-up `chore(<area>): remove orphaned <old-path> after
+  rename` commit (the staged `D` is already in the index, so `git commit
+  --only -F - -- <old-path>` is a one-line `--only` against an already-staged
+  deletion — no amend, no temp-index plumbing).
 - Splitting a single file's content across two commits (e.g. two
   `planning(repo)` commits whose spec.md needs `review_iterations: 5→6` in
   commit 1 and `6→7` in commit 2): `git commit --only -- <path>` UPDATES
