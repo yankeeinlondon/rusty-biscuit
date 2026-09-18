@@ -238,6 +238,21 @@ belong here.
 - In cycle-close bodies quote what the diff says; do not paraphrase into
   claims the staged text did not make ("smoke test failed" vs. "smoke attempt
   interrupted by host load").
+- A terminal review (`review-N.md` with `ready: true`, `implemented: false`,
+  and no `next:` field) marks the end of a feature/fix, and the close can
+  bundle the FINAL cycle with the directory move into
+  `<area>/<features|fixes>/_completed/` in one atomic commit rather than
+  splitting them. Subject shape: `planning(<area>): close <name> cycle N and
+  move to completed` for the single-cycle terminal variant (e.g.
+  `8ce2121af`), or `close <name> cycles N-M and move to completed` when
+  the implementer's batched work closed several cycles before the final
+  review landed (e.g. `9bb5bd8ac` closing cycles 1-3 with three review
+  files added at once, the terminal review-3 carrying no `next:`, and
+  the spec's `review_iterations` bumped once to the final count). The
+  move and the cycle closure share the same rename-and-bump commit
+  because splitting the renames from the review files leaves a populated
+  `_completed/<name>/` directory without the cycle history until each
+  cycle-close catches up.
 - Multi-spec consolidation is one atomic `planning(<area>):` commit, not
   N+M separate commits: marking N existing specs `status: superseded`
   (with `superseded_by: ../<new>/spec.md` frontmatter pointer), adding
