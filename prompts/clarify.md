@@ -196,7 +196,11 @@ Your job is to follow these steps exactly:
         - if yes: iterate one by one through remaining items employing the same basic technique used in the **Clarification** stage
         - if no: make sure the unanswered questions are documented in the spec/design document with enough detail that any future reader can understand the remaining rulings that are needed
     - update the document's frontmatter ({{doc.doc}}):
+        ::file ./_set_spec_schema.md
+        - set `status` to "finalized-spec"
         - set `clarified` to `true`
+        - set `reviewed` to `true`
         - set `needs_rulings` to a _boolean_ value based on whether there still remains rulings that are needed before planning and implementation are done
             - if `needs_rulings` is set to `true` then you must add `required_rulings` frontmatter property as a list of the rulings that are still required.
         - set `clarified_by` to `{{ctx.agent}}/{{ctx.model}}`
+        - set `review_note` to "the clarification process served as a review"
