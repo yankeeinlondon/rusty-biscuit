@@ -111,14 +111,10 @@ pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
                     source: SequenceLoadCause::Json5(e),
                 }
             })?;
-            // `value` is built by the same parser from the same text, so the
-            // order pass cannot fail where the value parse succeeded.
-            let orders = biscuit_file::json_five::from_str(json5.raw()).map_err(|e| {
+            let orders = json5.deserialize_raw::<MappingOrders>().map_err(|e| {
                 CompositionError::SequenceExternalLoad {
                     context: context(),
-                    source: SequenceLoadCause::Json5(biscuit_file::Json5Error::Parse(
-                        e.to_string(),
-                    )),
+                    source: SequenceLoadCause::Json5(e),
                 }
             })?;
             Ok(LoadedDocument {

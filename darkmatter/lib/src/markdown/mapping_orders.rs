@@ -10,8 +10,9 @@ use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visit
 /// Pointer.
 ///
 /// A YAML document is indexed from its parsed value with [`Self::collect`].
-/// Any other self-describing serde format — JSON and JSON5 included — is
-/// indexed by deserializing its text straight into this type: the
+/// Any other self-describing serde format — JSON and JSON5 included, through
+/// [`biscuit_file::Json5::deserialize_raw`] — is indexed by deserializing its
+/// text straight into this type: the
 /// [`Deserialize`](serde::Deserialize) impl records each mapping's keys in the
 /// order the format's deserializer reports them, which for a streaming parser
 /// is source order. Both routes produce the same pointers.
@@ -296,7 +297,10 @@ mod tests {
             "          a/first: [1, null, {y: 1, b: 2}]\n",
         );
 
-        let orders: MappingOrders = biscuit_file::json_five::from_str(json5).unwrap();
+        let orders: MappingOrders = biscuit_file::Json5::from_str(json5)
+            .unwrap()
+            .deserialize_raw()
+            .unwrap();
 
         assert_eq!(
             orders.get("/start/stack/0/action/set"),
@@ -313,7 +317,9 @@ mod tests {
     #[test]
     fn deserializing_plain_json_indexes_source_order() {
         let orders: MappingOrders =
-            biscuit_file::json_five::from_str(r#"{"z": {"y": 1, "b": 2}, "a": [3.5, "s"]}"#)
+            biscuit_file::Json5::from_str(r#"{"z": {"y": 1, "b": 2}, "a": [3.5, "s"]}"#)
+                .unwrap()
+                .deserialize_raw()
                 .unwrap();
 
         assert_eq!(orders.get(""), Some(["z".to_string(), "a".to_string()].as_slice()));

@@ -16,7 +16,7 @@ use darkmatter::markdown::MappingOrders;
 /// One document's authored mapping order, positioned at a node inside it.
 ///
 /// A default cursor carries no order source. That is the correct state for a
-/// document whose format records no key order (JSON5, JSONL/NDJSON) and for a
+/// document whose format records no key order (JSONL/NDJSON) and for a
 /// task assembled in memory: lookups return `None` and the consumer keeps the
 /// canonical `serde_json::Map` order it has always had.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

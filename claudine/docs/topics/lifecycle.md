@@ -105,6 +105,11 @@ preserves null; null embedded in text renders empty. Unrelated undeclared roots
 still fail strict evaluation. In a loop, initialization and its catch handlers
 use the full bootstrap frontmatter, and initialization writes persist in the
 runtime state for subsequent iterations.
+The mapping keeps its authored key order whether it was written in YAML
+frontmatter or in a YAML, JSON, or JSON5 task or group document. Order never
+changes what a mapping evaluates to, but the first invalid key or failing value
+in that order is the one diagnosed, and a `set` side effect's prior-value
+result serializes in it.
 
 ## Notification Fields
 
