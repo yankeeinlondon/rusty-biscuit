@@ -41,6 +41,34 @@ docs_created_during_phase_1:
     - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/
 skills_files_updated_during_phase_1:
     - .claude/skills/os/windows.md
+source_files_during_phase_2:
+    - messenger/lib/Cargo.toml
+    - messenger/lib/tests/research_corpus.rs
+    - messenger/lib/tests/fixtures/research/contract/
+    - messenger/lib/tests/fixtures/research/interaction/
+    - messenger/lib/tests/fixtures/research/diagnostics/
+    - messenger/lib/tests/fixtures/research/negative/schema/
+    - messenger/lib/tests/fixtures/research/negative/semantic/
+    - messenger/docs/platforms.yaml
+    - messenger/docs/platforms.schema.yaml
+    - messenger/docs/research/platforms/_schema.yaml
+    - messenger/docs/research/platforms/_types.yaml
+    - messenger/docs/research/platforms/_overrides.schema.yaml
+    - messenger/docs/research/implementation/_schema.yaml
+docs_updated_during_phase_2:
+    - messenger/docs/research/platforms/discord.md
+    - messenger/docs/research/platforms/slack.md
+    - messenger/docs/research/platforms/telegram.md
+    - messenger/docs/research/platforms/whatsapp.md
+    - messenger/docs/research/platforms/signal.md
+    - docs/dependencies.md
+docs_created_during_phase_2:
+    - messenger/docs/research/platforms/_fleet.md
+    - messenger/docs/research/platforms/_rules.md
+    - messenger/lib/tests/fixtures/research/README.md
+skills_files_updated_during_phase_2:
+    - .claude/skills/messenger/SKILL.md
+    - .claude/skills/messenger/research-contract.md
 packages:
     - messenger
 ---
@@ -201,7 +229,7 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Wave 3 — Contract Core
 
-- [ ] **Roster Contract**
+- [x] **Roster Contract**
   - Create `messenger/docs/platforms.yaml` with exactly five active platforms,
     seven implemented sending interfaces, explicit research-only companion
     interfaces, output filenames, identification URLs, curated source records,
@@ -209,7 +237,7 @@ numeric order unless a task explicitly names a narrower dependency.
   - Enforce the initial per-platform curated-source cap of 10 while leaving
     discovery and evidence citations uncapped.
 
-- [ ] **Metadata Schema**
+- [x] **Metadata Schema**
   - Create `messenger/docs/research/platforms/_schema.yaml` as a versioned,
     closed SimplifiedSchema with reusable named types and the complete vocabulary
     for identity/evidence, versions, constraints, formatting/text bindings,
@@ -218,7 +246,7 @@ numeric order unless a task explicitly names a narrower dependency.
   - Encode structural state/value rules where SimplifiedSchema can do so and list
     the remaining deterministic semantic rules beside their Rust owners.
 
-- [ ] **Fleet Prompt**
+- [x] **Fleet Prompt**
   - Replace the five duplicated inline prompts with
     `messenger/docs/research/platforms/_fleet.md` implementing independent
     discovery, curated reconciliation, and source-list maintenance.
@@ -228,7 +256,7 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Wave 4 — Negative Corpus
 
-- [ ] **Contract Fixtures**
+- [x] **Contract Fixtures**
   - Commit sanitized positive and negative fixtures for all required constraint
     units/stages, knowledge states, API/SDK/bridge version distinctions, source
     kinds, applicability conditions, and image/format/attribution/location/effect
@@ -237,7 +265,7 @@ numeric order unless a task explicitly names a narrower dependency.
     references, incompatible aggregates, unknown properties/enums, stale
     overrides, ambiguous applicability, and incomplete investigated gaps.
 
-- [ ] **Interaction Fixtures**
+- [x] **Interaction Fixtures**
   - Add fixtures for send-only, callback-only, conditional inbound visibility,
     companion-interface combinations, all four `QuestionKind` values, canceled
     versus empty answers, stale option IDs, correlation, and anonymous results.
@@ -245,7 +273,7 @@ numeric order unless a task explicitly names a narrower dependency.
     sequential questions, external forms, partial/absent/canceled values, and
     lifecycle deadlines.
 
-- [ ] **Diagnostic Fixtures**
+- [x] **Diagnostic Fixtures**
   - Add sanitized envelopes and signatures for HTTP-success application errors,
     plain text, nested fields, local validation, success warnings, overlaps,
     unknown codes, ambiguous timeouts, and changed/missing envelope fields.
@@ -254,10 +282,10 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Phase 2 Checkpoint
 
-- [ ] Run `md schema validate` over every pilot and corpus document and verify the
+- [x] Run `md schema validate` over every pilot and corpus document and verify the
   schema is passive: no expression execution, process spawn, remote fetch, or
   document mutation.
-- [ ] Freeze schema version 1 only after Discord, Telegram, Slack, and Signal
+- [x] Freeze schema version 1 only after Discord, Telegram, Slack, and Signal
   pilots all pass and every required category can express an investigated gap.
 
 ## Phase 3 — Implement Typed Validation
