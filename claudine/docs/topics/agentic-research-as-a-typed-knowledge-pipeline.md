@@ -131,7 +131,7 @@ Do not force every conclusion into metadata. Explanations of undocumented behavi
 
 Darkmatter's [`SimplifiedSchema`](../../../darkmatter/lib/src/markdown/schemas/simplified/types.rs) is the Rust representation of this authoring grammar. Despite sometimes being described informally as a struct, the current Rust type is an enum with `Single(SchemaShape)` and `Union(Vec<SchemaArm>)` variants. It is re-exported from [`darkmatter::markdown::schemas`](../../../darkmatter/lib/src/markdown/schemas/mod.rs).
 
-The broader API is documented in [Schema Definition](../../../darkmatter/docs/topics/schema-definition.md). Important entry points include:
+The broader API is documented in [Schema Definition](../../../darkmatter/docs/topics/schema/definition.md). Important entry points include:
 
 - `parse_yaml_schema` for parsing the authored grammar.
 - `to_json_schema` for compiling it to Draft 2020-12 JSON Schema.
