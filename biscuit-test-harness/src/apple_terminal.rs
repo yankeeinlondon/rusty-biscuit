@@ -163,7 +163,8 @@ fn next_registry_seq() -> u64 {
     SEQ.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Records `window_id` in the registry as owned by the current process.
+/// Records `window_id` in the registry as owned by the owning process (see
+/// [`super::owner_process_id`]).
 ///
 /// Call only for windows the harness genuinely created (`owned == true`):
 /// registering a reused window we don't own would later authorize the
@@ -171,7 +172,7 @@ fn next_registry_seq() -> u64 {
 fn register_window(window_id: i64) {
     let entry = RegistryEntry {
         window_id,
-        owner_pid: current_process_id(),
+        owner_pid: super::owner_process_id(),
         seq: next_registry_seq(),
     };
     append_registry_entry(&registry_path(), entry);
@@ -1254,7 +1255,13 @@ fn unique_window_tag() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    format!("{WINDOW_TITLE_PREFIX}{}-{n}", current_process_id())
+    // Owner first (what the reaper checks), then the spawning process so
+    // test processes sharing an owner under `_test_l2` never reuse a tag.
+    format!(
+        "{WINDOW_TITLE_PREFIX}{}-{}-{n}",
+        super::owner_process_id(),
+        current_process_id()
+    )
 }
 
 /// Wraps `s` in single quotes and escapes embedded single quotes using
@@ -1531,7 +1538,9 @@ mod tests {
     fn unique_window_tag_includes_harness_prefix_and_pid() {
         let tag = unique_window_tag();
         assert!(tag.starts_with(WINDOW_TITLE_PREFIX));
-        assert_eq!(pid_from_tag(&tag, WINDOW_TITLE_PREFIX), Some(current_process_id()));
+        assert_eq!(pid_from_tag(&tag, WINDOW_TITLE_PREFIX), Some(crate::owner_process_id()));
+        assert!(tag.contains(&format!("-{}-", current_process_id())), "{tag}");
+        assert_ne!(tag, unique_window_tag());
     }
 
     /// On non-macOS hosts `available()` must be false unconditionally so

@@ -323,13 +323,14 @@ impl WezTermHarness {
     }
 
     /// Returns a unique window title we stamp on the spawned WezTerm
-    /// window so System Events can target it precisely. Includes the
-    /// pane id (already unique within a WezTerm instance) so concurrent
-    /// runs of the same harness don't collide.
+    /// window so System Events can target it precisely. Carries the owning
+    /// process id (see [`super::owner_process_id`]) and the pane id (already
+    /// unique within a WezTerm instance) so concurrent runs of the same
+    /// harness don't collide.
     fn unique_window_title(&self) -> String {
         format!(
             "{PANE_TITLE_PREFIX}{}-{}",
-            current_process_id(),
+            super::owner_process_id(),
             self.pane_id()
         )
     }

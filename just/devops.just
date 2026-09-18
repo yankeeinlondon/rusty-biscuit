@@ -1628,6 +1628,13 @@ _test_l2 pkg *args="": _storage_preflight
     SHARED_REGISTRY="$(mktemp "${TMPDIR:-/tmp}/biscuit-shared.XXXXXX")"
     trap 'while read -r b i; do "${broker}" kill "${b}" "${i}" >/dev/null 2>&1 || true; done < "${SHARED_REGISTRY}"; rm -f "${SHARED_REGISTRY}"' EXIT
 
+    # The broker exits as soon as it has spawned, so a pane tagged with its
+    # pid looks leaked to every reaper on the host — including a concurrent
+    # L2 run in another worktree, whose first spawn killed this run's shared
+    # tmux session under the tests (2026-09-18). Tag the panes with this
+    # recipe's pid instead: it lives exactly as long as the run does.
+    export BISCUIT_HARNESS_OWNER_PID="$$"
+
     # spawn one shared pane per backend. Backends whose tooling is
     # missing exit non-zero; we silently skip them. The corresponding
     # BISCUIT_SHARED_* env var stays unset and tests fall back to

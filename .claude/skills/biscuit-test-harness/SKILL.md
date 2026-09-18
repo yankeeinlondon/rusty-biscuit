@@ -315,9 +315,20 @@ thing to reach for first:
 
 ## Defensive cleanup
 
-Panes/sessions/windows are tagged with the creating pid; later runs
-close only tagged resources whose process is no longer alive — active
+Panes/sessions/windows are tagged with an owning pid; later runs close
+only tagged resources whose process is no longer alive — active
 concurrent runs are left alone.
+
+The owning pid is the spawning process unless `BISCUIT_HARNESS_OWNER_PID`
+names a live process, in which case that pid is stamped instead. `_test_l2`
+exports its own pid before the broker spawns: the broker exits as soon as it
+has spawned, so a pane tagged with the broker's pid is "dead-owner" from the
+first test on, and any reaper on the host — a second L2 run in another
+worktree, say — killed the shared session under the tests. The symptom was
+`tmux send-keys failed` on the first send of a run that passes when rerun
+alone (2026-09-18, sniff-cli). The env-var guard on the shared session name
+still applies inside the run; the owner pid is what protects it from
+everyone else.
 
 - `cleanup_stale_terminal_harness_resources()` is callable for explicit
   suite setup or local maintenance.
