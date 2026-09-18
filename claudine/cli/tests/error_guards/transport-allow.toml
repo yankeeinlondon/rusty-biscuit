@@ -298,3 +298,11 @@ symbol = "QwenSemanticStreamParser::feed_line"
 tag = "retained"
 reason = """
 Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "cli/src/budget/mod.rs"
+symbol = "run_with_ledger"
+tag = "retained"
+reason = """
+The typed error is not collapsed: `run_with_ledger` returns the sequence's `Result` unchanged (`result?`) after closing the ledger. The string copy goes only into the budget ledger's persisted `stop_reason`, a JSON text field other tools read, which is a final record rather than a transport."""
