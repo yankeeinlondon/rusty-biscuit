@@ -440,8 +440,11 @@ fn level2_image_kitty_row_advance() {
     });
     let cursor_before = parse_debug_cursor_before(&frame.plain);
 
-    // Sentinel must be present and below the bt invocation row.
-    let bt_row = find_row_of(&frame.plain, "image --debug").unwrap_or_else(|| {
+    // Sentinel must be present and below the bt invocation row. The echoed
+    // binary path can wrap at any column, so the row is found through the
+    // wrap-aware helper rather than a single-row substring match.
+    let plain_lines: Vec<&str> = frame.plain.lines().collect();
+    let bt_row = common::find_bt_command_end(&plain_lines, "image --debug").unwrap_or_else(|| {
         panic!(
             "could not locate `bt image` invocation row. plain:\n{}",
             frame.plain
