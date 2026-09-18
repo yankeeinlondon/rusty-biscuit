@@ -180,6 +180,12 @@ pub fn select(loader: &Loader, today: &Date, request: &Request) -> Result<Vec<Se
         .list()
         .into_iter()
         .filter_map(|(_, record)| record.ok())
+        .map(|mut record| {
+            // Judge the run's resting state, not its last saved status.
+            let ledger = state.ledger(&record).ok().flatten();
+            super::state::apply_ledger(&mut record, ledger.as_ref());
+            record
+        })
         .filter(|record| record.status.is_open())
         .map(|record| (record.platform_id, (record.run_id, record.status)))
         .collect();

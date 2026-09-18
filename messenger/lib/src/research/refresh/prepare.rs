@@ -107,6 +107,7 @@ fn create_run(
         baseline: published.map(|bytes| BaselineRef { xxh64: text_fingerprint(&String::from_utf8_lossy(bytes)) }),
         researched_under: select::current_contract(workspace)?,
         recovery_attempts: 0,
+        ledger_runs: 0,
         stages: Stage::ALL.iter().map(|stage| pending(*stage)).collect(),
         stop_reason: None,
         decision: None,
@@ -164,6 +165,7 @@ pub fn resume(loader: &Loader, run_id: &str) -> Result<PreparedRun, RefreshError
         }
     }
     record.recovery_attempts += 1;
+    record.ledger_runs = ledger.as_ref().map_or(0, |ledger| ledger.runs);
     record.status = RunStatus::Active;
     record.stop_reason = None;
     state.save(&record)?;

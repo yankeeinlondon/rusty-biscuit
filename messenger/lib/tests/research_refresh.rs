@@ -805,6 +805,59 @@ fn an_exhausted_budget_stays_incomplete_and_needs_a_recorded_grant() {
 }
 
 #[test]
+fn a_sequence_that_stops_before_its_checks_leaves_a_resumable_or_rejectable_run() {
+    let repo = Repo::published();
+    let before = repo.tree();
+    let on = day("2026-09-18");
+    let run = repo.prepare(PlatformId::Discord, &on);
+    let id = run.run_id.as_str();
+    let agent = Agent { repo: &repo, run: &run };
+    let ledger = |runs: u64, stop_reason: &str| {
+        json!({ "format": "claudine-budget-ledger/1", "run_id": id, "platform": "discord", "state": "stopped",
+                "stop_reason": stop_reason, "stage": null, "limits": { "invocations": 8, "active_ms": 600000 },
+                "used": { "invocations": 0, "active_ms": 1200 }, "grants": [], "heartbeat_ms": 5000, "runs": runs,
+                "segment": null, "in_flight": [], "events": [], "exclusive_lock": "../../fleet.lock" })
+        .to_string()
+    };
+    let active = |result: Result<_, RefreshError>| matches!(result, Err(RefreshError::WrongStatus { status: RunStatus::Active, .. }));
+    let discord_is_open = |repo: &Repo| {
+        let selection = &repo.select("2026-09-18", &Request { forced: [PlatformId::Discord].into(), ..Request::default() })[&PlatformId::Discord];
+        matches!(selection.skip, Some(Skip::OpenRun { .. }))
+    };
+
+    // Initialized but never launched: the printed sequence command is still
+    // the way forward, so the run stays active.
+    agent.write("budget.json", &ledger(0, "initialized"));
+    assert!(active(prepare::resume(&repo.loader, id).map(|_| ())));
+    assert!(active(promote::reject(&repo.loader, id, "Maintainer", "unused", &on).map(|_| ())));
+    assert!(discord_is_open(&repo));
+
+    // Claudine refused the first step (no agent named, no terminal); the ledger
+    // rests `stopped` and no stage recorded a result.
+    agent.write("budget.json", &ledger(1, "agent resolution failed for run.md: NoAgent"));
+    assert!(!discord_is_open(&repo), "a failed run no longer blocks selection");
+    let resumed = prepare::resume(&repo.loader, id).expect("a stopped sequence is resumable");
+    assert_eq!(resumed.stages[0], Stage::Discovery, "nothing completed, so everything reruns");
+    assert!(resumed.commands.iter().all(|c| !c.contains(&"init".to_string())), "a resumption keeps the ledger");
+    assert_eq!(repo.run(&run).recovery_attempts, 1);
+    assert_eq!(repo.run(&run).status, RunStatus::Active);
+
+    // Resumed but not yet relaunched: the ledger still shows the earlier
+    // sequence, which must not count against the new attempt.
+    assert!(active(prepare::resume(&repo.loader, id).map(|_| ())));
+    assert_eq!(repo.run(&run).recovery_attempts, 1, "a refused resumption consumes no attempt");
+    assert!(discord_is_open(&repo), "the resumed run is open again");
+
+    // The relaunched sequence is stopped by Ctrl+C before any check ran.
+    agent.write("budget.json", &ledger(2, "interrupted by the operator"));
+    let rejected = promote::reject(&repo.loader, id, "Maintainer", "wrong agent", &on).expect("a stopped run is rejectable");
+    assert_eq!(rejected.status, RunStatus::Rejected);
+    assert_eq!(repo.run(&run).status, RunStatus::Rejected, "the decision is persisted");
+    assert!(!discord_is_open(&repo), "a rejected run no longer blocks selection");
+    assert_eq!(repo.tree(), before, "accepted research is untouched");
+}
+
+#[test]
 fn an_interrupted_promotion_recovers_to_one_consistent_snapshot_and_completes_on_retry() {
     let points = [
         Point::BeforeStaging,

@@ -176,6 +176,10 @@ pub struct RunRecord {
     pub researched_under: ResearchedUnder,
     /// Resumptions after a failed, interrupted, or exhausted attempt (max 2).
     pub recovery_attempts: u32,
+    /// The ledger's `runs` count when this attempt was prepared: a higher
+    /// count means a sequence has run for this attempt.
+    #[serde(default)]
+    pub ledger_runs: u64,
     pub stages: Vec<StageResult>,
     pub stop_reason: Option<String>,
     pub decision: Option<Decision>,
@@ -207,6 +211,9 @@ pub struct LedgerView {
     pub stop_reason: Option<String>,
     pub limits: Allowance,
     pub used: Allowance,
+    /// Budgeted sequence runs opened on this ledger.
+    #[serde(default)]
+    pub runs: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -354,8 +361,10 @@ impl StateArea {
 
 /// Applies the ledger's resting state to an active run: an exhausted ledger
 /// makes the run `exhausted` (never finished, never an investigated unknown);
-/// a crash-recovered ledger makes it `interrupted`. Returns whether the
-/// record changed.
+/// a crash-recovered ledger makes it `interrupted`; a sequence that ran for
+/// this attempt and rests `stopped` (a failed step, Ctrl+C, or a refused first
+/// step) without `check-run` deciding the run makes it `failed`. Returns
+/// whether the record changed.
 pub fn apply_ledger(record: &mut RunRecord, ledger: Option<&LedgerView>) -> bool {
     let Some(ledger) = ledger else { return false };
     if record.status != RunStatus::Active {
@@ -365,6 +374,10 @@ pub fn apply_ledger(record: &mut RunRecord, ledger: Option<&LedgerView>) -> bool
     let (status, reason) = match ledger.state.as_str() {
         "exhausted" => (RunStatus::Exhausted, format!("execution budget exhausted before or during stage {stage}")),
         "interrupted" => (RunStatus::Interrupted, format!("the runner stopped unexpectedly during stage {stage}")),
+        // `stopped` with no run for this attempt is a prepared, unlaunched run.
+        "stopped" if ledger.runs > record.ledger_runs => {
+            (RunStatus::Failed, "the sequence stopped before its checks passed".to_string())
+        }
         _ => return false,
     };
     record.status = status;
@@ -417,6 +430,7 @@ mod tests {
             stop_reason: None,
             limits: Allowance { invocations: 4, active_ms: 1000 },
             used: Allowance { invocations: 4, active_ms: 900 },
+            runs: 1,
         };
         let mut record: RunRecord = serde_json::from_value(serde_json::json!({
             "format": RUN_FORMAT, "run_id": "2026-09-17-0123abcd", "platform_id": "discord",
@@ -427,6 +441,10 @@ mod tests {
         }))
         .unwrap();
         assert!(!apply_ledger(&mut record, Some(&ledger("suspended"))));
+        let mut stopped = record.clone();
+        assert!(!apply_ledger(&mut stopped, Some(&LedgerView { runs: 0, ..ledger("stopped") })), "not launched yet");
+        assert!(apply_ledger(&mut stopped, Some(&ledger("stopped"))));
+        assert_eq!(stopped.status, RunStatus::Failed);
         assert!(apply_ledger(&mut record, Some(&ledger("exhausted"))));
         assert_eq!(record.status, RunStatus::Exhausted);
         assert!(record.stop_reason.as_deref().unwrap().contains("reconcile"));
