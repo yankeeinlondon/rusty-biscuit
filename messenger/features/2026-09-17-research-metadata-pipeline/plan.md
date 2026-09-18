@@ -69,6 +69,63 @@ docs_created_during_phase_2:
 skills_files_updated_during_phase_2:
     - .claude/skills/messenger/SKILL.md
     - .claude/skills/messenger/research-contract.md
+source_files_during_phase_3:
+    - messenger/lib/Cargo.toml
+    - messenger/justfile
+    - Cargo.lock
+    - messenger/lib/src/lib.rs
+    - messenger/lib/src/research/mod.rs
+    - messenger/lib/src/research/assess.rs
+    - messenger/lib/src/research/canonical.rs
+    - messenger/lib/src/research/diagnostics.rs
+    - messenger/lib/src/research/error.rs
+    - messenger/lib/src/research/load.rs
+    - messenger/lib/src/research/paths.rs
+    - messenger/lib/src/research/model/mod.rs
+    - messenger/lib/src/research/model/common.rs
+    - messenger/lib/src/research/model/document.rs
+    - messenger/lib/src/research/model/roster.rs
+    - messenger/lib/src/research/model/overrides.rs
+    - messenger/lib/src/research/model/mappings.rs
+    - messenger/lib/src/research/validate/mod.rs
+    - messenger/lib/src/research/validate/identity.rs
+    - messenger/lib/src/research/validate/constraints.rs
+    - messenger/lib/src/research/validate/bindings.rs
+    - messenger/lib/src/research/validate/interaction.rs
+    - messenger/lib/src/research/validate/errors.rs
+    - messenger/lib/src/research/validate/coverage.rs
+    - messenger/lib/src/research/validate/replay.rs
+    - messenger/lib/tests/research_corpus.rs
+    - messenger/lib/tests/research_validation.rs
+    - messenger/lib/tests/fixtures/research/contract/overrides-valid.yaml
+    - messenger/lib/tests/fixtures/research/contract/pilot-discord.md
+    - messenger/lib/tests/fixtures/research/contract/pilot-signal.md
+    - messenger/lib/tests/fixtures/research/contract/pilot-telegram.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-coverage--surface-uncovered.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-enforceable--unit-unspecified-executable.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-evidence--secondary-only-known.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-gap--gap-placeholder.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-interactivity--callback-only-claims-text.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--adapter-platform-mismatch.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--proposed-as-implemented.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--unassessed-without-reason.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-origin-phase--sdk-phase-certainty-mismatch.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--expired-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--stale-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-ref--error-dangling-constraint.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--missing-roster-interface.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--research-only-with-adapter.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-adapter-mapped-twice.yaml
+docs_updated_during_phase_3:
+    - messenger/docs/research/platforms/_rules.md
+    - messenger/lib/tests/fixtures/research/README.md
+    - messenger/lib/README.md
+    - docs/dependencies.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/messenger/SKILL.md
+    - .claude/skills/messenger/research-contract.md
+    - .claude/skills/os/macos.md
 packages:
     - messenger
 ---
@@ -292,7 +349,7 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Wave 5 — Typed Foundation
 
-- [ ] **Research Types**
+- [x] **Research Types**
   - Add feature-gated `messenger/lib/src/research/` types matching schema version
     1 exactly, using closed enums and deterministic maps/sets where ordering is
     observable.
@@ -302,7 +359,7 @@ numeric order unless a task explicitly names a narrower dependency.
   - Add typed errors carrying repository-relative paths, stable IDs, and precise
     causes without exposing secrets or raw response bodies.
 
-- [ ] **Passive Loader**
+- [x] **Passive Loader**
   - Load roster, Markdown frontmatter, schema, optional overrides, fixtures, and
     manifests through captured file-resolution context; reject unsupported schema
     versions and unknown top-level properties outside the explicit composition
@@ -312,7 +369,7 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Wave 6 — Parallel Semantic Rules
 
-- [ ] **Identity Validation**
+- [x] **Identity Validation**
   - Enforce active-roster coverage, platform/interface/adapter identity,
     operation scope, unique logical keys, source references, chronology,
     stable/preview distinctions, evidence dates/revisions, and required category
@@ -320,7 +377,7 @@ numeric order unless a task explicitly names a narrower dependency.
   - Distinguish established unversioned APIs from unresearched versioning and
     preserve chronology entries across refreshes.
 
-- [ ] **Constraint Validation**
+- [x] **Constraint Validation**
   - Enforce knowledge-state/value consistency, nonnegative and lower-bound rules,
     aggregate membership/unit compatibility, bounded typed conditions,
     simultaneous bounds, rendering/measurement stages, and explicit gaps.
@@ -328,7 +385,7 @@ numeric order unless a task explicitly names a narrower dependency.
     stages, applicability, and consumer mappings; retain every ineligible fact in
     reports with reasons.
 
-- [ ] **Binding Validation**
+- [x] **Binding Validation**
   - Validate format constructs and fixtures, text relationships/precedence,
     image role coverage and shared budgets, attachment/addressing/receipt facts,
     attribution controls, location subject/origin/inclusion, and expression
@@ -336,7 +393,7 @@ numeric order unless a task explicitly names a narrower dependency.
   - Reject provider-controlled placement as caller control and app-only behavior
     as API support.
 
-- [ ] **Interaction Validation**
+- [x] **Interaction Validation**
   - Validate companion-interface relationships, inbound mechanisms and payload
     locators, typed options/answers, form identities/submissions, correlation,
     lifecycle units, acknowledgments, and conditional recipient scope.
@@ -344,7 +401,7 @@ numeric order unless a task explicitly names a narrower dependency.
     controls, or free-text interpretation from being promoted to stronger native
     capabilities.
 
-- [ ] **Error Validation**
+- [x] **Error Validation**
   - Validate envelope locators, signature predicate types, specificity ordering,
     overlap rejection, related facts, delivery certainty, remediation evidence,
     retry candidacy, and replay-safety prerequisites.
@@ -353,20 +410,20 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Wave 7 — Validation Assembly
 
-- [ ] **Coverage Engine**
+- [x] **Coverage Engine**
   - Assemble schema and semantic findings into deterministic, stable-order
     diagnostics and platform/interface/category completeness summaries.
   - Validate overrides against source/schema hashes and reject an override whose
     target or justification is stale.
 
-- [ ] **Mapping Assessment**
+- [x] **Mapping Assessment**
   - Validate proposed versus accepted adapter mappings, code/test references,
     inspected revision, and relevant-input fingerprints.
   - Reuse accepted assessments only on fingerprint equality; otherwise emit
     `unassessed` and a structured `requires_messenger_update` gap without changing
     runtime capabilities.
 
-- [ ] **Validator Tests**
+- [x] **Validator Tests**
   - Turn the Phase 2 corpus into table-driven unit and integration tests,
     including Unicode scalar/UTF-8/UTF-16/grapheme/parsed-markup distinctions and
     all specification rejection cases.
@@ -375,9 +432,9 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Phase 3 Checkpoint
 
-- [ ] Run `just test` and `just lint` in `messenger/`, plus explicit no-default,
+- [x] Run `just test` and `just lint` in `messenger/`, plus explicit no-default,
   maintenance-feature, and all-chat-provider checks established in Phase 1.
-- [ ] Confirm a build without the maintenance feature has no Darkmatter,
+- [x] Confirm a build without the maintenance feature has no Darkmatter,
   Claudine, research-workspace, or network-refresh dependency in its normal send
   path.
 

@@ -40,9 +40,9 @@ human_review_items:
     - |-
         **Approve the extra `messenger research` commands** (beyond `validate`, `generate`, `generate --check`, and `report`, which the spec already requires).
 
-        **Status after Phase 2:** still undecided. Phase 2 added no commands, and the shared research prompt (`_fleet.md`) names only the required `messenger research validate`, so nothing yet depends on this choice.
+        **Status after Phase 3:** still undecided. Phase 3 built the library layer only (typed loading, validation, and assessment reuse in `messenger::research`) and added no commands, so nothing depends on this choice yet.
 
-        **Why decide now:** Phase 4 builds the maintenance CLI (Wave 10). Phase 3 can proceed without an answer, but Phase 4 cannot.
+        **Why decide now:** Phase 4 builds the maintenance CLI (Wave 10) and cannot start that wave without an answer.
 
         The research workflow needs to prepare a run, list runs, accept (promote) a reviewed result, repair an interrupted publication, and delete old local records. The spec gives run setup, inspection, and cleanup to `messenger-cli`, and forbids hiding these steps inside `generate`.
 
@@ -59,27 +59,21 @@ human_review_items:
 
         **Recommendation: A.** It is the smallest design that keeps every change to accepted research explicit and auditable. Details are in `architecture.md`, section "CLI and recipe surfaces".
     - |-
-        **Confirm the file layout that Phase 2 has now created** (beyond the artifact table in the spec).
+        **Confirm the file layout** (beyond the artifact table in the spec).
 
-        **Status after Phase 2:** implemented as recommended (option A below), because the schema cannot be written without splitting it into two files. These files now exist:
+        **Status after Phase 3:** the code now depends on it. `messenger::research::Workspace` hard-codes these paths, and every research file must point its `$schema` at the matching shipped schema:
         1. `docs/research/platforms/_types.yaml`, one shared file of named types used by every research schema.
         2. `docs/research/platforms/_overrides.schema.yaml` and `docs/research/platforms/_rules.md` (the list of checks the schema cannot express).
         3. `docs/platforms.schema.yaml`, the roster's schema.
-        4. `docs/research/implementation/_schema.yaml`, the schema for reviewed code-assessment mappings (the mappings file itself is created later).
+        4. `docs/research/implementation/_schema.yaml` and the future `mappings.yaml` (reviewed notes on how Messenger's code implements each researched fact).
 
-        Still planned for later phases: the committed snapshot manifest `docs/research/publication.json`, review records under `docs/research/reviews/`, and the git-ignored local folder `messenger/.research-state/`.
+        Still planned for Phase 4: the committed snapshot manifest `docs/research/publication.json`, review records under `docs/research/reviews/`, and the git-ignored local folder `messenger/.research-state/`.
 
-        **Why decide now:** Phase 3 builds the typed loader around these paths, and Phase 4 builds publication around the manifest. Moving them after Phase 3 means rework in code and tests. Moving them now costs only renames.
-
-        **Why each addition is needed:**
-        - **Schema split:** Darkmatter's schema format turns every named type into an allowed top-level document key unless the types live in a separate file.
-        - **Manifest:** readers use it to tell a complete published set from a half-written one. The Phase 1 spike proved this on macOS, Linux, and Windows.
-        - **Mappings:** kept apart from the research documents, because they describe Messenger's code rather than the platforms.
-        - **Local folder:** holds unreviewed candidates, failed runs, and in-progress publication state, so none of it reaches git.
+        **Why decide now:** Phase 4 builds publication around the manifest. Moving paths later means rework in code, tests, and fixtures; moving them now is a small change in one file (`messenger/lib/src/research/paths.rs`).
 
         Options:
         - **A. Keep the layout as built and planned.**
-          - Pros: proven by the spikes, tested in Phase 2, and nothing unreviewed gets committed.
+          - Pros: proven by the spikes, and now exercised by about 50 automated tests; nothing unreviewed gets committed.
           - Cons: more files than the spec's table names. The manifest must be committed in the same commit as the files it lists.
         - **B. Collapse to a single schema file.**
           - Pros: matches the spec's artifact table exactly.
@@ -88,18 +82,20 @@ human_review_items:
           - Pros: a cleaner single schema file later.
           - Cons: blocks this feature on another team's work, with no date.
 
-        **Recommendation: A.** It is already built and tested, and the alternatives either weaken validation or delay the feature. Details are in `architecture.md` and the Phase 2 section of `implementation-log.md`.
+        **Recommendation: A.** It is built and tested, and the alternatives either weaken validation or delay the feature.
 message_to_agent: |-
-    Phase 2 shipped the authored contract; Phase 3 turns it into typed Rust. Read `architecture.md`, then `messenger/docs/research/platforms/_rules.md`, then `messenger/lib/tests/fixtures/research/README.md`.
-    - Contract files (schema version 1, FROZEN): `messenger/docs/platforms.yaml` (+ `platforms.schema.yaml`); `docs/research/platforms/_schema.yaml`, `_types.yaml` (ONE types file shared by the document, roster, overrides, and mappings schemas), `_overrides.schema.yaml`; `docs/research/implementation/_schema.yaml`. Rust types must mirror `_types.yaml` exactly: 16 coverage categories as required keys, `Operation` in snake_case, `xxh64:` fingerprints, and one knowledge block per record.
-    - `_rules.md` lists 30 SR-* rules with planned owner modules. `negative/semantic/` holds one or more schema-valid fixtures per rule, and the file stem starts with the rule code. Each must yield that rule's diagnostic. `sr-enforceable--*` fixtures must VALIDATE and be ineligible for the executable projection; they are not rejections. Positive fixtures in `contract/`, `interaction/`, and `diagnostics/` were designed to be semantically clean, but check two caveats: `contract/overrides-valid.yaml` and `mappings-valid.yaml` name facts that no document defines (the cross-file checks need a context or a companion document), and the ported `pilot-*.md` coverage rests on OPEN gaps (`gap.<platform>.pilot_scope`), which SR-GAP should reject only in initial-baseline/acceptance mode. Decide and log whether SR-GAP has a baseline mode.
-    - `messenger/lib/tests/research_corpus.rs` already validates the corpus through `DarkmatterSchemas::validate`. Extend it with the typed loader and semantic pass rather than writing a parallel harness. `darkmatter` is currently a dev-dependency with `effects-instrumentation`; Phase 3 adds it as an optional normal dependency under the `research` feature and keeps the dev-dependency for the counters.
-    - Performance: Darkmatter re-resolves the schema for every document (about 100 ms per document in debug builds; a shared `DarkmatterSchemas` did not help). Keep tests split; the loader could cache `effective_for` results per resolved schema path and call `EffectiveSchema::validate`.
-    - YAML data files (roster, overrides, mappings) are `---`-fenced so `md` validates them. `biscuit_file::Yaml` rejects fenced files as two documents, so load them through Darkmatter's `Markdown` (frontmatter), never raw YAML. That also means Claudine cannot use the roster directly as a sequence source; Phase 6 must feed the fleet prepared per-run inputs.
-    - Read `CARGO_MANIFEST_DIR` at run time in tests (the WSL CI leg runs a nextest archive); see `lib_dir()` in the corpus test.
-    - Cross-OS evidence gaps: `build-win-native` has no free space on `W:` (`git fetch` failed with "No space left on device"), and the WSL host `build-win` reset SSH again. `build-linux` is blocked by a stale cross-check lock held since 2026-09-14 by `reward-20260914-c3e60d0` (`nightly-reward-spike`). No remote leg ran Phase 2 tests; CI's windows-latest and wsl2 legs are the first cross-OS evidence for `research_corpus.rs` (Windows `$schema`/`@../` resolution is the unproven path).
-    - Suspected runtime defects (Slack webhook response parsing, Signal group-send method name, Telegram 429 `retry_after` loss) remain research priorities only; do not change delivery behavior.
-    - Human review is still pending on the lifecycle subcommands (needed by Phase 4) and on confirming the file layout (built as recommended in Phase 2).
+    Phase 3 shipped `messenger::research` (Cargo feature `research`, now in `local-features`, so `just test` and `just lint` in `messenger/` cover it). Read the "## Phase 3" section of `implementation-log.md` and `messenger/docs/research/platforms/_rules.md` first.
+    - API to build on: `Workspace` (fixed contract paths, `RepoPath` spelling), `Loader` (`load_document/roster/overrides/mappings`; caches the resolved schema per kind, so reuse ONE loader per command), `validate_document(&Loaded, &Context { roster, scope })` → `DocumentValidation { diagnostics, validated: Option<ValidatedDocument> }`, `validate_roster`, `validate_fleet`, `validate_overrides(.., schema_fingerprint, today)`, `validate_mappings`, `coverage_summary`, `ValidatedDocument::{eligibility, coverage, record}`, `assess::evaluate`, `canonical::{canonical_json, record_fingerprint, text_fingerprint, schema_fingerprint}`, and `validate::replay::classify`.
+    - Scopes: `Scope::Fragment` for fixtures and candidates; `Scope::Accepted` for accepted research and baselines (full roster interfaces; coverage and unknowns rest only on investigated gaps). The catalog and `generate` should validate accepted documents in `Accepted` scope.
+    - The library never reads the clock: the caller supplies `today` for override expiry. Findings are sorted and deduplicated; the `Diagnostic` field order is the sort order. Messages never echo fixture bodies.
+    - Executable types (`ExecutableConstraint`, `ExecutableCondition`) are `#[non_exhaustive]` and come only from `ValidatedDocument::eligibility()`. Ineligible facts keep their reasons (`IneligibleReason::code()`); the catalog must show them, never drop them or coerce them to 0 or infinity.
+    - Every model type derives `Serialize`, but serialized `Option`s emit `null`: the Phase 4 catalog DTOs should be separate types (the architecture record already says so), not the authored model.
+    - The manifest (`publication.json`) reader is not written; add it with the Phase 4 snapshot writer.
+    - Speed: do NOT call `DarkmatterSchemas::validate` per document. It re-resolves imports (~100 ms debug) and pushed tests past nextest's 30 s termination. Use the `Loader` or cache an `EffectiveSchema`.
+    - `contract/overrides-valid.yaml` and `sr-override--expired-override.yaml` pin the real xxh64 of `c.fx.content.service_max` and of `_schema.yaml` + `_types.yaml`. Editing either schema file makes them stale; refresh the hashes in the same change (`research_validation::overrides_fail_precisely_when_expired_orphaned_or_stale` prints the expected fact hash).
+    - Cross-OS: Linux evidence came from Docker (see `os/macos.md`; mounts must live under `$HOME`). `build-linux` has a stale lock from 2026-09-14 (`reward-20260914-c3e60d0`), `build-win-native`'s `W:` is full, and the WSL host `build-win` resets SSH. All three need a human; do not remove the lock or delete data. Windows has compile evidence only (`x86_64-pc-windows-gnu`).
+    - Pre-existing and not ours: messenger's lib unit tests do not compile with `--no-default-features` (`src/tests/validation.rs:447`).
+    - Human review is still pending on the lifecycle subcommands (Phase 4 Wave 10 needs it) and the file layout (now load-bearing in `paths.rs`).
 ---
 
 # Provider Research Metadata Pipeline

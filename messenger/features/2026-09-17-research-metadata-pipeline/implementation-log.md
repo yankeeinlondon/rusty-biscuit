@@ -68,6 +68,63 @@ docs_created_during_phase_2:
 skills_files_updated_during_phase_2:
     - .claude/skills/messenger/SKILL.md
     - .claude/skills/messenger/research-contract.md
+source_files_during_phase_3:
+    - messenger/lib/Cargo.toml
+    - messenger/justfile
+    - Cargo.lock
+    - messenger/lib/src/lib.rs
+    - messenger/lib/src/research/mod.rs
+    - messenger/lib/src/research/assess.rs
+    - messenger/lib/src/research/canonical.rs
+    - messenger/lib/src/research/diagnostics.rs
+    - messenger/lib/src/research/error.rs
+    - messenger/lib/src/research/load.rs
+    - messenger/lib/src/research/paths.rs
+    - messenger/lib/src/research/model/mod.rs
+    - messenger/lib/src/research/model/common.rs
+    - messenger/lib/src/research/model/document.rs
+    - messenger/lib/src/research/model/roster.rs
+    - messenger/lib/src/research/model/overrides.rs
+    - messenger/lib/src/research/model/mappings.rs
+    - messenger/lib/src/research/validate/mod.rs
+    - messenger/lib/src/research/validate/identity.rs
+    - messenger/lib/src/research/validate/constraints.rs
+    - messenger/lib/src/research/validate/bindings.rs
+    - messenger/lib/src/research/validate/interaction.rs
+    - messenger/lib/src/research/validate/errors.rs
+    - messenger/lib/src/research/validate/coverage.rs
+    - messenger/lib/src/research/validate/replay.rs
+    - messenger/lib/tests/research_corpus.rs
+    - messenger/lib/tests/research_validation.rs
+    - messenger/lib/tests/fixtures/research/contract/overrides-valid.yaml
+    - messenger/lib/tests/fixtures/research/contract/pilot-discord.md
+    - messenger/lib/tests/fixtures/research/contract/pilot-signal.md
+    - messenger/lib/tests/fixtures/research/contract/pilot-telegram.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-coverage--surface-uncovered.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-enforceable--unit-unspecified-executable.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-evidence--secondary-only-known.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-gap--gap-placeholder.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-interactivity--callback-only-claims-text.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--adapter-platform-mismatch.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--proposed-as-implemented.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--unassessed-without-reason.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-origin-phase--sdk-phase-certainty-mismatch.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--expired-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--stale-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-ref--error-dangling-constraint.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--missing-roster-interface.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--research-only-with-adapter.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-adapter-mapped-twice.yaml
+docs_updated_during_phase_3:
+    - messenger/docs/research/platforms/_rules.md
+    - messenger/lib/tests/fixtures/research/README.md
+    - messenger/lib/README.md
+    - docs/dependencies.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/messenger/SKILL.md
+    - .claude/skills/messenger/research-contract.md
+    - .claude/skills/os/macos.md
 packages:
     - messenger
 ---
@@ -344,3 +401,185 @@ relative `$schema` and `Name@../platforms/_types.yaml` resolution on native
 Windows is the one unproven path; CI's `windows-latest` leg covers it, and
 the next phase with host access should run `just cross-check messenger --os
 windows research_corpus`.
+
+## Phase 3
+
+- Added the opt-in `research` feature to `messenger` (optional `darkmatter`,
+  `biscuit-file` with only `file-reference`, `biscuit-hash`,
+  `serde_path_to_error`) and the feature-gated module
+  `messenger/lib/src/research/`: `model` (authored DTOs), `load` (passive
+  loader), `diagnostics`, `error`, `paths` (`Workspace`, `RepoPath`),
+  `canonical` (canonical JSON + xxh64), `validate` (six rule families plus
+  `replay`), and `assess` (mappings and fingerprint reuse).
+- Local L1 now covers the feature: `local-features = ["desktop", "research"]`
+  and the package-area `test`/`sanity`/`lint` recipes build
+  `messenger --features desktop,research`. Without this, `just test` and
+  `just lint` would never compile the new module. CI is unchanged (it already
+  runs `all-features`).
+- Loader decisions:
+  - One `FileResolutionContext` is captured per `Loader`, anchored at an
+    explicit repository root (`FileResolutionContext::new(root)
+    .with_repository_root(root)`). No sniff or Git probing, so no process
+    spawn. Darkmatter shares the same context.
+  - `$schema` must resolve (through `FileReference`) to the shipped schema
+    for the file's kind; anything else is `SR-SCHEMA-BINDING` and schema
+    validation is skipped (a document bound to another schema proves nothing).
+  - Darkmatter validation problems become `SCHEMA` findings (`SR-TOP-LEVEL`
+    for an unknown root key). Only a schema-clean file is version-gated
+    (`SR-VERSION`: the raw value must be the integer 1) and then
+    deserialized from the *authored* frontmatter, so Darkmatter's coercion
+    cannot hide a quoted number or a float version (`SR-STRICT-SCALARS`
+    comes from serde's `invalid type` errors, with a JSON Pointer from
+    `serde_path_to_error`).
+  - Host paths never reach findings: every finding carries a `/`-separated
+    `RepoPath`; third-party messages are scrubbed of the repository root.
+  - Manifests (`publication.json`) are not loaded yet: the manifest format
+    is defined by the Phase 4 snapshot writer, which will add its reader.
+- Validation scopes (the SR-GAP baseline-mode decision the Phase 2 handoff
+  asked for): `Scope::Fragment` for fixtures, pilots, and candidates;
+  `Scope::Accepted` for accepted research and baselines, which additionally
+  requires every active roster interface, coverage and unknown facts resting
+  only on investigated gaps, an image-role matrix for researched images, and
+  an author-geolocation answer for researched location. Roster validation in
+  `Accepted` scope also requires all five platforms and all seven adapters.
+- Ruling: a known bound backed only by `secondary` sources is valid but
+  ineligible (`IneligibleReason::SecondaryEvidenceOnly`), not rejected, because
+  the spec says such claims "remain visible". Same treatment as
+  `sr-enforceable--*`.
+- Ruling: `recommended_max` is never executable (`Advisory`): no enforcing
+  consumer exists for a recommendation.
+- Ruling: the SR-UNIQUE / SR-APPLICABILITY scope key includes unit and
+  measurement stage. 2000 Unicode scalars and 4000 UTF-8 bytes on one field
+  are two simultaneous bounds, not a duplicate (`contract/units-ambiguous.md`
+  relies on this).
+- Ruling: `interactivity` coverage for an interface counts records on its
+  related companions in either direction (Gateway, Interactions, Events API),
+  plus question/form bindings naming it as `companion_interface`.
+- Ruling: changes may name gap IDs as well as facts; a `removed` change must
+  name an ID that is no longer present (removed IDs are never reused).
+- Error replay (`validate::replay`): signatures are explicit conjunctions; a
+  numeric or string native code is read at `code_locator`, and for `warning`
+  outcomes also from `warnings_locator`. A discriminator may read a JSON
+  Pointer beneath a defined envelope pointer (`/` is authored as the root).
+  `no_match` and `unknown` both mean "no executable signature matches".
+- Interaction replay: only `expect: answer` fixtures on question bindings are
+  replayed (confirmation mapping, option IDs, strings). Timeout, cancellation,
+  and stale-option outcomes are lifecycle facts that no payload proves.
+- Fixture corrections. Holding every semantic fixture to "each finding
+  carries the expected rule" exposed Phase 2 defects. The code was treated as
+  correct and the fixtures were fixed:
+  - `sr-coverage--surface-uncovered.md` gave both interfaces a matrix (so
+    nothing was uncovered); the second matrix was removed.
+  - `sr-roster--research-only-with-adapter.md` and
+    `sr-interactivity--callback-only-claims-text.md` had a duplicated
+    coverage matrix; `sr-roster--roster-adapter-mapped-twice.yaml` attributed
+    Slack curated sources to `discord_bot_api`;
+    `sr-ref--error-dangling-constraint.md` marked errors `researched` with no
+    record; `sr-origin-phase--sdk-phase-certainty-mismatch.md` bound an SDK
+    error to a service envelope (now an `sdk_error` envelope with an
+    `sdk_error_variant` signature).
+  - `pilot-discord.md`: dangling `alt_text_binding`, and
+    `requires_messenger_update: true` without the required gap (added
+    `gap.discord.embed_budget_preflight`). `pilot-signal.md`: operand-less
+    bridge-version conditions without a gap (the pilot prose predated
+    SR-CONDITION; now `gap: gap.signal.versions`), and a change naming the
+    removed `cap.signal.attachments` (now `att.signal.send`).
+    `pilot-telegram.md`: a prose selector default (now
+    `default_state: absent`) and a gap naming the old `cap.*` ID.
+  - Cross-file fixtures now name `c.fx.content.service_max`, a fact in the
+    companion `contract/constraints-field.md`. `overrides-valid.yaml` and
+    `sr-override--expired-override.yaml` carry the real target and schema
+    fingerprints, so each negative fails for exactly one cause.
+  - New headers: `# validate-scope: accepted` (missing roster interface, gap
+    placeholder) and `# expect-ineligible: <fact> <reason>` (enforceable,
+    secondary-only evidence). README updated.
+- Performance: every `DarkmatterSchemas::validate` call re-resolves the
+  schema's imports. With the typed corpus added, two tests hit nextest's 30 s
+  termination in the full `--all-features` run. Two fixes: `Loader` now caches
+  the resolved `EffectiveSchema` per contract kind (sound because binding
+  pins each kind to one schema file), and the Phase 2 corpus helper caches by
+  canonical `$schema` path. Both research suites dropped from about 18 s to
+  3 s wall time.
+- `_rules.md` updated: two new load-stage codes (`SR-SCHEMA-BINDING`,
+  `SR-TOP-LEVEL`), the two scopes, and the rulings above (SR-UNIQUE key,
+  SR-EVIDENCE, SR-ENFORCEABLE advisory, SR-COVERAGE counting, SR-GAP scope,
+  SR-CHANGE gaps and removals, SR-ENVELOPE root pointer, and SR-MAPPING
+  outcome versus finding).
+
+### Requirement-to-test mapping (Phase 3)
+
+| Behavior | Test(s) |
+|---|---|
+| Typed DTOs mirror schema v1 exactly (no lost, renamed, or extra field) | `research_validation::{contract,interaction,diagnostic}_documents_round_trip_through_the_schema` (load → serialize → Darkmatter schema → deserialize, twice for determinism) |
+| Roster, overrides, mappings typed load | `typed::shipped_roster_is_a_complete_accepted_roster`, `typed::positive_roster_overrides_and_mappings_fixtures_are_clean` |
+| Adapter IDs = `ProviderKind::as_str()` | `typed::adapter_ids_are_the_persisted_provider_kind_spellings` |
+| SR-VERSION independent of schema coercion (`'1'`) | `a_quoted_schema_version_is_unsupported_even_though_the_schema_coerces_it` |
+| SR-STRICT-SCALARS: quoted number, numeric operand, float version, with pointer | `strict_scalars_reject_authored_type_mismatches_at_their_pointer` + the two `sr-strict-scalars--*` fixtures |
+| SR-TOP-LEVEL | `an_unknown_top_level_key_is_rejected_by_rule` |
+| SR-SCHEMA-BINDING: missing or foreign `$schema`; shipped legacy docs | `the_schema_must_be_the_contract_for_the_file_kind`, `shipped_legacy_documents_are_reported_as_unbound` |
+| Typed errors with repo-relative paths, no host paths | `unreadable_files_are_errors_with_repository_relative_paths`; every semantic finding's path is checked portable in `assert_semantic_rules` |
+| All 30 SR rules reject their fixtures, with only that rule | `typed::{identity,constraint,coverage,binding,interaction,error}_rules_reject_their_fixtures`; `every_semantic_fixture_is_exercised_by_a_rule_family` |
+| Positive corpus clean | `typed::{contract,interaction,diagnostic}_documents_pass_the_semantic_rules` |
+| Eligibility keeps UTF-8 / scalar / UTF-16 / grapheme / parsed / serialized distinctions | `executable_constraints_keep_their_researched_unit_and_stage` |
+| Ambiguous, unknown, conflicting, not-applicable, advisory, and secondary-only facts are never executable | `ambiguous_unknown_and_advisory_constraints_never_become_executable`; `expect-ineligible` fixtures |
+| Unresolved condition makes a known bound ineligible (with and without the gap) | `an_unresolved_condition_makes_an_otherwise_known_bound_ineligible` |
+| Applicability: co-holding vs exclusive vs identical conditions | `only_conditions_that_can_hold_together_make_two_values_ambiguous` |
+| Missing interface, category, or platform never means unrestricted | `an_interface_without_a_matrix_reports_missing_not_unrestricted`, `accepted_scope_requires_the_whole_fleet_and_every_roster_interface` |
+| Stale but valid research stays inspectable | `stale_or_invalid_research_remains_inspectable` |
+| Deterministic, sorted findings | `findings_are_deterministic_and_sorted` |
+| Overrides: expired (boundary day), orphaned, stale target, stale schema | `overrides_fail_precisely_when_expired_orphaned_or_stale` |
+| Assessment reuse only on fingerprint equality; revision and unrelated files ignored; CRLF equal; code or fact change → `unassessed` + gap; removed fact; proposed never a claim | `assessments_are_reused_only_while_every_fingerprint_matches` |
+| Error replay: match, near miss, unknown code, warnings, plain text, header locators | `diagnostics/*` fixtures via the positive corpus; `sr-fixtures--*`, `sr-match-overlap--*`; `replay::tests::*` |
+| Canonical JSON and fingerprints | `canonical::tests::*` |
+| Passivity of typed load and validation | `typed::typed_loading_and_validation_are_passive` (effect-engine and network counters, bytes unchanged) |
+| Normal send build free of maintenance deps | `cargo tree -e normal` gate below |
+
+There is no persisted read/write/read round trip in this phase: Phase 3
+writes nothing. The DTO round trip through the schema stands in for it, and
+Phase 4 owns persistence round trips.
+
+### Gates (macOS)
+
+- `just test` in `messenger/` (now `desktop,research`): 587 run, 587 passed,
+  2 skipped (pre-existing skips).
+- `just lint` in `messenger/`: clean.
+- `cargo nextest run -p messenger --all-features`: 509 run, 509 passed,
+  2 skipped (the first run had two corpus timeouts, fixed as described above).
+- `cargo clippy -p messenger --all-features --all-targets -- -D warnings`: clean.
+- `cargo nextest run -p messenger --features research` (default providers
+  plus research, no desktop): 236 run, 236 passed, 2 skipped.
+- `cargo tree -p messenger -e normal` with `--no-default-features`, default,
+  and `--features desktop`: no `darkmatter`, `biscuit-file`, `biscuit-hash`,
+  `serde_path_to_error`, YAML, or Claudine crate. `--features research` adds
+  exactly those four, and no Claudine.
+- Pre-existing, not from this phase: `cargo nextest run -p messenger
+  --no-default-features` does not compile the lib's unit tests
+  (`src/tests/validation.rs:447` uses `Target::discord_channel` without the
+  `discord` feature). The same happens with or without `research`; the
+  `--no-default-features` library itself compiles, including `research`.
+
+### Cross-OS evidence
+
+- **Linux:** Docker Desktop (`rust:1`, rustc 1.97.1, `linux/arm64`) on a copy
+  of the worktree: `research_corpus` 28/28, `research_validation` 19/19,
+  research lib unit tests 8/8. `just cross-check --os linux` is still queued
+  behind the stale `build-linux` lock held since 2026-09-14 by
+  `reward-20260914-c3e60d0` (`nightly-reward-spike`); the foreign lock was
+  not removed.
+- **Windows:** compile evidence only. `cargo check -p messenger --features
+  research --target x86_64-pc-windows-gnu --tests` passed.
+  `just cross-check --os windows` failed again because `W:` on
+  `build-win-native` is full ("No space left on device"); it was not cleaned,
+  because that is a human decision on a shared host.
+- **WSL:** `just cross-check --os wsl` failed with an SSH connection reset
+  to `build-win`, as in Phases 1–2.
+- A first attempt passed `-E 'binary(…) | binary(…)'` to `just cross-check`,
+  which breaks its argument line (already documented in the `os` skill's
+  `build-hosts.md`). New fact added to `os/macos.md`: Docker bind mounts under
+  `/tmp` fail on this host, so Linux containers need source and target dirs
+  under `$HOME`.
+- OS risk review: repository paths are built from `Path::components` and
+  joined with `/`; schema binding compares canonicalized paths (verbatim
+  `\\?\` on both sides); fingerprints normalize CRLF; tests read
+  `CARGO_MANIFEST_DIR` at run time for the WSL archive leg. The macOS `/var`
+  symlinked tempdir already exercises the non-canonical workspace-root path.
