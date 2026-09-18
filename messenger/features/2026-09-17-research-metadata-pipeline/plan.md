@@ -165,9 +165,48 @@ skills_files_updated_during_phase_4:
     - .claude/skills/messenger/SKILL.md
     - .claude/skills/messenger/research-contract.md
     - .claude/skills/os/macos.md
+source_files_during_phase_5:
+    - Cargo.lock
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/args.rs
+    - claudine/cli/src/telemetry.rs
+    - claudine/cli/src/budget/mod.rs
+    - claudine/cli/src/budget/error.rs
+    - claudine/cli/src/budget/model.rs
+    - claudine/cli/src/budget/run.rs
+    - claudine/cli/src/budget/store.rs
+    - claudine/cli/src/budget/tests.rs
+    - claudine/cli/src/commands/mod.rs
+    - claudine/cli/src/commands/budget.rs
+    - claudine/cli/src/commands/help.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+    - claudine/cli/tests/sequence_budget.rs
+    - claudine/cli/tests/snapshots/wrap_basics__help_lists_wrapper_subcommands.snap
+    - claudine/cli/tests/error_guards/transport-allow.toml
+docs_updated_during_phase_5:
+    - claudine/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/dependencies.md
+    - docs/dependencies.md
+docs_created_during_phase_5:
+    - claudine/docs/cli/budget.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/messenger/SKILL.md
+    - .claude/skills/messenger/research-contract.md
 packages:
     - messenger
     - messenger-cli
+    - claudine-cli
 ---
 
 # Provider Research Metadata Pipeline Implementation Plan
@@ -551,7 +590,7 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Wave 11 — Budget Core
 
-- [ ] **Budget Ledger**
+- [x] **Budget Ledger**
   - Add a narrow sequence-run budget model to `claudine-cli` with required
     positive elapsed-time and invocation limits, a stable run/platform identity,
     retained counters, active/suspended/exhausted state, and crash-safe writes.
@@ -560,7 +599,7 @@ numeric order unless a task explicitly names a narrower dependency.
     suspension. On uncertain crash intervals, preserve a conservative consumed
     allowance rather than refunding it.
 
-- [ ] **Launch Accounting**
+- [x] **Launch Accounting**
   - Debit every agent launch before dispatch, including each pass, independent
     reviewer, retry, restart, and recovery attempt. Refuse dispatch when either
     limit is exhausted and never let the two-recovery cap grant extra budget.
@@ -569,14 +608,14 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Wave 12 — Cancellation and Recovery
 
-- [ ] **Deadline Enforcement**
+- [x] **Deadline Enforcement**
   - Apply the shared remaining deadline to active orchestration and child waits,
     reusing Claudine's process termination coordinator on Unix and Windows.
   - Attempt to stop in-flight local work at exhaustion, record cancellation
     outcome and possible remote continuation, and preserve the incomplete stage,
     candidate, stop reason, and consumed budget.
 
-- [ ] **Budget Fixtures**
+- [x] **Budget Fixtures**
   - Add fake-provider tests for every charged activity, explicit suspension,
     backoff, exhaustion before/during launch, retry, restart, crash recovery,
     operator-granted additional budget, and resumable candidates.

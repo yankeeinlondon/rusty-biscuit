@@ -164,9 +164,48 @@ skills_files_updated_during_phase_4:
     - .claude/skills/messenger/SKILL.md
     - .claude/skills/messenger/research-contract.md
     - .claude/skills/os/macos.md
+source_files_during_phase_5:
+    - Cargo.lock
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/args.rs
+    - claudine/cli/src/telemetry.rs
+    - claudine/cli/src/budget/mod.rs
+    - claudine/cli/src/budget/error.rs
+    - claudine/cli/src/budget/model.rs
+    - claudine/cli/src/budget/run.rs
+    - claudine/cli/src/budget/store.rs
+    - claudine/cli/src/budget/tests.rs
+    - claudine/cli/src/commands/mod.rs
+    - claudine/cli/src/commands/budget.rs
+    - claudine/cli/src/commands/help.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+    - claudine/cli/tests/sequence_budget.rs
+    - claudine/cli/tests/snapshots/wrap_basics__help_lists_wrapper_subcommands.snap
+    - claudine/cli/tests/error_guards/transport-allow.toml
+docs_updated_during_phase_5:
+    - claudine/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/dependencies.md
+    - docs/dependencies.md
+docs_created_during_phase_5:
+    - claudine/docs/cli/budget.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/messenger/SKILL.md
+    - .claude/skills/messenger/research-contract.md
 packages:
     - messenger
     - messenger-cli
+    - claudine-cli
 ---
 
 # Implementation Log for 2026-09-17-research-metadata-pipeline (8 phases)
@@ -808,3 +847,173 @@ published `catalog.json` bytes back through `CatalogView`.
   committed artifacts are LF (`.gitattributes` `eol=lf`) and generation emits
   LF only; the CLI test binary resolves through `bin_exe!` for the WSL archive
   leg; `CARGO_MANIFEST_DIR` is read at run time.
+
+## Phase 5
+
+### What landed
+
+- **`claudine-cli` budget module** (`claudine/cli/src/budget/`). It holds the
+  persisted ledger model and its pure transitions (`model.rs`, with time passed
+  in as `elapsed_ms` so the arithmetic is unit-testable), the store (`store.rs`:
+  a sibling `<ledger>.lock` OS file lock, an optional shared `exclusive_lock`,
+  atomic replacement through `claudine::config::atomic::atomic_write`), and the
+  live runner (`run.rs`: a monotonic clock, a heartbeat thread, orphan
+  verification, and the process-wide hooks). `mod.rs` wraps a sequence body in
+  `run_with_ledger` and renders the stderr summary with `Prose`.
+- **`claudine budget init|show|suspend|resume|grant`**
+  (`commands/budget.rs`). `init` requires both `--max-seconds` and
+  `--max-invocations` (clap `range(1..)`, no defaults). Every mutation takes
+  the ledger lock and first recovers a crashed runner.
+- **`claudine sequence --budget-ledger <path>`**. It is refused with
+  `--interactive` (passthrough does not isolate the process tree) and with
+  `--dry-run`. Without the flag, every hook is a no-op.
+- **Hook points** (each a line or two):
+  - admission in `execute_attempt_phase`, just before
+    `execute_harness_attempt`: debit, then cap `timeout_config.timeout` at the
+    remaining time. The cap is applied **after** `session_compat_key`, so a
+    resume is not refused over the shrinking deadline;
+  - settlement right after the attempt returns;
+  - the retry `delay` capped in `control_dispatch`;
+  - `enter_stage` at each step boundary in `run_sequence_steps`;
+  - `attach_stop_flag` on the sequence's interrupt flag in `execute_sequence`;
+  - `record_child` at the four spawn sites (`captured`, `inherited`,
+    `semantic`, Kimi `wiring/session`).
+- **Documentation.** `claudine/docs/cli/budget.md` (new), plus the sequence
+  CLI doc, README, and both dependency docs.
+
+### Decisions and rulings
+
+- **Process-wide active run instead of threading a handle.** The launch funnel
+  is reached from step bodies, lifecycle retry/resume/proxy re-entry, and
+  parallel group tasks. Threading a parameter through `run_harness_loop`'s
+  callers and the group-task path would have touched many signatures. One
+  Claudine process runs at most one budgeted sequence, so `budget::run`
+  installs the run process-wide. A thread-local keeps each attempt's
+  admission, spawn, and settlement together, so parallel group tasks are
+  separate `in_flight` entries.
+- **States.** `stopped` → `active` → one of: `suspended` (success, "awaiting
+  human review"), `stopped` (failure or Ctrl+C), or `exhausted`. `interrupted`
+  is reached only through crash recovery. A run starts only from `stopped`.
+  `resume` leaves `suspended` or `interrupted`. Only a grant that restores
+  **both** limits leaves `exhausted`.
+- **Exit statuses.** `76` means exhausted (Claudine already uses `75` for
+  `LOOP_RATE_LIMITED_EXIT_CODE`). `77` means blocked: suspended, interrupted,
+  or a lock is held.
+- **Time charging.** The clock runs by wall clock from ledger open to close.
+  Time outside a budgeted run is not observable. Messenger must therefore run
+  validation and delta as `shell:` steps inside the sequence, which the
+  architecture already requires.
+- **Deadline rounding (found by test).** The wall-clock timeout plumbing
+  carries whole seconds (`Duration::from_secs(seconds)` in
+  `exec/spawn/setup.rs`), so a 1.6 s cap became 1 s. The first fixture run
+  killed the worker at 1342 ms of a 2000 ms budget, and the run ended
+  `stopped`, not `exhausted`. The cap is now rounded **up** to whole seconds.
+  A launch can overrun by less than one second, and that time is charged.
+  Changing the timeout plumbing to sub-second precision was out of scope.
+- **Only time exhaustion is detected mid-launch (found by test).** The
+  heartbeat and settlement check only `is_time_exhausted()`. Invocation
+  exhaustion is detected at the next admission or step boundary. The first
+  version recorded `stage: "two"` for a step that had succeeded, and the
+  heartbeat made that label depend on timing. The ledger's `stage` must name
+  the step that could not run.
+- **Crash accounting.** Recovery charges `max(one heartbeat interval,
+  time a verified orphan kept running)` past the last persisted heartbeat. It
+  never refunds, then sets the ledger to `interrupted`, so downtime until an
+  operator resumes is not charged, as the architecture record decided. The
+  orphan is signaled only when its PID's start time (`sysinfo`) matches the
+  one recorded at spawn: the whole process group on Unix, `TerminateProcess`
+  on Windows. Recovery runs in whichever command next takes the lock.
+- **One platform at a time.** This is a generic `--exclusive-lock <path>` on
+  `init`, a lock file every run sharing it must hold. Claudine knows nothing
+  about platforms. Messenger (Phase 6) points every platform's ledger at one
+  fleet lock.
+- **`budget` belongs in the help "Administration" group**, not
+  "Composition". The Composition group and `argv::COMPOSITION_SUBCOMMANDS`
+  are defined as the three composition subcommands.
+- **Error guard.** `OrphanOutcome::TerminateFailed` carries the typed
+  `io::Error`. `run_with_ledger` copies the sequence error's text into the
+  persisted `stop_reason` but returns the typed error unchanged. That one
+  site has a `transport-allow.toml` entry (`retained`) saying so.
+- **Not in Claudine.** Discovery-input isolation needed no Claudine change
+  (orchestration findings). The fixture proves separately prepared prompt
+  documents stay separate. Sequence progress is not persisted, so a
+  restarted sequence re-runs from step 1. Candidate resumption is Messenger's
+  Phase 6 work.
+
+### GitNexus
+
+- `just gitnexus` backed off: another `gitnexus analyze` (pid 78755) held the
+  index lock. The CLI fallback (`node .gitnexus/run.cjs impact … --repo .`)
+  returned `Target not found` / `risk: UNKNOWN` for every hook symbol,
+  because the index was still being rebuilt. As the repository rules
+  require, `UNKNOWN` was treated as unresolved, and callers were confirmed by
+  text search:
+  - `execute_attempt_phase`: 1 caller (`run_harness_loop_inner`);
+  - `run_sequence_steps`: 1;
+  - `execute_sequence`: 1;
+  - `run_sequence`: 1;
+  - `run_sequence_inner`: 2 (including 1 test);
+  - `SequenceArgs {…}` literals: 2;
+  - `Commands` matches: `main.rs` and `telemetry.rs`;
+  - `*child_spawned = true`: 4 spawn sites.
+- `execute_attempt_phase` is the funnel for every agent launch, so it was
+  treated as high risk. The edit is guarded so that with no ledger it changes
+  nothing: `admit_launch` returns `Ok(None)`. The full Claudine suite confirms
+  unchanged behavior. `isolate_into_process_group` (CRITICAL) was not touched.
+- `detect-changes --scope all` after implementation: 37 files, 24 symbols,
+  11 affected flows, **risk high**. The high rating comes from the four spawn
+  functions (`run_child_capture`, `run_child`, `run_child_stream_semantic`,
+  `run_kimi_wire_session`) and `async_main`, each of which gained one
+  `budget::record_child` call or command arm. Without a ledger that call is a
+  no-op, and the full `claudine-cli` suite exercises those flows. The index
+  still does not map the `loop_control` or sequence symbols, so this is not a
+  complete picture. Re-run after `just gitnexus` before committing.
+
+### Requirement-to-test mapping (Phase 5)
+
+| Requirement | Test(s) |
+|---|---|
+| Both limits required and positive; no defaults; missing, zero, foreign, or unknown fields refused on load | `budget::tests::a_ledger_requires_both_positive_limits_and_an_identity`, `loading_rejects_missing_or_zero_limits_and_foreign_formats`; `sequence_budget::init_requires_both_positive_limits_and_a_sequence_refuses_a_missing_ledger` (real binary: exit 2 and no file; a sequence with no ledger exits 1 with **zero** launches) |
+| Debit before spawn; never refunded; each pass, retry, and reviewer charged to one ledger | `every_admission_debits_one_invocation_before_spawn_and_settling_never_refunds`; `sequence_budget::every_pass_retry_and_reviewer_launch_is_charged_to_one_ledger` (5 real fake-provider processes = 5 `admitted`/`spawned`/`settled`, stages in order, validation `shell:` step included) |
+| Discovery vs reconciliation inputs stay separate | same fixture: the discovery prompt contains `DISCOVERY-INPUT` and none of `PRIOR-PROSE`, `CURATED-LINK`, or `RECONCILE-INPUT`; both reconciliation launches contain them |
+| Exhaustion before a launch stops dispatch and keeps the incomplete stage; a restart does not reset; resume cannot bypass it; only a grant adds allowance | `elapsed_time_exhausts_at_a_stage_boundary_and_is_recorded_once`, `only_a_recorded_grant_reopens_an_exhausted_ledger`; `sequence_budget::exhaustion_before_launch_stops_dispatch_and_only_a_grant_adds_allowance` (exit 76, 2 launches, `stage: three`, a rerun makes no launch and keeps `runs: 1`, and after a grant exactly one more launch runs with `runs: 2`) |
+| Exhaustion during a launch stops the local worker at the shared deadline and records that remote work is unverified | `sequence_budget::a_running_worker_is_stopped_at_the_shared_deadline` (worker PID gone, no `done` marker, `active_ms ≥ 2000`, the `settled` detail says remote work is unverified) |
+| Automatic backoff charged and capped | `sequence_budget::automatic_retry_backoff_is_charged_and_capped_to_the_remaining_budget` (a 60 s delay capped, `active_ms ≥ 3000`, 1 launch, the retry refused) |
+| Suspension not charged; resume needed; consumption accumulates | `only_a_stopped_ledger_opens_and_suspension_requires_an_operator_resume`; `sequence_budget::a_suspended_ledger_is_not_charged_and_needs_an_operator_to_resume` (`used` byte-identical across a 1.2 s suspension and a refused run; after resume `invocations: 6`, `runs: 2`; explicit `suspend` behaves the same; `show --json` has no ESC) |
+| Crash: no refund, conservative tail, orphan stopped, operator resume required | `crash_recovery_charges_the_unseen_tail_and_requires_resumption`, `a_terminated_orphan_charges_the_time_it_kept_working`; `sequence_budget::a_crashed_runner_is_charged_conservatively_and_its_orphan_is_stopped` (SIGKILL/TerminateProcess on the runner; the ledger stays `active` with the worker PID; the restart recovers to `interrupted` with exit 77; `invocations` stays 1; `active_ms ≥ persisted + 200`; on Unix the orphan is **terminated by recovery**) |
+| One platform at a time | `a_held_ledger_or_exclusive_lock_refuses_a_second_holder`; `sequence_budget::runs_sharing_an_exclusive_lock_execute_one_platform_at_a_time` (the second platform exits 77 with 0 launches and its ledger untouched, then runs after the first finishes) |
+| Persisted round trip | `a_ledger_round_trips_through_disk_byte_for_byte` (create → read → write gives identical bytes, LF only) |
+| Existing `sequence` unchanged without a ledger | `sequence_budget::without_a_ledger_a_sequence_writes_no_budget_state`; full `claudine-cli` suite (all sequence, lifecycle-retry, termination, and ctrl-C tests pass) |
+| `--interactive` / `--dry-run` refused before charging | `sequence_budget::a_ledger_refuses_interactive_and_dry_run_modes_before_charging` (ledger JSON unchanged) |
+
+The fake provider is Rust compiled with `rustc` (the `sequence_cli.rs` Windows
+pattern), so every fixture is portable to native Windows. There are no
+credentials, network, audio, or windows, and the fixture environment is
+hermetic.
+
+### Gates (macOS)
+
+- `cargo nextest run -p claudine-cli --test sequence_budget`: 10/10, three
+  consecutive runs (about 4 s each). Ledger unit tests: 11/11.
+- `just test` in `claudine/` (`--no-fail-fast`): 7329 run, 7316 passed,
+  13 failed, 9 skipped. 3 failures were caused by this phase and are fixed
+  (`commands::help::tests::composition_group…`,
+  `wrap_basics::help_lists_wrapper_subcommands` snapshot, and
+  `error_guards::production_sources_pass_every_scan_backed_guard`); a rerun
+  of those binaries plus the budget tests gives 64/64. **10 failures predate
+  this phase**. All come from drift in shipped `prompts/` files, which this
+  phase did not touch:
+  - `claudine::composition::resolve::tests::cross_platform_prompt_composes_cleanly`
+    reads `prompts/cross-platform.md`, which commit `41f9adeb8` deleted;
+  - `claudine::composition::schema::tests::shipped_implement_plan_*` (2)
+    fail on `has_skill(): skill name must be a basename`;
+  - `shipped_prompt_route_drift` (3), `shipped_prompt_contract` (2),
+    `shipped_prompts` (1), and
+    `compose_caller_file_provenance::shipped_implement_router_refuses_an_archived_case`
+    fail because the `prompts/_implement/implement-plan.md` body and hash
+    differ from the Level 2 fixture, and `prompts/implement.md` uses a
+    `^prompt` link the expression parser rejects.
+- `just lint` in `claudine/`: exit 0. The only warning is the macOS linker's
+  `__eh_frame` notice, which every build of this binary prints.
+- `test_placement` (the 800-line production and 300-line inline-test
+  budgets): passes.
