@@ -129,7 +129,7 @@ impl RuntimeState {
         updates.insert(key.to_string(), value);
         Ok(self
             .set_batch(engine, &updates, prior_base)?
-            .remove(key)
+            .shift_remove(key)
             .expect("single update returns one prior value"))
     }
 
@@ -145,7 +145,7 @@ impl RuntimeState {
         engine: &EffectEngine,
         updates: &IndexMap<String, Value>,
         prior_base: &Map<String, Value>,
-    ) -> Result<Map<String, Value>, RuntimeMutationError> {
+    ) -> Result<IndexMap<String, Value>, RuntimeMutationError> {
         let mut validated = FrontmatterMap::new();
         for (key, value) in updates {
             if ROOT_OVERLAY_KEYS.contains(&key.as_str()) {
@@ -156,7 +156,7 @@ impl RuntimeState {
 
         let mut inner = self.inner.lock().expect(POISONED);
         let mut next = inner.mutations.clone();
-        let mut prior = Map::new();
+        let mut prior = IndexMap::with_capacity(updates.len());
         for (key, value) in updates {
             prior.insert(
                 key.clone(),

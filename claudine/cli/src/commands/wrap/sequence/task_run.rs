@@ -255,6 +255,9 @@ fn push_task_scan(task: &PreflightTask, scan: &mut String) {
         // Resolved by preflight to real directories; a path holds no expression.
         origin_dir: _,
         origin_path: _,
+        // Authored key names and a JSON Pointer, never expression text.
+        authored: _,
+        diagnostic: _,
     } = task;
     push_json_scan(
         &(name, label, params, timeout, operation, flow, setup, teardown),
@@ -274,7 +277,7 @@ fn push_action_scan(action: &PreflightAction, scan: &mut String) {
                 push_scan(command, scan);
             }
         }
-        PreflightAction::SideEffect { action } => push_json_scan(action, scan),
+        PreflightAction::SideEffect { action, .. } => push_json_scan(action, scan),
         PreflightAction::Group(group) => {
             let PreflightGroup {
                 name,
@@ -620,6 +623,13 @@ mod tests {
                 teardown: None,
                 origin_dir: self.task_dir.clone(),
                 origin_path: self.origin_path(),
+                // Synthesized in memory rather than walked out of a document,
+                // so there is no authored key order to carry.
+                authored: claudine::composition::AuthoredOrder::default(),
+                diagnostic: claudine::composition::sequence::preflight::TaskDiagnosticProvenance {
+                    source_path: self.origin_path(),
+                    action_property: "shell".to_string(),
+                },
             }
         }
     }
@@ -631,6 +641,7 @@ mod tests {
         let mut task = fixture.task();
         task.action = PreflightAction::SideEffect {
             action: json!({"stderr": CTX_REF}),
+            authored_set_order: None,
         };
         let invocation = InvocationContext::capture_at(&fixture.launch_dir);
         let env = BTreeMap::from([("TASK_MARKER".to_string(), "owned".to_string())]);
@@ -672,6 +683,7 @@ mod tests {
             action: json!({
                 "stderr": "{{ ctx.repo_root }}|{{ ctx.area }}|{{ ctx.agent }}|{{ ctx.model }}|{{ env.AGENT }}|{{ env.MODEL }}"
             }),
+            authored_set_order: None,
         };
         let invocation = InvocationContext::capture_at(&fixture.launch_dir);
         let env = BTreeMap::from([
@@ -720,6 +732,7 @@ mod tests {
                 Box::new(|task| {
                     task.action = PreflightAction::SideEffect {
                         action: json!({"stderr": CTX_REF}),
+                        authored_set_order: None,
                     };
                 }),
             ),

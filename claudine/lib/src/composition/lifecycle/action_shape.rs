@@ -5,6 +5,7 @@ pub(super) fn parse_positional_action(
     source_file: &Path,
     property_name: &str,
     action_index: usize,
+    authored_order: Option<&[String]>,
 ) -> Result<LifecycleAction, CompositionError> {
     if !is_known_lifecycle_verb(verb) {
         let rewrite = did_you_mean_verb(verb)
@@ -25,6 +26,7 @@ pub(super) fn parse_positional_action(
             source_file,
             property_name,
             action_index,
+            authored_order,
         );
     }
 

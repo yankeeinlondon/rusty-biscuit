@@ -109,13 +109,9 @@ fn set_batch_is_atomic_reports_priors_and_preserves_explicit_null_presence() {
     updates.insert("nullable".into(), json!("replacement"));
 
     let prior = state.set_batch(&engine, &updates, &document).unwrap();
-    assert_eq!(
-        prior,
-        json!({"left": "A", "right": "B", "nullable": null})
-            .as_object()
-            .unwrap()
-            .clone()
-    );
+    assert_eq!(prior["left"], json!("A"));
+    assert_eq!(prior["right"], json!("B"));
+    assert_eq!(prior["nullable"], Value::Null);
     let first_read = state.snapshot();
     assert_eq!(first_read.mutations.get("left"), Some(&json!("B")));
     assert_eq!(first_read.mutations.get("right"), Some(&json!("A")));

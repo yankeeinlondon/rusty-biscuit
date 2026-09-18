@@ -14,6 +14,7 @@
 use std::path::Path;
 
 pub mod agent_message;
+pub mod authored_order;
 pub mod closure;
 pub mod completion;
 pub mod coordinator;
@@ -45,6 +46,7 @@ pub mod sequence;
 mod types;
 
 pub use agent_message::{agent_state_breakdown, invalid_agent_message};
+pub use authored_order::AuthoredOrder;
 pub use closure::{
     BodyRejection, CLOSURE_OWNED_PROPERTIES, InlineArtifact, InlineReconciliation,
     reconcile_inline_artifact, reconcile_inline_artifact_with_evidence, restore_inline_baseline,

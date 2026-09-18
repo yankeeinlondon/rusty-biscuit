@@ -48,10 +48,13 @@ mod validate;
 
 use action_shape::*;
 pub(crate) use audio::*;
+pub(crate) use parse::parse_task_action_stack_with_order;
 pub use parse::{
     parse_lifecycle_config, parse_single_action, parse_task_action_stack,
     scan_removed_validation_keys,
 };
+pub(crate) use parse::parse_lifecycle_config_with_orders;
+pub(crate) use parse::parse_single_action_with_order;
 pub use validate::{
     collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
     validate_no_err_in_no_error_events,

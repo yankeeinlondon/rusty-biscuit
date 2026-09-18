@@ -800,9 +800,12 @@ impl Diagnostic for CompositionError {
                     json!(format!("`{param}` is only valid on `proxy`, not `{verb}`"));
             }
             CompositionError::LifecycleEvaluationError {
-                event, message, ..
+                event,
+                message,
+                property,
+                ..
             } => {
-                base["property"] = json!(event);
+                base["property"] = json!(property.as_deref().unwrap_or(event));
                 base["message"] = json!(message);
             }
             CompositionError::LifecycleSayConflict(property)

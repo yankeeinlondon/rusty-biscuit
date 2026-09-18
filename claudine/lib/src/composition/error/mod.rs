@@ -1460,7 +1460,8 @@ pub enum CompositionError {
     /// (`initialize`/`start`/`blocked`) routes it through `failure`/`finalize`
     /// like any other setup failure.
     #[error(
-        "lifecycle `{event}` evaluation error in `{surface}`: {message} ({source_path})",
+        "lifecycle `{event}` evaluation error in `{location}`: {message} ({source_path})",
+        location = property.as_deref().unwrap_or(surface),
         source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleEvaluationError {
@@ -1473,9 +1474,10 @@ pub enum CompositionError {
         surface: String,
         /// The raised expression's message.
         message: String,
-        /// Dotted lifecycle property that raised (`success.say`,
-        /// `failure.stack[0].when`, `start.stack[1].action[0]`), when the
-        /// executor located it.
+        /// Source-rooted semantic property that raised (`success.say`,
+        /// `failure.stack[0].when`,
+        /// `start.stack[1].action[0].set.metadata.files[2]`), when the executor
+        /// located it.
         property: Option<String>,
         /// Why evaluation failed; selects the remediation hint. Boxed to keep
         /// `CompositionError` within `clippy::result_large_err`.
@@ -3075,11 +3077,18 @@ impl CompositionError {
         source_path: impl Into<PathBuf>,
         info: &super::lifecycle_context::LifecycleErrorInfo,
     ) -> Self {
+        let message = info
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.detail.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or(&info.msg)
+            .to_string();
         Self::LifecycleEvaluationError {
             source_path: source_path.into(),
             event: event.into(),
             surface: info.variant.clone(),
-            message: info.msg.clone(),
+            message,
             property: info.property.clone(),
             reason: Box::new(info.reason.clone()),
         }
@@ -3207,6 +3216,10 @@ impl CompositionError {
             | CompositionError::LifecycleTransitionUnownedAtStage { property, .. } => {
                 Some(FrontmatterHighlight::Property(property.clone()))
             }
+            CompositionError::LifecycleEvaluationError {
+                property: Some(property),
+                ..
+            } => Some(FrontmatterHighlight::Property(property.clone())),
             CompositionError::InvalidFileReference { context, .. } => {
                 Some(FrontmatterHighlight::Property(context.property.clone()))
             }

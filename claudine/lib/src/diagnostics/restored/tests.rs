@@ -56,6 +56,7 @@ fn catalog_snapshot(code: &str, message: &str, detail: serde_json::Value) -> Dia
         detail,
         message: message.to_string(),
         cause: None,
+        frontmatter_excerpt: None,
     }
 }
 
@@ -138,6 +139,7 @@ fn an_unknown_code_degrades_instead_of_failing() {
         detail: json!({ "anything": 1 }),
         message: "from a newer producer".to_string(),
         cause: None,
+        frontmatter_excerpt: None,
     };
 
     let restored = RestoredDiagnostic::new(snapshot.clone());

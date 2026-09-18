@@ -391,7 +391,7 @@ fn effective_source_repo_root(
 use super::error::CompositionError;
 use super::guardrails::{load_or_create_guardrails, retired_custom_guardrails_path};
 use super::lifecycle::{
-    LIFECYCLE_EVENT_KEYS, parse_lifecycle_config, validate_no_err_in_no_error_events,
+    LIFECYCLE_EVENT_KEYS, validate_no_err_in_no_error_events,
     validate_no_nested_spans_in_literals,
 };
 use super::hints::{ParsedAgentHint, parse_agent_hint_full, parse_interactive_hint, parse_model_hint};
@@ -691,7 +691,11 @@ fn effective_surface(
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     };
-    let mut lifecycle = parse_lifecycle_config(effective_frontmatter, &source.resolved_path)?;
+    let mut lifecycle = super::lifecycle::parse_lifecycle_config_with_orders(
+        effective_frontmatter,
+        &source.resolved_path,
+        Some(composed.frontmatter()),
+    )?;
     // A nested span in a single-pass lifecycle literal can never interpolate;
     // reject it here, before any provider or lifecycle event runs.
     validate_no_nested_spans_in_literals(effective_frontmatter, &lifecycle, &source.resolved_path)?;

@@ -151,7 +151,13 @@ impl LifecycleErrorInfo {
     /// [`Diagnostic`](crate::diagnostics::Diagnostic) facets so `err.code` / `err.detail.*` project alongside the
     /// legacy aliases.
     pub fn from_composition_error(err: &CompositionError) -> Self {
-        Self::from_selection("CompositionError", variant_name_from_debug(err), err)
+        let mut info = Self::from_selection("CompositionError", variant_name_from_debug(err), err);
+        if let (Some(snapshot), Some(excerpt)) =
+            (info.snapshot.as_mut(), err.frontmatter_excerpt())
+        {
+            snapshot.frontmatter_excerpt = Some(excerpt.clone());
+        }
+        info
     }
 
     /// Build the snapshot from an arbitrary error, preferring the effective

@@ -110,12 +110,26 @@ pub fn parse_lifecycle_config(
     frontmatter: &serde_json::Value,
     source_file: &Path,
 ) -> Result<LifecycleConfig, CompositionError> {
+    parse_lifecycle_config_with_orders(frontmatter, source_file, None)
+}
+
+pub(crate) fn parse_lifecycle_config_with_orders(
+    frontmatter: &serde_json::Value,
+    source_file: &Path,
+    authored: Option<&darkmatter::markdown::Frontmatter>,
+) -> Result<LifecycleConfig, CompositionError> {
     // Non-object frontmatter returns default
     let Some(fm_obj) = frontmatter.as_object() else {
         return Ok(LifecycleConfig::default());
     };
 
     let mut config = LifecycleConfig::default();
+    // Every event block lives at a top-level frontmatter key and holds its
+    // items under `stack:`, so item `n` of `start:` is `/start/stack/n`.
+    let document_order = authored.map_or_else(AuthoredOrder::default, |frontmatter| {
+        AuthoredOrder::at_root(std::sync::Arc::new(frontmatter.mapping_orders().clone()))
+    });
+    let event_stack_order = |property_name: &str| document_order.child(property_name).child("stack");
 
     // Top-level event blocks. Loop concerns are handled separately below
     // because they share the `loop:` block with iteration controls.
@@ -137,8 +151,13 @@ pub fn parse_lifecycle_config(
             continue;
         }
 
-        let (notification, stack) =
-            parse_event_block(signal, value, source_file, property_name)?;
+        let (notification, stack) = parse_event_block(
+            signal,
+            value,
+            source_file,
+            property_name,
+            &event_stack_order(property_name),
+        )?;
 
         if signal == LifecycleSignal::Initialize {
             for (index, item) in stack.iter().flatten().enumerate() {
@@ -191,6 +210,7 @@ pub fn parse_lifecycle_config(
                 &concerns_value,
                 source_file,
                 property_name,
+                &event_stack_order(property_name),
             )?;
             config.loop_concerns = Some(notification);
             config.stacks.loop_gate = stack.filter(|s| !s.is_empty());
@@ -231,6 +251,7 @@ fn parse_event_block(
     value: &serde_json::Value,
     source_file: &Path,
     property_name: &str,
+    authored: &AuthoredOrder,
 ) -> Result<(LifecycleNotification, Option<Vec<LifecycleStackItem>>), CompositionError> {
     let mut notification: LifecycleNotification = serde_json::from_value(value.clone()).map_err(
         |e| {
@@ -285,6 +306,7 @@ fn parse_event_block(
             signal,
             &raw_stack,
             source_file,
+            authored,
         )?),
         _ => None,
     };
@@ -311,6 +333,26 @@ pub fn parse_task_action_stack(
     source_file: &Path,
     property: &str,
 ) -> Result<Vec<LifecycleStackItem>, CompositionError> {
+    parse_task_action_stack_with_order(signal, raw, source_file, property, &AuthoredOrder::default())
+}
+
+/// [`parse_task_action_stack`] against the stack's authored key order.
+///
+/// `authored` is positioned at the `setup:`/`teardown:` *list itself* — a task
+/// stack is the list, with no `stack:` key between it and the task — so item `n`
+/// is `authored.at(n)`. That is the one shape difference from an event stack,
+/// and it is why the pointer is supplied rather than rebuilt here.
+///
+/// ## Errors
+///
+/// As [`parse_task_action_stack`].
+pub fn parse_task_action_stack_with_order(
+    signal: LifecycleSignal,
+    raw: &serde_json::Value,
+    source_file: &Path,
+    property: &str,
+    authored: &AuthoredOrder,
+) -> Result<Vec<LifecycleStackItem>, CompositionError> {
     let serde_json::Value::Array(items) = raw else {
         return Err(CompositionError::LifecycleStackInvalidShape {
             source_path: source_file.to_path_buf(),
@@ -323,7 +365,7 @@ pub fn parse_task_action_stack(
     };
     let mut parsed = Vec::with_capacity(items.len());
     for (idx, raw_item) in items.iter().enumerate() {
-        let item = parse_lifecycle_stack_item(signal, raw_item, source_file)
+        let item = parse_lifecycle_stack_item(signal, raw_item, source_file, &authored.at(idx))
             .map_err(|e| annotate_stack_error(e, property, idx))?;
         parsed.push(item);
     }
@@ -347,6 +389,16 @@ pub fn parse_single_action(
     source_file: &Path,
     property: &str,
 ) -> Result<LifecycleAction, CompositionError> {
+    parse_single_action_with_order(signal, raw, source_file, property, None)
+}
+
+pub(crate) fn parse_single_action_with_order(
+    signal: LifecycleSignal,
+    raw: &serde_json::Value,
+    source_file: &Path,
+    property: &str,
+    authored_set_order: Option<&[String]>,
+) -> Result<LifecycleAction, CompositionError> {
     let serde_json::Value::Object(obj) = raw else {
         return Err(CompositionError::LifecycleStackInvalidShape {
             source_path: source_file.to_path_buf(),
@@ -357,7 +409,14 @@ pub fn parse_single_action(
             ),
         });
     };
-    parse_stack_item_action_object(signal, obj, source_file, property, 0)
+    parse_stack_item_action_object(
+        signal,
+        obj,
+        source_file,
+        property,
+        0,
+        authored_set_order,
+    )
 }
 
 /// Parse a raw stack (`Vec<Value>`) into typed form for the given event.
@@ -365,11 +424,12 @@ fn parse_lifecycle_stack(
     signal: LifecycleSignal,
     raw_stack: &[serde_json::Value],
     source_file: &Path,
+    authored: &AuthoredOrder,
 ) -> Result<Vec<LifecycleStackItem>, CompositionError> {
     let property_name = signal.property_name();
     let mut items = Vec::with_capacity(raw_stack.len());
     for (idx, raw_item) in raw_stack.iter().enumerate() {
-        let item = parse_lifecycle_stack_item(signal, raw_item, source_file)
+        let item = parse_lifecycle_stack_item(signal, raw_item, source_file, &authored.at(idx))
             .map_err(|e| annotate_stack_error(e, property_name, idx))?;
         items.push(item);
     }
@@ -567,8 +627,10 @@ fn parse_lifecycle_stack_item(
     signal: LifecycleSignal,
     raw_item: &serde_json::Value,
     source_file: &Path,
+    authored: &AuthoredOrder,
 ) -> Result<LifecycleStackItem, CompositionError> {
     let property_name = signal.property_name();
+    let authored_action = authored.child("action");
 
     let obj = raw_item.as_object().ok_or_else(|| {
         CompositionError::LifecycleStackInvalidShape {
@@ -715,6 +777,7 @@ fn parse_lifecycle_stack_item(
                             source_file,
                             property_name,
                             action_index,
+                            authored_action.at(action_index).child("set").key_order(),
                         )?
                     }
                     other => {
@@ -741,6 +804,7 @@ fn parse_lifecycle_stack_item(
                 source_file,
                 property_name,
                 0,
+                authored_action.child("set").key_order(),
             )?]
         }
         other => {
@@ -810,6 +874,7 @@ fn parse_stack_item_action_object(
     source_file: &Path,
     property_name: &str,
     action_index: usize,
+    authored_order: Option<&[String]>,
 ) -> Result<LifecycleAction, CompositionError> {
     if obj.contains_key("action") {
         return parse_long_form_action_object(
@@ -836,6 +901,7 @@ fn parse_stack_item_action_object(
                 source_file,
                 property_name,
                 action_index,
+                authored_order,
             )
         }
         _ => {
@@ -863,6 +929,7 @@ fn parse_stack_item_action_object(
                     source_file,
                     property_name,
                     action_index,
+                    authored_order,
                 )?;
                 action.no_error = *no_error;
                 return Ok(action);
@@ -1116,6 +1183,7 @@ pub(super) fn parse_runtime_set(
     source_file: &Path,
     property_name: &str,
     action_index: usize,
+    authored_order: Option<&[String]>,
 ) -> Result<LifecycleAction, CompositionError> {
     let path = format!("action[{action_index}].set");
     let Some(map) = value.as_object() else {
@@ -1154,7 +1222,7 @@ pub(super) fn parse_runtime_set(
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
-    let set = RuntimeSet::new(authored).map_err(|error| match error {
+    let set = RuntimeSet::new_with_order(authored, authored_order).map_err(|error| match error {
         RuntimeSetError::EmptyKey => CompositionError::LifecycleSetInvalidKey {
             source_path: source_file.to_path_buf(),
             property: property_name.to_string(),
@@ -1379,4 +1447,5 @@ fn collect_backtick_values(s: &str) -> Vec<String> {
 use indexmap::IndexMap;
 
 use super::*;
+use super::super::authored_order::AuthoredOrder;
 use super::super::json_util::json_type_name;

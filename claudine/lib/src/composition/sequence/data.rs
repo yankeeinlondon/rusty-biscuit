@@ -8,6 +8,7 @@
 
 use std::path::Path;
 
+use darkmatter::markdown::MappingOrders;
 use serde_json::{Map, Value};
 
 use super::super::error::{CompositionError, SequenceLoadCause};
@@ -60,13 +61,28 @@ impl SourceFormat {
     }
 }
 
+/// A loaded data document plus the authored key order of its mappings.
+///
+/// [`Self::orders`] is populated only for YAML, the authoring format for
+/// `kind: task` / `kind: group` / `kind: group-catalog` documents. The other
+/// formats record no key order — JSON objects are unordered by definition and a
+/// line-delimited file's root is the list — so their index is empty and every
+/// consumer keeps the canonical `serde_json::Map` order it already had.
+#[derive(Debug, Clone, Default)]
+pub struct LoadedDocument {
+    /// The document in the common value model.
+    pub value: Value,
+    /// Authored key order for every mapping in the document.
+    pub orders: MappingOrders,
+}
+
 /// Load a data file into the common value model.
 ///
 /// ## Errors
 ///
 /// Returns [`CompositionError::SequenceExternalLoad`] carrying the typed
 /// lower-layer parse cause.
-pub fn load_document(path: &Path) -> Result<Value, CompositionError> {
+pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
     let format = SourceFormat::for_path(path);
     let context = || biscuit_file::to_portable_string(path);
 
@@ -78,11 +94,14 @@ pub fn load_document(path: &Path) -> Result<Value, CompositionError> {
                     source: SequenceLoadCause::Yaml(e),
                 }
             })?;
-            yaml.as_json()
+            let orders = MappingOrders::collect(yaml.value());
+            let value = yaml
+                .as_json()
                 .map_err(|e| CompositionError::SequenceExternalLoad {
                     context: context(),
                     source: SequenceLoadCause::Yaml(e),
-                })
+                })?;
+            Ok(LoadedDocument { value, orders })
         }
         SourceFormat::Json | SourceFormat::Json5 => {
             let json5 = biscuit_file::Json5::new(path).map_err(|e| {
@@ -91,9 +110,15 @@ pub fn load_document(path: &Path) -> Result<Value, CompositionError> {
                     source: SequenceLoadCause::Json5(e),
                 }
             })?;
-            Ok(json5.as_json_value().clone())
+            Ok(LoadedDocument {
+                value: json5.as_json_value().clone(),
+                orders: MappingOrders::default(),
+            })
         }
-        SourceFormat::LineDelimited => load_line_delimited(path),
+        SourceFormat::LineDelimited => Ok(LoadedDocument {
+            value: load_line_delimited(path)?,
+            orders: MappingOrders::default(),
+        }),
     }
 }
 

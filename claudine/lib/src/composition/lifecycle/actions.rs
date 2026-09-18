@@ -271,6 +271,14 @@ pub struct RuntimeSet(IndexMap<String, ProxyWithValue>);
 impl RuntimeSet {
     /// Type a lifecycle `set:` mapping.
     pub fn new(authored: IndexMap<String, serde_json::Value>) -> Result<Self, RuntimeSetError> {
+        Self::new_with_order(authored, None)
+    }
+
+    /// Type a lifecycle `set:` mapping with order retained by the frontmatter parser.
+    pub fn new_with_order(
+        mut authored: IndexMap<String, serde_json::Value>,
+        authored_order: Option<&[String]>,
+    ) -> Result<Self, RuntimeSetError> {
         for key in authored.keys() {
             if key.is_empty() {
                 return Err(RuntimeSetError::EmptyKey);
@@ -279,8 +287,14 @@ impl RuntimeSet {
                 return Err(RuntimeSetError::DynamicKey(key.clone()));
             }
         }
-        let mut typed = IndexMap::with_capacity(authored.len());
-        for (key, value) in authored {
+        let mut ordered: Vec<_> = authored_order
+            .into_iter()
+            .flatten()
+            .filter_map(|key| authored.shift_remove_entry(key))
+            .collect();
+        ordered.extend(authored);
+        let mut typed = IndexMap::with_capacity(ordered.len());
+        for (key, value) in ordered {
             let value = type_with_value(&value, &key).map_err(|error| match error {
                 ProxyWithError::DynamicKey(_) => unreachable!("value typing does not inspect keys"),
                 ProxyWithError::Value { path, message } => {

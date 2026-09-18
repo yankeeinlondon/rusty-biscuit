@@ -57,7 +57,7 @@ use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use tracing::warn;
 
-use super::super::error::CompositionError;
+use super::super::error::{CompositionError, LifecycleEvaluationReason};
 use super::{
     LifecycleConfig, LifecycleEmitter, LifecycleNotification, LifecycleSignal, audio_phases,
     first_undefined_stack_variable, tts_config_from_settings,
@@ -552,15 +552,18 @@ impl StackExecutionContext<'_> {
     ///
     /// Returns the error snapshot for an unsuppressed dispatch failure, an
     /// expression-layer raise, or a non-side-effect action.
+    /// `property` is the source-rooted semantic path of a runtime `set`
+    /// mapping; nested value failures extend it with their key/index suffix.
     pub fn dispatch_task_side_effect(
         &self,
         action: &LifecycleAction,
+        property: &str,
     ) -> Result<Value, LifecycleErrorInfo> {
         let mut working: Map<String, Value> = match self.live_frontmatter {
             Some(cell) => cell.lock().expect(LIVE_POISONED).clone(),
             None => self.frontmatter.clone(),
         };
-        let result = self.dispatch_task_side_effect_inner(action, &mut working);
+        let result = self.dispatch_task_side_effect_inner(action, property, &mut working);
         if let Some(cell) = self.live_frontmatter {
             *cell.lock().expect(LIVE_POISONED) = working;
         }
@@ -572,10 +575,13 @@ impl StackExecutionContext<'_> {
     fn dispatch_task_side_effect_inner(
         &self,
         action: &LifecycleAction,
+        property: &str,
         working: &mut Map<String, Value>,
     ) -> Result<Value, LifecycleErrorInfo> {
         let dispatched = match &action.kind {
-            LifecycleActionKind::RuntimeSet(set) => self.dispatch_runtime_set(set, working),
+            LifecycleActionKind::RuntimeSet(set) => self
+                .dispatch_runtime_set(set, property, working)
+                .map(|prior| Value::Object(prior.into_iter().collect())),
             LifecycleActionKind::SideEffect(effect) => {
                 self.dispatch_side_effect(&effect.verb, &effect.args, working)
             }
@@ -1179,7 +1185,8 @@ impl StackExecutionContext<'_> {
                 self.run_shell_action(shell, working).map(|()| None)
             }
             LifecycleActionKind::RuntimeSet(set) => {
-                self.dispatch_runtime_set(set, working).map(|_| None)
+                self.dispatch_runtime_set(set, &format!("{location}.set"), working)
+                    .map(|_| None)
             }
             LifecycleActionKind::SideEffect(effect) => self
                 .dispatch_side_effect(&effect.verb, &effect.args, working)
@@ -1394,8 +1401,9 @@ impl StackExecutionContext<'_> {
     fn dispatch_runtime_set(
         &self,
         set: &RuntimeSet,
+        property: &str,
         working: &mut Map<String, Value>,
-    ) -> Result<Value, ActionFailure> {
+    ) -> Result<IndexMap<String, Value>, ActionFailure> {
         let mut snapshot = working.clone();
         for (key, _) in set.iter() {
             snapshot.entry(key.clone()).or_insert(Value::Null);
@@ -1403,10 +1411,30 @@ impl StackExecutionContext<'_> {
         let mut updates = IndexMap::with_capacity(set.len());
         for (key, value) in set.iter() {
             let resolved = self.resolve_with_value(value, &snapshot).map_err(|(suffix, error)| {
-                ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(
-                    "set",
-                    format!("`set.{key}{suffix}` could not be resolved: {error}"),
-                ))
+                let value_property = format!("{property}.{key}{suffix}");
+                let reason = match &error {
+                    LifecycleExprError::SurvivingSpan { span } => {
+                        LifecycleEvaluationReason::SurvivingSpan { span: span.clone() }
+                    }
+                    LifecycleExprError::Evaluate(_)
+                    | LifecycleExprError::Compose(_)
+                    | LifecycleExprError::Prose(_) => {
+                        LifecycleEvaluationReason::Expression
+                    }
+                };
+                let diagnostic = CompositionError::LifecycleEvaluationError {
+                    source_path: self.source_path.to_path_buf(),
+                    event: self.signal.property_name().to_string(),
+                    surface: "set".to_string(),
+                    message: error.to_string(),
+                    property: Some(value_property.clone()),
+                    reason: Box::new(reason.clone()),
+                };
+                let mut info = LifecycleErrorInfo::from_composition_error(&diagnostic)
+                    .at_property(value_property);
+                info.variant = "set".to_string();
+                info.reason = reason;
+                ActionFailure::Evaluation(info)
             })?;
             updates.insert(key.clone(), resolved);
         }
@@ -1427,7 +1455,7 @@ impl StackExecutionContext<'_> {
         for (key, value) in updates {
             working.insert(key, value);
         }
-        Ok(Value::Object(prior))
+        Ok(prior)
     }
 
     /// Resolve a document-authored mutation target through the same captured

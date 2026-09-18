@@ -1646,11 +1646,7 @@ fn proxy_with_rejects_unparseable_whole_value_span() {
 }
 
 #[test]
-fn proxy_with_iteration_is_deterministic_and_complete() {
-    // Frontmatter parsing normalizes a nested mapping's keys to sorted order
-    // before the overlay is built, so iteration is sorted rather than
-    // authored. Locked here so a future `preserve_order` change is a visible
-    // decision rather than silent drift.
+fn proxy_with_iteration_is_canonical_and_complete() {
     let fm = json!({
         "initialize": {
             "stack": [{"action": {
@@ -1873,7 +1869,7 @@ fn lifecycle_from_markdown(markdown: &str) -> Result<LifecycleConfig, Compositio
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
     );
-    parse_lifecycle_config(&fm, dummy_path())
+    super::super::parse::parse_lifecycle_config_with_orders(&fm, dummy_path(), Some(md.frontmatter()))
 }
 
 #[test]
@@ -2063,6 +2059,10 @@ fn runtime_set_parses_the_reported_mappings_as_one_typed_action() {
         panic!("expected one runtime-set action");
     };
     assert_eq!(first.len(), 2);
+    assert_eq!(
+        first.iter().map(|(key, _)| key.as_str()).collect::<Vec<_>>(),
+        vec!["epilog", "message_to_agent"],
+    );
     assert_eq!(
         first.get("epilog"),
         Some(&ProxyWithValue::Scalar(Expr::Variable("message_to_agent".into())))

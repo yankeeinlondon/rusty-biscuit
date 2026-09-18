@@ -37,6 +37,24 @@ fn config(value: Value) -> LifecycleConfig {
     parse_lifecycle_config(&value, Path::new("t.md")).unwrap()
 }
 
+fn config_from_markdown(source: &str) -> LifecycleConfig {
+    let markdown = darkmatter::markdown::Markdown::try_from_content(source.to_string()).unwrap();
+    let frontmatter = Value::Object(
+        markdown
+            .frontmatter()
+            .as_map()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+    );
+    super::super::super::parse::parse_lifecycle_config_with_orders(
+        &frontmatter,
+        Path::new("t.md"),
+        Some(markdown.frontmatter()),
+    )
+    .unwrap()
+}
+
 fn set_action(entries: Vec<(&str, Value)>, no_error: bool) -> LifecycleAction {
     let authored = entries
         .into_iter()
@@ -130,7 +148,9 @@ fn mapping_set_swaps_values_in_either_destination_order() {
             Path::new("t.md"),
         );
 
-        let prior = context.dispatch_task_side_effect(&set_action(entries, false)).unwrap();
+        let prior = context
+            .dispatch_task_side_effect(&set_action(entries, false), "tasks[0].side_effect.set")
+            .unwrap();
 
         assert_eq!(prior, json!({"left": "A", "right": "B"}));
         let mutations = runtime.snapshot().mutations;
@@ -165,7 +185,9 @@ fn failed_expression_publishes_no_part_of_the_mapping_with_or_without_runtime() 
         &harness,
         Path::new("t.md"),
     );
-    assert!(context.dispatch_task_side_effect(&action).is_err());
+    assert!(context
+        .dispatch_task_side_effect(&action, "tasks[0].side_effect.set")
+        .is_err());
     assert!(runtime.snapshot().mutations.is_empty());
     assert_eq!(*live.lock().unwrap(), base);
 
@@ -180,8 +202,65 @@ fn failed_expression_publishes_no_part_of_the_mapping_with_or_without_runtime() 
         &harness,
         Path::new("t.md"),
     );
-    assert!(context.dispatch_task_side_effect(&action).is_err());
+    assert!(context
+        .dispatch_task_side_effect(&action, "tasks[0].side_effect.set")
+        .is_err());
     assert_eq!(*live.lock().unwrap(), base);
+}
+
+#[test]
+fn event_set_failure_projects_its_source_rooted_nested_path_without_committing() {
+    use biscuit_terminal::errors::BlockError;
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let source_text = "---\nsuccess:\n    stack:\n        - action:\n            - set:\n                stable: changed\n                metadata:\n                    files:\n                        - \"{{unknown_root}}\"\n---\nbody\n";
+    let config = config_from_markdown(source_text);
+    let base = map(json!({"stable": "kept"}));
+    let live = std::sync::Mutex::new(base.clone());
+    let runtime = RuntimeState::new();
+    let (_dir, engine) = temp_engine();
+
+    let (outcome, _) = run_event(
+        &config,
+        LifecycleSignal::Success,
+        &base,
+        &live,
+        &runtime,
+        &engine,
+    );
+
+    let info = outcome.evaluation_error.expect("the nested value raises");
+    let expected = "success.stack[0].action[0].set.metadata.files[0]";
+    assert_eq!(info.property.as_deref(), Some(expected));
+    assert_eq!(info.variant, "set");
+    assert!(runtime.snapshot().mutations.is_empty());
+    assert_eq!(*live.lock().unwrap(), base);
+
+    let snapshot = info.snapshot.as_ref().expect("set failures are typed");
+    assert_eq!(snapshot.code, "composition.lifecycle_invalid");
+    assert_eq!(snapshot.detail["property"], json!(expected));
+    assert!(snapshot.message.contains("t.md"), "{}", snapshot.message);
+    let err_value = info.to_value();
+    assert_eq!(err_value["detail"]["property"], snapshot.detail["property"]);
+    assert_eq!(err_value["code"], json!(snapshot.code));
+
+    let diagnostic = CompositionError::lifecycle_evaluation("success", "t.md", &info)
+        .enrich_frontmatter_text(source_text, true);
+    assert_eq!(
+        crate::diagnostics::Diagnostic::detail(&diagnostic)["property"],
+        snapshot.detail["property"],
+    );
+    let excerpt = diagnostic
+        .frontmatter_excerpt()
+        .expect("the runtime value path selects a frontmatter excerpt");
+    assert_eq!(excerpt.highlight_line(), Some(9));
+    let appendix = strip_escape_codes(
+        excerpt.render_appendix(&biscuit_terminal::terminal::Terminal::new_optimistic(120)),
+    );
+    assert!(appendix.contains("{{unknown_root}}"), "{appendix}");
+    let rendered = strip_escape_codes(diagnostic.report_block_error_optimistic(Some(200)));
+    assert!(rendered.contains(expected), "{rendered}");
+    assert!(rendered.contains("t.md"), "{rendered}");
 }
 
 #[test]
@@ -210,7 +289,9 @@ fn late_invalid_destination_publishes_no_part_of_the_task_side_effect() {
             Path::new("t.md"),
         );
 
-        assert!(context.dispatch_task_side_effect(&action).is_err());
+        assert!(context
+            .dispatch_task_side_effect(&action, "tasks[0].side_effect.set")
+            .is_err());
         assert!(runtime.snapshot().mutations.is_empty(), "{invalid} published a runtime prefix");
         assert_eq!(*live.lock().unwrap(), base, "{invalid} leaked through outer write-back");
 
@@ -225,7 +306,9 @@ fn late_invalid_destination_publishes_no_part_of_the_task_side_effect() {
             &harness,
             Path::new("t.md"),
         );
-        assert!(context.dispatch_task_side_effect(&action).is_err());
+        assert!(context
+            .dispatch_task_side_effect(&action, "tasks[0].side_effect.set")
+            .is_err());
         assert_eq!(*live.lock().unwrap(), base, "{invalid} changed no-runtime working state");
     }
 }
@@ -279,15 +362,21 @@ fn mapping_result_reports_all_priors_and_preserves_explicit_runtime_null() {
     );
 
     let prior = context
-        .dispatch_task_side_effect(&set_action(
-            vec![("left", json!("B")), ("absent", json!(1)), ("nullable", json!("now set"))],
-            false,
-        ))
+        .dispatch_task_side_effect(
+            &set_action(
+                vec![("left", json!("B")), ("absent", json!(1)), ("nullable", json!("now set"))],
+                false,
+            ),
+            "tasks[0].side_effect.set",
+        )
         .unwrap();
     assert_eq!(prior, json!({"left": "A", "absent": null, "nullable": null}));
     assert_eq!(
         context
-            .dispatch_task_side_effect(&set_action(Vec::new(), false))
+            .dispatch_task_side_effect(
+                &set_action(Vec::new(), false),
+                "tasks[0].side_effect.set",
+            )
             .unwrap(),
         json!({}),
     );

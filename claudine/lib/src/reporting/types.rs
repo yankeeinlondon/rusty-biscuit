@@ -507,6 +507,7 @@ mod tests {
                     detail: serde_json::json!({ "field": null, "message": "bad line" }),
                     message: "bad line".into(),
                 }),
+                frontmatter_excerpt: None,
             }),
         };
 

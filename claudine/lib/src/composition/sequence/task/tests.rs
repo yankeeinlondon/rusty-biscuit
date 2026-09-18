@@ -2302,6 +2302,101 @@ mod side_effect_tasks {
     }
 
     #[test]
+    fn a_mapping_set_retains_authored_order_in_text_and_outputs() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("seq.md");
+        fs::write(
+            &path,
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    side_effect:\n",
+                "      set:\n",
+                "        z_last_lexically: true\n",
+                "        a_first_lexically: false\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        )
+        .unwrap();
+        let source = path.display().to_string();
+        let resolved = crate::composition::resolve_fixture_source(&source).unwrap();
+        assert_eq!(
+            resolved
+                .markdown
+                .frontmatter()
+                .mapping_key_order("/sequence/0/side_effect/set"),
+            Some(["z_last_lexically".to_string(), "a_first_lexically".to_string()].as_slice()),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(
+            outcome.stdout,
+            "{\"z_last_lexically\":null,\"a_first_lexically\":null}",
+        );
+        assert_eq!(
+            runtime.outputs_value().to_string(),
+            "[\"{\\\"z_last_lexically\\\":null,\\\"a_first_lexically\\\":null}\"]",
+        );
+    }
+
+    #[test]
+    fn a_failed_nested_mapping_set_projects_one_path_and_commits_nothing() {
+        use biscuit_terminal::errors::BlockError;
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "side_effect": { "set": {
+                    "stable": "changed",
+                    "metadata": {"files": ["{{unknown_root}}"]}
+                } },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+        let info = &outcome.error.as_ref().expect("task failure is reported").info;
+        let expected = "tasks[0].side_effect.set.metadata.files[0]";
+        assert_eq!(info.property.as_deref(), Some(expected));
+        assert_eq!(info.variant, "set");
+
+        let snapshot = info.snapshot.as_ref().expect("set failures are typed");
+        assert_eq!(snapshot.code, "composition.lifecycle_invalid");
+        assert_eq!(snapshot.detail["property"], json!(expected));
+        assert!(snapshot.message.contains(&source), "{}", snapshot.message);
+        let err_value = info.to_value();
+        assert_eq!(err_value["detail"]["property"], snapshot.detail["property"]);
+        assert_eq!(err_value["code"], json!(snapshot.code));
+
+        let restored = crate::diagnostics::RestoredDiagnostic::new((**snapshot).clone());
+        let rendered = strip_escape_codes(restored.report_block_error_optimistic(Some(200)));
+        assert!(rendered.contains(expected), "{rendered}");
+        assert!(rendered.contains(&source), "{rendered}");
+    }
+
+    #[test]
     fn the_mutation_delta_reports_the_keys_the_task_wrote() {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(
@@ -2869,6 +2964,52 @@ mod outcome_contract {
 mod serial_groups {
     use super::*;
 
+    fn assert_group_set_failure(
+        outcome: &TaskOutcome,
+        runtime: &RuntimeState,
+        expected_source: &Path,
+        expected_property: &str,
+        expected_excerpt: Option<&str>,
+    ) {
+        use biscuit_terminal::errors::BlockError;
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+
+        let info = &outcome.error.as_ref().expect("group failure is reported").info;
+        let snapshot = info.snapshot.as_ref().expect("set failures are typed");
+        let err_value = info.to_value();
+        let source = biscuit_file::to_portable_string(expected_source);
+
+        assert_eq!(info.property.as_deref(), Some(expected_property));
+        assert_eq!(snapshot.detail["property"], json!(expected_property));
+        assert_eq!(err_value["detail"]["property"], snapshot.detail["property"]);
+        assert_eq!(err_value["code"], json!(snapshot.code));
+        assert_eq!(err_value["msg"], json!(snapshot.message));
+        assert!(
+            serde_json::to_value(&**snapshot)
+                .unwrap()
+                .get("frontmatter_excerpt")
+                .is_none(),
+            "source excerpts stay out of the machine projection",
+        );
+        assert!(snapshot.message.contains(&source), "{}", snapshot.message);
+
+        let restored = crate::diagnostics::RestoredDiagnostic::new((**snapshot).clone());
+        let rendered = strip_escape_codes(restored.report_block_error_optimistic(Some(200)));
+        assert!(rendered.contains(expected_property), "{rendered}");
+        assert!(rendered.contains(&source), "{rendered}");
+        match expected_excerpt {
+            Some(value) => {
+                assert!(snapshot.frontmatter_excerpt.is_some());
+                assert!(rendered.contains(value), "{rendered}");
+            }
+            None => assert!(snapshot.frontmatter_excerpt.is_none()),
+        }
+    }
+
     /// The two-task bundle every definition site defines.
     fn bundle_tasks() -> Value {
         json!([
@@ -2952,6 +3093,118 @@ mod serial_groups {
             assert_eq!(*other_tasks, tasks, "{label} task results diverged");
             assert_eq!(*other_outputs, outputs, "{label} outputs diverged");
         }
+    }
+
+    #[test]
+    fn an_inline_group_set_failure_keeps_its_authored_document_and_property() {
+        let dir = TempDir::new().unwrap();
+        let source_path = dir.path().join("seq.md");
+        fs::write(
+            &source_path,
+            "---\nsequence:\n    - name: alpha\n      group:\n        name: bundle\n        tasks:\n            - side_effect:\n                set:\n                    stable: changed\n                    metadata:\n                        files:\n                            - \"{{unknown_root}}\"\n---\n\nDocument body.\n",
+        )
+        .unwrap();
+        let source = source_path.display().to_string();
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+        fixture.term.is_tty = true;
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_group_set_failure(
+            &outcome,
+            &runtime,
+            Path::new(&source),
+            "tasks[0].group.tasks[0].side_effect.set.metadata.files[0]",
+            Some("{{unknown_root}}"),
+        );
+    }
+
+    #[test]
+    fn an_external_group_set_failure_keeps_its_authored_document_and_property() {
+        let dir = TempDir::new().unwrap();
+        let group_path = dir.path().join("group.yaml");
+        write_yaml(
+            dir.path(),
+            "group.yaml",
+            &json!({
+                "kind": "group",
+                "name": "bundle",
+                "tasks": [{
+                    "side_effect": { "set": {
+                        "stable": "changed",
+                        "metadata": {"files": ["{{unknown_root}}"]}
+                    } }
+                }],
+            }),
+        );
+        let source = one_step_source(
+            dir.path(),
+            json!({ "name": "alpha", "group": "group.yaml" }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_group_set_failure(
+            &outcome,
+            &runtime,
+            &group_path,
+            "tasks[0].side_effect.set.metadata.files[0]",
+            None,
+        );
+    }
+
+    #[test]
+    fn an_externalized_group_task_set_failure_uses_the_task_document_root() {
+        let dir = TempDir::new().unwrap();
+        let task_path = dir.path().join("task.yaml");
+        write_yaml(
+            dir.path(),
+            "task.yaml",
+            &json!({
+                "kind": "task",
+                "side_effect": { "set": {
+                    "stable": "changed",
+                    "metadata": {"files": ["{{unknown_root}}"]}
+                } }
+            }),
+        );
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "tasks": [{ "task": "task.yaml" }],
+                },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_group_set_failure(
+            &outcome,
+            &runtime,
+            &task_path,
+            "side_effect.set.metadata.files[0]",
+            None,
+        );
     }
 
     /// A serial group grows `outputs` entry by entry. It never adds a wrapper

@@ -23,6 +23,7 @@ fn snapshot_with(
         detail,
         message: String::new(),
         cause: None,
+        frontmatter_excerpt: None,
     }
 }
 

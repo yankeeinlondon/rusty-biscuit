@@ -3,6 +3,7 @@
 use biscuit_file::YamlParseError;
 use biscuit_terminal::errors::SourceContext;
 
+use super::mapping_orders::MappingOrders;
 use super::span::SourceSpan;
 use super::types::{FrontmatterMap, MarkdownError, MarkdownResult};
 use biscuit_file::serde_yaml_ng;
@@ -24,6 +25,7 @@ pub enum MergeStrategy {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Frontmatter {
     map: FrontmatterMap,
+    mapping_orders: MappingOrders,
     /// Raw YAML text between the leading `---` markers, preserved verbatim
     /// when the frontmatter was parsed from source. `None` for
     /// programmatically constructed frontmatter. Used by the schemas
@@ -37,6 +39,7 @@ impl Frontmatter {
     pub fn new() -> Self {
         Self {
             map: FrontmatterMap::new(),
+            mapping_orders: MappingOrders::default(),
             raw_source: None,
         }
     }
@@ -45,6 +48,7 @@ impl Frontmatter {
     pub fn from_map(map: FrontmatterMap) -> Self {
         Self {
             map,
+            mapping_orders: MappingOrders::default(),
             raw_source: None,
         }
     }
@@ -57,8 +61,47 @@ impl Frontmatter {
     pub fn from_map_with_source(map: FrontmatterMap, raw_source: String) -> Self {
         Self {
             map,
+            mapping_orders: MappingOrders::default(),
             raw_source: Some(raw_source),
         }
+    }
+
+    fn from_parsed_yaml(parsed: ParsedYaml, raw_source: String) -> Self {
+        Self {
+            map: parsed.map,
+            mapping_orders: parsed.mapping_orders,
+            raw_source: Some(raw_source),
+        }
+    }
+
+    /// Returns `self` carrying `orders` as its authored key-order index.
+    ///
+    /// Frontmatter parsed from a `---`-fenced block collects its own orders.
+    /// This is for the callers that build frontmatter out of an already-parsed
+    /// YAML document — a whole-file YAML source, say — and hold that document's
+    /// [`MappingOrders`] separately.
+    #[must_use]
+    pub fn with_mapping_orders(mut self, orders: MappingOrders) -> Self {
+        self.mapping_orders = orders;
+        self
+    }
+
+    /// Returns authored key order for the mapping at a JSON Pointer path.
+    ///
+    /// This metadata is available only for frontmatter parsed from YAML. It
+    /// lets consumers preserve order at a narrow authoring boundary without
+    /// changing the representation of every `serde_json::Map` in their graph.
+    pub fn mapping_key_order(&self, pointer: &str) -> Option<&[String]> {
+        self.mapping_orders.get(pointer)
+    }
+
+    /// Returns the whole authored key-order index.
+    ///
+    /// Consumers that walk a document node by node need the index itself, so
+    /// they can carry it alongside a moving JSON Pointer rather than call
+    /// [`Self::mapping_key_order`] with a pointer they rebuilt from scratch.
+    pub fn mapping_orders(&self) -> &MappingOrders {
+        &self.mapping_orders
     }
 
     /// Returns the raw YAML source between the leading `---` markers, when
@@ -302,8 +345,8 @@ pub(super) fn parse_frontmatter(
     let yaml_content = yaml_lines.join("\n");
 
     // Parse YAML with fallback strategies
-    let frontmatter_map: FrontmatterMap = if yaml_content.trim().is_empty() {
-        FrontmatterMap::new()
+    let parsed = if yaml_content.trim().is_empty() {
+        ParsedYaml::default()
     } else {
         parse_yaml_with_fallbacks(&yaml_content).map_err(|source| {
             MarkdownError::FrontmatterParse {
@@ -318,7 +361,7 @@ pub(super) fn parse_frontmatter(
     let remaining_content = content_lines.join("\n");
 
     Ok((
-        Frontmatter::from_map_with_source(frontmatter_map, yaml_content),
+        Frontmatter::from_parsed_yaml(parsed, yaml_content),
         remaining_content,
     ))
 }
@@ -498,7 +541,7 @@ fn source_line_spans(source: &str) -> Vec<SourceLineSpan> {
 ///    substitutions and `{{ }}` interpolation expressions with safe
 ///    placeholders so YAML-significant characters inside them (e.g., nested
 ///    double quotes in `"$(dirname "{{path}}")"`) don't break the YAML parser.
-fn parse_yaml_with_fallbacks(yaml: &str) -> Result<FrontmatterMap, YamlParseError> {
+fn parse_yaml_with_fallbacks(yaml: &str) -> Result<ParsedYaml, YamlParseError> {
     // Strategy 1: direct parse
     match parse_yaml_map_rejecting_duplicates(yaml) {
         Ok(map) => Ok(map),
@@ -534,10 +577,10 @@ fn parse_yaml_with_fallbacks(yaml: &str) -> Result<FrontmatterMap, YamlParseErro
             }
 
             match parse_yaml_map_rejecting_duplicates(&fully_protected) {
-                Ok(map) => {
-                    let map = restore_expressions_in_map(map, &expr_replacements);
-                    let map = restore_expressions_in_map(map, &shell_replacements);
-                    Ok(map)
+                Ok(mut parsed) => {
+                    parsed.map = restore_expressions_in_map(parsed.map, &expr_replacements);
+                    parsed.map = restore_expressions_in_map(parsed.map, &shell_replacements);
+                    Ok(parsed)
                 }
                 Err(error) if is_duplicate_yaml_error(&error) => Err(error),
                 Err(_) => Err(original_err),
@@ -552,9 +595,17 @@ fn parse_yaml_with_fallbacks(yaml: &str) -> Result<FrontmatterMap, YamlParseErro
 /// semantics to duplicate YAML keys. `serde_yaml_ng::Value` rejects duplicates
 /// recursively and retains the parser's source location, so every fallback
 /// strategy validates the authored mapping before conversion can collapse it.
-fn parse_yaml_map_rejecting_duplicates(yaml: &str) -> Result<FrontmatterMap, YamlParseError> {
+#[derive(Debug, Default)]
+struct ParsedYaml {
+    map: FrontmatterMap,
+    mapping_orders: MappingOrders,
+}
+
+fn parse_yaml_map_rejecting_duplicates(yaml: &str) -> Result<ParsedYaml, YamlParseError> {
     let value = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml)?;
-    serde_yaml_ng::from_value(value)
+    let mapping_orders = MappingOrders::collect(&value);
+    let map = serde_yaml_ng::from_value(value)?;
+    Ok(ParsedYaml { map, mapping_orders })
 }
 
 fn is_duplicate_yaml_error(error: &YamlParseError) -> bool {
@@ -1122,6 +1173,33 @@ This is content."#;
         assert_eq!(
             frontmatter.get::<String>("shell").unwrap().as_deref(),
             Some("$(printf \"status: first\\nstatus: second\")")
+        );
+    }
+
+    #[test]
+    fn parsed_frontmatter_retains_nested_mapping_order_as_metadata() {
+        let content = concat!(
+            "---\n",
+            "start:\n",
+            "  stack:\n",
+            "    - action:\n",
+            "        set:\n",
+            "          z_last_lexically: true\n",
+            "          a_first_lexically: false\n",
+            "---\n",
+        );
+
+        let (frontmatter, _) = parse_frontmatter(content).unwrap();
+
+        assert_eq!(
+            frontmatter.mapping_key_order("/start/stack/0/action/set"),
+            Some(["z_last_lexically".to_string(), "a_first_lexically".to_string()].as_slice()),
+        );
+        let set = &frontmatter.as_map()["start"]["stack"][0]["action"]["set"];
+        assert_eq!(
+            set.as_object().unwrap().keys().collect::<Vec<_>>(),
+            vec!["a_first_lexically", "z_last_lexically"],
+            "ordinary serde_json maps keep their established canonical order",
         );
     }
 

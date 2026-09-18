@@ -47,7 +47,9 @@ use super::super::lifecycle::actions::{
 };
 use super::super::lifecycle::context::LifecycleErrorInfo;
 use super::super::lifecycle::executor::StackExecutionContext;
-use super::super::lifecycle::{LifecycleSignal, parse_single_action, parse_task_action_stack};
+use super::super::lifecycle::{
+    LifecycleSignal, parse_single_action_with_order, parse_task_action_stack_with_order,
+};
 use super::super::runtime_state::{RuntimeState, layered_set_overrides, trim_transport_newline};
 use super::model::RuntimeMutation;
 use super::preflight::{PreflightAction, PreflightGraph, PreflightTask};
@@ -468,7 +470,10 @@ impl TaskExecution<'_> {
         match &self.task.action {
             PreflightAction::Prompt { path, reference } => self.run_prompt(path, reference),
             PreflightAction::Shell { commands } => self.run_shell(commands),
-            PreflightAction::SideEffect { action } => self.run_side_effect(action),
+            PreflightAction::SideEffect {
+                action,
+                authored_set_order,
+            } => self.run_side_effect(action, authored_set_order.as_deref()),
             PreflightAction::Group(group) => self.run_group(group),
         }
     }
@@ -648,12 +653,13 @@ impl TaskExecution<'_> {
     }
 
     /// Dispatch a `side_effect:` action and capture its textual return.
-    fn run_side_effect(&self, action: &Value) -> PrimaryOutcome {
-        let parsed = match parse_single_action(
+    fn run_side_effect(&self, action: &Value, authored_set_order: Option<&[String]>) -> PrimaryOutcome {
+        let parsed = match parse_single_action_with_order(
             LifecycleSignal::Start,
             action,
             &self.task.origin_path,
             "side_effect",
+            authored_set_order,
         ) {
             Ok(parsed) => parsed,
             Err(error) => {
@@ -677,11 +683,24 @@ impl TaskExecution<'_> {
             ));
         }
 
-        match self.stack.dispatch_task_side_effect(&parsed) {
+        let property = format!("{}.set", self.task.diagnostic.action_property);
+        match self.stack.dispatch_task_side_effect(&parsed, &property) {
             // A side effect that returns nothing contributes the empty string,
             // keeping one `outputs` entry per executed task.
             Ok(Value::Null) => PrimaryOutcome::succeeded(String::new()),
             Ok(Value::String(text)) => {
+                self.emit_live(&text);
+                PrimaryOutcome::succeeded(text)
+            }
+            Ok(Value::Object(values))
+                if let LifecycleActionKind::RuntimeSet(set) = &parsed.kind =>
+            {
+                let ordered: indexmap::IndexMap<_, _> = set
+                    .iter()
+                    .filter_map(|(key, _)| values.get(key).map(|value| (key, value)))
+                    .collect();
+                let text = serde_json::to_string(&ordered)
+                    .expect("runtime set prior values are JSON-serializable");
                 self.emit_live(&text);
                 PrimaryOutcome::succeeded(text)
             }
@@ -690,21 +709,45 @@ impl TaskExecution<'_> {
                 self.emit_live(&text);
                 PrimaryOutcome::succeeded(text)
             }
-            Err(info) => PrimaryOutcome::failed(TaskDiagnostic {
-                stage: TaskStage::Primary,
-                info,
-            }),
+            Err(info) => {
+                let diagnostic = CompositionError::lifecycle_evaluation(
+                    self.stack.signal.property_name(),
+                    &self.task.origin_path,
+                    &info,
+                );
+                let enriched = match std::fs::read_to_string(&self.task.origin_path) {
+                    Ok(source) => {
+                        diagnostic.enrich_frontmatter_text(&source, self.stack.term.is_tty)
+                    }
+                    Err(_) => diagnostic,
+                };
+                let mut enriched_info = LifecycleErrorInfo::from_composition_error(&enriched);
+                enriched_info.variant = info.variant;
+                enriched_info.property = info.property;
+                enriched_info.reason = info.reason;
+                PrimaryOutcome::failed(TaskDiagnostic {
+                    stage: TaskStage::Primary,
+                    info: enriched_info,
+                })
+            }
         }
     }
 
     /// Parse both action stacks up front.
     fn parse_stacks(&self) -> Result<ParsedStacks, CompositionError> {
-        let parse = |raw: Option<&Value>, signal, property| match raw {
+        // `setup:`/`teardown:` *are* the stack list, so the task's own pointer
+        // plus the property name reaches item `n` — there is no `stack:` key
+        // between them the way an event block has one.
+        let parse = |raw: Option<&Value>, signal, property: &str| match raw {
             None | Some(Value::Null) => Ok(None),
-            Some(value) => {
-                parse_task_action_stack(signal, value, &self.task.origin_path, property)
-                    .map(|items| (!items.is_empty()).then_some(items))
-            }
+            Some(value) => parse_task_action_stack_with_order(
+                signal,
+                value,
+                &self.task.origin_path,
+                property,
+                &self.task.authored.child(property),
+            )
+            .map(|items| (!items.is_empty()).then_some(items)),
         };
         Ok(ParsedStacks {
             setup: parse(self.task.setup.as_ref(), LifecycleSignal::Start, "setup")?,

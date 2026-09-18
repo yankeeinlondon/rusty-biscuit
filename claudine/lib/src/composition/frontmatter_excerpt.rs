@@ -218,10 +218,9 @@ fn is_dash_only_fence(text: &str) -> bool {
 /// Locate the 1-based line of a dotted frontmatter property within a captured
 /// `block` (delimiters included).
 ///
-/// Resolves nested keys by indentation: each segment is matched among the
-/// sibling keys that share the indentation level established by the first
-/// non-blank line inside the parent's scope. Blank and comment lines are
-/// skipped. Returns `None` when any segment cannot be found.
+/// Resolves nested keys and sequence indexes by indentation. A semantic path
+/// whose document root differs from its authored YAML root may match a unique
+/// suffix; ambiguous suffixes are refused. Blank and comment lines are skipped.
 ///
 /// ## Examples
 ///
@@ -230,44 +229,67 @@ fn is_dash_only_fence(text: &str) -> bool {
 /// assert_eq!(locate_property_line(block, "success.message"), Some(16));
 /// ```
 pub fn locate_property_line(block: &str, dotted_property: &str) -> Option<usize> {
-    let lines: Vec<&str> = block.lines().collect();
-    let mut found: Option<usize> = None;
-    // Top-level keys sit above any nesting, so the first parent indent is below
-    // zero — every real key has indent >= 0 and thus deeper than the root.
-    let mut parent_indent: isize = -1;
-    let mut lo = 0usize;
+    let mut parents: Vec<(isize, String)> = Vec::new();
+    let mut indexes = std::collections::HashMap::<(isize, String), usize>::new();
+    let mut located = Vec::<(String, usize)>::new();
 
-    for segment in dotted_property.split('.') {
-        let mut level_indent: Option<isize> = None;
-        let mut matched: Option<usize> = None;
-
-        for (idx, line) in lines.iter().enumerate().skip(lo) {
-            if is_blank_or_comment(line) {
-                continue;
-            }
-            let indent = indent_of(line);
-            // A line at or shallower than the parent ends the parent's scope.
-            if indent <= parent_indent {
-                break;
-            }
-            // The first meaningful line fixes the indentation for this level.
-            let level = *level_indent.get_or_insert(indent);
-            if indent != level {
-                continue;
-            }
-            if key_name(line) == Some(segment) {
-                matched = Some(idx);
-                break;
-            }
+    for (idx, line) in block.lines().enumerate() {
+        if is_blank_or_comment(line) || line.trim() == "---" {
+            continue;
         }
+        let indent = indent_of(line);
+        while parents
+            .last()
+            .is_some_and(|(parent_indent, _)| *parent_indent >= indent)
+        {
+            parents.pop();
+        }
+        let parent = parents.last().map_or("", |(_, path)| path.as_str());
+        let trimmed = line.trim_start();
 
-        let idx = matched?;
-        found = Some(idx);
-        parent_indent = indent_of(lines[idx]);
-        lo = idx + 1;
+        let path = if let Some(rest) = trimmed.strip_prefix('-') {
+            let counter = indexes.entry((indent, parent.to_string())).or_default();
+            let item = format!("{parent}[{counter}]");
+            *counter += 1;
+            let rest = rest.trim_start();
+            match key_name(rest) {
+                Some(key) => join_property(&item, key),
+                None => item,
+            }
+        } else {
+            let Some(key) = key_name(trimmed) else {
+                continue;
+            };
+            join_property(parent, key)
+        };
+        located.push((path.clone(), idx + 1));
+        parents.push((indent, path));
     }
 
-    found.map(|idx| idx + 1)
+    if let Some((_, line)) = located.iter().find(|(path, _)| path == dotted_property) {
+        return Some(*line);
+    }
+
+    let mut suffix = dotted_property;
+    while let Some((_, remainder)) = suffix.split_once('.') {
+        suffix = remainder;
+        let matches = located
+            .iter()
+            .filter(|(path, _)| path == suffix || path.ends_with(&format!(".{suffix}")))
+            .collect::<Vec<_>>();
+        if let [(_, line)] = matches.as_slice() {
+            return Some(*line);
+        }
+    }
+    None
+}
+
+fn join_property(parent: &str, key: &str) -> String {
+    if parent.is_empty() {
+        key.to_string()
+    } else {
+        format!("{parent}.{key}")
+    }
 }
 
 /// Map a byte offset within a property's type-and-constraint string to the
@@ -383,6 +405,21 @@ mod tests {
         let block = capture_frontmatter_block(DOC).unwrap();
         // `failure.message` is on line 8 — must not match `success.message`.
         assert_eq!(locate_property_line(&block, "failure.message"), Some(8));
+    }
+
+    #[test]
+    fn locate_nested_sequence_value() {
+        let block = capture_frontmatter_block(
+            "---\nsuccess:\n    stack:\n        - action:\n            - set:\n                metadata:\n                    files:\n                        - \"{{unknown_root}}\"\n---\n",
+        )
+        .unwrap();
+        assert_eq!(
+            locate_property_line(
+                &block,
+                "success.stack[0].action[0].set.metadata.files[0]"
+            ),
+            Some(8)
+        );
     }
 
     #[test]
