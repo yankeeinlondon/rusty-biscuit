@@ -2357,9 +2357,26 @@ fn status_cells(
             continue;
         }
         let status = find_status(statuses, &expectation.key);
-        let (state, reason) = match status {
-            Some(status) => state_from_status(status),
-            None => (
+        // A gate the plan reused expects no producer status at all: the
+        // pushing host's L1 stood in for its check cell
+        // (`affected_scope.check_evidence`), so no job was scheduled for it and
+        // its silence is the plan working, not a job that never reported. As
+        // for a JUnit-backed tier, an executed status still outranks the reuse.
+        let reused = expectation.reused.as_ref().filter(|_| status.is_none());
+        let (state, reason) = match (status, reused) {
+            (Some(status), _) => state_from_status(status),
+            (None, Some(result)) => (
+                if result.passed {
+                    CellState::Pass
+                } else {
+                    CellState::Fail
+                },
+                Some(format!(
+                    "reused {} evidence from {}: {}",
+                    result.origin, result.evidence.reference, result.evidence.measurements
+                )),
+            ),
+            (None, None) => (
                 CellState::Missing,
                 Some(
                     "scheduled but uploaded no producer status; the job never \
@@ -2373,14 +2390,17 @@ fn status_cells(
         cells.push(Cell {
             area: expectation.area.clone(),
             state,
-            origin: if status.is_some() {
-                Origin::Ci
-            } else {
-                Origin::Unproduced
+            origin: match (status, reused) {
+                (Some(_), _) => Origin::Ci,
+                (None, Some(result)) => result.origin,
+                (None, None) => Origin::Unproduced,
             },
             // A gate with no JUnit report carries its command duration in its
             // producer status, or carries none at all.
-            duration_s: status.and_then(|status| status.duration_s),
+            duration_s: status
+                .and_then(|status| status.duration_s)
+                .or_else(|| reused.and_then(|result| result.duration_s)),
+            evidence: reused.map(|result| result.evidence.clone()),
             target_kinds: expectation.target_kinds.clone(),
             compile_coverage_from: expectation.compile_coverage_from.clone(),
             scheduled: true,

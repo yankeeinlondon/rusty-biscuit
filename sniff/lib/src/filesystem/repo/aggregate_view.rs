@@ -17,7 +17,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::filesystem::FilesystemInfo;
-use crate::filesystem::git::recent_commits::CommitDescSet;
+use crate::filesystem::git::recent_commits::RecentCommits;
 use crate::filesystem::git::types::GitAggregateEvidence;
 use crate::filesystem::git::{BranchInfo, FileStatus, GitInfo, WorktreeEntry};
 use crate::filesystem::path_kind::is_source_code_path;
@@ -56,10 +56,14 @@ pub struct RepoAggregate {
     pub worktrees: Vec<WorktreeEntry>,
     pub current_worktree: Option<String>,
     pub has_merge_conflict: bool,
-    /// One history observation. All three commit-family projections
-    /// (`recent_commits`, `source_code_changes`, `documentation_changes`) are
-    /// filters over this set rather than three separate history walks.
-    pub commits: CommitDescSet,
+    /// One history collection with default [`RecentCommitsOptions`] (the last
+    /// 10 commits). All three commit-family projections (`recent_commits`,
+    /// `source_code_changes`, `documentation_changes`) are
+    /// [`RecentCommits::projected`] views of this collection rather than
+    /// three separate history walks.
+    ///
+    /// [`RecentCommitsOptions`]: crate::filesystem::git::RecentCommitsOptions
+    pub commits: RecentCommits,
     /// The cwd-relative `context` block facts, resolved once over a shared
     /// package ownership index so the projection performs no lookups of its
     /// own (R2.7).
@@ -130,22 +134,7 @@ pub fn detect_repo_aggregate(dir: &Path) -> Result<RepoAggregateObservation> {
     // active collector must still see their INFO tracing events.
     let collecting = performance::is_collecting();
     let started = collecting.then(Instant::now);
-    let request = FilesystemRequest::new()
-        .git(
-            GitRequest::full()
-                .commit_count(10)
-                .metadata(GitMetadataRequest::none().remotes(true).config(true)),
-        )
-        .repo(RepoRequest::focused(RepoDetailRequest::all()))
-        .without_file_inventory()
-        // The aggregate renders neither the Markdown inventory nor the
-        // `.editorconfig` result, and its `documentation_changes` block is a
-        // filter over the one commit set — not a filesystem document walk.
-        // Leaving docs enabled would make the aggregate a repository-wide walk
-        // consumer and parse every Markdown file in the tree for output it
-        // never emits.
-        .without_docs()
-        .without_formatting();
+    let request = aggregate_request();
     let filesystem_started = collecting.then(Instant::now);
     let detected = crate::filesystem::detect_filesystem_for_aggregate(dir, &request)?;
     if let Some(filesystem_started) = filesystem_started {
@@ -170,6 +159,26 @@ pub fn detect_repo_aggregate(dir: &Path) -> Result<RepoAggregateObservation> {
     })
 }
 
+/// The filesystem request behind [`detect_repo_aggregate`].
+fn aggregate_request() -> FilesystemRequest {
+    FilesystemRequest::new()
+        .git(
+            GitRequest::full()
+                .commit_count(10)
+                .metadata(GitMetadataRequest::none().remotes(true).config(true)),
+        )
+        .repo(RepoRequest::focused(RepoDetailRequest::all()))
+        .without_file_inventory()
+        // The aggregate renders neither the Markdown inventory nor the
+        // `.editorconfig` result, and its `documentation_changes` block is a
+        // projection of the one commit collection — not a filesystem document
+        // walk. Leaving docs enabled would make the aggregate a repository-wide
+        // walk consumer and parse every Markdown file in the tree for output it
+        // never emits.
+        .without_docs()
+        .without_formatting()
+}
+
 fn project_repo_aggregate(
     dir: &Path,
     filesystem: Option<&FilesystemInfo>,
@@ -191,8 +200,7 @@ fn project_repo_aggregate(
     let version = collapse_detected_repo_version(repo.as_ref());
 
     let file_changes = detected_git.file_changes.as_slice();
-    let mut commits = evidence.commits.clone();
-    commits.attribute_from_repo(repo.as_ref());
+    let commits = evidence.commits.clone();
 
     let context = observe_cwd_context(dir, repo.as_ref(), Some(detected_git));
 
@@ -446,12 +454,7 @@ mod tests {
             branches: Vec::new(),
             worktrees: Vec::new(),
             current_worktree: None,
-            commits: CommitDescSet {
-                commits: Vec::new(),
-                period_label: "last 3d".to_string(),
-                repo_root: PathBuf::new(),
-                packages: None,
-            },
+            commits: RecentCommits::default(),
         }
     }
 
@@ -794,7 +797,7 @@ mod tests {
                 counts.all()
             );
             assert!(
-                aggregate.commits.commits.iter().any(|c| !c.hash.is_empty()),
+                aggregate.commits.commits().iter().any(|c| !c.hash.is_empty()),
                 "the one shared history observation must be populated"
             );
         }
@@ -855,6 +858,122 @@ mod tests {
                 result.is_err(),
                 "a dirty tree with no file changes must not yield empty buckets"
             );
+        }
+    }
+
+    mod commit_families {
+        //! The aggregate's one commit collection (recent-commits spec
+        //! Decision 10): local-only, and built from the request's own package
+        //! catalog and ref snapshot rather than fresh observations.
+
+        use super::*;
+        use crate::filesystem::detect_filesystem_with_request;
+        use crate::performance::{counters, testing::measure};
+        use tempfile::TempDir;
+
+        /// A two-package Cargo workspace with three commits, `origin/main` at
+        /// `HEAD`, and a GitHub `origin` URL.
+        fn pushed_workspace() -> TempDir {
+            let dir = TempDir::new().unwrap();
+            let root = dir.path();
+            let repo = git2::Repository::init(root).unwrap();
+            repo.remote("origin", "https://github.com/acme/widgets.git")
+                .unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            let commit = |files: &[(&str, &str)], message: &str| {
+                for (relative, content) in files {
+                    let path = root.join(relative);
+                    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                    std::fs::write(path, content).unwrap();
+                }
+                let mut index = repo.index().unwrap();
+                index
+                    .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+                    .unwrap();
+                index.write().unwrap();
+                let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+                let parents: Vec<git2::Commit<'_>> = repo
+                    .head()
+                    .ok()
+                    .and_then(|head| head.peel_to_commit().ok())
+                    .into_iter()
+                    .collect();
+                let parent_refs: Vec<&git2::Commit<'_>> = parents.iter().collect();
+                repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)
+                    .unwrap()
+            };
+            commit(
+                &[
+                    ("Cargo.toml", "[workspace]\nmembers = [\"pkg-a\", \"pkg-b\"]\n"),
+                    ("pkg-a/Cargo.toml", "[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n"),
+                    ("pkg-a/src/lib.rs", "pub fn a() {}\n"),
+                    ("pkg-b/Cargo.toml", "[package]\nname = \"pkg-b\"\nversion = \"0.1.0\"\n"),
+                    ("pkg-b/src/lib.rs", "pub fn b() {}\n"),
+                ],
+                "chore: scaffold",
+            );
+            commit(&[("pkg-a/src/lib.rs", "pub fn a() { }\n")], "feat(pkg-a): change a");
+            let head = commit(&[("pkg-b/README.md", "# b\n")], "docs(pkg-b): readme");
+            repo.reference("refs/remotes/origin/main", head, true, "fixture")
+                .unwrap();
+            dir
+        }
+
+        /// Measured against the identical request without the aggregate
+        /// companion, commit collection parses no manifest (attribution uses
+        /// the request's catalog), adds exactly the one ref walk branch facts
+        /// already needed (linking shares it), and contacts nothing. The
+        /// extra commit visits are the three-commit history walk plus the
+        /// three containment visits from `origin/main`; before this collection
+        /// replaced the 3-day window, the history walk alone was paid.
+        #[test]
+        fn collection_reuses_the_request_catalog_and_ref_snapshot_offline() {
+            let dir = pushed_workspace();
+
+            let (_, baseline) = measure(|| {
+                detect_filesystem_with_request(dir.path(), &aggregate_request()).unwrap()
+            });
+            let ((_, aggregate), counts) =
+                measure(|| detect_repo_aggregate(dir.path()).unwrap().into_parts());
+
+            let delta = |name: &str| counts.get(name) - baseline.get(name);
+            for name in [
+                counters::REPO_MANIFEST_PARSES,
+                counters::REPO_LOCKFILE_PARSES,
+                counters::REPO_PACKAGE_ENRICHMENTS,
+                counters::FS_WALK_STARTS,
+                counters::FS_DOCS_PARSED,
+                counters::FS_INVENTORY_ACCEPTED,
+                counters::GIT_DISCOVERIES,
+                counters::GIT_STATUS_WALKS,
+                counters::PROC_SPAWNS,
+            ] {
+                assert_eq!(
+                    delta(name),
+                    0,
+                    "`{name}` must not grow for the aggregate; baseline {:?}, aggregate {:?}",
+                    baseline.all(),
+                    counts.all()
+                );
+            }
+            assert_eq!(delta(counters::GIT_REF_WALKS), 1, "{:?}", counts.all());
+            assert_eq!(delta(counters::GIT_COMMIT_VISITS), 3 + 3, "{:?}", counts.all());
+            // One per changed file across the three commits: 5 + 1 + 1.
+            assert_eq!(delta(counters::GIT_FILE_DIFFS), 7, "{:?}", counts.all());
+            assert_eq!(counts.get(counters::REMOTE_REQUESTS), 0);
+
+            let commits = aggregate.commits.to_json();
+            assert_eq!(commits.as_array().map(Vec::len), Some(3));
+            assert_eq!(commits[0]["remote"], true);
+            assert_eq!(
+                commits[0]["commit_url"],
+                format!(
+                    "https://github.com/acme/widgets/commit/{}",
+                    commits[0]["hash"].as_str().unwrap()
+                )
+            );
+            assert_eq!(commits[0]["packages"], serde_json::json!(["pkg-b"]));
+            assert_eq!(commits[1]["packages"], serde_json::json!(["pkg-a"]));
         }
     }
 

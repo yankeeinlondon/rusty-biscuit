@@ -176,6 +176,12 @@ just lint
 that is run without that feature does not compile or execute and is not valid
 coverage. Cross-platform compile guards must enable the same feature.
 
+`just lint` here runs clippy without `--all-targets` or `-D warnings`, so it
+passes over warnings in `#[cfg(test)]` modules and test targets that CI's
+shared `_lint` (`--all-targets -D warnings`, no features) rejects. Before
+handoff, also run `cargo clippy -p sniff --all-targets -- -D warnings` and the
+same for `sniff-cli`.
+
 The CLI's `test-fixtures` feature is L2-only. Ordinary local L1 leaves it off;
 `just test-l2` and CI's reusable all-tier build enable it.
 

@@ -29,16 +29,19 @@ pub use file_types::{
 };
 pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
 pub use git::{
-    BehindStatus, CommitDesc, CommitDescSet, CommitInfo, DEFAULT_PATH_HISTORY_SCAN_LIMIT,
-    DeltaKind, FileChange, GitHostingProvider, GitInfo, GitRepo, LocalBranchInfo,
-    PathHistoryOptions, PathHistoryResult, PeriodSpecifier, RemoteInfo, RepoStatus,
-    commit_browser_url, commit_by_sha_at, commit_files_at, commits_for_branch_at,
+    BehindStatus, CommitInfo, CommitLink, DEFAULT_PATH_HISTORY_SCAN_LIMIT,
+    DEFAULT_RECENT_COMMIT_COUNT, DeltaKind, FileChange, GitHostingProvider, GitInfo, GitRepo,
+    LocalBranchInfo, NamedDate, PathHistoryOptions, PathHistoryResult,
+    RecentCommit, RecentCommitAuthor, RecentCommitFile, RecentCommitFileKind,
+    RecentCommitFileTypes, RecentCommitPackages, RecentCommits, RecentCommitsOptions,
+    RecentCommitsProjection, RecentCommitsVerbosity, RemoteInfo, RepoStatus, RepositoryLink,
+    Selection, commit_browser_url, commit_by_sha_at, commit_files_at, commit_links_at, commit_url,
+    commits_for_branch_at,
     commits_for_path_at, detect_git, detect_git_with_request, detect_merge_conflicts,
     get_commit_by_sha, get_commit_files, get_commits_for_branch, get_commits_for_path,
-    get_recent_commits_by_count, get_recent_commits_by_date, get_recent_commits_by_duration,
-    get_recent_commits_by_hash, get_recent_commits_in_range, merge_conflicts_at,
-    merge_conflicts_with_branch_at, parse_commit_message, parse_period, preferred_remote_url,
-    remote_url, repo_root,
+    merge_conflicts_at,
+    merge_conflicts_with_branch_at, parse_commit_message, preferred_remote_url,
+    remote_url, repo_root, repository_link,
 };
 pub use just::{JustRecipe, JustRecipeParam, JustfileInfo, detect_justfiles};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
@@ -473,22 +476,9 @@ fn detect_filesystem_with_request_inner(
             scope.spawn(move || {
                 performance::with_current_collector(collector, || {
                     let git_started = Instant::now();
-                    let detected: Result<(
-                        Option<GitInfo>,
-                        Option<git::types::GitAggregateEvidence>,
-                    )> = observation
+                    let detected: Result<Option<GitInfo>> = observation
                         .expect("Git request always has an observation")
-                        .with_repository(|repo| {
-                            let info = repo.detect_with_request(git_request)?;
-                            let aggregate = collect_aggregate
-                                .then(|| repo.observe_aggregate_evidence())
-                                .transpose()?;
-                            Ok((info, aggregate))
-                        })
-                        .map(|detected| match detected {
-                            Some((info, aggregate)) => (Some(info), aggregate),
-                            None => (None, None),
-                        });
+                        .with_repository(|repo| repo.detect_with_request(git_request));
                     performance::record_logged_stage(
                         "filesystem.git",
                         git_started.elapsed(),
@@ -568,9 +558,19 @@ fn detect_filesystem_with_request_inner(
         };
         performance::record_logged_stage("filesystem.repo", repo_started.elapsed(), Level::DEBUG);
 
-        let (git, aggregate_git) = match git_handle {
+        let git = match git_handle {
             Some(handle) => handle.join().unwrap()?,
-            None => (None, None),
+            None => None,
+        };
+        // Aggregate evidence waits for repo detection rather than running on
+        // the Git thread: commit attribution reuses this request's package
+        // catalog instead of detecting repository structure a second time.
+        let aggregate_git = match (collect_aggregate, git_observation) {
+            (true, Some(observation)) if git.is_some() => observation
+                .with_repository(|repo| {
+                    repo.observe_aggregate_evidence(repo_context.info.as_ref())
+                })?,
+            _ => None,
         };
         let formatting = formatting_handle.and_then(|handle| handle.join().unwrap());
 

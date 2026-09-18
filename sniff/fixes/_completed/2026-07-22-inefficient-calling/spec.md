@@ -1,7 +1,47 @@
 ---
 date: 2026-07-22
 agent: "${env.AGENT}"
+status: invalidated
+reviewed_on: 2026-09-14
 ---
+
+## 2026-09-14 viability review
+
+This proposal is **no longer viable and must not be implemented as written**.
+The exposing Claudine path was fixed by the completed
+[`propagated-context`](../../../claudine/fixes/_completed/2026-08-01-propagated-context/spec.md)
+work. Claudine now owns an invocation-scoped snapshot that reuses one
+`FilesystemObservation`, repository entries keyed by repository identity, and
+`OnceLock` cells for requested OS, hardware, and GPU evidence. The lifecycle
+path that originally repeated full ambient captures therefore no longer needs
+process-global Sniff caching as a defense against over-calling.
+
+The proposed cache boundary is also semantically incorrect for the current
+APIs:
+
+- `OsInfo` includes uptime, locale, timezone/NTP state, hostname, and package
+  managers found from the current executable environment. These are not all
+  process-stable.
+- `HardwareInfo` includes used/available memory and swap. Full requests also
+  include storage, GPU, and audio inventories, which may change during a
+  long-running process.
+- Repository identity and structure are intentionally reused through
+  request-scoped `FilesystemObservation` and caller-owned invocation evidence.
+  A process-global path cache would introduce stale manifests and
+  cross-worktree contamination; the completed propagated-context design
+  explicitly rejects that lifetime.
+- The original timing-based acceptance tests predate Sniff's stable work
+  counters. Any future optimization must demonstrate removed work with those
+  counters and preserve the request-tier freshness contract.
+
+No implementation work remains under this specification. If new counter or
+profile evidence identifies repeated immutable sub-probes outside a reusable
+request/invocation owner, write a new narrowly scoped proposal for those exact
+sub-probes. Do not revive the whole-result process-lifetime caches below.
+
+The remainder of this file is retained as the historical investigation that
+led to the now-completed request-scoped design; its requirements and success
+criteria are superseded by this review.
 
 ## Problem Statement
 

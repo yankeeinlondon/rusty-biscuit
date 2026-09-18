@@ -10,7 +10,7 @@ blast_radius:
 
 Lists source code files with changes (staged, unstaged, and untracked). Exits with code 1 if there are no dirty source files.
 
-Source code is defined as files with `ProgrammingLanguage`, `FrameworkFile`, or `Styling` associations, plus HTML/HTM files.
+Source code is defined by the library's canonical classifier (`sniff::filesystem::path_kind::classify_path`): files with `ProgrammingLanguage` or `FrameworkFile` associations (including Angular `.component.html` templates) that are not CI/CD definitions. Stylesheets and `.html`/`.htm` files are web assets, not source code.
 
 ## Arguments and Flags
 
