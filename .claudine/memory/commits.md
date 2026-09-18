@@ -13,6 +13,18 @@ belong here.
   otherwise mutate the index or working tree to manufacture a commit. Extra
   staged paths are sibling work in a concurrent batch — scope with
   `git commit --only -F - -- <assigned-paths>` and leave the rest alone.
+- For a 50+ path commit (e.g. one feature's entire source tree plus
+  fixtures), pass the paths via `--pathspec-from-file=<list>` rather than
+  expanding them inline. Inlining ~50 absolute or long paths approaches
+  `ARG_MAX` on macOS/Linux shells and either silently truncates the
+  pathspec or errors with `argument list too long`. The list file is read
+  by git, so each path is on its own line (LF or CRLF) and `#`-comments
+  are allowed. Combine with `-F /tmp/commit_msg_<scope>.md` for the
+  message and place `-F <msg>` BEFORE `--pathspec-from-file=`:
+  `git commit -F /tmp/msg.md --pathspec-from-file=/tmp/paths.txt`.
+  The sub-agent brief must still list the paths verbatim in its body so
+  `git show --name-status <hash>` against the brief's path list is the
+  post-commit verification.
 - Mixed-state (`MM`/`AM`) paths do not block unrelated groups. `--only` commits
   the *working-tree* content of named paths, so use it on an `MM` path only
   when the working tree is a clean superset of the staged snapshot.
