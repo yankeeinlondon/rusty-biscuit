@@ -38,6 +38,22 @@ references:
 human_review: true
 human_review_items:
     - |-
+        **Phase 8 ran, but the feature is not finished: Phase 7 is still blocked on the decisions below.**
+
+        **Why decide now:** Phase 8 publishes the reviewed research. Three of its items cannot exist until Phase 7 produces that research: the generated catalog and summary, the skill's compact platform summary, and the check that every acceptance criterion has passing evidence. Writing them by hand would invent research. Everything else in Phase 8 is done and tested: workflow documentation, one-command `just` recipes (`just research-refresh`, `just research-publish`, and others), the test and lint gates, and a full clean-fixture demonstration. So `implemented` stays `false` on this spec, the plan, and the log.
+
+        Phase 8 also found and fixed a real problem. If a research run was interrupted before its first check (Ctrl+C, a failed step, or no agent named), the run stayed "active" forever. No command could resume it, reject it, or clean it up, and that platform could not be researched again until someone deleted files by hand. Now such a run becomes "failed", so it can be resumed within its existing budget or rejected. It has regression tests, and it was verified with the real program.
+
+        Options:
+        - **A. Answer the Phase 7 items below, re-run Phase 7, then re-run Phase 8 for its three remaining items.**
+          - Pros: the feature finishes as specified.
+          - Cons: needs the limits, an approver, and an agent choice first.
+        - **B. Review and merge what exists now, and finish the research in a follow-up.**
+          - Pros: the tooling, documentation, and fix land sooner.
+          - Cons: the feature stays partly done, and no research catalog is published yet.
+
+        **Recommendation: A.** Only the decisions below stand between this feature and completion. The tooling is ready.
+    - |-
         **Phase 7 has not started: supply the research limits and name the approver.** Still unanswered since Phase 6; this is now the blocker.
 
         **Why decide now:** Phase 7 builds the first reviewed research for Discord, Telegram, Slack, WhatsApp, and Signal. Each platform's research is a run of AI research agents. The specification forbids starting a run until a person sets two numbers for that platform: the most wall-clock time the run may use, and the most agent launches it may use. There are deliberately no defaults. The specification also requires a named person to approve the first published research. The Phase 7 session was non-interactive, so it could not ask. It ran no research, spent no budget, and changed no research files. It checked the tooling offline instead, and the tooling is ready (see the Phase 7 log).
@@ -102,14 +118,14 @@ human_review_items:
 
         **Recommendation: A.** Phase 8 requires this evidence anyway, and it is cheaper to find Windows problems before Phase 7's live research depends on them.
 message_to_agent: |-
-    Phase 7 was attempted on 2026-09-18 and is NOT done: no limits, approver, or agent choice had been supplied, so no live research ran. Before touching Phase 7, read "## Phase 7" in `implementation-log.md` and the "Launching a live run" bullet in `.claude/skills/messenger/research-contract.md`.
-    - Start only once the human_review_items give per-platform limits, an approver, and an agent choice. Never invent them, and never write platform documents by hand in place of a run.
-    - Build `messenger-cli` and `claudine-cli` from this worktree and put `target/debug` first on PATH. The installed `~/.cargo/bin/claudine` has no `budget` subcommand.
-    - Pass a provider flag (for example `--claude`) to the printed `claudine sequence` command, or implement `prepare --agent` if the ruling chooses option B. Without one, a sequence with no terminal stops with `AgentResolutionFailed`.
-    - `claudine sequence --dry-run` still runs the `shell:` steps, which marks a real run `failed`. Rehearse only in a throwaway Git repository holding a copy of `messenger/docs`.
-    - Everything in the Phase 6 message still holds: the first publication is one `promote` with all five run IDs plus `--approved-by`; legacy documents are `previous.md` input only; commit `publication.json` together with every artifact it lists.
-    - GitNexus (`just gitnexus`) was blocked by another analyze in Phases 5 and 6. Run it, then `detect-changes --scope all`, before committing.
-
+    Phase 8 was run on 2026-09-18 with Phase 7 still blocked (no limits, approver, or agent choice). Read "## Phase 8" in `implementation-log.md` first.
+    - Still open in Phase 8, and only possible after Phase 7 publishes an accepted baseline: Generated Summary (`catalog.json` plus the summary's generated region, both via `messenger research generate` or `promote`, never by hand), Skill Projection (`.claude/skills/messenger/platform-metadata.md`, projected from the published snapshot), Platform Gates (real native-Windows and WSL2 runs), and Checkpoint 2 (acceptance criteria linked to evidence in `fixture-matrix.md`).
+    - Launch research with `just research-refresh SECONDS INVOCATIONS [PLATFORM…] -- --claude` from `messenger/`. It builds this worktree's `messenger` and `claudine`, puts them first on PATH, and runs each prepared run. Publish with `just research-publish "<approver>" RUN…`; the first publication takes all five run IDs.
+    - New in Phase 8: a run whose sequence stopped before `check-run` decided (the ledger is `stopped` with `runs` greater than the run's `ledger_runs`) is `failed`, so it can be resumed or rejected. A run whose sequence never launched stays `active`; run its printed `claudine sequence` command.
+    - Hosts: `build-linux` is still locked by `reward-20260914-c3e60d0`, `build-win-native`'s disk is full, and WSL2 SSH resets. Docker on the Mac covers Linux (see the `os` skill, macos.md; exclude `.gitnexus/` from the rsync).
+    - Claudine `just test` has 10 failures that predate this feature, from `41f9adeb8` (prompt reorganization). They are not caused by this feature.
+    - Two Phase 8 commits (`b2fb1d0bb`, `b3f69d2ba`) were made by a process outside the implementing session. They contain all Phase 8 code and docs; the skill, plan, log, and spec updates are uncommitted.
+implemented: false
 ---
 
 # Provider Research Metadata Pipeline

@@ -245,10 +245,199 @@ docs_updated_during_phase_7:
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
     - .claude/skills/messenger/research-contract.md
+source_files_during_phase_8:
+    - messenger/justfile
+    - messenger/lib/src/research/refresh/state.rs
+    - messenger/lib/src/research/refresh/prepare.rs
+    - messenger/lib/src/research/refresh/select.rs
+    - messenger/lib/tests/research_refresh.rs
+docs_updated_during_phase_8:
+    - messenger/README.md
+    - messenger/cli/README.md
+    - messenger/docs/user-guide.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/plan.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/implementation-log.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spec.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+    - .claude/skills/messenger/SKILL.md
+    - .claude/skills/messenger/research-contract.md
+    - .claude/skills/os/macos.md
 packages:
     - messenger
     - messenger-cli
     - claudine-cli
+source_code:
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/.gitignore
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/Cargo.toml
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/src/fault.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/src/fsutil.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/src/generations.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/src/journal.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/src/lib.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/src/model.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/tests/common/mod.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/tests/generations_interruption.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/tests/journal_interruption.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/tests/open_handles.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/orchestration/probe_budget.py
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/orchestration/probe_tree_windows.py
+    - messenger/lib/Cargo.toml
+    - messenger/lib/tests/research_corpus.rs
+    - messenger/lib/tests/fixtures/research/contract/
+    - messenger/lib/tests/fixtures/research/interaction/
+    - messenger/lib/tests/fixtures/research/diagnostics/
+    - messenger/lib/tests/fixtures/research/negative/schema/
+    - messenger/lib/tests/fixtures/research/negative/semantic/
+    - messenger/docs/platforms.yaml
+    - messenger/docs/platforms.schema.yaml
+    - messenger/docs/research/platforms/_schema.yaml
+    - messenger/docs/research/platforms/_types.yaml
+    - messenger/docs/research/platforms/_overrides.schema.yaml
+    - messenger/docs/research/implementation/_schema.yaml
+    - messenger/justfile
+    - Cargo.lock
+    - messenger/lib/src/lib.rs
+    - messenger/lib/src/research/mod.rs
+    - messenger/lib/src/research/assess.rs
+    - messenger/lib/src/research/canonical.rs
+    - messenger/lib/src/research/diagnostics.rs
+    - messenger/lib/src/research/error.rs
+    - messenger/lib/src/research/load.rs
+    - messenger/lib/src/research/paths.rs
+    - messenger/lib/src/research/model/mod.rs
+    - messenger/lib/src/research/model/common.rs
+    - messenger/lib/src/research/model/document.rs
+    - messenger/lib/src/research/model/roster.rs
+    - messenger/lib/src/research/model/overrides.rs
+    - messenger/lib/src/research/model/mappings.rs
+    - messenger/lib/src/research/validate/mod.rs
+    - messenger/lib/src/research/validate/identity.rs
+    - messenger/lib/src/research/validate/constraints.rs
+    - messenger/lib/src/research/validate/bindings.rs
+    - messenger/lib/src/research/validate/interaction.rs
+    - messenger/lib/src/research/validate/errors.rs
+    - messenger/lib/src/research/validate/coverage.rs
+    - messenger/lib/src/research/validate/replay.rs
+    - messenger/lib/tests/research_validation.rs
+    - messenger/lib/tests/fixtures/research/contract/overrides-valid.yaml
+    - messenger/lib/tests/fixtures/research/contract/pilot-discord.md
+    - messenger/lib/tests/fixtures/research/contract/pilot-signal.md
+    - messenger/lib/tests/fixtures/research/contract/pilot-telegram.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-coverage--surface-uncovered.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-enforceable--unit-unspecified-executable.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-evidence--secondary-only-known.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-gap--gap-placeholder.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-interactivity--callback-only-claims-text.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--adapter-platform-mismatch.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--proposed-as-implemented.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--unassessed-without-reason.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-origin-phase--sdk-phase-certainty-mismatch.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--expired-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--stale-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-ref--error-dangling-constraint.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--missing-roster-interface.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--research-only-with-adapter.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-adapter-mapped-twice.yaml
+    - .gitignore
+    - messenger/cli/Cargo.toml
+    - messenger/cli/src/lib.rs
+    - messenger/cli/src/main.rs
+    - messenger/cli/src/research.rs
+    - messenger/cli/tests/research_cli.rs
+    - messenger/lib/src/research/delta.rs
+    - messenger/lib/src/research/generate.rs
+    - messenger/lib/src/research/project.rs
+    - messenger/lib/src/research/report.rs
+    - messenger/lib/src/research/publish/mod.rs
+    - messenger/lib/src/research/publish/fsutil.rs
+    - messenger/lib/tests/research_lifecycle.rs
+    - messenger/lib/tests/research_publication.rs
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/discord.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/slack.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/telegram.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/whatsapp.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/signal.md
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/args.rs
+    - claudine/cli/src/telemetry.rs
+    - claudine/cli/src/budget/mod.rs
+    - claudine/cli/src/budget/error.rs
+    - claudine/cli/src/budget/model.rs
+    - claudine/cli/src/budget/run.rs
+    - claudine/cli/src/budget/store.rs
+    - claudine/cli/src/budget/tests.rs
+    - claudine/cli/src/commands/mod.rs
+    - claudine/cli/src/commands/budget.rs
+    - claudine/cli/src/commands/help.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+    - claudine/cli/tests/sequence_budget.rs
+    - claudine/cli/tests/snapshots/wrap_basics__help_lists_wrapper_subcommands.snap
+    - claudine/cli/tests/error_guards/transport-allow.toml
+    - messenger/lib/src/research/refresh/mod.rs
+    - messenger/lib/src/research/refresh/approval.rs
+    - messenger/lib/src/research/refresh/check.rs
+    - messenger/lib/src/research/refresh/cleanup.rs
+    - messenger/lib/src/research/refresh/config.rs
+    - messenger/lib/src/research/refresh/prepare.rs
+    - messenger/lib/src/research/refresh/promote.rs
+    - messenger/lib/src/research/refresh/records.rs
+    - messenger/lib/src/research/refresh/review.rs
+    - messenger/lib/src/research/refresh/select.rs
+    - messenger/lib/src/research/refresh/state.rs
+    - messenger/lib/tests/research_refresh.rs
+    - messenger/cli/src/research_lifecycle.rs
+    - messenger/cli/tests/research_lifecycle_cli.rs
+documentation:
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/orchestration/findings.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/architecture.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/fixture-matrix.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/surface-inventory/inventory.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/findings.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/findings.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/orchestration/probe-results.json
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/_schema.yaml
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/_types.yaml
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/_mappings.schema.yaml
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/_mappings.types.yaml
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/mappings.pilot.yaml
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/discord.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/telegram.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/slack.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/signal.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/negative/
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/
+    - messenger/docs/research/platforms/discord.md
+    - messenger/docs/research/platforms/slack.md
+    - messenger/docs/research/platforms/telegram.md
+    - messenger/docs/research/platforms/whatsapp.md
+    - messenger/docs/research/platforms/signal.md
+    - docs/dependencies.md
+    - messenger/docs/research/platforms/_fleet.md
+    - messenger/docs/research/platforms/_rules.md
+    - messenger/lib/tests/fixtures/research/README.md
+    - messenger/lib/README.md
+    - messenger/cli/README.md
+    - claudine/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/dependencies.md
+    - claudine/docs/cli/budget.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/plan.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/implementation-log.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spec.md
+    - messenger/README.md
+    - messenger/docs/user-guide.md
+completed_phase: 8
+implemented: false
 ---
 
 # Implementation Log for 2026-09-17-research-metadata-pipeline (8 phases)
@@ -1388,3 +1577,182 @@ shipped roster, contract, and prompts through the normal invocation path
   phase).
 - `just lint` in `messenger/`: exit 0.
 - No cross-OS runs: nothing platform-sensitive changed.
+
+## Phase 8
+
+### Outcome: partial; the baseline-dependent work is still blocked
+
+Phase 7 never produced a reviewed baseline, because no research limits,
+approver, or agent choice have been supplied (spec `human_review_items`,
+unchanged since Phase 7). Phase 8 therefore did everything that does not
+need accepted research and left the rest unchecked:
+
+| Plan item | State | Why |
+|---|---|---|
+| Generated Summary | **not done** | `catalog.json` and the summary are generated from accepted documents. None exist: the shipped documents are legacy prose that fails `SR-SCHEMA-BINDING`, and `generate` correctly refuses them. Hand-writing a catalog would fabricate research. |
+| Skill Projection (`.claude/skills/messenger/platform-metadata.md`) | **not done** | Same reason: it is a projection of the accepted snapshot. Only the skill's routing documentation was updated (recipes and lifecycle). |
+| Workflow Documentation | done | |
+| Messenger Gates | done | |
+| Claudine Gates | done, with pre-existing failures (below) | |
+| Platform Gates | **not done** | `build-linux` locked, native-Windows host disk full, WSL2 SSH reset (below) |
+| Change Analysis | done | |
+| Checkpoint 1 (clean-fixture demonstration) | done | |
+| Checkpoint 2 (acceptance criteria → evidence, unknowns as gaps) | **not done** | needs the accepted fleet |
+
+### Workflow documentation and recipes
+
+- `messenger/justfile`: `research-validate`, `research-generate`,
+  `research-check` (`generate --check`), `research-report`, `research-runs`,
+  `research-publish NAME RUN…` (`promote --approved-by`),
+  `research-cleanup` (preview unless `--apply`), and
+  `research-refresh SECONDS INVOCATIONS [prepare args] [-- sequence args]`.
+  - The offline recipes use `cargo run -q -p messenger-cli --`, so they are
+    portable. Variadic parameters are `*args` with no default: `*args=""`
+    passed one empty argument through `"$@"`, which clap rejected.
+  - `research-refresh` is the only recipe that runs agents. It builds both
+    CLIs, puts `<target>/debug` first on PATH (via `cygpath -u` under Git Bash,
+    where `C:\…` would split PATH), and runs `prepare --json` from the
+    repository root. For each run, it then executes the printed
+    `budget init` and `sequence` with the operator's `-- …` arguments
+    inserted after `claudine sequence`. A failed platform does not stop the
+    others; the recipe exits 1 at the end. It is bash 3.2-safe (`eval` +
+    `jq @sh`, not `mapfile`, which macOS's `/bin/bash` lacks) and needs `jq`,
+    as `just/devops.just` already does.
+- `messenger/docs/user-guide.md` gains a "Provider Research" section:
+  recipe table; authored vs accepted vs generated vs local files;
+  validate/generate/drift; single, full-fleet, and forced refresh with the
+  required limits and the agent flag; source-access rules; review,
+  renewal, and publication; partial failure and every recovery path;
+  cleanup.
+- `messenger/README.md` (layout and recipe pointer) and `messenger/cli/README.md`
+  (stopped sequences leave a `failed` run).
+- Dependency docs: no crates or feature edges were added in this phase.
+  `docs/dependencies.md` already documents the `research` feature's crates.
+  Generated files already carry "do not edit" notices
+  (`project::GENERATED_NOTICE`, `publish::REGION_BEGIN`).
+
+### Defect found and fixed: a stopped sequence left its run stuck `active`
+
+Found while exercising `just research-refresh 60 1 discord` with no agent
+flag and no terminal (the Phase 7 launch trap). Claudine stopped with
+`AgentResolutionFailed` and left the ledger `stopped` (`runs: 1`). Messenger's
+run stayed `active` indefinitely: `reject`, `prepare --resume`, and `cleanup`
+all refused it, and selection skipped Discord as having an open run. Only
+deleting local state by hand would release it. The same happens after
+Ctrl+C or a failed agent step: Claudine's documented resting state for
+those is `stopped`, and `state::apply_ledger` mapped only `exhausted` and
+`interrupted`.
+
+Fix (`messenger/lib/src/research/refresh/`):
+
+- `LedgerView.runs` (Claudine's count of opened budgeted runs) and
+  `RunRecord.ledger_runs` (that count when the attempt was prepared: 0 at
+  prepare, the ledger's value at resume; `#[serde(default)]`, so existing
+  `run.json` files still load).
+- `apply_ledger`: an `active` run whose ledger is `stopped` **and** whose
+  `runs` exceeds `ledger_runs` becomes `failed`, keeping Claudine's stop
+  reason. A ledger with no run for this attempt (freshly initialized,
+  resumed but not relaunched, or Claudine rejected the arguments before
+  opening a run) leaves the run `active`. Its printed sequence command is
+  still the way forward, and a second `resume` cannot burn an attempt.
+- `select`: judges open runs by the same effective status as `runs`,
+  `resume`, and `reject`, instead of the last saved status.
+- GitNexus impact (index refreshed with `just gitnexus` this phase):
+  `apply_ledger` MEDIUM (callers: promote, reject, check-run, resume, runs
+  listing); `RunRecord` (file-qualified) LOW; `LedgerView` LOW; `resume`
+  UNKNOWN. Text search: its only caller is `cli/src/research_lifecycle.rs`.
+  Unqualified `RunRecord` resolved to an unrelated TypeScript type and
+  reported HIGH; discarded after text search.
+
+### Requirement-to-test mapping (Phase 8)
+
+| Behavior | Test / evidence |
+|---|---|
+| Stopped ledger after a launch → resumable; exact original input (`runs: 1`, stop reason `agent resolution failed … NoAgent`) | `research_refresh::a_sequence_that_stops_before_its_checks_leaves_a_resumable_or_rejectable_run` (new; failed before the fix with `WrongStatus { status: Active }`) |
+| Initialized-but-unlaunched run stays active (negative: resume and reject refused, platform still open) | same test, first block |
+| Resumed-but-not-relaunched run is not re-failed; a refused resume consumes no attempt | same test, third block |
+| Ctrl+C after relaunch (`runs: 2`) → rejectable; decision persisted; platform selectable again | same test, last block |
+| Selection uses the effective status | same test (`discord_is_open` at each step) |
+| Accepted research untouched throughout | same test (`repo.tree()` before/after) |
+| `apply_ledger` state mapping, `runs: 0` vs `runs: 1` boundary | `state::tests::only_an_active_run_takes_the_ledger_resting_state` (extended) |
+| Real binary, real shipped roster: stuck run released | manual: `just research-refresh 60 1 discord` (no agent) → `messenger research reject` exit 0 → `prepare --dry-run` shows Discord due |
+| Recipes | manual, real worktree: `research-validate` exit 1 (legacy documents), `--json` output; `research-check`/`research-report` exit 3 (no snapshot); `research-runs`, `research-cleanup` exit 0; `research-publish "Ken Snyder" no-such-run` exit 3 (name with a space passed intact); `research-refresh` failure path exit 1; `-- --claude --dry-run` reached `claudine sequence` (Claudine refused `--dry-run` with `--budget-ledger`, as documented); "nothing due" path exit 0. All local state was deleted afterwards. |
+
+No parser, schema, template, or prompt changed, so the passive corpus
+tests (`research_corpus`) and end-to-end CLI suites from earlier phases
+still cover the shipped artifacts. They pass unchanged.
+
+### Checkpoint 1 demonstration (clean fixture, real binaries)
+
+Throwaway Git repository `/tmp/p8demo`: the shipped roster, schemas, and
+fleet prompt plus `lib/tests/fixtures/research/lifecycle/fleet/`. Script:
+`/tmp/p8demo.sh`.
+
+1. `validate` → exit 0.
+2. `generate` twice → exit 0 both times; the second reports "already
+   current". The digest of every file under `messenger/docs` is identical
+   (`cad91aa7bd1ed86a`).
+3. `generate --check` → "No drift", exit 0.
+4. Human `report --platform discord` renders; `report --json` parses
+   (8 top-level keys) and contains 0 escape sequences.
+5. Failed partial refresh: `prepare discord --force --max-seconds 600
+   --max-invocations 8`; the printed `claudine budget init` ran for real.
+   The ledger was then set by hand to what Claudine leaves after a failed
+   first step (`stopped`, `runs: 1`, 1 invocation / 42 s used), because a
+   real sequence needs an agent. `check-run --through validation` → run
+   `failed`.
+6. The selected snapshot is unchanged: `generate --check` clean, docs digest
+   identical, `recover` → "Nothing to recover".
+7. `prepare --resume` → stages from discovery; the only command is
+   `claudine sequence` (no new `budget init`); the same ledger keeps
+   1/8 invocations and 42/600 s used; `recovery_attempts` 1.
+
+### Gates
+
+- **macOS**, `just test` in `messenger/`: 659 passed, 2 skipped (both
+  predate this feature). `just lint`: clean. `cargo clippy -p messenger
+  --all-features --all-targets -D warnings`: clean (all chat providers).
+  `cargo check -p messenger` (default features): builds without darkmatter,
+  biscuit-file, biscuit-hash, or serde_path_to_error (`cargo tree`).
+  Outside `src/research/`, the library mentions research only in the
+  `#[cfg(feature = "research")]` module declaration. The CLI mentions it
+  only in the `research` subcommand. Sends never read research artifacts.
+- **macOS**, `just test` in `claudine/` (`--no-fail-fast`): 7319 passed,
+  **10 failed**, 9 skipped. All 10 failures are shipped-prompt tests broken
+  by `41f9adeb8 chore(prompts): reorganize prompt template layout`
+  (2026-09-17, before this phase): `prompts/cross-platform.md` removed,
+  `prompts/implement.md` now uses `link(^prompt/…)`, and the
+  `shipped_implement_route` fixture drifted. None touches budget, sequence,
+  cancellation, or restart code. 664 budget/sequence/cancel/restart/ledger
+  tests pass. `just lint` in `claudine/`: clean.
+- **Linux** (Docker `rust:1`, arm64): `research_refresh` 16/16,
+  `research::refresh` unit tests 6/6, `research_lifecycle_cli` and
+  `research_cli` 8/8 and 3/3.
+- **Windows**: `cargo check -p messenger-cli --target
+  x86_64-pc-windows-gnu` succeeds (compile evidence only).
+  `just cross-check messenger --os windows` failed: "No space left on
+  device" on `build-win-native`.
+- **WSL2**: `just cross-check messenger --os wsl` failed: "Connection closed
+  by 192.168.100.64 port 22".
+- **build-linux**: `cross-check` still waits on the 2026-09-14 lock held by
+  `reward-20260914-c3e60d0`; stopped.
+- GitNexus `detect-changes --scope compare --base-ref 488b8b2e9`: 11 files,
+  9 symbols, not partial or truncated, risk "critical". Every affected flow
+  it lists belongs to other `RunRecord`/`resume` symbols (CI rollup,
+  test-audit, terminal rendering). Messenger's `RunRecord` is used only in
+  `messenger/lib/src/research/refresh/` and its test. No provider, `Message`,
+  `Dispatch`, or `CapabilitySet` code changed.
+
+### Notes
+
+- **Commits made outside this session.** At 00:41, while this phase was in
+  progress, `b2fb1d0bb` (the ledger fix) and `b3f69d2ba` (docs and recipes)
+  were committed in Ken's name by a process outside this session. This
+  session ran no git write command. All code, the recipes, and the README
+  and user-guide changes are in those commits. The skill files, plan, log,
+  and spec updates are uncommitted.
+- The worktree also holds uncommitted Claudine spec work
+  (`claudine/fixes/2026-09-17-remove-strict-mode/`) from another session; it
+  was not touched here.
+- A shell `cd` into `messenger/lib/src/research/…` hung twice for 120 s,
+  apparently a directory-change hook on this host. Absolute paths avoided it.

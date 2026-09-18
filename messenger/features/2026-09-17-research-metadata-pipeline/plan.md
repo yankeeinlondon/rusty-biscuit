@@ -246,10 +246,199 @@ docs_updated_during_phase_7:
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
     - .claude/skills/messenger/research-contract.md
+source_files_during_phase_8:
+    - messenger/justfile
+    - messenger/lib/src/research/refresh/state.rs
+    - messenger/lib/src/research/refresh/prepare.rs
+    - messenger/lib/src/research/refresh/select.rs
+    - messenger/lib/tests/research_refresh.rs
+docs_updated_during_phase_8:
+    - messenger/README.md
+    - messenger/cli/README.md
+    - messenger/docs/user-guide.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/plan.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/implementation-log.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spec.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+    - .claude/skills/messenger/SKILL.md
+    - .claude/skills/messenger/research-contract.md
+    - .claude/skills/os/macos.md
 packages:
     - messenger
     - messenger-cli
     - claudine-cli
+source_code:
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/.gitignore
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/Cargo.toml
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/src/fault.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/src/fsutil.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/src/generations.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/src/journal.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/src/lib.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/src/model.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/tests/common/mod.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/tests/generations_interruption.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/tests/journal_interruption.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/prototype/tests/open_handles.rs
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/orchestration/probe_budget.py
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/orchestration/probe_tree_windows.py
+    - messenger/lib/Cargo.toml
+    - messenger/lib/tests/research_corpus.rs
+    - messenger/lib/tests/fixtures/research/contract/
+    - messenger/lib/tests/fixtures/research/interaction/
+    - messenger/lib/tests/fixtures/research/diagnostics/
+    - messenger/lib/tests/fixtures/research/negative/schema/
+    - messenger/lib/tests/fixtures/research/negative/semantic/
+    - messenger/docs/platforms.yaml
+    - messenger/docs/platforms.schema.yaml
+    - messenger/docs/research/platforms/_schema.yaml
+    - messenger/docs/research/platforms/_types.yaml
+    - messenger/docs/research/platforms/_overrides.schema.yaml
+    - messenger/docs/research/implementation/_schema.yaml
+    - messenger/justfile
+    - Cargo.lock
+    - messenger/lib/src/lib.rs
+    - messenger/lib/src/research/mod.rs
+    - messenger/lib/src/research/assess.rs
+    - messenger/lib/src/research/canonical.rs
+    - messenger/lib/src/research/diagnostics.rs
+    - messenger/lib/src/research/error.rs
+    - messenger/lib/src/research/load.rs
+    - messenger/lib/src/research/paths.rs
+    - messenger/lib/src/research/model/mod.rs
+    - messenger/lib/src/research/model/common.rs
+    - messenger/lib/src/research/model/document.rs
+    - messenger/lib/src/research/model/roster.rs
+    - messenger/lib/src/research/model/overrides.rs
+    - messenger/lib/src/research/model/mappings.rs
+    - messenger/lib/src/research/validate/mod.rs
+    - messenger/lib/src/research/validate/identity.rs
+    - messenger/lib/src/research/validate/constraints.rs
+    - messenger/lib/src/research/validate/bindings.rs
+    - messenger/lib/src/research/validate/interaction.rs
+    - messenger/lib/src/research/validate/errors.rs
+    - messenger/lib/src/research/validate/coverage.rs
+    - messenger/lib/src/research/validate/replay.rs
+    - messenger/lib/tests/research_validation.rs
+    - messenger/lib/tests/fixtures/research/contract/overrides-valid.yaml
+    - messenger/lib/tests/fixtures/research/contract/pilot-discord.md
+    - messenger/lib/tests/fixtures/research/contract/pilot-signal.md
+    - messenger/lib/tests/fixtures/research/contract/pilot-telegram.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-coverage--surface-uncovered.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-enforceable--unit-unspecified-executable.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-evidence--secondary-only-known.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-gap--gap-placeholder.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-interactivity--callback-only-claims-text.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--adapter-platform-mismatch.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--proposed-as-implemented.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--unassessed-without-reason.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-origin-phase--sdk-phase-certainty-mismatch.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--expired-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--stale-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-ref--error-dangling-constraint.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--missing-roster-interface.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--research-only-with-adapter.md
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-adapter-mapped-twice.yaml
+    - .gitignore
+    - messenger/cli/Cargo.toml
+    - messenger/cli/src/lib.rs
+    - messenger/cli/src/main.rs
+    - messenger/cli/src/research.rs
+    - messenger/cli/tests/research_cli.rs
+    - messenger/lib/src/research/delta.rs
+    - messenger/lib/src/research/generate.rs
+    - messenger/lib/src/research/project.rs
+    - messenger/lib/src/research/report.rs
+    - messenger/lib/src/research/publish/mod.rs
+    - messenger/lib/src/research/publish/fsutil.rs
+    - messenger/lib/tests/research_lifecycle.rs
+    - messenger/lib/tests/research_publication.rs
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/discord.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/slack.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/telegram.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/whatsapp.md
+    - messenger/lib/tests/fixtures/research/lifecycle/fleet/signal.md
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/args.rs
+    - claudine/cli/src/telemetry.rs
+    - claudine/cli/src/budget/mod.rs
+    - claudine/cli/src/budget/error.rs
+    - claudine/cli/src/budget/model.rs
+    - claudine/cli/src/budget/run.rs
+    - claudine/cli/src/budget/store.rs
+    - claudine/cli/src/budget/tests.rs
+    - claudine/cli/src/commands/mod.rs
+    - claudine/cli/src/commands/budget.rs
+    - claudine/cli/src/commands/help.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+    - claudine/cli/tests/sequence_budget.rs
+    - claudine/cli/tests/snapshots/wrap_basics__help_lists_wrapper_subcommands.snap
+    - claudine/cli/tests/error_guards/transport-allow.toml
+    - messenger/lib/src/research/refresh/mod.rs
+    - messenger/lib/src/research/refresh/approval.rs
+    - messenger/lib/src/research/refresh/check.rs
+    - messenger/lib/src/research/refresh/cleanup.rs
+    - messenger/lib/src/research/refresh/config.rs
+    - messenger/lib/src/research/refresh/prepare.rs
+    - messenger/lib/src/research/refresh/promote.rs
+    - messenger/lib/src/research/refresh/records.rs
+    - messenger/lib/src/research/refresh/review.rs
+    - messenger/lib/src/research/refresh/select.rs
+    - messenger/lib/src/research/refresh/state.rs
+    - messenger/lib/tests/research_refresh.rs
+    - messenger/cli/src/research_lifecycle.rs
+    - messenger/cli/tests/research_lifecycle_cli.rs
+documentation:
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/orchestration/findings.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/architecture.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/fixture-matrix.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/surface-inventory/inventory.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/findings.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/findings.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/orchestration/probe-results.json
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/_schema.yaml
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/_types.yaml
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/_mappings.schema.yaml
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/_mappings.types.yaml
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/mappings.pilot.yaml
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/discord.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/telegram.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/slack.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/signal.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/negative/
+    - messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/
+    - messenger/docs/research/platforms/discord.md
+    - messenger/docs/research/platforms/slack.md
+    - messenger/docs/research/platforms/telegram.md
+    - messenger/docs/research/platforms/whatsapp.md
+    - messenger/docs/research/platforms/signal.md
+    - docs/dependencies.md
+    - messenger/docs/research/platforms/_fleet.md
+    - messenger/docs/research/platforms/_rules.md
+    - messenger/lib/tests/fixtures/research/README.md
+    - messenger/lib/README.md
+    - messenger/cli/README.md
+    - claudine/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/dependencies.md
+    - claudine/docs/cli/budget.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/plan.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/implementation-log.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/spec.md
+    - messenger/README.md
+    - messenger/docs/user-guide.md
+completed_phase: 8
+implemented: false
 ---
 
 # Provider Research Metadata Pipeline Implementation Plan
@@ -842,14 +1031,14 @@ platform.
 
 ### Wave 22 — Final Verification
 
-- [ ] **Messenger Gates**
+- [x] **Messenger Gates**
   - Run `just test` and `just lint` in `messenger/`, explicit maintenance and
     all-chat-provider checks, deterministic generation/check, help snapshots, and
     the full validation corpus through nextest-backed recipes.
   - Confirm ordinary offline builds/sends neither read research artifacts nor
     require fresh metadata, network access, an agent, or a research workspace.
 
-- [ ] **Claudine Gates**
+- [x] **Claudine Gates**
   - Run `just test` and `just lint` in `claudine/` and the focused fake-worker,
     sequence, cancellation, restart, and budget suites. Confirm tests use the
     existing isolated process fixture and keep audio/browser/terminal focus off.
@@ -862,7 +1051,7 @@ platform.
     cancellation, fixture binary lookup, and nextest-archive behavior on the OS
     where each contract matters. Treat cross-compilation as compile evidence only.
 
-- [ ] **Change Analysis**
+- [x] **Change Analysis**
   - Run GitNexus `detect_changes` for the complete worktree and resolve any
     partial/truncated analysis before review. Investigate every HIGH/CRITICAL or
     UNKNOWN impact with source search and focused tests.
@@ -872,7 +1061,7 @@ platform.
 
 ### Phase 8 Checkpoint
 
-- [ ] Demonstrate from a clean fixture: validate accepted inputs, generate twice
+- [x] Demonstrate from a clean fixture: validate accepted inputs, generate twice
   byte-identically, detect no drift, render human and JSON reports, simulate a
   failed partial refresh, recover the selected snapshot, and resume within the
   retained budget.
