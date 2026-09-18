@@ -63,7 +63,9 @@ fn dependencies(file: &Path, files: &[PathBuf], found: &mut BTreeMap<String, Str
         let path = PathBuf::from(name.trim_end_matches(':'));
         if !path.is_file() || files.contains(&path) { continue; }
         let key = path.to_string_lossy().into_owned();
-        if !found.contains_key(&key) { found.insert(key, library_identity(&path)?); }
+        if let std::collections::btree_map::Entry::Vacant(entry) = found.entry(key) {
+            entry.insert(library_identity(&path)?);
+        }
     }
     Ok(())
 }
