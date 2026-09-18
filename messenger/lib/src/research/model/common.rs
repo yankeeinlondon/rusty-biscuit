@@ -51,7 +51,12 @@ pub(crate) use string_enum;
 pub struct Date(String);
 
 impl Date {
-    /// Parses `YYYY-MM-DD`, checking month and day ranges (not leap years).
+    /// Parses `YYYY-MM-DD`, accepting only a real proleptic-Gregorian date:
+    /// `2024-02-29` parses, `2026-02-29` and `2026-04-31` do not.
+    ///
+    /// Serde, the CLI `--today`, and run identifiers all parse here;
+    /// [`Date::from_unix_days`] and [`Date::plus_days`] construct valid dates
+    /// arithmetically through year 9999.
     pub fn parse(text: &str) -> Option<Self> {
         let bytes = text.as_bytes();
         let digits = |range: std::ops::Range<usize>| {
@@ -64,9 +69,10 @@ impl Date {
         if !(digits(0..4) && digits(5..7) && digits(8..10)) {
             return None;
         }
+        let year: u32 = text[0..4].parse().ok()?;
         let month: u32 = text[5..7].parse().ok()?;
         let day: u32 = text[8..10].parse().ok()?;
-        ((1..=12).contains(&month) && (1..=31).contains(&day)).then(|| Self(text.to_string()))
+        ((1..=12).contains(&month) && (1..=days_in_month(year, month)).contains(&day)).then(|| Self(text.to_string()))
     }
 
     pub fn as_str(&self) -> &str {
@@ -98,6 +104,16 @@ impl Date {
             days_from_civil(field(0..4), field(5..7), field(8..10))
         };
         days(later) - days(self)
+    }
+}
+
+/// Proleptic Gregorian: leap years divide by 4, except centuries not dividing by 400.
+fn days_in_month(year: u32, month: u32) -> u32 {
+    match month {
+        2 if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
     }
 }
 
@@ -135,7 +151,7 @@ impl<'de> Deserialize<'de> for Date {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
         Date::parse(&text)
-            .ok_or_else(|| serde::de::Error::custom(format!("invalid date `{text}`, expected YYYY-MM-DD")))
+            .ok_or_else(|| serde::de::Error::custom(format!("invalid date `{text}`: expected a real YYYY-MM-DD calendar date")))
     }
 }
 
@@ -472,6 +488,47 @@ mod tests {
             assert!(Date::parse(invalid).is_none(), "{invalid}");
         }
         assert!(Date::parse("2026-09-17") < Date::parse("2027-01-01"));
+    }
+
+    /// Calendar validity: `(text, is a real date)`. Review-1 regression; the
+    /// parser once accepted any day up to 31 in any month.
+    const CALENDAR: &[(&str, bool)] = &[
+        ("2024-02-29", true),
+        ("2000-02-29", true),
+        ("2026-02-28", true),
+        ("2026-02-29", false),
+        ("1900-02-29", false),
+        ("2026-02-30", false),
+        ("2026-02-31", false),
+        ("2026-04-30", true),
+        ("2026-04-31", false),
+        ("2026-06-31", false),
+        ("2026-09-31", false),
+        ("2026-11-31", false),
+        ("2026-12-31", true),
+        ("2026-01-00", false),
+        ("2026-00-10", false),
+        ("2026-13-01", false),
+    ];
+
+    #[test]
+    fn dates_parse_only_real_calendar_days() {
+        for (text, valid) in CALENDAR {
+            assert_eq!(Date::parse(text).is_some(), *valid, "{text}");
+        }
+    }
+
+    #[test]
+    fn dates_deserialize_only_real_calendar_days() {
+        for (text, valid) in CALENDAR {
+            match serde_json::from_value::<Date>(serde_json::json!(text)) {
+                Ok(date) => assert!(valid, "{text} deserialized as {date}"),
+                Err(error) => {
+                    assert!(!valid, "{text}: {error}");
+                    assert!(error.to_string().contains(&format!("`{text}`")), "the error names the date: {error}");
+                }
+            }
+        }
     }
 
     #[test]

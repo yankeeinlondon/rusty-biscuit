@@ -157,6 +157,26 @@ fn help_lists_the_research_commands_and_exit_statuses() {
     assert_eq!(code(&research(None, &["--today", "17/09/2026", "report"])), 2);
 }
 
+/// Review-1 regression: `--today 2026-02-31` was accepted.
+#[test]
+fn today_accepts_only_real_calendar_days() {
+    let fleet = Fleet::new();
+    for valid in ["2024-02-29", "2000-02-29"] {
+        let output = fleet.research(&["--today", valid, "validate", "--json"]);
+        assert_eq!(code(&output), 0, "{valid}: {}", String::from_utf8_lossy(&output.stderr));
+    }
+    let invalid = [
+        "2026-02-29", "1900-02-29", "2026-02-30", "2026-02-31", "2026-04-31", "2026-06-31", "2026-09-31", "2026-11-31",
+        "2026-01-00", "2026-00-10", "2026-13-01",
+    ];
+    for text in invalid {
+        let output = research(None, &["--today", text, "report"]);
+        assert_eq!(code(&output), 2, "{text} is a usage error");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(&format!("`{text}` is not a real YYYY-MM-DD calendar date")), "{text}: {stderr}");
+    }
+}
+
 #[test]
 fn validate_accepts_the_fleet_fixture() {
     let fleet = Fleet::new();

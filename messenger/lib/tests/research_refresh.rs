@@ -744,6 +744,38 @@ fn automatic_renewal_is_refused_unless_everything_substantive_is_unchanged_and_r
     assert_eq!(rejected, 4);
 }
 
+/// Review-1 regression: `2026-09-31` once parsed, so an impossible `checked_on`
+/// could match an equally impossible `retrieved` date. The schema already
+/// refused the document's date; the source-check record now refuses its own.
+#[test]
+fn an_impossible_evidence_date_cannot_qualify_an_unchanged_renewal() {
+    let repo = Repo::published();
+    reviewed_discord(&repo, "2026-09-18");
+    let accepted = repo.read(&document(PlatformId::Discord)).expect("doc");
+    let (on, impossible) = ("2026-10-20", "2026-09-31");
+    let dated = accepted.replace("2026-09-18", on);
+    let candidate = dated.replace(&format!("retrieved: {on}"), &format!("retrieved: {impossible}"));
+    assert_ne!(candidate, dated, "the fixture edit applies");
+
+    for (checked_on, refused_at) in [(impossible, Stage::Reconcile), (on, Stage::Validation)] {
+        let run = repo.prepare(PlatformId::Discord, &day(on));
+        let agent = Agent { repo: &repo, run: &run };
+        agent.discovery();
+        agent.reconcile(&candidate, &agent.checks(checked_on, &[]));
+        agent.sources(false);
+        let report = check_run(&repo.loader, run.run_id.as_str(), Stage::Validation, &day(on)).expect("check validation");
+        assert_eq!(report.status, RunStatus::Failed, "checked on {checked_on}: {:#?}", report.stages);
+        let stage = report.stages.iter().find(|result| result.stage == refused_at).expect("stage");
+        assert_eq!(stage.status, StageStatus::Failed, "checked on {checked_on}: {:#?}", report.stages);
+        assert!(stage.findings.iter().any(|f| f.contains(impossible)), "checked on {checked_on}: the finding names the date: {:#?}", stage.findings);
+        assert!(
+            matches!(renew(&repo, &run, on), Err(RefreshError::WrongStatus { status: RunStatus::Failed, .. })),
+            "checked on {checked_on}"
+        );
+    }
+    assert_eq!(repo.read(&document(PlatformId::Discord)).as_deref(), Some(accepted.as_str()), "nothing is published");
+}
+
 #[test]
 fn an_initial_publication_promotes_every_platform_together() {
     let repo = Repo::bare();

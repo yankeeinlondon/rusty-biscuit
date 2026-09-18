@@ -128,7 +128,7 @@ pub enum ScopeArg {
 }
 
 fn parse_date(text: &str) -> Result<Date, String> {
-    Date::parse(text).ok_or_else(|| format!("`{text}` is not a YYYY-MM-DD date"))
+    Date::parse(text).ok_or_else(|| format!("`{text}` is not a real YYYY-MM-DD calendar date"))
 }
 
 pub(crate) fn parse_platform(text: &str) -> Result<PlatformId, String> {
