@@ -11,6 +11,11 @@
 //! drift. Both refuse to act while a publication awaits recovery, and a
 //! refused or interrupted generation leaves the previous snapshot selected.
 //!
+//! Accepted change history travels with the snapshot: every published review
+//! record under `docs/research/reviews/` is carried forward byte for byte, new
+//! ones arrive through [`generate_with`] (promotion), and `CHANGELOG.md` is
+//! rendered from them, so history is selected atomically with the documents.
+//!
 //! Partial refresh: `updates` supplies new accepted document text for some
 //! platforms; every other platform carries its previously published document
 //! unchanged (so its own freshness dates remain), provided it still satisfies
@@ -34,6 +39,7 @@ use super::publish::{
     self, Artifact, ArtifactScope, InputEntry, Options, PublishError, PublishReport, REGION_BEGIN, REGION_END,
     SchemaEntry, Snapshot, Verified, covered_bytes, read_verified, splice_regions,
 };
+use super::refresh::review::{CHANGELOG, REVIEWS_DIR, ReviewRecord, is_review_path, render_changelog, review_path};
 use super::report::{self, CatalogView, Enforceability, Filter};
 use super::validate::{Context, DocumentValidation, Scope, validate_document, validate_fleet, validate_mappings, validate_overrides, validate_roster};
 
@@ -59,6 +65,8 @@ pub struct Fleet {
     inputs: Vec<InputEntry>,
     /// The current summary file, if any; its authored prose is kept.
     summary: Option<String>,
+    /// Review records by repository path: the published ones plus new ones.
+    reviews: BTreeMap<String, Vec<u8>>,
     workspace: Workspace,
 }
 
@@ -148,8 +156,32 @@ pub fn load_fleet(loader: &Loader, baseline: Baseline<'_>, updates: &BTreeMap<Pl
         Baseline::Published(verified) => verified.files.get(SUMMARY).map(|bytes| String::from_utf8_lossy(bytes).into_owned()),
         Baseline::FixedPaths => read(SUMMARY)?,
     };
+    let reviews = match baseline {
+        Baseline::Published(verified) => verified
+            .files
+            .iter()
+            .filter(|(path, _)| is_review_path(path))
+            .map(|(path, bytes)| (path.clone(), bytes.clone()))
+            .collect(),
+        Baseline::FixedPaths => read_reviews(&workspace)?,
+    };
 
-    Ok(Fleet { roster, documents, missing, overrides, mappings, schema, inputs, summary, workspace })
+    Ok(Fleet { roster, documents, missing, overrides, mappings, schema, inputs, summary, reviews, workspace })
+}
+
+/// Review records at the fixed directory (initial publication only).
+fn read_reviews(workspace: &Workspace) -> Result<BTreeMap<String, Vec<u8>>, ResearchError> {
+    let dir = workspace.resolve(&RepoPath::from_portable(REVIEWS_DIR));
+    let mut reviews = BTreeMap::new();
+    let Ok(entries) = std::fs::read_dir(&dir) else { return Ok(reviews) };
+    for entry in entries.flatten() {
+        let path = format!("{REVIEWS_DIR}/{}", entry.file_name().to_string_lossy());
+        if entry.path().is_file() && is_review_path(&path) {
+            let bytes = std::fs::read(entry.path()).map_err(|source| ResearchError::Io { path: RepoPath::from_portable(&path), source })?;
+            reviews.insert(path, bytes);
+        }
+    }
+    Ok(reviews)
 }
 
 fn markdown_hashes(text: &str) -> (Option<String>, Option<String>) {
@@ -206,6 +238,9 @@ impl Fleet {
                 diagnostics.extend(validate_fleet(&self.roster.path, roster, &present));
             }
         }
+        if let Some(roster) = &self.roster.record {
+            diagnostics.extend(self.review_diagnostics(roster));
+        }
         let validated: Vec<&super::validate::ValidatedDocument> = accepted.iter().map(|a| &a.validated).collect();
         if let Some(overrides) = &self.overrides {
             diagnostics.extend(validate_overrides(overrides, &validated, &self.schema.xxh64, today));
@@ -219,6 +254,46 @@ impl Fleet {
         }
         sort_diagnostics(&mut diagnostics);
         FleetValidation { diagnostics, missing: self.missing.clone(), accepted, assessments }
+    }
+
+    /// Adds review records (a promotion's new record) to the fleet.
+    pub fn add_reviews(&mut self, reviews: &BTreeMap<String, Vec<u8>>) {
+        self.reviews.extend(reviews.iter().map(|(path, bytes)| (path.clone(), bytes.clone())));
+    }
+
+    /// Parsed review records; malformed ones are reported by `validate`.
+    fn parsed_reviews(&self) -> BTreeMap<String, ReviewRecord> {
+        self.reviews
+            .iter()
+            .filter_map(|(path, bytes)| ReviewRecord::parse(bytes).ok().map(|record| (path.clone(), record)))
+            .collect()
+    }
+
+    fn review_diagnostics(&self, roster: &Roster) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        for (path, bytes) in &self.reviews {
+            let mut push = |message: String| {
+                diagnostics.push(Diagnostic {
+                    path: RepoPath::from_portable(path),
+                    pointer: String::new(),
+                    rule: super::diagnostics::Rule::Review,
+                    subject: None,
+                    message,
+                });
+            };
+            match ReviewRecord::parse(bytes) {
+                Err(message) => push(format!("not a review record: {message}")),
+                Ok(record) => {
+                    if review_path(&record.approval.on, record.platform_id, &record.run_id) != *path {
+                        push("the file name does not match the record's approval date, platform, and run".to_string());
+                    }
+                    if roster.active_platforms().all(|platform| platform.platform_id != record.platform_id) {
+                        push(format!("{} is not an active roster platform", record.platform_id));
+                    }
+                }
+            }
+        }
+        diagnostics
     }
 
     /// The snapshot a clean fleet publishes.
@@ -271,6 +346,13 @@ impl Fleet {
         }
         artifacts.insert(CATALOG.to_string(), Artifact { bytes: catalog_bytes, scope: ArtifactScope::File });
         artifacts.insert(SUMMARY.to_string(), Artifact { bytes: summary.into_bytes(), scope: ArtifactScope::GeneratedRegions });
+        for (path, bytes) in &self.reviews {
+            artifacts.insert(path.clone(), Artifact { bytes: bytes.clone(), scope: ArtifactScope::File });
+        }
+        artifacts.insert(
+            CHANGELOG.to_string(),
+            Artifact { bytes: render_changelog(&self.parsed_reviews()).into_bytes(), scope: ArtifactScope::File },
+        );
         Ok((Snapshot { schema: self.schema.clone(), inputs, artifacts }, catalog))
     }
 }
@@ -316,6 +398,23 @@ pub fn generate(
     today: &Date,
     options: Options,
 ) -> Result<Generated, GenerateError> {
+    generate_with(loader, updates, &BTreeMap::new(), today, options)
+}
+
+/// [`generate`] with new review records (repository path to bytes) added to
+/// the published history; promotion's only way to write accepted research.
+///
+/// ## Errors
+///
+/// As [`generate`]; a malformed or misnamed review record refuses
+/// generation with an `SR-REVIEW` finding.
+pub fn generate_with(
+    loader: &Loader,
+    updates: &BTreeMap<PlatformId, String>,
+    reviews: &BTreeMap<String, Vec<u8>>,
+    today: &Date,
+    options: Options,
+) -> Result<Generated, GenerateError> {
     let workspace = loader.workspace();
     if publish::pending(workspace) {
         return Err(PublishError::RecoveryRequired.into());
@@ -326,7 +425,8 @@ pub fn generate(
         Err(error) => return Err(error.into()),
     };
     let baseline = verified.as_ref().map_or(Baseline::FixedPaths, Baseline::Published);
-    let fleet = load_fleet(loader, baseline, updates)?;
+    let mut fleet = load_fleet(loader, baseline, updates)?;
+    fleet.add_reviews(reviews);
     let validation = fleet.validate(today);
     let (snapshot, _catalog) = fleet.snapshot(&validation)?;
     let manifest = snapshot.manifest();

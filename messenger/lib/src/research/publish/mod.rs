@@ -13,7 +13,7 @@
 //! Design and per-OS evidence: the publication spike findings under
 //! `messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/`.
 
-mod fsutil;
+pub(crate) mod fsutil;
 
 use std::collections::BTreeMap;
 use std::fs;

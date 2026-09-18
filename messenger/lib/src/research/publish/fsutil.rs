@@ -36,7 +36,7 @@ fn is_transient_handle_conflict(error: &io::Error) -> bool {
 }
 
 /// Creates or truncates `path`, writes `bytes`, and `sync_all`s.
-pub(super) fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -79,7 +79,7 @@ fn with_retry(retry: RetryPolicy, mut operation: impl FnMut() -> io::Result<()>)
 
 /// Atomically replaces `dest` with `bytes` through a durable sibling temp.
 /// Never deletes `dest` first, so it always holds complete old or new bytes.
-pub(super) fn replace_file(dest: &Path, bytes: &[u8], tag: &str, retry: RetryPolicy) -> io::Result<()> {
+pub(crate) fn replace_file(dest: &Path, bytes: &[u8], tag: &str, retry: RetryPolicy) -> io::Result<()> {
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -96,7 +96,7 @@ pub(super) fn replace_file(dest: &Path, bytes: &[u8], tag: &str, retry: RetryPol
 }
 
 /// Removes a file if present.
-pub(super) fn remove_if_present(path: &Path, retry: RetryPolicy) -> io::Result<()> {
+pub(crate) fn remove_if_present(path: &Path, retry: RetryPolicy) -> io::Result<()> {
     with_retry(retry, || match fs::remove_file(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         other => other,
@@ -105,7 +105,7 @@ pub(super) fn remove_if_present(path: &Path, retry: RetryPolicy) -> io::Result<(
 
 /// Reads a whole file and closes it, or `None` when it does not exist.
 /// Readers must not hold artifact handles across a publication.
-pub(super) fn read_optional(path: &Path) -> io::Result<Option<Vec<u8>>> {
+pub(crate) fn read_optional(path: &Path) -> io::Result<Option<Vec<u8>>> {
     match fs::read(path) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),

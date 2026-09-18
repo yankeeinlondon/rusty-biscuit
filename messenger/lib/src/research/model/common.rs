@@ -90,6 +90,15 @@ impl Date {
         let (year, month, day) = civil_from_days(days_from_civil(field(0..4), field(5..7), field(8..10)) + i64::from(days));
         Date(format!("{year:04}-{month:02}-{day:02}"))
     }
+
+    /// Whole days from `self` to `later` (negative when `later` is earlier).
+    pub fn days_until(&self, later: &Date) -> i64 {
+        let days = |date: &Date| {
+            let field = |range: std::ops::Range<usize>| date.0[range].parse::<i64>().expect("parsed date");
+            days_from_civil(field(0..4), field(5..7), field(8..10))
+        };
+        days(later) - days(self)
+    }
 }
 
 /// Days since 1970-01-01 (Howard Hinnant's `days_from_civil`).

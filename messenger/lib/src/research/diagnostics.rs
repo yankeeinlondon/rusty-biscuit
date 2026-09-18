@@ -78,6 +78,8 @@ pub enum Rule {
     Override,
     #[serde(rename = "SR-MAPPING")]
     Mapping,
+    #[serde(rename = "SR-REVIEW")]
+    Review,
 }
 
 impl Rule {
@@ -114,6 +116,7 @@ impl Rule {
         Rule::Fixtures,
         Rule::Override,
         Rule::Mapping,
+        Rule::Review,
     ];
 
     /// The documented code, e.g. `SR-UNIQUE`.
@@ -150,6 +153,7 @@ impl Rule {
             Rule::Fixtures => "SR-FIXTURES",
             Rule::Override => "SR-OVERRIDE",
             Rule::Mapping => "SR-MAPPING",
+            Rule::Review => "SR-REVIEW",
         }
     }
 
