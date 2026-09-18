@@ -69,6 +69,12 @@ pub struct TaskDiagnosticProvenance {
     pub source_path: PathBuf,
     /// Exact source-rooted path of the task's executable property.
     pub action_property: String,
+    /// Exact source-rooted path of the task itself, the root every other task
+    /// property hangs off (`tasks[0]`, `tasks[1].group.tasks[0]`).
+    ///
+    /// Empty when the task *is* the document — an external `kind: task` file,
+    /// where `setup` is already the source-rooted spelling.
+    pub task_property: String,
 }
 
 /// The five executable shapes, resolved.

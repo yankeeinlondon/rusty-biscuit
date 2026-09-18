@@ -549,6 +549,15 @@ mod tests {
     /// its presence in the composed context proves the field was scanned.
     const CTX_REF: &str = "{{ ctx.repo_root }}";
 
+    /// A side effect with no authored order — like every task built here, it is
+    /// synthesized in memory rather than walked out of an authored document.
+    fn side_effect(action: Value) -> PreflightAction {
+        PreflightAction::SideEffect {
+            action,
+            authored_set_order: None,
+        }
+    }
+
     fn init_git_repo(path: &Path) {
         let status = Command::new("git")
             .args(["init", "--quiet"])
@@ -623,12 +632,11 @@ mod tests {
                 teardown: None,
                 origin_dir: self.task_dir.clone(),
                 origin_path: self.origin_path(),
-                // Synthesized in memory rather than walked out of a document,
-                // so there is no authored key order to carry.
                 authored: claudine::composition::AuthoredOrder::default(),
                 diagnostic: claudine::composition::sequence::preflight::TaskDiagnosticProvenance {
                     source_path: self.origin_path(),
                     action_property: "shell".to_string(),
+                    task_property: String::new(),
                 },
             }
         }
@@ -639,10 +647,7 @@ mod tests {
         let fixture = Fixture::new();
         let origin_path = fixture.origin_path();
         let mut task = fixture.task();
-        task.action = PreflightAction::SideEffect {
-            action: json!({"stderr": CTX_REF}),
-            authored_set_order: None,
-        };
+        task.action = side_effect(json!({"stderr": CTX_REF}));
         let invocation = InvocationContext::capture_at(&fixture.launch_dir);
         let env = BTreeMap::from([("TASK_MARKER".to_string(), "owned".to_string())]);
 
@@ -679,12 +684,9 @@ mod tests {
         )
         .unwrap();
         let mut task = fixture.task();
-        task.action = PreflightAction::SideEffect {
-            action: json!({
-                "stderr": "{{ ctx.repo_root }}|{{ ctx.area }}|{{ ctx.agent }}|{{ ctx.model }}|{{ env.AGENT }}|{{ env.MODEL }}"
-            }),
-            authored_set_order: None,
-        };
+        task.action = side_effect(json!({
+            "stderr": "{{ ctx.repo_root }}|{{ ctx.area }}|{{ ctx.agent }}|{{ ctx.model }}|{{ env.AGENT }}|{{ env.MODEL }}"
+        }));
         let invocation = InvocationContext::capture_at(&fixture.launch_dir);
         let env = BTreeMap::from([
             ("AGENT".to_string(), "codex".to_string()),
@@ -729,12 +731,7 @@ mod tests {
         let cases: Vec<(&str, Box<dyn Fn(&mut PreflightTask)>)> = vec![
             (
                 "action (side_effect)",
-                Box::new(|task| {
-                    task.action = PreflightAction::SideEffect {
-                        action: json!({"stderr": CTX_REF}),
-                        authored_set_order: None,
-                    };
-                }),
+                Box::new(|task| task.action = side_effect(json!({"stderr": CTX_REF}))),
             ),
             (
                 "action (shell)",

@@ -263,6 +263,59 @@ fn event_set_failure_projects_its_source_rooted_nested_path_without_committing()
     assert!(rendered.contains("t.md"), "{rendered}");
 }
 
+/// The task-stack rebasing gives `setup:`/`teardown:` items a `{root}[n]`
+/// spelling with no `stack` segment. An event's items must keep the
+/// `{signal}.stack[n]` spelling they have always had — on both of the
+/// executor's stack-loop property sites, which is why one run asserts the
+/// guard *and* the action.
+#[test]
+fn event_stack_items_keep_their_signal_rooted_stack_spelling() {
+    let guard_config = config(json!({"success": {"stack": [
+        {"when": "unknown_guard", "action": {"set": {"unreached": "value"}}},
+    ]}}));
+    let action_config = config(json!({"success": {"stack": [
+        {"action": {"set": {"stable": "{{ unknown_value }}"}}},
+    ]}}));
+    let base = map(json!({"stable": "kept"}));
+    let live = std::sync::Mutex::new(base.clone());
+    let runtime = RuntimeState::new();
+    let (_dir, engine) = temp_engine();
+
+    let (guard_outcome, _) = run_event(
+        &guard_config,
+        LifecycleSignal::Success,
+        &base,
+        &live,
+        &runtime,
+        &engine,
+    );
+    assert_eq!(
+        guard_outcome
+            .evaluation_error
+            .expect("the guard raises")
+            .property
+            .as_deref(),
+        Some("success.stack[0].when"),
+    );
+
+    let (action_outcome, _) = run_event(
+        &action_config,
+        LifecycleSignal::Success,
+        &base,
+        &live,
+        &runtime,
+        &engine,
+    );
+    assert_eq!(
+        action_outcome
+            .evaluation_error
+            .expect("the value raises")
+            .property
+            .as_deref(),
+        Some("success.stack[0].action[0].set.stable"),
+    );
+}
+
 #[test]
 fn late_invalid_destination_publishes_no_part_of_the_task_side_effect() {
     for invalid in ["outputs", "a.b"] {

@@ -2483,6 +2483,597 @@ mod side_effect_tasks {
     }
 }
 
+// -- authored set order -----------------------------------------------------
+
+/// Every task source the shared lifecycle grammar accepts must reach its
+/// `set:` mapping's authored key order, not the canonical order a
+/// `serde_json::Map` would impose.
+///
+/// Each case authors `z_last_lexically` before `a_first_lexically`, so a
+/// lexical-order implementation produces the exact reverse of the asserted
+/// output and cannot pass.
+mod authored_set_order {
+    use super::*;
+
+    /// The serialized prior-value object authored order produces.
+    const EXPECTED_OUTPUT: &str = "{\"z_last_lexically\":null,\"a_first_lexically\":null}";
+
+    /// Write a document verbatim.
+    ///
+    /// The file-scope `write_source`/`write_yaml` helpers serialize through
+    /// `serde_json`, whose maps are already in the canonical order these tests
+    /// have to distinguish themselves from.
+    fn write_authored(dir: &Path, name: &str, text: &str) -> String {
+        let path = dir.join(name);
+        fs::write(&path, text).unwrap();
+        path.display().to_string()
+    }
+
+    /// Run the fixture's single step and return the accumulated outputs.
+    fn outputs_of(fixture: &Fixture) -> Value {
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        runtime.outputs_value()
+    }
+
+    #[test]
+    fn an_inline_group_member_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    group:\n",
+                "      name: bundle\n",
+                "      tasks:\n",
+                "        - side_effect:\n",
+                "            set:\n",
+                "              z_last_lexically: true\n",
+                "              a_first_lexically: false\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
+    fn an_external_group_member_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "group.yaml",
+            concat!(
+                "kind: group\n",
+                "name: bundle\n",
+                "tasks:\n",
+                "  - side_effect:\n",
+                "      set:\n",
+                "        z_last_lexically: true\n",
+                "        a_first_lexically: false\n",
+            ),
+        );
+        let source = one_step_source(
+            dir.path(),
+            json!({ "name": "alpha", "group": "group.yaml" }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
+    fn a_catalog_group_member_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "catalog.yaml",
+            concat!(
+                "kind: group-catalog\n",
+                "groups:\n",
+                // The selected group is the *second* entry, so a pointer left
+                // at the file root reads the wrong subtree and finds no order.
+                "  - name: decoy\n",
+                "    tasks:\n",
+                "      - shell: \"true\"\n",
+                "  - name: bundle\n",
+                "    tasks:\n",
+                "      - side_effect:\n",
+                "          set:\n",
+                "            z_last_lexically: true\n",
+                "            a_first_lexically: false\n",
+            ),
+        );
+        let source = one_step_source(
+            dir.path(),
+            json!({ "name": "alpha", "group": "bundle@catalog.yaml" }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
+    fn an_externalized_task_document_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "task.yaml",
+            concat!(
+                "kind: task\n",
+                "side_effect:\n",
+                "  set:\n",
+                "    z_last_lexically: true\n",
+                "    a_first_lexically: false\n",
+            ),
+        );
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.yaml" }));
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
+    fn a_referenced_formal_sequence_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "steps.yaml",
+            concat!(
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    side_effect:\n",
+                "      set:\n",
+                "        z_last_lexically: true\n",
+                "        a_first_lexically: false\n",
+            ),
+        );
+        // The invoking document declares no `set:` of its own, so the order can
+        // only have come from the referenced document.
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[("sequence", json!("steps.yaml"))],
+            "Document body.\n",
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    /// Order is not only a serialization concern: the executor commits a `set:`
+    /// in its mapping's order and returns at the first failure, so the key the
+    /// diagnostic names *is* the first authored one.
+    #[test]
+    fn a_task_setup_stack_diagnoses_the_first_authored_failure() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    shell: \"true\"\n",
+                "    setup:\n",
+                "      - action:\n",
+                "          set:\n",
+                "            z_last_lexically: \"{{ z_unknown_root }}\"\n",
+                "            a_first_lexically: \"{{ a_unknown_root }}\"\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        let info = &outcome.error.as_ref().expect("setup failure is reported").info;
+        let property = info.property.as_deref().expect("a set failure names its key");
+        assert!(
+            property.ends_with(".z_last_lexically"),
+            "the first authored assignment must be the diagnosed one, got `{property}`",
+        );
+        assert!(
+            !property.contains("a_first_lexically"),
+            "lexical order would have diagnosed the second authored assignment: `{property}`",
+        );
+        assert_eq!(info.variant, "set");
+        // Atomic: a failed mapping commits nothing and the primary never ran.
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert!(shell.commands().is_empty());
+    }
+}
+
+// -- task stack diagnostics -------------------------------------------------
+
+/// A task's `setup:`/`teardown:` stack is parsed and run under a *synthetic*
+/// lifecycle signal, so left alone its diagnostics name `start.stack[n]` — a
+/// location no author can find. Every case here proves the stack is rooted at
+/// the authored task property instead, in the document that authored it.
+mod task_stack_diagnostics {
+    use super::*;
+
+    /// The failing `set:` mapping, indented to `indent` columns so it nests
+    /// under whichever `action:` key the calling fixture authored.
+    ///
+    /// Its innermost element cannot resolve, so the failure carries the
+    /// object-key plus array-index suffix R5 requires.
+    fn failing_set(indent: usize) -> String {
+        let pad = " ".repeat(indent);
+        [
+            "set:",
+            "  stable: changed",
+            "  metadata:",
+            "    files:",
+            "      - \"{{unknown_root}}\"",
+        ]
+        .iter()
+        .map(|line| format!("{pad}{line}\n"))
+        .collect()
+    }
+
+    fn write_authored(dir: &Path, name: &str, text: &str) -> String {
+        let path = dir.join(name);
+        fs::write(&path, text).unwrap();
+        path.display().to_string()
+    }
+
+    /// Run the fixture's single step with runtime state wired and a TTY
+    /// terminal, so excerpt capture is exercised rather than skipped.
+    fn run(fixture: &mut Fixture) -> (TaskOutcome, Arc<RuntimeState>, Vec<String>) {
+        fixture.term.is_tty = true;
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute(&wiring);
+        (outcome, runtime, shell.commands())
+    }
+
+    /// Assert the one effective diagnostic every projection selects: the
+    /// authored document, the exact property, terminal/`err.*`/machine parity,
+    /// and the absence of any synthetic event spelling.
+    fn assert_stack_failure(
+        outcome: &TaskOutcome,
+        expected_source: &Path,
+        expected_property: &str,
+        expected_excerpt: Option<&str>,
+    ) {
+        use biscuit_terminal::errors::BlockError;
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        let info = &outcome.error.as_ref().expect("the stack failure is reported").info;
+        let snapshot = info.snapshot.as_ref().expect("stack failures are typed");
+        let err_value = info.to_value();
+        let source = biscuit_file::to_portable_string(expected_source);
+
+        // `info.property` is the executor's own finding, so only a runtime
+        // failure has one; a parse failure's path lives in the typed snapshot
+        // alone, which is what every projection reads.
+        if let Some(property) = info.property.as_deref() {
+            assert_eq!(property, expected_property);
+        }
+        assert_eq!(snapshot.detail["property"], json!(expected_property));
+        assert_eq!(err_value["detail"]["property"], snapshot.detail["property"]);
+        assert_eq!(err_value["code"], json!(snapshot.code));
+        assert_eq!(err_value["msg"], json!(snapshot.message));
+        assert!(snapshot.message.contains(&source), "{}", snapshot.message);
+
+        let restored = crate::diagnostics::RestoredDiagnostic::new((**snapshot).clone());
+        let rendered = strip_escape_codes(restored.report_block_error_optimistic(Some(200)));
+        assert!(rendered.contains(expected_property), "{rendered}");
+        assert!(rendered.contains(&source), "{rendered}");
+        for synthetic in ["start.stack", "finalize.stack"] {
+            assert!(
+                !rendered.contains(synthetic)
+                    && !snapshot.message.contains(synthetic)
+                    && !err_value.to_string().contains(synthetic),
+                "the synthetic signal location leaked as `{synthetic}`: {rendered}",
+            );
+        }
+        match expected_excerpt {
+            Some(value) => {
+                assert!(
+                    snapshot.frontmatter_excerpt.is_some(),
+                    "a locatable frontmatter value must carry an excerpt",
+                );
+                assert!(rendered.contains(value), "{rendered}");
+            }
+            None => assert!(snapshot.frontmatter_excerpt.is_none()),
+        }
+    }
+
+    /// A stack whose `set:` is not a mapping at all is rejected before the task
+    /// starts, so the rebased root has to survive the *parse* path too.
+    #[test]
+    fn a_malformed_setup_mapping_is_rejected_at_the_task_rooted_property() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    shell: \"true\"\n",
+                "    setup:\n",
+                "      - action:\n",
+                "          set: ready\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, commands) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].setup[0].action[0].set",
+            Some("set: ready"),
+        );
+        // A stack that will not parse fails the task before setup starts.
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+        assert!(commands.is_empty());
+    }
+
+    /// A removed positional `set: [key, value]` in a group member's
+    /// `teardown:` is rejected at parse time — before the member's primary
+    /// runs — at the member's nested stack root.
+    #[test]
+    fn a_removed_teardown_form_in_a_group_member_is_rejected_at_its_nested_root() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    group:\n",
+                "      name: bundle\n",
+                "      tasks:\n",
+                "        - shell: \"true\"\n",
+                "          teardown:\n",
+                "            - action:\n",
+                "                set: [ready, \"yes\"]\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, commands) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].group.tasks[0].teardown[0].action[0].set",
+            Some("set: [ready, \"yes\"]"),
+        );
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+        assert!(commands.is_empty(), "the member never started: {commands:?}");
+    }
+
+    /// An external `kind: task` document is its own root, so a malformed
+    /// stack there is `setup[n]` in *that* file, not the invoking sequence.
+    #[test]
+    fn a_malformed_external_task_setup_names_the_owning_document() {
+        let dir = TempDir::new().unwrap();
+        let task_path = dir.path().join("task.yaml");
+        write_authored(
+            dir.path(),
+            "task.yaml",
+            concat!(
+                "kind: task\n",
+                "shell: \"true\"\n",
+                "setup:\n",
+                "  - action:\n",
+                "      set: ready\n",
+            ),
+        );
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.yaml" }));
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, commands) = run(&mut fixture);
+
+        // A YAML data document has no frontmatter block to excerpt.
+        assert_stack_failure(&outcome, &task_path, "setup[0].action[0].set", None);
+        assert!(
+            !failure_message(&outcome).contains("seq.md"),
+            "the invoking sequence is not the authoring document: {}",
+            failure_message(&outcome),
+        );
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn a_setup_evaluation_failure_keeps_its_authored_document_and_property() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            &format!(
+                concat!(
+                    "---\n",
+                    "sequence:\n",
+                    "  - name: alpha\n",
+                    "    shell: \"true\"\n",
+                    "    setup:\n",
+                    "      - action:\n",
+                    "{}",
+                    "---\n\n",
+                    "Document body.\n",
+                ),
+                failing_set(10),
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, commands) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].setup[0].action[0].set.metadata.files[0]",
+            Some("{{unknown_root}}"),
+        );
+        assert_eq!(outcome.error.as_ref().unwrap().stage, TaskStage::Setup);
+        // Atomic: neither half of the mapping commits, and the primary never ran.
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn a_teardown_evaluation_failure_keeps_its_authored_document_and_property() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            &format!(
+                concat!(
+                    "---\n",
+                    "sequence:\n",
+                    "  - name: alpha\n",
+                    "    shell: \"true\"\n",
+                    "    teardown:\n",
+                    "      - action:\n",
+                    "{}",
+                    "---\n\n",
+                    "Document body.\n",
+                ),
+                failing_set(10),
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, commands) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].teardown[0].action[0].set.metadata.files[0]",
+            Some("{{unknown_root}}"),
+        );
+        assert_eq!(outcome.error.as_ref().unwrap().stage, TaskStage::Teardown);
+        // The primary ran and succeeded; the teardown mapping still commits
+        // nothing, and the failed task contributes no output.
+        assert_eq!(commands, vec!["true".to_string()]);
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+    }
+
+    /// The owning document, not the invoking sequence: an external task file
+    /// supplies both the source and the property root, so `setup` is already
+    /// source-rooted there.
+    #[test]
+    fn an_external_task_setup_failure_names_the_owning_document() {
+        let dir = TempDir::new().unwrap();
+        let task_path = dir.path().join("task.yaml");
+        write_authored(
+            dir.path(),
+            "task.yaml",
+            &format!(
+                concat!(
+                    "kind: task\n",
+                    "shell: \"true\"\n",
+                    "setup:\n",
+                    "  - action:\n",
+                    "{}",
+                ),
+                failing_set(6),
+            ),
+        );
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.yaml" }));
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, commands) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            &task_path,
+            "setup[0].action[0].set.metadata.files[0]",
+            // An external task document is data, not Markdown, so there is no
+            // frontmatter block to excerpt — the same outcome the file-backed
+            // group cases record. Enrichment still has to run against *this*
+            // document, which the source assertions above prove.
+            None,
+        );
+        assert!(
+            !failure_message(&outcome).contains("seq.md"),
+            "the invoking sequence is not the authoring document: {}",
+            failure_message(&outcome),
+        );
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert!(commands.is_empty());
+    }
+
+    /// A group member is reached through the group, so its stack root carries
+    /// the whole nested path.
+    #[test]
+    fn an_inline_group_member_setup_failure_carries_the_nested_task_root() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            &format!(
+                concat!(
+                    "---\n",
+                    "sequence:\n",
+                    "  - name: alpha\n",
+                    "    group:\n",
+                    "      name: bundle\n",
+                    "      tasks:\n",
+                    "        - shell: \"true\"\n",
+                    "          setup:\n",
+                    "            - action:\n",
+                    "{}",
+                    "---\n\n",
+                    "Document body.\n",
+                ),
+                failing_set(16),
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, _) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].group.tasks[0].setup[0].action[0].set.metadata.files[0]",
+            Some("{{unknown_root}}"),
+        );
+        assert!(runtime.snapshot().mutations.is_empty());
+    }
+}
+
 // -- prompt tasks -----------------------------------------------------------
 
 mod prompt_tasks {

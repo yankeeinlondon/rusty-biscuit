@@ -404,6 +404,46 @@ pub struct StackExecutionContext<'a> {
     pub settings: &'a GlobalSettings,
 }
 
+/// Which authored container a running stack came from, for the property paths
+/// its diagnostics report.
+///
+/// An event's items are reached through `{signal}.stack[i]`; a task's
+/// `setup:`/`teardown:` value *is* the list, so its items are `{root}[i]` with
+/// no `stack` segment. That spelling is the only difference between the two, so
+/// they share one loop and this is where it lives. Carried as a call argument
+/// rather than on [`StackExecutionContext`] because one context runs both kinds
+/// of stack, and as a borrowed root rather than on [`ActionLocation`] because
+/// that type is the owned, `Copy` proxy-provenance identity.
+#[derive(Debug, Clone, Copy)]
+enum StackRoot<'a> {
+    /// A lifecycle event block's `stack:`.
+    Event,
+    /// A task's `setup:`/`teardown:` list, at its source-rooted property.
+    Task(&'a str),
+}
+
+impl StackRoot<'_> {
+    /// The property of the `when:` guard on the `index`-th item.
+    fn when_property(&self, signal: LifecycleSignal, index: usize) -> String {
+        match self {
+            Self::Event => format!("{}.stack[{index}].when", signal.property_name()),
+            Self::Task(root) => format!("{root}[{index}].when"),
+        }
+    }
+
+    /// The property of the action `location` names.
+    fn action_property(&self, location: ActionLocation) -> String {
+        match self {
+            Self::Event => location.to_string(),
+            Self::Task(root) => format!(
+                "{root}[{}].action[{}]",
+                location.stack_index(),
+                location.action_index()
+            ),
+        }
+    }
+}
+
 /// What a single action did.
 enum ActionStep {
     /// Continue to the next action / item.
@@ -483,7 +523,7 @@ impl StackExecutionContext<'_> {
     /// only needs the stack actions evaluated.
     pub fn execute_stack_for_signal(&self, config: &LifecycleConfig) -> LifecycleEventOutcome {
         match config.stack(self.signal) {
-            Some(items) if !items.is_empty() => self.execute_stack(items),
+            Some(items) if !items.is_empty() => self.execute_stack(items, StackRoot::Event),
             _ => LifecycleEventOutcome::default(),
         }
     }
@@ -530,11 +570,17 @@ impl StackExecutionContext<'_> {
     /// A task stack has no event block of its own, so it never emits top-level
     /// communication; only the items run. Mutations reach the live cell exactly
     /// as they do for an event stack.
+    ///
+    /// `property` is the source-rooted path of the stack value itself
+    /// (`tasks[0].setup`). Item `n`'s diagnostics are rooted at `{property}[n]`,
+    /// so a task-stack failure names the authored task property rather than the
+    /// synthetic signal the stack was parsed under.
     pub fn execute_action_stack(
         &self,
         items: &[super::actions::LifecycleStackItem],
+        property: &str,
     ) -> LifecycleEventOutcome {
-        self.execute_stack(items)
+        self.execute_stack(items, StackRoot::Task(property))
     }
 
     /// Dispatch one action as a task's `side_effect:` primary and return the
@@ -1000,12 +1046,16 @@ impl StackExecutionContext<'_> {
     /// live cell so a *later* event observes this event's mutations — including
     /// mutations made before an early control/error return (the side effect
     /// already hit disk).
-    fn execute_stack(&self, items: &[super::actions::LifecycleStackItem]) -> LifecycleEventOutcome {
+    fn execute_stack(
+        &self,
+        items: &[super::actions::LifecycleStackItem],
+        root: StackRoot<'_>,
+    ) -> LifecycleEventOutcome {
         let mut working: Map<String, Value> = match self.live_frontmatter {
             Some(cell) => cell.lock().expect(LIVE_POISONED).clone(),
             None => self.frontmatter.clone(),
         };
-        let outcome = self.execute_stack_inner(items, &mut working);
+        let outcome = self.execute_stack_inner(items, root, &mut working);
         if let Some(cell) = self.live_frontmatter {
             *cell.lock().expect(LIVE_POISONED) = working;
         }
@@ -1021,6 +1071,7 @@ impl StackExecutionContext<'_> {
     fn execute_stack_inner(
         &self,
         items: &[super::actions::LifecycleStackItem],
+        root: StackRoot<'_>,
         working: &mut Map<String, Value>,
     ) -> LifecycleEventOutcome {
         for (stack_index, item) in items.iter().enumerate() {
@@ -1030,8 +1081,7 @@ impl StackExecutionContext<'_> {
                 // A `when:` guard that raised is an expression-layer evaluation
                 // error, not a side-effect dispatch failure.
                 Err(info) => {
-                    let property =
-                        format!("{}.stack[{stack_index}].when", self.signal.property_name());
+                    let property = root.when_property(self.signal, stack_index);
                     return LifecycleEventOutcome {
                         evaluation_error: Some(info.at_property(property)),
                         ..Default::default()
@@ -1040,7 +1090,8 @@ impl StackExecutionContext<'_> {
             }
             for (action_index, action) in item.actions.iter().enumerate() {
                 let location = ActionLocation::new(self.signal, stack_index, action_index);
-                match self.run_action(action, location, working) {
+                let property = root.action_property(location);
+                match self.run_action(action, location, &property, working) {
                     ActionStep::Continue => {}
                     ActionStep::Control(control) => {
                         return LifecycleEventOutcome {
@@ -1056,7 +1107,7 @@ impl StackExecutionContext<'_> {
                     }
                     ActionStep::EvaluationErrored(info) => {
                         return LifecycleEventOutcome {
-                            evaluation_error: Some(info.at_property(location.to_string())),
+                            evaluation_error: Some(info.at_property(property)),
                             ..Default::default()
                         };
                     }
@@ -1107,9 +1158,10 @@ impl StackExecutionContext<'_> {
         &self,
         action: &LifecycleAction,
         location: ActionLocation,
+        property: &str,
         working: &mut Map<String, Value>,
     ) -> ActionStep {
-        match self.execute_action_inner(action, location, working) {
+        match self.execute_action_inner(action, location, property, working) {
             Ok(None) => ActionStep::Continue,
             Ok(Some(control)) => ActionStep::Control(control),
             Err(ActionFailure::Evaluation(info)) => {
@@ -1150,10 +1202,15 @@ impl StackExecutionContext<'_> {
     /// [`ActionFailure::Evaluation`] for an expression-layer raise (which always
     /// halts) and [`ActionFailure::Dispatch`] for a side-effect failure (subject
     /// to `no_error` and the per-phase policy).
+    ///
+    /// `location` is the proxy-provenance identity; `property` is the authored
+    /// path the same action reports in diagnostics. The two differ for a task
+    /// `setup:`/`teardown:` stack, whose signal is synthetic.
     fn execute_action_inner(
         &self,
         action: &LifecycleAction,
         location: ActionLocation,
+        property: &str,
         working: &mut Map<String, Value>,
     ) -> Result<Option<StackControl>, ActionFailure> {
         match &action.kind {
@@ -1185,7 +1242,7 @@ impl StackExecutionContext<'_> {
                 self.run_shell_action(shell, working).map(|()| None)
             }
             LifecycleActionKind::RuntimeSet(set) => {
-                self.dispatch_runtime_set(set, &format!("{location}.set"), working)
+                self.dispatch_runtime_set(set, &format!("{property}.set"), working)
                     .map(|_| None)
             }
             LifecycleActionKind::SideEffect(effect) => self

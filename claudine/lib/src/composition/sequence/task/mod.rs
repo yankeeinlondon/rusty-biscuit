@@ -52,7 +52,7 @@ use super::super::lifecycle::{
 };
 use super::super::runtime_state::{RuntimeState, layered_set_overrides, trim_transport_newline};
 use super::model::RuntimeMutation;
-use super::preflight::{PreflightAction, PreflightGraph, PreflightTask};
+use super::preflight::{PreflightAction, PreflightGraph, PreflightTask, property_child};
 use super::reserved;
 use crate::harness::parse_timeout;
 use crate::render::{TaskLiveOutput, TaskStreamOutcome, TaskStreamSink};
@@ -373,7 +373,10 @@ impl TaskExecution<'_> {
             Err(error) => {
                 return StageOutcome::terminal(
                     TaskStatus::Failed,
-                    Some(TaskDiagnostic::from_composition(TaskStage::Setup, &error)),
+                    Some(TaskDiagnostic::from_composition(
+                        TaskStage::Setup,
+                        &self.with_owning_excerpt(error),
+                    )),
                 );
             }
         };
@@ -444,6 +447,11 @@ impl TaskExecution<'_> {
     }
 
     /// Run one action stack, returning its failure when it had one.
+    ///
+    /// The stack is rooted at its source-rooted task property, and a failure is
+    /// re-raised against the owning document, so a `setup:`/`teardown:`
+    /// diagnostic is indistinguishable in shape from a primary `side_effect:`
+    /// one.
     fn run_stack(
         &self,
         stage: TaskStage,
@@ -458,11 +466,49 @@ impl TaskExecution<'_> {
             }
             None => self.stack,
         };
-        let outcome = context.execute_action_stack(items);
+        let outcome = context.execute_action_stack(items, &self.stack_property(stage));
         outcome
             .evaluation_error
             .or(outcome.action_error)
-            .map(|info| TaskDiagnostic { stage, info })
+            .map(|info| TaskDiagnostic {
+                stage,
+                info: self.enrich_from_owning_document(info),
+            })
+    }
+
+    /// Re-raise a runtime failure as the typed `composition.lifecycle_invalid`
+    /// diagnostic, carrying the owning document's frontmatter excerpt.
+    ///
+    /// `variant`/`property`/`reason` are restored onto the rebuilt snapshot
+    /// because they are the executor's findings, not the typed error's: the
+    /// typed error only widens what a projection can show.
+    fn enrich_from_owning_document(&self, info: LifecycleErrorInfo) -> LifecycleErrorInfo {
+        let diagnostic = CompositionError::lifecycle_evaluation(
+            self.stack.signal.property_name(),
+            &self.task.origin_path,
+            &info,
+        );
+        let enriched = self.with_owning_excerpt(diagnostic);
+        let mut enriched_info = LifecycleErrorInfo::from_composition_error(&enriched);
+        enriched_info.variant = info.variant;
+        enriched_info.property = info.property;
+        enriched_info.reason = info.reason;
+        enriched_info
+    }
+
+    /// Attach the owning document's frontmatter excerpt to `error`.
+    ///
+    /// The excerpt is read from `origin_path`, which for a group member or an
+    /// external task is the document that *authored* the task rather than the
+    /// sequence that invoked it — the same document the task's source-rooted
+    /// properties are rooted in, so the two always agree. A data document (an
+    /// external `kind: task` YAML file) has no frontmatter block, so it yields
+    /// no excerpt and `error` is returned unchanged.
+    fn with_owning_excerpt(&self, error: CompositionError) -> CompositionError {
+        match std::fs::read_to_string(&self.task.origin_path) {
+            Ok(source) => error.enrich_frontmatter_text(&source, self.stack.term.is_tty),
+            Err(_) => error,
+        }
     }
 
     /// Run the task's executable field.
@@ -709,28 +755,20 @@ impl TaskExecution<'_> {
                 self.emit_live(&text);
                 PrimaryOutcome::succeeded(text)
             }
-            Err(info) => {
-                let diagnostic = CompositionError::lifecycle_evaluation(
-                    self.stack.signal.property_name(),
-                    &self.task.origin_path,
-                    &info,
-                );
-                let enriched = match std::fs::read_to_string(&self.task.origin_path) {
-                    Ok(source) => {
-                        diagnostic.enrich_frontmatter_text(&source, self.stack.term.is_tty)
-                    }
-                    Err(_) => diagnostic,
-                };
-                let mut enriched_info = LifecycleErrorInfo::from_composition_error(&enriched);
-                enriched_info.variant = info.variant;
-                enriched_info.property = info.property;
-                enriched_info.reason = info.reason;
-                PrimaryOutcome::failed(TaskDiagnostic {
-                    stage: TaskStage::Primary,
-                    info: enriched_info,
-                })
-            }
+            Err(info) => PrimaryOutcome::failed(TaskDiagnostic {
+                stage: TaskStage::Primary,
+                info: self.enrich_from_owning_document(info),
+            }),
         }
+    }
+
+    /// The source-rooted property of one of the task's action stacks.
+    ///
+    /// Both the parser and the executor root their diagnostics here, so a
+    /// `setup:`/`teardown:` failure names the authored task property rather
+    /// than the synthetic signal the stack is parsed and run under.
+    fn stack_property(&self, stage: TaskStage) -> String {
+        property_child(&self.task.diagnostic.task_property, stage.key())
     }
 
     /// Parse both action stacks up front.
@@ -738,23 +776,27 @@ impl TaskExecution<'_> {
         // `setup:`/`teardown:` *are* the stack list, so the task's own pointer
         // plus the property name reaches item `n` — there is no `stack:` key
         // between them the way an event block has one.
-        let parse = |raw: Option<&Value>, signal, property: &str| match raw {
+        let parse = |raw: Option<&Value>, signal, stage: TaskStage| match raw {
             None | Some(Value::Null) => Ok(None),
             Some(value) => parse_task_action_stack_with_order(
                 signal,
                 value,
                 &self.task.origin_path,
-                property,
-                &self.task.authored.child(property),
+                stage.key(),
+                &self.task.authored.child(stage.key()),
             )
             .map(|items| (!items.is_empty()).then_some(items)),
         };
         Ok(ParsedStacks {
-            setup: parse(self.task.setup.as_ref(), LifecycleSignal::Start, "setup")?,
+            setup: parse(
+                self.task.setup.as_ref(),
+                LifecycleSignal::Start,
+                TaskStage::Setup,
+            )?,
             teardown: parse(
                 self.task.teardown.as_ref(),
                 LifecycleSignal::Finalize,
-                "teardown",
+                TaskStage::Teardown,
             )?,
         })
     }

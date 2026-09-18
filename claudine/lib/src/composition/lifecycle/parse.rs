@@ -318,8 +318,13 @@ fn parse_event_block(
 ///
 /// A task stack is the same grammar as a lifecycle event's `stack:` — a list of
 /// `{when?, action, no_error?}` items — with no surrounding event block, so this
-/// is the entry point for callers that hold the bare list. `property` names the
-/// authoring key in diagnostics (`setup` / `teardown`).
+/// is the entry point for callers that hold the bare list.
+///
+/// `property` is the source-rooted path of the stack value itself — the task's
+/// own property joined to `setup`/`teardown` (`tasks[0].setup`,
+/// `tasks[1].group.tasks[0].teardown`, or a bare `setup` in an external
+/// `kind: task` document). Because that value *is* the list, item `n` is
+/// `{property}[n]`; there is no `stack` segment the way an event block has one.
 ///
 /// ## Errors
 ///
@@ -428,9 +433,10 @@ fn parse_lifecycle_stack(
 ) -> Result<Vec<LifecycleStackItem>, CompositionError> {
     let property_name = signal.property_name();
     let mut items = Vec::with_capacity(raw_stack.len());
+    let container = format!("{property_name}.stack");
     for (idx, raw_item) in raw_stack.iter().enumerate() {
         let item = parse_lifecycle_stack_item(signal, raw_item, source_file, &authored.at(idx))
-            .map_err(|e| annotate_stack_error(e, property_name, idx))?;
+            .map_err(|e| annotate_stack_error(e, &container, idx))?;
         items.push(item);
     }
     Ok(items)
@@ -438,8 +444,13 @@ fn parse_lifecycle_stack(
 
 /// Attach the stack-item index to a parse error so the diagnostic can name
 /// `start.stack[2]` rather than just `start`.
-fn annotate_stack_error(err: CompositionError, property: &str, idx: usize) -> CompositionError {
-    let dotted = super::super::error::indexed_property(&format!("{property}.stack"), idx);
+///
+/// `container` is the property of the indexed list itself, supplied by the
+/// caller rather than derived here: an event's items live under
+/// `{signal}.stack`, while a task's `setup:`/`teardown:` value *is* the list, so
+/// its items are `tasks[0].setup[2]` with no `stack` segment to insert.
+fn annotate_stack_error(err: CompositionError, container: &str, idx: usize) -> CompositionError {
+    let dotted = super::super::error::indexed_property(container, idx);
     match err {
         CompositionError::LifecycleStackInvalidShape {
             source_path,

@@ -487,6 +487,7 @@ impl<'a> Loader<'a> {
             diagnostic: TaskDiagnosticProvenance {
                 source_path: origin.to_path_buf(),
                 action_property: property_child(property, field.key()),
+                task_property: property.to_string(),
             },
         };
 
@@ -1035,7 +1036,9 @@ impl<'a> Loader<'a> {
     }
 }
 
-fn property_child(parent: &str, child: &str) -> String {
+/// Join a source-rooted property to one of its children, treating the empty
+/// parent as the document root rather than producing a leading dot.
+pub(crate) fn property_child(parent: &str, child: &str) -> String {
     if parent.is_empty() {
         child.to_string()
     } else {
