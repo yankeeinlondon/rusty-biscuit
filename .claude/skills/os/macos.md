@@ -41,6 +41,10 @@ conditions that masquerade as repository defects.
   source copy and the target dir under `$HOME` (for example
   `~/.cache/rb-linux/{src,target}`). `rust:1` needs
   `apt-get install libdbus-1-dev pkg-config` for `messenger --features desktop`.
+  Run the container command with `bash -c`, not `bash -lc`: the login shell
+  resets `PATH` and drops `/usr/local/cargo/bin`, so every `cargo` call fails
+  with "command not found" while a trailing pipe can still exit 0. `rust:1`
+  has no `cargo-nextest`; `cargo test --test <name>` avoids a slow install.
 - **Windows compile evidence:** the `x86_64-pc-windows-gnu` target; details
   and the msvc prohibition are in [windows.md](windows.md).
 - **Behavioral Windows and WSL2 evidence:** the build hosts
