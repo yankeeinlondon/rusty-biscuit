@@ -5,10 +5,13 @@ human_review: false
 reviewed_by: codex/gpt-5.6-sol
 created: 2026-09-17T13:23:13-07:00
 spec: 2026-09-16-better-spec-syntax/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md
 description: A **fix** review of `2026-09-16-better-spec-syntax/spec.md`
 fix: 2026-09-16-better-spec-syntax/review-3.md
 previous: 2026-09-16-better-spec-syntax/review-2.md
+next: 2026-09-16-better-spec-syntax/review-4.md
 findings:
     - "[high] Authored set order is still lost outside top-level inline side-effect steps"
     - "[high] Task setup and teardown set failures still lose source-rooted diagnostics and excerpts"

@@ -4,6 +4,7 @@ plan: "claudine/fixes/2026-09-16-better-spec-syntax/plan.md"
 implemented_by: "codex/gpt-5.6-sol"
 implementation_1: "2026-09-17T11:11:26-07:00"
 implementation_2: "2026-09-17T12:16:17-07:00"
+implementation_3: "2026-09-17T16:42:23-07:00"
 started_phase: "5"
 implemented: true
 source_code:
@@ -1203,3 +1204,116 @@ The implementation of review cycle 1 has completed successfully in 52 minutes 4 
                 - **gap found:** parse-time failures (malformed mapping, removed forms) still went through `TaskDiagnostic::from_composition` without enrichment, so they carried no frontmatter excerpt; the existing malformed test checked only the message, so it could not see this
                 - the six in-flight Level 1 tests (`task_stack_diagnostics` module plus the event-spelling guard) pass as found
         - impact analysis: `node .gitnexus/run.cjs impact` returns "Target not found" (risk `UNKNOWN`) for `run_stages`, `parse_stacks`, and `run_stack`; a text search confirms each has exactly one caller, all inside `claudine/lib/src/composition/sequence/task/mod.rs` (`execute` → `run_stages` → `parse_stacks`/`run_stack`), so the blast radius is task execution only
+        - design: parse-time failures now take the same owning-document enrichment as runtime ones
+                - extracted `TaskExecution::with_owning_excerpt(CompositionError) -> CompositionError` in `claudine/lib/src/composition/sequence/task/mod.rs`; `enrich_from_owning_document` (runtime, rebuilt as `composition.lifecycle_invalid`) and the `parse_stacks` error branch of `run_stages` both call it, so every task-stack diagnostic is enriched from `origin_path` before it is snapshotted
+                - the "owning document" rationale moved from `enrich_from_owning_document`'s docs onto the new helper, where it now also records that a YAML data document yields no excerpt
+                - discovered while testing: a parse failure's `LifecycleErrorInfo::property` is `None` (it is the executor's own finding and is not projected into `err.*`), but its typed snapshot's `detail.property` carries the full path down to the offending payload — `tasks[0].setup[0].action[0].set` — which is what the rendered, `err.*`, and machine projections all read
+        - tests (Level 1, `claudine/lib/src/composition/sequence/task/tests.rs`, module `task_stack_diagnostics`):
+                - strengthened `a_malformed_setup_mapping_is_rejected_at_the_task_rooted_property` from a message-substring check to the shared `assert_stack_failure` (exact file, full property `tasks[0].setup[0].action[0].set`, snapshot/`err.*`/rendered parity, no `start.stack`/`finalize.stack` leak, excerpt present) plus no mutations, no outputs, and no commands
+                - added `a_removed_teardown_form_in_a_group_member_is_rejected_at_its_nested_root` (removed positional `set: [ready, "yes"]` in an inline-group member's `teardown:` → `tasks[0].group.tasks[0].teardown[0].action[0].set`, excerpt present, member never started)
+                - added `a_malformed_external_task_setup_names_the_owning_document` (external `kind: task` YAML → bare `setup[0].action[0].set` in `task.yaml`, never `seq.md`; no excerpt because a data document has no frontmatter block)
+                - `assert_stack_failure` now checks `info.property` only when the executor recorded one, since parse failures carry their path solely in the typed snapshot
+                - the in-flight evaluation-failure cases (setup, teardown, external task, inline-group member) and `runtime_set::event_stack_items_keep_their_signal_rooted_stack_spelling` were kept unchanged
+        - non-vacuity (each mutation restored with a fresh mtime and verified with `cmp`):
+                - parse-branch enrichment removed → the two Markdown-sourced malformed cases fail (no excerpt)
+                - `StackRoot::Task` action paths reverted to the synthetic `ActionLocation` spelling → all four evaluation cases fail
+                - `parse_stacks` given the bare `setup`/`teardown` property → the two sequence-rooted malformed cases fail; the external-task malformed case correctly stays green because an external task's root is the document itself, where bare `setup` is already source-rooted
+        - validation:
+                - `cargo nextest run -p claudine -E 'test(task_stack_diagnostics)'` → 7 run, 7 passed
+                - `cd claudine && just test --no-fail-fast` → **7,301 tests run: 7,291 passed (4 slow), 10 failed, 9 skipped**. Nine failures are the known-unrelated `has_skill(ctx.area)` set in `prompts/_implement/implement-plan.md` (the two `composition::schema::tests::shipped_implement_plan_*`, `compose_caller_file_provenance shipped_implement_router_refuses_an_archived_case_through_its_own_error`, the two `shipped_prompt_contract` tests, the three `shipped_prompt_route_drift` tests, and `shipped_prompts shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch`)
+                - the tenth, `composition::resolve::tests::cross_platform_prompt_composes_cleanly`, is also unrelated: it fails with `FileReferenceNoMatch` because `prompts/cross-platform.md` (and other `prompts/` files) are deleted in the working tree by a concurrent session — they were not in this session's starting `git status`, and this change touches nothing under `prompts/`
+                - `cd claudine && just lint` → passed (all five crates plus the transport and lifecycle-doc-facet guards)
+                - Darkmatter was not touched, so its gates were not re-run
+                - platform notes: assertions compare the source path through `biscuit_file::to_portable_string` of the fixture's own path and check YAML excerpt text that the fixture writes with explicit `\n`; no path-separator or CRLF-sensitive assertion was added
+                - no formatting command was run and nothing was committed
+        - **note for the author — concurrent commit captured a temporary test mutation.** Commit `3268e59ab` (18:27:04) was made by another session while this agent's non-vacuity step (c) was in flight, so it recorded `TaskExecution::parse_stacks` passing the bare `stage.key()` instead of `&self.stack_property(stage)`. At that commit the two sequence-rooted malformed-stack tests fail. The working tree already has the correct line restored — it is the only uncommitted code change under `claudine/lib` (`git diff claudine/lib/src/composition/sequence/task/mod.rs`, one line) — and the full `just test` above ran against the restored tree. That line must be included in the next commit. This agent committed nothing.
+- work completed for 'Finding 2 — task setup and teardown set failures still lose source-rooted diagnostics and excerpts' at 18:35:10
+        - orchestrator re-check: the working-tree diff under `claudine/lib` and `claudine/cli` is the single restored line in `sequence/task/mod.rs`, and `cargo nextest run -p claudine -E 'test(task_stack_diagnostics) | test(authored_set_order)'` → 13 run, 13 passed
+
+### Successful Completion
+
+The implementation of review cycle 3 has completed successfully in 19 minutes 14 seconds. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- No review findings were deferred.
+- The files changed for the review findings were (most are already in concurrent commits `14f444ab6` and `3268e59ab`):
+        - `claudine/cli/src/commands/wrap/sequence/task_run.rs`
+        - `claudine/lib/src/composition/coordinator/handoff.rs`
+        - `claudine/lib/src/composition/lifecycle/executor.rs`
+        - `claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs`
+        - `claudine/lib/src/composition/lifecycle/parse.rs`
+        - `claudine/lib/src/composition/sequence/preflight/mod.rs`
+        - `claudine/lib/src/composition/sequence/preflight/shape.rs`
+        - `claudine/lib/src/composition/sequence/task/mod.rs`
+        - `claudine/lib/src/composition/sequence/task/tests.rs`
+        - `claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md`
+- **Must be committed:** commit `3268e59ab` recorded a temporary non-vacuity mutation in `TaskExecution::parse_stacks`. The one-line fix restoring `&self.stack_property(stage)` exists only in the working tree.
+- The gates ran from `claudine/`. `just lint` passed. `just test --no-fail-fast` had 10 failures, none caused by this change:
+        - nine are the `has_skill(ctx.area)` failures in the shipped `implement-plan.md` prompt, already recorded by review-3
+        - one is `cross_platform_prompt_composes_cleanly`, which fails because another session deleted files under `prompts/` in the working tree
+- No formatting command was run, nothing was committed, and `just cross-check` was not run because the change has no OS-specific surface.
+        - **concurrent-agent note — two agents worked Finding 2 in the same worktree.** The entry above is the second agent's; this paragraph is the first agent's (the one that started at 17:50:09 and produced the `StackRoot` / `task_property` / `enrich_from_owning_document` work it resumed from). The two runs overlapped rather than conflicted: the second agent found the first's uncommitted tree, kept every seam and test in it, and added the parse-time enrichment gap the first had left open. Nothing was reverted in either direction, and the merged tree is what both `just test` runs measured. Recorded here so the author does not read the two write-ups as duplicate work on the same lines.
+        - first agent's account of the seams, for the record:
+                - impact analysis: `node .gitnexus/run.cjs impact <symbol> --direction upstream` was run for `ActionLocation`, `execute_action_stack`, `run_stack`, `parse_stacks`, `annotate_stack_error`, `TaskDiagnosticProvenance`, `run_side_effect`, and `execute_stack_inner`. Only `ActionLocation` and `TaskDiagnosticProvenance` resolved, both `risk: UNKNOWN` with zero resolved callers and the standard `riskNote`; the six private methods returned `Target not found`. Per CLAUDE.md the `UNKNOWN` verdicts were resolved by text search: `ActionLocation` has 20 call sites (the executor plus proxy-provenance construction in `coordinator/`, `lifecycle/control/`, and the CLI loop-control tests), `execute_action_stack` and `TaskDiagnosticProvenance` have exactly one production site each, and `annotate_stack_error` has exactly two. That caller set is what made the `ActionLocation` decision below
+                - **design decision for the execution-time path: a borrowed `StackRoot` threaded through the stack loop, not a field on `ActionLocation` and not a field on `StackExecutionContext`.** `ActionLocation` is `Copy` and lives *owned* inside `ProxyProvenance`, so an owned root would break `Copy` across all 20 sites and a borrowed one would force a lifetime parameter onto a type that must be owned there; it is also semantically the proxy identity (signal + indices), which a synthetic task signal does not change. `StackExecutionContext` is copied field-by-field by four `with_*` constructors and one context runs *both* kinds of stack, so a root field there is per-call data on a per-context struct — a stale-root shape. The enum instead travels `execute_stack` → `execute_stack_inner` → `run_action` → `execute_action_inner`, and its `Event` arm delegates to `ActionLocation`'s existing `Display`, which makes the event spellings byte-identical by construction rather than by copied format strings
+                - `annotate_stack_error` now receives the indexed *container* (`start.stack` for an event, `tasks[0].setup` for a task stack) instead of deriving `{property}.stack`, which is what lets a task stack omit the `stack` segment the authored YAML does not have
+                - doc drift fixed in the same edits: `ActionLocation`'s type docs now say its rendering is the event spelling only and point at `StackRoot`; `execute_action_stack`, `execute_action_inner`, `run_stack`, `parse_task_action_stack`, and `TaskDiagnosticProvenance` all describe the new property contract
+                - first agent's non-vacuity proof, run before the second agent's: (a) `execute_action_stack` forced back to `StackRoot::Event` → all four evaluation cases red with exactly `start.stack[0].action[0].set.metadata.files[0]`; (b) `stack_property` reduced to the bare `setup`/`teardown` key → the sequence-rooted cases red with `setup[0]…`/`teardown[0]…`; (c) `run_stack`'s enrichment removed → the excerpt and typed-message assertions red; (d) inverted check — `StackRoot::Event` made to render the task spelling → the event-stack guard red with `success[0].when`. All restored, all green again
+                - first agent's gates: `cd claudine && just test --no-fail-fast` → **7,290 passed, 9 failed, 9 skipped** (exactly the known `has_skill(ctx.area)` set) and `just lint` → passed, both before the `prompts/` deletions landed; `cd darkmatter && just test` → **7,945 passed, 7 skipped** and `just lint` → passed. A later re-run on the merged tree reproduced the second agent's numbers plus one `LEAK-FAIL` on `shell_tasks::an_early_wait_error_still_reaps_the_whole_tree`, which passes in isolation in 0.063 s and is contention-sensitive, not a regression
+                - GitNexus `detect-changes --scope all --limit 500` completed with neither `partial` nor `truncated` set: 15 files, 45 symbols, 35 affected processes, `critical`. The symbol list is dominated by `Section` nodes from the concurrently deleted `prompts/*.md` files; the only entry from this work is `Impl TaskExecution`
+                - platform notes: the change is path-spelling-neutral — the rebased property is built from YAML keys and list indices, and every new assertion that names a file compares against `biscuit_file::to_portable_string` of the fixture's own path. No CRLF-sensitive assertion was added. `just cross-check` was not run, as instructed
+- work completed for 'Finding 2 — task setup and teardown set failures still lose source-rooted diagnostics and excerpts' at 18:41:12
+- orchestrator verification of the merged tree at 18:49, run independently of both subagents
+        - the focused slice for both findings passed together: 37 tests run, 37 passed — the six new `authored_set_order` cases, the seven new `task_stack_diagnostics` cases, the event-stack spelling guard, and the pre-existing `runtime_set` and `action_shape_control` coverage
+        - `claudine` `just test --no-fail-fast`: 7,301 tests run, 7,291 passed, 10 failed, 9 skipped
+        - `claudine` `just lint`: passed across all five crates
+        - `darkmatter` `just test`: 7,945 passed, 7 skipped, confirmed over three consecutive runs. An initial fail-fast run went red while the Claudine lint was still compiling; the affected tests are the deadline-sensitive `remote_fetch` mock-server and concurrency-cap cases, and they pass cleanly once the machine is not contended. This is load sensitivity, not a regression
+        - `darkmatter` `just lint`: passed, including the `zed-dmls` wasm32-wasip2 check
+        - all 10 Claudine failures were individually attributed to concurrent, unrelated work in this shared worktree, and none of them touch the code changed by this cycle:
+                - nine are the shipped-prompt set already recorded by review 3. Each fails identically at `prompts/_implement/implement-plan.md:146` evaluating `has_skill(ctx.area)`, which raises `has_skill() skill name must be a basename without path separators`. That prompt is committed content this cycle never edits
+                - the tenth, `composition::resolve::tests::cross_platform_prompt_composes_cleanly`, is new since review 3 and fails with `FileReferenceNoMatch` on `prompts/cross-platform.md`. A concurrent session moved that file to `prompts/_reviews/cross-platform.md` mid-run; `git status` shows the deletion and the untracked replacement
+        - concurrent-session interference was reported by both subagents and is confirmed: commits `14f444ab6` and `3268e59ab` swept portions of this cycle's work into unrelated commits while it was in flight. The merged tree is coherent and is what the numbers above measure. The corrected `parse_stacks` line at `claudine/lib/src/composition/sequence/task/mod.rs:785` was verified present and correct, since commit `3268e59ab` had captured an intermediate non-vacuity mutation of it
+        - no formatting command was run and nothing was committed
+
+### Successful Completion
+
+The implementation of review cycle 3 has completed successfully in 2 hours 7 minutes. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- No review findings were deferred. Neither finding required a performance measurement, so no deferred performance test was recorded.
+- The files changed for the review findings were:
+        - `claudine/cli/src/commands/wrap/sequence/task_run.rs`
+        - `claudine/lib/src/composition/authored_order.rs`
+        - `claudine/lib/src/composition/coordinator/handoff.rs`
+        - `claudine/lib/src/composition/lifecycle/executor.rs`
+        - `claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs`
+        - `claudine/lib/src/composition/lifecycle/mod.rs`
+        - `claudine/lib/src/composition/lifecycle/parse.rs`
+        - `claudine/lib/src/composition/mod.rs`
+        - `claudine/lib/src/composition/resolve.rs`
+        - `claudine/lib/src/composition/sequence/data.rs`
+        - `claudine/lib/src/composition/sequence/mod.rs`
+        - `claudine/lib/src/composition/sequence/model.rs`
+        - `claudine/lib/src/composition/sequence/normalize.rs`
+        - `claudine/lib/src/composition/sequence/preflight/mod.rs`
+        - `claudine/lib/src/composition/sequence/preflight/shape.rs`
+        - `claudine/lib/src/composition/sequence/source.rs`
+        - `claudine/lib/src/composition/sequence/task/mod.rs`
+        - `claudine/lib/src/composition/sequence/task/tests.rs`
+        - `darkmatter/lib/src/markdown/frontmatter.rs`
+        - `darkmatter/lib/src/markdown/mapping_orders.rs`
+        - `darkmatter/lib/src/markdown/mod.rs`
+        - `claudine/fixes/2026-09-16-better-spec-syntax/review-3.md`
+        - `claudine/fixes/2026-09-16-better-spec-syntax/implementation-log.md`
+- No formatting command was run and no commit was made.
+
+## Implementation of Review Findings #4
+
+> **started at:** 2026-09-17T19:07:22-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis/claudine/fixes/2026-09-16-better-spec-syntax/review-4.md'
+- this is iteration 4 of the review-to-implement cycle
+- starting the work on 'Primary side_effect set parse failures report a synthetic, task-unrooted path with no excerpt' at 19:07:40
+        - GitNexus impact for `run_side_effect` / `parse_single_action_with_order` returned "not found" (stale index, as Review 4 also saw); callers confirmed in source: `parse_single_action_with_order` <- `parse_single_action` (re-exported, no callers) and `TaskExecution::run_side_effect` <- `run_primary` only
+        - design: `parse_single_action_with_order` now roots its errors at the caller's `property` with no synthetic `action[0]` segment (a single action has no stack/index to name); `run_side_effect` passes `self.task.diagnostic.action_property` and routes the parse error through `with_owning_excerpt`
+        - files changed: `claudine/lib/src/composition/lifecycle/parse.rs` (new private `root_single_action_error`, applied in `parse_single_action_with_order`; strips the `action[0].` prefix from `set`/`proxy.with` value paths and re-roots the `set` value-error message; doc updated), `claudine/lib/src/composition/sequence/task/mod.rs` (`run_side_effect` parses at `diagnostic.action_property` and wraps the parse error with `with_owning_excerpt`), `claudine/lib/src/composition/error/mod.rs` (field docs of the four `LifecycleSet*` variants now describe the `set`-rooted single-action path — doc drift fix)
+        - tests added in `task/tests.rs` `task_stack_diagnostics`: `a_malformed_primary_side_effect_mapping_is_rejected_at_the_task_rooted_property` (`tasks[0].side_effect.set`, excerpt), `a_removed_primary_side_effect_form_in_a_group_member_is_rejected_at_its_nested_root` (`tasks[0].group.tasks[0].side_effect.set`, excerpt), `a_malformed_external_task_side_effect_names_the_owning_document` (`side_effect.set` in `task.yaml`, no excerpt); all use `assert_stack_failure` (source, property, terminal/err.*/snapshot parity, excerpt)
+        - non-vacuity: with both production edits temporarily reverted, all three new tests fail with `left: "side_effect.action[0].set"`; restored (fresh mtime) and focused slice (146 tests: task_stack_diagnostics, runtime_set, action_shape_control, authored_set_order, side_effect) passes
