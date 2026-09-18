@@ -41,11 +41,18 @@ ENVIRONMENTS_CONFIG = ROOT / ".github" / "ci" / "environments.json"
 
 #: Version 2 added the per-environment `build` contract: the compile-affecting
 #: inputs a native producer declares and the predicates an archive-only
-#: environment is checked against.
-ENVIRONMENTS_SCHEMA_VERSION = 2
+#: environment is checked against. Version 3 added `events`, the GitHub events
+#: that schedule the environment (fixes/2026-09-18-ci-cadence).
+ENVIRONMENTS_SCHEMA_VERSION = 3
 
 # The environment names the policy table declares, for argument validation.
 ENVIRONMENTS = schema.ENVIRONMENTS
+
+#: The GitHub events a run can carry, as `github.event_name` spells them. An
+#: environment's `events` names the subset that schedules it; a planner run
+#: without an event (a developer's `just ci-local --plan`, the test suites)
+#: plans every environment.
+EVENT_NAMES = schema.EVENTS
 
 # The three verdicts CI can produce per package.
 GATES = ("lint", "check", "test")
@@ -89,6 +96,22 @@ GLOBAL_PATHS = (
     GLOBAL_PATHS_ALL_GATES | JUST_PATHS | set().union(*GLOBAL_PATHS_BY_GATE.values())
 )
 GLOBAL_PREFIXES = GLOBAL_PREFIXES_ALL_GATES + JUST_PREFIXES
+
+# The global inputs that decide what CI RUNS and never what a local gate
+# PRODUCES. `local_evidence.gate_global_inputs` leaves them out of a cell's
+# gate-input identity, so editing a workflow no longer invalidates every
+# published local cell (fixes/2026-09-18-ci-cadence, decision 5). The toolchain
+# pin, Cargo config, the root manifest, the lockfile, `clippy.toml`,
+# `.config/nextest.toml`, and the Just recipes stay inputs: each changes what
+# a local run compiles or executes.
+ORCHESTRATION_PATHS = {
+    ".github/ci/environments.json",
+    ".github/workflows/_package-ci.yml",
+    ".github/workflows/_wsl-ci.yml",
+    ".github/workflows/ci.yml",
+    "scripts/ci/affected_scope.py",
+}
+ORCHESTRATION_PREFIXES = (".github/actions/",)
 
 # Deliberately NOT in GLOBAL_PATHS. Every dependency add or removal rewrites the
 # lockfile, so treating the filename as global escalated the most routine change
@@ -289,10 +312,10 @@ AREA_DRIFT_PATHS = {
 # that `ci-gate` folds; the miss it prevents is silent.
 AREA_DRIFT_MANIFEST = "Cargo.toml"
 
-# Bootstrap-preflight breadth (D3). A global CI/tooling change validates every
-# runner OS before fan-out; a package-local change validates only the scope host
-# plus the runner OSes its selected packages' environments actually land on.
-ALL_RUNNER_OS = ["macos-latest", "ubuntu-latest", "windows-latest"]
+# Bootstrap-preflight breadth (D3). A full-scope run validates every runner OS
+# the plan's environments land on before fan-out; a package-local change
+# validates only the scope host plus the runner OSes its selected packages'
+# environments actually land on.
 SCOPE_HOST_OS = "ubuntu-latest"
 
 KNOWN_L2_BACKENDS = {"tmux", "wezterm", "kitty", "apple-terminal"}
@@ -361,6 +384,12 @@ EXCLUSION_FIELDS = {"exclusion-class", "owner", "reason", "expiry"}
 # Where `_package-ci.yml` runs clippy. A cell carries it so the lint gate's
 # environment is visible in the matrix (AC10) instead of being implied.
 LINT_ENVIRONMENT = "ubuntu-latest"
+
+# Where the `example` and `bench` kinds are compiled. One environment, like
+# lint: compiling them once is the coverage, compiling them per operating
+# system was cost (fixes/2026-09-18-ci-cadence, decision 3). The archive-only
+# guest this host builds for is stood for here as before.
+CHECK_ENVIRONMENT = "ubuntu-latest"
 
 # The gates the L1 build itself compiles. A separate check cell is scheduled
 # only for required kinds outside this set (spec section 1.7).
@@ -550,12 +579,23 @@ def load_environments(path: Path, today: date | None = None) -> list[dict[str, A
         label = environment.get("name", f"<record {index}>") if isinstance(environment, dict) else f"<record {index}>"
         if not isinstance(environment, dict):
             raise RuntimeError(f"environments[{index}] must be an object")
-        unknown = environment.keys() - {"name", "runner", "native_key", "capabilities", "build"}
+        unknown = environment.keys() - {"name", "runner", "native_key", "events", "capabilities", "build"}
         if unknown:
             raise RuntimeError(f"environment '{label}' has unknown field(s): {sorted(unknown)}")
         for field in ("name", "runner", "native_key"):
             if not isinstance(environment.get(field), str) or not environment[field].strip():
                 raise RuntimeError(f"environment '{label}' must give a non-empty '{field}'")
+        events = environment.get("events")
+        if (
+            not isinstance(events, list)
+            or not events
+            or any(event not in EVENT_NAMES for event in events)
+            or len(set(events)) != len(events)
+        ):
+            raise RuntimeError(
+                f"environment '{label}' must give a non-empty 'events' list drawn from "
+                f"{list(EVENT_NAMES)} without repeats"
+            )
         if environment["name"] in names:
             raise RuntimeError(f"duplicate environment '{environment['name']}'")
         names.add(environment["name"])
@@ -2402,20 +2442,24 @@ def package_cells(
             cell["prohibition"] = constraint
         cells.append(cell)
 
-    add(
-        LINT_ENVIRONMENT,
-        "lint",
-        target_kinds,
-        # Clippy builds the package, but the check contract is about target
-        # coverage and clippy's target selection is the lint recipe's, not the
-        # plan's. Crediting it here would claim coverage nothing asserts.
-        "",
-        f"lint gate for {package}, hosted on {LINT_ENVIRONMENT}",
-        reusable=False,
-        companions=companion_records(
-            record["companion_suites"], LINT_ENVIRONMENT, "lint"
-        ),
-    )
+    # Lint, like check, lives on one environment; a plan that does not carry
+    # it (a push whose pull request validation proved Linux) lints nowhere,
+    # because that validation already did.
+    if any(environment["name"] == LINT_ENVIRONMENT for environment in environments):
+        add(
+            LINT_ENVIRONMENT,
+            "lint",
+            target_kinds,
+            # Clippy builds the package, but the check contract is about target
+            # coverage and clippy's target selection is the lint recipe's, not
+            # the plan's. Crediting it here would claim coverage nothing asserts.
+            "",
+            f"lint gate for {package}, hosted on {LINT_ENVIRONMENT}",
+            reusable=False,
+            companions=companion_records(
+                record["companion_suites"], LINT_ENVIRONMENT, "lint"
+            ),
+        )
 
     unchecked = uncovered_target_kinds(target_kinds)
     seam = sorted(dependents)
@@ -2424,8 +2468,13 @@ def package_cells(
         f"public API: {', '.join(seam)}"
     )
     if unchecked:
+        # One environment, whichever the event scheduled: a plan that does not
+        # carry the check host (a run scheduling only deferred environments)
+        # checks nowhere, and its L1 builds still compile the L1 kinds.
         for environment in native_environments(environments):
             name = environment["name"]
+            if name != CHECK_ENVIRONMENT:
+                continue
             # The guest whose archive this runner builds never compiles, so
             # this cell is the only compile coverage those kinds get there.
             stands_for = [
@@ -2440,7 +2489,7 @@ def package_cells(
                 unchecked,
                 "check",
                 f"{', '.join(unchecked)} target(s) are compiled by no test gate; "
-                f"checked on {name}"
+                f"checked on {name} only"
                 + (
                     f", which also stands for {', '.join(stands_for)} "
                     "(archive built here, never compiles)"
@@ -3039,6 +3088,54 @@ def build_slices(owners: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return slices
 
 
+def environment_events(environment: dict[str, Any]) -> list[str]:
+    """The events that schedule `environment`; every event when undeclared.
+
+    A hand-built record (the suites' fixtures, a plan from before the field
+    existed) is scheduled everywhere, which is the behavior every such caller
+    already relied on.
+    """
+    return list(environment.get("events") or EVENT_NAMES)
+
+
+def schedule_environments(
+    environments: list[dict[str, Any]],
+    event: str | None,
+    all_environments: bool = False,
+    proven_event: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split the table into the environments this run plans and those it does not.
+
+    ## Returns
+
+    `(scheduled, deferred, proven)`. `deferred` holds the environments `event`
+    does not schedule, each as `{name, events}` so a reader sees which event
+    will. `proven` holds the environments a `proven_event` run already
+    validated for this tree — a push to `main` after a green pull request
+    plans only what the pull request could not — as `{name, event}`. With no
+    `event`, or with `all_environments`, everything is scheduled and both
+    lists are empty; a `proven_event` still applies.
+    """
+    if event is not None and event not in EVENT_NAMES:
+        raise RuntimeError(f"unknown event {event!r}; expected one of {list(EVENT_NAMES)}")
+    if proven_event is not None and proven_event not in EVENT_NAMES:
+        raise RuntimeError(
+            f"unknown proven event {proven_event!r}; expected one of {list(EVENT_NAMES)}"
+        )
+    scheduled: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
+    proven: list[dict[str, Any]] = []
+    for environment in environments:
+        events = environment_events(environment)
+        if proven_event is not None and proven_event in events:
+            proven.append({"name": environment["name"], "event": proven_event})
+        elif event is None or all_environments or event in events:
+            scheduled.append(environment)
+        else:
+            deferred.append({"name": environment["name"], "events": events})
+    return scheduled, deferred, proven
+
+
 def calculate_scope(
     files: list[str],
     root: Path,
@@ -3056,6 +3153,9 @@ def calculate_scope(
     evidence_rejections: list[str] | None = None,
     base: str = NULL_OID,
     head: str = NULL_OID,
+    event: str | None = None,
+    all_environments: bool = False,
+    proven_event: str | None = None,
 ) -> dict[str, Any]:
     """The canonical resolved plan for one event.
 
@@ -3073,8 +3173,18 @@ def calculate_scope(
     `prohibitions` maps an environment to the recorded constraint forbidding
     it. A prohibited cell is never scheduled and is listed in
     `prohibited_cells`, which is what `just ci-local --plan` refuses on.
+
+    `event` is the GitHub event this plan is for. An environment the event
+    does not schedule contributes no cell, no build, and no preflight runner,
+    and is listed in `deferred_environments`; `all_environments` overrides that
+    (the `ci:all-os` label). `proven_event` names an event whose run already
+    validated this tree, so its environments are listed in
+    `proven_environments` and planned nowhere. See `schedule_environments`.
     """
     packages = workspace_packages(metadata)
+    environments, deferred_environments, proven_environments = schedule_environments(
+        environments, event, all_environments, proven_event
+    )
 
     full_gates = set(GATES) if force_all else set()
     full_scope = bool(full_gates)
@@ -3228,7 +3338,7 @@ def calculate_scope(
         for path in normalized_files
     )
 
-    return {
+    plan: dict[str, Any] = {
         "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
         "base": base,
         "head": head,
@@ -3260,6 +3370,16 @@ def calculate_scope(
         "preflight_reason": outcomes["preflight_reason"],
         "flags": flags,
     }
+    # Optional, and absent rather than empty: a plan resolved without an event
+    # is byte-identical to one from before the field existed (R9: the schema
+    # version follows the required set).
+    if event is not None:
+        plan["event"] = event
+    if deferred_environments:
+        plan["deferred_environments"] = deferred_environments
+    if proven_environments:
+        plan["proven_environments"] = proven_environments
+    return plan
 
 
 def outcome_fields(
@@ -3580,10 +3700,13 @@ def classify_preflight(
     of ``"full"``, ``"package"``, or ``"documentation"``.
     """
     if full_scope:
+        # Every runner the plan's environments land on — the table after the
+        # event filtered it, so a scheduled run preflights no runner that
+        # hosts nothing that night.
         return (
             "full",
-            list(ALL_RUNNER_OS),
-            "explicit full-scope request selects every runner OS",
+            sorted({SCOPE_HOST_OS, *(environment["runner"] for environment in environments)}),
+            "explicit full-scope request selects every scheduled runner OS",
         )
 
     if gating:
@@ -3765,12 +3888,38 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--base", default=NULL_OID, help="base revision under test")
     parser.add_argument("--head", default=NULL_OID, help="head revision under test")
+    parser.add_argument(
+        "--event",
+        choices=EVENT_NAMES,
+        help=(
+            "the GitHub event this plan is for; an environment the event does "
+            "not schedule is deferred, not planned. Omitted: every environment"
+        ),
+    )
+    parser.add_argument(
+        "--all-environments",
+        action="store_true",
+        help="plan every environment regardless of --event (the ci:all-os label)",
+    )
+    parser.add_argument(
+        "--proven-event",
+        choices=EVENT_NAMES,
+        metavar="EVENT",
+        help=(
+            "an event whose run already validated this tree; its environments "
+            "are listed as proven and planned nowhere"
+        ),
+    )
     parser.add_argument("files", nargs="*", help="changed repository-relative paths")
     args = parser.parse_args()
-    if args.apply_to and (args.all or args.files or args.constraints):
+    if args.apply_to and (
+        args.all or args.files or args.constraints
+        or args.event or args.all_environments or args.proven_event
+    ):
         parser.error(
             "--apply-to applies evidence to a carried plan and performs no "
-            "selection: it cannot be combined with --all, --constraints, or a file list"
+            "selection: it cannot be combined with --all, --constraints, --event, "
+            "--all-environments, --proven-event, or a file list"
         )
     return args
 
@@ -3862,6 +4011,9 @@ def main() -> None:
             evidence_rejections=evidence_rejections,
             base=args.base,
             head=args.head,
+            event=args.event,
+            all_environments=args.all_environments,
+            proven_event=args.proven_event,
         )
     if args.plan_out:
         Path(args.plan_out).write_text(schema.canonical(plan), encoding="utf-8")

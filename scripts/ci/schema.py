@@ -102,6 +102,10 @@ UNRECORDED_MEASUREMENT = "not recorded (v1 receipt)"
 
 ENVIRONMENTS = ("ubuntu-latest", "windows-latest", "macos-latest", "wsl2-ubuntu")
 
+#: The GitHub events a plan can be resolved for, as `github.event_name` spells
+#: them. `affected_scope.EVENT_NAMES` is this tuple.
+EVENTS = ("pull_request", "push", "schedule", "workflow_dispatch")
+
 #: A cell's gate. `check` and `lint` are compile-time gates; the rest are test
 #: tiers. One flat vocabulary because a cell key is `{package, environment,
 #: gate/tier}` and the two kinds are never both present for one key.
@@ -175,6 +179,7 @@ SCOPE_REJECTIONS = (
     "scope-head-mismatch",
     "scope-tree-mismatch",
     "scope-base-mismatch",
+    "scope-event-mismatch",
     "scope-malformed",
 )
 
@@ -268,6 +273,15 @@ RESOLVED_PLAN_FIELDS: dict[str, bool] = {
     "preflight_os": True,
     "preflight_reason": True,
     "flags": True,
+    #: The GitHub event the plan was resolved for, and the environments that
+    #: event does not schedule (`{name, events}`) or that an earlier run of
+    #: another event already validated for this tree (`{name, event}`). All
+    #: three are optional and absent rather than empty, so a plan resolved
+    #: without an event is byte-identical to one from before they existed
+    #: (fixes/2026-09-18-ci-cadence).
+    "event": False,
+    "deferred_environments": False,
+    "proven_environments": False,
 }
 
 #: `paths` and `counts` are present exactly when `diff_available` is true, and
@@ -863,6 +877,37 @@ def validate_resolved_plan(document: Any) -> list[str]:
         )
     if not isinstance(document["job_estimate"], int) or document["job_estimate"] < 0:
         problems.append("malformed-receipt: resolved plan job_estimate must be a non-negative integer")
+    if "event" in document:
+        problems += _member("resolved plan event", document["event"], EVENTS, "malformed-receipt")
+    scheduled = {
+        environment.get("name")
+        for environment in document["environments"]
+        if isinstance(environment, dict)
+    }
+    for field, key in (("deferred_environments", "events"), ("proven_environments", "event")):
+        if field not in document:
+            continue
+        entries = document[field]
+        if not isinstance(entries, list) or not entries:
+            problems.append(f"malformed-receipt: resolved plan {field} must be a non-empty list")
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry) != {"name", key}:
+                problems.append(
+                    f"malformed-receipt: resolved plan {field} entries carry exactly "
+                    f"'name' and '{key}'"
+                )
+                continue
+            problems += _member(f"resolved plan {field} name", entry["name"], ENVIRONMENTS, "unknown-environment")
+            if entry["name"] in scheduled:
+                problems.append(
+                    f"malformed-receipt: resolved plan {field} names {entry['name']!r}, "
+                    "which the plan also schedules"
+                )
+            if key == "events":
+                problems += _str_list(f"resolved plan {field} events", entry["events"], EVENTS)
+            else:
+                problems += _member(f"resolved plan {field} event", entry["event"], EVENTS, "malformed-receipt")
     return problems
 
 

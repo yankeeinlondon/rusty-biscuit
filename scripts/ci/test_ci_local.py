@@ -1383,6 +1383,7 @@ class WorkflowScopeStepTests(unittest.TestCase):
             )
             rustup.chmod(0o755)
             if scope_receipt is not None:
+                self.receipt_event = event
                 fixture_git(root, "notes", "--ref", SCOPE_REF, "add", "-f", "-m",
                             scope_receipt(root, base, head), head)
             for receipt in ([{}] if validation_receipt else []) + list(evidence or []):
@@ -1472,11 +1473,17 @@ class WorkflowScopeStepTests(unittest.TestCase):
             raise AssertionError(f"{name} {' '.join(args)} failed: {result.stderr}")
         return result.stdout
 
+    #: The event the receipt under construction is planned for: `run_step`
+    #: sets it to the event it is about to run, as the hook plans for the
+    #: event the push will trigger. A receipt for another event must miss.
+    receipt_event: str | None = None
+
     def planned_documents(self, root: Path, base: str, head: str) -> tuple[dict, dict]:
         """The real planner's plan and projection for the fixture's `base..head`."""
+        event_args = ["--event", self.receipt_event] if self.receipt_event else []
         projection = json.loads(self.tool(
             root, "affected_scope.py", "--plan-out", "receipt-plan.json",
-            "--base", base, "--head", head, "--", "README.md", SOURCE_FILE,
+            "--base", base, "--head", head, *event_args, "--", "README.md", SOURCE_FILE,
         ))
         plan = json.loads((root / "receipt-plan.json").read_text(encoding="utf-8"))
         (root / "tool-calls.log").unlink(missing_ok=True)
@@ -1634,8 +1641,9 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertEqual(1, len(run.planner_calls), run.planner_calls)
         self.assertIn("--apply-to", run.planner_calls[0])
         self.assertEqual("consulted: macos-latest; matched: macos-latest", run.summary_row("validation environments"))
-        # The check cell rides on the same L1 pass (`check_evidence`).
-        self.assertEqual("2: biscuit-hash/macos-latest/check, biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
+        # No check rides on the macOS pass: check is a single-environment gate
+        # hosted on Linux (fixes/2026-09-18-ci-cadence, decision 3).
+        self.assertEqual("1: biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
         self.assertEqual("none", run.summary_row("cells retained (evidence incomplete or rejected)"))
 
     # -- the summary's evidence provenance (2026-09-10 spec R9, AC15) --------
@@ -1674,8 +1682,9 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertEqual({("macos-latest", "pass")}, reused)
         self.assertEqual("consulted: macos-latest, ubuntu-latest; matched: macos-latest",
                          run.summary_row("validation environments"))
-        # The check cell rides on the same L1 pass (`check_evidence`).
-        self.assertEqual("2: biscuit-hash/macos-latest/check, biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
+        # No check rides on the macOS pass: check is a single-environment gate
+        # hosted on Linux (fixes/2026-09-18-ci-cadence, decision 3).
+        self.assertEqual("1: biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
         self.assertEqual("1 rejection(s): failed-cell (1)", run.summary_row("cells retained (evidence incomplete or rejected)"))
         self.assertEqual([], run.rustup_calls)
 
@@ -1699,6 +1708,30 @@ class WorkflowScopeStepTests(unittest.TestCase):
                 self.assertTrue(run.scope_source().startswith(f"CI fallback ({code}:"), run.scope_source())
                 self.assertNotEqual(SCOPE_MARKER, run.plan["preflight_reason"])
                 self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+
+    def test_a_receipt_planned_for_another_event_falls_back(self) -> None:
+        # A plan schedules the environments of the event it was planned for,
+        # so a push-event receipt (Windows planned, say) cannot stand in for a
+        # pull request, and one planned with no event at all cannot either.
+        def push_receipt(root: Path, base: str, head: str) -> str:
+            self.receipt_event = "push"
+            return self.local_scope_receipt(root, base, head)
+
+        def eventless_receipt(root: Path, base: str, head: str) -> str:
+            self.receipt_event = None
+            return self.local_scope_receipt(root, base, head)
+
+        for label, receipt in (("push", push_receipt), ("none", eventless_receipt)):
+            with self.subTest(label):
+                run = self.run_step("pull_request", scope_receipt=receipt)
+                self.assertTrue(
+                    run.scope_source().startswith("CI fallback (scope-event-mismatch:"),
+                    run.scope_source(),
+                )
+                self.assertNotEqual(SCOPE_MARKER, run.plan["preflight_reason"])
+                self.assertEqual("pull_request", run.plan["event"])
+                self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+                self.assertIn("--event pull_request", run.planner_calls[0])
 
     def test_a_receipt_of_another_schema_version_falls_back(self) -> None:
         def future(root: Path, base: str, head: str) -> str:

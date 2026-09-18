@@ -1368,6 +1368,27 @@ class GateGlobalInputTests(EvidenceFixture):
                 for shared in ("Cargo.lock", "Cargo.toml", "rust-toolchain.toml", ".cargo"):
                     self.assertIn(shared, inputs)
 
+    def test_orchestration_files_move_no_gate_identity(self) -> None:
+        # A workflow decides what CI runs, never what a local gate produces,
+        # so editing one leaves every published cell reusable
+        # (fixes/2026-09-18-ci-cadence, decision 5). Measured on the branch
+        # that motivated it: one workflow edit invalidated 38 cells and cost
+        # a 45-minute pre-push.
+        orchestration = {
+            ".github/ci/environments.json",
+            ".github/workflows/_package-ci.yml",
+            ".github/workflows/_wsl-ci.yml",
+            ".github/workflows/ci.yml",
+            "scripts/ci/affected_scope.py",
+            ".github/actions",
+        }
+        for gate in schema.GATES:
+            with self.subTest(gate=gate):
+                inputs = set(local_evidence.gate_global_inputs(gate))
+                self.assertEqual(set(), inputs & orchestration)
+                # And the inputs that DO change a local gate's product stay.
+                self.assertLessEqual({"Cargo.lock", "rust-toolchain.toml", "justfile", "just"}, inputs)
+
     def test_clippy_configuration_moves_only_the_lint_identity(self) -> None:
         self.assertIn("clippy.toml", local_evidence.gate_global_inputs("lint"))
         for gate in ("check", "L1", "L2"):

@@ -105,6 +105,11 @@ def gate_global_inputs(gate: str) -> list[str]:
     *equivalence* the opposite is true: a resolved dependency change makes an
     older result describe a different build, so the lockfile has to move the
     identity.
+
+    The planner's orchestration files (`ORCHESTRATION_PATHS`) are left out for
+    the opposite reason: they decide what CI runs, not what a local gate
+    produces, so an older result under a different workflow still describes
+    the same build.
     """
     planner_gate = gate if gate in ("lint", "check") else "test"
     paths = set(affected_scope.GLOBAL_PATHS_ALL_GATES)
@@ -113,6 +118,8 @@ def gate_global_inputs(gate: str) -> list[str]:
     paths |= {prefix.rstrip("/") for prefix in affected_scope.GLOBAL_PREFIXES_ALL_GATES}
     paths |= {prefix.rstrip("/") for prefix in affected_scope.JUST_PREFIXES}
     paths.add(affected_scope.LOCKFILE_PATH)
+    paths -= set(affected_scope.ORCHESTRATION_PATHS)
+    paths -= {prefix.rstrip("/") for prefix in affected_scope.ORCHESTRATION_PREFIXES}
     return sorted(paths)
 
 
@@ -500,13 +507,20 @@ def record_scope(plan_path: str, scope_path: str, base: str, head: str) -> str:
     return schema.canonical(document)
 
 
-def verify_scope(base: str, head: str) -> tuple[dict[str, Any] | None, str]:
+def verify_scope(
+    base: str, head: str, event: str | None = None
+) -> tuple[dict[str, Any] | None, str]:
     """The scope receipt that binds exactly `{base, head, head tree}`, or why not.
 
     Read from the event head only — scope binds to an exact head, so an older
     commit's note can never stand in. Checked in R3's order: schema, head,
-    tree, base, then structure. Every miss fails safe: the caller calculates
-    scope itself.
+    tree, base, event, then structure. Every miss fails safe: the caller
+    calculates scope itself.
+
+    `event` is the GitHub event the caller is running for. A receipt's plan
+    schedules the environments of the event it was planned for, so a plan for
+    another event — or for none — cannot stand in and misses as
+    `scope-event-mismatch`.
 
     ## Returns
 
@@ -544,6 +558,14 @@ def verify_scope(base: str, head: str) -> tuple[dict[str, Any] | None, str]:
             return None, (
                 f"{code}: the scope note on {head_sha[:9]} declares {field} "
                 f"{str(declared)[:9]}, the event's is {expected[:9]}"
+            )
+    if event is not None:
+        plan = document.get("plan")
+        planned_event = plan.get("event") if isinstance(plan, dict) else None
+        if planned_event != event:
+            return None, (
+                f"scope-event-mismatch: the scope note on {head_sha[:9]} was planned "
+                f"for event {planned_event!r}, this run is {event!r}"
             )
     problems = schema.validate_scope_receipt(document)
     if problems:
@@ -1159,6 +1181,11 @@ def parse_args() -> argparse.Namespace:
     scope_verifier.add_argument(
         "--reason-out", metavar="FILE", help="write the coded miss reason here"
     )
+    scope_verifier.add_argument(
+        "--event",
+        choices=affected_scope.EVENT_NAMES,
+        help="the GitHub event this run is for; a receipt planned for another misses",
+    )
 
     verifier = subparsers.add_parser("verify")
     verifier.add_argument("--scope", help="legacy scope document (version-1 path)")
@@ -1201,7 +1228,7 @@ def main() -> None:
         print(record_scope(args.plan, args.scope, args.base, args.head))
         return
     if args.command == "scope-verify":
-        receipt, reason = verify_scope(args.base, args.head)
+        receipt, reason = verify_scope(args.base, args.head, args.event)
         if receipt is None:
             if args.reason_out:
                 Path(args.reason_out).write_text(reason + "\n", encoding="utf-8")

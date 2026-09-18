@@ -1,10 +1,11 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "environments": [
     {
       "name": "ubuntu-latest",
       "runner": "ubuntu-latest",
       "native_key": "ubuntu-latest",
+      "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
       "capabilities": {
         "tmux": true,
         "headless_browser": true,
@@ -55,6 +56,7 @@
       "name": "windows-latest",
       "runner": "windows-latest",
       "native_key": "windows-latest",
+      "events": ["push", "schedule", "workflow_dispatch"],
       "capabilities": {
         "tmux": {
           "available": false,
@@ -118,6 +120,7 @@
       "name": "macos-latest",
       "runner": "macos-latest",
       "native_key": "macos-latest",
+      "events": ["pull_request", "push", "workflow_dispatch"],
       "capabilities": {
         "tmux": true,
         "headless_browser": {
@@ -172,6 +175,7 @@
       "name": "wsl2-ubuntu",
       "runner": "windows-latest",
       "native_key": "ubuntu-latest",
+      "events": ["schedule", "workflow_dispatch"],
       "capabilities": {
         "tmux": {
           "available": false,

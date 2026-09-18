@@ -540,11 +540,13 @@ class TargetCoverageTests(PlannerFixture):
             if cell["package"] == package and cell["gate"] == "check"
         ]
 
-    def test_example_targets_are_checked_on_each_native_environment_not_the_guest(self) -> None:
+    def test_example_targets_are_checked_on_the_check_environment_not_the_guest(self) -> None:
         plan = self.plan("biscuit-speaks/lib/src/lib.rs")
         record = self.package_record(plan, "biscuit-speaks")
         self.assertEqual(["lib", "test", "example"], record["targets"], "fixture: examples only")
-        self.assertEqual(self.NATIVE, self.check_environments(plan, "biscuit-speaks"))
+        self.assertEqual(
+            [affected_scope.CHECK_ENVIRONMENT], self.check_environments(plan, "biscuit-speaks")
+        )
         for cell in self.cells(plan):
             if cell["package"] == "biscuit-speaks" and cell["gate"] == "check":
                 self.assertEqual(["example"], cell["target_kinds"])
@@ -570,8 +572,10 @@ class TargetCoverageTests(PlannerFixture):
                 self.assertEqual(expected, [token for token in tokens if token in self.SELECTORS.values()])
                 self.assertEqual(["-p", record["package"]], tokens[:2])
                 self.assertEqual([], [token for token in tokens if token in self.BLANKET])
+                # One check environment, like lint (fixes/2026-09-18-ci-cadence,
+                # decision 3): the example and bench kinds compile once.
                 self.assertEqual(
-                    self.NATIVE if expected else [],
+                    [affected_scope.CHECK_ENVIRONMENT] if expected else [],
                     self.check_environments(plan, record["package"]),
                 )
                 shapes_seen.add(tuple(expected))
@@ -580,31 +584,49 @@ class TargetCoverageTests(PlannerFixture):
             {(), ("--examples",), ("--benches",), ("--examples", "--benches")}, shapes_seen
         )
 
-    def test_a_reused_macos_l1_reuses_the_macos_check_cell(self) -> None:
-        accepted = [
-            {
-                "package": "biscuit-speaks",
-                "environment": "macos-latest",
-                "gate": "L1",
-                "outcome": "pass",
-                "origin": "local",
+    def test_a_reused_linux_l1_reuses_the_check_cell_and_macos_reuses_none(self) -> None:
+        def accepted(environment: str) -> list[dict[str, str]]:
+            return [
+                {
+                    "package": "biscuit-speaks",
+                    "environment": environment,
+                    "gate": "L1",
+                    "outcome": "pass",
+                    "origin": "local",
+                }
+            ]
+
+        def states(plan: dict) -> dict[tuple[str, str], str]:
+            return {
+                (cell["environment"], cell["gate"]): cell["execution"]
+                for cell in self.cells(plan)
+                if cell["package"] == "biscuit-speaks"
             }
-        ]
-        plan = self.plan("biscuit-speaks/lib/src/lib.rs", accepted_cells=accepted)
-        states = {
-            (cell["environment"], cell["gate"]): cell["execution"]
-            for cell in self.cells(plan)
-            if cell["package"] == "biscuit-speaks"
-        }
-        self.assertEqual("reuse", states[("macos-latest", "L1")], "fixture: macOS L1 reused")
-        self.assertEqual("reuse", states[("macos-latest", "check")])
-        scheduled = legacy_scope_document(plan)
-        matrix = scheduled["area_matrix"]["biscuit-speaks"]["include"]
-        entry = next(item for item in matrix if item["package"] == "biscuit-speaks")
-        self.assertEqual(
-            [name for name in self.NATIVE if name != "macos-latest"], entry["check_os"]
+
+        check = affected_scope.CHECK_ENVIRONMENT
+        # biscuit-speaks has unchanged direct dependents, so its one check
+        # cell also compiles their seam — which no local run builds, so the
+        # Linux L1 pass covers the L1 cell and never the check.
+        plan = self.plan("biscuit-speaks/lib/src/lib.rs", accepted_cells=accepted(check))
+        linux = states(plan)
+        self.assertEqual("reuse", linux[(check, "L1")], "fixture: Linux L1 reused")
+        self.assertEqual("execute", linux[(check, "check")])
+        seam = next(
+            cell for cell in self.cells(plan)
+            if cell["package"] == "biscuit-speaks" and cell["gate"] == "check"
         )
-        self.assertNotIn("macos-latest", entry["native_environments"])
+        self.assertFalse(seam["reusable"])
+        self.assertIn("claudine", seam["dependents"])
+        matrix = legacy_scope_document(plan)["area_matrix"]["biscuit-speaks"]["include"]
+        entry = next(item for item in matrix if item["package"] == "biscuit-speaks")
+        self.assertEqual([check], entry["check_os"])
+        self.assertNotIn(check, entry["native_environments"])
+        # A macOS pass stands in for no check: there is no macOS check cell.
+        plan = self.plan("biscuit-speaks/lib/src/lib.rs", accepted_cells=accepted("macos-latest"))
+        macos = states(plan)
+        self.assertEqual("reuse", macos[("macos-latest", "L1")], "fixture: macOS L1 reused")
+        self.assertNotIn(("macos-latest", "check"), macos)
+        self.assertEqual("execute", macos[(check, "check")])
 
     def test_the_workflow_command_joined_with_check_args_selects_only_the_declared_kinds(self) -> None:
         # The review's "test the final command": the planner's string and the

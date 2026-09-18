@@ -46,7 +46,10 @@ GLOBAL_PATHS_BY_GATE = {"lint": (), "check": (), "test": ()}
 JUST_PATHS = ()
 GLOBAL_PREFIXES_ALL_GATES = ()
 JUST_PREFIXES = ()
+ORCHESTRATION_PATHS = ()
+ORCHESTRATION_PREFIXES = ()
 LOCKFILE_PATH = "Cargo.lock"
+EVENT_NAMES = ("pull_request", "push", "schedule", "workflow_dispatch")
 
 
 def preflight_reason() -> str:
@@ -372,6 +375,10 @@ def main() -> None:
                 "diff_available": False,
                 "reason": "explicit full-scope request; no diff was consulted",
             }
+        if "--event" in values:
+            # Like the real planner: the event the plan is for rides in it, so
+            # CI's scope-verify can refuse a receipt planned for another.
+            plan["event"] = values["--event"]
     if "--plan-out" in values:
         with open(values["--plan-out"], "w", encoding="utf-8") as handle:
             handle.write(json.dumps(plan, sort_keys=True, separators=(",", ":")))

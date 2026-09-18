@@ -2605,11 +2605,24 @@ fn post_merge_reuse_preserves_the_gate_and_normal_ci_fallback() {
     let scope = job_block("ci.yml", "  scope:");
     assert!(
         scope.contains("needs: validation")
-            && scope.contains("!cancelled() && needs.validation.outputs.reuse != 'true'")
+            && scope.contains("if: ${{ !cancelled() }}")
             && scope.contains("reuse_validation.py record")
             && scope.contains("name: ${{ steps.receipt.outputs.receipt }}")
             && scope.contains("if: github.event_name == 'pull_request'"),
-        "scope must run on lookup failure and publish receipts for PR validation"
+        "scope must run on every event, including a reused validation, and publish \
+         receipts for PR validation"
+    );
+    // A reused validation narrows the push's plan to the environments the
+    // pull request event does not schedule, rather than skipping scope: the
+    // proven environments are what the planner drops, and nothing else reads
+    // the reuse flag to skip work (fixes/2026-09-18-ci-cadence).
+    assert!(
+        scope.contains("PROVEN_BY_PULL_REQUEST: ${{ needs.validation.outputs.reuse }}")
+            && scope.contains("event_args+=(--proven-event pull_request)")
+            && scope.contains("event_args=(--event \"$EVENT_NAME\")")
+            && scope.contains("--all-environments"),
+        "scope must plan by event, drop the environments a reused PR validation proved, \
+         and honor the ci:all-os label"
     );
     // On reuse every downstream job is skipped, which the fold accepts, so
     // the gate passes; the reused-run link is reporting and lives in the
@@ -2627,11 +2640,15 @@ fn post_merge_reuse_preserves_the_gate_and_normal_ci_fallback() {
             && report.contains("actions/runs/$VALIDATED_RUN"),
         "the advisory report must run on reuse and link the reused evidence"
     );
+    // Every other report step keys on the scope result alone: scope runs on
+    // reuse too (for the environments the pull request event did not
+    // schedule), so the reuse note is additive and the report is never
+    // silenced by it (fixes/2026-09-18-ci-cadence).
     let steps = report.split_once("    steps:\n").unwrap().1;
     for step in steps.split("      - ").skip(2) {
         assert!(
-            step.contains("needs.validation.outputs.reuse != 'true'"),
-            "every other report step must stay silent on reuse: {step}"
+            step.contains("needs.scope.result") && !step.contains("needs.validation.outputs.reuse"),
+            "every other report step must key on the scope result, not on reuse: {step}"
         );
     }
     // The reuse decision is verified by its own suite, which `repo-deps` owns
@@ -2968,34 +2985,39 @@ fn speaking_modes(guards: &[String], context: &BTreeMap<String, String>) -> Vec<
         .collect()
 }
 
-/// Specification section 6 gives `ci-reporting` three modes and one voice. That
-/// is a property of the guards together, not of any one of them: overlapping
-/// guards render two reports for the same run, and a gap renders none.
+/// Specification section 6 gives `ci-reporting` one voice per run. Since
+/// fixes/2026-09-18-ci-cadence, `scope` runs on a reused PR validation too —
+/// for the environments the pull request event did not schedule — so the
+/// report has two exhaustive, exclusive modes keyed on the scope result (the
+/// full report, or the first actionable failure) plus one additional note
+/// that speaks exactly when a validation was reused. Overlapping report
+/// guards would render two reports for the same run, and a gap renders none.
 #[test]
 fn exactly_one_ci_reporting_mode_speaks_for_every_bootstrap_state() {
     let guards = reporting_mode_guards();
 
-    /// (validation.result, validation.outputs.reuse, scope.result, mode)
-    const NAMED: [(&str, &str, &str, usize); 7] = [
-        // A reused whole-PR validation skips scope entirely.
-        ("success", "true", "skipped", 1),
+    /// (validation.result, validation.outputs.reuse, scope.result, modes)
+    const NAMED: [(&str, &str, &str, &[usize]); 7] = [
+        // A reused PR validation: the note, plus the report of what scope
+        // planned beyond it.
+        ("success", "true", "success", &[1, 2]),
         // The ordinary scoped run: the full report, and only the full report.
-        ("success", "false", "success", 2),
-        ("failure", "false", "skipped", 3),
-        ("cancelled", "false", "skipped", 3),
-        ("success", "false", "failure", 3),
-        ("success", "false", "cancelled", 3),
+        ("success", "false", "success", &[2]),
+        ("failure", "false", "skipped", &[3]),
+        ("cancelled", "false", "skipped", &[3]),
+        ("success", "false", "failure", &[3]),
+        ("success", "false", "cancelled", &[3]),
         // Reuse recorded by a validation job that did not itself succeed: mode
         // 1 declines it, so mode 3 has to take it or the run says nothing.
-        ("failure", "true", "skipped", 3),
+        ("failure", "true", "skipped", &[3]),
     ];
 
     for (validation, reuse, scope, expected) in NAMED {
         let speaking = speaking_modes(&guards, &bootstrap_context(validation, reuse, scope));
         assert_eq!(
             speaking,
-            vec![expected],
-            "validation={validation} reuse={reuse} scope={scope}: mode {expected} alone must \
+            expected.to_vec(),
+            "validation={validation} reuse={reuse} scope={scope}: modes {expected:?} must \
              report this run, but {speaking:?} did"
         );
     }
@@ -3005,11 +3027,19 @@ fn exactly_one_ci_reporting_mode_speaks_for_every_bootstrap_state() {
             for scope in JOB_RESULTS {
                 let speaking =
                     speaking_modes(&guards, &bootstrap_context(validation, reuse, scope));
+                let reports: Vec<usize> =
+                    speaking.iter().copied().filter(|mode| *mode != 1).collect();
                 assert_eq!(
-                    speaking.len(),
+                    reports.len(),
                     1,
-                    "validation={validation} reuse={reuse} scope={scope}: the three modes must \
-                     be exclusive and exhaustive, but {speaking:?} spoke"
+                    "validation={validation} reuse={reuse} scope={scope}: the report modes \
+                     must be exclusive and exhaustive, but {speaking:?} spoke"
+                );
+                assert_eq!(
+                    speaking.contains(&1),
+                    validation == "success" && reuse == "true",
+                    "validation={validation} reuse={reuse} scope={scope}: the reuse note \
+                     speaks exactly for a successful, reused validation"
                 );
             }
         }

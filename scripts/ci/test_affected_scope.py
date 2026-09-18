@@ -35,7 +35,10 @@ from affected_scope import (
     package_cells,
     check_arguments,
     dependent_seam,
+    CHECK_ENVIRONMENT,
     DEPENDENTS_ENVIRONMENT,
+    EVENT_NAMES,
+    schedule_environments,
     feature_args,
     apply_accepted_cells,
     capability,
@@ -1077,12 +1080,13 @@ class EnvironmentsTests(unittest.TestCase):
         from affected_scope import KNOWN_CAPABILITIES
 
         doc = {
-            "schema_version": 2,
+            "schema_version": 3,
             "environments": [
                 {
                     "name": "x",
                     "runner": "x",
                     "native_key": "x",
+                    "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
                     "capabilities": {key: True for key in KNOWN_CAPABILITIES if key != "tmux"},
                     "build": producer_build("x", "x86_64", "gnu", "glibc", ["x"]),
                 }
@@ -1098,12 +1102,13 @@ class EnvironmentsTests(unittest.TestCase):
         import json
 
         doc = {
-            "schema_version": 2,
+            "schema_version": 3,
             "environments": [
                 {
                     "name": "x",
                     "runner": "x",
                     "native_key": "x",
+                    "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
                     "capabilities": {
                         "tmux": {"available": False, "reason": "r", "owner": "@o", "expiry": "2026-01-01"},
                         "headless_browser": True,
@@ -1280,7 +1285,7 @@ class BuildContractTests(unittest.TestCase):
             by_name[name.replace("_", "-")]["build"].update(changes)
         return environments
 
-    def write(self, environments: list[dict], version: int = 2) -> Path:
+    def write(self, environments: list[dict], version: int = 3) -> Path:
         path = Path(tempfile.mkdtemp()) / "environments.json"
         for entry in environments:
             entry["capabilities"].setdefault("wezterm", False)
@@ -1431,7 +1436,7 @@ class BuildContractTests(unittest.TestCase):
     def test_a_version_one_table_is_refused_rather_than_read_without_contracts(self) -> None:
         with self.assertRaises(RuntimeError) as raised:
             load_environments(self.write(environments_for_tests(), version=1), today=TODAY)
-        self.assertIn("schema_version must be 2", str(raised.exception))
+        self.assertIn("schema_version must be 3", str(raised.exception))
 
     def test_an_unsorted_executes_list_is_refused(self) -> None:
         path = self.write(self.table(ubuntu_latest={"executes": ["wsl2-ubuntu", "ubuntu-latest"]}))
@@ -2264,13 +2269,13 @@ class EstimateJobsTests(unittest.TestCase):
             environments=environments_for_tests(),
             accepted={},
         )
-        # lint (1) + check for the bench target on three native environments
-        # (3) + L1 on three native environments (3) + L1 on wsl2-ubuntu (2:
+        # lint (1) + check for the bench target on the check environment (1)
+        # + L1 on three native environments (3) + L1 on wsl2-ubuntu (2:
         # archive builder + guest) + L2 where a backend is hostable (2: ubuntu,
         # macOS). The Windows and WSL L2 cells are governed policy gaps and
         # launch nothing; the WSL guest compiles nothing, so no check there.
         self.assertEqual(
-            estimate_jobs(cells, environments_for_tests()), 1 + 3 + 3 + 2 + 2
+            estimate_jobs(cells, environments_for_tests()), 1 + 1 + 3 + 2 + 2
         )
 
     def test_a_reused_cell_costs_no_job(self) -> None:
@@ -2301,11 +2306,12 @@ class EstimateJobsTests(unittest.TestCase):
 
 
 class CheckCellTests(unittest.TestCase):
-    """A check cell covers the uncovered kinds on every native environment.
+    """A check cell covers the uncovered kinds on the one check environment.
 
     The L1 build compiles `lib`, `bin`, and `test`; `example` and `bench` are
-    compiled by no test gate, so their check runs wherever a toolchain exists
-    and is selected explicitly, never through `--all-targets`.
+    compiled by no test gate, so their check runs on `CHECK_ENVIRONMENT` and is
+    selected explicitly, never through `--all-targets`. One environment, like
+    lint (fixes/2026-09-18-ci-cadence, decision 3).
     """
 
     NATIVE = ["ubuntu-latest", "windows-latest", "macos-latest"]
@@ -2339,20 +2345,31 @@ class CheckCellTests(unittest.TestCase):
         )
         return [cell for cell in cells if cell["gate"] == "check"]
 
-    def test_an_example_target_is_checked_on_each_native_environment_only(self) -> None:
+    def test_an_example_target_is_checked_on_the_check_environment_only(self) -> None:
         checks = self.check_cells(["lib", "example"])
-        self.assertEqual(self.NATIVE, [cell["environment"] for cell in checks])
-        for cell in checks:
-            self.assertEqual(["example"], cell["target_kinds"])
-            self.assertEqual("check", cell["compile_coverage_from"])
-            self.assertEqual("execute", cell["execution"])
-            self.assertIn("example", cell["selection_reason"])
-            self.assertIn(cell["environment"], cell["selection_reason"])
+        self.assertEqual([CHECK_ENVIRONMENT], [cell["environment"] for cell in checks])
+        (cell,) = checks
+        self.assertEqual(["example"], cell["target_kinds"])
+        self.assertEqual("check", cell["compile_coverage_from"])
+        self.assertEqual("execute", cell["execution"])
+        self.assertIn("example", cell["selection_reason"])
+        self.assertIn(f"checked on {CHECK_ENVIRONMENT} only", cell["selection_reason"])
         # The guest compiles nothing: its uncovered kinds are covered by the
         # runner that builds its archive, and the reason says so there.
-        by_environment = {cell["environment"]: cell for cell in checks}
-        self.assertIn("wsl2-ubuntu", by_environment["ubuntu-latest"]["selection_reason"])
-        self.assertNotIn("wsl2-ubuntu", by_environment["windows-latest"]["selection_reason"])
+        self.assertIn("wsl2-ubuntu", cell["selection_reason"])
+
+    def test_a_plan_without_the_check_environment_checks_nowhere(self) -> None:
+        # A run that schedules only deferred environments (a push to main
+        # after a validated pull request) still compiles the L1 kinds there;
+        # the example and bench kinds were checked by the run that had Linux.
+        environments = [
+            environment
+            for environment in environments_for_tests()
+            if environment["name"] == "windows-latest"
+        ]
+        cells = package_cells(self.ARGUMENTS, "a", ["lib", "example"], environments, {})
+        self.assertEqual([], [cell for cell in cells if cell["gate"] == "check"])
+        self.assertEqual(["L1"], [cell["gate"] for cell in cells if cell["environment"] == "windows-latest"])
 
     def test_check_arguments_carry_exactly_the_uncovered_selectors(self) -> None:
         cases = {
@@ -2379,40 +2396,45 @@ class CheckCellTests(unittest.TestCase):
         )
         self.assertEqual("-p a", record["check_args"])
 
-    def test_a_reused_macos_l1_reuses_the_macos_check_and_no_other(self) -> None:
-        evidence = {"origin": "local", "evidence": "refs/notes/ci-local/macos-latest"}
+    def test_a_reused_linux_l1_reuses_the_check_and_another_host_reuses_nothing(self) -> None:
+        evidence = {"origin": "local", "evidence": "refs/notes/ci-local/ubuntu-latest"}
         cells = package_cells(
             self.ARGUMENTS,
             "a",
             ["lib", "example"],
             environments_for_tests(),
-            {("a", "macos-latest", "L1"): evidence},
+            {
+                ("a", "ubuntu-latest", "L1"): evidence,
+                ("a", "macos-latest", "L1"): {**evidence, "evidence": "refs/notes/ci-local/macos-latest"},
+            },
         )
         by_key = {(cell["environment"], cell["gate"]): cell for cell in cells}
-        self.assertEqual("reuse", by_key[("macos-latest", "L1")]["execution"])
-        check = by_key[("macos-latest", "check")]
+        self.assertEqual("reuse", by_key[("ubuntu-latest", "L1")]["execution"])
+        check = by_key[("ubuntu-latest", "check")]
         self.assertEqual("reuse", check["execution"])
         self.assertEqual("local", check["origin"])
         self.assertEqual("L1", check["evidence"]["covered_by"])
-        self.assertEqual("refs/notes/ci-local/macos-latest", check["evidence"]["evidence"])
+        self.assertEqual("refs/notes/ci-local/ubuntu-latest", check["evidence"]["evidence"])
         self.assertNotIn("counts", check["evidence"], "test counts are not a check measurement")
-        self.assertEqual("execute", by_key[("ubuntu-latest", "check")]["execution"])
-        self.assertEqual("execute", by_key[("windows-latest", "check")]["execution"])
+        # A macOS L1 pass stands in for no check: there is no macOS check cell
+        # to stand in for, and the Linux cell is not its to cover.
+        self.assertEqual("reuse", by_key[("macos-latest", "L1")]["execution"])
+        self.assertNotIn(("macos-latest", "check"), by_key)
 
     def test_a_whole_environment_acceptance_does_not_satisfy_a_check(self) -> None:
         # A version-1 note proves no particular package was built.
-        evidence = {"origin": "local", "evidence": "refs/notes/ci-local/macos-latest"}
+        evidence = {"origin": "local", "evidence": "refs/notes/ci-local/ubuntu-latest"}
         cells = package_cells(
             self.ARGUMENTS,
             "a",
             ["lib", "example"],
             environments_for_tests(),
             {},
-            accepted_environments={"macos-latest": evidence},
+            accepted_environments={"ubuntu-latest": evidence},
         )
         states = {(cell["environment"], cell["gate"]): cell["execution"] for cell in cells}
-        self.assertEqual("reuse", states[("macos-latest", "L1")])
-        self.assertEqual("execute", states[("macos-latest", "check")])
+        self.assertEqual("reuse", states[("ubuntu-latest", "L1")])
+        self.assertEqual("execute", states[("ubuntu-latest", "check")])
 
     def test_a_check_that_compiles_dependents_is_never_reused(self) -> None:
         evidence = {"origin": "local", "evidence": "refs/notes/ci-local/ubuntu-latest"}
@@ -2432,15 +2454,21 @@ class CheckCellTests(unittest.TestCase):
         self.assertEqual("execute", check["execution"])
         self.assertEqual(["b"], check["dependents"])
 
-    def test_a_prohibited_environment_turns_its_check_cell_prohibited(self) -> None:
+    def test_a_prohibited_check_environment_turns_the_check_cell_prohibited(self) -> None:
         checks = self.check_cells(
-            ["lib", "bench"], prohibitions={"windows-latest": self.CONSTRAINT}
+            ["lib", "bench"], prohibitions={CHECK_ENVIRONMENT: self.CONSTRAINT}
         )
-        by_environment = {cell["environment"]: cell for cell in checks}
-        self.assertEqual("prohibited", by_environment["windows-latest"]["state"])
-        self.assertEqual("omit", by_environment["windows-latest"]["execution"])
-        self.assertEqual("execute", by_environment["ubuntu-latest"]["execution"])
-        self.assertEqual("execute", by_environment["macos-latest"]["execution"])
+        (check,) = checks
+        self.assertEqual(CHECK_ENVIRONMENT, check["environment"])
+        self.assertEqual("prohibited", check["state"])
+        self.assertEqual("omit", check["execution"])
+        # A prohibition elsewhere touches no check: there is no cell there.
+        self.assertEqual(
+            ["execute"],
+            [cell["execution"] for cell in self.check_cells(
+                ["lib", "bench"], prohibitions={"windows-latest": self.CONSTRAINT}
+            )],
+        )
 
     def test_check_os_lists_every_executing_check_environment(self) -> None:
         def record(executing: set[tuple[str, str]]) -> dict[str, object]:
@@ -2459,6 +2487,225 @@ class CheckCellTests(unittest.TestCase):
             record(every - {("windows-latest", "check")})["check_os"],
         )
         self.assertEqual([], record(set())["check_os"])
+
+
+class EventSchedulingTests(unittest.TestCase):
+    """Environments are scheduled by GitHub event (fixes/2026-09-18-ci-cadence).
+
+    Each environment names the events that schedule it. The planner drops the
+    rest of the table for a run — no cell, no build, no preflight runner — and
+    records them in `deferred_environments`; a reused pull request validation
+    drops the environments it proved into `proven_environments` instead.
+    """
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
+        packages = [
+            package(self.root, "alpha-core", "alpha/lib/Cargo.toml", targets=["lib", "example"]),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    @staticmethod
+    def shipped_events() -> list[dict[str, object]]:
+        """The test table carrying the shipped table's `events` policy."""
+        events = {
+            "ubuntu-latest": ["pull_request", "push", "schedule", "workflow_dispatch"],
+            "windows-latest": ["push", "schedule", "workflow_dispatch"],
+            "macos-latest": ["pull_request", "push", "workflow_dispatch"],
+            "wsl2-ubuntu": ["schedule", "workflow_dispatch"],
+        }
+        environments = environments_for_tests()
+        for environment in environments:
+            environment["events"] = events[environment["name"]]
+        return environments
+
+    def plan(self, **kwargs: object) -> dict[str, object]:
+        plan = calculate_scope(
+            ["alpha/lib/src/lib.rs"],
+            self.root,
+            self.metadata,
+            self.shipped_events(),
+            self.policy,
+            **kwargs,  # type: ignore[arg-type]
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        return plan
+
+    @staticmethod
+    def names(environments: list[dict[str, object]]) -> list[str]:
+        return [environment["name"] for environment in environments]
+
+    def test_the_shipped_table_schedules_each_environment_as_decided(self) -> None:
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        events = {environment["name"]: environment["events"] for environment in environments}
+        self.assertEqual(
+            {
+                "ubuntu-latest": ["pull_request", "push", "schedule", "workflow_dispatch"],
+                "windows-latest": ["push", "schedule", "workflow_dispatch"],
+                "macos-latest": ["pull_request", "push", "workflow_dispatch"],
+                "wsl2-ubuntu": ["schedule", "workflow_dispatch"],
+            },
+            events,
+        )
+
+    def test_a_table_without_events_or_with_an_unknown_one_is_refused(self) -> None:
+        for mutate, fragment in (
+            (lambda environment: environment.pop("events"), "events"),
+            (lambda environment: environment.update(events=[]), "events"),
+            (lambda environment: environment.update(events=["nightly"]), "events"),
+            (lambda environment: environment.update(events=["push", "push"]), "repeats"),
+        ):
+            environments = self.shipped_events()
+            mutate(environments[0])
+            path = Path(tempfile.mkdtemp()) / "environments.json"
+            path.write_text(json.dumps({"schema_version": 3, "environments": environments}))
+            with self.subTest(fragment=fragment), self.assertRaises(RuntimeError) as raised:
+                load_environments(path, today=TODAY)
+            self.assertIn(fragment, str(raised.exception))
+
+    def test_each_event_schedules_its_environments_and_defers_the_rest(self) -> None:
+        cases = {
+            "pull_request": (["ubuntu-latest", "macos-latest"], ["windows-latest", "wsl2-ubuntu"]),
+            "push": (["ubuntu-latest", "windows-latest", "macos-latest"], ["wsl2-ubuntu"]),
+            "schedule": (["ubuntu-latest", "windows-latest", "wsl2-ubuntu"], ["macos-latest"]),
+            "workflow_dispatch": (
+                ["ubuntu-latest", "windows-latest", "macos-latest", "wsl2-ubuntu"],
+                [],
+            ),
+        }
+        for event, (expected_scheduled, expected_deferred) in cases.items():
+            with self.subTest(event=event):
+                scheduled, deferred, proven = schedule_environments(self.shipped_events(), event)
+                self.assertEqual(expected_scheduled, self.names(scheduled))
+                self.assertEqual(expected_deferred, [entry["name"] for entry in deferred])
+                self.assertEqual([], proven)
+                for entry in deferred:
+                    self.assertNotIn(event, entry["events"])
+
+    def test_no_event_or_every_environment_schedules_the_whole_table(self) -> None:
+        for kwargs in ({"event": None}, {"event": "pull_request", "all_environments": True}):
+            with self.subTest(kwargs=kwargs):
+                scheduled, deferred, proven = schedule_environments(self.shipped_events(), **kwargs)
+                self.assertEqual(4, len(scheduled))
+                self.assertEqual(([], []), (deferred, proven))
+
+    def test_a_record_without_events_is_scheduled_on_every_event(self) -> None:
+        environments = environments_for_tests()
+        for environment in environments:
+            environment.pop("events", None)
+        for event in EVENT_NAMES:
+            scheduled, deferred, _ = schedule_environments(environments, event)
+            self.assertEqual(4, len(scheduled), event)
+            self.assertEqual([], deferred)
+
+    def test_an_unknown_event_is_refused(self) -> None:
+        for kwargs in ({"event": "nightly"}, {"event": "push", "proven_event": "merge"}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(RuntimeError):
+                schedule_environments(self.shipped_events(), **kwargs)
+
+    def test_a_proven_event_drops_what_it_validated_and_plans_the_rest(self) -> None:
+        scheduled, deferred, proven = schedule_environments(
+            self.shipped_events(), "push", proven_event="pull_request"
+        )
+        self.assertEqual(["windows-latest"], self.names(scheduled))
+        self.assertEqual(["wsl2-ubuntu"], [entry["name"] for entry in deferred])
+        self.assertEqual(
+            [
+                {"name": "ubuntu-latest", "event": "pull_request"},
+                {"name": "macos-latest", "event": "pull_request"},
+            ],
+            proven,
+        )
+
+    def test_a_pull_request_plan_carries_no_deferred_cell_build_or_preflight(self) -> None:
+        plan = self.plan(event="pull_request")
+        self.assertEqual("pull_request", plan["event"])
+        self.assertEqual(["ubuntu-latest", "macos-latest"], self.names(plan["environments"]))
+        self.assertEqual(
+            [
+                {"name": "windows-latest", "events": ["push", "schedule", "workflow_dispatch"]},
+                {"name": "wsl2-ubuntu", "events": ["schedule", "workflow_dispatch"]},
+            ],
+            plan["deferred_environments"],
+        )
+        self.assertNotIn("proven_environments", plan)
+        cell_environments = {cell["environment"] for cell in plan["cells"]}
+        self.assertEqual({"ubuntu-latest", "macos-latest"}, cell_environments)
+        self.assertEqual({"ubuntu-latest", "macos-latest"}, {build["producer"] for build in plan["builds"]})
+        self.assertEqual(["macos-latest", "ubuntu-latest"], plan["preflight_os"])
+        matrix = legacy_scope_document(plan)["matrix"]
+        self.assertFalse(matrix[0]["wsl"], "no WSL2 leg on a pull request")
+
+    def test_a_plan_without_an_event_is_byte_identical_to_before(self) -> None:
+        plan = self.plan()
+        for field in ("event", "deferred_environments", "proven_environments"):
+            self.assertNotIn(field, plan)
+        self.assertEqual(4, len(plan["environments"]))
+
+    def test_a_reused_pull_request_narrows_a_push_to_what_it_could_not_prove(self) -> None:
+        plan = self.plan(event="push", proven_event="pull_request")
+        self.assertEqual(["windows-latest"], self.names(plan["environments"]))
+        self.assertEqual(
+            [
+                {"name": "ubuntu-latest", "event": "pull_request"},
+                {"name": "macos-latest", "event": "pull_request"},
+            ],
+            plan["proven_environments"],
+        )
+        self.assertEqual({"windows-latest"}, {cell["environment"] for cell in plan["cells"]})
+        # The check environment was proven by the pull request; nothing checks
+        # here, and the L1 build still compiles the L1 kinds.
+        self.assertEqual([], [cell for cell in plan["cells"] if cell["gate"] == "check"])
+        self.assertEqual(["ubuntu-latest", "windows-latest"], plan["preflight_os"])
+
+    def test_a_full_scope_run_preflights_only_the_scheduled_runners(self) -> None:
+        plan = self.plan(force_all=True, event="schedule")
+        self.assertEqual(["ubuntu-latest", "windows-latest"], plan["preflight_os"])
+        self.assertEqual([{"name": "macos-latest", "events": ["pull_request", "push", "workflow_dispatch"]}], plan["deferred_environments"])
+        self.assertIn("wsl2-ubuntu", {cell["environment"] for cell in plan["cells"]})
+
+    def test_the_label_plans_every_environment_for_a_pull_request(self) -> None:
+        plan = self.plan(event="pull_request", all_environments=True)
+        self.assertEqual(4, len(plan["environments"]))
+        self.assertNotIn("deferred_environments", plan)
+        self.assertEqual("pull_request", plan["event"])
+
+    def test_the_schema_refuses_a_deferred_environment_the_plan_also_schedules(self) -> None:
+        plan = self.plan(event="pull_request")
+        broken = {**plan, "deferred_environments": [{"name": "ubuntu-latest", "events": ["push"]}]}
+        problems = schema.validate_resolved_plan(broken)
+        self.assertTrue(any("also schedules" in problem for problem in problems), problems)
+        for field, value in (
+            ("event", "nightly"),
+            ("deferred_environments", []),
+            ("proven_environments", [{"name": "windows-latest"}]),
+        ):
+            with self.subTest(field=field):
+                self.assertNotEqual([], schema.validate_resolved_plan({**plan, field: value}))
+
+    def test_the_cli_plans_by_event_and_refuses_it_with_apply_to(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "ci" / "affected_scope.py"),
+             "--apply-to", "plan.json", "--event", "push"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("--event", result.stderr)
 
 
 class CheckCellScopeTests(unittest.TestCase):
@@ -2509,9 +2756,7 @@ class CheckCellScopeTests(unittest.TestCase):
             for cell in plan["cells"]  # type: ignore[union-attr]
             if cell["gate"] == "check"
         }
-        self.assertEqual(
-            {("alpha-core", environment) for environment in CheckCellTests.NATIVE}, checks
-        )
+        self.assertEqual({("alpha-core", CHECK_ENVIRONMENT)}, checks)
         records = {entry["package"]: entry for entry in plan["packages"]}  # type: ignore[union-attr]
         self.assertEqual("-p alpha-core --examples", records["alpha-core"]["check_args"])
         self.assertEqual("-p beta-app", records["beta-app"]["check_args"])
@@ -2528,9 +2773,9 @@ class CheckCellScopeTests(unittest.TestCase):
             for entry in legacy_scope_document(plan)["matrix"]
         }
         self.assertEqual("-p alpha-core --examples", matrix["alpha-core"]["check_args"])
-        # macOS L1 reused and Windows prohibited: the check still runs on the
-        # two environments that can host it, and macOS is one of them.
-        self.assertEqual(["ubuntu-latest", "macos-latest"], matrix["alpha-core"]["check_os"])
+        # macOS L1 reused and Windows prohibited: neither hosts a check, so
+        # the one check environment is the whole projection.
+        self.assertEqual([CHECK_ENVIRONMENT], matrix["alpha-core"]["check_os"])
         self.assertEqual([], matrix["beta-app"]["check_os"])
 
 
@@ -2679,30 +2924,25 @@ class DependentSeamTests(unittest.TestCase):
         self.assertIn("also compiles 2 unchanged dependent(s)", cell["selection_reason"])
         self.assertIn("beta-app, gamma-lib", cell["selection_reason"])
 
-    def test_uncovered_kinds_keep_every_native_check_and_only_linux_carries_the_seam(self) -> None:
-        # delta-lib declares a bench, so its own check runs on every native
-        # environment as before; gamma-lib's seam rides on the Linux cell only,
-        # and the Windows and macOS cells are not widened by it.
+    def test_uncovered_kinds_check_on_linux_which_also_carries_the_seam(self) -> None:
+        # delta-lib declares a bench, so its own check runs on the one check
+        # environment; gamma-lib's seam rides on that same Linux cell, which
+        # is also `DEPENDENTS_ENVIRONMENT`.
         plan = self.plan("delta/lib/src/lib.rs")
         checks = self.check_cells(plan, "delta-lib")
-        self.assertEqual(
-            ["macos-latest", "ubuntu-latest", "windows-latest"], sorted(checks)
-        )
-        for environment, cell in checks.items():
-            self.assertEqual(["bench"], cell["target_kinds"])
-            self.assertEqual(
-                environment == DEPENDENTS_ENVIRONMENT, "dependents" in cell, environment
-            )
+        self.assertEqual([DEPENDENTS_ENVIRONMENT], sorted(checks))
+        cell = checks[DEPENDENTS_ENVIRONMENT]
+        self.assertEqual(["bench"], cell["target_kinds"])
         self.assertEqual(["gamma-lib"], checks[DEPENDENTS_ENVIRONMENT]["dependents"])
         self.assertIn("bench target(s)", checks[DEPENDENTS_ENVIRONMENT]["selection_reason"])
         self.assertIn("also compiles 1 unchanged", checks[DEPENDENTS_ENVIRONMENT]["selection_reason"])
         record = next(entry for entry in plan["packages"] if entry["package"] == "delta-lib")  # type: ignore[union-attr]
         self.assertEqual("-p delta-lib --benches", record["check_args"])
         self.assertEqual("-p gamma-lib --lib", record["dependent_seam"]["check_args"])
-        # gamma-lib has an example but no dependents: its own check runs
-        # everywhere and no cell carries a seam.
+        # gamma-lib has an example but no dependents: its own check runs on
+        # the check environment and no cell carries a seam.
         gamma_checks = self.check_cells(self.plan("gamma/lib/src/lib.rs"), "gamma-lib")
-        self.assertEqual(3, len(gamma_checks))
+        self.assertEqual(1, len(gamma_checks))
         self.assertEqual([], [cell for cell in gamma_checks.values() if "dependents" in cell])
 
     def test_a_dependent_that_is_itself_selected_is_excluded_from_the_seam(self) -> None:
@@ -2932,7 +3172,7 @@ class ApplyFixture(unittest.TestCase):
              "origin": "prior-local", "outcome": "pass", "evidence": {"ref": "refs/notes/ci-local/wsl2-ubuntu"}},
             # Never accepted as themselves, whatever a receipt claims (a check
             # is satisfied only through its package's L1 pass):
-            {"package": "alpha-core", "environment": "macos-latest", "gate": "check", "origin": "local"},
+            {"package": "alpha-core", "environment": "ubuntu-latest", "gate": "check", "origin": "local"},
             {"package": "web-server", "environment": "ubuntu-latest", "gate": "L1", "origin": "local"},
             {"package": "alpha-core", "environment": "windows-latest", "gate": "L2", "origin": "local"},
         ]
@@ -2984,16 +3224,17 @@ class ApplyAcceptedCellsTests(ApplyFixture):
         self.assertEqual(("reuse", "reused"), states["alpha-core/macos-latest/L1"])
         self.assertEqual(("execute", "pending"), states["web-server/macos-latest/L1"])
         self.assertEqual(("reuse", "reused"), states["alpha-core/wsl2-ubuntu/L1"], "evidence satisfies the prohibition")
-        self.assertEqual(("reuse", "reused"), states["alpha-core/macos-latest/check"], "the host's L1 pass covers it")
-        self.assertEqual(("execute", "pending"), states["alpha-core/windows-latest/check"])
+        self.assertEqual(("execute", "pending"), states["alpha-core/ubuntu-latest/check"], "no Linux L1 pass to cover it")
+        self.assertNotIn("alpha-core/macos-latest/check", states, "check is a single-environment gate")
         self.assertEqual(("execute", "pending"), states["web-server/ubuntu-latest/L1"], "companion host")
         self.assertEqual(("omit", "accepted-gap"), states["alpha-core/windows-latest/L2"])
         self.assertEqual(("omit", "accepted-gap"), states["alpha-core/wsl2-ubuntu/L2"])
         self.assertEqual(("omit", "prohibited"), states["web-server/wsl2-ubuntu/L1"], "no evidence, still prohibited")
         self.assertEqual(["web-server/wsl2-ubuntu/L1"], applied["prohibited_cells"])
         self.assertEqual(self.rejections, applied["evidence_rejections"])
-        # Two L1 passes, plus the macOS check that rides on one of them.
-        self.assertEqual(3, len(applied["accepted_evidence"]))
+        # Two L1 passes; neither is on the check environment, so no check rides
+        # on them.
+        self.assertEqual(2, len(applied["accepted_evidence"]))
         self.assertNotIn("prohibition", next(
             cell for cell in applied["cells"]  # type: ignore[union-attr]
             if cell["environment"] == "wsl2-ubuntu" and cell["gate"] == "L1"
@@ -3041,7 +3282,7 @@ class ApplyAcceptedCellsTests(ApplyFixture):
         projection = legacy_scope_document(plan)
         matrix = {entry["package"]: entry for entry in projection["matrix"]}
         self.assertNotIn("macos-latest", matrix["alpha-core"]["native_environments"])
-        self.assertEqual(["ubuntu-latest", "windows-latest"], matrix["alpha-core"]["check_os"])
+        self.assertEqual([CHECK_ENVIRONMENT], matrix["alpha-core"]["check_os"])
         self.assertEqual(["ubuntu-latest"], matrix["web-server"]["node_environments"])
         policy = {entry["package"]: entry for entry in projection["policy"]}
         self.assertFalse(policy["excluded"]["gates"])
@@ -4785,6 +5026,7 @@ def environments_for_tests() -> list[dict[str, object]]:
             "name": "ubuntu-latest",
             "runner": "ubuntu-latest",
             "native_key": "ubuntu-latest",
+            "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
             "capabilities": {
                 "tmux": True,
                 "headless_browser": True,
@@ -4804,6 +5046,7 @@ def environments_for_tests() -> list[dict[str, object]]:
             "name": "windows-latest",
             "runner": "windows-latest",
             "native_key": "windows-latest",
+            "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
             "capabilities": {
                 "tmux": {
                     "available": False,
@@ -4824,6 +5067,7 @@ def environments_for_tests() -> list[dict[str, object]]:
             "name": "macos-latest",
             "runner": "macos-latest",
             "native_key": "macos-latest",
+            "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
             "capabilities": {
                 "tmux": True,
                 "headless_browser": False,
@@ -4843,6 +5087,7 @@ def environments_for_tests() -> list[dict[str, object]]:
             "name": "wsl2-ubuntu",
             "runner": "windows-latest",
             "native_key": "ubuntu-latest",
+            "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
             "capabilities": {
                 "tmux": {
                     "available": False,
