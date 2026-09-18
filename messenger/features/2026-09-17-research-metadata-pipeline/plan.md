@@ -204,6 +204,40 @@ skills_files_updated_during_phase_5:
     - .claude/skills/messenger/SKILL.md
     - .claude/skills/messenger/research-contract.md
     - .claude/skills/os/macos.md
+source_files_during_phase_6:
+    - messenger/lib/src/research/mod.rs
+    - messenger/lib/src/research/diagnostics.rs
+    - messenger/lib/src/research/generate.rs
+    - messenger/lib/src/research/model/common.rs
+    - messenger/lib/src/research/publish/mod.rs
+    - messenger/lib/src/research/publish/fsutil.rs
+    - messenger/lib/src/research/refresh/mod.rs
+    - messenger/lib/src/research/refresh/approval.rs
+    - messenger/lib/src/research/refresh/check.rs
+    - messenger/lib/src/research/refresh/cleanup.rs
+    - messenger/lib/src/research/refresh/config.rs
+    - messenger/lib/src/research/refresh/prepare.rs
+    - messenger/lib/src/research/refresh/promote.rs
+    - messenger/lib/src/research/refresh/records.rs
+    - messenger/lib/src/research/refresh/review.rs
+    - messenger/lib/src/research/refresh/select.rs
+    - messenger/lib/src/research/refresh/state.rs
+    - messenger/lib/tests/research_refresh.rs
+    - messenger/cli/src/lib.rs
+    - messenger/cli/src/main.rs
+    - messenger/cli/src/research.rs
+    - messenger/cli/src/research_lifecycle.rs
+    - messenger/cli/tests/research_lifecycle_cli.rs
+docs_updated_during_phase_6:
+    - messenger/lib/README.md
+    - messenger/cli/README.md
+    - messenger/docs/research/platforms/_fleet.md
+    - messenger/docs/research/platforms/_rules.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/fixture-matrix.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/messenger/SKILL.md
+    - .claude/skills/messenger/research-contract.md
 packages:
     - messenger
     - messenger-cli
@@ -637,21 +671,21 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Wave 13 — Candidate Lifecycle
 
-- [ ] **Refresh Selection**
+- [x] **Refresh Selection**
   - Select missing, expired, forced, schema-invalid, prompt/schema-changed, or
     relevant-version-changed items from the roster; skip accepted current items
     with an auditable reason.
   - Preserve `created`, stable IDs, actual source check dates, and prior chronology;
     never treat an agent exit code or timestamp-only edit as success.
 
-- [ ] **Three Passes**
+- [x] **Three Passes**
   - Wire the shared fleet through Claudine's budgeted sequence: isolated discovery,
     curated reconciliation, then capped source-list proposals.
   - Require contribution notes for suggested/retained sources, an access-attempt
     record for every curated source, accountable investigated gaps, and human
     approval for every curated-list change.
 
-- [ ] **Candidate Storage**
+- [x] **Candidate Storage**
   - Persist isolated per-platform candidates, stage results, sanitized fixtures,
     source-check results, and resume metadata in the Phase 1 local state area.
   - Protect active and awaiting-review runs; never overwrite accepted platform
@@ -659,21 +693,21 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Wave 14 — Review Gates
 
-- [ ] **Delta Review**
+- [x] **Delta Review**
   - Run structural and semantic validation, deterministic delta, suspicious flags,
     and an independently launched evidence reviewer after reconciliation and
     before promotion.
   - Review changed evidence even at the same URL and meaningful prose changes
     even when typed values match; unresolved evidence remains unresolved.
 
-- [ ] **Approval Policy**
+- [x] **Approval Policy**
   - Enforce human approval for the initial baseline and all substantive fact, gap,
     applicability, evidence, schema, curated-source, or prose changes.
   - Implement automatic unchanged renewal only when all substantive elements are
     identical, the same sources were successfully rechecked, and validation and
     publication consistency checks pass.
 
-- [ ] **Independent Promotion**
+- [x] **Independent Promotion**
   - Promote successful platforms independently and combine them only with prior
     accepted documents that satisfy the current schema and coverage.
   - Store concise accepted change summaries in the CHANGELOG, durable structured
@@ -682,7 +716,7 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Wave 15 — Retention Controls
 
-- [ ] **Cleanup Preview**
+- [x] **Cleanup Preview**
   - Add exact, dry-run-first cleanup reporting for local candidate, rejected,
     failed, and routine-renewal records older than the configured threshold
     (initially 30 days), including the resumability that would be lost.
@@ -690,7 +724,7 @@ numeric order unless a task explicitly names a narrower dependency.
     candidates, and all evidence needed by accepted research. Cleanup never commits
     or publishes Git changes.
 
-- [ ] **Lifecycle Tests**
+- [x] **Lifecycle Tests**
   - Cover missing/unchanged/malformed/contradictory output, bounded recovery,
     partial failure, source inaccessibility, unchanged renewals, substantive
     changes, initial-baseline rejection, independent platform publication, and
@@ -701,10 +735,10 @@ numeric order unless a task explicitly names a narrower dependency.
 
 ### Phase 6 Checkpoint
 
-- [ ] Replay the full lifecycle from an empty fixture and from a partially failed
+- [x] Replay the full lifecycle from an empty fixture and from a partially failed
   refresh; verify the accepted snapshot remains internally consistent at every
   injected interruption.
-- [ ] Review stored artifacts for secrets, raw transcripts, wholesale social
+- [x] Review stored artifacts for secrets, raw transcripts, wholesale social
   threads, message content, host-specific paths, and inaccurate freshness dates.
 
 ## Phase 7 — Establish Reviewed Baseline

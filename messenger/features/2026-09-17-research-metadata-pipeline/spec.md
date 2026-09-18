@@ -38,73 +38,67 @@ references:
 human_review: true
 human_review_items:
     - |-
-        **Unblock the three shared test machines** (Linux, native Windows, and Windows' Linux subsystem, WSL2).
+        **Supply the time and agent limits for live research, and confirm who approves the first baseline.**
 
-        **Why decide now:** Phase 5 is now built. It changes how Claudine stops a research worker and everything that worker started, and how it cleans up after a crash. That behavior is operating-system specific; on Windows it relies on a Windows-only mechanism. Phase 4's snapshot publication also depends on Windows file-replacement rules. Phase 6 builds the refresh workflow on top of both, so both need real runs on each system first. Phase 5 re-checked the hosts on 2026-09-17 and all three were still blocked:
-        - `build-linux` is held by a lock left since 2026-09-14 by an unrelated job (`reward-20260914-c3e60d0`).
-        - `build-win-native` has no free space on its `W:` drive, so nothing can be copied there.
-        - `build-win` (WSL2) drops the SSH connection, which earlier phases traced to the same full `W:` drive.
-
-        Phases 3, 4, and 5 fell back to Linux in Docker on this Mac plus Windows *compile-only* checks. Phase 5's budget tests are written to run unchanged on Windows, but they have never actually run there. Agents were told not to delete other people's data or locks, so this needs a person.
+        **Why decide now:** Phase 7 is the first phase that runs real research agents. The specification forbids a live run until a person gives two numbers for each platform: the most wall-clock time a platform's research may use, and the most agent launches it may use. There are deliberately no defaults. The Phase 6 tooling refuses to start without both (`messenger research prepare --max-seconds N --max-invocations N`). Phase 7 also ends with a person approving all five platforms' research; the approver's name is written into the committed review records.
 
         Options:
-        - **A. Free space on `W:` and clear the stale `build-linux` lock** (after confirming the 2026-09-14 job is dead).
-          - Pros: real evidence on all three systems before Phase 6 builds on it; later phases can use `just cross-check` as designed.
-          - Cons: a few minutes of manual host maintenance.
-        - **B. Continue with Docker Linux plus Windows compile checks, and rely on CI for Windows and WSL2.**
-          - Pros: no host work.
-          - Cons: Windows-only failures surface hours later in CI, and Phase 5's Windows process-stopping and crash-cleanup behavior stays untested until then.
-        - **C. Pause Phase 6 until the hosts are fixed.**
-          - Pros: no risk of building on untested behavior.
-          - Cons: stalls the feature on host maintenance.
+        - **A. Give per-platform limits now** (for example 3600 seconds and 12 agent launches per platform, the same for all five).
+          - Pros: Phase 7 can start immediately; one number to reason about.
+          - Cons: Signal and WhatsApp may need less, Discord and Slack more; unused allowance is simply not spent.
+        - **B. Give different limits per platform.**
+          - Pros: tighter cost control.
+          - Cons: more to decide up front, with little evidence yet about how long each platform takes.
+        - **C. Run one platform first (Discord) with small limits, then set the rest from what it used.**
+          - Pros: real data before committing to numbers; the budget ledger records exactly what was used.
+          - Cons: slower start; Discord alone cannot be published (the first publication needs all five platforms together), so its result waits in local state.
 
-        **Recommendation: A.** It is small, and Phase 5 added the Windows-specific behavior that most needs a real Windows run.
+        **Recommendation: C.** It costs one small run and replaces guesses with measured usage. Please also name the maintainer who will approve the baseline.
     - |-
-        **Approve the remaining research commands** (`prepare`, `runs`, `promote`, `cleanup`).
+        **Approve the research commands as built**, including three details the design record did not list.
 
-        **Status after Phase 4:** Phase 4 shipped the four commands the spec requires (`validate`, `generate`, `generate --check`, `report`) plus `recover`. `recover` repairs an interrupted publication, and publication cannot be operated without it: `generate` refuses to run until an interrupted publication is repaired, and the design forbids hiding that repair inside `generate`. The other four commands have not been built.
+        **Why decide now:** Phase 7 uses these commands for every platform, and the review records they write are committed. Phase 6 built `prepare`, `runs`, `promote`, and `cleanup` as proposed (flat commands next to the existing `recover`), and added:
+        - `check-run`, which the research sequence calls after each stage to judge what the agents wrote;
+        - `reject`, which records a rejected run locally so it never reaches the change log;
+        - `promote` accepting several runs at once. This is required because the first publication needs all five platforms, while research runs one platform at a time.
 
-        **Why decide now:** Phase 6, the next phase, builds these commands. Phase 5 (Claudine) did not need them.
-
-        Options:
-        - **A. Four more flat subcommands** (`messenger research prepare`, `runs`, `promote`, `cleanup`), matching the `recover` command already shipped.
-          - Pros: every change to accepted research stays one explicit, visible command; consistent with what exists.
-          - Cons: four more commands to document and test.
-        - **B. Grouped commands** (`research run prepare|list`, `research publish promote|recover`).
-          - Pros: shorter top-level help.
-          - Cons: `recover` would have to move; deeper nesting than the rest of the `messenger` CLI.
-        - **C. `just` recipes only.**
-          - Pros: no new commands.
-          - Cons: not workable; recipes need a binary to call, and the spec puts run setup, inspection, and cleanup in `messenger-cli`.
-
-        **Recommendation: A.** Smallest change, consistent with the shipped `recover`, and it keeps every change to accepted research explicit.
-    - |-
-        **Confirm the file layout**, which Phase 4 made more load-bearing.
-
-        **Status after Phase 4:** the code now writes and verifies `docs/research/publication.json` (the committed record that selects which set of research files is current), generates `docs/research/platforms/catalog.json` and `docs/research/summary/platforms.md`, and keeps its local working files in the git-ignored `messenger/.research-state/`. The summary is authored prose with one generated region; only that region is checked, so people can edit the prose freely. Earlier layout choices (the shared `_types.yaml`, the separate roster and mappings schemas) are unchanged.
-
-        **Why decide now:** Phase 6 adds the change log and review records to this layout. Moving paths is a one-file change today (`messenger/lib/src/research/paths.rs`) and gets more expensive with each phase.
+        It also added `docs/research/CHANGELOG.md` (generated from the review records) and `docs/research/reviews/` to the committed layout, as the design record proposed.
 
         Options:
-        - **A. Keep the layout as built.**
-          - Pros: implemented and covered by about 100 automated tests; no unreviewed file is ever committed by a tool.
-          - Cons: more files than the spec's table lists, and `publication.json` must be committed together with the files it lists.
-        - **B. Change paths now** (for example, move `publication.json` or the summary).
-          - Pros: the layout matches a different preference.
-          - Cons: rework in code, tests, and docs, with no functional gain.
+        - **A. Accept as built.**
+          - Pros: implemented and covered by 18 new automated tests, on macOS and Linux.
+          - Cons: six more commands to document (Phase 8 does this).
+        - **B. Ask for changes** (for example, fold `check-run` into another command).
+          - Pros: a smaller command list.
+          - Cons: rework before Phase 7; the research sequence depends on `check-run` by name.
 
         **Recommendation: A.**
+    - |-
+        **Unblock the shared test machines** (Linux, native Windows, and Windows' Linux subsystem, WSL2). Unchanged since Phase 5.
+
+        **Why decide now:** Phases 4 to 6 added file locking, atomic file replacement, and process cleanup that behave differently on Windows. None has run on a real Windows machine yet; only compile checks passed. Phase 6 re-checked on 2026-09-17: `build-linux` is still held by the lock left on 2026-09-14 by an unrelated job (`reward-20260914-c3e60d0`). `build-win-native` and `build-win` were not retried because nothing had changed there. Linux was covered with Docker on this Mac instead, and everything passed.
+
+        Options:
+        - **A. Free space on the `W:` drive and clear the stale `build-linux` lock** (after confirming the 2026-09-14 job is dead).
+          - Pros: real Windows and WSL2 evidence before Phase 8's final verification.
+          - Cons: a few minutes of manual host work.
+        - **B. Rely on Docker for Linux and on CI for Windows and WSL2.**
+          - Pros: no host work.
+          - Cons: Windows-only failures appear hours later in CI.
+
+        **Recommendation: A.** Phase 8 requires this evidence anyway, and it is cheaper to find Windows problems before Phase 7's live research depends on them.
 message_to_agent: |-
-    Phase 5 shipped Claudine's shared budget. Read "## Phase 5" in `implementation-log.md`, `claudine/docs/cli/budget.md`, and the "Refresh budget (Claudine)" section of `.claude/skills/messenger/research-contract.md` first.
-    - Interface for Phase 6. Messenger cannot link Claudine, so it uses the CLI only. `claudine budget init <ledger> --run-id <id> --platform <p> --max-seconds N --max-invocations N [--exclusive-lock ../../fleet.lock] [--heartbeat 5s]` creates the ledger. Then `claudine sequence --budget-ledger <ledger> <run.md>` runs under it. Operate it with `claudine budget show --json | suspend | resume --operator | grant --operator --reason [--invocations N] [--seconds N]`. Point every platform's ledger at one shared `--exclusive-lock` to get one-platform-at-a-time.
-    - Messenger-side limit validation is still owed. Claudine refuses missing or zero limits (clap exit 2, no file written), but the Phase 5 checkpoint's "Messenger fleet rejects missing limits before launching a worker" is only proven at Claudine's boundary. Make `messenger research prepare` (architecture `run_config`) require both limits, with no defaults, before it calls `budget init`.
-    - Exit statuses: `0` means the run finished and the ledger rests `suspended` ("awaiting human review"). `76` means exhausted; the ledger keeps the incomplete `stage`, and the result must never be treated as finished or as an investigated unknown. `77` means blocked (suspended, interrupted, or the lock is held). After a crash the ledger still says `active`; the next `sequence` or `budget` command recovers it to `interrupted`, and an operator must `resume` it.
-    - Put validation and delta inside the sequence as `shell:` steps; only time inside a budgeted run is charged. Shell steps need approval without a terminal, via `--yolo` or a `.darkmatter-shell-whitelist`.
-    - Sequence progress is not persisted: a restarted sequence re-runs from step 1 and consumes more budget. Resuming a candidate mid-run is Messenger's job.
-    - Each pass is its own prompt document (`prompt: "./inputs/discovery/prompt.md"` step). Discovery must never be a step of a sequence whose root has a top-level `prompt:` (that turns every step into inline-compose). `sequence_budget.rs` shows the pattern with a portable Rust fake provider.
-    - The test hosts are still blocked (see human_review_items). Linux evidence came from Docker (`os/macos.md`), Windows from `just check-windows` in `claudine/` (compile only).
-    - Pre-existing and unrelated: 10 Claudine tests fail on drift between the shipped `prompts/` files and Claudine's fixtures (listed in the Phase 5 gates). `just test` in `claudine/` is not green for that reason.
-    - GitNexus: another analyze held the index lock during Phase 5, and every symbol came back `UNKNOWN`. Run `just gitnexus` and re-run `detect_changes` before committing.
+    Phase 6 built the refresh and review lifecycle. Read "## Phase 6" in `implementation-log.md` and the "Refresh and review" section of `.claude/skills/messenger/research-contract.md` first.
+    - A live run needs operator limits and a named approver (see human_review_items). Never invent limits.
+    - Per platform: `messenger research prepare <platform> --max-seconds N --max-invocations N` creates `messenger/.research-state/runs/<platform>/<run_id>/` and prints two commands: `claudine budget init ...` and `claudine sequence --yolo --budget-ledger ... run.md`. Run them from the repository root. The sequence's `shell:` steps call `messenger research check-run`, so a `messenger` binary built from this worktree must be first on PATH.
+    - After a run, `messenger research runs` shows its state. Resume a failed stage with `prepare --resume RUN_ID` (at most 2 times, same budget). Claudine exit 76 means exhausted: the run is `exhausted`, never a finished result; only an operator `claudine budget grant` allows resuming.
+    - The first publication needs all five platforms together: `messenger research promote RUN_A RUN_B RUN_C RUN_D RUN_E --approved-by NAME`. Promoting one run alone is refused (it lists the missing platforms) and writes nothing. Leave finished runs `awaiting_review` until all five are ready.
+    - The shipped legacy documents at `messenger/docs/research/platforms/*.md` are reconciliation input only (`previous.md`); they are not a baseline and do not validate.
+    - `promote` never edits the roster. A Pass 3 source-list proposal lands in the review record; applying it to `messenger/docs/platforms.yaml` is a separate human edit.
+    - Commit `publication.json` together with every artifact it lists, which now includes `docs/research/CHANGELOG.md` and `docs/research/reviews/*.json`.
+    - Agents write only into the run directory. If an agent edits an accepted document directly, `generate`, `report`, and `promote` refuse the snapshot until it is restored.
+    - GitNexus: `just gitnexus` timed out behind another analyze (pid 78755) in Phases 5 and 6. Run it, then `detect-changes --scope all`, before committing.
+    - Disk: `/Volumes/coding` ran out mid-build in Phase 6; `just sweep` recovered 79 GiB. Check `df -h /Volumes/coding` before large builds.
 ---
 
 # Provider Research Metadata Pipeline

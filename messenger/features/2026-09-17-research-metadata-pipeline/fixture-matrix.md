@@ -33,6 +33,8 @@ Test entry points (names fixed in Phase 3–6, one per boundary):
 | `messenger/lib/tests/research_publication.rs` | Snapshot writer with fault injection in fixture-owned directories |
 | `messenger/lib/tests/research_lifecycle.rs` | Selection, delta, approval, promotion, retention with fake agent output |
 | `messenger/cli/tests/research_cli.rs` | Real `messenger research …` binary against fixture trees (exit codes, JSON, drift) |
+| `messenger/lib/tests/research_refresh.rs` | Phase 6 lifecycle with a fake agent: selection, prepared inputs, stage checks, approval, promotion, recovery, budgets, retention |
+| `messenger/cli/tests/research_lifecycle_cli.rs` | Real `messenger research prepare\|check-run\|runs\|promote\|reject\|cleanup` binary |
 | `claudine/cli/tests/sequence_budget.rs` | Budgeted sequence runs with fake providers and fixture-owned home/PATH |
 
 ## Criteria

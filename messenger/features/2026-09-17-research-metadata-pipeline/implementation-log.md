@@ -203,6 +203,40 @@ skills_files_updated_during_phase_5:
     - .claude/skills/messenger/SKILL.md
     - .claude/skills/messenger/research-contract.md
     - .claude/skills/os/macos.md
+source_files_during_phase_6:
+    - messenger/lib/src/research/mod.rs
+    - messenger/lib/src/research/diagnostics.rs
+    - messenger/lib/src/research/generate.rs
+    - messenger/lib/src/research/model/common.rs
+    - messenger/lib/src/research/publish/mod.rs
+    - messenger/lib/src/research/publish/fsutil.rs
+    - messenger/lib/src/research/refresh/mod.rs
+    - messenger/lib/src/research/refresh/approval.rs
+    - messenger/lib/src/research/refresh/check.rs
+    - messenger/lib/src/research/refresh/cleanup.rs
+    - messenger/lib/src/research/refresh/config.rs
+    - messenger/lib/src/research/refresh/prepare.rs
+    - messenger/lib/src/research/refresh/promote.rs
+    - messenger/lib/src/research/refresh/records.rs
+    - messenger/lib/src/research/refresh/review.rs
+    - messenger/lib/src/research/refresh/select.rs
+    - messenger/lib/src/research/refresh/state.rs
+    - messenger/lib/tests/research_refresh.rs
+    - messenger/cli/src/lib.rs
+    - messenger/cli/src/main.rs
+    - messenger/cli/src/research.rs
+    - messenger/cli/src/research_lifecycle.rs
+    - messenger/cli/tests/research_lifecycle_cli.rs
+docs_updated_during_phase_6:
+    - messenger/lib/README.md
+    - messenger/cli/README.md
+    - messenger/docs/research/platforms/_fleet.md
+    - messenger/docs/research/platforms/_rules.md
+    - messenger/features/2026-09-17-research-metadata-pipeline/fixture-matrix.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/messenger/SKILL.md
+    - .claude/skills/messenger/research-contract.md
 packages:
     - messenger
     - messenger-cli
@@ -1077,3 +1111,181 @@ hermetic.
   Messenger's own `prepare` command (architecture `run_config`) does not exist
   until Phase 6; the Phase 6 agent is told to validate both limits there.
 
+
+## Phase 6
+
+### Starting point and rulings applied
+
+- The spec's `human_review_items` (test hosts, remaining commands, layout)
+  were still open. This phase proceeded on each item's recommendation: flat
+  subcommands matching the shipped `recover` (item 2, option A) and the layout
+  as built (item 3, option A). Lifecycle commands added: `prepare`,
+  `check-run`, `runs`, `promote`, `reject`, `cleanup`. `check-run` and
+  `reject` are additions beyond the architecture record's list (see below).
+- Messenger never spawns Claudine or an agent: `prepare` writes the run and
+  prints the `claudine budget init` / `claudine sequence --yolo
+  --budget-ledger` commands (architecture: "Messenger reaches Claudine only
+  through `just` recipes"). Package-area recipes stay with Phase 8 (plan
+  Wave 21).
+
+### Environment notes (in progress)
+
+- `/Volumes/coding` ran out of space mid-build (`ld: errno=28`, 212 MiB
+  free). Applied the repository policy (`just sweep`) to this worktree only:
+  the capacity backstop removed 79.34 GiB from this worktree's `target/`;
+  56 GiB free afterward. No other session's files were touched.
+- GitNexus: `just gitnexus` gave up after 600 s waiting on another
+  `gitnexus analyze` (pid 78755, the same holder seen in Phase 5); the process
+  was left alone. `impact` returned `Target not found`/`UNKNOWN` for the
+  research symbols, so callers of the edited `generate.rs` functions were
+  confirmed by text search: `load_fleet` (CLI `validate`, publication tests),
+  `generate` (CLI `generate`, tests), `check` (CLI), `Fleet::snapshot`
+  (`generate`, `check` only). All are research-feature code; no delivery path.
+  (The later `detect-changes --scope all` saw 10 tracked files and 2 README
+  sections, risk "low"; it does not see the new untracked files and the index
+  predates the research code, so it is **not** a clean check. Re-run after
+  `just gitnexus` succeeds, before committing.)
+
+### What landed
+
+- **`messenger::research::refresh`** (new, feature `research`):
+  - `config` — `RunLimits::new(max_seconds, max_invocations)`: both required
+    and positive, no defaults (the Messenger-side check Phase 5 handed over).
+  - `state` — the state area: `RunId` (`{date}-{8 hex}`), `RunStatus`,
+    `Stage`, `run.json` (`messenger-research-run/1`, atomic replacement, LF),
+    a read-only `LedgerView` of Claudine's `budget.json`, and `apply_ledger`
+    (an exhausted ledger makes an active run `exhausted`, a recovered crash
+    makes it `interrupted`).
+  - `select` — refresh selection with reasons `missing`, `expired`, `forced`,
+    `schema_invalid`, `prompt_changed`, `schema_changed`, `no_review_record`,
+    `version_changed`; skips `current` or `open_run` with the reason.
+  - `prepare` — creates the run, per-pass inputs (discovery gets
+    identification + contract only; reconciliation gets curated sources,
+    previous document, discovery outputs), schema copies beside the candidate,
+    and `run.md` (five steps plus `review-check`; validation and the review
+    check are `shell:` steps so their time is charged). `resume` reruns from
+    the first incomplete stage (reconcile when validation failed), max two,
+    same ledger, refused while the ledger is exhausted/suspended/interrupted/
+    active.
+  - `records` — pass outputs (`suggested-sources.json`, `source-checks.json`,
+    `source-proposal.json`, `evidence-review.json`), their checks (cap,
+    contributions, replacement at capacity, every curated source attempted),
+    and `unsafe_content`, a library port of the corpus scanner, applied to
+    every stored free-text field (bounded to 1000 characters).
+  - `check` — `evaluate`/`check_run`: judges outputs, validates the candidate
+    in Accepted scope at the accepted path, integrity rules (platform,
+    `created`, chronology, removals in `changes`, `last_updated` only with a
+    successful check, curated `retrieved` only with a successful check on that
+    date), stale-baseline refusal, delta, and evidence-review coverage of every
+    changed fact/source/gap/prose.
+  - `approval` — `decide`: `Ineligible` / `Renewal` / `HumanRequired`.
+  - `review` — durable `ReviewRecord` (`messenger-research-review/1`, sorted
+    keys), local `RenewalRecord`, and `render_changelog`.
+  - `promote` — `promote(run_ids…)` publishes one or more runs together via
+    `generate_with`; `reject`.
+  - `cleanup` — `plan` / `apply`.
+- **`generate.rs`**: carries every published review record forward, accepts new
+  ones (`generate_with`), renders `docs/research/CHANGELOG.md` from them, and
+  validates them under the new rule code `SR-REVIEW` (documented in
+  `_rules.md`). CHANGELOG and reviews are snapshot artifacts, so history is
+  selected atomically with documents and catalog.
+- **CLI** (`cli/src/research_lifecycle.rs`): `prepare`, `check-run`, `runs`,
+  `promote`, `reject`, `cleanup`, with `--json` and `TerminalRenderable`
+  output. Refusals exit 1, missing limits exit 2, environment failures exit 3.
+
+### Decisions (new in this phase)
+
+- **`promote` takes several run IDs.** Publication needs every active
+  platform, and Phase 7 researches one platform at a time, so a one-run
+  `promote` could never publish the first baseline. Each run is judged on its
+  own; nothing is accepted unless the single publication succeeds. One run
+  alone is refused with the missing platforms listed, and nothing is written.
+- **`check-run` and `reject` are additional commands** beyond the
+  architecture record's list: `check-run` is what the sequence's `shell:`
+  steps call, and rejected runs need a recorded local state.
+- **CHANGELOG is generated from review records** (architecture: "generated
+  from approved review records"), so candidate, rejected, and renewal
+  outcomes structurally cannot appear there.
+- **"Researched under"** (prompt/schema fingerprints) is recorded in each
+  review and renewal record; selection compares the newest one with the
+  current contract. A generate-only snapshot has none, so its platforms read
+  `no_review_record` (true of the fixture fleet).
+- **Promotion never applies a curated-list proposal.** The proposal is kept
+  in the review record; changing the roster stays a human edit, which is how
+  "human approval for every curated-list change" is enforced.
+- **A worker cannot write accepted research.** Candidates live in the state
+  area; a direct edit of an accepted file makes `read_verified` refuse the
+  snapshot (tested).
+- **Unchanged renewal rule**: frontmatter equal after removing
+  `last_updated`, `agent`, `model`, and `sources[*].retrieved`; same body
+  hash; no curated change; same prompt and schema as the last record; no
+  inaccessible check; every URL source rechecked on the date it records.
+- **Shell-step root spelled with `/`** so a Windows path's backslashes are
+  never tokenizer escapes (Windows accepts `C:/…`).
+
+### Bugs found by tests
+
+- `RunId::generate` used `xxh64_digest`'s `xxh64:` prefix as hex (unit test).
+- `delta::compare` panics on a cross-platform candidate; `check` now skips
+  the delta on a platform mismatch and reports it (lifecycle test).
+- An unparseable candidate aborted `check-run`; it is now a validation
+  finding.
+
+### Requirement-to-test mapping (Phase 6)
+
+| Requirement (plan / spec AC) | Test(s) |
+|---|---|
+| Selection reasons and auditable skips (AC 8 "skipped current items") | `research_refresh::selection_names_every_due_reason_and_skips_current_or_open_platforms`, `an_accepted_document_that_no_longer_validates_is_due`; CLI `prepare_requires_both_limits…` (dry-run JSON) |
+| Missing limits rejected before any write (AC 33) | `refresh::config::tests::both_limits_are_required_and_positive`; CLI `prepare_requires_both_limits_before_writing_anything` (exit 2 for each missing/zero variant; no `runs/` dir; JSON refusal) |
+| Discovery isolation; reconciliation inputs (AC 24) | `discovery_inputs_hold_no_previous_research_or_curated_sources` (also sequence shape, both limits and fleet lock in the printed commands, run.json round trip) |
+| Initial migration uses legacy prose as input, not baseline (AC 26) | `initial_research_reconciles_legacy_prose_without_treating_it_as_a_baseline` |
+| Outputs judged, not exit codes; missing/malformed/contradictory/timestamp-only output; integrity rules (AC 8, 25, 36) | `stages_are_judged_from_their_outputs_not_exit_codes`; CLI run test (exit 1 with nothing written) |
+| Delta after validation, before promotion; same-URL evidence; unresolved stays unresolved; mechanical vs agent separate (AC 26) | `a_reviewed_change_publishes_with_its_review_record_and_changelog_entry`, `stages_are_judged…` (review coverage) |
+| Approval policy (AC 29, 34) | `automatic_renewal_is_refused_unless_everything_substantive_is_unchanged_and_rechecked` (failed check, source added, prose changed, curated change), `a_verified_unchanged_renewal_is_accepted_without_a_changelog_entry` (prose preserved, dates advance), timestamp-only in `stages_are_judged…` |
+| Initial baseline needs human approval and every platform (AC 28, 30) | `an_initial_publication_promotes_every_platform_together` |
+| Partial refresh keeps failed platform resumable with real dates (AC 30) | `a_partial_refresh_publishes_successes_and_keeps_failed_platforms_resumable` |
+| CHANGELOG vs review records; rejected/renewal never listed; no transcripts/host paths (AC 31, 36) | `a_reviewed_change…` (scan of every committed artifact), `a_verified_unchanged_renewal…`, `automatic_renewal_is_refused…` (4 rejections, 1 entry) |
+| Suggestions never become evidence/curated; roster and mappings untouched (AC 24, 32) | `a_reviewed_change…` |
+| Bounded recovery, no extra budget (AC 8, 33) | `recovery_is_bounded_and_never_adds_budget`, `an_exhausted_budget_stays_incomplete_and_needs_a_recorded_grant` |
+| Interrupted promotion (AC 34) | `an_interrupted_promotion_recovers_to_one_consistent_snapshot_and_completes_on_retry` (all 8 fault points) |
+| Retention (AC 35) | `cleanup_previews_exact_removals_and_protects_open_runs` (held ledger lock, unreadable record, resumability, exact apply); CLI `cleanup_previews_by_default_and_deletes_only_with_apply` |
+| Candidates never overwrite accepted research | `prepared_runs_never_write_accepted_research_even_when_the_worker_misbehaves`; tree-unchanged asserts throughout |
+| End-to-end through the binary | CLI `a_run_goes_from_preparation_to_promotion_through_the_binary` |
+| Persisted round trips | run.json (discovery-inputs test), review record `to_bytes → parse → to_bytes` (reviewed-change test) |
+
+The passive corpus test (`research_corpus.rs`) still covers every shipped
+contract file, including the edited `_fleet.md` and `_rules.md` (SR-REVIEW
+documented, as the corpus test requires for every `Rule`).
+
+### Gates
+
+- macOS: `just test` in `messenger/`: 658 passed, 2 skipped (both
+  pre-existing). `just lint`: exit 0. `cargo clippy -p messenger
+  --all-features --all-targets -- -D warnings`: exit 0. `cargo nextest run
+  -p messenger --all-features`: 567 passed, 2 skipped. `cargo tree -e normal`
+  for no-default, default, and `desktop`: no `darkmatter`, `biscuit-file`, or
+  YAML crate.
+- Manual: a scratch repository (removed afterwards) ran generate → prepare →
+  fake outputs → `check-run` ×2 → `promote` with the real binary; the review
+  record and CHANGELOG were read by hand (concise, sorted, no host paths).
+  `claudine sequence --yolo --dry-run` on the generated `run.md` composed all
+  6 steps and the discovery prompt.
+
+### Cross-OS evidence
+
+- **Linux (Docker `rust:1`, arm64, real kernel)** per `os/macos.md`:
+  `research_refresh` 15/15, `--lib refresh` 6/6, `research_lifecycle_cli`
+  3/3 (including the held-lock cleanup protection on Linux `flock`).
+- **`build-linux`**: `just cross-check messenger --os linux` still waits on
+  the stale `reward-20260914-c3e60d0` lock; stopped, lock not removed.
+- **Native Windows**: `cargo check -p messenger --features research -p
+  messenger-cli --tests --target x86_64-pc-windows-gnu`: exit 0, no warnings
+  (compile evidence only; the 1.9 GB check target was deleted afterwards).
+  Not run: `File::try_lock` against Claudine's held lock on Windows, and
+  `remove_dir_all` of a run directory.
+- **WSL2**: not attempted (same blocked host as Phases 1–5).
+
+### Not done here (by plan)
+
+- Package-area `just` recipes for refresh/publish/cleanup: Phase 8 Wave 21.
+- The skill projection `platform-metadata.md`: Phase 8.
