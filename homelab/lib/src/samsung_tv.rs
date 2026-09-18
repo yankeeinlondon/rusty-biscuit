@@ -49,8 +49,13 @@ pub enum SamsungTvError {
     Api(#[from] schematic_schema::shared::SchematicError),
 
     /// WebSocket error
+    ///
+    /// Boxed: `WsError` is at least 136 bytes, and it is the largest variant
+    /// here, so every `Result<_, SamsungTvError>` in this module would carry
+    /// that much on its success path too. `From<WsError>` below keeps `?`
+    /// working at the call sites.
     #[error("Samsung TV WebSocket error: {0}")]
-    WebSocket(#[from] WsError),
+    WebSocket(Box<WsError>),
 
     /// TV rejected the remote connection
     #[error("Samsung TV unauthorized: remote access denied")]
@@ -63,6 +68,12 @@ pub enum SamsungTvError {
     /// JSON serialization/deserialization error
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+impl From<WsError> for SamsungTvError {
+    fn from(error: WsError) -> Self {
+        Self::WebSocket(Box::new(error))
+    }
 }
 
 /// Samsung Smart TV client for REST and WebSocket control.
