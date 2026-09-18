@@ -782,7 +782,7 @@ impl TaskExecution<'_> {
                 signal,
                 value,
                 &self.task.origin_path,
-                stage.key(),
+                &self.stack_property(stage),
                 &self.task.authored.child(stage.key()),
             )
             .map(|items| (!items.is_empty()).then_some(items)),
