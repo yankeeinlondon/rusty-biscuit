@@ -113,7 +113,7 @@ CLI commands for desktop notifications:
 - `messenger dismiss <receipt>` — dismiss a delivered desktop notification using a saved receipt
 - `messenger info [--json]` — show host OS, detected helpers, election order, and configured routes
 - `messenger install [--yes] [--helper <name>…] [--dry-run]` — install missing notification helpers via the host package manager
-- `messenger research validate|generate [--check]|report|recover` — offline research-contract maintenance; `prepare|check-run|runs|promote|reject|cleanup` — the refresh and review lifecycle (see [Research Contract](research-contract.md))
+- `messenger research validate|generate [--check]|report|recover` — offline research-contract maintenance; `prepare|check-run|runs|promote|reject|cleanup` — the refresh and review lifecycle (see [Research Contract](research-contract.md)). Package-area `just research-*` recipes wrap them; only `just research-refresh` runs agents
 
 Discord ships with two adapters behind a single `discord` feature: `DiscordProvider` (bot token, full capability) and `DiscordWebhookProvider` (webhook URL, notification-only). The webhook adapter rejects `reply_to` at plan time with `MessengerError::UnsupportedFeature { feature: "replies" }` — no network call is made.
 Both Discord adapters render Markdown through the same Discord renderer; the transport and capability differences live in the provider layer, not in a second markup dialect.

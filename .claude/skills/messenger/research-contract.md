@@ -113,6 +113,25 @@ Platform research is becoming typed, reviewed metadata (feature
   (reconcile when validation failed), at most twice, with the same ledger. It
   refuses an exhausted, suspended, interrupted, or active ledger until the
   operator acts in Claudine.
+- **Effective status** (`state::apply_ledger`, applied by `runs`, selection,
+  `check-run`, `resume`, `promote`, and `reject`): an `active` run takes the
+  ledger's resting state. `exhausted` → exhausted, `interrupted` →
+  interrupted, and `stopped` → `failed` **only when the ledger's `runs`
+  exceeds `RunRecord::ledger_runs`**, the count recorded at prepare/resume. A
+  sequence that stopped before `check-run` decided (a failed step, Ctrl+C, or
+  `AgentResolutionFailed`) is resumable or rejectable, not stuck `active`. A
+  ledger still `stopped`/`initialized` (never launched, or Claudine rejected
+  the arguments before opening a run) leaves the run `active`: its printed
+  `claudine sequence` command is still the way forward.
+- **Recipes** (`messenger/justfile`): `research-validate|generate|check|
+  report|runs|cleanup` wrap the offline commands; `research-publish NAME
+  RUN…` is `promote --approved-by`. `research-refresh SECONDS INVOCATIONS
+  [prepare args] [-- sequence args]` builds both CLIs, puts the target's
+  `debug/` first on PATH (via `cygpath -u` on Git Bash), runs `prepare
+  --json` from the repository root, then each run's `budget init` and
+  `sequence` in turn. It continues past a failed platform and exits 1 at
+  the end. Needs `jq`; bash 3.2-safe (no `mapfile`). Workflow docs:
+  `messenger/docs/user-guide.md#provider-research`.
 - **Launching a live run** (checked 2026-09-18 on the shipped roster):
   - Put this worktree's `target/debug` first on PATH. An older installed
     `claudine` has no `budget` subcommand, and the `shell:` steps call
@@ -120,7 +139,8 @@ Platform research is becoming typed, reviewed metadata (feature
   - `run.md` has no `agent` hint. With no terminal, `claudine sequence` fails
     with `AgentResolutionFailed` before the first step. With a terminal, it
     opens a picker, and that wait is charged to the budget. Pass a provider
-    flag (for example `--claude`) to the printed sequence command.
+    flag (for example `--claude`) to the printed sequence command, or after
+    `--` to `just research-refresh`.
   - `sequence --dry-run` still runs the `shell:` steps. `check-run` then marks
     the run `failed` because it has no outputs. Rehearse only in a throwaway
     Git repository holding a copy of `messenger/docs`, never on a real run.
