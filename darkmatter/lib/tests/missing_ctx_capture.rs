@@ -12,7 +12,12 @@ use darkmatter::markdown::compose::expression::ExpressionError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionOptions;
 use darkmatter::markdown::compose::{
     ComposeContext, ComposeOperation, ComposeOptions, ContextCaptureEvidence, ContextGroup,
+    ContextMergeDiagnostic,
 };
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::errors::BlockError;
+use biscuit_terminal::prelude::strip_escape_codes;
+use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::{Markdown, MarkdownError, SourceRef};
 use tempfile::TempDir;
 
@@ -74,12 +79,149 @@ fn body_reference_to_an_uncaptured_group_names_variable_group_and_source() {
     assert!(message.contains("ctx.repo_root") && message.contains("Repo"), "{message}");
     match &error {
         MarkdownError::Interpolation { source, .. } => match source.as_ref() {
-            SourceRef::OnDisk(context) => {
-                assert!(context.display.ends_with("root.md"), "source: {:?}", context.display)
+            SourceRef::OnDiskSpan { context, span } => {
+                assert!(context.display.ends_with("root.md"), "source: {:?}", context.display);
+                assert_eq!(span.line(), 3, "authored line of the failing expression");
+                assert_eq!(span.range(), 17..36, "authored span of the failing expression");
             }
-            other => panic!("expected the on-disk source document, got {other:?}"),
+            other => panic!("expected the located on-disk source document, got {other:?}"),
         },
         other => panic!("expected an interpolation error, got {other:?}"),
+    }
+}
+
+/// Renders `error`'s status block as plain text.
+fn rendered(error: &MarkdownError) -> String {
+    let term = Terminal::builder().width(100).build();
+    strip_escape_codes(error.status_block(&term).render(&term))
+}
+
+/// The excerpt line carrying the `>` failure marker, without the block gutter.
+fn marked_excerpt_line(rendered: &str) -> Option<&str> {
+    rendered
+        .lines()
+        .map(|line| line.trim_start_matches('┃').trim())
+        .find(|line| line.starts_with('>'))
+}
+
+/// A body failure deep in a frontmatter-bearing file names the file and the
+/// failing expression's line in that file, not its line within the body.
+#[test]
+fn a_body_failure_reports_its_authored_file_line_after_frontmatter() {
+    let dir = TempDir::new().unwrap();
+    // File line 9 is body line 5; the expressions on lines 7 and 8 evaluate
+    // first, and CRLF endings must not shift the count.
+    let root = write(
+        dir.path(),
+        "root.md",
+        "---\r\ntitle: Report\r\nowner: team\r\n---\r\n# Heading\r\n\r\ntitle={{ title }} today={{ ctx.date }}\r\nowner={{ owner }}\r\nrepo={{ ctx.repo_root }}\r\ntrailing text\r\n",
+    );
+
+    let error = compose_file(&root, ComposeOptions::new_with_context(date_time_only(dir.path())))
+        .expect_err("an uncaptured Repo group must fail composition");
+
+    assert_not_captured(&error, "repo_root", ContextGroup::Repo);
+    let MarkdownError::Interpolation { source, .. } = &error else {
+        panic!("expected an interpolation error, got {error:?}");
+    };
+    let SourceRef::OnDiskSpan { context, span } = source.as_ref() else {
+        panic!("expected a located source, got {source:?}");
+    };
+    assert!(context.display.ends_with("root.md"), "source: {:?}", context.display);
+    assert_eq!(span.line(), 9, "file line, counting the four frontmatter lines");
+    assert_eq!((span.column(), &context.content[span.range()]), (6, "{{ ctx.repo_root }}"));
+
+    let out = rendered(&error);
+    assert!(out.contains("root.md"), "{out}");
+    assert!(out.contains("Expression at line: 9, column: 6"), "{out}");
+    assert!(
+        marked_excerpt_line(&out).is_some_and(|l| l.ends_with("9 │ repo={{ ctx.repo_root }}")),
+        "excerpt marks the authored line: {out}"
+    );
+}
+
+/// A failure inside a transcluded child is reported against the child file and
+/// the child's own line, not the parent's `::file` directive.
+#[test]
+fn a_transcluded_child_failure_reports_the_child_file_and_line() {
+    let dir = TempDir::new().unwrap();
+    write(
+        dir.path(),
+        "child.md",
+        "---\nrole: child\n---\nchild intro\n\nos={{ ctx.os }}\n",
+    );
+    let root = write(dir.path(), "root.md", "root\n\n::file ./child.md\n");
+
+    let error = compose_file(&root, ComposeOptions::new_with_context(date_time_only(dir.path())))
+        .expect_err("the child's missing capture fails the parent");
+
+    assert_not_captured(&error, "os", ContextGroup::Os);
+    let out = rendered(&error);
+    assert!(out.contains("child.md"), "names the child file: {out}");
+    assert!(out.contains("Expression at line: 6"), "child's own file line: {out}");
+    assert!(
+        marked_excerpt_line(&out).is_some_and(|l| l.ends_with("6 │ os={{ ctx.os }}")),
+        "{out}"
+    );
+}
+
+/// An expression that only exists in a replacement value (found by the rescan)
+/// has no authored position: the error names the file but no line, rather
+/// than an offset into generated text.
+#[test]
+fn a_generated_expression_is_not_reported_at_an_authored_line() {
+    let dir = TempDir::new().unwrap();
+    // `{{{ … }}}` makes the frontmatter value the literal text `{{ ctx.os }}`;
+    // body interpolation substitutes it on line 7 and the rescan then fails.
+    let root = write(
+        dir.path(),
+        "root.md",
+        "---\ntemplate: \"{{{ ctx.os }}}\"\n---\none\ntwo\nthree\nvalue={{ template }}\n",
+    );
+
+    let error = compose_file(&root, ComposeOptions::new_with_context(date_time_only(dir.path())))
+        .expect_err("the generated reference still fails");
+
+    assert_not_captured(&error, "os", ContextGroup::Os);
+    let MarkdownError::Interpolation { key, source, .. } = &error else {
+        panic!("expected an interpolation error, got {error:?}");
+    };
+    assert_eq!(*key, None, "the failure is in the body, not the frontmatter");
+    match source.as_ref() {
+        SourceRef::OnDisk(context) => assert!(context.display.ends_with("root.md")),
+        other => panic!("a generated expression must not carry an authored line: {other:?}"),
+    }
+    let out = rendered(&error);
+    assert!(out.contains("root.md"), "{out}");
+    assert!(!out.contains("Expression at line"), "{out}");
+}
+
+/// A page block removed before the failing expression shifts every later body
+/// line; the stage's edit record still projects the failure to its authored
+/// position.
+#[test]
+fn an_expression_after_text_an_earlier_stage_removed_keeps_its_authored_span() {
+    let dir = TempDir::new().unwrap();
+    let root = write(
+        dir.path(),
+        "root.md",
+        "---\nshow: false\n---\n::block when=\"show\"\nhidden\n::end-block\n\nos={{ ctx.os }}\n",
+    );
+
+    let error = compose_file(&root, ComposeOptions::new_with_context(date_time_only(dir.path())))
+        .expect_err("the body reference still fails");
+
+    assert_not_captured(&error, "os", ContextGroup::Os);
+    let MarkdownError::Interpolation { source, .. } = &error else {
+        panic!("expected an interpolation error, got {error:?}");
+    };
+    match source.as_ref() {
+        SourceRef::OnDiskSpan { context, span } => {
+            assert!(context.display.ends_with("root.md"));
+            assert_eq!((span.line(), span.column()), (8, 4));
+            assert_eq!(&context.content[span.range()], "{{ ctx.os }}");
+        }
+        other => panic!("expected the authored span past the removed block: {other:?}"),
     }
 }
 
@@ -285,10 +427,17 @@ fn a_captured_group_without_evidence_renders_its_typed_projection() {
     for group in [ContextGroup::Git, ContextGroup::FileChanges, ContextGroup::Repo] {
         assert!(context.capture_requirements().contains(group), "{group:?} requested");
     }
-    assert!(
-        !context.diagnostics().is_empty(),
-        "missing evidence keeps its partial-capture diagnostic"
-    );
+    let expected: Vec<String> = context
+        .diagnostics()
+        .iter()
+        .filter_map(|diagnostic| match diagnostic {
+            ContextMergeDiagnostic::PartialRuntimeCapture { area, detail } => {
+                Some(format!("Partial runtime capture for {area}: {detail}"))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(!expected.is_empty(), "missing evidence keeps its partial-capture diagnostic");
 
     let md: Markdown = content.into();
     let (composed, report) = md
@@ -301,6 +450,13 @@ fn a_captured_group_without_evidence_renders_its_typed_projection() {
         "{:?}",
         report.warnings
     );
+    let reported: Vec<&str> = report
+        .warnings
+        .iter()
+        .map(|warning| warning.message.as_str())
+        .filter(|message| message.starts_with("Partial runtime capture for "))
+        .collect();
+    assert_eq!(reported, expected, "each partial-capture diagnostic reaches the report once");
 }
 
 // ── Verification #5 and diagnostic stability ─────────────────────────────────
@@ -342,10 +498,11 @@ fn the_same_reference_in_two_files_reports_each_files_own_source() {
         assert_not_captured(&error, "os", ContextGroup::Os);
         match &error {
             MarkdownError::Interpolation { source, .. } => match source.as_ref() {
-                SourceRef::OnDisk(context) => {
-                    assert_eq!(context.display.file_name(), path.file_name())
+                SourceRef::OnDiskSpan { context, span } => {
+                    assert_eq!(context.display.file_name(), path.file_name());
+                    assert_eq!((span.line(), span.range()), (1, 3..15));
                 }
-                other => panic!("expected an on-disk source, got {other:?}"),
+                other => panic!("expected a located on-disk source, got {other:?}"),
             },
             other => panic!("expected an interpolation error, got {other:?}"),
         }

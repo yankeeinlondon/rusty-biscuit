@@ -987,7 +987,7 @@ fn transclusion_ref_resolved_target_is_correct_path() {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn reference_graph_cache_honors_namespace() {
+fn reference_graph_with_namespaced_cache_root_writes_nothing() {
     let dir = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     write_files(
@@ -1005,16 +1005,14 @@ fn reference_graph_cache_honors_namespace() {
         .with_cache_root(cache_dir.path())
         .with_cache_namespace("test-branch");
 
-    // The only persistent store is the remote-body store, which child
-    // composition resolves through the same namespaced cache-root path.
+    // The only persistent store is the remote-body store, and it creates its
+    // namespaced directories only when it writes a remote body; a local-only
+    // graph writes none.
     let graph = md.reference_graph(options).unwrap();
     assert_eq!(graph.node_count(), 2);
 
-    let expected_cache = cache_dir.path().join(".darkmatter").join("cache");
-    assert!(
-        expected_cache.exists(),
-        "the remote-body store should be created under the resolve_cache_root path"
-    );
+    let entries: Vec<_> = std::fs::read_dir(cache_dir.path()).unwrap().collect();
+    assert!(entries.is_empty(), "a local-only graph wrote under the cache root: {entries:?}");
 }
 
 // ── FileTree integration tests ──────────────────────────────────────
@@ -1562,8 +1560,8 @@ fn prebuilt_graph_rejects_unreadable_child() {
     assert!(err.to_string().contains("no longer readable"), "got: {err}");
 }
 
-/// Descendant verification reads the child straight from disk, so a persistent
-/// cache holding the old content cannot mask a subsequent on-disk edit.
+/// Descendant verification reads the child straight from disk, so a configured
+/// cache root cannot mask a subsequent on-disk edit.
 #[test]
 fn prebuilt_graph_bypasses_cache_for_descendant_edit() {
     let dir = TempDir::new().unwrap();
@@ -1574,7 +1572,7 @@ fn prebuilt_graph_bypasses_cache_for_descendant_edit() {
     );
     let md = load_md(&dir, "root.md");
 
-    // Build the graph with a persistent cache populated from the old child.
+    // Build the graph with a cache root configured (no child is persisted).
     let graph_opts =
         ReferenceGraphOptions::with_compose(ComposeOptions::new().with_cache_root(cache_root.path()));
     let graph = md.reference_graph(graph_opts.clone()).unwrap();

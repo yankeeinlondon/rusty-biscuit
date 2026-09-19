@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::ExpressionError;
 use darkmatter::markdown::compose::{
-    CacheFreshnessMode, ComposeContext, ComposeOptions, ContextAuthority, ContextCaptureEvidence,
+    CacheAccessMode, ComposeContext, ComposeOptions, ContextAuthority, ContextCaptureEvidence,
     ContextExtension, ContextGroup, ContextRequirements,
 };
 use darkmatter::markdown::MarkdownError;
@@ -289,6 +289,76 @@ fn preflight_discovers_a_child_branch_reading_a_child_introduced_group() {
     );
 }
 
+/// Grows a context with no supplied evidence at all, so every group it
+/// captures projects its typed null/empty value plus a `PartialRuntimeCapture`
+/// diagnostic.
+#[derive(Debug)]
+struct UnavailableEvidence;
+
+impl ContextExtension for UnavailableEvidence {
+    fn extend(&self, context: &mut ComposeContext, required: &ContextRequirements) -> bool {
+        context.extend_with_evidence(required, &ContextCaptureEvidence::new(HashMap::new()))
+    }
+}
+
+/// A partial-capture compose: the output, the `Partial runtime capture`
+/// warnings in report order, and the run-local cache hits.
+struct PartialCompose {
+    output: String,
+    warnings: Vec<String>,
+    hits: usize,
+}
+
+/// Composes `root` with a request context grown from unavailable evidence.
+fn compose_partial(root: &Path, options: ComposeOptions) -> PartialCompose {
+    let options =
+        options.with_context_authority(ContextAuthority::CallerExtended(Arc::new(UnavailableEvidence)));
+    let markdown = Markdown::try_from(root).expect("root loads");
+    let (composed, report) = markdown
+        .compose_with(options.with_source_file(root))
+        .expect("a partial capture renders");
+    PartialCompose {
+        output: composed.content().to_string(),
+        warnings: report
+            .warnings
+            .iter()
+            .filter(|warning| warning.message.contains("Partial runtime capture"))
+            .map(|warning| warning.message.clone())
+            .collect(),
+        hits: report.cache_stats.map_or(0, |stats| stats.hits),
+    }
+}
+
+#[track_caller]
+fn assert_git_partial_capture(warnings: &[String]) {
+    assert!(
+        !warnings.is_empty()
+            && warnings.iter().all(|message| message.contains("Partial runtime capture for git")),
+        "the child's partial capture must warn: {warnings:?}"
+    );
+}
+
+/// A child transcluded twice is composed once and served from the run-local
+/// cache the second time. The hit replays the child's report, so its
+/// partial-capture warnings match a run that recomposes every child
+/// (spec Requirement 3, verification #4).
+#[test]
+fn a_run_local_hit_replays_a_child_only_partial_capture_warning() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = write(directory.path(), "root.md", "root\n\n::file ./child.md\n\n::file ./child.md\n");
+    write(directory.path(), "child.md", "child=[{{ ctx.branch }}]\n");
+    let options =
+        |mode| ComposeOptions::new_with_context(root_context(directory.path())).with_cache_access_mode(mode);
+
+    let uncached = compose_partial(&root, options(CacheAccessMode::Off));
+    let cached = compose_partial(&root, options(CacheAccessMode::ReadWrite));
+
+    assert!(cached.hits >= 1, "the second transclusion must be a run-local hit");
+    assert_git_partial_capture(&uncached.warnings);
+    assert_eq!(cached.warnings, uncached.warnings, "a run-local hit changed the diagnostics");
+    assert_eq!(cached.output, uncached.output);
+}
+
 mod persistent_cache {
     use super::*;
 
@@ -298,36 +368,37 @@ mod persistent_cache {
         root: &Path,
         cache: &Path,
         label: &str,
-    ) -> (String, darkmatter::markdown::compose::CacheStats) {
+    ) -> String {
         let extension = CountingExtension::new(label);
         let options = extended(root.parent().unwrap(), &extension).with_cache_root(cache);
         let markdown = Markdown::try_from(root).expect("root loads");
-        let (composed, report) = markdown
+        let (composed, _) = markdown
             .compose_with(options.with_source_file(root))
             .expect("the graph composes");
-        (composed.content().to_string(), report.cache_stats.expect("cache stats"))
+        composed.content().to_string()
+    }
+
+    fn assert_nothing_persisted(cache: &Path) {
+        let entries: Vec<_> = std::fs::read_dir(cache).unwrap().collect();
+        assert!(entries.is_empty(), "the cache root gained entries: {entries:?}");
     }
 
     /// A cache root persists no composed output (R18,
     /// `fixes/2026-09-16-content-policy-no-cache`), so every run recomposes:
-    /// a changed value is never stale and an unchanged request never hits.
+    /// a changed value is never stale and nothing lands under the root.
     fn assert_child_only_value_is_never_stale(root: &Path, cache: &Path, reader: &str) {
-        let (first, _) = compose_cached(root, cache, "one");
+        let first = compose_cached(root, cache, "one");
         assert!(rendered(&first, reader).contains("one-1"), "{first}");
 
-        let (second, _) = compose_cached(root, cache, "two");
+        let second = compose_cached(root, cache, "two");
         assert!(
             rendered(&second, reader).contains("two-1"),
             "a changed child-only value reused stale composed output: {second}"
         );
 
-        let (third, stats) = compose_cached(root, cache, "two");
+        let third = compose_cached(root, cache, "two");
         assert_eq!(third, second);
-        assert_eq!(
-            (stats.persistent_hits, stats.persistent_writes),
-            (0, 0),
-            "an unchanged request must not replay persisted output: {stats:?}"
-        );
+        assert_nothing_persisted(cache);
     }
 
     /// A child whose own key covers the group it reads.
@@ -342,8 +413,8 @@ mod persistent_cache {
     }
 
     /// A middle document naming no group transcludes the reader: the middle
-    /// document's own key never sees the group, so only its recorded context
-    /// closure can reject the stale entry.
+    /// document's own key never sees the group, so a persisted entry keyed on
+    /// it alone would be stale.
     #[test]
     fn a_changed_grandchild_only_value_invalidates_the_cached_parent() {
         let directory = tempfile::tempdir().unwrap();
@@ -355,10 +426,33 @@ mod persistent_cache {
         assert_child_only_value_is_never_stale(&root, cache.path(), "leaf");
     }
 
+    /// A root naming no discovery-backed group transcludes a child whose first
+    /// `ctx.*` read is captured from unavailable evidence. A warm run against
+    /// the same cache root recomposes the child, so it reports the child's
+    /// partial-capture warning exactly as the cold run did — the cache cannot
+    /// replay output while dropping the diagnostic that explains it (review-1,
+    /// "Persistent cache hits discard child partial-capture diagnostics").
+    #[test]
+    fn a_child_only_partial_capture_warns_identically_on_cold_and_warm_runs() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let root = write(directory.path(), "root.md", "root\n\n::file ./child.md\n");
+        write(directory.path(), "child.md", "child=[{{ ctx.branch }}]\n");
+        let options = || ComposeOptions::new_with_context(root_context(directory.path())).with_cache_root(cache.path());
+
+        let cold = compose_partial(&root, options());
+        let warm = compose_partial(&root, options());
+
+        assert_eq!(rendered(&cold.output, "child"), "[]", "{}", cold.output);
+        assert_git_partial_capture(&cold.warnings);
+        assert_eq!(warm.warnings, cold.warnings, "the warm run changed the warning count or content");
+        assert_eq!(warm.output, cold.output);
+        assert_nothing_persisted(cache.path());
+    }
+
     /// A request that could capture the group leaves nothing persisted that a
-    /// frozen request could read around the missing-capture contract — in any
-    /// freshness mode, including the ones that skip revalidation or fall back
-    /// to stale output on a compute error.
+    /// frozen request could read around the missing-capture contract — under
+    /// any run-local cache access mode.
     #[test]
     fn a_persistent_entry_cannot_bypass_a_frozen_missing_capture() {
         let directory = tempfile::tempdir().unwrap();
@@ -366,18 +460,18 @@ mod persistent_cache {
         let root = write(directory.path(), "root.md", "root\n\n::file ./middle.md\n");
         write(directory.path(), "middle.md", "middle\n\n::file ./leaf.md\n");
         write(directory.path(), "leaf.md", "leaf={{ ctx.repo_root }}\n");
-        let (_, stats) = compose_cached(&root, cache.path(), "one");
-        assert_eq!(stats.persistent_writes, 0, "{stats:?}");
+        compose_cached(&root, cache.path(), "one");
+        assert_nothing_persisted(cache.path());
 
         for mode in [
-            CacheFreshnessMode::Strict,
-            CacheFreshnessMode::Fallback,
-            CacheFreshnessMode::Optimistic,
-            CacheFreshnessMode::Forced,
+            CacheAccessMode::Off,
+            CacheAccessMode::ReadOnly,
+            CacheAccessMode::ReadWrite,
+            CacheAccessMode::Refresh,
         ] {
             let options = ComposeOptions::new_with_context(root_context(directory.path()))
                 .with_cache_root(cache.path())
-                .with_cache_freshness_mode(mode);
+                .with_cache_access_mode(mode);
             let error = compose(&root, options).expect_err("a frozen request cannot read the group");
             assert!(
                 matches!(
