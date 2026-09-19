@@ -10,4 +10,8 @@ prompt: |-
     - discuss what LSP features are implemented and which are not
     - discuss the extensibility that DMLS provides though configuration
     - discuss the extensibility that DMLS provides programatically
+
+    If it can be made aesthetically tasteful it would also be nice to see a table that on one dimension shows the features an LSP can provide and on the other dimension shows the parts of the Darkmatter DSL which are supported. Regardless of how you present it, it's important to provide the reader with a view on how much "coverage" we currently provide to schemas in DMLS.
+
+    If you want to visualize some aspects of your research you should feel free to use Mermaid code blocks.
 ---

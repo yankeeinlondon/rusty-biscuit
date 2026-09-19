@@ -19,6 +19,13 @@ not filesystem or remote-reading expression calls. Unsupported function calls
 fail preparation even in inactive branches; eligible computations retain normal
 short-circuit behavior.
 
+An activated trigger's schema takes precedence over always-on schema
+definitions and the Darkmatter base schema, but the document's own `$schema`
+takes precedence over the trigger. For each conflicting property, the winning
+definition supplies both its type and its description. See
+[Schema Layering](./authoring-schemas.md#schema-layering) for the shared ordering
+and guidance on keeping active schema stacks small.
+
 The `match` property is composed of 1:M _matchers_ which are either:
 
 - a match expression, or 

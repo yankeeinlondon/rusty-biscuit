@@ -254,13 +254,107 @@ preparation does not execute inactive operands to search for computation errors.
 This policy uses the same Darkmatter parser and evaluator, not a separate
 expression language or an editor-specific function list.
 
-These are agreed design requirements, not implemented support. Predicate
-spelling, path anchors, and refresh scheduling remain under design review.
+These are agreed design requirements, not implemented support. Remaining
+predicate spellings and refresh scheduling remain under design review.
+
+#### File predicate references
+
+File predicates accept ordinary `biscuit-file` file-reference strings. An
+explicit-relative string resolves only beside the declaring schema:
+
+```yaml
+file_exists: "./config.yaml"
+```
+
+An optional explicit base selector distinguishes a consuming-workspace check:
+
+```yaml
+file_exists:
+    base: workspace
+    path: "./.example/config.yaml"
+```
+
+The explicit-base form requires an explicit-relative `path`, preventing a
+fallback search through other roots. Both forms use `FileReference` and captured
+resolution contexts, preserving typed failures. Schema imports retain their
+source origin. Existing sigils retain their meaning: `&` selects a repository
+root; `@` performs magic-path search and is not a workspace-root shorthand.
+
+`base: workspace` selects the consuming document's repository/worktree root,
+even when the editor opened only a repository subdirectory. Outside a
+repository, it selects the nearest containing editor workspace folder or the
+captured CLI working directory. Nested repositories and linked worktrees use
+their own roots. Repository-discovery errors remain errors, not evidence that
+the document is outside a repository.
+
+The consuming root is independent of schema-source location, including external
+`SCHEMA_DIR` sources. It does not expand the applicability of automatically
+discovered nested schemas. Additional base selectors remain under design
+review; these examples describe the intended contract, not current support.
 
 For the matching model and its implementation status, read
 [Schema Triggers in Darkmatter](./schema-targeting.md).
 
 ### Schema Layering
+
+Schemas are so great we often end with too many of them:
+
+- we _always_ get a base schema layer from Darkmatter
+    - if you're using a library like Claudine (which is a big consumer of Darkmatter) then it will inject it's own schemas into the mix
+- every document can define a schema in the `$schema` frontmatter property
+- then we've just found out that `schema-definitions` and `schema-trigger`'s are a thing
+
+That can be a lot of schemas all piled up on top of one another. What happens when two or more of these schema's disagree on what type the property `foo` is? Well fortunately we live in a law based society ... so we follow the law/rules. 
+
+
+
+The agreed precedence, from highest to lowest, is:
+
+| Precedence | Source |
+| --- | --- |
+| Highest | The consuming document's `$schema` |
+|         | Schemas activated by matching `schema-trigger` definitions |
+|         | Always-on schema definitions, including discovered `kind: schema` exports |
+| Lowest | The built-in Darkmatter base schema |
+
+Conflicts are resolved for each frontmatter property, not by rejecting either
+schema as a whole. If two schemas both declare `foo`, the higher-precedence
+definition of `foo` wins; unrelated properties from both schemas remain.
+
+The winning property definition supplies its type, constraints, required or
+optional status, nested shape, and prose description together. For example, if
+the base schema defines `description` as a string and an active trigger defines
+it as an array of strings, the property becomes an array of strings and uses
+the trigger's description. If the winning definition has no description, the
+lower-precedence prose is not carried forward as though it describes the winner.
+
+Conflicts do not generate union types and are not themselves errors. Authors
+can still explicitly declare union types for individual properties. This policy
+does not decide the separate, still-open handling of alternative shapes for an
+entire exported document schema.
+
+Darkmatter owns one deterministic ordering shared by DMLS, the CLI, and library
+consumers. Within each precedence level, retain automatic sources in
+nearest-directory-first order and filename order within each directory, then
+apply explicit `SCHEMA_DIR` sources; later definitions win. Same-filename
+shadowing is confined to a level so an always-on file cannot hide a trigger.
+This tie-break is a consistency rule, not a claim that one same-level schema
+is more semantically appropriate. Source priority never crosses a level:
+an automatic trigger still outranks an always-on `SCHEMA_DIR` definition.
+
+Mandatory restrictions, including inherited `no-shell-expansion`, remain
+non-relaxable regardless of precedence. Types-only libraries do not become
+layers. These rules describe the intended contract, not a claim that the
+current implementation already follows it.
+
+#### Best practices
+
+Keep the active schema stack small. A typical Claudine document should need
+only the built-in Darkmatter schema plus the Claudine schema. Use
+`schema-trigger` definitions for specialized schemas so they participate only
+when document and environment conditions indicate that they apply. Avoid
+loading a large collection of unrelated always-on schemas and relying on
+precedence to sort out their differences.
 
 
 
