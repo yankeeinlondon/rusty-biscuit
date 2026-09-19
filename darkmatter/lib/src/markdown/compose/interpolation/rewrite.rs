@@ -8,6 +8,7 @@
 use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse};
 use crate::markdown::compose::expression::{EvaluationLookup, ExpressionError};
 use crate::markdown::compose::ComposeWarning;
+use crate::markdown::compose::context::report::ExpressionOrigin;
 use crate::markdown::types::{MarkdownError, SourceRef};
 use serde_json::Value;
 
@@ -30,6 +31,24 @@ fn interpolation_error(expression: &str, cause: ExpressionError) -> MarkdownErro
         }),
         cause: Box::new(cause),
     }
+}
+
+/// What a failing `{{ … }}` expression does to the text being rewritten.
+///
+/// A full-document composition always passes [`Strict`](Self::Strict), whatever
+/// `ComposeOptions::fail_fast` says: an expression that cannot be parsed or
+/// evaluated is an authoring error there. [`Lenient`](Self::Lenient) is for
+/// best-effort callers, `compose_subtree(..., SubtreeStrictness::Lenient)` and
+/// preflight command discovery, which must keep going past a bad span.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExpressionFailurePolicy {
+    /// A parse or evaluation failure becomes a coded `ComposeWarning` and the
+    /// failing `{{ … }}` stays in the output. Authoring-fatal causes
+    /// (`ExpressionError::is_authoring_fatal`) still abort.
+    Lenient,
+    /// Every parse or evaluation failure aborts the rewrite, including one found
+    /// by a rescan of replacement output.
+    Strict,
 }
 
 /// Controls how `interpolate_text` scans for `{{ }}` expressions.
@@ -79,6 +98,18 @@ pub(crate) fn convert_literals(input: &str, scan_mode: ScanMode) -> String {
     output
 }
 
+/// A fatal [`interpolate_text_located`] failure plus where the failing
+/// expression sits in the scanned `input`.
+#[derive(Debug)]
+pub(crate) struct LocatedInterpolationError {
+    /// Boxed so the pair stays within clippy's `result_large_err` budget.
+    pub error: Box<MarkdownError>,
+    /// Byte range of the failing `{{ … }}` in the caller's `input`, or `None`
+    /// when the expression was found by a rescan of replacement output and so
+    /// has no position in the text the caller supplied.
+    pub span: Option<std::ops::Range<usize>>,
+}
+
 /// Scans `input` for `{{ }}` expressions, evaluates them, and returns
 /// the rewritten string.
 ///
@@ -92,15 +123,35 @@ pub(crate) fn convert_literals(input: &str, scan_mode: ScanMode) -> String {
 /// - `input` — the text to scan
 /// - `evaluator` — evaluates parsed expressions against state
 /// - `scan_mode` — whether to respect code regions or scan everything
-/// - `fail_fast` — if `true`, return an error on the first parse/eval failure
+/// - `policy` — whether a parse/eval failure aborts or becomes a warning
 /// - `warning_stage` — label attached to any warnings produced
 pub(crate) fn interpolate_text<L: EvaluationLookup>(
     input: &str,
     evaluator: &Evaluator<L>,
     scan_mode: ScanMode,
-    fail_fast: bool,
+    policy: ExpressionFailurePolicy,
     warning_stage: &'static str,
 ) -> Result<InterpolationRewrite, MarkdownError> {
+    interpolate_text_located(input, evaluator, scan_mode, policy, warning_stage)
+        .map_err(|failure| *failure.error)
+}
+
+/// [`interpolate_text`], but a fatal failure also reports the failing
+/// expression's span in `input`.
+///
+/// Expressions evaluated in the first pass are located in `input` itself:
+/// replacements run end to start, so every byte before an expression is still
+/// the caller's text when it fails. Later passes rescan replacement output, so
+/// an expression found there is reported with no span rather than an offset
+/// that points at generated text.
+pub(crate) fn interpolate_text_located<L: EvaluationLookup>(
+    input: &str,
+    evaluator: &Evaluator<L>,
+    scan_mode: ScanMode,
+    policy: ExpressionFailurePolicy,
+    warning_stage: &'static str,
+) -> Result<InterpolationRewrite, LocatedInterpolationError> {
+    let strict = policy == ExpressionFailurePolicy::Strict;
     // Fast path (F14): a `{{ … }}` expression and a `{{{ … }}}` literal both
     // require the `{{` sequence. When the input contains none, no expression or
     // literal can be present, so the whole scan pipeline — the MarkdownAware
@@ -119,6 +170,11 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
     let mut output = input.to_string();
     let mut total_count = 0;
     let mut all_warnings = Vec::new();
+    // Failures already reported, at their current range in `output`. A failing
+    // span is left in place, so when a sibling is replaced the next pass would
+    // otherwise evaluate and report it again. The range tracks `output` as
+    // replacements land; the origin is the failure's stable identity.
+    let mut reported: Vec<(std::ops::Range<usize>, ExpressionOrigin)> = Vec::new();
 
     for depth in 0..MAX_INTERPOLATION_DEPTH {
         let locations: Vec<ExpressionLocation> = match scan_mode {
@@ -134,14 +190,30 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
         let mut warnings = Vec::new();
 
         for loc in locations.into_iter().rev() {
+            if reported.iter().any(|(range, _)| *range == (loc.start..loc.end)) {
+                continue;
+            }
+            let origin = if depth == 0 {
+                ExpressionOrigin::Authored(loc.start..loc.end)
+            } else {
+                ExpressionOrigin::Generated {
+                    pass: depth,
+                    span: loc.start..loc.end,
+                }
+            };
             match parse(&loc.expression) {
                 Ok(expr) => {
                     let mut ctx_warnings = evaluator.collect_context_warnings(
                         &expr,
                         warning_stage,
                     );
+                    ctx_warnings.reverse();
                     warnings.append(&mut ctx_warnings);
-                    match evaluator.eval(&expr) {
+                    let mark = evaluator.missing_root_mark();
+                    let evaluated = evaluator.eval(&expr);
+                    evaluator
+                        .locate_missing_roots(mark, (depth == 0).then_some(loc.start..loc.end));
+                    match evaluated {
                     EvalResult::Value(replacement) => {
                         // Inherit line indentation for multiline replacements
                         let replacement = if replacement.contains('\n') {
@@ -159,38 +231,54 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
                         } else {
                             replacement
                         };
+                        shift_reported(&mut reported, &loc, replacement.len());
                         output.replace_range(loc.start..loc.end, &replacement);
                         count += 1;
                     }
                     EvalResult::Error { error, .. }
-                        if fail_fast || error.is_authoring_fatal() =>
+                        if strict || error.is_authoring_fatal() =>
                     {
-                        return Err(interpolation_error(&loc.expression, error));
+                        return Err(LocatedInterpolationError {
+                            error: Box::new(interpolation_error(&loc.expression, error)),
+                            span: (depth == 0).then_some(loc.start..loc.end),
+                        });
                     }
                     EvalResult::Error { error, original } => {
-                        warnings.push(ComposeWarning::new(
+                        warnings.push(ComposeWarning::expression_failure(
                             warning_stage,
                             format!("failed to evaluate '{}': {}", original, error),
+                            ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE,
+                            origin.clone(),
                         ));
+                        reported.push((loc.start..loc.end, origin));
                     }
                 }
                 }
-                Err(e) if fail_fast => {
-                    return Err(interpolation_error(
-                        &loc.expression,
-                        ExpressionError::Parse(e.to_string()),
-                    ));
+                Err(e) if strict => {
+                    return Err(LocatedInterpolationError {
+                        error: Box::new(interpolation_error(
+                            &loc.expression,
+                            ExpressionError::Parse(e.to_string()),
+                        )),
+                        span: (depth == 0).then_some(loc.start..loc.end),
+                    });
                 }
                 Err(e) => {
-                    warnings.push(ComposeWarning::new(
+                    warnings.push(ComposeWarning::expression_failure(
                         warning_stage,
                         format!("failed to parse '{}': {}", loc.expression, e),
+                        ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE,
+                        origin.clone(),
                     ));
+                    reported.push((loc.start..loc.end, origin));
                 }
             }
         }
 
         total_count += count;
+        // Locations were visited end to start; report them in document order
+        // so the first authored occurrence of an issue is the one kept.
+        warnings.reverse();
         all_warnings.extend(warnings);
 
         if count == 0 {
@@ -226,6 +314,22 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
     })
 }
 
+/// Moves every reported range that sits after `replaced` by the length change
+/// of replacing it with `replacement_len` bytes.
+///
+/// Locations are replaced end to start and never overlap, so a reported range
+/// is either wholly after `replaced` or wholly before it.
+fn shift_reported(
+    reported: &mut [(std::ops::Range<usize>, ExpressionOrigin)],
+    replaced: &ExpressionLocation,
+    replacement_len: usize,
+) {
+    let removed = replaced.end - replaced.start;
+    for (range, _) in reported.iter_mut().filter(|(range, _)| range.start >= replaced.end) {
+        *range = range.start + replacement_len - removed..range.end + replacement_len - removed;
+    }
+}
+
 /// Interpolates a single frontmatter value.
 ///
 /// When `input`'s trimmed content is exactly one `{{ expr }}` (a *whole-value*
@@ -234,36 +338,47 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
 /// so `{{ false }}` stays the boolean `false` (falsy) rather than the string
 /// `"false"` (truthy), `{{ file_index(x) }}` stays a number, and a whole-value
 /// expression that yields an array or object is preserved as that typed value.
-/// A whole-value parse or evaluation failure is **fatal regardless of
-/// `fail_fast`**, so malformed expansion syntax (e.g. a mismatched paren) can
+/// A whole-value parse or evaluation failure is **fatal under either
+/// `policy`**, so malformed expansion syntax (e.g. a mismatched paren) can
 /// never leak downstream as a raw `{{ … }}` string.
 ///
 /// Mixed text (`"a {{ x }}"`), strings holding more than one expression, and
-/// plain strings fall through to [`interpolate_text`], keeping the established
-/// lenient string-rewrite behavior — including leaving an unresolved `{{ … }}`
-/// in place for a later pass and demoting parse/eval failures to warnings when
-/// `fail_fast` is off.
+/// plain strings fall through to [`interpolate_text`] under `policy`.
 ///
 /// ## Errors
 ///
-/// Returns `MarkdownError::Transform` when a whole-value expression fails to
-/// parse or evaluate, and propagates the same error as [`interpolate_text`]
-/// when `fail_fast` is set or a fatal evaluation error occurs on the string
-/// path. Whole-value undefined variables resolve to `null` (not an error), so
-/// `{{ missing }}` stays lenient.
+/// Returns `MarkdownError::Interpolation` when a whole-value expression fails
+/// to parse or evaluate, and propagates the same error as [`interpolate_text`]
+/// on the string path. Whole-value undefined variables resolve to `null` (not
+/// an error), so `{{ missing }}` stays lenient.
 pub(crate) fn interpolate_value<L: EvaluationLookup>(
     input: &str,
     evaluator: &Evaluator<L>,
-    fail_fast: bool,
+    policy: ExpressionFailurePolicy,
     warning_stage: &'static str,
 ) -> Result<(Value, usize, Vec<ComposeWarning>), MarkdownError> {
+    interpolate_value_located(input, evaluator, policy, warning_stage).map_err(|failure| *failure.error)
+}
+
+/// [`interpolate_value`], but a fatal failure also reports the failing
+/// `{{ … }}`'s span in `input` (see [`interpolate_text_located`]).
+pub(crate) fn interpolate_value_located<L: EvaluationLookup>(
+    input: &str,
+    evaluator: &Evaluator<L>,
+    policy: ExpressionFailurePolicy,
+    warning_stage: &'static str,
+) -> Result<(Value, usize, Vec<ComposeWarning>), LocatedInterpolationError> {
     if is_whole_value_literal(input) {
-        let result = interpolate_text(input, evaluator, ScanMode::Plain, fail_fast, warning_stage)?;
+        let result = interpolate_text_located(input, evaluator, ScanMode::Plain, policy, warning_stage)?;
         return Ok((Value::String(result.output), result.replacements, result.warnings));
     }
     if let Some(loc) = whole_value_span(input) {
+        let located = |error| LocatedInterpolationError {
+            error: Box::new(error),
+            span: Some(loc.start..loc.end),
+        };
         let expr = parse(&loc.expression).map_err(|e| {
-            interpolation_error(&loc.expression, ExpressionError::Parse(e.to_string()))
+            located(interpolation_error(&loc.expression, ExpressionError::Parse(e.to_string())))
         })?;
         // The whole-value path bypasses `interpolate_text`, so it must still run
         // the context-typo check on its single parsed expression — otherwise
@@ -272,10 +387,10 @@ pub(crate) fn interpolate_value<L: EvaluationLookup>(
         let warnings = evaluator.collect_context_warnings(&expr, warning_stage);
         let value = evaluator
             .eval_json(&expr)
-            .map_err(|cause| interpolation_error(&loc.expression, cause))?;
+            .map_err(|cause| located(interpolation_error(&loc.expression, cause)))?;
         return Ok((value, 1, warnings));
     }
-    let result = interpolate_text(input, evaluator, ScanMode::Plain, fail_fast, warning_stage)?;
+    let result = interpolate_text_located(input, evaluator, ScanMode::Plain, policy, warning_stage)?;
     Ok((Value::String(result.output), result.replacements, result.warnings))
 }
 
@@ -283,7 +398,7 @@ pub(crate) fn interpolate_value<L: EvaluationLookup>(
 /// exactly one `{{ expr }}` (only whitespace before and after the span).
 ///
 /// Returns `None` for plain strings, mixed text (`"a {{ x }}"`), and strings
-/// holding more than one expression — those route to the lenient
+/// holding more than one expression — those route to the
 /// [`interpolate_text`] string path. Detection is independent of parse/eval
 /// outcome, so a malformed whole-value `{{ … }}` is still recognized as
 /// whole-value and held to the strict parse-and-evaluate contract.
@@ -339,7 +454,7 @@ mod tests {
         let state = make_state(json!({"name": "Alice"}));
         let evaluator = Evaluator::new(&state);
         let result =
-            interpolate_text("`{{ name }}`", &evaluator, ScanMode::Plain, false, "test").unwrap();
+            interpolate_text("`{{ name }}`", &evaluator, ScanMode::Plain, ExpressionFailurePolicy::Lenient, "test").unwrap();
         assert_eq!(result.output, "`Alice`");
         assert_eq!(result.replacements, 1);
     }
@@ -354,12 +469,47 @@ mod tests {
             "`{{ name }}`",
             &evaluator,
             ScanMode::MarkdownAware,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "test",
         )
         .unwrap();
         assert_eq!(result.output, "`Alice`");
         assert_eq!(result.replacements, 1);
+    }
+
+    /// A first-pass failure is located at its own bytes in the caller's input,
+    /// even with earlier expressions still unreplaced before it.
+    #[test]
+    fn located_failure_spans_the_authored_expression() {
+        let state = make_state(json!({"name": "Alice"}));
+        let evaluator = Evaluator::new(&state);
+        let input = "a {{ name }}\nb {{ > invalid }}\n";
+        let Err(failure) =
+            interpolate_text_located(input, &evaluator, ScanMode::Plain, ExpressionFailurePolicy::Strict, "test")
+        else {
+            panic!("the invalid expression must fail");
+        };
+        let span = failure.span.expect("a first-pass expression is located");
+        assert_eq!(&input[span], "{{ > invalid }}");
+    }
+
+    /// An expression that exists only in a replacement value is found by the
+    /// rescan and must not be reported at an offset in the caller's input.
+    #[test]
+    fn located_failure_from_replacement_output_has_no_span() {
+        let state = make_state(json!({"template": "{{ > invalid }}"}));
+        let evaluator = Evaluator::new(&state);
+        let Err(failure) = interpolate_text_located(
+            "x\ny {{ template }}",
+            &evaluator,
+            ScanMode::Plain,
+            ExpressionFailurePolicy::Strict,
+            "test",
+        ) else {
+            panic!("the generated invalid expression must fail");
+        };
+        assert!(matches!(*failure.error, MarkdownError::Interpolation { .. }));
+        assert_eq!(failure.span, None);
     }
 
     #[test]
@@ -368,7 +518,7 @@ mod tests {
         let evaluator = Evaluator::new(&state);
         let input = "before {{ name }}\n\n```\n{{ name }}\n```\nafter";
         let result =
-            interpolate_text(input, &evaluator, ScanMode::MarkdownAware, false, "test").unwrap();
+            interpolate_text(input, &evaluator, ScanMode::MarkdownAware, ExpressionFailurePolicy::Lenient, "test").unwrap();
         assert!(result.output.contains("before Alice"));
         assert!(result.output.contains("```\n{{ name }}\n```"));
         assert_eq!(result.replacements, 1);
@@ -382,7 +532,7 @@ mod tests {
             "  list: {{ items }}",
             &evaluator,
             ScanMode::Plain,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "test",
         )
         .unwrap();
@@ -395,7 +545,7 @@ mod tests {
         let state = make_state(json!({}));
         let evaluator = Evaluator::new(&state);
         // An unparseable expression
-        let result = interpolate_text("{{ > invalid }}", &evaluator, ScanMode::Plain, true, "test");
+        let result = interpolate_text("{{ > invalid }}", &evaluator, ScanMode::Plain, ExpressionFailurePolicy::Strict, "test");
         assert!(result.is_err());
     }
 
@@ -407,7 +557,7 @@ mod tests {
             "{{ > invalid }}",
             &evaluator,
             ScanMode::Plain,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "test",
         )
         .unwrap();
@@ -428,7 +578,7 @@ mod tests {
             "{{ unknown_fn(spec) }}",
             &evaluator,
             ScanMode::Plain,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "test",
         );
         let Err(err) = result else {
@@ -445,7 +595,7 @@ mod tests {
             "no expressions here",
             &evaluator,
             ScanMode::Plain,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "test",
         )
         .unwrap();
@@ -468,7 +618,7 @@ mod tests {
             ("{{ concrete_target }}", Value::String("child.md".to_string())),
         ] {
             let (value, replacements, warnings) =
-                interpolate_value(expression, &evaluator, true, "target-evaluation").unwrap();
+                interpolate_value(expression, &evaluator, ExpressionFailurePolicy::Strict, "target-evaluation").unwrap();
             assert_eq!(value, expected, "{expression}");
             assert_eq!(replacements, 1, "{expression}");
             assert!(warnings.is_empty(), "{expression}: {warnings:?}");
@@ -486,7 +636,7 @@ mod tests {
         // untouched under both scan modes.
         let input = "config { key: value } and a lone } brace";
         for mode in [ScanMode::Plain, ScanMode::MarkdownAware] {
-            let result = interpolate_text(input, &evaluator, mode, false, "test").unwrap();
+            let result = interpolate_text(input, &evaluator, mode, ExpressionFailurePolicy::Lenient, "test").unwrap();
             assert_eq!(result.output, input);
             assert_eq!(result.replacements, 0);
             assert!(result.warnings.is_empty());
@@ -499,7 +649,7 @@ mod tests {
     fn triple_brace_literal_still_converted_despite_fast_path() {
         let state = make_state(json!({}));
         let evaluator = Evaluator::new(&state);
-        let result = interpolate_text("{{{ x }}}", &evaluator, ScanMode::Plain, false, "test")
+        let result = interpolate_text("{{{ x }}}", &evaluator, ScanMode::Plain, ExpressionFailurePolicy::Lenient, "test")
             .unwrap();
         assert_eq!(result.output, "{{ x }}");
         assert_eq!(result.replacements, 0);
@@ -513,7 +663,7 @@ mod tests {
             "{{ a ? b ? 'inner-true' : 'inner-false' : 'outer-false' }}",
             &evaluator,
             ScanMode::Plain,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "test",
         )
         .unwrap();
@@ -529,7 +679,7 @@ mod tests {
             "{{ a ? 'outer-true' : c ? 'inner-true' : 'inner-false' }}",
             &evaluator,
             ScanMode::Plain,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "test",
         )
         .unwrap();
@@ -545,7 +695,7 @@ mod tests {
             "{{ a ? b ? c ? 'd' : 'e' : 'f' : 'g' }}",
             &evaluator,
             ScanMode::Plain,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "test",
         )
         .unwrap();
@@ -562,7 +712,7 @@ mod tests {
             "{{ ctx.today ? ctx.today : 'no date' }}",
             &evaluator,
             ScanMode::Plain,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "test",
         )
         .unwrap();
@@ -580,7 +730,7 @@ mod tests {
             "{{ pkg ? 'in a package directory: {{pkg}}' : 'not in a package directory' }}",
             &evaluator,
             ScanMode::Plain,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "test",
         )
         .unwrap();
@@ -596,7 +746,7 @@ mod tests {
             "{{ pkg ? 'has: {{pkg}}' : 'missing: {{fallback}}' }}",
             &evaluator,
             ScanMode::Plain,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "test",
         )
         .unwrap();
@@ -612,7 +762,7 @@ mod tests {
             "{{ ctx.tody }}",
             &evaluator,
             ScanMode::Plain,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "test",
         )
         .unwrap();
@@ -631,7 +781,7 @@ mod tests {
             "{{ ctx.today }}",
             &evaluator,
             ScanMode::Plain,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "test",
         )
         .unwrap();
@@ -652,7 +802,7 @@ mod tests {
         let state = make_state(json!({}));
         let evaluator = Evaluator::new(&state);
         let (value, replacements, warnings) =
-            interpolate_value("{{ ctx.toady }}", &evaluator, false, "frontmatter-interpolation")
+            interpolate_value("{{ ctx.toady }}", &evaluator, ExpressionFailurePolicy::Lenient, "frontmatter-interpolation")
                 .unwrap();
         // Silent-null evaluation is unchanged: still null, still one replacement.
         assert_eq!(value, Value::Null);
@@ -673,7 +823,7 @@ mod tests {
         let (_value, _replacements, warnings) = interpolate_value(
             r#"{{ "ctx.toady" }}"#,
             &evaluator,
-            false,
+            ExpressionFailurePolicy::Lenient,
             "frontmatter-interpolation",
         )
         .unwrap();
@@ -688,7 +838,7 @@ mod tests {
         let evaluator = Evaluator::new(&state);
         // ctx.year resolves to a number in the fixed test context.
         let (value, replacements, warnings) =
-            interpolate_value("{{ number(ctx.year) }}", &evaluator, false, "frontmatter-interpolation")
+            interpolate_value("{{ number(ctx.year) }}", &evaluator, ExpressionFailurePolicy::Lenient, "frontmatter-interpolation")
                 .unwrap();
         assert!(matches!(value, Value::Number(_)));
         assert_eq!(replacements, 1);
@@ -706,7 +856,7 @@ mod tests {
                 "{{{ name }}}",
                 &evaluator,
                 ScanMode::MarkdownAware,
-                false,
+                ExpressionFailurePolicy::Lenient,
                 "test",
             )
             .unwrap();
@@ -723,7 +873,7 @@ mod tests {
                 "`{{{ name }}}`",
                 &evaluator,
                 ScanMode::MarkdownAware,
-                false,
+                ExpressionFailurePolicy::Lenient,
                 "test",
             )
             .unwrap();
@@ -736,7 +886,7 @@ mod tests {
             let state = make_state(json!({}));
             let evaluator = Evaluator::new(&state);
             let input = "```\n{{{ name }}}\n```";
-            let result = interpolate_text(input, &evaluator, ScanMode::MarkdownAware, false, "test").unwrap();
+            let result = interpolate_text(input, &evaluator, ScanMode::MarkdownAware, ExpressionFailurePolicy::Lenient, "test").unwrap();
             assert_eq!(result.output, input);
             assert_eq!(result.replacements, 0);
         }
@@ -750,7 +900,7 @@ mod tests {
                 ("{{{}}}", "{{}}"),
                 ("{{{ }}}", "{{ }}"),
             ] {
-                let result = interpolate_text(input, &evaluator, ScanMode::Plain, false, "test").unwrap();
+                let result = interpolate_text(input, &evaluator, ScanMode::Plain, ExpressionFailurePolicy::Lenient, "test").unwrap();
                 assert_eq!(result.output, expected, "input: {input:?}");
                 assert_eq!(result.replacements, 0, "input: {input:?}");
             }
@@ -764,7 +914,7 @@ mod tests {
                 "{{ a }}{{{ b }}}",
                 &evaluator,
                 ScanMode::Plain,
-                false,
+                ExpressionFailurePolicy::Lenient,
                 "test",
             )
             .unwrap();
@@ -780,7 +930,7 @@ mod tests {
                 "{{ tmpl }}",
                 &evaluator,
                 ScanMode::Plain,
-                false,
+                ExpressionFailurePolicy::Lenient,
                 "test",
             )
             .unwrap();
@@ -796,7 +946,7 @@ mod tests {
                 "{{{ name }}} {{{ other }}}",
                 &evaluator,
                 ScanMode::Plain,
-                true,
+                ExpressionFailurePolicy::Strict,
                 "test",
             )
             .unwrap();
@@ -810,7 +960,7 @@ mod tests {
             let state = make_state(json!({}));
             let evaluator = Evaluator::new(&state);
             let (value, replacements, warnings) =
-                interpolate_value("{{{ x }}}", &evaluator, false, "frontmatter-interpolation").unwrap();
+                interpolate_value("{{{ x }}}", &evaluator, ExpressionFailurePolicy::Lenient, "frontmatter-interpolation").unwrap();
             assert_eq!(value, Value::String("{{ x }}".to_string()));
             assert_eq!(replacements, 0);
             assert!(warnings.is_empty());
@@ -824,7 +974,7 @@ mod tests {
                 "{{{ {{ x }} }}}",
                 &evaluator,
                 ScanMode::Plain,
-                false,
+                ExpressionFailurePolicy::Lenient,
                 "test",
             )
             .unwrap();
@@ -836,6 +986,134 @@ mod tests {
         fn convert_literals_plain_leaves_expressions_intact() {
             let output = convert_literals("{{ a }}{{{ b }}}", ScanMode::Plain);
             assert_eq!(output, "{{ a }}{{ b }}");
+        }
+    }
+
+    /// Requirement 5: a failing span that survives a pass is one issue, no
+    /// matter how many rescans a sibling replacement triggers.
+    mod rescan_identity {
+        use super::*;
+
+        fn codes(warnings: &[ComposeWarning]) -> Vec<&str> {
+            warnings.iter().filter_map(|w| w.code.as_deref()).collect()
+        }
+
+        /// The original two-span fixture: one successful replacement plus one
+        /// bad expression. Before identity tracking the replacement forced a
+        /// second pass that rescanned and re-reported the unchanged failure.
+        #[test]
+        fn one_replacement_and_one_parse_failure_report_exactly_one_issue() {
+            let state = make_state(json!({"name": "Alice"}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "{{ name }} {{ > invalid }}",
+                &evaluator,
+                ScanMode::MarkdownAware,
+                ExpressionFailurePolicy::Lenient,
+                "interpolation",
+            )
+            .unwrap();
+
+            assert_eq!(result.output, "Alice {{ > invalid }}");
+            assert_eq!(result.replacements, 1);
+            assert_eq!(result.warnings.len(), 1, "{:?}", result.warnings);
+            assert_eq!(codes(&result.warnings), [ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE]);
+            assert!(result.warnings[0].message.contains("failed to parse '> invalid'"));
+        }
+
+        #[test]
+        fn one_replacement_and_one_evaluation_failure_report_exactly_one_issue() {
+            let state = make_state(json!({"name": "Alice"}));
+            let evaluator = Evaluator::new(&state);
+            let result =
+                interpolate_text("{{ min(1) }} {{ name }}", &evaluator, ScanMode::Plain, ExpressionFailurePolicy::Lenient, "interpolation")
+                    .unwrap();
+
+            assert_eq!(result.output, "{{ min(1) }} Alice");
+            assert_eq!(result.warnings.len(), 1, "{:?}", result.warnings);
+            assert_eq!(
+                codes(&result.warnings),
+                [ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE]
+            );
+        }
+
+        /// Failures on both sides of a replacement that changes length: the
+        /// later one's tracked range must shift or the next pass re-reports it.
+        #[test]
+        fn failures_around_a_length_changing_replacement_stay_one_each_in_document_order() {
+            let state = make_state(json!({"name": "a much longer replacement value"}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "{{ > first }} {{ name }} {{ > second }}",
+                &evaluator,
+                ScanMode::Plain,
+                ExpressionFailurePolicy::Lenient,
+                "interpolation",
+            )
+            .unwrap();
+
+            assert_eq!(
+                result.output,
+                "{{ > first }} a much longer replacement value {{ > second }}"
+            );
+            let messages: Vec<&str> = result.warnings.iter().map(|w| w.message.as_str()).collect();
+            assert_eq!(messages.len(), 2, "{messages:?}");
+            assert!(messages[0].contains("'> first'"), "{messages:?}");
+            assert!(messages[1].contains("'> second'"), "{messages:?}");
+        }
+
+        /// A replacement that generates a failing expression is reported once,
+        /// at a generated origin that cannot alias an authored failure.
+        #[test]
+        fn a_generated_failure_is_reported_once_and_distinct_from_an_authored_one() {
+            let state = make_state(json!({"tpl": "{{ > generated }}"}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "{{ tpl }} {{ > generated }}",
+                &evaluator,
+                ScanMode::Plain,
+                ExpressionFailurePolicy::Lenient,
+                "interpolation",
+            )
+            .unwrap();
+
+            assert_eq!(result.output, "{{ > generated }} {{ > generated }}");
+            assert_eq!(result.warnings.len(), 2, "{:?}", result.warnings);
+            let origins: Vec<_> = result
+                .warnings
+                .iter()
+                .map(|w| match &w.identity.as_ref().unwrap().subject {
+                    crate::markdown::compose::context::report::WarningSubject::Expression {
+                        origin,
+                        ..
+                    } => origin.clone(),
+                    other => panic!("expected an expression identity, got {other:?}"),
+                })
+                .collect();
+            assert!(origins.contains(&ExpressionOrigin::Authored(10..27)), "{origins:?}");
+            assert!(
+                origins.contains(&ExpressionOrigin::Generated { pass: 1, span: 0..17 }),
+                "{origins:?}"
+            );
+        }
+
+        /// Ten references to one unknown `ctx.*` group in one text carry one
+        /// identity, so the report keeps one warning.
+        #[test]
+        fn ten_unknown_context_references_share_one_identity() {
+            let state = make_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            let input = "{{ ctx.toady }} ".repeat(10);
+            let result =
+                interpolate_text(&input, &evaluator, ScanMode::Plain, ExpressionFailurePolicy::Lenient, "interpolation").unwrap();
+
+            let mut report = crate::markdown::compose::ComposeReport::new();
+            report.add_warnings(result.warnings);
+            assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+            assert_eq!(
+                report.warnings[0].code.as_deref(),
+                Some(ComposeWarning::UNKNOWN_CONTEXT_VARIABLE_CODE)
+            );
         }
     }
 }

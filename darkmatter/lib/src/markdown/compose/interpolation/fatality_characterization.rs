@@ -9,26 +9,35 @@
 //!
 //! ## The ratified policy this matrix locks
 //!
-//! - **Body interpolation** ([`interpolate_text`]): under `fail_fast = true`
-//!   every failure is fatal. In lenient (`fail_fast = false`) mode, **three**
-//!   classes are fatal — an **unknown function**, a **present file reference
-//!   that fails to resolve** (missing file or malformed path), and a **focused
-//!   provider failure** ([`ExpressionError::Provider`]). A present file
-//!   reference that does not resolve is treated as a real authoring mistake
-//!   rather than a tolerated absence (real-errors finding #1, ratified), and a
-//!   provider failure is actionable state the spec forbids demoting to a
-//!   warning. The provider class is exercised end-to-end in
-//!   `compose/tests/provider_network.rs` (it needs a repository fixture and a
-//!   mock transport, which this harness deliberately does not build); the six
-//!   cells below pin the purely local failure kinds.
+//! - **Full-document composition is strict.** Body interpolation, frontmatter
+//!   mixed text, and directive targets pass [`ExpressionFailurePolicy::Strict`]
+//!   whatever `ComposeOptions::fail_fast` says (dasherized-identifiers
+//!   Requirement 2). Every parse or evaluation failure aborts. The
+//!   `document_body_is_strict_whatever_fail_fast_says` cell pins that the
+//!   document entry passes `Strict`, not only that the helper honors it.
+//! - **The helper under [`ExpressionFailurePolicy::Lenient`]**
+//!   ([`interpolate_text`]) is what `compose_subtree(..., Lenient)` and
+//!   preflight discovery still use. There, **three** classes are fatal: an
+//!   **unknown function**, a **present file reference that fails to resolve**
+//!   (missing file or malformed path), and a **focused provider failure**
+//!   ([`ExpressionError::Provider`]). A present file reference that does not
+//!   resolve is a real authoring mistake rather than a tolerated absence
+//!   (real-errors finding #1, ratified), and a provider failure is actionable
+//!   state the spec forbids demoting to a warning. The provider class is
+//!   exercised end-to-end in `compose/tests/provider_network.rs` (it needs a
+//!   repository fixture and a mock transport, which this harness deliberately
+//!   does not build); the cells below pin the purely local failure kinds.
 //!   The remaining failures (arity, arg-type, parse) are demoted to a
 //!   `ComposeWarning` with the original `{{ … }}` left in place.
+//! - **Specified contract violation** ([`ContractViolation`]): fatal on every
+//!   cell. A function's specification makes the call a compose error (for
+//!   example `recent_commits(0)`), so it is never demoted to a warning.
 //! - **Missing runtime context** ([`ContextNotCaptured`],
 //!   [`ContextProjectionInvariant`]): fatal on every cell. A known `ctx.*`
 //!   variable with no captured value is never rendered as an empty string.
 //! - **Frontmatter whole-value span** ([`interpolate_value`]): a value whose
 //!   trimmed content is exactly one `{{ expr }}` is executable state, so *every*
-//!   parse/eval failure is fatal regardless of `fail_fast`.
+//!   parse/eval failure is fatal under either policy.
 //!
 //! The file-reference fatality promotion is the one **intentional** behavior
 //! change in this effort; it is characterized here and tested separately from
@@ -38,10 +47,14 @@
 //! [`is_authoring_fatal`]: crate::markdown::compose::expression::ExpressionError::is_authoring_fatal
 //! [`interpolate_text`]: super::rewrite::interpolate_text
 //! [`interpolate_value`]: super::rewrite::interpolate_value
+//! [`ExpressionFailurePolicy::Strict`]: super::rewrite::ExpressionFailurePolicy::Strict
+//! [`ExpressionFailurePolicy::Lenient`]: super::rewrite::ExpressionFailurePolicy::Lenient
+//! [`ExpressionError::Provider`]: crate::markdown::compose::expression::ExpressionError::Provider
+//! [`ContractViolation`]: crate::markdown::compose::expression::ExpressionError::ContractViolation
 //! [`ContextNotCaptured`]: crate::markdown::compose::expression::ExpressionError::ContextNotCaptured
 //! [`ContextProjectionInvariant`]: crate::markdown::compose::expression::ExpressionError::ContextProjectionInvariant
 
-use super::rewrite::{ScanMode, interpolate_text, interpolate_value};
+use super::rewrite::{ExpressionFailurePolicy, ScanMode, interpolate_text, interpolate_value};
 use super::Evaluator;
 use crate::markdown::compose::expression::ResolutionContext;
 use crate::markdown::compose::{
@@ -157,7 +170,7 @@ fn empty_state(kind: &str) -> EffectiveState {
         .unwrap()
 }
 
-/// Evaluates `input` on `surface` under `fail_fast`, returning the observed
+/// Evaluates `input` on `surface` under `policy`, returning the observed
 /// outcome and the surfaced message (the `Err` text, or the joined warning
 /// messages).
 ///
@@ -165,7 +178,12 @@ fn empty_state(kind: &str) -> EffectiveState {
 /// filesystem builtins (`frontmatter`, `absolute`) actually run rather than
 /// short-circuiting to the "no resolution context" recoverable error. The
 /// directory is intentionally empty: `does-not-exist.md` must miss.
-fn classify(kind: &str, input: &str, surface: Surface, fail_fast: bool) -> (Outcome, String) {
+fn classify(
+    kind: &str,
+    input: &str,
+    surface: Surface,
+    policy: ExpressionFailurePolicy,
+) -> (Outcome, String) {
     let dir = tempfile::TempDir::new().unwrap();
     let state = empty_state(kind);
     let ctx = ResolutionContext::new(dir.path().to_path_buf());
@@ -178,7 +196,7 @@ fn classify(kind: &str, input: &str, surface: Surface, fail_fast: bool) -> (Outc
                 input,
                 &evaluator,
                 ScanMode::MarkdownAware,
-                fail_fast,
+                policy,
                 "characterization",
             ) {
                 Ok(rewrite) => {
@@ -194,7 +212,7 @@ fn classify(kind: &str, input: &str, surface: Surface, fail_fast: bool) -> (Outc
             }
         }
         Surface::FrontmatterWholeValue => {
-            match interpolate_value(input, &evaluator, fail_fast, "characterization") {
+            match interpolate_value(input, &evaluator, policy, "characterization") {
                 Ok((_value, _replacements, warnings)) => {
                     let msg = join_warnings(&warnings);
                     let outcome = if warnings.is_empty() {
@@ -223,60 +241,104 @@ fn join_warnings(warnings: &[crate::markdown::compose::ComposeWarning]) -> Strin
 /// This function *is* the locked matrix — keep it the single source of truth so
 /// a refactor that changes a verdict has exactly one place to (deliberately)
 /// update, with the test names below documenting the headline cases.
-fn expected(kind: &str, surface: Surface, fail_fast: bool) -> Outcome {
+fn expected(kind: &str, surface: Surface, policy: ExpressionFailurePolicy) -> Outcome {
     match surface {
         // A whole-value frontmatter span is executable state: every failure is
-        // fatal, regardless of fail_fast.
+        // fatal under either policy.
         Surface::FrontmatterWholeValue => Outcome::Fatal,
-        Surface::Body => {
-            if fail_fast {
-                Outcome::Fatal
-            } else {
-                // Ratified (real-errors finding #1): a present-but-unresolvable
-                // file reference is now fatal in lenient body mode too, alongside
-                // the always-fatal unknown function. Arity/arg-type/parse remain
-                // warnings — they are not file references.
-                match kind {
-                    "unknown-function"
-                    | "missing-file"
-                    | "malformed-path"
-                    | "context-not-captured"
-                    | "context-projection-invariant" => Outcome::Fatal,
-                    _ => Outcome::Warning,
-                }
-            }
-        }
+        Surface::Body => match policy {
+            ExpressionFailurePolicy::Strict => Outcome::Fatal,
+            // Ratified (real-errors finding #1): a present-but-unresolvable
+            // file reference is fatal even under the lenient policy, alongside
+            // the always-fatal unknown function. Arity/arg-type/parse remain
+            // warnings — they are not file references.
+            ExpressionFailurePolicy::Lenient => match kind {
+                "unknown-function"
+                | "missing-file"
+                | "malformed-path"
+                | "context-not-captured"
+                | "context-projection-invariant" => Outcome::Fatal,
+                _ => Outcome::Warning,
+            },
+        },
     }
 }
+
+const POLICIES: [ExpressionFailurePolicy; 2] =
+    [ExpressionFailurePolicy::Lenient, ExpressionFailurePolicy::Strict];
 
 #[test]
 fn fatality_matrix_is_locked() {
     for case in CASES {
         for surface in [Surface::Body, Surface::FrontmatterWholeValue] {
-            for fail_fast in [false, true] {
-                let (outcome, message) = classify(case.kind, case.input, surface, fail_fast);
-                let want = expected(case.kind, surface, fail_fast);
+            for policy in POLICIES {
+                let (outcome, message) = classify(case.kind, case.input, surface, policy);
+                let want = expected(case.kind, surface, policy);
                 assert_eq!(
                     outcome, want,
-                    "fatality drift: kind={} surface={:?} fail_fast={} \
+                    "fatality drift: kind={} surface={:?} policy={:?} \
                      expected {:?} but observed {:?}; message: {}",
-                    case.kind, surface, fail_fast, want, outcome, message
+                    case.kind, surface, policy, want, outcome, message
                 );
                 // A fatal or warning outcome must surface the cause that fired,
                 // so a verdict-preserving cause swap is still caught.
                 if outcome != Outcome::Clean {
                     assert!(
                         message.contains(case.fragment),
-                        "message-content drift: kind={} surface={:?} fail_fast={} \
+                        "message-content drift: kind={} surface={:?} policy={:?} \
                          expected fragment {:?} in message: {}",
                         case.kind,
                         surface,
-                        fail_fast,
+                        policy,
                         case.fragment,
                         message
                     );
                 }
             }
+        }
+    }
+}
+
+/// The document entry, not only the helper: composing a body holding each
+/// failure kind aborts with the same cause under both `fail_fast` settings.
+///
+/// The two missing-runtime-context kinds need a doctored context snapshot that
+/// full composition does not accept; they are fatal on every cell above.
+#[test]
+fn document_body_is_strict_whatever_fail_fast_says() {
+    use crate::markdown::Markdown;
+    use crate::markdown::compose::ComposeOptions;
+
+    for case in CASES.iter().filter(|case| !case.kind.starts_with("context-")) {
+        for fail_fast in [false, true] {
+            let dir = tempfile::TempDir::new().unwrap();
+            let path = dir.path().join("doc.md");
+            std::fs::write(&path, format!("before\n\n{}\n", case.input)).unwrap();
+            let markdown = Markdown::try_from(path.as_path()).unwrap();
+            let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(
+                dir.path(),
+                "",
+            ))
+            .with_source_file(path.clone())
+            .with_fail_fast(fail_fast);
+            let error = match markdown.compose_with(options) {
+                Ok((composed, report)) => panic!(
+                    "fatality drift: kind={} fail_fast={} composed {:?} with warnings {:?}",
+                    case.kind,
+                    fail_fast,
+                    composed.content(),
+                    report.warnings
+                ),
+                Err(error) => error.to_string(),
+            };
+            assert!(
+                error.contains(case.fragment),
+                "message-content drift: kind={} fail_fast={} expected {:?} in: {}",
+                case.kind,
+                fail_fast,
+                case.fragment,
+                error
+            );
         }
     }
 }
@@ -288,110 +350,109 @@ fn fatality_matrix_is_locked() {
 // at the drifted contract rather than at a generic matrix loop.
 
 #[test]
-fn body_unknown_function_is_fatal_in_lenient_mode() {
-    let (outcome, message) = classify("unknown-function", "{{ unknown_fn(\"x\") }}", Surface::Body, false);
+fn body_unknown_function_is_fatal_under_the_lenient_policy() {
+    let (outcome, message) = classify("unknown-function", "{{ unknown_fn(\"x\") }}", Surface::Body, ExpressionFailurePolicy::Lenient);
     assert_eq!(outcome, Outcome::Fatal);
     assert!(message.contains("Unknown function"), "message: {message}");
 }
 
 #[test]
-fn body_missing_file_is_fatal_in_lenient_mode() {
+fn body_missing_file_is_fatal_under_the_lenient_policy() {
     // Ratified (real-errors finding #1): a present file reference that misses is
     // fatal even in lenient body mode — it was a warning before this change.
     let (outcome, message) = classify(
         "missing-file",
         "{{ frontmatter(\"does-not-exist.md\", \"x\") }}",
         Surface::Body,
-        false,
+        ExpressionFailurePolicy::Lenient,
     );
     assert_eq!(outcome, Outcome::Fatal);
     assert!(message.contains("invalid file path"), "message: {message}");
 }
 
 #[test]
-fn body_malformed_path_is_fatal_in_lenient_mode() {
+fn body_malformed_path_is_fatal_under_the_lenient_policy() {
     // Ratified (real-errors finding #1): a malformed (present) reference is fatal
     // even in lenient body mode — it was a warning before this change.
-    let (outcome, message) = classify("malformed-path", "{{ absolute(\"\") }}", Surface::Body, false);
+    let (outcome, message) = classify("malformed-path", "{{ absolute(\"\") }}", Surface::Body, ExpressionFailurePolicy::Lenient);
     assert_eq!(outcome, Outcome::Fatal);
     assert!(message.contains("invalid file path"), "message: {message}");
 }
 
 #[test]
-fn body_arity_is_warning_in_lenient_mode() {
-    let (outcome, message) = classify("arity", "{{ min(1) }}", Surface::Body, false);
+fn body_arity_is_warning_under_the_lenient_policy() {
+    let (outcome, message) = classify("arity", "{{ min(1) }}", Surface::Body, ExpressionFailurePolicy::Lenient);
     assert_eq!(outcome, Outcome::Warning);
     assert!(message.contains("requires"), "message: {message}");
 }
 
 #[test]
-fn body_arg_type_is_warning_in_lenient_mode() {
-    let (outcome, message) = classify("arg-type", "{{ min(\"a\", \"b\") }}", Surface::Body, false);
+fn body_arg_type_is_warning_under_the_lenient_policy() {
+    let (outcome, message) = classify("arg-type", "{{ min(\"a\", \"b\") }}", Surface::Body, ExpressionFailurePolicy::Lenient);
     assert_eq!(outcome, Outcome::Warning);
     assert!(message.contains("numeric"), "message: {message}");
 }
 
 #[test]
-fn body_parse_failure_is_warning_in_lenient_mode() {
-    let (outcome, message) = classify("parse", "{{ > invalid }}", Surface::Body, false);
+fn body_parse_failure_is_warning_under_the_lenient_policy() {
+    let (outcome, message) = classify("parse", "{{ > invalid }}", Surface::Body, ExpressionFailurePolicy::Lenient);
     assert_eq!(outcome, Outcome::Warning);
     assert!(message.contains("parse"), "message: {message}");
 }
 
 #[test]
-fn body_every_failure_is_fatal_in_fail_fast_mode() {
+fn body_every_failure_is_fatal_under_the_strict_policy() {
     for case in CASES {
-        let (outcome, _message) = classify(case.kind, case.input, Surface::Body, true);
+        let (outcome, _message) = classify(case.kind, case.input, Surface::Body, ExpressionFailurePolicy::Strict);
         assert_eq!(
             outcome,
             Outcome::Fatal,
-            "kind {} should be fatal under fail_fast",
+            "kind {} should be fatal under the strict policy",
             case.kind
         );
     }
 }
 
 #[test]
-fn frontmatter_whole_value_missing_file_is_fatal_in_lenient_mode() {
-    // The most important contrast with body interpolation: the same missing-file
-    // failure that merely warns in body text aborts in a whole-value frontmatter
-    // span even when fail_fast is off.
+fn frontmatter_whole_value_missing_file_is_fatal_under_the_lenient_policy() {
+    // A whole-value span is executable state, so the helper's lenient policy
+    // never reaches it.
     let (outcome, message) = classify(
         "missing-file",
         "{{ frontmatter(\"does-not-exist.md\", \"x\") }}",
         Surface::FrontmatterWholeValue,
-        false,
+        ExpressionFailurePolicy::Lenient,
     );
     assert_eq!(outcome, Outcome::Fatal);
     assert!(message.contains("invalid file path"), "message: {message}");
 }
 
 #[test]
-fn frontmatter_whole_value_every_failure_is_fatal_in_lenient_mode() {
+fn frontmatter_whole_value_every_failure_is_fatal_under_the_lenient_policy() {
     for case in CASES {
         let (outcome, _message) =
-            classify(case.kind, case.input, Surface::FrontmatterWholeValue, false);
+            classify(case.kind, case.input, Surface::FrontmatterWholeValue, ExpressionFailurePolicy::Lenient);
         assert_eq!(
             outcome,
             Outcome::Fatal,
-            "kind {} should be fatal on a whole-value frontmatter span even in lenient mode",
+            "kind {} should be fatal on a whole-value frontmatter span even under the lenient policy",
             case.kind
         );
     }
 }
 
 #[test]
-fn body_context_not_captured_is_fatal_in_lenient_mode() {
+fn body_context_not_captured_is_fatal_under_the_lenient_policy() {
     let (outcome, message) =
-        classify("context-not-captured", "{{ ctx.repo_root }}", Surface::Body, false);
+        classify("context-not-captured", "{{ ctx.repo_root }}", Surface::Body, ExpressionFailurePolicy::Lenient);
     assert_eq!(outcome, Outcome::Fatal);
     assert!(message.contains("ctx.repo_root"), "message: {message}");
 }
 
 #[test]
-fn body_context_projection_invariant_is_fatal_in_lenient_mode() {
+fn body_context_projection_invariant_is_fatal_under_the_lenient_policy() {
     let (outcome, message) =
-        classify("context-projection-invariant", "{{ ctx.today }}", Surface::Body, false);
+        classify("context-projection-invariant", "{{ ctx.today }}", Surface::Body, ExpressionFailurePolicy::Lenient);
     assert_eq!(outcome, Outcome::Fatal);
     assert!(message.contains("ctx.today"), "message: {message}");
 }

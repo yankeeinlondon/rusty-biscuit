@@ -29,7 +29,8 @@ pub use lifecycle::{ComposePreflightApprovals, PreflightApprovalStats};
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::transclusion;
-use crate::markdown::compose::{ComposeOptions, ComposeWarning};
+use crate::markdown::compose::icmp::PlannedIcmpProbe;
+use crate::markdown::compose::{ComposeOptions, ComposeWarning, DeferredCapabilities};
 use crate::markdown::compose::shell_expansion::types::{ShellCommandEntry, ShellExpansionError};
 use crate::markdown::types::MarkdownResult;
 use std::path::{Path, PathBuf};
@@ -208,11 +209,26 @@ pub struct ComposePreflightReport {
     pub entries: Vec<ShellCommandEntry>,
     /// Non-fatal warnings raised during collection.
     pub warnings: Vec<ComposeWarning>,
+    /// ICMP probes the document graph could send, in discovery order and
+    /// deduplicated. Collecting them sends no packet; each record carries the
+    /// target, per-attempt timeout, attempt count, and whether the request's
+    /// grants already permit it, so an orchestrator can approve the ones that
+    /// are not yet granted (R6).
+    pub icmp_probes: Vec<PlannedIcmpProbe>,
     /// Hierarchical graph metadata for the walked document tree. The root node
     /// represents the source document passed to
     /// [`Markdown::compose_preflight`](crate::markdown::Markdown::compose_preflight);
     /// its `children` are the documents it directly transcludes, and so on.
     pub preflight_graph: PreflightGraphNode,
+    /// The lazy context reads and expression functions the walked graph can
+    /// reach: `current.<key>` capabilities, `current_env.<KEY>` names, and
+    /// cataloged function calls, unioned across every document and every
+    /// statically known nested source.
+    ///
+    /// Metadata only (**R30**). Collecting it observes nothing — not a value, not
+    /// a probe, not the environment — so an orchestrator can see what a document
+    /// *could* read before deciding which capabilities to supply.
+    pub deferred_context: DeferredCapabilities,
 }
 
 impl ComposePreflightReport {
@@ -288,11 +304,14 @@ impl Markdown {
         &self,
         options: &ComposeOptions,
     ) -> MarkdownResult<ComposePreflightReport> {
-        let (entries, preflight_graph) = collect::collect_shell_commands_with_graph(self, options)?;
+        let (entries, icmp_probes, deferred_context, preflight_graph) =
+            collect::collect_effects(self, options)?;
         Ok(ComposePreflightReport {
             entries,
             warnings: Vec::new(),
+            icmp_probes,
             preflight_graph,
+            deferred_context,
         })
     }
 }

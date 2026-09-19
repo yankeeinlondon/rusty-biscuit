@@ -74,9 +74,11 @@
 use crate::catalog::{describe_for_error, suggest};
 use crate::markdown::compose::ComposeWarning;
 use crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
+use crate::markdown::compose::expression::absence::{AbsenceScope, MissingRoot};
 use crate::markdown::compose::expression::{
-    EvaluationLookup, Expr, ExpressionError, evaluate, scalar_string,
+    EvaluationLookup, Expr, ExpressionError, evaluate_observed, observe_missing, scalar_string,
 };
+use std::cell::RefCell;
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::{debug, trace};
@@ -211,6 +213,9 @@ impl EvalValue {
 pub struct Evaluator<'a, L: EvaluationLookup> {
     state: &'a L,
     presentation_values: Option<&'a HashMap<String, Value>>,
+    /// Unhandled reads of unknown roots, when the surface observes them.
+    /// Stage-local and uncontended: one evaluator serves one stage.
+    missing_roots: Option<RefCell<Vec<MissingRoot>>>,
 }
 
 impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
@@ -219,6 +224,47 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
         Self {
             state,
             presentation_values: None,
+            missing_roots: None,
+        }
+    }
+
+    /// Records every evaluated read of a root the lookup does not know and no
+    /// absence construct handles, for full-document unknown-identifier
+    /// warnings. Values and errors are unchanged.
+    pub(crate) fn observing_missing_roots(mut self) -> Self {
+        self.missing_roots = Some(RefCell::new(Vec::new()));
+        self
+    }
+
+    /// How many missing roots are recorded so far; pair with
+    /// [`Self::locate_missing_roots`].
+    pub(crate) fn missing_root_mark(&self) -> usize {
+        self.missing_roots.as_ref().map_or(0, |roots| roots.borrow().len())
+    }
+
+    /// Attributes every root recorded since `mark` to `span` of the scanned text.
+    pub(crate) fn locate_missing_roots(&self, mark: usize, span: Option<std::ops::Range<usize>>) {
+        if let Some(roots) = &self.missing_roots {
+            for root in roots.borrow_mut().iter_mut().skip(mark) {
+                root.span = span.clone();
+            }
+        }
+    }
+
+    /// Takes the recorded missing roots, leaving none.
+    pub(crate) fn take_missing_roots(&self) -> Vec<MissingRoot> {
+        self.missing_roots.as_ref().map(RefCell::take).unwrap_or_default()
+    }
+
+    fn evaluate(&self, expr: &Expr) -> Result<Value, ExpressionError> {
+        match &self.missing_roots {
+            Some(roots) => {
+                let mut observed = Vec::new();
+                let result = evaluate_observed(expr, self.state, &mut observed);
+                roots.borrow_mut().append(&mut observed);
+                result
+            }
+            None => evaluate_observed(expr, self.state, &mut ()),
         }
     }
 
@@ -246,6 +292,9 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     /// - Function calls (`length()`, `number()`, `round()`)
     pub fn eval(&self, expr: &Expr) -> EvalResult {
         trace!(expr = ?expr, "interpolation: evaluating expression");
+        // The variable fast path below reads the lookup without going through
+        // `evaluate`, so this surface opens the expression scope itself (Q2).
+        self.state.begin_expression_scope();
 
         if let Some(value) = self.presentation_value(expr) {
             return EvalResult::Value(scalar_string(&value));
@@ -265,6 +314,11 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
                     };
                 }
             };
+            if resolved.is_none()
+                && let Some(roots) = &self.missing_roots
+            {
+                observe_missing(name, AbsenceScope::default(), self.state, &mut *roots.borrow_mut());
+            }
             let value = match resolved {
                 Some(array @ Value::Array(_)) => scalar_string(&array),
                 Some(Value::Object(_)) => self.state.get_string(name),
@@ -281,7 +335,7 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
             return EvalResult::Value(value);
         }
 
-        match evaluate(expr, self.state) {
+        match self.evaluate(expr) {
             Ok(value) => EvalResult::Value(scalar_string(&value)),
             Err(error) => EvalResult::Error {
                 error,
@@ -347,7 +401,7 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     /// - Comparison expressions (returns Bool)
     /// - Function calls (returns appropriate type based on function)
     pub fn eval_value(&self, expr: &Expr) -> EvalValue {
-        match evaluate(expr, self.state) {
+        match self.evaluate(expr) {
             Ok(value) => EvalValue::from_json(&value),
             Err(_) => EvalValue::Null,
         }
@@ -362,7 +416,7 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     /// of collapsing it to a string. The `Err` is the evaluator's message, so
     /// callers can fall back to the string path on failure.
     pub fn eval_json(&self, expr: &Expr) -> Result<Value, ExpressionError> {
-        evaluate(expr, self.state)
+        self.evaluate(expr)
     }
 
     /// Collects warnings for `ctx.*` references that don't resolve to a known
@@ -385,7 +439,7 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
                 message.push_str("\n  did you mean: ");
                 message.push_str(&describe_for_error(*descriptor));
             }
-            warnings.push(ComposeWarning::new(warning_stage, message));
+            warnings.push(ComposeWarning::unknown_context_variable(warning_stage, message, name));
         });
         warnings
     }

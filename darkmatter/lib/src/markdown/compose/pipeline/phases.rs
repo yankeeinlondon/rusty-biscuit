@@ -19,8 +19,13 @@ use super::super::{
 use tracing::{debug, info};
 
 use transclusion::{ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionEngine};
+use super::super::body_origin::BodyOrigin;
 
 impl Markdown {
+    /// Runs one inline-pre `operation`. `body_origin` maps the body back to
+    /// the loaded text; the stages that rewrite the body carry it forward and
+    /// body interpolation projects failure spans through it.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn run_inline_pre_operation(
         &mut self,
         operation: ComposeOperation,
@@ -29,6 +34,7 @@ impl Markdown {
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
         perf: &mut perf::PerfCollector,
+        body_origin: &mut Option<BodyOrigin>,
     ) -> MarkdownResult<()> {
         match operation {
             // FrontmatterInterpolation is handled before EffectiveState build,
@@ -38,15 +44,16 @@ impl Markdown {
             // not in the generic operation loop.
             ComposeOperation::FrontmatterShellExpansion => Ok(()),
             ComposeOperation::TextReplacement => {
-                report.replacements_applied = inline::replacement::run_stage(self, state, options);
+                report.replacements_applied =
+                    inline::replacement::run_stage(self, state, options, body_origin);
                 Ok(())
             }
             ComposeOperation::PageBlocks => {
-                inline::page_blocks::run_stage(self, state, options, runtime, report)
+                inline::page_blocks::run_stage(self, state, options, runtime, report, body_origin)
             }
             ComposeOperation::Interpolation => {
                 report.interpolations_applied =
-                    inline::interpolation::run_stage(self, state, options, runtime, report)
+                    inline::interpolation::run_stage(self, state, options, runtime, report, body_origin.as_ref())
                         .map_err(|e| e.with_on_disk_source(&self.full_source_context_for_errors()))?;
                 Ok(())
             }

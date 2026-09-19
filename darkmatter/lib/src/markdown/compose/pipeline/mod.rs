@@ -21,6 +21,7 @@ use super::{
     context, frontmatter_interpolation, frontmatter_shell_expansion, perf, remote,
     schema_validation, shell_expansion, transclusion,
 };
+use super::body_origin::BodyOrigin;
 use serde_json::{Map, Value};
 use std::path::Path;
 use tracing::{info, instrument, trace};
@@ -33,6 +34,11 @@ impl Markdown {
         // extendable context grows to the groups this document names, and the
         // result seeds the request epoch every transcluded source extends.
         options.extend_context_for(self);
+        // `ComposeOptions::for_document` fixed the repository observation at
+        // request creation; a request built through an older constructor
+        // reaches its first boundary here. Either way it is fixed before any
+        // stage of the root runs, so no descendant can establish it late.
+        options.establish_repository_observation();
         options.ensure_file_resolution_context();
 
         // Reuse the caller-supplied shared runtime when present (so a pre-flight
@@ -48,6 +54,7 @@ impl Markdown {
             remote_fetch,
         );
         runtime.context_epoch.seed(options.context());
+        runtime.root_source = Some((options.source.clone(), options.source_derivation));
 
         // Eagerly register discovered remote URLs and start fetching. The two
         // discovery paths gate independently: directive (`::file`/`::code`)
@@ -87,9 +94,19 @@ impl Markdown {
             }
         }
 
+        // Every nested and transcluded child clones these options, so one
+        // handle drains the ICMP denials raised anywhere under this root.
+        let icmp = options.icmp.clone();
+        // Same handle rule for the lazy roots: one sink drains every fail-closed
+        // `current.*` read raised anywhere under this root.
+        let current = options.current_authority();
         let mut report = self.run_compose_pipeline_internal(options, &mut runtime)?;
         report.cache_stats = Some(runtime.cache.stats());
-        report.remote_fetch_stats = Some(runtime.remote_fetch.stats());
+        let remote_fetch_stats = runtime.remote_fetch.stats();
+        report.warnings.extend(remote_fetch_stats.cache_compose_warnings());
+        report.remote_fetch_stats = Some(remote_fetch_stats);
+        report.warnings.extend(icmp.take_warnings());
+        report.warnings.extend(current.take_warnings());
         Ok(report)
     }
 
@@ -112,28 +129,42 @@ impl Markdown {
     #[instrument(skip_all, fields(source = ?options.source))]
     pub(crate) fn run_compose_pipeline_internal(
         &mut self,
-        mut options: ComposeOptions,
+        options: ComposeOptions,
         runtime: &mut shell_expansion::types::PipelineRuntime,
     ) -> MarkdownResult<ComposeReport> {
-        let source_id = match &options.source {
+        let node = match &options.source {
             ComposeSource::Unknown => None,
-            ComposeSource::File(path) => Some(
+            ComposeSource::File(path) => Some((
                 std::fs::canonicalize(path)
                     .unwrap_or_else(|_| path.clone())
                     .to_string_lossy()
                     .to_string(),
-            ),
-            ComposeSource::Url(url) => Some(url.to_string()),
+                path.clone(),
+            )),
+            ComposeSource::Url(url) => {
+                Some((url.to_string(), std::path::PathBuf::from(url.to_string())))
+            }
         };
+        self.run_compose_pipeline_node(options, runtime, node)
+    }
 
-        if let Some(id) = source_id.clone() {
-            let path = match &options.source {
-                ComposeSource::File(p) => p.clone(),
-                ComposeSource::Url(u) => std::path::PathBuf::from(u.to_string()),
-                ComposeSource::Unknown => std::path::PathBuf::from("<unknown>"),
-            };
+    /// Runs every stage for one document under an explicit ancestry node.
+    ///
+    /// `node` is `(id, display path)`. Transcluded documents derive it from
+    /// their source; an `as_markdown` child passes a unique node while its
+    /// options carry the root source, so the shared stack counts the call
+    /// without reporting the root as a cycle.
+    pub(crate) fn run_compose_pipeline_node(
+        &mut self,
+        mut options: ComposeOptions,
+        runtime: &mut shell_expansion::types::PipelineRuntime,
+        node: Option<(String, std::path::PathBuf)>,
+    ) -> MarkdownResult<ComposeReport> {
+        let entered = node.is_some();
+        if let Some((id, path)) = node {
             runtime.transclusion.enter(id, path, 1)?;
         }
+        let nested = super::nested::NestedCompose::install(&mut options, runtime, self);
 
         let result = (|| {
             let mut report = ComposeReport::new();
@@ -175,21 +206,25 @@ impl Markdown {
             if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
                 let fm_start = perf.is_enabled().then(std::time::Instant::now);
                 // Capture the on-disk locus before borrowing frontmatter so a
-                // file-reference failure can render an OSC8 link + focused
-                // excerpt instead of the late-binding fallback.
+                // failure can render an OSC8 link, its authored span, and a
+                // focused excerpt instead of the late-binding fallback.
                 let fm_source_ctx = self.full_source_context_for_errors();
-                let fm_report = frontmatter_interpolation::interpolate_frontmatter(
+                let fm_authored_ctx = self.loaded_source_context_for_errors();
+                let fm_report = frontmatter_interpolation::interpolate_frontmatter_located(
                     self.frontmatter_mut(),
                     options.context(),
-                    options.fail_fast,
+                    options.expression_failure_policy(),
                     shell_expansion_enabled,
                     Some(options.frontmatter_resolution_context()),
                     &options.exclude_keys,
                     &options.name_coercion_keys,
                 )
-                .map_err(|e| e.with_on_disk_source(&fm_source_ctx))?;
+                .map_err(|failure| {
+                    failure.into_anchored(fm_authored_ctx).with_on_disk_source(&fm_source_ctx)
+                })?;
                 report.frontmatter_interpolations_applied = fm_report.replacements;
-                report.warnings.extend(fm_report.warnings);
+                report.add_warnings(fm_report.warnings);
+                add_frontmatter_candidates(&mut report, "frontmatter-interpolation", fm_report.missing_roots);
                 if let Some(start) = fm_start {
                     perf.record(
                         perf::PerfMetricKind::FrontmatterInterpolation,
@@ -263,17 +298,20 @@ impl Markdown {
             // before any frontmatter `$(...)`, body `::shell`, or shell block
             // executes. This removes the failure mode where an earlier
             // frontmatter command runs before a later body or shell-block
-            // command is found unapproved. Root-only (depth 1) because the
-            // collector already walks every child; gated on a shell-executing
+            // command is found unapproved. Root-only because the
+            // collector already walks every child, nested `as_markdown` content
+            // included; gated on a shell-executing
             // operation being enabled so the collection's own internal inline
             // compose (which disables shell execution) cannot recurse.
-            if options.pre_approved_commands.is_some()
-                && runtime.transclusion.depth() <= 1
-                && (options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
-                    || options.is_enabled(ComposeOperation::ShellExpansion)
-                    || options.is_enabled(ComposeOperation::ShellBlocks))
+            if preflight_gate_applies(&options, runtime)
+                && !runtime
+                    .preflight_validated()
+                    .load(std::sync::atomic::Ordering::Acquire)
             {
                 super::preflight::validate_pre_approved(self, &options)?;
+                runtime
+                    .preflight_validated()
+                    .store(true, std::sync::atomic::Ordering::Release);
             }
 
             // Frontmatter Shell Expansion: execute $(cmd) in frontmatter values
@@ -291,7 +329,12 @@ impl Markdown {
                 )?;
                 report.frontmatter_shell_expansions_applied = fse_report.replacements;
                 report.shell_approvals_used += fse_report.approvals_used;
-                report.warnings.extend(fse_report.warnings);
+                report.add_warnings(fse_report.warnings);
+                add_frontmatter_candidates(
+                    &mut report,
+                    "frontmatter-shell-ternary",
+                    fse_report.missing_roots,
+                );
                 if let Some(start) = fse_start {
                     perf.record(
                         perf::PerfMetricKind::FrontmatterShellExpansion,
@@ -307,18 +350,22 @@ impl Markdown {
                 {
                     let fm_start = perf.is_enabled().then(std::time::Instant::now);
                     let fm_source_ctx = self.full_source_context_for_errors();
-                    let fm_report = frontmatter_interpolation::interpolate_frontmatter(
+                    let fm_authored_ctx = self.loaded_source_context_for_errors();
+                    let fm_report = frontmatter_interpolation::interpolate_frontmatter_located(
                         self.frontmatter_mut(),
                         options.context(),
-                        options.fail_fast,
+                        options.expression_failure_policy(),
                         false,
                         Some(options.frontmatter_resolution_context()),
                         &options.exclude_keys,
                         &options.name_coercion_keys,
                     )
-                    .map_err(|e| e.with_on_disk_source(&fm_source_ctx))?;
+                    .map_err(|failure| {
+                        failure.into_anchored(fm_authored_ctx).with_on_disk_source(&fm_source_ctx)
+                    })?;
                     report.frontmatter_interpolations_applied += fm_report.replacements;
-                    report.warnings.extend(fm_report.warnings);
+                    report.add_warnings(fm_report.warnings);
+                    add_frontmatter_candidates(&mut report, "frontmatter-interpolation", fm_report.missing_roots);
                     if let Some(start) = fm_start {
                         perf.record(
                             perf::PerfMetricKind::FrontmatterInterpolation,
@@ -381,6 +428,7 @@ impl Markdown {
                 .with_allow_ctx_override(options.allow_ctx_override)
                 .with_name_coercion_keys(options.name_coercion_keys.clone())
                 .with_presentation_values(caller_projection.presentation_values())
+                .with_current_authority(options.current_authority())
                 .build()?;
             if let Some(start) = esb_start {
                 perf.record(perf::PerfMetricKind::EffectiveStateBuild, start.elapsed());
@@ -424,6 +472,7 @@ impl Markdown {
             }
 
             let mut transclusion_ran = false;
+            let mut body_origin = BodyOrigin::capture(self);
             for operation in ComposeOperation::default_order() {
                 trace!(operation = ?operation, enabled = options.is_enabled(*operation), "compose: checking operation");
                 if !options.is_enabled(*operation) {
@@ -441,6 +490,7 @@ impl Markdown {
                             runtime,
                             &mut report,
                             &mut perf,
+                            &mut body_origin,
                         )?;
                         if let Some(start) = op_start
                             && let Some(kind) = operation.perf_metric()
@@ -481,7 +531,7 @@ impl Markdown {
                         }
                     }
                     ComposePhase::Finalization => {
-                        if runtime.transclusion.depth() <= 1 {
+                        if runtime.is_root() {
                             let op_start = perf.is_enabled().then(std::time::Instant::now);
                             self.run_finalization_operation(*operation, &options, &mut report)?;
                             if let Some(start) = op_start
@@ -494,6 +544,14 @@ impl Markdown {
                 }
             }
 
+            super::unknown_identifiers::reconcile(
+                &mut report,
+                self,
+                &options,
+                &effective_state,
+                &prepared_schemas,
+            );
+            report.attribute_to_document(&schema_validation::source_path(self, &options));
             report.max_transclusion_depth = runtime.transclusion.deepest_seen;
             if perf.is_enabled() {
                 perf.set_capture_timings(options.context().capture_timings().to_vec());
@@ -502,10 +560,41 @@ impl Markdown {
             Ok(report)
         })();
 
-        if source_id.is_some() {
+        let result = match nested {
+            Some(nested) => nested.finish(result, runtime),
+            None => result,
+        };
+
+        if entered {
             runtime.transclusion.exit();
         }
 
         result
     }
+}
+
+/// Records frontmatter unknown-root reads, each located at its top-level key.
+fn add_frontmatter_candidates(
+    report: &mut ComposeReport,
+    stage: &'static str,
+    roots: Vec<(String, super::expression::absence::MissingRoot)>,
+) {
+    for (key, root) in roots {
+        report.add_unknown_root_candidates(stage, vec![root], |_| {
+            super::context::report::CandidateLocus::FrontmatterKey(key.clone())
+        });
+    }
+}
+
+/// Whether this pipeline owns the up-front pre-approved command gate: the
+/// request root, with a pre-approved set and a shell-executing stage enabled.
+pub(crate) fn preflight_gate_applies(
+    options: &ComposeOptions,
+    runtime: &shell_expansion::types::PipelineRuntime,
+) -> bool {
+    options.pre_approved_commands.is_some()
+        && runtime.is_root()
+        && (options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
+            || options.is_enabled(ComposeOperation::ShellExpansion)
+            || options.is_enabled(ComposeOperation::ShellBlocks))
 }
