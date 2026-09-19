@@ -295,6 +295,22 @@ belong here.
   sides together. See `4616e9aec` for a 5-file example (3 M supersede +
   ratification, 2 A new spec + design annex).
 
+- An in-design.md supersede (a decision `D{N}` confirmed and then explicitly
+  replaced by `D{N+1}` within the same human review checkpoint, e.g. when
+  the user reverses direction immediately after the option-A confirmation)
+  is one atomic `planning(<area>):` commit, not two. `D{N}` stays in
+  `design.md` under a leading "**Superseded by D{N+1}.**" banner so the
+  audit trail records what was first agreed and why it was replaced;
+  `D{N+1}` carries the effective rule and is the only decision reflected in
+  `spec.md`. The commit subject explicitly calls out the supersede
+  ("confirm D{N+1}-D{M} and record D{N} supersede by D{N+1}") so reviewers
+  know both sections in `design.md` were intentional. Splitting the
+  confirmation commit from the supersede ships a checkpoint where `D{N}` is
+  authoritative text in `spec.md` between the two commits, which is wrong
+  for the period before the supersede lands. See `2d783c6ad` for the
+  2026-09-17-remove-strict-mode D19→D20 example (D19 retained for
+  traceability, D20 is the effective tier policy in `spec.md`).
+
 - A brief that says "write the message body to a temp file" yields a file
   with no subject line, and `git commit -F` then collapses every bullet into
   one multi-hundred-character subject. Say "write the FULL message: subject
