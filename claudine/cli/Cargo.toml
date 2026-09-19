@@ -119,6 +119,14 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 rendezvous-core = { path = "../rendezvous/core", features = ["test-support"] }
 
 [[test]]
+name = "level2_ac2_worktree_compose"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_ac28_lifecycle_lazy_roots"
+required-features = ["terminal-tests"]
+
+[[test]]
 name = "level2_auto_complete_chooser"
 required-features = ["terminal-tests"]
 
