@@ -1,11 +1,16 @@
 mod common;
 
-use common::{md_cmd, md_file};
+use common::{CliProcessFixture, md_file};
+
+fn rendering_command(fixture: &CliProcessFixture) -> assert_cmd::Command {
+    fixture.command_builder().plain_terminal(80, 24).build()
+}
 
 #[test]
 fn layout_margin_shorthand_overrides_axis_and_side() {
+    let fixture = CliProcessFixture::named("layout_margin_shorthand_overrides_axis_and_side");
     let tmp = md_file("# Hello\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--margin")
         .arg("4")
@@ -24,8 +29,9 @@ fn layout_margin_shorthand_overrides_axis_and_side() {
 
 #[test]
 fn layout_padding_shorthand_overrides_axis_and_side() {
+    let fixture = CliProcessFixture::named("layout_padding_shorthand_overrides_axis_and_side");
     let tmp = md_file("# Hello\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--padding")
         .arg("4")
@@ -44,8 +50,9 @@ fn layout_padding_shorthand_overrides_axis_and_side() {
 
 #[test]
 fn layout_max_width_zero_rejected() {
+    let fixture = CliProcessFixture::named("layout_max_width_zero_rejected");
     let tmp = md_file("# Hello\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--max-width")
         .arg("0")
@@ -62,8 +69,9 @@ fn layout_max_width_zero_rejected() {
 
 #[test]
 fn layout_max_width_positive_accepted() {
+    let fixture = CliProcessFixture::named("layout_max_width_positive_accepted");
     let tmp = md_file("# Hello\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--max-width")
         .arg("80")
@@ -75,8 +83,9 @@ fn layout_max_width_positive_accepted() {
 
 #[test]
 fn layout_fill_full_accepted() {
+    let fixture = CliProcessFixture::named("layout_fill_full_accepted");
     let tmp = md_file("```rust\nfn main() {}\n```\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--fill")
         .arg("full")
@@ -88,8 +97,9 @@ fn layout_fill_full_accepted() {
 
 #[test]
 fn layout_fill_pad_fixed_accepted() {
+    let fixture = CliProcessFixture::named("layout_fill_pad_fixed_accepted");
     let tmp = md_file("```rust\nfn main() {}\n```\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--fill")
         .arg("pad=4")
@@ -101,8 +111,9 @@ fn layout_fill_pad_fixed_accepted() {
 
 #[test]
 fn layout_fill_pad_percent_accepted() {
+    let fixture = CliProcessFixture::named("layout_fill_pad_percent_accepted");
     let tmp = md_file("```rust\nfn main() {}\n```\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--fill")
         .arg("pad=10%")
@@ -114,9 +125,11 @@ fn layout_fill_pad_percent_accepted() {
 
 #[test]
 fn layout_fill_indent_max_explicit_accepted() {
+    let fixture = CliProcessFixture::named("layout_fill_indent_max_explicit_accepted");
     let tmp = md_file("```rust\nfn main() {}\n```\n");
     for fill in ["indent=2", "max=40", "explicit=60"] {
-        let output = md_cmd()
+        let output = fixture
+            .command()
             .arg(tmp.path())
             .arg("--fill")
             .arg(fill)
@@ -128,8 +141,9 @@ fn layout_fill_indent_max_explicit_accepted() {
 
 #[test]
 fn layout_fill_unknown_kind_rejected() {
+    let fixture = CliProcessFixture::named("layout_fill_unknown_kind_rejected");
     let tmp = md_file("# Hello\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--fill")
         .arg("unknown=4")
@@ -141,8 +155,9 @@ fn layout_fill_unknown_kind_rejected() {
 
 #[test]
 fn layout_fill_percent_over_100_rejected() {
+    let fixture = CliProcessFixture::named("layout_fill_percent_over_100_rejected");
     let tmp = md_file("# Hello\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--fill")
         .arg("pad=150%")
@@ -154,8 +169,9 @@ fn layout_fill_percent_over_100_rejected() {
 
 #[test]
 fn layout_fill_negative_rejected() {
+    let fixture = CliProcessFixture::named("layout_fill_negative_rejected");
     let tmp = md_file("# Hello\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--fill")
         .arg("pad=-1")
@@ -167,9 +183,11 @@ fn layout_fill_negative_rejected() {
 
 #[test]
 fn layout_alignment_global_accepted() {
+    let fixture = CliProcessFixture::named("layout_alignment_global_accepted");
     let tmp = md_file("| A | B |\n|---|---|\n| 1 | 2 |\n");
     for align in ["left", "center", "right"] {
-        let output = md_cmd()
+        let output = fixture
+            .command()
             .arg(tmp.path())
             .arg("--alignment")
             .arg(align)
@@ -184,8 +202,9 @@ fn layout_alignment_global_accepted() {
 
 #[test]
 fn layout_align_component_overrides_global() {
+    let fixture = CliProcessFixture::named("layout_align_component_overrides_global");
     let tmp = md_file("```rust\nfn main() {}\n```\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--alignment")
         .arg("center")
@@ -199,9 +218,11 @@ fn layout_align_component_overrides_global() {
 
 #[test]
 fn layout_page_bg_accepted() {
+    let fixture = CliProcessFixture::named("layout_page_bg_accepted");
     let tmp = md_file("# Hello\n");
     for bg in ["transparent", "subtle", "pronounced"] {
-        let output = md_cmd()
+        let output = fixture
+            .command()
             .arg(tmp.path())
             .arg("--page-bg")
             .arg(bg)
@@ -213,8 +234,9 @@ fn layout_page_bg_accepted() {
 
 #[test]
 fn layout_page_background_alias_works() {
+    let fixture = CliProcessFixture::named("layout_page_background_alias_works");
     let tmp = md_file("# Hello\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--page-background")
         .arg("subtle")
@@ -226,9 +248,11 @@ fn layout_page_background_alias_works() {
 
 #[test]
 fn layout_page_bg_color_hex_accepted() {
+    let fixture = CliProcessFixture::named("layout_page_bg_color_hex_accepted");
     let tmp = md_file("# Hello\n");
     for hex in ["#1e1e23", "#abc", "#ffffff"] {
-        let output = md_cmd()
+        let output = fixture
+            .command()
             .arg(tmp.path())
             .arg("--page-bg-color")
             .arg(hex)
@@ -244,8 +268,9 @@ fn layout_page_bg_color_hex_accepted() {
 
 #[test]
 fn layout_page_bg_color_rgb_triple_accepted() {
+    let fixture = CliProcessFixture::named("layout_page_bg_color_rgb_triple_accepted");
     let tmp = md_file("# Hello\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--page-bg-color")
         .arg("30,30,35")
@@ -256,8 +281,9 @@ fn layout_page_bg_color_rgb_triple_accepted() {
 
 #[test]
 fn layout_page_bg_color_tailwind_accepted() {
+    let fixture = CliProcessFixture::named("layout_page_bg_color_tailwind_accepted");
     let tmp = md_file("# Hello\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--page-bg-color")
         .arg("red-500")
@@ -268,23 +294,30 @@ fn layout_page_bg_color_tailwind_accepted() {
 
 #[test]
 fn layout_page_bg_color_special_keyword_accepted() {
+    let fixture = CliProcessFixture::named("layout_page_bg_color_special_keyword_accepted");
     let tmp = md_file("# Hello\n");
     for kw in ["transparent", "currentColor", "inherit"] {
-        let output = md_cmd()
+        let output = fixture
+            .command()
             .arg(tmp.path())
             .arg("--page-bg-color")
             .arg(kw)
             .output()
             .unwrap();
-        assert!(output.status.success(), "--page-bg-color {kw} should succeed");
+        assert!(
+            output.status.success(),
+            "--page-bg-color {kw} should succeed"
+        );
     }
 }
 
 #[test]
 fn layout_page_bg_color_invalid_rejected() {
+    let fixture = CliProcessFixture::named("layout_page_bg_color_invalid_rejected");
     let tmp = md_file("# Hello\n");
     for bad in ["not-a-color", "256,0,0", "1,2", "purple-555"] {
-        let output = md_cmd()
+        let output = fixture
+            .command()
             .arg(tmp.path())
             .arg("--page-bg-color")
             .arg(bad)
@@ -299,8 +332,9 @@ fn layout_page_bg_color_invalid_rejected() {
 
 #[test]
 fn layout_width_flag_rejected() {
+    let fixture = CliProcessFixture::named("layout_width_flag_rejected");
     let tmp = md_file("# Hello\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--width")
         .arg("80")
@@ -316,6 +350,7 @@ fn layout_width_flag_rejected() {
 
 #[test]
 fn layout_margin_aliases_work() {
+    let fixture = CliProcessFixture::named("layout_margin_aliases_work");
     // `--margin-top` and friends should be accepted as visible_aliases for
     // the existing `--mt` / `--mb` / `--ml` / `--mr` flags.
     let tmp = md_file("# Hello\n");
@@ -329,7 +364,8 @@ fn layout_margin_aliases_work() {
         ["--padding-left", "1"],
         ["--padding-right", "1"],
     ] {
-        let output = md_cmd()
+        let output = fixture
+            .command()
             .arg(tmp.path())
             .args(args)
             .output()
@@ -346,8 +382,9 @@ fn layout_margin_aliases_work() {
 
 #[test]
 fn layout_line_numbers_flag_accepted() {
+    let fixture = CliProcessFixture::named("layout_line_numbers_flag_accepted");
     let tmp = md_file("```rust\nfn main() {}\n```\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--line-numbers")
         .output()
@@ -361,8 +398,9 @@ fn layout_line_numbers_flag_accepted() {
 
 #[test]
 fn layout_line_numbers_true_accepted() {
+    let fixture = CliProcessFixture::named("layout_line_numbers_true_accepted");
     let tmp = md_file("```rust\nfn main() {}\n```\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--line-numbers")
         .arg("true")
@@ -377,8 +415,9 @@ fn layout_line_numbers_true_accepted() {
 
 #[test]
 fn layout_line_numbers_false_accepted() {
+    let fixture = CliProcessFixture::named("layout_line_numbers_false_accepted");
     let tmp = md_file("```rust\nfn main() {}\n```\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--line-numbers")
         .arg("false")
@@ -393,8 +432,9 @@ fn layout_line_numbers_false_accepted() {
 
 #[test]
 fn layout_fill_component_specific_accepted() {
+    let fixture = CliProcessFixture::named("layout_fill_component_specific_accepted");
     let tmp = md_file("```rust\nfn main() {}\n```\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--fill-code-blocks")
         .arg("max=40")
@@ -406,8 +446,9 @@ fn layout_fill_component_specific_accepted() {
 
 #[test]
 fn layout_margin_negative_rejected() {
+    let fixture = CliProcessFixture::named("layout_margin_negative_rejected");
     let tmp = md_file("# Hello\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--margin")
         .arg("-1")
@@ -419,8 +460,12 @@ fn layout_margin_negative_rejected() {
 
 #[test]
 fn layout_no_flags_preserves_existing_behavior() {
+    let fixture = CliProcessFixture::named("layout_no_flags_preserves_existing_behavior");
     let tmp = md_file("# Hello World\n\nSome prose here.\n");
-    let output = md_cmd().arg(tmp.path()).output().unwrap();
+    let output = rendering_command(&fixture)
+        .arg(tmp.path())
+        .output()
+        .unwrap();
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -432,8 +477,9 @@ fn layout_no_flags_preserves_existing_behavior() {
 
 #[test]
 fn layout_combined_margin_padding_bg() {
+    let fixture = CliProcessFixture::named("layout_combined_margin_padding_bg");
     let tmp = md_file("# Hello\n");
-    let output = md_cmd()
+    let output = rendering_command(&fixture)
         .arg(tmp.path())
         .arg("--margin")
         .arg("2")

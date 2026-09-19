@@ -176,6 +176,61 @@ exit 0
     assert!(env_lines.contains("MODEL=cli-selected"));
 }
 
+/// OpenCode's config directory is additive, so it has no provider-owned
+/// mechanism that hides the user's resources (shadow-home audit, finding F4).
+/// `--repo` is refused before spawn with a typed diagnostic: the launch neither
+/// moves `HOME` nor degrades to a null home, and it does not blame the user's
+/// credentials.
+#[cfg(unix)]
+fn assert_repo_isolation_refused_before_spawn(output: &std::process::Output, spawn_marker: &Path) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "--repo must not launch; stderr:\n{stderr}");
+    assert!(
+        stderr.contains("provider.overlay_unsupported"),
+        "the refusal must be the typed diagnostic; stderr:\n{stderr}"
+    );
+    assert!(stderr.contains("--repo"), "the refusal must name the mode; stderr:\n{stderr}");
+    assert!(
+        !stderr.to_lowercase().contains("credential"),
+        "an isolation refusal must not blame credentials; stderr:\n{stderr}"
+    );
+    assert!(!spawn_marker.exists(), "the provider was spawned despite the refusal");
+}
+
+/// Records argv, so an args file existing at all proves the child was spawned.
+#[cfg(unix)]
+const RECORD_SPAWN: &str = r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#;
+
+#[cfg(unix)]
+#[test]
+fn opencode_repo_isolation_is_refused_before_spawn() {
+    let fixture = CliProcessFixture::named("opencode-repo-refused");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
+    fs::create_dir_all(fixture.home().join(".opencode")).unwrap();
+    write(
+        &fixture.home().join(".config").join("opencode").join("opencode.jsonc"),
+        "{ \"model\": \"minimax/MiniMax-M3\" }\n",
+    );
+    write_executable(&fixture.bin_dir().join("opencode"), RECORD_SPAWN);
+
+    let output = fixture
+        .command()
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["opencode", "--repo", "summarize"])
+        .output()
+        .unwrap();
+
+    assert_repo_isolation_refused_before_spawn(&output, &args_path);
+    assert!(
+        !fixture.home().join(".claudine").join(".opencode").exists(),
+        "a refused overlay must not be materialized"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn opencode_post_summary_messages_are_logged_after_summary_block() {
@@ -275,6 +330,31 @@ exit 0
         json_index < prompt_index,
         "OpenCode flags must precede the positional prompt so structured output is enabled; args: {args}"
     );
+}
+
+/// The composition counterpart of [`opencode_repo_isolation_is_refused_before_spawn`].
+/// Composition builds its child environment through its own pipeline, so the
+/// refusal is proven on both routes rather than inferred from the shared stage.
+#[cfg(unix)]
+#[test]
+fn compose_opencode_repo_isolation_is_refused_before_spawn() {
+    let fixture = CliProcessFixture::named("compose-opencode-repo-refused");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
+    fs::create_dir_all(fixture.home().join(".opencode")).unwrap();
+    let md_file = fixture.cwd().join("test.md");
+    write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
+    write_executable(&fixture.bin_dir().join("opencode"), RECORD_SPAWN);
+
+    let output = fixture
+        .command()
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["compose", "--opencode", "--repo", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert_repo_isolation_refused_before_spawn(&output, &args_path);
 }
 
 #[cfg(unix)]
@@ -601,10 +681,17 @@ exit 0
 
     let row = read_summary_row(fixture.home());
     assert_eq!(row["extra"]["exit_code"], serde_json::json!(1));
-    assert_eq!(
-        row["error"].as_str().unwrap_or(""),
-        row["error"].as_str().unwrap_or(""),
-        "error field should carry the rate-limit message",
+    // Was `assert_eq!(row["error"], row["error"], "error field should carry the
+    // rate-limit message")` — a value compared with itself, which held for a
+    // missing `error`, a `null` one, and a generic "provider exited non-zero"
+    // just as happily as for the message it named.
+    let error_field = row["error"].as_str().unwrap_or_else(|| {
+        panic!("summary row must carry a prose `error` string; row={row}")
+    });
+    assert!(
+        error_field.contains("Usage limit reached"),
+        "error field must carry the provider's rate-limit message, not a generic \
+         failure; got {error_field:?}",
     );
     let diagnostics = &row["extra"]["provider_summary"]["stderr_diagnostics"];
     assert_eq!(

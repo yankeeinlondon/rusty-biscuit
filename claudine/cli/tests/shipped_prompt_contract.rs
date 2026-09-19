@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 mod common;
 
 fn repository_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .join("../..")
         .canonicalize()
         .unwrap()
@@ -233,6 +233,11 @@ fn shipped_implement_plan_launches_without_a_sibling_spec() {
     fixture.seed_user_config();
     let prompts = fixture.cwd().join("prompts");
     copy_shipped_prompts(&prompts);
+    let implement_plan = fs::read_to_string(prompts.join("_implement/implement-plan.md")).unwrap();
+    assert!(
+        implement_plan.contains("epilog: null"),
+        "the normal invocation must exercise the shipped mapping-only lifecycle action"
+    );
     let feature_dir = fixture.home().join("features/no-spec-here");
     fs::create_dir_all(&feature_dir).unwrap();
     write_executable(&fixture.bin_dir().join("codex"), "#!/bin/sh\nexit 0\n");
@@ -404,4 +409,330 @@ fn feature_review_cli_preserves_numeric_iteration_and_dependent_paths() {
         !composed.contains("decrement_file_index(review)"),
         "the helper call must be evaluated rather than delivered as literal text: {composed}"
     );
+}
+
+/// The first nested-span-in-literal defect in `markdown`'s lifecycle, found by
+/// the same validator shared preparation runs before any provider starts.
+fn nested_span_defect(path: &Path, markdown: &Markdown) -> Option<String> {
+    use claudine::composition::lifecycle::{
+        parse_lifecycle_config, validate_no_nested_spans_in_literals,
+    };
+
+    let frontmatter = Value::Object(
+        markdown
+            .frontmatter()
+            .as_map()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+    );
+    // A lifecycle block that does not parse is refused by preparation with its
+    // own error; this rule has nothing to inspect there.
+    let lifecycle = parse_lifecycle_config(&frontmatter, path).ok()?;
+    validate_no_nested_spans_in_literals(&frontmatter, &lifecycle, path)
+        .err()
+        .map(|error| format!("{}: {error}", path.display()))
+}
+
+/// Passive corpus check (spec acceptance 3): no shipped prompt carries a
+/// lifecycle that shared preparation would refuse, which covers both branches
+/// of every ternary without composing anything. The pre-fix incident is the
+/// negative control that keeps the walk from passing vacuously.
+#[test]
+fn shipped_prompt_lifecycles_have_no_nested_spans_in_literals() {
+    let incident = Markdown::from(include_str!(
+        "fixtures/nested_span_regression/review-spec-inline.md"
+    ));
+    let control = nested_span_defect(Path::new("review-spec-inline.md"), &incident)
+        .expect("the pre-fix incident must be refused");
+    assert!(control.contains("success.say"), "{control}");
+
+    let paths = shipped_prompt_paths();
+    assert!(!paths.is_empty(), "the shipped prompt corpus must not be empty");
+    let defects: Vec<String> = paths
+        .iter()
+        .filter_map(|prompt| {
+            let markdown = Markdown::try_from(prompt.as_path()).ok()?;
+            nested_span_defect(prompt, &markdown)
+        })
+        .collect();
+    assert!(
+        defects.is_empty(),
+        "shipped prompts refused by lifecycle validation:\n{}",
+        defects.join("\n")
+    );
+}
+
+/// Run the shipped `_reviews/review-spec-inline.md` through `compose` with a
+/// `codex` stub exiting `exit_code`, returning `(success, rendered output,
+/// prompt the provider received)`.
+#[cfg(unix)]
+fn compose_shipped_review_spec_inline(exit_code: i32) -> (bool, String, String) {
+    use common::{CliProcessFixture, strip_ansi, write_executable};
+
+    let fixture = CliProcessFixture::named(&format!("shipped-review-spec-inline-{exit_code}"));
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    // Composed from a copy for the same reason as the feature-review contract:
+    // in place it would anchor repository discovery on the rusty-biscuit
+    // checkout, and `::file _writing-clearly.md` must still resolve.
+    let prompts = fixture.cwd().join("prompts");
+    copy_shipped_prompts(&prompts);
+    let spec = fixture.home().join("features/2026-09-16-example/spec.md");
+    std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+    std::fs::write(&spec, "---\ncreated: 2026-09-16\n---\n# Example\n").unwrap();
+    write_executable(
+        &fixture.bin_dir().join("codex"),
+        &format!("#!/bin/sh\n/bin/cat > \"$CLAUDINE_STDIN_FILE\"\nexit {exit_code}\n"),
+    );
+    let delivered = fixture.cwd().join("stdin.txt");
+
+    let output = fixture
+        .command()
+        .env("CLAUDINE_STDIN_FILE", &delivered)
+        .arg("compose")
+        .arg(prompts.join("_reviews/review-spec-inline.md"))
+        .arg(format!("spec={}", spec.display()))
+        .args(["-y", "--codex"])
+        .output()
+        .unwrap();
+    // `say` is real speech; the fixture's child-local dry-run must have kept
+    // it off the spool.
+    assert!(
+        !fixture.audio_spool().exists(),
+        "the shipped review lifecycle must not publish audio from a test"
+    );
+    let rendered = strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ));
+    // Only a started provider writes the capture, so its presence separates a
+    // lifecycle outcome from a run that failed before launch.
+    let delivered = std::fs::read_to_string(&delivered).unwrap_or_else(|_| {
+        panic!("the provider must have started; output was:\n{rendered}")
+    });
+    (output.status.success(), rendered, delivered)
+}
+
+/// Assert no lifecycle validation or evaluation error reached the output.
+#[cfg(unix)]
+fn assert_clean_lifecycle(rendered: &str) {
+    for marker in [
+        "lifecycle evaluation error",
+        "nested interpolation inside a string literal",
+        "after every interpolation pass",
+    ] {
+        assert!(
+            !rendered.contains(marker),
+            "the shipped lifecycle must fire cleanly ({marker}):\n{rendered}"
+        );
+    }
+}
+
+/// End-to-end over the real shipped artifact (spec acceptance 3): the repaired
+/// `review-spec-inline.md` fires `success` with its `say` and `info` resolved.
+/// A `say` that still carried a span would fail the event closed through the
+/// runtime surviving-span guard, so a clean exit is the spoken-text proof.
+#[cfg(unix)]
+#[test]
+fn shipped_review_spec_inline_fires_success_cleanly() {
+    let (success, rendered, delivered) = compose_shipped_review_spec_inline(0);
+    assert!(!rendered.contains("{{"), "no raw span may be written:\n{rendered}");
+    assert!(success, "a successful review must exit zero:\n{rendered}");
+    assert!(
+        delivered.contains("2026-09-16-example/spec.md"),
+        "the provider must receive the composed review prompt:\n{delivered}"
+    );
+    let flowed = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        flowed.contains("2026-09-16-example/spec.md specification has been reviewed and updated inline"),
+        "the `success.info` line must be written with its link resolved:\n{rendered}"
+    );
+    assert_clean_lifecycle(&rendered);
+}
+
+/// The `failure` half: a failed review reports the provider failure, not a
+/// lifecycle crash that replaces it (the incident's secondary hazard).
+#[cfg(unix)]
+#[test]
+fn shipped_review_spec_inline_fires_failure_cleanly() {
+    let (success, rendered, _) = compose_shipped_review_spec_inline(1);
+    assert!(!rendered.contains("{{"), "no raw span may be written:\n{rendered}");
+    assert!(!success, "a failed review must exit non-zero:\n{rendered}");
+    assert_clean_lifecycle(&rendered);
+}
+
+/// End-to-end over the shipped `commit.md` (spec acceptance 3): its repaired
+/// `resides_in` whole value composes into the delivered prompt with no raw
+/// span, and the `success` lifecycle fires cleanly after the provider exits.
+#[cfg(unix)]
+#[test]
+fn shipped_commit_prompt_composes_resides_in_and_fires_success_cleanly() {
+    use common::{CliProcessFixture, strip_ansi, write, write_executable};
+
+    let fixture = CliProcessFixture::named("shipped-commit");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    let prompts = fixture.cwd().join("prompts");
+    copy_shipped_prompts(&prompts);
+    write(
+        &fixture.cwd().join(".claudine/memory/commits.md"),
+        "# Commit lessons\n",
+    );
+    write(&fixture.cwd().join("staged.txt"), "staged\n");
+    let staged = common::helper_command("git")
+        .arg("-C")
+        .arg(fixture.cwd())
+        .args(["add", "staged.txt"])
+        .status()
+        .unwrap();
+    assert!(staged.success(), "the fixture needs one staged file");
+
+    let delivered = fixture.cwd().join("delivered.txt");
+    write_executable(
+        &fixture.bin_dir().join("opencode"),
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$CLAUDINE_PROMPT_CAPTURE\"\n/bin/cat >> \"$CLAUDINE_PROMPT_CAPTURE\"\nexit 0\n",
+    );
+    let output = fixture
+        .command()
+        .env("CLAUDINE_PROMPT_CAPTURE", &delivered)
+        .arg("compose")
+        .arg(prompts.join("commit.md"))
+        .arg("-y")
+        .output()
+        .unwrap();
+    let rendered = strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ));
+    assert!(output.status.success(), "the commit prompt must succeed:\n{rendered}");
+    assert!(!fixture.audio_spool().exists(), "no audio may be published");
+
+    let delivered = std::fs::read_to_string(&delivered)
+        .unwrap_or_else(|_| panic!("the provider must have started:\n{rendered}"));
+    let flowed = delivered.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        flowed.contains("There are 1 staged files to commit which are"),
+        "`resides_in` must compose into the delivered prompt:\n{delivered}"
+    );
+    assert!(!delivered.contains("{{"), "no raw span may reach the provider:\n{delivered}");
+    assert_clean_lifecycle(&rendered);
+}
+
+/// Composes `implement-plan.md` once through the normal CLI path and returns
+/// the prompt the provider received.
+///
+/// The shipped document's success stack runs `git`/`just`/`gitnexus` and its
+/// lifecycle speaks, so this drives the side-effect-free Level 2 copy, whose
+/// body `shipped_prompt_route_drift` pins byte-identical to the shipped body.
+#[cfg(unix)]
+fn deliver_implement_plan_prompt(
+    fixture: &common::CliProcessFixture,
+    prompts: &Path,
+    case: &Path,
+    phase: u32,
+) -> String {
+    use common::{strip_ansi, write, write_executable};
+
+    write(
+        &prompts.join("_implement/implement-plan.md"),
+        include_str!("fixtures/shipped_implement_route/_implement/implement-plan.md"),
+    );
+    write(&case.join("spec.md"), "---\nstatus: draft\n---\n# Spec\n");
+    write(
+        &case.join("plan.md"),
+        &format!("---\ntotal_phases: {phase}\nphase: {phase}\n---\n# Plan\n"),
+    );
+    let delivered = fixture.cwd().join("delivered.txt");
+    let _ = std::fs::remove_file(&delivered);
+    write_executable(
+        &fixture.bin_dir().join("goose"),
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CLAUDINE_PROMPT_CAPTURE\"\nexit 0\n",
+    );
+
+    let output = fixture
+        .command()
+        .env("CLAUDINE_PROMPT_CAPTURE", &delivered)
+        .arg("compose")
+        .arg(prompts.join(if phase == 3 { "implement.md" } else { "_implement/implement-plan.md" }))
+        .arg(format!("phase={phase}"))
+        .arg(format!("spec={}", case.join("spec.md").display()))
+        .args(["--goose", "-y"])
+        .output()
+        .unwrap();
+    let rendered = strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ));
+    assert!(output.status.success(), "implement-plan must succeed:\n{rendered}");
+    assert!(!fixture.audio_spool().exists(), "no audio may be published");
+    std::fs::read_to_string(&delivered)
+        .unwrap_or_else(|_| panic!("the provider must have started:\n{rendered}"))
+}
+
+/// `initialize` runs `ensure_file: log` before the body composes, so the log
+/// always exists by the time the logging blocks are evaluated. The "start the
+/// log" instructions must therefore key on an *unstarted* log (missing, or
+/// present with no frontmatter and a blank body), not on a missing one —
+/// otherwise a fresh implementation is told the log "already exists" and never
+/// learns to write its title and metadata.
+#[cfg(unix)]
+#[test]
+fn shipped_implement_plan_logging_instructions_follow_log_content() {
+    use common::CliProcessFixture;
+
+    const UNSTARTED: &str = "the log file for this implementation has not been started yet";
+    const STARTED: &str = "the log file already has content from earlier work";
+
+    let fixture = CliProcessFixture::named("implement-plan-logging");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    let prompts = fixture.cwd().join("prompts");
+    copy_shipped_prompts(&prompts);
+    let case = fixture.cwd().join("fixes/case");
+    let log = case.join("implementation-log.md");
+
+    // Missing log: initialize creates it empty, and the prompt starts it.
+    assert!(!log.exists());
+    let fresh = deliver_implement_plan_prompt(&fixture, &prompts, &case, 1);
+    assert_eq!(
+        std::fs::read_to_string(&log).expect("initialize must create the log"),
+        "",
+        "ensure_file creates an empty log"
+    );
+    assert!(fresh.contains(UNSTARTED), "a fresh log must be started:\n{fresh}");
+    assert!(fresh.contains("# Implementation Log for"), "title instructions:\n{fresh}");
+    assert!(!fresh.contains(STARTED), "a fresh log has no prior content:\n{fresh}");
+
+    // An empty or whitespace-only log left by an earlier initialize is still unstarted.
+    for unstarted in ["", "\n  \n"] {
+        std::fs::write(&log, unstarted).unwrap();
+        let prompt = deliver_implement_plan_prompt(&fixture, &prompts, &case, 1);
+        assert!(prompt.contains(UNSTARTED), "{unstarted:?} is unstarted:\n{prompt}");
+        assert!(!prompt.contains(STARTED), "{unstarted:?} is unstarted:\n{prompt}");
+    }
+
+    // Frontmatter alone, or a body alone, means an earlier phase started the log;
+    // ensure_file must keep those bytes and the prompt must append to them.
+    for (started, phase) in [
+        ("---\nmessage_to_agent: Phase 2 is complete; begin Phase 3.\n---\n# Implementation Log\n", 3),
+        ("---\nspec: fixes/case/spec.md\n---\n", 2),
+        ("# Implementation Log\n\n## Phase 1\n\n- did things\n", 2),
+        ("---\nstarted_phase: 1\n---\n# Implementation Log\n\n## Phase 1\n", 1),
+    ] {
+        std::fs::write(&log, started).unwrap();
+        let prompt = deliver_implement_plan_prompt(&fixture, &prompts, &case, phase);
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), started, "log preserved");
+        assert!(prompt.contains(STARTED), "{started:?} is started:\n{prompt}");
+        assert!(!prompt.contains(UNSTARTED), "{started:?} is started:\n{prompt}");
+        assert!(!prompt.contains("# Implementation Log for"), "no re-title:\n{prompt}");
+        assert_eq!(
+            prompt.contains(&format!("we do have the log entries for {}", phase - 1)),
+            phase > 1,
+            "prior-phase pointer tracks the phase:\n{prompt}"
+        );
+    }
 }

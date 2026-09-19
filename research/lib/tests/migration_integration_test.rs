@@ -3,6 +3,7 @@
 //! This test suite verifies end-to-end functionality of the migration system,
 //! including loading v0 files, creating backups, and auto-saving migrated data.
 
+use biscuit_test_harness::manifest_dir;
 use research::metadata::{MetadataV0, migration};
 use research::{ResearchKind, ResearchMetadata};
 use std::path::PathBuf;
@@ -11,7 +12,7 @@ use tokio::fs;
 
 /// Returns the path to the test fixtures directory.
 fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
+    manifest_dir!().join("tests/fixtures")
 }
 
 /// Helper to read fixture content as a string.

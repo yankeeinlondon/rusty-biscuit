@@ -8,9 +8,8 @@
 //! not-found errors.
 
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, init_git_repo, strip_ansi, write, write_executable};
 
 // ============================================================================
 // External file references
@@ -19,20 +18,18 @@ use common::{augmented_path, strip_ansi, write_executable};
 #[cfg(unix)]
 #[test]
 fn sequence_resolves_external_file_via_relative_path() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("sequence-magic-reference");
+    let count_path = fixture.cwd().join("call-count.txt");
 
     // External YAML in the same directory as the source markdown.
-    let steps_yaml = workspace.path().join("steps.yaml");
+    let steps_yaml = fixture.cwd().join("steps.yaml");
     fs::write(&steps_yaml, "sequence:\n  - alpha\n  - beta\n").unwrap();
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(&md_file, "---\nsequence: steps.yaml\n---\nStep {{state}}\n").unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -44,12 +41,9 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(workspace.path())
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -63,22 +57,14 @@ exit 0
 fn sequence_resolves_external_file_via_magic_reference() {
     // Initialize a real git repo so FileReference's @ magic (driven by
     // git2::Repository::discover) can find the repo root.
-    let workspace = tempdir().unwrap();
-    let repo_root = workspace.path().join("repo");
+    let fixture = CliProcessFixture::named("sequence-magic-reference");
+    let repo_root = fixture.cwd().join("repo");
     fs::create_dir_all(&repo_root).unwrap();
-    let git_init_ok = std::process::Command::new("git")
-        .arg("init")
-        .current_dir(&repo_root)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !git_init_ok {
+    if !init_git_repo(&repo_root) {
         eprintln!("git init unavailable; skipping magic reference test");
         return;
     }
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let count_path = fixture.cwd().join("call-count.txt");
 
     // Magic reference target: @fixtures/steps.yaml resolves from git root.
     let fixtures_dir = repo_root.join("fixtures");
@@ -99,7 +85,7 @@ fn sequence_resolves_external_file_via_magic_reference() {
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -111,12 +97,13 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command_builder()
+        // `@` resolves from the git root the launch context discovers, so the
+        // launch directory is the repository this test built.
+        .ambient_context(&repo_root)
+        .build()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(&repo_root)
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -142,18 +129,12 @@ fn sequence_magic_reference_uses_source_doc_location_not_cwd() {
     // source doc lives) and `unrelated/` (the process CWD). Each repo
     // has its own `fixtures/steps.yaml` with a different step count.
     // If resolution was driven by CWD, the wrong file would be loaded.
-    let workspace = tempdir().unwrap();
+    let fixture = CliProcessFixture::named("sequence-magic-reference");
 
     // --- Primary repo: source doc + correct fixtures (2 steps) ---
-    let repo_root = workspace.path().join("repo");
+    let repo_root = fixture.cwd().join("repo");
     fs::create_dir_all(&repo_root).unwrap();
-    let git_init_ok = std::process::Command::new("git")
-        .arg("init")
-        .current_dir(&repo_root)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !git_init_ok {
+    if !init_git_repo(&repo_root) {
         eprintln!("git init unavailable; skipping magic reference test");
         return;
     }
@@ -174,13 +155,9 @@ fn sequence_magic_reference_uses_source_doc_location_not_cwd() {
     .unwrap();
 
     // --- Unrelated repo: decoy fixtures (3 steps) used iff resolution is CWD-driven ---
-    let unrelated = workspace.path().join("unrelated");
+    let unrelated = fixture.cwd().join("unrelated");
     fs::create_dir_all(&unrelated).unwrap();
-    std::process::Command::new("git")
-        .arg("init")
-        .current_dir(&unrelated)
-        .status()
-        .ok();
+    init_git_repo(&unrelated);
     let decoy_fixtures = unrelated.join("fixtures");
     fs::create_dir_all(&decoy_fixtures).unwrap();
     fs::write(
@@ -189,12 +166,10 @@ fn sequence_magic_reference_uses_source_doc_location_not_cwd() {
     )
     .unwrap();
 
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let count_path = fixture.cwd().join("call-count.txt");
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -207,12 +182,13 @@ exit 0
     );
 
     // Run FROM the unrelated repo, but target the doc inside repo_root.
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command_builder()
+        // The decoy repository *is* the subject: the launch CWD must lose to
+        // the source document's own location.
+        .ambient_context(&unrelated)
+        .build()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(&unrelated)
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -230,12 +206,12 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn sequence_external_file_not_found_fails_clearly() {
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("seq.md");
-    fs::write(&md_file, "---\nsequence: does-not-exist.yaml\n---\nBody\n").unwrap();
+    let fixture = CliProcessFixture::named("sequence-magic-reference");
+    let md_file = fixture.cwd().join("seq.md");
+    write(&md_file, "---\nsequence: does-not-exist.yaml\n---\nBody\n");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let assert = fixture
+        .command()
         .args(["sequence", md_file.to_str().unwrap()])
         .assert()
         .failure();

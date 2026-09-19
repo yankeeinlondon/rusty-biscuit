@@ -7,6 +7,7 @@ subprocesses, host capabilities, or request cost.
 
 - [Request planning](#request-planning)
 - [Filesystem observation](#filesystem-observation)
+- [Change classification and committed diffs](#change-classification-and-committed-diffs)
 - [Package topology](#package-topology)
 - [Programs and subprocesses](#programs-and-subprocesses)
 - [Network defaults](#network-defaults)
@@ -69,6 +70,87 @@ Inventory accepts at most `MAX_FILES`. An inventory-only walk stops globally at
 the cap. A combined walk continues for active manifest/docs consumers while the
 inventory projection reports `truncated` and `limit`. A truncated subset is not
 stable across runs; complete output is sorted and deterministic.
+
+## Change classification and committed diffs
+
+`filesystem::path_kind::classify_path` is the only path classifier. It maps a
+path to exactly one `ChangeCategory` with first-match precedence: CI/CD path
+rules, then registry exact file name, basename pattern, the `.html`/`.htm`
+web-asset override, extension, then `other`. `is_source_code_path` and
+`is_documentation_path` are wrappers, and darkmatter and worktree call them
+directly. Any change is CRITICAL in GitNexus, so run their downstream tests.
+HTML and CSS are web assets, not source code. Angular `.component.html` is
+source code.
+
+Committed-tree diffs have two paths:
+
+- The public `get_commit_files*` family keeps rename tracking **disabled**, so a
+  rename is a delete/add pair.
+- The crate-private `discovery::committed_file_changes_with_cache` enables
+  Git-default rename and copy tracking (`FromSetOfModifiedFiles`) and adds line
+  counts. Binary files and non-blob entries get `None`, never `0/0`. A
+  rewrite reuses its similarity stats, so computing line counts does not
+  diff the pair a second time.
+- gix's rewrite tracker drops a copy's **source** modification from the change
+  list. `restore_copy_source_modifications` re-adds it from the parent tree.
+  Keep that step if you touch copy detection.
+
+## Recent commits and commit links
+
+`RecentCommits::collect(&GitRepo, &RecentCommitsOptions)`
+(`git/recent_commits/collect.rs`) is the one collection pipeline:
+
+- Filters apply **during** the walk. Message filters (operation, scope,
+  author) run first. Path filters (package, area, file type) use the cheap
+  untracked file listing. A count selection stops at N *matches*.
+- Only survivors are enriched: the rename-aware diff with line counts,
+  structure-tier attribution through one `PackageOwnershipIndex`, and one
+  linking pass. The work counters prove this: `git.file_diffs` covers only
+  survivors, with zero inventory, doc, or enrichment counters.
+- `--branch` resolves in order: local branch, `refs/remotes/<name>`, then
+  `<remote>/<name>` over *configured* remotes. Nothing is fetched.
+
+`git/commit_links.rs` is the only remote URL and containment authority.
+`repository_link` and `commit_url` build browser URLs. Do not add another URL
+parser; `remote::parse_remote_url` is feature-gated and unusable here. Linking
+rules:
+
+- Linking walks remote-tracking tips in `preferred_remote_order`. Within a
+  remote, it walks the `refs/remotes/<r>/HEAD` default branch first.
+- All walks share `COMMIT_VISIT_BUDGET` (5,000,000) through
+  `remote_refresh::walk_ancestry`, the same walker the deep tier uses.
+- `remote` is `false` only when every walk completed. An exhausted budget or an
+  unreadable ancestor gives `null`.
+- `commit_browser_url` and CLI `repo git-status` link a commit only when a
+  remote-tracking ref contains it.
+- Older single-purpose parsers remain outside linking and were deliberately
+  not consolidated: `GitInfo.org`/`repo` (`types.rs::parse_org_repo`),
+  provider host classification (`extract_remote_host`), and the identity
+  basename (`repo/identity.rs`). Do not build commit or repository links from
+  them.
+
+The bare `sniff repo --json` aggregate collects once with default options
+through the crate-private `RecentCommits::collect_observed`. It runs after
+the Git and repo-detection threads join, so it can reuse the request's detected
+`RepoInfo` as the package catalog (zero extra manifest parses) and the branch
+`RefSnapshot` for linking (still one `git.ref_walks`). The three commit families
+are `projected` views of that one collection and equal the focused commands'
+default `--json` arrays. Expect the aggregate's `git.commit_visits` to grow on a
+branch with unpushed commits: proving `remote: false` walks every
+remote-tracking tip (about 153k visits on this monorepo on 2026-09-17, against
+13k before linking). `aggregate_view::tests::commit_families` pins the deltas.
+The legacy `CommitDescSet` / `get_recent_commits_*` API is gone.
+
+Text reports (`git/recent_commits/render.rs`) come from one layout walk folded
+three ways: `to_prose`, `to_markdown`, and `to_plain`. The library owns every
+report byte, including sibling headings and `file://` links.
+
+- Dynamic text is backslash-escaped for Prose and Markdown. Prose has no
+  backtick escape (it renders the backslash), so only Markdown escapes
+  backticks.
+- Link targets percent-encode `( ) space < >`.
+- `RecentCommits::projected` is the single file-pruning authority for text
+  and JSON. `to_json()` ignores every display option.
 
 ## Package topology
 

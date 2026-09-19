@@ -483,6 +483,45 @@ fn skipping_body(evidence: &std::path::Path) {
 
 #[test]
 #[serial_test::serial]
+fn expect_level_panics_where_require_level_would_have_skipped() {
+    let _clean = clean_env();
+
+    // `require_level!(Level::L1, false, …)` skips under exactly these
+    // conditions — see `skipping_body` above — which is what the mandatory
+    // tier must not do.
+    let panicked = std::panic::catch_unwind(|| {
+        test_toolkit::expect_level!(Level::L1, false, "PTY (/dev/ptmx)");
+    })
+    .unwrap_err();
+    let message = panicked
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .unwrap_or("<non-string panic>");
+    assert!(
+        message.contains("PTY (/dev/ptmx)"),
+        "the missing requirement must survive into the failure: {message}"
+    );
+}
+
+#[test]
+#[serial_test::serial]
+fn expect_level_records_the_run_decision_like_require_level() {
+    let _clean = clean_env();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let _override = EnvGuard::set_safe(BISCUIT_JUNIT_STAGE_DIR, dir.path());
+    let _required = EnvGuard::set_safe(BISCUIT_TEST_REQUIRED_BACKENDS, "tmux");
+
+    test_toolkit::expect_level!(Level::L2, true, Backend::Tmux);
+
+    let records =
+        read_backend_executions(&dir.path().join(BACKEND_EXECUTIONS_FILE)).expect("readable");
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].backend, "tmux");
+    assert_eq!(records[0].decision, "run");
+}
+
+#[test]
+#[serial_test::serial]
 fn require_level_still_accepts_a_bare_label() {
     let _clean = clean_env();
     let spec: HarnessSpec<'_> = "PTY (/dev/ptmx)".into();

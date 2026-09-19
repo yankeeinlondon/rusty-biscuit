@@ -72,6 +72,7 @@ pub mod error;
 pub mod file_suggestions;
 pub mod functions;
 pub mod lexer;
+pub mod lint;
 pub(crate) mod path_projection;
 pub mod parser;
 pub mod resolve_ctx;
@@ -92,6 +93,7 @@ pub(crate) use path_projection::{
     make_portable_relative_in_context,
 };
 pub use resolve_ctx::ResolutionContext;
+pub use lint::{ExpressionLint, ExpressionLintKind, is_whole_value_span, lint_expression, lint_spanned};
 pub use lexer::{
     ComparisonOp, ExpressionFinder, ExpressionLocation, ExpressionScanResult, InterpolationLiteral,
     Lexer, LexerError, ParseMode, Token, lex_spanned,
@@ -349,24 +351,6 @@ pub fn scalar_string(value: &Value) -> String {
         }
         Value::String(s) => s.clone(),
         Value::Array(_) | Value::Object(_) => value.to_string(),
-    }
-}
-
-/// Renders a value for the interpolation output boundary.
-///
-/// Identical to [`scalar_string`] except a top-level array renders
-/// line-separated (spec D4 default), so `{{ ctx.some_list }}` ≡
-/// `{{ as_line_separated(ctx.some_list) }}`. Equality comparison and
-/// frontmatter shell expansion keep calling [`scalar_string`] directly (the
-/// byte-identical JSON-array form), so only interpolation output changes.
-pub fn interpolation_output_string(value: &Value) -> String {
-    match value {
-        Value::Array(items) => items
-            .iter()
-            .map(scalar_string)
-            .collect::<Vec<_>>()
-            .join("\n"),
-        other => scalar_string(other),
     }
 }
 
@@ -871,25 +855,6 @@ mod tests {
             assert_eq!(scalar_string(&json!([])), "[]");
         }
 
-        #[test]
-        fn interpolation_output_string_renders_arrays_line_separated() {
-            assert_eq!(
-                interpolation_output_string(&json!(["a", "b", "c"])),
-                "a\nb\nc"
-            );
-            assert_eq!(interpolation_output_string(&json!([])), "");
-        }
-
-        #[test]
-        fn interpolation_output_string_matches_scalar_string_for_non_arrays() {
-            for value in [json!("hi"), json!(42), json!(true), json!(null), json!({"a": 1})] {
-                assert_eq!(
-                    interpolation_output_string(&value),
-                    scalar_string(&value),
-                    "non-array rendering must match scalar_string for {value:?}"
-                );
-            }
-        }
     }
 
     mod error_enrichment {

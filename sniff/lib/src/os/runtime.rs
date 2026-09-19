@@ -65,10 +65,7 @@ mod tests {
     #[test]
     fn classifies_wsl2_markers() {
         assert_eq!(
-            runtime_environment_from_markers(
-                "Linux version 5.15.0-microsoft-standard-WSL2",
-                ""
-            ),
+            runtime_environment_from_markers("Linux version 5.15.0-microsoft-standard-WSL2", ""),
             RuntimeEnvironment::Wsl2
         );
         assert_eq!(
@@ -92,10 +89,7 @@ mod tests {
     #[test]
     fn classifies_native_linux_and_missing_proc() {
         assert_eq!(
-            runtime_environment_from_markers(
-                "Linux version 6.8.0-generic",
-                "6.8.0-generic"
-            ),
+            runtime_environment_from_markers("Linux version 6.8.0-generic", "6.8.0-generic"),
             RuntimeEnvironment::Native
         );
         assert_eq!(

@@ -6,6 +6,7 @@
 
 use gix::bstr::ByteSlice;
 use std::collections::{HashMap, HashSet};
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -124,12 +125,18 @@ impl RefSnapshot {
             };
 
             if decorations {
-                snapshot.decorations.entry(tip).or_default().push(RefDecoration {
-                    is_head: kind == RefKind::LocalBranch
-                        && head_target.as_ref().is_some_and(|head| head == &display_name),
-                    name: display_name,
-                    kind,
-                });
+                snapshot
+                    .decorations
+                    .entry(tip)
+                    .or_default()
+                    .push(RefDecoration {
+                        is_head: kind == RefKind::LocalBranch
+                            && head_target
+                                .as_ref()
+                                .is_some_and(|head| head == &display_name),
+                        name: display_name,
+                        kind,
+                    });
             }
         }
 
@@ -166,6 +173,23 @@ impl RefSnapshot {
             .iter()
             .find(|observed| observed.remote == remote && observed.branch == branch)
             .map(|observed| observed.tip)
+    }
+
+    /// Every observed remote-tracking branch as `(remote, branch, tip)`,
+    /// sorted by remote then branch. `<remote>/HEAD` is excluded.
+    pub(crate) fn remote_branch_tips(&self) -> impl Iterator<Item = (&str, &str, gix::ObjectId)> {
+        self.remote_branches.iter().map(|observed| {
+            (
+                observed.remote.as_str(),
+                observed.branch.as_str(),
+                observed.tip,
+            )
+        })
+    }
+
+    /// The branch `refs/remotes/<remote>/HEAD` points at, when recorded.
+    pub(crate) fn remote_default_branch(&self, remote: &str) -> Option<&str> {
+        self.remote_defaults.get(remote).map(String::as_str)
     }
 
     fn remote_tips(&self, remote: &str) -> Vec<gix::ObjectId> {
@@ -238,10 +262,7 @@ pub(crate) fn get_branch_info_from_snapshot(
 
         branches.push(BranchInfo {
             current: current_branch.is_some_and(|current| current == name),
-            remote_represented: refs
-                .remote_branches
-                .iter()
-                .any(|remote| remote.tip == tip),
+            remote_represented: refs.remote_branches.iter().any(|remote| remote.tip == tip),
             name,
             sha,
             upstream,
@@ -664,9 +685,9 @@ fn fetch_single_remote(
         .env("GIT_TERMINAL_PROMPT", "0")
         .args(["fetch", "--quiet", "--prune", remote_name]);
     let _ = runner(&mut command, timeout).map_err(|e| {
-            warn!(remote = remote_name, error = %e, "git fetch failed");
-            e
-        });
+        warn!(remote = remote_name, error = %e, "git fetch failed");
+        e
+    });
 }
 
 /// Derive the user-facing behind status from per-remote tracking counts.
@@ -763,45 +784,26 @@ pub(crate) fn populate_recent_commit_remotes_from_snapshot(
         })
         .collect();
 
-    // Walk ancestry from each remote tip, recording only target commits.
-    //
-    // We do NOT stop early based on commit time: gix's ByCommitTime walk is a
-    // lazy frontier, not a globally monotonic sequence. An old-dated child can
-    // have a newer-dated parent, so a time-based `break` would incorrectly
-    // discard unseen requested commits (see skewed-timestamp test). The
-    // target-count stop below is a *reachability* bound and is safe precisely
-    // because it makes no assumption about ordering: once every target has been
+    // Walk ancestry from each remote tip, recording only target commits. The
+    // target-count stop is a *reachability* bound: once every target has been
     // seen on this walk, no further ancestor can change this walk's answer.
     let mut containment: HashMap<gix::ObjectId, Vec<u32>> = HashMap::new();
+    let mut unbounded = usize::MAX;
 
     for (remote_idx, tip_oid) in &tips {
-        let Ok(walk) = repo
-            .rev_walk(Some(*tip_oid))
-            .sorting(gix::revision::walk::Sorting::ByCommitTime(
-                gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
-            ))
-            .use_commit_graph(Some(true))
-            .all()
-        else {
-            continue;
-        };
-
         let mut found_here = 0usize;
-        for info_result in walk {
-            let Ok(info) = info_result else {
-                continue;
-            };
-            performance::increment_counter(counters::GIT_COMMIT_VISITS, 1);
-
-            if !targets.contains(&info.id) {
-                continue;
+        walk_ancestry(repo, *tip_oid, &mut unbounded, |id| {
+            if !targets.contains(&id) {
+                return ControlFlow::Continue(());
             }
-            containment.entry(info.id).or_default().push(*remote_idx);
+            containment.entry(id).or_default().push(*remote_idx);
             found_here += 1;
             if found_here == targets.len() {
-                break;
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
             }
-        }
+        });
     }
 
     for commit in commits {
@@ -822,6 +824,74 @@ pub(crate) fn populate_recent_commit_remotes_from_snapshot(
                 commit.remotes = Some(containing);
             }
         }
+    }
+}
+
+/// How one [`walk_ancestry`] call ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AncestryWalkEnd {
+    /// The visitor asked to stop.
+    Stopped,
+    /// Every ancestor of the tip was visited.
+    Completed,
+    /// The shared visit budget reached zero before the walk finished.
+    OverBudget,
+    /// The walk could not start, or at least one ancestor could not be read,
+    /// so an absent commit cannot be proven unreachable.
+    Failed,
+}
+
+/// Visit every ancestor of `tip`, including `tip`, until `visit` breaks or the
+/// history ends. This is the one containment walk shared by the deep tier's
+/// per-remote containment and commit linking.
+///
+/// Each visited commit increments [`counters::GIT_COMMIT_VISITS`] and consumes
+/// one unit of `visit_budget`, which callers share across several walks to
+/// bound their total work.
+///
+/// The walk never stops early on commit time: gix's `ByCommitTime` walk is a
+/// lazy frontier, not a globally monotonic sequence, so an old-dated child can
+/// have a newer-dated parent and a time-based stop would miss ancestors (see
+/// the skewed-timestamp test). An unreadable ancestor is skipped rather than
+/// ending the walk, and the walk then reports [`AncestryWalkEnd::Failed`].
+pub(crate) fn walk_ancestry(
+    repo: &gix::Repository,
+    tip: gix::ObjectId,
+    visit_budget: &mut usize,
+    mut visit: impl FnMut(gix::ObjectId) -> ControlFlow<()>,
+) -> AncestryWalkEnd {
+    let Ok(walk) = repo
+        .rev_walk(Some(tip))
+        .sorting(gix::revision::walk::Sorting::ByCommitTime(
+            gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
+        ))
+        .use_commit_graph(Some(true))
+        .all()
+    else {
+        return AncestryWalkEnd::Failed;
+    };
+
+    let mut failed = false;
+    for info_result in walk {
+        let Ok(info) = info_result else {
+            failed = true;
+            continue;
+        };
+        if *visit_budget == 0 {
+            return AncestryWalkEnd::OverBudget;
+        }
+        *visit_budget -= 1;
+        performance::increment_counter(counters::GIT_COMMIT_VISITS, 1);
+
+        if visit(info.id).is_break() {
+            return AncestryWalkEnd::Stopped;
+        }
+    }
+
+    if failed {
+        AncestryWalkEnd::Failed
+    } else {
+        AncestryWalkEnd::Completed
     }
 }
 
@@ -943,9 +1013,9 @@ pub(crate) fn get_worktrees_from_snapshot(
             let sha = wt_head.map(|o| o.to_string()).unwrap_or_default();
 
             // Determine whether this worktree is the current one.
-            let is_current = current_canonical.as_ref().is_some_and(|current| {
-                metadata.path.as_path() == current.as_path()
-            });
+            let is_current = current_canonical
+                .as_ref()
+                .is_some_and(|current| metadata.path.as_path() == current.as_path());
 
             // Skip expensive commit-graph walks for non-current worktrees when
             // the caller has not requested full details.
@@ -965,9 +1035,9 @@ pub(crate) fn get_worktrees_from_snapshot(
             }
             let mut opened_worktree = if !base_is_worktree && compute_full {
                 performance::increment_counter(counters::GIT_WORKTREE_OPENS, 1);
-                let Some(mut opened) = super::open::trusted_open_registered_worktree(
-                    &metadata.path,
-                )? else {
+                let Some(mut opened) =
+                    super::open::trusted_open_registered_worktree(&metadata.path)?
+                else {
                     return Ok(None);
                 };
                 super::open::configure_cache(&mut opened);
@@ -2200,10 +2270,9 @@ mod tests {
         let gix_repo = gix::open(dir.path()).unwrap();
 
         let collector = crate::performance::PerformanceCollector::new_shared();
-        let worktrees = crate::performance::with_current_collector(
-            Some(collector.clone()),
-            || get_worktrees(&gix_repo, true, Some(&feature_path)).unwrap(),
-        );
+        let worktrees = crate::performance::with_current_collector(Some(collector.clone()), || {
+            get_worktrees(&gix_repo, true, Some(&feature_path)).unwrap()
+        });
 
         let feature = worktrees
             .get("feature")
@@ -2218,9 +2287,7 @@ mod tests {
             other.ahead > 0,
             "non-current worktree must also have ahead in full-detail mode"
         );
-        let counters = collector
-            .snapshot(std::time::Duration::ZERO)
-            .counters;
+        let counters = collector.snapshot(std::time::Duration::ZERO).counters;
         assert_eq!(
             counters
                 .get(counters::GIT_WORKTREE_OPENS)

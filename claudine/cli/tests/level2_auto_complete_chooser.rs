@@ -445,21 +445,22 @@ fn run_file_array_chooser_test<H: KeySender>(harness: &mut H) {
         prompt.starts_with("attachments: "),
         "composed prompt must begin with 'attachments: '; prompt:\n{prompt}"
     );
-    // Bare array interpolation renders line-separated (spec D4): one selected
-    // file path per line, no JSON brackets.
+    // The span sits in surrounding text, so the selected paths are stringified
+    // as compact JSON rather than kept as a typed array.
     let value = prompt.trim_start_matches("attachments: ").trim();
-    let lines: Vec<&str> = value.lines().map(str::trim).collect();
+    let selected: Vec<String> = serde_json::from_str(value)
+        .unwrap_or_else(|error| panic!("value must be a JSON array; value: {value}: {error}"));
     assert_eq!(
-        lines.len(),
+        selected.len(),
         2,
         "must have selected exactly two files; value: {value}"
     );
     assert!(
-        lines.iter().any(|line| line.contains("notes.md")),
+        selected.iter().any(|path| path.contains("notes.md")),
         "notes.md must be selected; value: {value}"
     );
     assert!(
-        lines.iter().any(|line| line.contains("readme.md")),
+        selected.iter().any(|path| path.contains("readme.md")),
         "readme.md must be selected; value: {value}"
     );
 }

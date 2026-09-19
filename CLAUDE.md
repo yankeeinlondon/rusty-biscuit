@@ -28,11 +28,19 @@
 - `scripts/ci/affected_scope.py` emits **one** canonical resolved plan with a
   `{package, environment, gate}` cell per unit of work. Every consumer reads
   that document; nothing recalculates scope.
+- **Environments are scheduled by event** (`events` in
+  `.github/ci/environments.json`, decided 2026-09-18): a pull request proves
+  Linux and macOS, a push to `main` adds Windows, the nightly schedule adds
+  WSL2, and `lint`/`check` run on Linux only. Windows and WSL2 failures are
+  found after merge and fixed forward. The `ci:all-os` label opts a pull
+  request back into every environment.
 - **Compile coverage is per target kind.** L1 covers `lib`, `bin`, and `test`; a
   `check` cell exists where `example` or `bench` targets are declared, and on
   `ubuntu-latest` for a package with unchanged direct reverse dependencies,
   which it compiles inside that cell. An unchanged reverse dependency is
-  reported by name and scheduled nowhere.
+  reported by name and scheduled nowhere. The package's passing local L1 on
+  an environment satisfies its check cell there, so the pushing host's OS is
+  not compile-checked again; a check cell that compiles dependents always runs.
 - **Each area audits its planned coverage.** Its `coverage-audit` renders every
   result and, when producers are green, enforces exact skips, governed gaps,
   and missing-cell rules for that area alone. Producer failures reach the gate
@@ -44,11 +52,23 @@
 - **The merge gate is `ci-gate`,** a policy-free fold of every blocking job's
   `needs.*.result` (`success` and `skipped` pass; `failure` and `cancelled`
   block). It reads no plan, baseline, or artifact; `MISSING` is each area's
-  coverage audit to catch. Until the `protect-your-bacon` required context is
-  switched from `ci-verdict` to `ci-gate` — Ken's separate approval, after
-  this branch's own run is green — every PR shows `ci-verdict — Expected` and
-  cannot merge. Load the `rust-devops` skill before changing CI scope,
-  evidence reuse, or the gate.
+  coverage audit to catch. It has been the `protect-your-bacon` required
+  context since 2026-09-13, replacing `ci-verdict`. Load the `rust-devops`
+  skill before changing CI scope, evidence reuse, or the gate.
+
+## CI/CD Test-scope Discipline
+
+- **This is a CI/CD rule. It does not extend to local testing**, where runs are
+  cheap and catch things early; over-testing locally has not been a problem
+  here.
+- Before adding a CI run, matrix cell, fixture, or gate, ask what question it
+  answers and whether something cheaper answers the same question.
+- Never trigger a full-scope run to learn UI behavior or ruleset semantics that
+  could be read or reasoned out. CI turnaround here runs to hours, so a
+  speculative cell is not a small cost.
+- This is the upstream question — should the cell exist at all. "Evidence Reuse
+  and Execution Constraints" below is the downstream one — must an existing
+  cell re-run.
 
 ## Evidence Reuse and Execution Constraints
 
@@ -137,7 +157,19 @@ Update alongside code changes:
     - features/fixes which have been identified but not scheduled (aka, lower urgency) will be found in `_unscheduled` with non-dated filename
     - features/fixes as direct subdirectories are "active" features/fixes and should always follow the format `YYYY-MM-DD-{name}`
         - the files in a feature/fix can vary but almost always will be the `spec.md` file
-    - when a feature/fix is completed it is moved to `_completed`
+    - the **author** moves a feature/fix into `_completed`, and only after the
+      review cycle closes
+        - an agent never makes that move and never runs `just complete`; an
+          agent's terminal state is "implementation complete, ready for review"
+- **reference a feature/fix by its `{date}-{name}` directory alone**, never by a
+  path that carries a lifecycle directory
+    - write `2026-09-13-cicd-redundancies`, not
+      `fixes/_completed/2026-09-13-cicd-redundancies/spec.md`
+    - the lifecycle directory records where a spec is in its life, not what it
+      is; closing a spec moves it, and every reference that spelled out the old
+      location goes stale in the same commit
+    - this applies to `related:`/`depends-on:` frontmatter and to prose
+      cross-references alike
 
 <!-- gitnexus:start -->
 
@@ -145,7 +177,7 @@ Update alongside code changes:
 
 This project is indexed by GitNexus as **rusty-biscuit** (158905 symbols, 335372 relationships, 815 execution flows).
 
-> Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
+> Index stale? Run **`just gitnexus`** from anywhere in the repo — always this recipe, never a bare `gitnexus analyze`. It short-circuits when `gitnexus status` already reports up-to-date, and it passes `--skip-agents-md` so refreshing the index cannot rewrite this file or `AGENTS.md` into tracked diff noise. It also passes `--force`, because incremental indexing fails often enough to be unreliable.
 
 ## Always Do
 

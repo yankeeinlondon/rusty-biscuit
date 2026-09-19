@@ -44,7 +44,7 @@ pub(crate) struct CliOverheadReport {
 /// A single named sub-stage timing within environment setup.
 ///
 /// `children` itemize where a substage's own measured time went — currently
-/// only `child env build`, which carries `env sanitize` and `shadow home sync`
+/// only `child env build`, which carries `env sanitize` and `provider overlay`
 /// (and, under that, the `repo root detect` that dominates it). They render as
 /// `Breakdown` nodes nested under the substage, so the substage keeps its
 /// authoritative `Structural` total and the children stay out of reconciliation

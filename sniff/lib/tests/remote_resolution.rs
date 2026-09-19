@@ -11,15 +11,27 @@ fn repository() -> (tempfile::TempDir, git2::Repository) {
 #[test]
 fn preferred_remote_ignores_url_less_entries_and_uses_contract_order() {
     let (directory, repository) = repository();
-    repository.remote("upstream", "https://gitlab.com/group/upstream.git").unwrap();
-    repository.remote("zebra", "https://github.com/acme/zebra.git").unwrap();
-    repository.remote("alpha", "https://github.com/acme/alpha.git").unwrap();
-    repository.config().unwrap().set_str("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*").unwrap();
+    repository
+        .remote("upstream", "https://gitlab.com/group/upstream.git")
+        .unwrap();
+    repository
+        .remote("zebra", "https://github.com/acme/zebra.git")
+        .unwrap();
+    repository
+        .remote("alpha", "https://github.com/acme/alpha.git")
+        .unwrap();
+    repository
+        .config()
+        .unwrap()
+        .set_str("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+        .unwrap();
 
     let resolved = resolve_remote_at(directory.path(), None).unwrap().unwrap();
     assert_eq!(resolved.name, "alpha");
 
-    repository.remote("origin", "https://github.com/acme/origin.git").unwrap();
+    repository
+        .remote("origin", "https://github.com/acme/origin.git")
+        .unwrap();
     let resolved = resolve_remote_at(directory.path(), None).unwrap().unwrap();
     assert_eq!(resolved.name, "origin");
 }
@@ -27,14 +39,29 @@ fn preferred_remote_ignores_url_less_entries_and_uses_contract_order() {
 #[test]
 fn exact_remote_resolution_preserves_urls_and_nested_identity() {
     let (directory, repository) = repository();
-    repository.remote("source", "git@gitlab.com:group/nested/project.git").unwrap();
-    repository.config().unwrap()
-        .set_str("remote.source.pushurl", "ssh://git@gitlab.com/group/nested/project-write.git")
+    repository
+        .remote("source", "git@gitlab.com:group/nested/project.git")
+        .unwrap();
+    repository
+        .config()
+        .unwrap()
+        .set_str(
+            "remote.source.pushurl",
+            "ssh://git@gitlab.com/group/nested/project-write.git",
+        )
         .unwrap();
 
-    let resolved = resolve_remote_at(directory.path(), Some("source")).unwrap().unwrap();
-    assert_eq!(resolved.fetch_url, "git@gitlab.com:group/nested/project.git");
-    assert_eq!(resolved.push_url, "ssh://git@gitlab.com/group/nested/project-write.git");
+    let resolved = resolve_remote_at(directory.path(), Some("source"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        resolved.fetch_url,
+        "git@gitlab.com:group/nested/project.git"
+    );
+    assert_eq!(
+        resolved.push_url,
+        "ssh://git@gitlab.com/group/nested/project-write.git"
+    );
     assert_eq!(resolved.host.as_deref(), Some("gitlab.com"));
     assert_eq!(resolved.namespace.as_deref(), Some("group/nested"));
     assert_eq!(resolved.repository.as_deref(), Some("project"));
@@ -65,7 +92,9 @@ fn aggregate_projection_and_resolver_agree_when_origin_has_no_url() {
         .unwrap()
         .set_str("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
         .unwrap();
-    repository.remote("alpha", "https://github.com/acme/alpha.git").unwrap();
+    repository
+        .remote("alpha", "https://github.com/acme/alpha.git")
+        .unwrap();
 
     let resolved = resolve_remote_at(directory.path(), None).unwrap().unwrap();
     assert_eq!(resolved.name, "alpha");
@@ -98,7 +127,10 @@ fn resolution_retains_the_configured_scheme_and_non_default_port() {
     assert_eq!(endpoint.scheme, "https");
     assert_eq!(endpoint.host, "git.example");
     assert_eq!(endpoint.port, Some(8443));
-    assert_eq!(resolved.http_origin().as_deref(), Some("https://git.example:8443"));
+    assert_eq!(
+        resolved.http_origin().as_deref(),
+        Some("https://git.example:8443")
+    );
 }
 
 /// A default port normalizes away, and non-HTTP transports never contribute an
@@ -116,24 +148,42 @@ fn default_ports_normalize_and_ssh_transports_have_no_http_origin() {
         .remote("ssh", "ssh://git@git.example:2222/team/project.git")
         .unwrap();
 
-    let https = resolve_remote_at(directory.path(), Some("https")).unwrap().unwrap();
+    let https = resolve_remote_at(directory.path(), Some("https"))
+        .unwrap()
+        .unwrap();
     let endpoint = https.endpoint.as_ref().expect("endpoint captured");
     assert_eq!(endpoint.port, None);
     assert_eq!(https.http_origin().as_deref(), Some("https://git.example"));
 
-    let scp = resolve_remote_at(directory.path(), Some("scp")).unwrap().unwrap();
-    assert_eq!(scp.endpoint.as_ref().map(|endpoint| endpoint.scheme.as_str()), Some("ssh"));
+    let scp = resolve_remote_at(directory.path(), Some("scp"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        scp.endpoint
+            .as_ref()
+            .map(|endpoint| endpoint.scheme.as_str()),
+        Some("ssh")
+    );
     assert_eq!(scp.http_origin(), None);
 
-    let ssh = resolve_remote_at(directory.path(), Some("ssh")).unwrap().unwrap();
-    assert_eq!(ssh.endpoint.as_ref().and_then(|endpoint| endpoint.port), Some(2222));
+    let ssh = resolve_remote_at(directory.path(), Some("ssh"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        ssh.endpoint.as_ref().and_then(|endpoint| endpoint.port),
+        Some(2222)
+    );
     assert_eq!(ssh.http_origin(), None);
 }
 
 #[test]
 fn explicit_missing_and_url_less_remotes_are_distinct_errors() {
     let (directory, repository) = repository();
-    repository.config().unwrap().set_str("remote.empty.fetch", "+refs/heads/*:refs/remotes/empty/*").unwrap();
+    repository
+        .config()
+        .unwrap()
+        .set_str("remote.empty.fetch", "+refs/heads/*:refs/remotes/empty/*")
+        .unwrap();
 
     assert!(matches!(
         resolve_remote_at(directory.path(), Some("missing")),

@@ -8,6 +8,8 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::{Length, TargetValue};
 use claudine::provider::Provider;
+
+use crate::commands::wrap::profile::ModelSource;
 use claudine::stream::semantic::SemanticErrorKind;
 
 use crate::log;
@@ -90,7 +92,7 @@ impl AgentErrorReport {
         provider: Provider,
         exit_code: i32,
         stderr: Option<&str>,
-        model_source: Option<&crate::commands::wrap::profile::OpenCodeModelSource>,
+        model_source: Option<&crate::commands::wrap::profile::ModelSource>,
     ) -> Self {
         let (category, summary, detail, hint, suggestions, location) =
             classify_exit(provider, exit_code, stderr, model_source);
@@ -129,7 +131,7 @@ impl AgentErrorReport {
         provider: Provider,
         exit_code: i32,
         stderr: Option<&str>,
-        model_source: Option<&crate::commands::wrap::profile::OpenCodeModelSource>,
+        model_source: Option<&crate::commands::wrap::profile::ModelSource>,
         forwarded_switch_names: &[String],
         explicit: bool,
     ) -> Self {
@@ -146,7 +148,10 @@ impl AgentErrorReport {
         let tail_desc = if explicit {
             "the opaque argument tail forwarded after `--`".to_string()
         } else {
-            format!("the forwarded argument(s): {}", forwarded_switch_names.join(" "))
+            format!(
+                "the forwarded argument(s): {}",
+                forwarded_switch_names.join(" ")
+            )
         };
         Self {
             provider,
@@ -179,13 +184,19 @@ impl AgentErrorReport {
             category: AgentErrorCategory::Configuration,
             summary: format!(
                 "No model specified! {provider_name} by default does not specify a model but you can\n\
-                 change this behavior by adding a <yellow>model</yellow> property to the <blue>~/.config/opencode/config.json</blue> file.\n\
+                 change this behavior by adding a <yellow>model</yellow> property to the <blue>~/.config/opencode/opencode.json</blue> file.\n\
                  You can override/set the default model with any of the following methods:"
             ),
-            body_list: Some(vec![
-                "set <yellow>OPENCODE_MODEL</yellow> to a valid model name".to_string(),
-                "use the CLI switch <yellow>--model <model></yellow>".to_string(),
-            ]),
+            body_list: Some(
+                claudine::provider::provider_info(provider)
+                    .model_env_vars
+                    .iter()
+                    .map(|var| format!("set <yellow>{var}</yellow> to a valid model name"))
+                    .chain(std::iter::once(
+                        "use the CLI switch <yellow>--model <model></yellow>".to_string(),
+                    ))
+                    .collect(),
+            ),
             footer: Some(
                 "Running <yellow>opencode models</yellow> will give you a list of all valid models.\n\
                  Model names follow the format <dim>[provider]</dim>/<dim>[model]</dim> for direct providers\n\
@@ -308,7 +319,7 @@ fn classify_exit(
     provider: Provider,
     exit_code: i32,
     stderr: Option<&str>,
-    model_source: Option<&crate::commands::wrap::profile::OpenCodeModelSource>,
+    model_source: Option<&crate::commands::wrap::profile::ModelSource>,
 ) -> (
     AgentErrorCategory,
     String,
@@ -414,7 +425,7 @@ fn native_cause_report(
     cause: &NativeCliCause,
     provider: Provider,
     stderr: &str,
-    model_source: Option<&crate::commands::wrap::profile::OpenCodeModelSource>,
+    model_source: Option<&crate::commands::wrap::profile::ModelSource>,
 ) -> (
     AgentErrorCategory,
     String,
@@ -426,7 +437,7 @@ fn native_cause_report(
     let first_line = || stderr.lines().next().unwrap_or("").to_string();
     match cause {
         NativeCliCause::ModelNotFound { suggestions } => {
-            let location = model_source.map(|s| s.location_string().to_string());
+            let location = model_source.map(ModelSource::location_string);
             let loc = location.as_deref().unwrap_or("the command line");
             (
                 AgentErrorCategory::AgentNative,
@@ -492,9 +503,8 @@ fn native_cause_report(
 fn extract_unknown_flag(stderr: &str) -> Option<String> {
     for line in stderr.lines() {
         for candidate in line.split_whitespace() {
-            let trimmed = candidate.trim_matches(|c: char| {
-                c == '\'' || c == '"' || c == ',' || c == '.' || c == '`'
-            });
+            let trimmed = candidate
+                .trim_matches(|c: char| c == '\'' || c == '"' || c == ',' || c == '.' || c == '`');
             if trimmed.starts_with('-') && trimmed.len() > 1 && !trimmed.contains("error") {
                 return Some(trimmed.to_string());
             }
@@ -544,12 +554,12 @@ fn parse_model_suggestions(stderr: &str) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::wrap::profile::OpenCodeModelSource;
+    use crate::commands::wrap::profile::{ConfiguredModel, ModelSource};
 
     fn opencode_report(
         exit_code: i32,
         stderr: &str,
-        model_source: Option<&OpenCodeModelSource>,
+        model_source: Option<&ModelSource>,
     ) -> AgentErrorReport {
         AgentErrorReport::from_exit_code_with_source(
             Provider::OpenCode,
@@ -562,7 +572,7 @@ mod tests {
     #[test]
     fn classify_provider_model_not_found_error() {
         let stderr = "Error: ProviderModelNotFoundError: model xyz not found\nsuggestions: [\"abc/one\", \"abc/two\"]";
-        let source = OpenCodeModelSource::CliSwitch("xyz".to_string());
+        let source = ModelSource::CliSwitch("xyz".to_string());
         let report = opencode_report(1, stderr, Some(&source));
         assert_eq!(report.category, AgentErrorCategory::AgentNative);
         assert!(
@@ -580,7 +590,10 @@ mod tests {
     #[test]
     fn classify_model_not_found_lowercased() {
         let stderr = "model not found: invalid model name";
-        let source = OpenCodeModelSource::OpenCodeModelEnv("bad".to_string());
+        let source = ModelSource::ProviderEnv {
+            var: "OPENCODE_MODEL",
+            model: "bad".to_string(),
+        };
         let report = opencode_report(1, stderr, Some(&source));
         assert_eq!(report.category, AgentErrorCategory::AgentNative);
         assert!(
@@ -597,13 +610,16 @@ mod tests {
     #[test]
     fn classify_invalid_model_text() {
         let stderr = "invalid model specified";
-        let source = OpenCodeModelSource::ConfigDefault("bad".to_string());
+        let source = ModelSource::ConfigDefault(ConfiguredModel {
+            model: "bad".to_string(),
+            path: std::path::PathBuf::from("/home/u/.config/opencode/opencode.jsonc"),
+        });
         let report = opencode_report(1, stderr, Some(&source));
         assert_eq!(report.category, AgentErrorCategory::AgentNative);
         assert!(report.summary.contains("the config file"));
         assert_eq!(
             report.location.as_deref(),
-            Some("the config file ~/.config/opencode/config.json")
+            Some("the config file /home/u/.config/opencode/opencode.jsonc")
         );
     }
 
@@ -642,7 +658,7 @@ mod tests {
         assert!(
             report
                 .summary
-                .contains("<blue>~/.config/opencode/config.json</blue>")
+                .contains("<blue>~/.config/opencode/opencode.json</blue>")
         );
         assert!(report.body_list.is_some());
         let body_list = report.body_list.as_ref().unwrap();
@@ -692,7 +708,11 @@ mod tests {
         let report = AgentErrorReport::from_exit_code(Provider::Claude, 1, Some(stderr));
         assert_eq!(report.category, AgentErrorCategory::AgentNative);
         assert!(report.summary.contains("did not recognize a flag"));
-        assert!(report.summary.contains("--foo"), "flag name should be named: {}", report.summary);
+        assert!(
+            report.summary.contains("--foo"),
+            "flag name should be named: {}",
+            report.summary
+        );
     }
 
     #[test]
@@ -715,7 +735,10 @@ mod tests {
 
     #[test]
     fn native_cause_none_for_unclassified_exit() {
-        assert_eq!(classify_native_cli_cause(1, "some unrelated crash output"), None);
+        assert_eq!(
+            classify_native_cli_cause(1, "some unrelated crash output"),
+            None
+        );
     }
 
     #[test]
@@ -729,7 +752,11 @@ mod tests {
             false,
         );
         assert_eq!(report.category, AgentErrorCategory::AgentNative);
-        assert!(report.summary.contains("--badflag"), "summary: {}", report.summary);
+        assert!(
+            report.summary.contains("--badflag"),
+            "summary: {}",
+            report.summary
+        );
         assert!(report.summary.contains("likely caused by"));
     }
 

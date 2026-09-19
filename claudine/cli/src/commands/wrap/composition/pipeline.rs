@@ -4,10 +4,8 @@ use color_eyre::eyre::WrapErr;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use super::preflight::{PreflightBlockedOutcome, emit_preflight_blocked_and_finalize_in_context};
 use super::*;
-use super::preflight::{
-    PreflightBlockedOutcome, emit_preflight_blocked_and_finalize_in_context,
-};
 use claudine::composition::{
     DocumentTransition, EvaluatedProxyRequest, LifecycleCatchProtocol, LifecycleCatchResult,
     LifecycleCatchState, LifecycleErrorInfo, LifecycleTransitionAbort, LifecycleTransitionDecision,
@@ -15,7 +13,7 @@ use claudine::composition::{
     commit_proxy, commit_proxy_in_context, decide_lifecycle_transition,
 };
 
-enum CompositionPhaseResult<T> {
+pub(super) enum CompositionPhaseResult<T> {
     Proceed(T),
     Completed(Box<SingleCompositionOutcome>),
     Blocked(color_eyre::Report),
@@ -117,8 +115,9 @@ struct SelectionPhase {
 
 struct EnvironmentPhase {
     env_plan: env::EnvPlan,
-    /// The native Codex SQLite directory captured before shadowing `HOME`.
-    codex_sqlite_home: Option<std::ffi::OsString>,
+    /// What a per-attempt rebuild that moves provider plans the target's
+    /// overlay from.
+    overlay_rebuild: crate::commands::wrap::launch_plan::OverlayRebuildInputs,
     effective_prompt: String,
     mcp_extra_args: Vec<String>,
     /// R8 — the MCP inputs a per-attempt rebuild recomputes injection from,
@@ -127,6 +126,8 @@ struct EnvironmentPhase {
     mcp_rebuild: Option<crate::commands::wrap::launch_plan::McpRebuildInputs>,
     /// `OPENCODE_CONFIG_CONTENT` as it stood before the MCP fold.
     opencode_config_base: Option<String>,
+    /// `KILO_CONFIG_CONTENT` as it stood before the MCP fold.
+    kilo_config_base: Option<String>,
     /// R8 — the child environment as it stood before any provider-shaped stage
     /// wrote to it. Diffed against the final plan at the launch-plan record site
     /// to produce [`crate::commands::wrap::launch_plan::LaunchPlanInputs::provider_env_baseline`],
@@ -197,8 +198,9 @@ macro_rules! proceed_phase {
         match $phase {
             CompositionPhaseResult::Proceed(value) => value,
             CompositionPhaseResult::Completed(outcome) => return Ok(*outcome),
-            CompositionPhaseResult::Blocked(error)
-            | CompositionPhaseResult::Failed(error) => return Err(error),
+            CompositionPhaseResult::Blocked(error) | CompositionPhaseResult::Failed(error) => {
+                return Err(error)
+            }
         }
     };
 }
@@ -223,8 +225,8 @@ pub(super) fn execute_composition_request_inner_with_guard<'guard, 'runtime>(
     let prepare_span = tracing::info_span!("composition_prepare").entered();
     // --dry-run seam. Composition, shell expansion, body/frontmatter
     // finalization, and provider/model selection have all happened in
-    // `prepare`. Stop here — before provider executable discovery, MCP
-    // shadow-HOME materialization, argv and system-prompt overlay construction,
+    // `prepare`. Stop here — before provider executable discovery, provider
+    // overlay materialization, argv and system-prompt overlay construction,
     // the child-CWD switch, and every lifecycle event — and emit the composed
     // artifacts.
     //
@@ -245,8 +247,7 @@ pub(super) fn execute_composition_request_inner_with_guard<'guard, 'runtime>(
     }
 
     let selection = proceed_phase!(resolve_selection_and_launch(&mut attempt));
-    let mut environment =
-        proceed_phase!(prepare_environment_and_mcp(&mut attempt, &selection));
+    let mut environment = proceed_phase!(prepare_environment_and_mcp(&mut attempt, &selection));
     let command = proceed_phase!(construct_argv_and_system_prompt(
         &mut attempt,
         &selection,
@@ -261,13 +262,7 @@ pub(super) fn execute_composition_request_inner_with_guard<'guard, 'runtime>(
         &environment,
     ));
     let outcome = proceed_phase!(CompositionPhaseResult::from_blocked_result(
-        provider_run_handoff(
-            &mut attempt,
-            &selection,
-            &environment,
-            &command,
-            &lifecycle,
-        ),
+        provider_run_handoff(&mut attempt, &selection, &environment, &command, &lifecycle,),
     ));
     Ok(outcome)
 }
@@ -372,11 +367,7 @@ fn resolve_selection_and_launch(
             _ => SelectionReason::InteractiveChoice,
         };
         let is_inline = matches!(request.prepared.closure, CompositionClosurePlan::Inline(_));
-        record_substage(
-            perf_collector,
-            last_checkpoint,
-            "target resolution",
-        );
+        record_substage(perf_collector, last_checkpoint, "target resolution");
 
         // -- Profile, binary, arguments, environment --------------------------
 
@@ -386,7 +377,10 @@ fn resolve_selection_and_launch(
 
         // -- Inline + interactive check ---------------------------------------
 
-        if request.session_interactive && is_inline && !profile.supports_interactive_inline_closure() {
+        if request.session_interactive
+            && is_inline
+            && !profile.supports_interactive_inline_closure()
+        {
             return Err(CompositionError::InlineInteractiveUnsupported {
                 provider: provider.to_string(),
                 source_kind: request.session_interactive_source,
@@ -457,9 +451,7 @@ fn prepare_environment_and_mcp(
         let profile = *profile;
         let effective_non_interactive = *effective_non_interactive;
         let silent = request.silent;
-        let needs_mcp_shadow_home = (request.mcp || !request.mcp_use.is_empty())
-            && matches!(provider, Provider::Codex | Provider::Gemini);
-        let needs_repo_shadow_home = request.repo;
+        let mcp_requested = request.mcp || !request.mcp_use.is_empty();
         let raw_agent_params: Vec<String> = std::env::args().skip(1).collect();
         let yolo_enabled = request.yolo;
         // Taken before the allow-list runs: once `build_child_env_with_launch`
@@ -470,6 +462,23 @@ fn prepare_environment_and_mcp(
             ambient: env::ambient_sensitive_env(),
             explicit_include: env::validate_include_names(&request.include)?,
         };
+        // A composition run may reach here without an invocation owner (a
+        // synthesized request in tests and the ambient-fallback path); capturing
+        // here is then the same environment the owner would have recorded.
+        let env_baseline = match request.invocation_context.as_ref() {
+            Some(invocation) => invocation.env_baseline().clone(),
+            None => claudine::invocation_context::EnvBaseline::capture(),
+        };
+        let home_baseline = match request.invocation_context.as_ref() {
+            Some(invocation) => invocation.home_baseline().clone(),
+            None => claudine::invocation_context::HomeBaseline::capture(),
+        };
+        let overlay_reasons = crate::commands::wrap::provider_overlay::overlay_reasons(
+            provider,
+            request.repo,
+            mcp_requested,
+            &launch_workspace.child_cwd,
+        );
         let mut env_plan = env::build_child_env_with_launch(
             profile,
             provider,
@@ -478,8 +487,9 @@ fn prepare_environment_and_mcp(
             request.session_interactive,
             &raw_agent_params,
             &[],
-            needs_repo_shadow_home,
-            needs_mcp_shadow_home || needs_repo_shadow_home,
+            overlay_reasons,
+            &home_baseline,
+            &env_baseline,
             launch_workspace.clone(),
             perf_enabled,
         )?;
@@ -500,10 +510,10 @@ fn prepare_environment_and_mcp(
                 .insert(key.clone().into(), value.clone().into());
         }
 
-        // `child env build` carries a measured breakdown (env sanitize / shadow
-        // home sync → repo root detect) so the substage's cost is itemized rather
+        // `child env build` carries a measured breakdown (env sanitize / provider
+        // overlay → repo root detect) so the substage's cost is itemized rather
         // than opaque. The launch-child root is threaded through, so `repo root
-        // detect` is microsecond-scale local work and the shadow sync's filesystem
+        // detect` is microsecond-scale local work and the overlay's filesystem
         // linking is what remains; only the fallback (no supplied root) still pays
         // the sniff git walk. The children are `Breakdown`, so they do not enter
         // the substage's reconciliation (TR-1).
@@ -522,34 +532,15 @@ fn prepare_environment_and_mcp(
         // everything that follows (MCP injection, YOLO, model, system-prompt
         // delivery) is provider-shaped, and a refreshed document that lands on a
         // different provider must not inherit those writes.
+        // The overlay patch is provider-shaped too: `--repo` is invocation
+        // intent, but the selector that carries it belongs to one provider, so
+        // every rebuild re-applies its own provider's plan over this base.
         let mut pre_provider_env = env_plan.env.clone();
-        let codex_sqlite_home = if env_plan.shadow_home_path.is_some() {
-            Some(
-                crate::commands::wrap::repo_home::codex_sqlite_home()?
-                    .into_os_string(),
-            )
-        } else {
-            None
-        };
-        if provider == Provider::Codex && codex_sqlite_home.is_some() {
-            // The derived value belongs to Codex, not to invocation-wide repo
-            // isolation. Record the ambient baseline so a provider transition
-            // removes it or restores an explicit user value.
-            match std::env::var_os("CODEX_SQLITE_HOME") {
-                Some(value) => pre_provider_env.insert("CODEX_SQLITE_HOME".into(), value),
-                None => pre_provider_env.remove(std::ffi::OsStr::new("CODEX_SQLITE_HOME")),
-            };
-        }
-        if needs_mcp_shadow_home && !needs_repo_shadow_home {
-            // `HOME` is the one provider-shaped key written before this point:
-            // `build_child_env_with_launch` materializes the MCP shadow home for
-            // the providers whose injector needs one. Under `--repo` the shadow
-            // home is invocation intent instead, and stays put.
-            match std::env::var_os("HOME") {
-                Some(home) => pre_provider_env.insert("HOME".into(), home),
-                None => pre_provider_env.remove(std::ffi::OsStr::new("HOME")),
-            };
-        }
+        crate::commands::wrap::provider_overlay::restore_overlay_selectors(
+            &mut pre_provider_env,
+            env_plan.overlay.as_ref(),
+            &env_baseline,
+        );
 
         let mut effective_prompt = request.prepared.prompt.clone();
         let mut mcp_extra_args = Vec::new();
@@ -560,17 +551,19 @@ fn prepare_environment_and_mcp(
             .env
             .get(std::ffi::OsStr::new("OPENCODE_CONFIG_CONTENT"))
             .map(|v| v.to_string_lossy().into_owned());
+        let kilo_config_base = env_plan
+            .env
+            .get(std::ffi::OsStr::new(claudine::opencode_config::KILO_CONFIG_CONTENT))
+            .map(|v| v.to_string_lossy().into_owned());
         let mut mcp_rebuild: Option<crate::commands::wrap::launch_plan::McpRebuildInputs> = None;
         if request.mcp || !request.mcp_use.is_empty() {
             use claudine::mcp::catalog::McpCatalogStore;
             use claudine::mcp::inject::injector_for_provider;
             use claudine::mcp::session::{compute_session_set, lex_tags};
 
-            let repo_root_ref =
-                effective_source_repo_root(request, env_plan.repo_root.as_deref());
+            let repo_root_ref = effective_source_repo_root(request, env_plan.repo_root.as_deref());
             let _ = super::super::bootstrap_mcp_state(repo_root_ref)?;
-            let catalog =
-                McpCatalogStore::load().wrap_err("failed to load MCP catalog")?;
+            let catalog = McpCatalogStore::load().wrap_err("failed to load MCP catalog")?;
             let (cleaned_prompt, prompt_tags) = lex_tags(&effective_prompt);
             let prompt_is_interactive = request.session_interactive
                 && std::io::stdin().is_terminal()
@@ -645,41 +638,46 @@ fn prepare_environment_and_mcp(
 
             effective_prompt = session.cleaned_prompt.unwrap_or(cleaned_prompt);
 
-            // Materialized whenever MCP is in play, not only when *this*
-            // provider's injector needs one: a refreshed document can move the
-            // provider to a shadow-HOME injector at a retry boundary, and the
-            // rebuild must find one already on disk rather than create it.
+            // Builds this provider's overlay when servers resolved and its
+            // injector needs a config root; a no-op otherwise. A rebuild that
+            // moves onto such a provider builds that provider's overlay itself
+            // (`launch_plan::rebuild_overlay`).
             let mcp_repo_root = repo_root_ref.map(std::path::Path::to_path_buf);
-            crate::commands::exec_prep::ensure_shadow_home(
+            crate::commands::exec_prep::ensure_provider_overlay(
                 provider,
                 !session.servers.is_empty(),
                 &mut env_plan,
+                &home_baseline,
+                &env_baseline,
             )?;
             mcp_rebuild = Some(crate::commands::wrap::launch_plan::McpRebuildInputs {
                 explicit_use: request.mcp_use.clone(),
                 repo_root: mcp_repo_root,
-                shadow_home: env_plan.shadow_home_path.clone(),
                 ambiguity_resolutions,
             });
 
             if let Some(injector) = injector_for_provider(provider) {
                 if !session.servers.is_empty() {
-                    crate::commands::exec_prep::ensure_shadow_home(
+                    crate::commands::exec_prep::ensure_provider_overlay(
                         provider,
-                        needs_mcp_shadow_home,
+                        true,
                         &mut env_plan,
+                        &home_baseline,
+                        &env_baseline,
                     )?;
-                    let shadow = env_plan.shadow_home_path.as_deref();
+                    let config_root = env_plan.overlay_visible_root();
                     let mut string_env = std::collections::HashMap::new();
                     let result = injector
-                        .inject(&session.servers, &mut string_env, shadow)
+                        .inject(&session.servers, &mut string_env, config_root)
                         .wrap_err("MCP injection failed")?;
 
-                    // The OpenCode inline config is shared with the system-prompt
-                    // and YOLO producers, so it must merge into any value already on
-                    // the plan rather than overwrite it; every other key is a plain
-                    // set. Mirrors the direct wrapper at wrapper_mcp.rs.
-                    super::super::wrapper_mcp::merge_injected_env_into_plan(string_env, &mut env_plan)?;
+                    // An inline config merges into any value already on the plan
+                    // rather than overwriting it; every other key is a plain set.
+                    // Mirrors the direct wrapper at wrapper_mcp.rs.
+                    super::super::wrapper_mcp::merge_injected_env_into_plan(
+                        string_env,
+                        &mut env_plan,
+                    )?;
                     mcp_extra_args.extend(result.extra_args);
                 }
             } else {
@@ -699,11 +697,17 @@ fn prepare_environment_and_mcp(
 
         Ok(EnvironmentPhase {
             env_plan,
-            codex_sqlite_home,
+            overlay_rebuild: crate::commands::wrap::launch_plan::OverlayRebuildInputs {
+                repo_resources: request.repo,
+                mcp_requested,
+                home: home_baseline,
+                env: env_baseline,
+            },
             effective_prompt,
             mcp_extra_args,
             mcp_rebuild,
             opencode_config_base,
+            kilo_config_base,
             pre_provider_env,
             credential_policy,
         })
@@ -736,11 +740,12 @@ fn construct_argv_and_system_prompt(
         let effective_non_interactive = *effective_non_interactive;
         let EnvironmentPhase {
             env_plan,
-            codex_sqlite_home,
+            overlay_rebuild,
             effective_prompt,
             mcp_extra_args,
             mcp_rebuild,
             opencode_config_base,
+            kilo_config_base,
             pre_provider_env,
             credential_policy,
         } = environment;
@@ -874,7 +879,7 @@ fn construct_argv_and_system_prompt(
         let has_model_env = env_plan
             .env
             .contains_key(&std::ffi::OsString::from("MODEL"));
-        let _opencode_model_source: Option<super::super::profile::OpenCodeModelSource> =
+        let _model_source: Option<super::super::profile::ModelSource> =
             crate::commands::exec_prep::resolve_model_and_validate(
                 provider,
                 profile,
@@ -913,10 +918,7 @@ fn construct_argv_and_system_prompt(
 
         record_substage(perf_collector, last_checkpoint, "argv assembly");
 
-        enforce_repo_launch_detection(
-            request.repo,
-            request.prep_launch_detection_error.as_ref(),
-        )?;
+        enforce_repo_launch_detection(request.repo, request.prep_launch_detection_error.as_ref())?;
         let mut launch_context = if let Some(prep) = request.prep_launch_context.as_ref() {
             // Reuse the launch projection supplied by the invocation owner.
             prep.clone()
@@ -1000,7 +1002,9 @@ fn construct_argv_and_system_prompt(
                             "OPENCODE_CONFIG_CONTENT".to_string(),
                             v.to_string_lossy().to_string(),
                         )]);
-                        super::super::wrapper_mcp::merge_injected_env_into_plan(injected, env_plan)?;
+                        super::super::wrapper_mcp::merge_injected_env_into_plan(
+                            injected, env_plan,
+                        )?;
                         continue;
                     }
                     env_plan.env.insert(
@@ -1102,7 +1106,7 @@ fn construct_argv_and_system_prompt(
 
         // R8 — record the inputs and the resulting plan so a per-attempt rebuild
         // can re-derive one for a refreshed document without repeating any of the
-        // effects above (temp-file writes, shadow-HOME materialization, warnings,
+        // effects above (temp-file writes, provider-overlay materialization, warnings,
         // the ambiguity prompt). An unchanged document's facets compare equal and
         // get `args_before_prompt` back verbatim.
         let launch_plan_inputs = {
@@ -1121,9 +1125,7 @@ fn construct_argv_and_system_prompt(
             }
             let mut mcp_body_tags: Vec<String> = mcp_rebuild
                 .as_ref()
-                .map(|_| {
-                    claudine::mcp::session::lex_tags(&request.prepared.prompt).1
-                })
+                .map(|_| claudine::mcp::session::lex_tags(&request.prepared.prompt).1)
                 .unwrap_or_default();
             mcp_body_tags.sort();
             mcp_body_tags.dedup();
@@ -1142,8 +1144,7 @@ fn construct_argv_and_system_prompt(
             }
             for key in pre_provider_env.keys() {
                 if !env_plan.env.contains_key(key) {
-                    provider_env_baseline
-                        .insert(key.clone(), pre_provider_env.get(key).cloned());
+                    provider_env_baseline.insert(key.clone(), pre_provider_env.get(key).cloned());
                 }
             }
             lp::LaunchPlanInputs {
@@ -1156,7 +1157,7 @@ fn construct_argv_and_system_prompt(
                 system_prompt_scoped_tmp: scoped_tmp.clone(),
                 sandbox_requested: request.sandbox,
                 provider_env_baseline,
-                codex_sqlite_home: codex_sqlite_home.clone(),
+                overlay: Some(overlay_rebuild.clone()),
                 credential_policy: credential_policy.clone(),
                 workspace_cwd: env_plan.child_cwd.clone(),
                 write_grant_env: ["GOOSE_MODE", "OPENCODE_PERMISSION"]
@@ -1172,6 +1173,7 @@ fn construct_argv_and_system_prompt(
                     .contains_key(&std::ffi::OsString::from("MODEL")),
                 mcp: mcp_rebuild.clone(),
                 opencode_config_base: opencode_config_base.clone(),
+                kilo_config_base: kilo_config_base.clone(),
                 codex_last_message_path: structured_codex_output
                     .as_ref()
                     .map(|o| o.last_message_path.clone())
@@ -1196,6 +1198,7 @@ fn construct_argv_and_system_prompt(
                     env_overlay,
                     structured_codex: structured_codex_output.is_some(),
                     write_posture: write_posture.clone(),
+                    overlay: env_plan.overlay.clone(),
                 },
                 replay_supported: true,
             }
@@ -1219,14 +1222,13 @@ fn construct_argv_and_system_prompt(
         )?;
 
         if tracing::enabled!(tracing::Level::WARN) {
-            super::super::profile::validate_argv_flags_before_separator(profile.binary(), &child_args);
+            super::super::profile::validate_argv_flags_before_separator(
+                profile.binary(),
+                &child_args,
+            );
         }
 
-        record_substage(
-            perf_collector,
-            last_checkpoint,
-            "stream + prompt delivery",
-        );
+        record_substage(perf_collector, last_checkpoint, "stream + prompt delivery");
 
         if let Some(collector) = perf_collector.as_mut() {
             collector.mark_env_setup_complete();
@@ -1388,7 +1390,6 @@ fn construct_lifecycle_runtime(
     })
 }
 
-
 fn execute_initialize_catch(
     guard: &mut LifecycleRunGuard<'_>,
     init_ctx: &StackExecutionContext<'_>,
@@ -1422,7 +1423,9 @@ fn execute_initialize_catch(
         let outcome = guard.execute_event(step.signal, &event_ctx);
         assert!(protocol.record(step.signal, outcome));
     }
-    let result = protocol.finish().expect("initialize catch protocol completed");
+    let result = protocol
+        .finish()
+        .expect("initialize catch protocol completed");
     let Some(signal) = result.evaluation_error_signal else {
         return Ok(result);
     };
@@ -1435,17 +1438,19 @@ fn execute_initialize_catch(
         .evaluation_error
         .as_ref()
         .expect("evaluation signal carries error info");
-    Err(crate::output::error_walker::emit_lifecycle_evaluation_error_early(
-        source_path,
-        match signal {
-            LifecycleSignal::Failure => "failure",
-            LifecycleSignal::Finalize => "finalize",
-            _ => unreachable!("catch protocol returned an unexpected signal"),
-        },
-        info,
-        term,
+    Err(
+        crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+            source_path,
+            match signal {
+                LifecycleSignal::Failure => "failure",
+                LifecycleSignal::Finalize => "finalize",
+                _ => unreachable!("catch protocol returned an unexpected signal"),
+            },
+            info,
+            term,
+        )
+        .into(),
     )
-    .into())
 }
 
 /// Run the launched document's `initialize` event and translate its control
@@ -1454,7 +1459,7 @@ fn execute_initialize_catch(
 /// This route decides *what* should happen; it never commits it. A `Proxy`
 /// control leaves here as an unresolved request, so the target is resolved and
 /// hop-checked in the one place that owns the invocation-wide chain.
-fn route_initialize(
+pub(super) fn route_initialize(
     guard: &mut LifecycleRunGuard<'_>,
     init_ctx: &StackExecutionContext<'_>,
     source_path: &Path,
@@ -1463,18 +1468,10 @@ fn route_initialize(
 ) -> CompositionPhaseResult<DocumentTransition> {
     let routed = (|| -> Result<CompositionPhaseResult<DocumentTransition>> {
         let init_outcome = guard.execute_event(LifecycleSignal::Initialize, init_ctx);
-        let init_result = execute_initialize_catch(
-            guard,
-            init_ctx,
-            source_path,
-            term,
-            init_outcome.clone(),
-        )?;
+        let init_result =
+            execute_initialize_catch(guard, init_ctx, source_path, term, init_outcome.clone())?;
         if let Some(setup_error) = init_result.setup_error.as_ref() {
-            let message = if matches!(
-                init_result.control,
-                Some(StackControl::Error { .. })
-            ) {
+            let message = if matches!(init_result.control, Some(StackControl::Error { .. })) {
                 setup_error.msg.clone()
             } else {
                 "lifecycle initialize failed".to_string()
@@ -1704,8 +1701,10 @@ fn provider_run_handoff(
     };
 
     // --- Initialize lifecycle event --------------------------------------
-    // Fires after prompt/frontmatter resolution and CLI/frontmatter override
-    // merge, but before $schema validation and shell pre-flight.
+    // Reached only by a document that does not author `initialize` (its event
+    // is empty) or by a caller without a command coordinator (a sequence step);
+    // a live `initialize`-declaring compose document ran the coordinator's
+    // staged boot and enters through the external-guard path above.
     let mut guard = LifecycleRunGuard::new(lifecycle, &lifecycle_ctx, emitter);
     let fm_map = request.prepared.effective_frontmatter.as_object();
     let empty_frontmatter = serde_json::Map::new();
@@ -1744,7 +1743,11 @@ fn provider_run_handoff(
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(lifecycle_context),
-        file_resolution_context: request.prepared.input_layers.file_resolution_context.as_ref(),
+        file_resolution_context: request
+            .prepared
+            .input_layers
+            .file_resolution_context
+            .as_ref(),
         effect_engine: lifecycle_effect_engine,
         shell_runner: &SystemShellRunner,
         emitter,
@@ -1756,9 +1759,11 @@ fn provider_run_handoff(
     };
     // An adopted proxy target's `initialize` is NOT routed here: the command
     // coordinator already committed the hop, and the harness loop's staged
-    // bootstrap owns the target's narrow initialize-shell gate, its own
+    // bootstrap owns the target's shell-free bootstrap validation, its own
     // `initialize`, the stabilized reread, and the full audit — the one
-    // canonical R4 staging shared with an in-harness adoption. Routing
+    // canonical R4 staging shared with an in-harness adoption. (A target that
+    // authors `initialize` never arrives adopted: the coordinator's own staged
+    // boot runs it before any `PreparedComposition` exists.) Routing
     // `initialize` here as well would fire it twice and audit a bootstrap read
     // the target's `initialize` may replace, so hand straight to the body, which
     // adopts the committed handoff into the loop.
@@ -1786,8 +1791,7 @@ fn provider_run_handoff(
     // already-committed handoff. The command coordinator re-prepares the target
     // through the *same* canonical launch pipeline a direct invocation uses —
     // rebuilding the complete launch bundle rather than inheriting the router's —
-    // and adopts it into the harness loop's staged bootstrap for its own
-    // `initialize`/reread/audit. This mirrors the terminal-proxy route's
+    // and boots the target in stages for its own `initialize`/reread/audit. This mirrors the terminal-proxy route's
     // `surface_or_adopt_terminal_proxy`: one commit point, one set of resolution
     // and cycle semantics.
     //
@@ -1812,82 +1816,142 @@ fn provider_run_handoff(
                 .handoff_ledger
                 .as_ref()
                 .expect("handoff_ledger.is_some() checked in the match guard");
-            let commit = match request
-                .prepared
-                .input_layers
-                .file_resolution_context
-                .as_ref()
-            {
-                Some(context) => commit_proxy_in_context(
-                    &mut ledger.lock().expect("run ledger mutex poisoned"),
-                    handoff,
-                    context,
-                ),
-                None => {
-                    if let Some(invocation) = request.invocation_context.as_ref() {
-                        invocation.record_ambient_fallback();
-                    }
-                    commit_proxy(
-                        &mut ledger.lock().expect("run ledger mutex poisoned"),
-                        handoff,
-                        effective_repo_root,
-                    )
-                }
-            };
-            match commit {
-                Ok(committed) => Ok(SingleCompositionOutcome {
-                    exit_code: 0,
-                    provider,
-                    agent_perf: None,
-                    iteration_signals: None,
-                    terminal_signal: None,
-                    final_output: None,
-                    initialize_handoff: Some(SurfacedHandoff::Committed(Box::new(committed))),
-                }),
-                // A refused hop leaves the source active; route the typed commit
-                // failure through its still-live `blocked`/`finalize` stacks with
-                // the concrete cause as `err`, exactly as the terminal route's
-                // `route_handoff_failure` does.
-                Err(commit_error) => {
-                    let info = LifecycleErrorInfo::from_proxy_commit_error(&commit_error);
-                    let outcome = emit_preflight_blocked_and_finalize_in_context(
-                        &mut guard,
-                        lifecycle_effect_engine,
-                        emitter,
-                        lifecycle_settings,
-                        lifecycle_messaging,
-                        term,
-                        &request.prepared.resolved_path,
-                        effective_repo_root,
-                        base_dir,
-                        Some(launch_workspace.launch_cwd.as_path()),
-                        Some(lifecycle_context),
-                        request
-                            .prepared
-                            .input_layers
-                            .file_resolution_context
-                            .as_ref(),
-                        fm_map.unwrap_or(&empty_frontmatter),
-                        document_start,
-                        info,
-                    );
-                    match outcome {
-                        // A raise inside the catch stacks supersedes the hand-off
-                        // failure.
-                        PreflightBlockedOutcome::EvaluationError(ce) => Err(ce.into()),
-                        // No flow-control recovery exists for a pre-launch
-                        // `initialize` blocked; surface the typed commit error so
-                        // the renderer walks `source()` to the concrete cause.
-                        PreflightBlockedOutcome::Control(_) => {
-                            Err(color_eyre::eyre::Report::new(commit_error))
-                        }
-                    }
-                }
-            }
+            let committed = commit_initialize_proxy(
+                &mut guard,
+                ledger,
+                handoff,
+                request.invocation_context.as_ref(),
+                &InitializeCatchSurface {
+                    effect_engine: lifecycle_effect_engine,
+                    emitter,
+                    settings: lifecycle_settings,
+                    messaging: lifecycle_messaging,
+                    term,
+                    source_path: &request.prepared.resolved_path,
+                    repo_root: effective_repo_root,
+                    launch_area: launch_workspace.launch_cwd.as_path(),
+                    context: lifecycle_context,
+                    file_resolution_context: request
+                        .prepared
+                        .input_layers
+                        .file_resolution_context
+                        .as_ref(),
+                    frontmatter: fm_map.unwrap_or(&empty_frontmatter),
+                    document_start,
+                },
+            )?;
+            Ok(SingleCompositionOutcome {
+                exit_code: 0,
+                provider,
+                agent_perf: None,
+                iteration_signals: None,
+                terminal_signal: None,
+                final_output: None,
+                initialize_handoff: Some(committed),
+            })
         }
         // Dry-run proxies (and every other transition) stay on the in-harness
         // coordinator.
         other => runner::run_composition_body(&ctx, &mut guard, perf_collector, false, other),
+    }
+}
+
+/// Where a pre-launch `initialize` failure is caught: the document's own
+/// `blocked`/`finalize` stacks, with the bindings its `initialize` ran against.
+pub(super) struct InitializeCatchSurface<'a> {
+    pub effect_engine: &'a EffectEngine,
+    pub emitter: &'a DefaultLifecycleEmitter,
+    pub settings: &'a claudine::events::GlobalSettings,
+    pub messaging: &'a claudine::messaging::RuntimeMessagingSettings,
+    pub term: &'a Terminal,
+    pub source_path: &'a Path,
+    pub repo_root: Option<&'a Path>,
+    pub launch_area: &'a Path,
+    pub context: &'a darkmatter::markdown::compose::ComposeContext,
+    pub file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
+    pub frontmatter: &'a serde_json::Map<String, serde_json::Value>,
+    pub document_start: Instant,
+}
+
+impl InitializeCatchSurface<'_> {
+    /// Route `info` through the document's `blocked`/`finalize`, returning the
+    /// evaluation error a catch stack raised instead, when it raised one.
+    pub(super) fn route_blocked(
+        &self,
+        guard: &mut LifecycleRunGuard<'_>,
+        info: LifecycleErrorInfo,
+    ) -> PreflightBlockedOutcome {
+        emit_preflight_blocked_and_finalize_in_context(
+            guard,
+            self.effect_engine,
+            self.emitter,
+            self.settings,
+            self.messaging,
+            self.term,
+            self.source_path,
+            self.repo_root,
+            self.source_path.parent().or(self.repo_root),
+            Some(self.launch_area),
+            Some(self.context),
+            self.file_resolution_context,
+            self.frontmatter,
+            self.document_start,
+            info,
+        )
+    }
+}
+
+/// Commit an `initialize` proxy against the command-owned ledger while the
+/// source's `initialize` guard is still live.
+///
+/// A clean commit synthesizes no source terminal/`finalize`: the source is
+/// transferred, not completed. A refused hop (missing target, cycle, hop limit)
+/// leaves the source active, so it routes through the source's still-legal
+/// `blocked`/`finalize` with the concrete cause as `err` (AC29).
+///
+/// ## Errors
+///
+/// The typed commit failure, or the evaluation error a catch stack raised
+/// while routing it.
+pub(super) fn commit_initialize_proxy(
+    guard: &mut LifecycleRunGuard<'_>,
+    ledger: &claudine::composition::SharedRunLedger,
+    handoff: EvaluatedProxyRequest,
+    invocation: Option<&claudine::invocation_context::InvocationContext>,
+    surface: &InitializeCatchSurface<'_>,
+) -> Result<SurfacedHandoff> {
+    let commit = match surface.file_resolution_context {
+        Some(context) => commit_proxy_in_context(
+            &mut ledger.lock().expect("run ledger mutex poisoned"),
+            handoff,
+            context,
+        ),
+        None => {
+            if let Some(invocation) = invocation {
+                invocation.record_ambient_fallback();
+            }
+            commit_proxy(
+                &mut ledger.lock().expect("run ledger mutex poisoned"),
+                handoff,
+                surface.repo_root,
+            )
+        }
+    };
+    match commit {
+        Ok(committed) => Ok(SurfacedHandoff::Committed(Box::new(committed))),
+        Err(commit_error) => {
+            let info = LifecycleErrorInfo::from_proxy_commit_error(&commit_error);
+            match surface.route_blocked(guard, info) {
+                // A raise inside the catch stacks supersedes the hand-off failure.
+                PreflightBlockedOutcome::EvaluationError(ce) => Err(ce.into()),
+                // No flow-control recovery exists for a pre-launch `initialize`
+                // blocked; surface the typed commit error so the renderer walks
+                // `source()` to the concrete cause.
+                PreflightBlockedOutcome::Control(_) => {
+                    Err(color_eyre::eyre::Report::new(commit_error))
+                }
+            }
+        }
     }
 }
 

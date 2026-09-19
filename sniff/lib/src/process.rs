@@ -173,8 +173,8 @@ mod sample_hook {
 mod pipe_reader {
     use std::io::Read;
     use std::os::fd::AsRawFd;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
     pub(super) struct DrainControl {
@@ -225,8 +225,7 @@ mod pipe_reader {
                         continue;
                     }
                     if ready == -1 {
-                        if std::io::Error::last_os_error().kind()
-                            == std::io::ErrorKind::Interrupted
+                        if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted
                         {
                             continue;
                         }
@@ -506,8 +505,7 @@ mod process_tree {
         // this function resumes it.
         unsafe {
             let snapshot = Owned::new(
-                CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
-                    .map_err(std::io::Error::other)?,
+                CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0).map_err(std::io::Error::other)?,
             );
             let mut entry = THREADENTRY32 {
                 dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
@@ -866,8 +864,8 @@ mod tests {
             .args(args)
             .spawn()
             .expect("detached pipe-holding descendant should spawn");
-        let descendant_pid = libc::pid_t::try_from(descendant.id())
-            .expect("descendant process ID should fit pid_t");
+        let descendant_pid =
+            libc::pid_t::try_from(descendant.id()).expect("descendant process ID should fit pid_t");
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline {
             // SAFETY: `descendant_pid` names the child spawned above. A session
@@ -942,8 +940,8 @@ mod tests {
             .args(args)
             .spawn()
             .expect("quiet detached descendant should spawn");
-        let descendant_pid = libc::pid_t::try_from(descendant.id())
-            .expect("descendant process ID should fit pid_t");
+        let descendant_pid =
+            libc::pid_t::try_from(descendant.id()).expect("descendant process ID should fit pid_t");
 
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
@@ -995,8 +993,8 @@ mod tests {
             .args(args)
             .spawn()
             .expect("between-samples descendant should spawn");
-        let descendant_pid = libc::pid_t::try_from(descendant.id())
-            .expect("descendant process ID should fit pid_t");
+        let descendant_pid =
+            libc::pid_t::try_from(descendant.id()).expect("descendant process ID should fit pid_t");
         std::fs::write(pid_file, descendant_pid.to_string())
             .expect("between-samples descendant PID should be reported");
 
@@ -1195,12 +1193,8 @@ mod tests {
     fn output_larger_than_a_pipe_buffer_does_not_deadlock() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(LARGE_OUTPUT_CHILD);
-        let out = run_with_timeout(
-            executable,
-            &args,
-            Duration::from_secs(30),
-        )
-        .expect("child should complete, not time out");
+        let out = run_with_timeout(executable, &args, Duration::from_secs(30))
+            .expect("child should complete, not time out");
 
         assert!(out.status.success());
         assert!(out.stdout.iter().filter(|byte| **byte == b'o').count() >= 1_048_576);
@@ -1238,9 +1232,8 @@ mod tests {
         let expected_dir = working_dir.path().canonicalize().unwrap();
         assert!(
             output.stdout_lossy().lines().any(|line| {
-                line.strip_suffix("|preserved").is_some_and(|dir| {
-                    std::fs::canonicalize(dir).is_ok_and(|d| d == expected_dir)
-                })
+                line.strip_suffix("|preserved")
+                    .is_some_and(|dir| std::fs::canonicalize(dir).is_ok_and(|d| d == expected_dir))
             }),
             "configured child output should contain the preserved cwd and environment"
         );
@@ -1409,12 +1402,19 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_failing_exit_still_returns_captured_output() {
-        let out = run_with_timeout("sh", &["-c", "echo oops >&2; exit 3"], Duration::from_secs(5))
-            .expect("a non-zero exit is not a helper error");
+        let out = run_with_timeout(
+            "sh",
+            &["-c", "echo oops >&2; exit 3"],
+            Duration::from_secs(5),
+        )
+        .expect("a non-zero exit is not a helper error");
 
         assert!(!out.status.success());
         assert_eq!(String::from_utf8_lossy(&out.stderr).trim(), "oops");
-        assert_eq!(run_for_stdout("sh", &["-c", "exit 3"], Duration::from_secs(5)), None);
+        assert_eq!(
+            run_for_stdout("sh", &["-c", "exit 3"], Duration::from_secs(5)),
+            None
+        );
     }
 
     #[test]
@@ -1432,8 +1432,12 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn arguments_are_not_shell_interpreted() {
-        let out = run_with_timeout("echo", &["$HOME; rm -rf /", "&&", "|"], Duration::from_secs(5))
-            .expect("echo should run");
+        let out = run_with_timeout(
+            "echo",
+            &["$HOME; rm -rf /", "&&", "|"],
+            Duration::from_secs(5),
+        )
+        .expect("echo should run");
 
         assert_eq!(out.stdout_lossy().trim(), "$HOME; rm -rf / && |");
     }

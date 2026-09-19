@@ -3,6 +3,7 @@
 //! This test suite verifies end-to-end functionality of the list command,
 //! including discovery, filtering, and formatting.
 
+use biscuit_test_harness::manifest_dir;
 use research::list::{
     ResearchOutput, TopicType, apply_filters, discover_topics, format_json, format_terminal,
 };
@@ -10,7 +11,7 @@ use std::path::PathBuf;
 
 /// Returns the path to the test fixtures directory.
 fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/.research/library")
+    manifest_dir!().join("tests/fixtures/.research/library")
 }
 
 #[test]

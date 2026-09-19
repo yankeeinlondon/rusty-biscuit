@@ -10,7 +10,8 @@ description: |-
 
     Note: the caller _can_ pass in the **iteration** number but it should be detected automatically.
 dir: "{{dirname(spec)}}"
-design: "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
+design: |-
+    {{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}
 iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
 review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
 previous: "{{ iteration > 1 ? decrement_file_index(review) : null }}"
@@ -18,40 +19,45 @@ spec_name: "{{ parent_dir(spec) }}"
 
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
-    message: "👓 starting {{feature_or_fix}} review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
+    message: "🏃‍♂️ starting review #{{iteration}} of `{{parent_dir(spec)}}` (_{{feature_or_fix}} in the **{{ctx.area || ctx.repo}}**_)"
 success:
     stack:
         - when: "frontmatter(review,'ready') == true"
           action:
               - success: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in **{{ctx.area}}** finished and deemed code to be **production ready**"
-              - message: "✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully (_**production ready**_)"
+              - message: |-
+                    ✅  review #{{iteration}} of `{{parent_dir(spec)}}` in **{{ctx.area || ctx.repo}}** completed successfully (_**production ready**_)
               - effect: small-group-cheer
         - when: "frontmatter(review,'ready') == true && frontmatter(review,'human_review') == true"
           action:
-              - message: "{{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- while production ready -- does require human review"
               - message: |-
-                    The human review items include:
-    
-                    {{ as_ordered_list(frontmatter(review,"human_review_items")) }}
+                    🤷  {{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- while production ready -- requires human review. Review items include:
+
+                    {{ as_ordered_list(frontmatter(review,"human_review_items") || []) }}    
               - info: |-
-                    {{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- _while production ready_ -- does require human review ({{length(frontmatter(review, 'human_review_items'))}} items):
+                    review #{{iteration}} of `{{ upper(feature_or_fix) + ' ' + parent_dir(spec) }}` -- _while production ready_ -- requires human review ({{length(frontmatter(review, 'human_review_items') || [])}} items):
     
-                    {{ as_ordered_list(frontmatter(review, 'human_review_items')) }}
+                    {{ as_ordered_list(frontmatter(review, 'human_review_items') || []) }}
         - when: "frontmatter(review,'ready') != true"
           action:
-              - warn: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>"
-              - message: "⚠️  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed but was deemed NOT production ready"
-              - message: '{{ as_ordered_list( frontmatter(review,"findings") || [] ) }}'
-              - effect: sad-trombone
-        - when: "frontmatter(review,'ready') != true && frontmatter(review,'human_review') == true"
-          action:
+              - warn: |-
+                    {{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>
               - message: |-
-                    In addition to the review findings, there _are_ human review items as well:
+                    ⚠️  review #{{iteration}} for the _{{feature_or_fix}}_ `{{parent_dir(spec)}}` in the **{{ctx.area_description || ctx.repo}}** _completed_ but is NOT production ready! Findings include:
 
-                    {{ as_ordered_list(frontmatter(review, 'human_review_items')) }}
+                    {{ as_ordered_list( frontmatter(review,"findings") || [] ) }}
+
+                    {{ 
+                        frontmatter(review,'human_review') == true
+                            ? '- in addition to the code findings blocking readiness there are some rulings that require **human review**:\n' + as_ordered_list( frontmatter(review, 'human_review_items') || [] )
+                            : '- no _human review_ is required at this point'
+                    }}
+              - effect: sad-trombone
 failure:
-    stderr: "{{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!"
-    message: "💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area }}** failed to complete ({{err.msg}})!"
+    stderr: |-
+        {{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!
+    message: |-
+        💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area || ctx.repo }}** failed to complete ({{err.msg}})!
     effect: phase-jump-3
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
@@ -64,7 +70,7 @@ failure:
 
 ## Context
 
-You are performing a review of the functionality defined by the `{{spec-name}}` spec:
+You are performing a review of the functionality defined by the `{{spec_name}}` spec:
 
 ::block when="previous"
 - This is the #{{iteration}} iteration of the review/fix cycle for this specification
@@ -82,8 +88,6 @@ You are performing a review of the functionality defined by the `{{spec-name}}` 
 ::block when="design"
 - **Technical Design:** "@{{design}}"
 ::end-block
-
-
 
 ::block when="And(spec, design)"
 Read both the specification and design documents and then perform a review on the implementation:
@@ -133,7 +137,9 @@ test is at the wrong level under "Findings" with severity at least "high".
 
 ## Closure
 
-- Save your review suggestions to "@{{review}}"
+### Review Frontmatter
+
+- Save your review suggestions/findings to "@{{review}}"
 - Save the following frontmatter properties to the review file (@{{review}}):
     - set `$schema` to "feature-review.yaml"
     ::file "../_ready.md"
@@ -151,7 +157,17 @@ test is at the wrong level under "Findings" with severity at least "high".
     - set the `next` property on the _previous review_ to "{{parent_dir(review)}}/{{basename(review)}}"
     - set the `implemented` property to `true`
 ::end-block
-- Set the spec file's ({{spec}}) `review_iterations` Frontmatter property to '{{iteration}}'
+
+### Spec Frontmatter
+
+The spec file which underpins the requirements for this feature review needs to have it's frontmatter properties updated too:
+
+- the spec file is located at: {{spec}}
+- Set the `review_iterations` Frontmatter property to '{{iteration}}'
+- if you set the review's `ready` property to `true` then set the spec file's `completed` property to `true`
+
+### Summarize
+
 - Summarize to the caller what was found and be sure to mention whether the review deemed the {{feature_or_fix}} to be **production ready** or not.
 
 ::block when="iteration != 1"
@@ -160,7 +176,7 @@ test is at the wrong level under "Findings" with severity at least "high".
 
 **IMPORTANT:**
 
-::block when="ctx.area != 'root'"
+::block when="ctx.area && has_skill(ctx.area)"
 - use the '{{ctx.area}}' skill during the implementation
 ::end-block
 - you are running as part of a non-interactive session! Do not ask the user for feedback or permissions as they can not answer!

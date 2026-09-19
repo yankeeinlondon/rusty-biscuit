@@ -5,9 +5,11 @@
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::{parse, parse_condition};
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, ValidationReport, coerce::coerce_frontmatter, parse_yaml_schema,
-    to_json_schema,
+    DarkmatterSchemas, ValidationReport,
+    coerce::coerce_frontmatter,
+    parse_yaml_schema,
     simplified::{grammar::parse_type_expr, serialize_property_atom},
+    to_json_schema,
 };
 use serde_json::Value;
 
@@ -80,7 +82,10 @@ fn literal_bare_number_typed() {
     // Number-typed const in the compiled schema (AC 1 / AC 3).
     let schema = json_schema("version: literal(2)\n");
     let constv = optional_const(&schema, "version");
-    assert!(constv.is_number(), "literal(2) const must be a JSON number, got {constv}");
+    assert!(
+        constv.is_number(),
+        "literal(2) const must be a JSON number, got {constv}"
+    );
 }
 
 #[test]
@@ -96,7 +101,11 @@ fn literal_quoted_protects_punctuation() {
     assert!(atom("literal('a, b')").is_ok());
     // Round-trips through canonical serialization.
     let once = serialize("literal('a, b')");
-    assert_eq!(serialize(&once), once, "quoted literal must serialize stably");
+    assert_eq!(
+        serialize(&once),
+        once,
+        "quoted literal must serialize stably"
+    );
 }
 
 #[test]
@@ -130,7 +139,10 @@ fn literal_bare_null_rejected() {
 fn literal_leading_zero_is_string_not_number() {
     // `007` fails the numberlike shape test (leading-zero) → typed as string.
     let schema = json_schema("code: literal(007)\n");
-    assert_eq!(*optional_const(&schema, "code"), Value::String("007".into()));
+    assert_eq!(
+        *optional_const(&schema, "code"),
+        Value::String("007".into())
+    );
 }
 
 #[test]
@@ -146,7 +158,12 @@ fn literal_array_suffix_allowed() {
 
 #[test]
 fn literal_parse_serialize_reparse_equivalent() {
-    for input in ["literal(spec)", "literal(2)", "literal(false)", "literal('a, b')"] {
+    for input in [
+        "literal(spec)",
+        "literal(2)",
+        "literal(false)",
+        "literal('a, b')",
+    ] {
         let first = parse_type_expr("prop", input).expect("parse");
         let text = serialize_property_atom(&first);
         let second = parse_type_expr("prop", &text).expect("reparse");
@@ -161,7 +178,11 @@ fn literal_parse_serialize_reparse_equivalent() {
 #[test]
 fn literal_required_enforces_equality() {
     let ok = validate("---\n$schema:\n  kind: literal(spec; required)\nkind: spec\n---\nbody\n");
-    assert!(ok.valid, "matching required literal must validate: {:?}", ok.problems);
+    assert!(
+        ok.valid,
+        "matching required literal must validate: {:?}",
+        ok.problems
+    );
 
     let bad = validate("---\n$schema:\n  kind: literal(spec; required)\nkind: other\n---\nbody\n");
     assert!(!bad.valid, "wrong literal value must fail");
@@ -170,10 +191,18 @@ fn literal_required_enforces_equality() {
 #[test]
 fn literal_optional_accepts_missing_and_null() {
     let missing = validate("---\n$schema:\n  kind: literal(spec)\n---\nbody\n");
-    assert!(missing.valid, "optional literal accepts missing: {:?}", missing.problems);
+    assert!(
+        missing.valid,
+        "optional literal accepts missing: {:?}",
+        missing.problems
+    );
 
     let null = validate("---\n$schema:\n  kind: literal(spec)\nkind: null\n---\nbody\n");
-    assert!(null.valid, "optional literal accepts null: {:?}", null.problems);
+    assert!(
+        null.valid,
+        "optional literal accepts null: {:?}",
+        null.problems
+    );
 }
 
 #[test]
@@ -234,12 +263,20 @@ fn literal_property_union_mixes_with_atom() {
     let keyword = validate(
         "---\n$schema:\n  width:\n    - literal(auto)\n    - number\nwidth: auto\n---\nbody\n",
     );
-    assert!(keyword.valid, "literal arm must accept 'auto': {:?}", keyword.problems);
+    assert!(
+        keyword.valid,
+        "literal arm must accept 'auto': {:?}",
+        keyword.problems
+    );
 
     let numeric = validate(
         "---\n$schema:\n  width:\n    - literal(auto)\n    - number\nwidth: 5\n---\nbody\n",
     );
-    assert!(numeric.valid, "number arm must accept 5: {:?}", numeric.problems);
+    assert!(
+        numeric.valid,
+        "number arm must accept 5: {:?}",
+        numeric.problems
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -269,7 +306,10 @@ fn union_discriminant_is_type_sensitive() {
     let doc = "---\n$schema:\n  v:\n    - '{ tag: literal(2), a: string(required) }'\n    - '{ tag: literal(other), b: string(required) }'\nv:\n  tag: '2'\n---\nbody\n";
     let report = validate(doc);
     // String '2' does not match literal(2) (number) → no narrowing to arm 0.
-    assert!(!report.valid, "string '2' should not satisfy number literal(2) arm");
+    assert!(
+        !report.valid,
+        "string '2' should not satisfy number literal(2) arm"
+    );
 }
 
 #[test]
@@ -304,10 +344,7 @@ fn union_duplicate_tags_are_not_narrowed() {
     // Ambiguous → NOT narrowed: the general merged `anyOf` diagnostic stands
     // (byte-for-byte the pre-literal behavior), rather than a single arm's keys.
     assert!(
-        report
-            .problems
-            .iter()
-            .any(|p| p.message.contains("anyOf")),
+        report.problems.iter().any(|p| p.message.contains("anyOf")),
         "duplicate tags must retain the merged anyOf diagnostic, got {:?}",
         report.problems
     );
@@ -319,7 +356,10 @@ fn union_conflicting_multi_key_discriminants_are_not_narrowed() {
     // is selected and the merged `anyOf` reporting stands.
     let doc = "---\n$schema:\n  cfg:\n    - '{ kind: literal(a), mode: literal(x), one: string(required) }'\n    - '{ kind: literal(b), mode: literal(y), two: string(required) }'\ncfg:\n  kind: a\n  mode: y\n---\nbody\n";
     let report = validate(doc);
-    assert!(!report.valid, "conflicting discriminants cannot satisfy any arm");
+    assert!(
+        !report.valid,
+        "conflicting discriminants cannot satisfy any arm"
+    );
 }
 
 #[test]
@@ -348,7 +388,11 @@ fn union_sparse_known_key_plus_unknown_key_are_not_narrowed() {
     // them arm 0's `one`.
     let narrowed_to_arm0 =
         report.problems.len() == 1 && report.problems[0].property.as_deref() == Some("one");
-    assert!(!narrowed_to_arm0, "must not narrow to arm 0, got {:?}", report.problems);
+    assert!(
+        !narrowed_to_arm0,
+        "must not narrow to arm 0, got {:?}",
+        report.problems
+    );
     assert!(
         report
             .problems
@@ -403,7 +447,10 @@ fn expression_parameterized_rejected_in_v1() {
     // Bare `expression` must first be a known keyword (fails today), and the
     // parameterized form must be rejected with a *specific* reserved-form
     // message rather than the generic "unknown type" lexer error.
-    assert!(atom("expression").is_ok(), "bare expression must be a known type");
+    assert!(
+        atom("expression").is_ok(),
+        "bare expression must be a known type"
+    );
     let err = atom("expression(condition)").expect_err("expression(condition) reserved in v1");
     assert!(
         !err.contains("unknown type"),
@@ -430,7 +477,11 @@ fn expression_accepts_either_dialect() {
     let report = validate(
         "---\n$schema:\n  when: expression\nwhen: 'is_agent() && os == \"macos\"'\n---\nbody\n",
     );
-    assert!(report.valid, "either-dialect expression must validate: {:?}", report.problems);
+    assert!(
+        report.valid,
+        "either-dialect expression must validate: {:?}",
+        report.problems
+    );
 }
 
 #[test]
@@ -443,15 +494,24 @@ fn expression_rejects_unparseable_with_format_problem() {
         .problems
         .iter()
         .any(|p| format!("{p:?}").contains("darkmatter-expression"));
-    assert!(has_format, "problem should carry the format name, got {:?}", report.problems);
+    assert!(
+        has_format,
+        "problem should carry the format name, got {:?}",
+        report.problems
+    );
 }
 
 #[test]
 fn expression_unknown_identifier_ok() {
     // Identifier resolution is a compose-time concern; schema validation checks
     // parseability only.
-    let report = validate("---\n$schema:\n  when: expression\nwhen: some_unknown_thing\n---\nbody\n");
-    assert!(report.valid, "unknown identifier must not be a schema error: {:?}", report.problems);
+    let report =
+        validate("---\n$schema:\n  when: expression\nwhen: some_unknown_thing\n---\nbody\n");
+    assert!(
+        report.valid,
+        "unknown identifier must not be a schema error: {:?}",
+        report.problems
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -479,13 +539,19 @@ fn expression_native_number_coerces_to_string() {
 #[test]
 fn expression_mapping_is_type_mismatch() {
     let report = validate("---\n$schema:\n  when: expression\nwhen:\n  a: 1\n---\nbody\n");
-    assert!(!report.valid, "mapping against expression must be a type mismatch");
+    assert!(
+        !report.valid,
+        "mapping against expression must be a type mismatch"
+    );
 }
 
 #[test]
 fn expression_sequence_is_type_mismatch() {
     let report = validate("---\n$schema:\n  when: expression\nwhen:\n  - a\n  - b\n---\nbody\n");
-    assert!(!report.valid, "sequence against expression must be a type mismatch");
+    assert!(
+        !report.valid,
+        "sequence against expression must be a type mismatch"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -506,7 +572,10 @@ fn expression_pending_shell_value_deferred() {
         .problems
         .iter()
         .any(|p| format!("{p:?}").contains("darkmatter-expression"));
-    assert!(!malformed, "pending $() value must not eager-fail the format check");
+    assert!(
+        !malformed,
+        "pending $() value must not eager-fail the format check"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -551,6 +620,12 @@ fn value_dialect_is_condition_parse_superset() {
 
 #[test]
 fn expression_validation_never_evaluates() {
+    #[cfg(feature = "effects-instrumentation")]
+    let before = (
+        darkmatter::effects::engine_build_count(),
+        darkmatter::effects::network_attempt_count(),
+    );
+
     // Schema validation checks parseability only — it must never evaluate the
     // expression. A value whose evaluation would touch the filesystem, shell, or
     // environment still validates purely because it *parses*; nothing runs.
@@ -572,6 +647,16 @@ fn expression_validation_never_evaluates() {
         missing.valid,
         "expression validation must not resolve file references: {:?}",
         missing.problems,
+    );
+
+    #[cfg(feature = "effects-instrumentation")]
+    assert_eq!(
+        (
+            darkmatter::effects::engine_build_count(),
+            darkmatter::effects::network_attempt_count(),
+        ),
+        before,
+        "passive expression validation must build no effect engine and attempt no network access",
     );
 }
 
@@ -605,7 +690,11 @@ fn literal_large_integer_const_is_exact() {
     for (lit, _) in LARGE_INT_CASES {
         let expected: Value = serde_json::from_str(lit).expect("literal is a JSON number");
         let schema = json_schema(&format!("version: literal({lit})\n"));
-        assert_eq!(*optional_const(&schema, "version"), expected, "const for literal({lit})");
+        assert_eq!(
+            *optional_const(&schema, "version"),
+            expected,
+            "const for literal({lit})"
+        );
     }
 }
 
@@ -615,7 +704,11 @@ fn literal_large_integer_validates_exact_and_rejects_neighbor() {
         let ok = validate(&format!(
             "---\n$schema:\n  version: literal({lit}; required)\nversion: {lit}\n---\nbody\n"
         ));
-        assert!(ok.valid, "literal({lit}) must accept {lit}: {:?}", ok.problems);
+        assert!(
+            ok.valid,
+            "literal({lit}) must accept {lit}: {:?}",
+            ok.problems
+        );
 
         let bad = validate(&format!(
             "---\n$schema:\n  version: literal({lit}; required)\nversion: {neighbor}\n---\nbody\n"
@@ -666,7 +759,9 @@ fn trigger_matcher_large_integer_literal_is_exact() {
     // schemas. A required literal gate must accept the exact large integer and
     // reject its f64-colliding off-by-one neighbor.
     use darkmatter::markdown::schemas::triggers::matches;
-    use darkmatter::markdown::schemas::{Constraint, MatchExpr, PropertyAtom, SimplifiedType, TypeExpr};
+    use darkmatter::markdown::schemas::{
+        Constraint, MatchExpr, PropertyAtom, SimplifiedType, TypeExpr,
+    };
 
     fn version_frontmatter(value: &Value) -> Value {
         let mut map = serde_json::Map::new();

@@ -50,6 +50,8 @@ conducted to determine how well the current implementation meets the requirement
 - Design File: {{design}}
 ::end-block
 
+::file "../_no_formatting.md"
+
 ## Task
 
 Your task is to implement phase {{phase}} of the plan found in '@{{plan}}'.
@@ -132,3 +134,5 @@ You are done when:
 - You do not need to run tests across the entire monorepo as this will take far too long. Only 
 - once the implementation is complete update the '{{ctx.current_package_area}}' if there were any notable changes needed in this skill
 - you are running as part of a non-interactive session! Do not ask the user for feedback or permissions as they can not answer!
+
+::file "../_os.md"

@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod agents;
+pub mod budget;
 pub mod completions;
 pub mod compose;
 pub mod config_tui;

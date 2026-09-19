@@ -511,6 +511,24 @@
             }
           ]
         },
+        "overlay_capabilities": {
+          "source": {
+            "key": "overlay_capabilities",
+            "kind": "facts"
+          },
+          "value": {
+            "mcp": "unsupported",
+            "repo_prompt": "unsupported",
+            "repo_resources": "unsupported"
+          }
+        },
+        "overlay_selector": {
+          "source": {
+            "key": "overlay_selector",
+            "kind": "facts"
+          },
+          "value": null
+        },
         "platform_kind": {
           "source": {
             "key": "platform_kind",
@@ -4066,6 +4084,34 @@
               "stdin_supported": true
             }
           ]
+        },
+        "overlay_capabilities": {
+          "source": {
+            "key": "overlay_capabilities",
+            "kind": "facts"
+          },
+          "value": {
+            "mcp": "unsupported",
+            "repo_prompt": "unsupported",
+            "repo_resources": "native_root"
+          }
+        },
+        "overlay_selector": {
+          "source": {
+            "key": "overlay_selector",
+            "kind": "facts"
+          },
+          "value": {
+            "additive": false,
+            "env_var": "CLAUDE_CONFIG_DIR",
+            "relocates": [
+              "config",
+              "sessions",
+              "cache"
+            ],
+            "shape": "provider_dir",
+            "source_root": "~/.claude"
+          }
         },
         "platform_kind": {
           "source": {
@@ -9816,6 +9862,36 @@
             }
           ]
         },
+        "overlay_capabilities": {
+          "source": {
+            "key": "overlay_capabilities",
+            "kind": "facts"
+          },
+          "value": {
+            "mcp": "native_root",
+            "repo_prompt": "native_root",
+            "repo_resources": "native_root"
+          }
+        },
+        "overlay_selector": {
+          "source": {
+            "key": "overlay_selector",
+            "kind": "facts"
+          },
+          "value": {
+            "additive": false,
+            "env_var": "CODEX_HOME",
+            "relocates": [
+              "config",
+              "auth",
+              "sessions",
+              "cache",
+              "state"
+            ],
+            "shape": "provider_dir",
+            "source_root": "~/.codex"
+          }
+        },
         "platform_kind": {
           "source": {
             "key": "platform_kind",
@@ -15463,6 +15539,40 @@
             }
           ]
         },
+        "overlay_capabilities": {
+          "source": {
+            "key": "overlay_capabilities",
+            "kind": "facts"
+          },
+          "value": {
+            "mcp": "native_root",
+            "repo_prompt": "unsupported",
+            "repo_resources": "native_root"
+          }
+        },
+        "overlay_selector": {
+          "source": {
+            "key": "overlay_selector",
+            "kind": "facts"
+          },
+          "value": {
+            "additive": false,
+            "env_var": "GEMINI_CLI_HOME",
+            "relocates": [
+              "config",
+              "auth",
+              "sessions",
+              "cache",
+              "state"
+            ],
+            "shape": {
+              "parent_of_provider_dir": {
+                "child": ".gemini"
+              }
+            },
+            "source_root": "~/.gemini"
+          }
+        },
         "platform_kind": {
           "source": {
             "key": "platform_kind",
@@ -20329,6 +20439,40 @@
               "stdin_supported": true
             }
           ]
+        },
+        "overlay_capabilities": {
+          "source": {
+            "key": "overlay_capabilities",
+            "kind": "facts"
+          },
+          "value": {
+            "mcp": "unsupported",
+            "repo_prompt": "unsupported",
+            "repo_resources": "unsupported"
+          }
+        },
+        "overlay_selector": {
+          "source": {
+            "key": "overlay_selector",
+            "kind": "facts"
+          },
+          "value": {
+            "additive": false,
+            "env_var": "GOOSE_PATH_ROOT",
+            "relocates": [
+              "config",
+              "auth",
+              "sessions",
+              "cache",
+              "state"
+            ],
+            "shape": {
+              "parent_of_provider_dir": {
+                "child": "config"
+              }
+            },
+            "source_root": null
+          }
         },
         "platform_kind": {
           "source": {
@@ -25510,6 +25654,32 @@
               "stdin_supported": true
             }
           ]
+        },
+        "overlay_capabilities": {
+          "source": {
+            "key": "overlay_capabilities",
+            "kind": "facts"
+          },
+          "value": {
+            "mcp": "composable_injection",
+            "repo_prompt": "unsupported",
+            "repo_resources": "unsupported"
+          }
+        },
+        "overlay_selector": {
+          "source": {
+            "key": "overlay_selector",
+            "kind": "facts"
+          },
+          "value": {
+            "additive": true,
+            "env_var": "KILO_CONFIG_DIR",
+            "relocates": [
+              "config"
+            ],
+            "shape": "provider_dir",
+            "source_root": null
+          }
         },
         "platform_kind": {
           "source": {
@@ -30764,6 +30934,34 @@
             }
           ]
         },
+        "overlay_capabilities": {
+          "source": {
+            "key": "overlay_capabilities",
+            "kind": "facts"
+          },
+          "value": {
+            "mcp": "unsupported",
+            "repo_prompt": "unsupported",
+            "repo_resources": "native_root"
+          }
+        },
+        "overlay_selector": {
+          "source": {
+            "key": "overlay_selector",
+            "kind": "facts"
+          },
+          "value": {
+            "additive": false,
+            "env_var": "KIMI_CODE_HOME",
+            "relocates": [
+              "config",
+              "auth",
+              "sessions"
+            ],
+            "shape": "provider_dir",
+            "source_root": "~/.kimi-code"
+          }
+        },
         "platform_kind": {
           "source": {
             "key": "platform_kind",
@@ -35907,6 +36105,32 @@
               "stdin_supported": false
             }
           ]
+        },
+        "overlay_capabilities": {
+          "source": {
+            "key": "overlay_capabilities",
+            "kind": "facts"
+          },
+          "value": {
+            "mcp": "composable_injection",
+            "repo_prompt": "unsupported",
+            "repo_resources": "unsupported"
+          }
+        },
+        "overlay_selector": {
+          "source": {
+            "key": "overlay_selector",
+            "kind": "facts"
+          },
+          "value": {
+            "additive": true,
+            "env_var": "OPENCODE_CONFIG_DIR",
+            "relocates": [
+              "config"
+            ],
+            "shape": "provider_dir",
+            "source_root": null
+          }
         },
         "platform_kind": {
           "source": {
@@ -41988,6 +42212,34 @@
             }
           ]
         },
+        "overlay_capabilities": {
+          "source": {
+            "key": "overlay_capabilities",
+            "kind": "facts"
+          },
+          "value": {
+            "mcp": "unsupported",
+            "repo_prompt": "unsupported",
+            "repo_resources": "native_root"
+          }
+        },
+        "overlay_selector": {
+          "source": {
+            "key": "overlay_selector",
+            "kind": "facts"
+          },
+          "value": {
+            "additive": false,
+            "env_var": "PI_CODING_AGENT_DIR",
+            "relocates": [
+              "config",
+              "auth",
+              "sessions"
+            ],
+            "shape": "provider_dir",
+            "source_root": "~/.pi/agent"
+          }
+        },
         "platform_kind": {
           "source": {
             "key": "platform_kind",
@@ -47012,6 +47264,32 @@
               "stdin_supported": true
             }
           ]
+        },
+        "overlay_capabilities": {
+          "source": {
+            "key": "overlay_capabilities",
+            "kind": "facts"
+          },
+          "value": {
+            "mcp": "unsupported",
+            "repo_prompt": "unsupported",
+            "repo_resources": "native_root"
+          }
+        },
+        "overlay_selector": {
+          "source": {
+            "key": "overlay_selector",
+            "kind": "facts"
+          },
+          "value": {
+            "additive": false,
+            "env_var": "QWEN_HOME",
+            "relocates": [
+              "config"
+            ],
+            "shape": "provider_dir",
+            "source_root": "~/.qwen"
+          }
         },
         "platform_kind": {
           "source": {

@@ -719,7 +719,6 @@ impl GitRequest {
             None => self.include_worktrees,
         }
     }
-
 }
 
 /// Focused package details that can be added to a shallow repository request.
@@ -816,10 +815,7 @@ impl RepoRequest {
 
     /// Whether package-manager detection is requested.
     pub fn wants_package_managers(&self) -> bool {
-        !self.structure_only
-            || self
-                .details
-                .is_some_and(|details| details.package_managers)
+        !self.structure_only || self.details.is_some_and(|details| details.package_managers)
     }
 
     /// Whether dependency parsing is requested.
@@ -1034,7 +1030,10 @@ mod tests {
     fn metadata_controls_cannot_widen_past_coarse_fields() {
         let request = GitRequest::summary().metadata(GitMetadataRequest::all());
         assert!(!request.wants_commits(), "commit_count 0 still wins");
-        assert!(!request.wants_worktrees(), "include_worktrees false still wins");
+        assert!(
+            !request.wants_worktrees(),
+            "include_worktrees false still wins"
+        );
     }
 
     #[test]
@@ -1061,7 +1060,9 @@ mod tests {
     /// default that reaches the network.
     #[test]
     fn default_plan_makes_no_ntp_request() {
-        let os = DetectionPlan::default().os.expect("os domain is on by default");
+        let os = DetectionPlan::default()
+            .os
+            .expect("os domain is on by default");
 
         assert!(!os.include_ntp_status, "default plan must not probe NTP");
         // Every other full() field survives — this gates one probe, it does not
@@ -1247,10 +1248,7 @@ mod tests {
     #[test]
     fn focused_repo_details_narrow_package_enrichment() {
         let cases = [
-            (
-                RepoDetailRequest::package_managers(),
-                (true, false, false),
-            ),
+            (RepoDetailRequest::package_managers(), (true, false, false)),
             (RepoDetailRequest::dependencies(), (false, true, false)),
             (RepoDetailRequest::test_runners(), (false, false, true)),
             (RepoDetailRequest::all(), (true, true, true)),
@@ -1277,8 +1275,7 @@ mod tests {
         assert!(structure_json.get("details").is_none());
         assert!(full_json.get("details").is_none());
 
-        let legacy: RepoRequest =
-            serde_json::from_str(r#"{"structure_only":true}"#).unwrap();
+        let legacy: RepoRequest = serde_json::from_str(r#"{"structure_only":true}"#).unwrap();
         assert_eq!(legacy.details, None);
         assert!(!legacy.wants_package_enrichment());
 

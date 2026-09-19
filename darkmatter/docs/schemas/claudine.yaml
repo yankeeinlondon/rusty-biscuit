@@ -20,12 +20,12 @@ $schema:
     operation: "string -> You can add an operation label/name so that it will be tagged in logs and so that memory can be gathered for that operation."
     yolo: "boolean -> Explicitly allow high-trust execution mode when the caller has opted into it."
 
-    initialize: "lifecycle-event@./claudine-types.yaml -> Lifecycle concerns emitted before schema validation and shell pre-flight."
+    initialize: "lifecycle-event@./claudine-types.yaml -> Shell-free lifecycle concerns emitted before schema validation and shell preflight. Shell actions and bootstrap frontmatter shell expansion are forbidden regardless of approvals."
     start: "lifecycle-event@./claudine-types.yaml -> Lifecycle event emitted immediately before provider invocation."
-    blocked: "lifecycle-event@./claudine-types.yaml -> Lifecycle event emitted when execution stops before provider launch."
+    blocked: "lifecycle-event@./claudine-types.yaml -> Lifecycle event emitted when execution stops before provider launch. Shell actions cannot execute before successful preflight reaches start."
     success: "lifecycle-event@./claudine-types.yaml -> Lifecycle event emitted after a successful provider session."
     failure: "lifecycle-event@./claudine-types.yaml -> Lifecycle event emitted after a provider-session error."
-    finalize: "lifecycle-event@./claudine-types.yaml -> Lifecycle event emitted once after each terminal event."
+    finalize: "lifecycle-event@./claudine-types.yaml -> Lifecycle event emitted once after each terminal event. Early catch chains cannot execute shell actions before successful preflight reaches start."
 
     timeout: "string(not-empty) -> Optional wall-clock timeout duration for the provider run."
     step_timeout: "string(not-empty) -> Stream-silence timeout duration. Defaults to 30m when not otherwise configured."

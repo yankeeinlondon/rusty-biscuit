@@ -28,6 +28,7 @@ use crate::provider::known_gap::{KnownGap, KnownGapArea};
 use crate::provider::model_catalog_source::ModelCatalogSource;
 use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
 use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
+use crate::provider::overlay::{OverlayCapabilities, OverlayCapability};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
 use crate::provider::prompt_args::PromptArgConventions;
@@ -298,6 +299,12 @@ pub(in crate::provider) static ANTIGRAVITY_INFO: ProviderInfo = ProviderInfo {
     model_required_in_non_tty: false,
     platform_kind: PlatformKind::VendorPlatform,
     unmapped_native_events: &[],
+    overlay_selector: None,
+    overlay_capabilities: OverlayCapabilities {
+        repo_resources: OverlayCapability::Unsupported,
+        repo_prompt: OverlayCapability::Unsupported,
+        mcp: OverlayCapability::Unsupported,
+    },
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).

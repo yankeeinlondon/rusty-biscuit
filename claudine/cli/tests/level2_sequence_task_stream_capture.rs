@@ -205,12 +205,12 @@ sequence:
           prompt: one.md
           setup:
             - action:
-                - set: [shared, from-failing]
+                - set: {shared: from-failing}
         - name: surviving-proxy
           prompt: two.md
           setup:
             - action:
-                - set: [shared, from-survivor]
+                - set: {shared: from-survivor}
   - name: verify-merge
     prompt: reader.md
 ---

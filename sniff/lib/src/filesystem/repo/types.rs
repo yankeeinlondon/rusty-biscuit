@@ -536,8 +536,7 @@ pub fn detect_repo_with_request(
     root: &Path,
     request: &crate::request::RepoRequest,
 ) -> Result<Option<RepoInfo>> {
-    super::detection::detect_repo_inner_with_request(root, request)
-        .map(|(info, _inventory)| info)
+    super::detection::detect_repo_inner_with_request(root, request).map(|(info, _inventory)| info)
 }
 
 /// Like [`detect_repo_structure`], but synthesizes a single-package `RepoInfo`
@@ -668,9 +667,10 @@ mod tests {
                     .map(|package| package.name.as_str()),
                 Some("pkg-a2")
             );
-            assert!(repo
-                .package_for_dir(Path::new("/repo/crates/pkg-a20/src"))
-                .is_none());
+            assert!(
+                repo.package_for_dir(Path::new("/repo/crates/pkg-a20/src"))
+                    .is_none()
+            );
         });
 
         assert_eq!(
@@ -953,7 +953,7 @@ mod tests {
         // Regression: on the rusty-biscuit repo, `primary_layer()` must agree
         // with the first layer — and select Cargo over the pnpm workspace that
         // also lives at the repo root.
-        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest_dir = biscuit_test_harness::manifest_dir!();
         let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
         let info = detect_repo_structure(repo_root)
             .expect("detect_repo_structure should succeed")

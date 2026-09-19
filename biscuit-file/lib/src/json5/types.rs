@@ -159,6 +159,19 @@ impl Json5 {
         &self.raw
     }
 
+    /// Deserialize the raw source text into `T`.
+    ///
+    /// The text is parsed again rather than converted from [`Self::value`], so
+    /// a `T` that observes the document's structure sees it as authored —
+    /// `serde_json::Value` objects have already lost their key order.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`Json5Error::Parse`] if the text does not deserialize into `T`.
+    pub fn deserialize_raw<T: serde::de::DeserializeOwned>(&self) -> Result<T, Json5Error> {
+        json_five::from_str(&self.raw).map_err(|e| Json5Error::Parse(e.to_string()))
+    }
+
     /// Returns the source of this JSON5 document.
     #[must_use]
     pub fn source(&self) -> &Json5Source {
@@ -297,6 +310,48 @@ mod tests {
         let j = Json5::from_str(input).unwrap();
         assert_eq!(j.value()["key"], "value");
         assert_eq!(j.value()["num"], 42);
+    }
+
+    #[test]
+    fn deserialize_raw_reads_the_source_text_in_authored_order() {
+        let j = Json5::from_str("{ z: 1, a: 2, }").unwrap();
+
+        let pairs: Vec<(String, u32)> = j
+            .deserialize_raw::<KeyOrder>()
+            .unwrap()
+            .0;
+
+        assert_eq!(pairs, [("z".to_string(), 1), ("a".to_string(), 2)]);
+        assert!(matches!(
+            j.deserialize_raw::<Vec<u32>>(),
+            Err(Json5Error::Parse(_))
+        ));
+    }
+
+    /// The entries of a JSON5 object in the order the deserializer yields them.
+    struct KeyOrder(Vec<(String, u32)>);
+
+    impl<'de> serde::Deserialize<'de> for KeyOrder {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct Entries;
+            impl<'de> serde::de::Visitor<'de> for Entries {
+                type Value = KeyOrder;
+                fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    f.write_str("an object")
+                }
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    mut map: A,
+                ) -> Result<KeyOrder, A::Error> {
+                    let mut pairs = Vec::new();
+                    while let Some(pair) = map.next_entry()? {
+                        pairs.push(pair);
+                    }
+                    Ok(KeyOrder(pairs))
+                }
+            }
+            deserializer.deserialize_map(Entries)
+        }
     }
 
     #[test]

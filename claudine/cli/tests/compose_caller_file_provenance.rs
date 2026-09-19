@@ -2,7 +2,11 @@
 
 mod common;
 
-use common::{CliProcessFixture, strip_ansi, write, write_executable};
+use common::{CliProcessFixture, strip_ansi, write};
+// Consumed only inside the `#[cfg(unix)]` statements below; ungated, the
+// Windows check (`just check-windows`) reports it unused.
+#[cfg(unix)]
+use common::write_executable;
 
 /// A Goose stub that records its delivered prompt and, when
 /// `CLAUDINE_INLINE_TARGET` names a document, edits that document's body the
@@ -136,9 +140,10 @@ fn run_compose_failure(
     document: &std::path::Path,
     setters: &[&str],
 ) -> (String, serde_json::Value) {
-    let snapshot = fixture
-        .cwd()
-        .join(format!("diagnostic-{}.json", document.file_stem().unwrap().to_string_lossy()));
+    let snapshot = fixture.cwd().join(format!(
+        "diagnostic-{}.json",
+        document.file_stem().unwrap().to_string_lossy()
+    ));
     // Escape: caller-relative references must resolve from this fixture directory.
     let mut command = fixture.command_builder().ambient_context(cwd).build();
     let audio_spool = fixture.cwd().join("provenance-audio-spool");
@@ -153,16 +158,24 @@ fn run_compose_failure(
     let assertion = command.assert().failure();
     assert!(!audio_spool.exists(), "provenance tests must not publish audio");
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
-    let diagnostic = serde_json::from_str(
-        &std::fs::read_to_string(&snapshot)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}\nstderr:\n{stderr}", snapshot.display())),
-    )
-    .unwrap_or_else(|error| panic!("invalid diagnostic snapshot: {error}\nstderr:\n{stderr}"));
+    let diagnostic =
+        serde_json::from_str(&std::fs::read_to_string(&snapshot).unwrap_or_else(|error| {
+            panic!(
+                "failed to read {}: {error}\nstderr:\n{stderr}",
+                snapshot.display()
+            )
+        }))
+        .unwrap_or_else(|error| panic!("invalid diagnostic snapshot: {error}\nstderr:\n{stderr}"));
     (stderr, diagnostic)
 }
 
+/// A caller launched from a package subdirectory passes a package-relative
+/// file through a router whose target lives in a different directory. The
+/// target derives sibling paths from that file lazily, in its own frontmatter,
+/// so every derived path must anchor at the caller's file rather than at either
+/// prompt's directory or the repository root.
 #[test]
-fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target() {
+fn a_proxy_target_derives_sibling_paths_from_the_callers_package_relative_file() {
     let fixture = CliProcessFixture::named("caller-file-provenance");
     fixture.initialize_repository();
     fixture.seed_user_config();
@@ -170,73 +183,63 @@ fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target(
 
     let package = fixture.cwd().join("packages/example");
     let spec = package.join("fixes/case/spec.md");
-    write(
-        &spec,
-        "---\nimplemented: true\nreview_iterations: 4\n---\nCase.\n",
-    );
-    // The suggestions target implements an existing review; without it the
-    // derived `design` probe anchors at the prompt directory and never fires.
-    // It is already implemented so the router takes the implemented-spec
-    // branch and the target derives `review` itself rather than receiving the
-    // router's absolute `pending_review` through `proxy.with`.
-    write(
-        &package.join("fixes/case/review-4.md"),
-        "---\nimplemented: true\n---\n# Review 4\n",
-    );
+    write(&spec, "---\nreview_iterations: 4\n---\nCase.\n");
+    // `design` is probed through the file-typed `review`, which only yields a
+    // directory when the review exists; without it the design never renders.
+    write(&package.join("fixes/case/review-4.md"), "# Review 4\n");
 
-    let router = fixture.cwd().join("prompts/implement.md");
+    let router = fixture.cwd().join("prompts/router.md");
     write(
         &router,
-        include_str!("../../../prompts/implement.md"),
+        "---\n$schema:\n  spec: 'file(required;eager)'\ninitialize:\n  stack:\n    - action: {proxy: './_derive/target.md'}\n---\nRouter.\n",
     );
     write(
-        &fixture
-            .cwd()
-            .join("prompts/_implement/implement-suggestions.md"),
-        include_str!("../../../prompts/_implement/implement-suggestions.md"),
+        &fixture.cwd().join("prompts/_derive/target.md"),
+        "---\n\
+         $schema:\n  spec: 'file(required)'\n  review: file\n  design: file\n  log: file\n  iteration: number\n\
+         iteration: \"{{ frontmatter(spec, 'review_iterations') || 1 }}\"\n\
+         review: \"{{ dirname(spec) + '/review-' + iteration + '.md' }}\"\n\
+         log: \"{{ dirname(spec) + '/log.md' }}\"\n\
+         design: \"{{ file_exists(dirname(review) + '/design.md') ? dirname(review) + '/design.md' : null }}\"\n\
+         ---\n\
+         # Derived Paths\n\n\
+         - **Specification:** @{{spec}}\n\
+         - **Iteration:** {{iteration}}\n\
+         - **Review:** @{{review}}\n\
+         - **Log File:** {{log}}\n\
+         ::block when=\"design\"\n\
+         - **Design:** @{{design}}\n\
+         ::end-block\n",
     );
 
-    let stderr = run_compose(
-        &fixture,
-        &package,
-        &router,
-        &["spec=fixes/case/spec.md"],
-    );
-
-    assert!(
-        stderr.contains("Iteration: 4"),
-        "the literal shipped lazy target must read the caller's package-relative specification; stderr:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("fixes/case/log.md"),
-        "the shipped target must derive its log beside the caller's spec; stderr:\n{stderr}"
-    );
+    let _ = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
     let absent_design_prompt =
         std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
-    let portable_package = biscuit_file::to_portable_string(&std::fs::canonicalize(&package).unwrap());
-    // Paths derived from the eager caller value project to the repository-
-    // relative display form, whatever spelling the temp repository carries.
-    let derived_package = "packages/example";
-    // The shipped prompt builds the specification mention from an expression
-    // (`'@' + spec`), which renders the native semantic path rather than the
-    // portable presentation a direct `{{spec}}` would use; compare its spelling
+    let portable_package =
+        biscuit_file::to_portable_string(&std::fs::canonicalize(&package).unwrap());
+    // A caller file renders its native semantic path; compare its spelling
     // portably so Windows and POSIX agree on the identity.
     let specification = absent_design_prompt
         .lines()
         .find_map(|line| line.trim().strip_prefix("- **Specification:** @"))
-        .unwrap_or_else(|| panic!("the shipped target omitted the specification mention; prompt:\n{absent_design_prompt}"));
+        .unwrap_or_else(|| {
+            panic!("the target omitted the specification mention; prompt:\n{absent_design_prompt}")
+        });
     assert_eq!(
         canonical_portable(std::path::Path::new(specification.trim())),
         format!("{portable_package}/fixes/case/spec.md"),
         "the specification mention must identify the caller's spec; prompt:\n{absent_design_prompt}"
     );
+    // Paths derived from the caller's file project to the repository-relative
+    // display form, whatever spelling the temp repository carries.
     for expected in [
-        format!("**Review:** @{derived_package}/fixes/case/review-4.md"),
-        format!("**Log File:** {derived_package}/fixes/case/log.md"),
+        "**Iteration:** 4",
+        "**Review:** @packages/example/fixes/case/review-4.md",
+        "**Log File:** packages/example/fixes/case/log.md",
     ] {
         assert!(
-            absent_design_prompt.contains(&expected),
-            "the shipped target omitted {expected:?}; prompt:\n{absent_design_prompt}"
+            absent_design_prompt.contains(expected),
+            "the target omitted {expected:?}; prompt:\n{absent_design_prompt}"
         );
     }
     assert!(
@@ -244,26 +247,13 @@ fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target(
         "an absent optional design must not render; prompt:\n{absent_design_prompt}"
     );
 
-    write(
-        &fixture
-            .cwd()
-            .join(derived_package)
-            .join("fixes/case/design.md"),
-        "# Design\n",
-    );
-    let _ = run_compose(
-        &fixture,
-        &package,
-        &router,
-        &["spec=fixes/case/spec.md"],
-    );
+    write(&package.join("fixes/case/design.md"), "# Design\n");
+    let _ = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
     let present_design_prompt =
         std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
     assert!(
-        present_design_prompt.contains(&format!(
-            "**Design:** @{derived_package}/fixes/case/design.md"
-        )),
-        "the shipped target must derive a present design beside the spec; prompt:\n{present_design_prompt}"
+        present_design_prompt.contains("**Design:** @packages/example/fixes/case/design.md"),
+        "the target must derive a present design beside the caller's spec; prompt:\n{present_design_prompt}"
     );
 }
 
@@ -297,28 +287,96 @@ fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_p
             .join("prompts/_implement/implement-suggestions.md"),
         include_str!("../../../prompts/_implement/implement-suggestions.md"),
     );
+    // The shipped route transcludes these two snippets; without them the
+    // redirect fails on a missing file instead of reaching its assertions.
     write(
-        &fixture
-            .cwd()
-            .join("prompts/_implement/implement-plan.md"),
+        &fixture.cwd().join("prompts/_no_formatting.md"),
+        include_str!("../../../prompts/_no_formatting.md"),
+    );
+    write(
+        &fixture.cwd().join("prompts/_os.md"),
+        include_str!("../../../prompts/_os.md"),
+    );
+    write(
+        &fixture.cwd().join("prompts/_implement/implement-plan.md"),
         include_str!("fixtures/shipped_implement_route/_implement/implement-plan.md"),
     );
 
-    let stderr = run_compose(
-        &fixture,
-        &package,
-        &router,
-        &["spec=fixes/case/spec.md"],
-    );
+    let stderr = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
 
     assert!(
         stderr.contains("Implement Review Suggestions"),
         "an existing unimplemented review must outrank the already-executed plan; stderr:\n{stderr}"
     );
-    assert!(stderr.contains("review-1.md"), "stderr:\n{stderr}");
+    // The stderr panel previews only the first 20 rendered rows, and the
+    // route's leading rule block fills most of them, so the review path is
+    // asserted on the prompt the provider received rather than the preview.
+    let provider_prompt =
+        std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
+    assert!(
+        provider_prompt.contains("review-1.md"),
+        "the routed prompt must name the unimplemented review; prompt:\n{provider_prompt}"
+    );
     assert!(
         !stderr.contains("Implement Phase 5 of 5"),
         "the router must not resume the original plan once a review exists; stderr:\n{stderr}"
+    );
+}
+
+/// An archived case — an implemented spec whose reviews are all implemented —
+/// matches no route. The router must reach its own routing error rather than
+/// raising on the `review` guard, which is an optional input nobody supplied.
+#[test]
+fn shipped_implement_router_refuses_an_archived_case_through_its_own_error() {
+    let fixture = CliProcessFixture::named("implement-router-archived-case");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    install_goose(&fixture);
+
+    let package = fixture.cwd().join("packages/example");
+    let case = package.join("fixes/case");
+    write(
+        &case.join("spec.md"),
+        "---\nimplemented: true\nreview_iterations: 4\n---\nCase.\n",
+    );
+    write(
+        &case.join("review-4.md"),
+        "---\nimplemented: true\n---\n# Review 4\n",
+    );
+
+    let router = fixture.cwd().join("prompts/implement.md");
+    write(&router, include_str!("../../../prompts/implement.md"));
+
+    // Not `run_compose_failure`: an authored `error:` action is a routing
+    // decision, not a typed diagnostic facet, so it writes no snapshot.
+    // Escape: caller-relative references must resolve from this fixture directory.
+    let mut command = fixture.command_builder().ambient_context(&package).build();
+    let audio_spool = fixture.cwd().join("provenance-audio-spool");
+    let assertion = command
+        .env("PLAYA_DRY_RUN", "1")
+        .env("PLAYA_SPOOL_DIR", &audio_spool)
+        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        .args(["compose", "--goose", router.to_str().unwrap()])
+        .args(["spec=fixes/case/spec.md"])
+        .assert()
+        .failure();
+    assert!(
+        !audio_spool.exists(),
+        "provenance tests must not publish audio"
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
+
+    assert!(
+        stderr.contains("Unable to route the implementation to an appropriate prompt"),
+        "an archived case must fail through the router's own error; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("references undefined variable"),
+        "an unsupplied optional input must not crash a routing guard; stderr:\n{stderr}"
+    );
+    assert!(
+        !fixture.home().join("provider-prompt").exists(),
+        "an unroutable case must not launch a provider"
     );
 }
 
@@ -435,7 +493,10 @@ fn a_proxied_retry_rematerializes_from_the_original_caller_record() {
     let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
 
     assert_eq!(
-        events.lines().filter(|line| *line == "retry=original").count(),
+        events
+            .lines()
+            .filter(|line| *line == "retry=original")
+            .count(),
         2,
         "the original attempt and fresh retry must both materialize the caller file; events:\n{events}\nstderr:\n{output}"
     );
@@ -478,11 +539,17 @@ fn a_proxied_resume_rematerializes_from_the_original_caller_record() {
     let provider_events = std::fs::read_to_string(fixture.home().join("provider-events")).unwrap();
 
     assert_eq!(
-        events.lines().filter(|line| *line == "resume=original").count(),
+        events
+            .lines()
+            .filter(|line| *line == "resume=original")
+            .count(),
         2,
         "both the opening and resumed attempts must materialize the original caller file; events:\n{events}\nstderr:\n{stderr}"
     );
-    assert!(provider_events.contains("resume-session-ok"), "{provider_events}");
+    assert!(
+        provider_events.contains("resume-session-ok"),
+        "{provider_events}"
+    );
 }
 
 #[test]
@@ -514,7 +581,10 @@ fn a_proxied_loop_reuses_the_same_materialized_caller_identity() {
     );
     let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
     assert_eq!(
-        events.lines().filter(|line| line.starts_with("loop=original:")).count(),
+        events
+            .lines()
+            .filter(|line| line.starts_with("loop=original:"))
+            .count(),
         3,
         "every reused loop plan must retain the caller file identity; events:\n{events}\nstderr:\n{stderr}"
     );
@@ -561,7 +631,10 @@ fn a_sequence_prompt_task_proxy_reads_the_invocation_wide_caller_file() {
         .success();
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
     let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
-    assert!(events.contains("sequence=caller"), "events:\n{events}\nstderr:\n{stderr}");
+    assert!(
+        events.contains("sequence=caller"),
+        "events:\n{events}\nstderr:\n{stderr}"
+    );
 }
 
 #[test]
@@ -576,10 +649,7 @@ fn sequence_task_params_and_cli_file_inputs_keep_distinct_authoring_origins() {
         &package.join("caller/spec.md"),
         "---\nmarker: caller\n---\n",
     );
-    write(
-        &package.join("task/spec.md"),
-        "---\nmarker: task\n---\n",
-    );
+    write(&package.join("task/spec.md"), "---\nmarker: task\n---\n");
     let sequence = package.join("sequence.md");
     write(
         &sequence,
@@ -609,7 +679,10 @@ fn sequence_task_params_and_cli_file_inputs_keep_distinct_authoring_origins() {
         .success();
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
     let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
-    assert!(events.contains("mixed=caller:task"), "events:\n{events}\nstderr:\n{stderr}");
+    assert!(
+        events.contains("mixed=caller:task"),
+        "events:\n{events}\nstderr:\n{stderr}"
+    );
 }
 
 #[test]
@@ -653,7 +726,10 @@ fn a_sequence_cli_setter_shadows_the_same_named_task_file_param() {
         .success();
     let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
     let events = std::fs::read_to_string(fixture.cwd().join("events.log")).unwrap();
-    assert!(events.contains("winner=cli"), "events:\n{events}\nstderr:\n{stderr}");
+    assert!(
+        events.contains("winner=cli"),
+        "events:\n{events}\nstderr:\n{stderr}"
+    );
 }
 
 #[test]
@@ -678,7 +754,7 @@ fn a_sequence_runtime_mutation_shadows_the_same_named_task_file_param() {
     );
     write(
         &fixture.cwd().join("mutator.md"),
-        "---\nsuccess:\n  stack:\n    - action: {set: [spec, runtime/spec.md]}\n---\nMutator.\n",
+        "---\nsuccess:\n  stack:\n    - action: {set: {spec: runtime/spec.md}}\n---\nMutator.\n",
     );
     write(
         &fixture.cwd().join("router.md"),
@@ -792,7 +868,9 @@ fn inline_compose_proxy_uses_the_caller_origin_and_closes_over_the_target() {
         "the inline closure must rewrite the adopted target, not the router; target:\n{rewritten}"
     );
     assert!(
-        std::fs::read_to_string(&router).unwrap().contains("Router body."),
+        std::fs::read_to_string(&router)
+            .unwrap()
+            .contains("Router body."),
         "the router must remain unchanged after handing off"
     );
 }
@@ -801,7 +879,12 @@ fn inline_compose_proxy_uses_the_caller_origin_and_closes_over_the_target() {
 fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
     for (case, schema, expression, raw) in [
         ("malformed", "file(eager; required)", "", "@//invalid"),
-        ("eager-missing", "file(eager; required)", "", "cases/missing/spec.md"),
+        (
+            "eager-missing",
+            "file(eager; required)",
+            "",
+            "cases/missing/spec.md",
+        ),
         (
             "lazy-read-missing",
             "file(required)",
@@ -817,9 +900,7 @@ fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
         let target = fixture.cwd().join("prompts/target.md");
         write(
             &target,
-            &format!(
-                "---\n$schema:\n  spec: '{schema}'\n{expression}---\nTarget.\n"
-            ),
+            &format!("---\n$schema:\n  spec: '{schema}'\n{expression}---\nTarget.\n"),
         );
         let router = fixture.cwd().join("prompts/router.md");
         write(
@@ -873,8 +954,7 @@ fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
             );
         }
         assert_eq!(
-            direct_diagnostic["detail"]["base_dir"],
-            proxied_diagnostic["detail"]["base_dir"],
+            direct_diagnostic["detail"]["base_dir"], proxied_diagnostic["detail"]["base_dir"],
             "{case} changed caller base across proxy"
         );
         assert_eq!(
@@ -883,17 +963,15 @@ fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
             "{case} changed caller origin across proxy"
         );
         assert_eq!(
-            direct_diagnostic["detail"]["candidates"],
-            proxied_diagnostic["detail"]["candidates"],
+            direct_diagnostic["detail"]["candidates"], proxied_diagnostic["detail"]["candidates"],
             "{case} changed selected candidate evidence across proxy"
         );
         if case == "malformed" {
             assert!(direct_diagnostic["detail"]["candidates"].is_null());
         } else {
-            let expected_candidate = std::path::Path::new(
-                direct_diagnostic["detail"]["base_dir"].as_str().unwrap(),
-            )
-            .join(raw);
+            let expected_candidate =
+                std::path::Path::new(direct_diagnostic["detail"]["base_dir"].as_str().unwrap())
+                    .join(raw);
             assert_eq!(
                 direct_diagnostic["detail"]["candidates"][0]["path"],
                 biscuit_file::to_portable_string(&expected_candidate),
@@ -946,7 +1024,10 @@ fn dynamic_array_selection_keeps_complete_direct_and_proxy_diagnostics() {
             ("direct", &direct, &direct_diagnostic),
             ("proxy", &proxied, &proxied_diagnostic),
         ] {
-            assert!(stderr.contains("invalid file path"), "{index} {route}: {stderr}");
+            assert!(
+                stderr.contains("invalid file path"),
+                "{index} {route}: {stderr}"
+            );
             assert!(stderr.contains(raw), "{index} {route}: {stderr}");
             assert_eq!(diagnostic["code"], "composition.invalid_file_reference");
             assert_eq!(diagnostic["detail"]["reference"], raw, "{index} {route}");
@@ -956,14 +1037,18 @@ fn dynamic_array_selection_keeps_complete_direct_and_proxy_diagnostics() {
             let canonical_root = canonical_portable(&caller_root);
             assert_eq!(
                 canonical_portable(std::path::Path::new(
-                    diagnostic["detail"]["base_dir"].as_str().unwrap_or_default()
+                    diagnostic["detail"]["base_dir"]
+                        .as_str()
+                        .unwrap_or_default()
                 )),
                 canonical_root,
                 "{index} {route} lost the caller base"
             );
             assert_eq!(
                 canonical_portable(std::path::Path::new(
-                    diagnostic["detail"]["repository_root"].as_str().unwrap_or_default()
+                    diagnostic["detail"]["repository_root"]
+                        .as_str()
+                        .unwrap_or_default()
                 )),
                 canonical_root,
                 "{index} {route} lost the caller repository root"
@@ -973,7 +1058,9 @@ fn dynamic_array_selection_keeps_complete_direct_and_proxy_diagnostics() {
             let selected = std::path::PathBuf::from_iter(caller_root.join(raw).components());
             assert_eq!(
                 canonical_portable(std::path::Path::new(
-                    diagnostic["detail"]["candidates"][0]["path"].as_str().unwrap_or_default()
+                    diagnostic["detail"]["candidates"][0]["path"]
+                        .as_str()
+                        .unwrap_or_default()
                 )),
                 canonical_portable(&selected),
                 "{index} {route} lost the selected candidate"
@@ -1003,14 +1090,16 @@ fn canonical_portable(path: &std::path::Path) -> String {
     let mut existing = path;
     let mut tail = Vec::new();
     while !existing.exists() {
-        let Some(parent) = existing.parent() else { break };
+        let Some(parent) = existing.parent() else {
+            break;
+        };
         if let Some(name) = existing.file_name() {
             tail.push(name.to_os_string());
         }
         existing = parent;
     }
-    let mut out = biscuit_file::canonicalize_simplified(existing)
-        .unwrap_or_else(|_| existing.to_path_buf());
+    let mut out =
+        biscuit_file::canonicalize_simplified(existing).unwrap_or_else(|_| existing.to_path_buf());
     for name in tail.into_iter().rev() {
         out.push(name);
     }
@@ -1114,4 +1203,38 @@ fn shipped_review_router_literal_does_not_collect_absent_route_inputs() {
     assert!(prompt.contains("SELECTED=caller-spec"), "{prompt}");
     assert!(!stderr.contains("Use this file"), "{stderr}");
     assert!(!stderr.contains("did not match a file directly"), "{stderr}");
+}
+
+/// The review router's `review` entry point sits below two guards that test
+/// inputs this route never supplies. Those guards must evaluate falsy and fall
+/// through rather than raising on an optional input nobody passed.
+#[test]
+fn shipped_review_router_reaches_the_review_route_past_the_absent_spec_guard() {
+    let fixture = CliProcessFixture::named("review-router-review-route");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    install_goose(&fixture);
+    let package = fixture.cwd().join("packages/example");
+    write(
+        &package.join("fixes/case/review-1.md"),
+        "---\nimplemented: true\nmarker: caller-review\n---\n# Review 1\n",
+    );
+    let router = fixture.cwd().join("prompts/review.md");
+    write(&router, include_str!("../../../prompts/review.md"));
+    write(
+        &fixture.cwd().join("prompts/_reviews/suggestion-review.md"),
+        "---\n$schema:\n  review: file(required;eager;match(**/*review*.md))\nselected: \"{{ frontmatter(review, 'marker') }}\"\n---\nSELECTED={{ selected }}\n",
+    );
+
+    let stderr = run_compose(&fixture, &package, &router, &["review=fixes/case/review-1.md"]);
+
+    let prompt = std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
+    assert!(
+        prompt.contains("SELECTED=caller-review"),
+        "the review route must reach suggestion-review; prompt:\n{prompt}"
+    );
+    assert!(
+        !stderr.contains("references undefined variable"),
+        "an unsupplied optional input must not crash a routing guard; stderr:\n{stderr}"
+    );
 }

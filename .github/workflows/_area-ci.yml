@@ -22,6 +22,10 @@ name: area-ci
 on:
   workflow_call:
     inputs:
+      tested-revision:
+        description: "The resolved plan's `head`: the one revision this whole run tests, and the only checkout `ci-build` will produce or verify an archive against. Required, and never recomputed here — see the `env:` comment in `ci.yml`."
+        type: string
+        required: true
       area:
         description: "Package area, as `sniff repo package-area` names it (e.g. claudine, claudine/rendezvous, root)."
         type: string
@@ -38,6 +42,11 @@ on:
         description: "Whether the resolved plan carries an accepted policy gap in this area. Required, so a caller that forgets it fails at parse rather than silently publishing nothing."
         type: boolean
         required: true
+      measure-compiler-work:
+        description: "Count actual rustc invocations around each measured test command. Baseline collection only; defaults off so an ordinary run is byte-identical to the uninstrumented one."
+        type: boolean
+        required: false
+        default: false
 
 env:
   # The repository tracks no rustc wrapper; cleared explicitly so a stray
@@ -70,6 +79,7 @@ jobs:
       matrix: ${{ fromJSON(inputs.packages) }}
     uses: ./.github/workflows/_package-ci.yml
     with:
+      tested-revision: ${{ inputs.tested-revision }}
       package: ${{ matrix.package }}
       check-args: ${{ matrix.check_args }}
       # The unchanged direct dependents the planner attributed to this package,
@@ -92,11 +102,19 @@ jobs:
       l2-environments: ${{ toJSON(matrix.l2_environments) }}
       browser-environments: ${{ toJSON(matrix.browser_environments) }}
       node-environments: ${{ toJSON(matrix.node_environments) }}
+      toolchain-environments: ${{ toJSON(matrix.toolchain_environments) }}
       backends: ${{ toJSON(matrix.l2_backends) }}
       runner-tools: ${{ toJSON(matrix.runner_tools) }}
       companion-suites: ${{ toJSON(matrix.companion_suites) }}
+      companion-environments: ${{ toJSON(matrix.companion_environments) }}
       native: ${{ toJSON(matrix.native) }}
       wsl: ${{ matrix.wsl }}
+      # The build records this package's executing cells consume, narrowed by
+      # the planner to the producers whose consumers read an archive. A tier
+      # whose environment appears in a record's `consumers` runs from that
+      # archive and compiles nothing; one that does not is unchanged.
+      builds: ${{ toJSON(matrix.builds) }}
+      measure-compiler-work: ${{ inputs.measure-compiler-work }}
     secrets: inherit
 
   # This area's accepted policy gaps, published the moment the area starts
@@ -112,9 +130,10 @@ jobs:
   # cell whose acceptance is ungoverned or expired rather than publish a
   # `neutral` check for a cell the coverage audit is about to block on.
   #
-  # The check runs land on the PULL REQUEST HEAD: on a `pull_request` event
-  # `github.sha` is the merge commit, and a check created there never appears
-  # in the PR's checks list. On a push the two are the same commit.
+  # The check runs land on the tested revision — the pull-request head, which
+  # is also what this job checks out. On a `pull_request` event `github.sha` is
+  # the merge commit, and a check created there never appears in the PR's checks
+  # list. On a push the two are the same commit.
   #
   # The only job in this workflow holding `checks: write`; `package-ci` and
   # coverage audit stays read-only. Presentation only (Design Decision 10):
@@ -131,6 +150,8 @@ jobs:
       checks: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tested-revision }}
       # The plain in-run download, not the `run-id` overlay the audit uses:
       # that form needs `actions: read`, which this job deliberately lacks,
       # and the plan is among the first artifacts the run produces.
@@ -144,7 +165,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           AREA: ${{ inputs.area }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          HEAD_SHA: ${{ inputs.tested-revision }}
         run: |
           set -euo pipefail
           python3 scripts/ci/publish_gaps.py \
@@ -183,6 +204,8 @@ jobs:
       checks: read
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tested-revision }}
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - name: Resolve this area's packages
@@ -216,13 +239,13 @@ jobs:
       - name: Download current-attempt result and status artifacts
         uses: actions/download-artifact@v7
         with:
-          pattern: '{junit-*,status-*}'
+          pattern: '{junit-*,status-*,build-status-*}'
           path: ci-artifacts
           merge-multiple: false
       - name: Overlay newest run-wide result and status artifacts
         uses: actions/download-artifact@v7
         with:
-          pattern: '{junit-*,status-*}'
+          pattern: '{junit-*,status-*,build-status-*}'
           path: ci-artifacts
           merge-multiple: false
           github-token: ${{ github.token }}
@@ -245,6 +268,7 @@ jobs:
             --attempt "$GITHUB_RUN_ATTEMPT" \
             --artifacts ci-artifacts \
             --package "$AREA_PACKAGES" \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
             --out "$RUNNER_TEMP/runner-loss.json"
       # `--no-default-features` deselects biscuit-terminal, sniff, and
       # cargo_metadata, which the other two bins in `scripts/` need and this one
@@ -252,7 +276,7 @@ jobs:
       - name: Build ci-rollup
         run: |
           cargo build --release \
-            --manifest-path scripts/Cargo.toml \
+            -p repo-deps \
             --no-default-features --bin ci-rollup
       # Renders this area's grid — including its reused cells and its accepted
       # policy gaps, with the evidence, counts, duration, and host each receipt
@@ -269,7 +293,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ci-artifacts
-          ./scripts/target/release/ci-rollup rollup \
+          ./target/release/ci-rollup rollup \
             --artifacts ci-artifacts \
             --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
             --policy ci-artifacts/ci-scope/scope.json \
@@ -299,7 +323,7 @@ jobs:
         env:
           AREA: ${{ inputs.area }}
         run: |
-          ./scripts/target/release/ci-rollup verdict \
+          ./target/release/ci-rollup verdict \
             --results "ci-results-${{ inputs.slug }}.json" \
             --area "$AREA" \
             --baseline .github/ci/ci-baseline.toml

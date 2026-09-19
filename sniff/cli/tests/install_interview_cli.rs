@@ -3,12 +3,16 @@
 //! `--dry-run` skips execution so the test never mutates host state.
 //! `NO_COLOR=1` and `--plain` strip escape codes so assertions are stable.
 
-use assert_cmd::Command;
 use predicates::prelude::*;
+
+mod common;
 
 #[test]
 fn install_dry_run_plain_emits_announcement_and_success_status() {
-    let mut cmd = Command::cargo_bin("sniff").unwrap();
+    let fixture = common::SniffCliFixture::named("sniff-install-interview");
+    // The host's real package manager (Homebrew, apt, winget, ...) is the tool
+    // under observation: the interview must select one to plan a ripgrep install.
+    let mut cmd = fixture.command_builder().host_path().build();
     cmd.env("NO_COLOR", "1")
         .args([
             "software",

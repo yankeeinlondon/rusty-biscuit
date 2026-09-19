@@ -3,22 +3,19 @@ use std::path::{Path, PathBuf};
 use predicates::prelude::*;
 use serde_json::Value;
 
+mod common;
+use common::DisposableAmbientContext as _;
+
 fn run_isolated_software(args: &[&str]) -> assert_cmd::assert::Assert {
     // These tests verify the CLI contract, not the host's installed inventory.
-    // Isolation also prevents JSON rendering from running arbitrary version commands.
-    let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("path");
-    let install_root = temp.path().join("program-files");
-    std::fs::create_dir(&path).unwrap();
-    std::fs::create_dir(&install_root).unwrap();
-
-    assert_cmd::Command::cargo_bin("sniff")
-        .unwrap()
-        .env("PATH", &path)
-        .env("HOME", temp.path())
-        .env("ProgramFiles", &install_root)
-        .env("ProgramFiles(x86)", &install_root)
-        .env("LocalAppData", temp.path())
+    // The fake-only escape proves no host executable can be version-probed.
+    let fixture = common::SniffCliFixture::named("sniff-software-contract");
+    fixture
+        .command_builder()
+        // Proves the absence of every host program: `sniff software` must find
+        // no `rg`, `fd`, `node`, or any other real binary to version-probe.
+        .fake_only_path()
+        .build()
         .args(args)
         .assert()
 }
@@ -29,7 +26,7 @@ fn run_isolated_software(args: &[&str]) -> assert_cmd::assert::Assert {
 
 #[test]
 fn test_help_flag() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("--help")
         .assert()
         .success()
@@ -38,7 +35,7 @@ fn test_help_flag() {
 
 #[test]
 fn test_version_flag() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("--version")
         .assert()
         .success()
@@ -47,7 +44,7 @@ fn test_version_flag() {
 
 #[test]
 fn test_help_mentions_subcommands() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("--help")
         .assert()
         .success()
@@ -64,7 +61,7 @@ fn test_help_mentions_subcommands() {
 
 #[test]
 fn test_completions_bash_shows_setup() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--completions", "bash"])
         .assert()
         .success()
@@ -74,7 +71,7 @@ fn test_completions_bash_shows_setup() {
 
 #[test]
 fn test_completions_zsh_shows_setup() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--completions", "zsh"])
         .assert()
         .success()
@@ -84,7 +81,7 @@ fn test_completions_zsh_shows_setup() {
 
 #[test]
 fn test_completions_fish_shows_setup() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--completions", "fish"])
         .assert()
         .success()
@@ -94,7 +91,7 @@ fn test_completions_fish_shows_setup() {
 
 #[test]
 fn test_completions_powershell_shows_setup() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--completions", "powershell"])
         .assert()
         .success()
@@ -104,7 +101,7 @@ fn test_completions_powershell_shows_setup() {
 
 #[test]
 fn test_dynamic_completions_bash() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .env("COMPLETE", "bash")
         .assert()
         .success()
@@ -114,7 +111,7 @@ fn test_dynamic_completions_bash() {
 
 #[test]
 fn test_dynamic_completions_zsh() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .env("COMPLETE", "zsh")
         .assert()
         .success()
@@ -124,7 +121,7 @@ fn test_dynamic_completions_zsh() {
 
 #[test]
 fn test_dynamic_completions_fish() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .env("COMPLETE", "fish")
         .assert()
         .success()
@@ -135,7 +132,7 @@ fn test_dynamic_completions_fish() {
 
 #[test]
 fn test_help_mentions_completions() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("--help")
         .assert()
         .success()
@@ -145,7 +142,7 @@ fn test_help_mentions_completions() {
 
 #[test]
 fn test_completions_help_flag_shows_setup() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--completions", "--help"])
         .assert()
         .success()
@@ -164,7 +161,7 @@ fn test_completions_help_flag_shows_setup() {
 #[test]
 fn test_no_subcommand_shows_help() {
     // Without a subcommand, the output should be the help text
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .assert()
         .success()
         .stdout(predicate::str::contains("Commands:"))
@@ -175,8 +172,8 @@ fn test_no_subcommand_shows_help() {
 fn test_no_subcommand_with_json_outputs_json() {
     // Without a subcommand but with --json, the output should be JSON
     let (_dir, path) = create_test_repo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&path)
+    common::owned_sniff_command()
+        .ambient_context(&path)
         .arg("--json")
         .assert()
         .success()
@@ -187,7 +184,7 @@ fn test_no_subcommand_with_json_outputs_json() {
 #[test]
 fn test_subcommand_outputs_text_by_default() {
     // With a subcommand (os), the output should be text by default
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("os")
         .assert()
         .success()
@@ -197,7 +194,7 @@ fn test_subcommand_outputs_text_by_default() {
 #[test]
 fn test_subcommand_with_json_flag_outputs_json() {
     // With a subcommand and --json, output should be JSON
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["os", "--json"])
         .assert()
         .success()
@@ -212,7 +209,7 @@ fn test_subcommand_with_json_flag_outputs_json() {
 
 #[test]
 fn test_json_flag_before_subcommand() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--json", "cpu"])
         .assert()
         .success()
@@ -222,7 +219,7 @@ fn test_json_flag_before_subcommand() {
 
 #[test]
 fn test_json_flag_after_subcommand() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["cpu", "--json"])
         .assert()
         .success()
@@ -232,7 +229,7 @@ fn test_json_flag_after_subcommand() {
 
 #[test]
 fn test_verbose_flag_before_subcommand() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["-v", "cpu"])
         .assert()
         .success()
@@ -241,7 +238,7 @@ fn test_verbose_flag_before_subcommand() {
 
 #[test]
 fn test_verbose_flag_after_subcommand() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["cpu", "-v"])
         .assert()
         .success()
@@ -250,7 +247,7 @@ fn test_verbose_flag_after_subcommand() {
 
 #[test]
 fn test_double_verbose_flag() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["cpu", "-vv"])
         .assert()
         .success();
@@ -258,7 +255,7 @@ fn test_double_verbose_flag() {
 
 #[test]
 fn with_network_global_flag_is_rejected() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--with-network", "repo", "name"])
         .assert()
         .failure()
@@ -267,7 +264,7 @@ fn with_network_global_flag_is_rejected() {
 
 #[test]
 fn with_network_subcommand_flag_is_rejected() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "name", "--with-network"])
         .assert()
         .failure()
@@ -276,7 +273,9 @@ fn with_network_subcommand_flag_is_rejected() {
 
 #[test]
 fn repo_name_json_is_leaf_only() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let (_dir, path) = create_test_repo();
+    let output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "name", "--json"])
         .assert()
         .success()
@@ -319,8 +318,8 @@ fn repo_name_json_is_leaf_only() {
 
 fn repo_aggregate_json_output() -> std::process::Output {
     let (_dir, path) = create_test_repo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(path)
+    common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "--json"])
         .output()
         .expect("run sniff repo --json")
@@ -347,7 +346,7 @@ fn repo_aggregate_json_is_valid_object() {
 #[test]
 fn repo_aggregate_perf_covers_complete_command() {
     let (_dir, path) = create_cli_monorepo();
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -366,7 +365,9 @@ fn repo_aggregate_perf_covers_complete_command() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("valid aggregate JSON");
     let report = &value["performance"];
-    let counters = report["counters"].as_object().expect("performance counters");
+    let counters = report["counters"]
+        .as_object()
+        .expect("performance counters");
     let stages = report["stages"].as_object().expect("performance stages");
 
     for (counter, expected) in [
@@ -399,15 +400,246 @@ fn repo_aggregate_perf_covers_complete_command() {
          total={total_ms}, detection={detect_ms}, aggregate={aggregate_ms}"
     );
 
+    // The human report is a hierarchy: rows carry the last dotted segment of
+    // their key, and the measured value sits in its own aligned column. Keys are
+    // matched segment-wise rather than as whole dotted strings, and the connector
+    // glyph is never asserted because it follows the runner's locale.
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("cli.repo.aggregate_projection"),
+        stderr.contains("aggregate_projection"),
         "stderr report must include post-detection aggregate projection: {stderr}"
     );
+    for (counter, expected) in [("repository_discoveries", "1"), ("status_walks", "1")] {
+        let row = stderr
+            .lines()
+            .find(|line| line.contains(counter))
+            .unwrap_or_else(|| {
+                panic!("stderr report must include command-wide bounds: {stderr}")
+            });
+        let cells: Vec<&str> = row.split_whitespace().collect();
+        let label = cells
+            .iter()
+            .position(|cell| *cell == counter)
+            .expect("the label owns its own cell");
+        assert_eq!(
+            cells.get(label + 1).copied(),
+            Some(expected),
+            "unexpected `{counter}` row: {row}"
+        );
+    }
+}
+
+// ============================================================================
+// `--perf` rendering contract tests
+// ============================================================================
+
+/// Everything the `## Performance` heading introduces.
+fn performance_section(rendered: &str) -> &str {
+    rendered
+        .split_once("## Performance")
+        .unwrap_or_else(|| panic!("output must carry a performance section:\n{rendered}"))
+        .1
+}
+
+/// The row a metrics-tree label owns. Labels are matched as whole whitespace
+/// cells so a short label can never hit a substring of a longer one, and the
+/// connector prefix is never matched — it follows the runner's locale rather
+/// than the report.
+fn metric_row<'a>(section: &'a str, label: &str) -> &'a str {
+    section
+        .lines()
+        .find(|line| line.split_whitespace().any(|cell| cell == label))
+        .unwrap_or_else(|| panic!("performance section must carry a `{label}` row:\n{section}"))
+}
+
+/// A row's measured value: the cell immediately after its label. Reading from
+/// the end of the row would pick up the share instead, which folds from an em
+/// dash to a hyphen on a runner without Unicode.
+fn metric_value<'a>(section: &'a str, label: &str) -> &'a str {
+    let row = metric_row(section, label);
+    let cells: Vec<&str> = row.split_whitespace().collect();
+    let label_cell = cells
+        .iter()
+        .position(|cell| *cell == label)
+        .expect("a located row owns its label cell");
+    cells
+        .get(label_cell + 1)
+        .copied()
+        .unwrap_or_else(|| panic!("`{label}` row carries no value: {row}"))
+}
+
+/// How deep a row sits, as the offset its label starts at. Connectors occupy
+/// that prefix under either glyph set, so a child's offset always exceeds its
+/// parent's — an ordering that holds without naming a single glyph.
+fn metric_offset(section: &str, label: &str) -> usize {
+    let row = metric_row(section, label);
+    row.find(label).expect("a located row contains its label")
+}
+
+/// `--plain` must remove every escape sequence while leaving the timing tree a
+/// hierarchy. Rows are found by the last dotted segment of their stage name,
+/// never by a connector glyph.
+#[test]
+fn perf_plain_output_is_ansi_free_and_hierarchical() {
+    let assert = common::owned_sniff_command()
+        .args(["os", "--perf", "--plain"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+
     assert!(
-        stderr.contains("git.repository_discoveries: 1")
-            && stderr.contains("git.status_walks: 1"),
-        "stderr report must include complete command-wide bounds: {stderr}"
+        !stdout.contains('\u{1b}'),
+        "--plain output must carry no escape sequence: {stdout:?}"
+    );
+
+    let section = performance_section(&stdout);
+    assert!(
+        metric_row(section, "Total").contains("100%"),
+        "the synthetic root owns the full share: {section}"
+    );
+    assert!(
+        metric_offset(section, "detect") < metric_offset(section, "os"),
+        "`detect.os` must render as an `os` row nested below `detect`: {section}"
+    );
+
+    // The retired flat list must be gone, not merely joined by a tree: it
+    // printed one `- <full.dotted.key>: N ms total (...)` bullet per stage
+    // under a `Stages:` header.
+    for retired in ["Stages:", "ms total", "Total: ", "detect.os"] {
+        assert!(
+            !section.contains(retired),
+            "the flat stage list must not survive alongside the tree (`{retired}`): {section}"
+        );
+    }
+}
+
+/// A scriptable text command keeps its data on stdout and the whole
+/// performance section — both trees and the overlap note — on stderr.
+#[test]
+fn perf_on_a_scriptable_text_command_stays_off_stdout() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = common::owned_sniff_command()
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "language",
+            "--perf",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
+
+    assert_eq!(
+        stdout.trim(),
+        "Rust",
+        "scriptable stdout must carry its datum alone: {stdout:?}"
+    );
+    for leaked in ["## Performance", "Total", "Counters", "may overlap"] {
+        assert!(
+            !stdout.contains(leaked),
+            "`{leaked}` must not reach a scriptable command's stdout: {stdout:?}"
+        );
+    }
+
+    let section = performance_section(&stderr);
+    metric_row(section, "Total");
+    metric_row(section, "Counters");
+    assert!(
+        section.contains("may overlap"),
+        "the overlap note travels with the section: {section}"
+    );
+}
+
+/// `--json --perf` stdout must remain exactly one JSON document carrying the
+/// structured report, with the human tree routed to stderr.
+#[test]
+fn json_perf_stdout_is_exactly_one_document() {
+    let assert = common::owned_sniff_command()
+        .args(["os", "--json", "--perf", "--plain"])
+        .assert()
+        .success();
+    let stdout = assert.get_output().stdout.clone();
+
+    let mut documents = serde_json::Deserializer::from_slice(&stdout).into_iter::<Value>();
+    let value = documents
+        .next()
+        .unwrap_or_else(|| panic!("stdout must carry a JSON document: {stdout:?}"))
+        .unwrap_or_else(|error| {
+            panic!(
+                "stdout must parse as JSON: {error}\n{}",
+                String::from_utf8_lossy(&stdout)
+            )
+        });
+    assert!(
+        documents.next().is_none(),
+        "stdout must hold one document and nothing after it: {}",
+        String::from_utf8_lossy(&stdout)
+    );
+
+    let report = value
+        .get("performance")
+        .unwrap_or_else(|| panic!("--perf must attach the structured report: {value}"));
+    assert!(
+        report.get("total_duration_ms").is_some()
+            && report["stages"].is_object()
+            && report["counters"].is_object(),
+        "the structured report keeps its schema: {report}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&stdout).contains("## Performance"),
+        "the human report must never reach JSON stdout"
+    );
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
+    let section = performance_section(&stderr);
+    assert!(
+        metric_offset(section, "detect") < metric_offset(section, "os"),
+        "the human tree still renders on stderr: {section}"
+    );
+}
+
+/// Counters reach the human report as their own tree below the timing one, and
+/// never as timing rows.
+#[test]
+fn counter_tree_reaches_the_human_report() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = common::owned_sniff_command()
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "filesystem",
+            "--perf",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    let section = performance_section(&stdout);
+
+    let (timing, counters) = section
+        .split_once("Counters")
+        .unwrap_or_else(|| panic!("the report must carry a counter tree: {section}"));
+    assert!(
+        timing.contains("shared_walk"),
+        "the timing tree precedes the counter tree: {section}"
+    );
+    assert!(
+        !timing.contains("bytes_read"),
+        "counter data must never enter the timing tree: {section}"
+    );
+
+    // `filesystem.io.bytes_read` counts bytes read from the fixture's
+    // manifests, so the row exists on every platform and is never zero.
+    let bytes_read: u64 = metric_value(counters, "bytes_read")
+        .parse()
+        .unwrap_or_else(|error| panic!("`bytes_read` must render as a count: {error}\n{counters}"));
+    assert!(bytes_read > 0, "manifest reads move bytes: {counters}");
+    assert!(
+        !counters.contains("HOT"),
+        "the counter tree carries no HOT marker: {counters}"
     );
 }
 
@@ -572,7 +804,9 @@ fn repo_json_output_is_valid_json_on_stdout_with_clean_stderr() {
 /// consumed by the single value.
 #[test]
 fn repo_json_stdout_is_exactly_one_json_document() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let (_dir, path) = create_test_repo();
+    let output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "--json"])
         .output()
         .expect("run sniff repo --json");
@@ -580,8 +814,7 @@ fn repo_json_stdout_is_exactly_one_json_document() {
     assert!(output.status.success(), "sniff repo --json must succeed");
 
     let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
-    let mut stream =
-        serde_json::Deserializer::from_str(stdout).into_iter::<serde_json::Value>();
+    let mut stream = serde_json::Deserializer::from_str(stdout).into_iter::<serde_json::Value>();
 
     let first = stream
         .next()
@@ -597,16 +830,12 @@ fn repo_json_stdout_is_exactly_one_json_document() {
 /// `--json` must survive a **shallow** repository, because that is the normal CI
 /// checkout: `actions/checkout@v4` fetches depth 1 by default.
 ///
-/// Owns the repository it asserts against, unlike
-/// `repo_json_stdout_is_exactly_one_json_document` above, which runs in the
-/// ambient checkout. That one passed on every developer machine and failed on
-/// every runner — a shallow clone's HEAD names a parent the object database does
-/// not contain, and resolving it aborted the aggregate with "An object with id …
-/// could not be found". A test that can only fail on CI cannot drive a fix.
+/// A shallow clone's HEAD can name a parent absent from the object database;
+/// resolving it must not abort aggregate reporting.
 #[test]
 fn repo_json_succeeds_in_a_shallow_clone() {
-    fn git(args: &[&str], cwd: &std::path::Path) {
-        let output = std::process::Command::new("git")
+    fn git(args: &[&str], cwd: &std::path::Path, global_config: &std::path::Path) {
+        let output = common::git_command(global_config)
             .args(args)
             .current_dir(cwd)
             .output()
@@ -619,22 +848,32 @@ fn repo_json_succeeds_in_a_shallow_clone() {
     }
 
     let root = tempfile::tempdir().unwrap();
+    let global_config = root.path().join("git-config-global");
+    std::fs::write(&global_config, b"").unwrap();
     let origin = root.path().join("origin");
     std::fs::create_dir(&origin).unwrap();
 
     // `-b main` explicitly: an ambient `init.defaultBranch` would otherwise
     // decide the branch this fixture clones.
-    git(&["init", "-b", "main"], &origin);
-    git(&["config", "user.email", "test@example.com"], &origin);
-    git(&["config", "user.name", "Test"], &origin);
+    git(&["init", "-b", "main"], &origin, &global_config);
+    git(
+        &["config", "user.email", "test@example.com"],
+        &origin,
+        &global_config,
+    );
+    git(&["config", "user.name", "Test"], &origin, &global_config);
 
     // Two commits, so a depth-1 clone genuinely has an unreachable parent. One
     // commit would make HEAD a root and never exercise the boundary.
     for n in 1..=2 {
         std::fs::write(origin.join(format!("file{n}.txt")), format!("contents {n}"))
             .expect("write fixture file");
-        git(&["add", "."], &origin);
-        git(&["commit", "-m", &format!("commit {n}")], &origin);
+        git(&["add", "."], &origin, &global_config);
+        git(
+            &["commit", "-m", &format!("commit {n}")],
+            &origin,
+            &global_config,
+        );
     }
 
     let shallow = root.path().join("shallow");
@@ -652,15 +891,16 @@ fn repo_json_succeeds_in_a_shallow_clone() {
             shallow.to_str().expect("utf8 path"),
         ],
         root.path(),
+        &global_config,
     );
     assert!(
         shallow.join(".git/shallow").exists(),
         "fixture must actually be shallow, or this test proves nothing"
     );
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["repo", "--json"])
-        .current_dir(&shallow)
+        .ambient_context(&shallow)
         .output()
         .expect("run sniff repo --json in a shallow clone");
 
@@ -681,9 +921,11 @@ fn repo_json_succeeds_in_a_shallow_clone() {
 /// leak JSON into, or diagnostics out of, the human-facing paths.
 #[test]
 fn repo_default_and_plain_emit_text_with_clean_stderr() {
+    let (_dir, path) = create_test_repo();
     for args in [vec!["repo"], vec!["repo", "--plain"]] {
         let label = args.join(" ");
-        let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+        let output = common::owned_sniff_command()
+            .ambient_context(&path)
             .args(&args)
             .output()
             .unwrap_or_else(|e| panic!("run sniff {label}: {e}"));
@@ -691,7 +933,10 @@ fn repo_default_and_plain_emit_text_with_clean_stderr() {
         assert!(output.status.success(), "sniff {label} must succeed");
 
         let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
-        assert!(!stdout.trim().is_empty(), "sniff {label} must render output");
+        assert!(
+            !stdout.trim().is_empty(),
+            "sniff {label} must render output"
+        );
         assert!(
             serde_json::from_str::<serde_json::Value>(stdout).is_err(),
             "sniff {label} must render text, not JSON"
@@ -708,8 +953,8 @@ fn repo_default_and_plain_emit_text_with_clean_stderr() {
 #[test]
 fn repo_structure_json_output_is_valid_json_on_stdout_with_clean_stderr() {
     let (_dir, path) = create_test_repo();
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&path)
+    let output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "structure", "--json"])
         .output()
         .expect("run sniff repo structure --json");
@@ -744,7 +989,13 @@ fn repo_aggregate_json_scope_buckets_have_stable_shape() {
             leaf.is_object(),
             "{key} must be an object in aggregate: {json}"
         );
-        for field in ["files", "source_code", "documentation", "packages", "package_areas"] {
+        for field in [
+            "files",
+            "source_code",
+            "documentation",
+            "packages",
+            "package_areas",
+        ] {
             assert!(
                 leaf[field].is_array(),
                 "{key}.{field} must be an array: {leaf}"
@@ -784,8 +1035,7 @@ fn repo_aggregate_json_does_not_duplicate_full_package_catalogs() {
 #[test]
 fn repo_aggregate_json_never_re_embeds_the_full_package_catalog() {
     let output = repo_aggregate_json_output();
-    let json: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("valid json");
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
 
     // Dotted paths permitted to carry full-catalog entries. Every other section
     // must reference packages by a slim summary or a narrow projection.
@@ -857,7 +1107,9 @@ fn repo_aggregate_json_is_offline() {
 fn repo_name_json_is_still_leaf_only() {
     // Regression guard: `sniff repo name --json` must remain a single-key leaf
     // even after the bare `repo --json` aggregate landed.
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let (_dir, path) = create_test_repo();
+    let output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "name", "--json"])
         .output()
         .expect("run sniff repo name --json");
@@ -881,7 +1133,9 @@ fn repo_name_json_is_still_leaf_only() {
 
 #[test]
 fn repo_is_monorepo_json_emits_object() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let (_dir, path) = create_cli_monorepo();
+    let output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "is-monorepo", "--json"])
         .output()
         .expect("run sniff repo is-monorepo --json");
@@ -913,7 +1167,9 @@ fn repo_is_monorepo_json_emits_object() {
 
 #[test]
 fn repo_is_monorepo_text_prints_label() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let (_dir, path) = create_cli_monorepo();
+    let output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "is-monorepo"])
         .env("NO_COLOR", "1")
         .output()
@@ -934,16 +1190,18 @@ fn repo_is_monorepo_text_prints_label() {
 #[test]
 fn repo_is_monorepo_no_error_exits_zero_when_false() {
     let dir = tempfile::tempdir().unwrap();
-    let git_init = std::process::Command::new("git")
+    let global_config = dir.path().join("git-config-global");
+    std::fs::write(&global_config, b"").unwrap();
+    let git_init = common::git_command(&global_config)
         .args(["init"])
         .current_dir(dir.path())
         .output()
         .expect("git init");
     assert!(git_init.status.success(), "git init failed");
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["repo", "is-monorepo", "--no-error"])
-        .current_dir(dir.path())
+        .ambient_context(dir.path())
         .env("NO_COLOR", "1")
         .output()
         .expect("run sniff repo is-monorepo --no-error in non-monorepo");
@@ -962,7 +1220,9 @@ fn repo_is_monorepo_no_error_exits_zero_when_false() {
 
 #[test]
 fn repo_is_monorepo_text_in_monorepo_exits_zero_with_label() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let (_dir, path) = create_cli_monorepo();
+    let output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "is-monorepo"])
         .env("NO_COLOR", "1")
         .output()
@@ -988,16 +1248,18 @@ fn repo_is_monorepo_text_in_monorepo_exits_zero_with_label() {
 #[test]
 fn repo_is_monorepo_text_in_non_monorepo_exits_nonzero_with_false() {
     let dir = tempfile::tempdir().unwrap();
-    let git_init = std::process::Command::new("git")
+    let global_config = dir.path().join("git-config-global");
+    std::fs::write(&global_config, b"").unwrap();
+    let git_init = common::git_command(&global_config)
         .args(["init"])
         .current_dir(dir.path())
         .output()
         .expect("git init");
     assert!(git_init.status.success(), "git init failed");
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["repo", "is-monorepo"])
-        .current_dir(dir.path())
+        .ambient_context(dir.path())
         .env("NO_COLOR", "1")
         .output()
         .expect("run sniff repo is-monorepo in non-monorepo");
@@ -1023,16 +1285,18 @@ fn repo_is_monorepo_text_in_non_monorepo_exits_nonzero_with_false() {
 #[test]
 fn repo_is_monorepo_json_in_non_monorepo_exits_nonzero_with_valid_json() {
     let dir = tempfile::tempdir().unwrap();
-    let git_init = std::process::Command::new("git")
+    let global_config = dir.path().join("git-config-global");
+    std::fs::write(&global_config, b"").unwrap();
+    let git_init = common::git_command(&global_config)
         .args(["init"])
         .current_dir(dir.path())
         .output()
         .expect("git init");
     assert!(git_init.status.success(), "git init failed");
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["repo", "is-monorepo", "--json"])
-        .current_dir(dir.path())
+        .ambient_context(dir.path())
         .env("NO_COLOR", "1")
         .output()
         .expect("run sniff repo is-monorepo --json in non-monorepo");
@@ -1058,9 +1322,9 @@ fn repo_is_monorepo_genuine_failure_exits_nonzero_with_stderr_even_with_no_error
     let dir = tempfile::tempdir().unwrap();
     // Not a git repository — genuine failure path.
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["repo", "is-monorepo", "--no-error"])
-        .current_dir(dir.path())
+        .ambient_context(dir.path())
         .env("NO_COLOR", "1")
         .output()
         .expect("run sniff repo is-monorepo --no-error outside a repo");
@@ -1088,7 +1352,7 @@ fn repo_is_monorepo_genuine_failure_exits_nonzero_with_stderr_even_with_no_error
 
 #[test]
 fn repo_package_count_json_is_single_key_number() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["repo", "package-count", "--json"])
         .output()
         .expect("run sniff repo package-count --json");
@@ -1115,7 +1379,7 @@ fn repo_package_count_json_is_single_key_number() {
 
 #[test]
 fn repo_package_count_text_is_integer() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["repo", "package-count"])
         .env("NO_COLOR", "1")
         .output()
@@ -1131,11 +1395,12 @@ fn repo_package_count_text_is_integer() {
 
 #[test]
 fn repo_version_json_returns_array_shape_under_real_repo() {
-    // The repo under test is the rusty-biscuit monorepo (a real Cargo
-    // workspace with packages). `sniff repo version --json` must report
+    // A real Cargo workspace with packages must report
     // the new `{ "versions": [...] }` contract — never the legacy
     // `{ "version": ... }` single-key shape.
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let (_dir, path) = create_cli_monorepo();
+    let output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "version", "--json"])
         .output()
         .expect("run sniff repo version --json");
@@ -1146,16 +1411,18 @@ fn repo_version_json_returns_array_shape_under_real_repo() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let json: Value =
-        serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8"))
-            .expect("stdout is valid JSON");
+    let json: Value = serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8"))
+        .expect("stdout is valid JSON");
     let obj = json.as_object().expect("JSON object at the top level");
     assert!(
         obj.contains_key("versions"),
         "version --json must surface the `versions` array, got {json}"
     );
     let versions = obj["versions"].as_array().expect("`versions` is an array");
-    assert!(!versions.is_empty(), "real repo should report at least one version");
+    assert!(
+        !versions.is_empty(),
+        "real repo should report at least one version"
+    );
     for entry in versions {
         let entry_obj = entry.as_object().expect("entry is an object");
         assert!(entry_obj.contains_key("version"));
@@ -1170,7 +1437,7 @@ fn repo_version_json_no_error_exits_zero() {
     // `--no-error` is exercised on the success path. The empty
     // `--no-error` behaviour is covered by integration tests in the
     // `repo_version_empty_with_no_error` family.
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["repo", "version", "--json", "--no-error"])
         .output()
         .expect("run sniff repo version --json --no-error");
@@ -1181,10 +1448,13 @@ fn repo_version_json_no_error_exits_zero() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let json: Value =
-        serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8"))
-            .expect("stdout is valid JSON");
-    assert!(json.as_object().expect("JSON object").contains_key("versions"));
+    let json: Value = serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8"))
+        .expect("stdout is valid JSON");
+    assert!(
+        json.as_object()
+            .expect("JSON object")
+            .contains_key("versions")
+    );
 }
 
 #[test]
@@ -1193,10 +1463,10 @@ fn repo_version_text_absent_exits_one() {
     // nothing to report. This exercises the empty-result path under real
     // shell conditions.
     let tmp = tempfile::tempdir().expect("tempdir");
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["repo", "version"])
         .env("NO_COLOR", "1")
-        .current_dir(tmp.path())
+        .ambient_context(tmp.path())
         .output()
         .expect("run sniff repo version in empty dir");
 
@@ -1215,13 +1485,16 @@ fn repo_version_text_absent_exits_one() {
 
 #[test]
 fn repo_name_verbose_is_name_only() {
-    let name_output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let (_dir, path) = create_test_repo();
+    let name_output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "name"])
         .env("NO_COLOR", "1")
         .output()
         .expect("run sniff repo name");
 
-    let name_verbose_output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let name_verbose_output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "name", "-v"])
         .env("NO_COLOR", "1")
         .output()
@@ -1247,13 +1520,16 @@ fn repo_name_verbose_is_name_only() {
 
 #[test]
 fn repo_default_is_bare_name() {
-    let name_output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let (_dir, path) = create_test_repo();
+    let name_output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "name"])
         .env("NO_COLOR", "1")
         .output()
         .expect("run sniff repo name");
 
-    let default_output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let default_output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo"])
         .env("NO_COLOR", "1")
         .output()
@@ -1269,7 +1545,9 @@ fn repo_default_is_bare_name() {
 
 #[test]
 fn repo_default_verbose_is_rich_oneliner() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let (_dir, path) = create_cli_monorepo();
+    let output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "-v"])
         .env("NO_COLOR", "1")
         .output()
@@ -1289,8 +1567,8 @@ fn repo_default_verbose_is_rich_oneliner() {
 #[test]
 fn test_base_flag_before_subcommand() {
     let (_dir, path) = create_test_repo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&path)
+    common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["-b", ".", "filesystem"])
         .assert()
         .success();
@@ -1299,8 +1577,8 @@ fn test_base_flag_before_subcommand() {
 #[test]
 fn test_base_flag_after_subcommand_is_accepted() {
     let (_dir, path) = create_test_repo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&path)
+    common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["filesystem", "-b", "."])
         .assert()
         .success();
@@ -1308,7 +1586,7 @@ fn test_base_flag_after_subcommand_is_accepted() {
 
 #[test]
 fn test_filesystem_scoped_flags_parse_in_help() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["filesystem", "--help"])
         .assert()
         .success()
@@ -1318,7 +1596,7 @@ fn test_filesystem_scoped_flags_parse_in_help() {
 
 #[test]
 fn test_repo_scoped_flags_parse_in_help() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "--help"])
         .assert()
         .success()
@@ -1333,7 +1611,7 @@ fn test_repo_scoped_flags_parse_in_help() {
 
 #[test]
 fn test_topics_subcommand_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("topics")
         .assert()
         .success()
@@ -1350,7 +1628,7 @@ fn test_topics_subcommand_output() {
 
 #[test]
 fn test_os_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("os")
         .assert()
         .success()
@@ -1361,7 +1639,7 @@ fn test_os_subcommand_text_output() {
 
 #[test]
 fn test_os_subcommand_json_output() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["os", "--json"])
         .assert()
         .success()
@@ -1392,7 +1670,7 @@ fn test_os_subcommand_json_output() {
 
 #[test]
 fn test_runtime_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["runtime", "--plain"])
         .assert()
         .success()
@@ -1401,7 +1679,7 @@ fn test_runtime_subcommand_text_output() {
 
 #[test]
 fn test_runtime_subcommand_json_output() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["runtime", "--json"])
         .assert()
         .success()
@@ -1418,7 +1696,7 @@ fn test_runtime_subcommand_json_output() {
 
 #[test]
 fn test_hardware_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("hardware")
         .assert()
         .success()
@@ -1429,7 +1707,7 @@ fn test_hardware_subcommand_text_output() {
 
 #[test]
 fn test_hardware_subcommand_json_output() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["hardware", "--json"])
         .assert()
         .success()
@@ -1464,7 +1742,7 @@ fn test_hardware_subcommand_json_output() {
 
 #[test]
 fn test_network_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("network")
         .assert()
         .success()
@@ -1475,7 +1753,7 @@ fn test_network_subcommand_text_output() {
 
 #[test]
 fn test_network_subcommand_verbose_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["network", "-v"])
         .assert()
         .success()
@@ -1485,7 +1763,7 @@ fn test_network_subcommand_verbose_text_output() {
 
 #[test]
 fn test_network_subcommand_json_output() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["network", "--json"])
         .assert()
         .success()
@@ -1523,8 +1801,8 @@ fn test_network_subcommand_json_output() {
 #[test]
 fn test_filesystem_subcommand_text_output() {
     let (_dir, path) = create_test_repo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&path)
+    common::owned_sniff_command()
+        .ambient_context(&path)
         .arg("filesystem")
         .assert()
         .success()
@@ -1534,8 +1812,8 @@ fn test_filesystem_subcommand_text_output() {
 #[test]
 fn test_filesystem_subcommand_json_output() {
     let (_dir, path) = create_test_repo();
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&path)
+    let output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["filesystem", "--json"])
         .assert()
         .success()
@@ -1566,7 +1844,7 @@ fn test_filesystem_subcommand_json_output() {
 
 #[test]
 fn test_cpu_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("cpu")
         .assert()
         .success()
@@ -1577,7 +1855,7 @@ fn test_cpu_subcommand_text_output() {
 
 #[test]
 fn test_cpu_subcommand_json_output() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["cpu", "--json"])
         .assert()
         .success()
@@ -1603,7 +1881,7 @@ fn test_cpu_subcommand_json_output() {
 
 #[test]
 fn test_gpu_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("gpu")
         .assert()
         .success()
@@ -1612,7 +1890,7 @@ fn test_gpu_subcommand_text_output() {
 
 #[test]
 fn test_gpu_subcommand_json_output() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["gpu", "--json"])
         .assert()
         .success()
@@ -1632,7 +1910,7 @@ fn test_gpu_subcommand_json_output() {
 
 #[test]
 fn test_memory_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("memory")
         .assert()
         .success()
@@ -1643,7 +1921,7 @@ fn test_memory_subcommand_text_output() {
 
 #[test]
 fn test_memory_subcommand_json_output() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["memory", "--json"])
         .assert()
         .success()
@@ -1678,7 +1956,7 @@ fn test_memory_subcommand_json_output() {
 
 #[test]
 fn test_storage_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("storage")
         .assert()
         .success()
@@ -1687,7 +1965,7 @@ fn test_storage_subcommand_text_output() {
 
 #[test]
 fn test_storage_subcommand_json_output() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["storage", "--json"])
         .assert()
         .success()
@@ -1717,8 +1995,8 @@ fn test_storage_subcommand_json_output() {
 #[test]
 fn test_git_status_subcommand_text_output() {
     let (_dir, path) = create_test_repo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&path)
+    common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "git-status"])
         .assert()
         .success()
@@ -1731,8 +2009,8 @@ fn test_git_status_subcommand_text_output() {
 fn test_git_status_subcommand_with_history_flag() {
     // Test that the --history flag is accepted
     let (_dir, path) = create_test_repo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&path)
+    common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "git-status", "--history", "3"])
         .assert()
         .success()
@@ -1742,8 +2020,8 @@ fn test_git_status_subcommand_with_history_flag() {
 #[test]
 fn test_git_status_subcommand_compact_output() {
     let (_dir, path) = create_test_repo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&path)
+    common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "git-status", "--compact"])
         .assert()
         .success()
@@ -1754,8 +2032,8 @@ fn test_git_status_subcommand_compact_output() {
 #[test]
 fn test_git_status_subcommand_json_output() {
     let (_dir, path) = create_test_repo();
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&path)
+    let output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "git-status", "--json"])
         .assert()
         .success()
@@ -1806,14 +2084,19 @@ fn test_git_status_subcommand_json_output() {
 
 #[test]
 fn test_repo_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap().arg("repo").assert().success();
+    let (_dir, path) = create_test_repo();
+    common::owned_sniff_command()
+        .ambient_context(&path)
+        .arg("repo")
+        .assert()
+        .success();
 }
 
 #[test]
 fn test_repo_subcommand_json_output() {
     let (_dir, path) = create_test_repo();
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&path)
+    let output = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "--json"])
         .assert()
         .success()
@@ -1837,7 +2120,7 @@ fn test_repo_subcommand_json_output() {
 
 #[test]
 fn test_language_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "language", "--breakdown"])
         .assert()
         .success();
@@ -1845,7 +2128,7 @@ fn test_language_subcommand_text_output() {
 
 #[test]
 fn test_language_subcommand_json_output() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["repo", "language", "--breakdown", "--json"])
         .assert()
         .success()
@@ -1883,7 +2166,7 @@ fn test_repo_language_text_returns_rust_for_rust_repo() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args(["--base", path.to_str().unwrap(), "repo", "language"])
         .assert()
         .success();
@@ -1897,7 +2180,7 @@ fn test_repo_language_json_returns_rust_for_rust_repo() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -1926,7 +2209,7 @@ fn test_repo_language_base_flag_all_three_placements() {
     let base = path.to_str().unwrap();
 
     // Placement A: `sniff --base <repo> repo language` (global, before subcommand)
-    let a = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let a = common::owned_sniff_command()
         .args(["--base", base, "repo", "language"])
         .assert()
         .success()
@@ -1940,7 +2223,7 @@ fn test_repo_language_base_flag_all_three_placements() {
     );
 
     // Placement B: `sniff repo --base <repo> language` (between repo and leaf)
-    let b = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let b = common::owned_sniff_command()
         .args(["repo", "--base", base, "language"])
         .assert()
         .success()
@@ -1954,7 +2237,7 @@ fn test_repo_language_base_flag_all_three_placements() {
     );
 
     // Placement C: `sniff repo language --base <repo>` (after the leaf subcommand)
-    let c = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let c = common::owned_sniff_command()
         .args(["repo", "language", "--base", base])
         .assert()
         .success()
@@ -1974,7 +2257,7 @@ fn test_repo_language_text_empty_repo_exits_one_with_no_stdout() {
     // and no source files — primary language detection returns None.
     let (_dir, path) = create_test_repo();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args(["--base", path.to_str().unwrap(), "repo", "language"])
         .assert()
         .failure() // exit 1 by Phase 1 contract
@@ -1991,7 +2274,7 @@ fn test_repo_language_text_empty_repo_exits_one_with_no_stdout() {
 fn test_repo_language_json_empty_repo_emits_null_and_exits_one() {
     let (_dir, path) = create_test_repo();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -2012,7 +2295,7 @@ fn test_repo_language_json_empty_repo_emits_null_and_exits_one() {
 
 #[test]
 fn test_repo_help_lists_language_subcommand() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "--help"])
         .assert()
         .success()
@@ -2029,11 +2312,9 @@ fn test_software_subcommand_text_output() {
     // In a non-TTY context, terminal width defaults to 80 columns which may be
     // too narrow for the programs table. Accept either the rendered table
     // or the graceful width error message.
-    run_isolated_software(&["software"])
-        .success()
-        .stdout(
-            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
-        );
+    run_isolated_software(&["software"]).success().stdout(
+        predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
+    );
 }
 
 #[test]
@@ -2061,7 +2342,7 @@ fn test_software_subcommand_json_output() {
 
 #[test]
 fn test_software_subcommand_rejects_json_format_flag() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "--json-format", "full"])
         .assert()
         .failure()
@@ -2072,7 +2353,7 @@ fn test_software_subcommand_rejects_json_format_flag() {
 
 #[test]
 fn test_software_editors_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "editors"])
         .assert()
         .success()
@@ -2083,7 +2364,7 @@ fn test_software_editors_subcommand_text_output() {
 
 #[test]
 fn test_software_editors_subcommand_json_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "editors", "--json"])
         .assert()
         .success();
@@ -2091,7 +2372,7 @@ fn test_software_editors_subcommand_json_output() {
 
 #[test]
 fn test_software_utilities_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "utilities"])
         .assert()
         .success()
@@ -2102,7 +2383,7 @@ fn test_software_utilities_subcommand_text_output() {
 
 #[test]
 fn test_software_utilities_subcommand_json_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "utilities", "--json"])
         .assert()
         .success();
@@ -2110,7 +2391,7 @@ fn test_software_utilities_subcommand_json_output() {
 
 #[test]
 fn test_software_language_package_managers_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "language-package-managers"])
         .assert()
         .success()
@@ -2121,7 +2402,7 @@ fn test_software_language_package_managers_subcommand_text_output() {
 
 #[test]
 fn test_software_language_package_managers_subcommand_json_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "language-package-managers", "--json"])
         .assert()
         .success();
@@ -2129,7 +2410,7 @@ fn test_software_language_package_managers_subcommand_json_output() {
 
 #[test]
 fn test_software_os_package_managers_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "os-package-managers"])
         .assert()
         .success()
@@ -2139,7 +2420,7 @@ fn test_software_os_package_managers_subcommand_text_output() {
 
 #[test]
 fn test_software_os_package_managers_subcommand_json_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "os-package-managers", "--json"])
         .assert()
         .success();
@@ -2147,7 +2428,7 @@ fn test_software_os_package_managers_subcommand_json_output() {
 
 #[test]
 fn test_software_tts_clients_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "tts-clients"])
         .assert()
         .success()
@@ -2158,7 +2439,7 @@ fn test_software_tts_clients_subcommand_text_output() {
 
 #[test]
 fn test_software_tts_clients_subcommand_json_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "tts-clients", "--json"])
         .assert()
         .success();
@@ -2166,7 +2447,7 @@ fn test_software_tts_clients_subcommand_json_output() {
 
 #[test]
 fn test_software_terminal_apps_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "terminal-apps"])
         .assert()
         .success()
@@ -2177,7 +2458,7 @@ fn test_software_terminal_apps_subcommand_text_output() {
 
 #[test]
 fn test_software_terminal_apps_subcommand_json_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "terminal-apps", "--json"])
         .assert()
         .success();
@@ -2185,7 +2466,7 @@ fn test_software_terminal_apps_subcommand_json_output() {
 
 #[test]
 fn test_software_audio_players_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "audio-players"])
         .assert()
         .success()
@@ -2196,7 +2477,7 @@ fn test_software_audio_players_subcommand_text_output() {
 
 #[test]
 fn test_software_audio_players_subcommand_json_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "audio-players", "--json"])
         .assert()
         .success();
@@ -2204,7 +2485,7 @@ fn test_software_audio_players_subcommand_json_output() {
 
 #[test]
 fn test_software_agents_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "agents"])
         .assert()
         .success()
@@ -2215,7 +2496,7 @@ fn test_software_agents_subcommand_text_output() {
 
 #[test]
 fn test_software_agents_subcommand_json_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "agents", "--json"])
         .assert()
         .success();
@@ -2223,14 +2504,12 @@ fn test_software_agents_subcommand_json_output() {
 
 #[test]
 fn test_software_notification_helpers_subcommand_text_output() {
-    run_isolated_software(&["software", "notification-helpers"])
-        .success();
+    run_isolated_software(&["software", "notification-helpers"]).success();
 }
 
 #[test]
 fn test_software_notification_helpers_subcommand_json_output() {
-    run_isolated_software(&["software", "notification-helpers", "--json"])
-        .success();
+    run_isolated_software(&["software", "notification-helpers", "--json"]).success();
 }
 
 // ============================================================================
@@ -2360,7 +2639,7 @@ fn create_cargo_workspace_repo() -> (tempfile::TempDir, PathBuf) {
 fn test_repo_test_runner_json_reports_package_usage() {
     let (_dir, path) = create_cargo_workspace_repo();
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -2384,14 +2663,17 @@ fn test_repo_test_runner_json_reports_package_usage() {
     assert_eq!(entry["source"]["kind"], "ecosystem_default");
     // Enriched metadata: the run command and documentation website.
     assert_eq!(entry["binary"], "cargo test");
-    assert_eq!(entry["website"], "https://doc.rust-lang.org/cargo/commands/cargo-test.html");
+    assert_eq!(
+        entry["website"],
+        "https://doc.rust-lang.org/cargo/commands/cargo-test.html"
+    );
 }
 
 #[test]
 fn test_repo_test_runner_list_reports_library_values() {
     let (_dir, path) = create_cargo_workspace_repo();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -2409,19 +2691,19 @@ fn test_repo_test_runner_output_modes() {
     let (_dir, path) = create_cargo_workspace_repo();
     let base = path.to_str().unwrap();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--base", base, "repo", "test-runner", "--csv"])
         .assert()
         .success()
         .stdout("cargo test\n");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--base", base, "repo", "test-runner", "--md"])
         .assert()
         .success()
         .stdout("- cargo test\n");
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["--base", base, "repo", "test-runner", "--plain"])
         .assert()
         .success()
@@ -2444,8 +2726,16 @@ fn test_repo_test_runner_verbose_machine_formats_keep_evidence() {
     std::fs::write(path.join(".config/nextest.toml"), "[profile.default]\n").unwrap();
     let base = path.to_str().unwrap();
 
-    let list = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["--base", base, "repo", "test-runner", "-v", "--list", "--plain"])
+    let list = common::owned_sniff_command()
+        .args([
+            "--base",
+            base,
+            "repo",
+            "test-runner",
+            "-v",
+            "--list",
+            "--plain",
+        ])
         .assert()
         .success()
         .get_output()
@@ -2458,8 +2748,16 @@ fn test_repo_test_runner_verbose_machine_formats_keep_evidence() {
         "--list -v should keep the evidence, got {list:?}"
     );
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["--base", base, "repo", "test-runner", "-v", "--md", "--plain"])
+    common::owned_sniff_command()
+        .args([
+            "--base",
+            base,
+            "repo",
+            "test-runner",
+            "-v",
+            "--md",
+            "--plain",
+        ])
         .assert()
         .success()
         .stdout(
@@ -2468,7 +2766,7 @@ fn test_repo_test_runner_verbose_machine_formats_keep_evidence() {
         );
 
     // Without -v the machine formats stay names-only.
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--base", base, "repo", "test-runner", "--list"])
         .assert()
         .success()
@@ -2481,13 +2779,9 @@ fn test_repo_test_runner_detects_workspace_root_nextest() {
     // no nextest marker of its own. The repo aggregate must still surface it.
     let (_dir, path) = create_cargo_workspace_repo();
     std::fs::create_dir_all(path.join(".config")).unwrap();
-    std::fs::write(
-        path.join(".config/nextest.toml"),
-        "[profile.default]\n",
-    )
-    .unwrap();
+    std::fs::write(path.join(".config/nextest.toml"), "[profile.default]\n").unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -2507,7 +2801,11 @@ fn test_repo_test_runner_detects_workspace_root_nextest() {
         .expect("test_runners is always an array");
     // The configured runner supersedes the cargo test ecosystem default, so the
     // single member crate collapses to nextest alone.
-    assert_eq!(runners.len(), 1, "configured nextest should be the lone answer, got {json}");
+    assert_eq!(
+        runners.len(),
+        1,
+        "configured nextest should be the lone answer, got {json}"
+    );
     let entry = &runners[0];
     assert_eq!(entry["runner"], "Nextest");
     assert_eq!(entry["source"]["kind"], "config");
@@ -2515,8 +2813,14 @@ fn test_repo_test_runner_detects_workspace_root_nextest() {
     assert_eq!(entry["binary"], "cargo nextest run");
 
     // Default text output is the single answer with no cargo test noise.
-    let text = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["--base", path.to_str().unwrap(), "repo", "test-runner", "--plain"])
+    let text = common::owned_sniff_command()
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "test-runner",
+            "--plain",
+        ])
         .assert()
         .success()
         .get_output()
@@ -2534,7 +2838,7 @@ fn test_repo_test_runner_detects_workspace_root_nextest() {
 fn test_repo_package_manager_json_uses_shared_collapse() {
     let (_dir, path) = create_cargo_workspace_repo();
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -2567,8 +2871,14 @@ fn test_repo_package_manager_json_uses_shared_collapse() {
 fn test_repo_version_json_reports_array_shape() {
     let (_dir, path) = create_cli_monorepo();
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["--base", path.to_str().unwrap(), "repo", "version", "--json"])
+    let output = common::owned_sniff_command()
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--json",
+        ])
         .assert()
         .success()
         .get_output()
@@ -2591,17 +2901,25 @@ fn test_repo_version_json_reports_array_shape() {
     assert!(!sources.is_empty(), "at least one source, got {entry:?}");
     assert_eq!(sources[0]["manifest"], "Cargo.toml");
     assert_eq!(sources[0]["inherited"], false);
-    assert!(sources[0]["href"]
-        .as_str()
-        .expect("href is a string")
-        .starts_with("file://"));
+    assert!(
+        sources[0]["href"]
+            .as_str()
+            .expect("href is a string")
+            .starts_with("file://")
+    );
 }
 
 #[test]
 fn test_repo_version_text_output_default() {
     let (_dir, path) = create_cli_monorepo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["--base", path.to_str().unwrap(), "repo", "version", "--plain"])
+    common::owned_sniff_command()
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--plain",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("0.1.0"));
@@ -2610,7 +2928,7 @@ fn test_repo_version_text_output_default() {
 #[test]
 fn test_repo_version_csv_output_is_names_only() {
     let (_dir, path) = create_cli_monorepo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--base", path.to_str().unwrap(), "repo", "version", "--csv"])
         .assert()
         .success()
@@ -2620,7 +2938,7 @@ fn test_repo_version_csv_output_is_names_only() {
 #[test]
 fn test_repo_version_md_output_uses_dash_prefix() {
     let (_dir, path) = create_cli_monorepo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--base", path.to_str().unwrap(), "repo", "version", "--md"])
         .assert()
         .success()
@@ -2630,8 +2948,14 @@ fn test_repo_version_md_output_uses_dash_prefix() {
 #[test]
 fn test_repo_version_list_output_is_names_only() {
     let (_dir, path) = create_cli_monorepo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["--base", path.to_str().unwrap(), "repo", "version", "--list"])
+    common::owned_sniff_command()
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--list",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("0.1.0"));
@@ -2643,8 +2967,14 @@ fn test_repo_version_list_output_is_names_only() {
 fn test_repo_version_monorepo_root_reports_collapsed_versions() {
     let (_dir, path) = create_cli_monorepo();
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["--base", path.to_str().unwrap(), "repo", "version", "--json"])
+    let output = common::owned_sniff_command()
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--json",
+        ])
         .assert()
         .success()
         .get_output()
@@ -2654,9 +2984,7 @@ fn test_repo_version_monorepo_root_reports_collapsed_versions() {
     let versions = json["versions"].as_array().expect("versions array");
     assert_eq!(versions.len(), 1, "uniform collapse, got {json}");
     assert_eq!(versions[0]["version"], "0.1.0");
-    let packages = versions[0]["packages"]
-        .as_array()
-        .expect("packages array");
+    let packages = versions[0]["packages"].as_array().expect("packages array");
     let names: Vec<&str> = packages.iter().map(|p| p.as_str().unwrap()).collect();
     assert!(names.contains(&"pkg-a"));
     assert!(names.contains(&"pkg-b"));
@@ -2671,7 +2999,7 @@ fn test_repo_version_monorepo_root_reports_collapsed_versions() {
 fn test_repo_version_all_override_returns_repo_scope() {
     let (_dir, path) = create_cli_monorepo();
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.join("pkg-a/lib").to_str().unwrap(),
@@ -2706,7 +3034,7 @@ fn test_repo_version_all_override_returns_repo_scope() {
 fn test_repo_version_package_override_scopes_to_single_package() {
     let (_dir, path) = create_cli_monorepo();
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -2735,7 +3063,7 @@ fn test_repo_version_package_override_scopes_to_single_package() {
 fn test_repo_version_package_area_override_scopes_to_single_area() {
     let (_dir, path) = create_cli_monorepo();
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -2764,7 +3092,7 @@ fn test_repo_version_package_area_override_scopes_to_single_area() {
 fn test_repo_version_unknown_package_errors() {
     let (_dir, path) = create_cli_monorepo();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -2788,7 +3116,7 @@ fn test_repo_version_unknown_package_errors() {
 fn test_repo_version_unknown_package_area_errors() {
     let (_dir, path) = create_cli_monorepo();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -2814,7 +3142,7 @@ fn test_repo_version_unknown_package_area_errors() {
 fn test_repo_version_single_package_unknown_package_errors() {
     let (_dir, path) = create_single_package_repo();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -2839,7 +3167,7 @@ fn test_repo_version_single_package_unknown_package_errors() {
 fn test_repo_version_single_package_unknown_area_errors() {
     let (_dir, path) = create_single_package_repo();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -2864,7 +3192,7 @@ fn test_repo_version_single_package_unknown_area_errors() {
 fn test_repo_version_single_package_known_package_resolves() {
     let (_dir, path) = create_single_package_repo();
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -2908,8 +3236,14 @@ edition = "2024"
     )
     .unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["--base", path.to_str().unwrap(), "repo", "version", "--json"])
+    let output = common::owned_sniff_command()
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--json",
+        ])
         .assert()
         .success()
         .get_output()
@@ -2917,7 +3251,11 @@ edition = "2024"
 
     let json: Value = serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
     let versions = json["versions"].as_array().expect("versions array");
-    assert_eq!(versions.len(), 2, "variance should not collapse, got {json}");
+    assert_eq!(
+        versions.len(),
+        2,
+        "variance should not collapse, got {json}"
+    );
     let mut values: Vec<&str> = versions
         .iter()
         .map(|v| v["version"].as_str().unwrap())
@@ -2925,8 +3263,14 @@ edition = "2024"
     values.sort();
     assert_eq!(values, vec!["0.1.0", "2.0.0"]);
 
-    let list = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["--base", path.to_str().unwrap(), "repo", "version", "--list"])
+    let list = common::owned_sniff_command()
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--list",
+        ])
         .assert()
         .success()
         .get_output()
@@ -2941,7 +3285,7 @@ edition = "2024"
 fn test_repo_version_empty_exits_one_with_no_stdout() {
     let (_dir, path) = create_test_repo();
     // No manifest → nothing to read.
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args(["--base", path.to_str().unwrap(), "repo", "version"])
         .assert()
         .failure();
@@ -2957,7 +3301,7 @@ fn test_repo_version_empty_exits_one_with_no_stdout() {
 fn test_repo_version_empty_with_no_error_exits_zero() {
     let (_dir, path) = create_test_repo();
 
-    let json = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let json = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -2974,7 +3318,7 @@ fn test_repo_version_empty_with_no_error_exits_zero() {
     let json: Value = serde_json::from_slice(&json).expect("stdout is valid JSON");
     assert_eq!(json["versions"], serde_json::json!([]));
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -3030,7 +3374,7 @@ edition = "2024"
     .unwrap();
     std::fs::write(pkg_b.join("src/lib.rs"), "pub fn b() {}").unwrap();
 
-    let json = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let json = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -3065,7 +3409,7 @@ edition = "2024"
 
     // Verbose text surfaces `[workspace.package]` rather than a misleading
     // member-crate path.
-    let text = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let text = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -3122,7 +3466,7 @@ edition.workspace = true
     .unwrap();
     std::fs::write(member.join("src/lib.rs"), "pub fn m() {}").unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["--base", member.to_str().unwrap(), "repo", "--json"])
         .assert()
         .success()
@@ -3141,14 +3485,20 @@ edition.workspace = true
 #[test]
 fn test_repo_version_empty_json_emits_array_shape() {
     let (_dir, path) = create_test_repo();
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["--base", path.to_str().unwrap(), "repo", "version", "--json"])
+    let output = common::owned_sniff_command()
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--json",
+        ])
         .assert()
         .failure()
         .get_output()
         .clone();
-    let json: Value = serde_json::from_slice(&output.stdout)
-        .expect("stdout is valid JSON even on empty result");
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout is valid JSON even on empty result");
     assert_eq!(json["versions"], serde_json::json!([]));
 }
 
@@ -3161,7 +3511,7 @@ fn test_repo_package_manager_variant_list_uses_unique_values() {
     )
     .unwrap();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -3180,19 +3530,19 @@ fn test_repo_package_manager_output_modes() {
     let (_dir, path) = create_cargo_workspace_repo();
     let base = path.to_str().unwrap();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--base", base, "repo", "package-manager", "--csv"])
         .assert()
         .success()
         .stdout("cargo\n");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--base", base, "repo", "package-manager", "--md"])
         .assert()
         .success()
         .stdout("- cargo\n");
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["--base", base, "repo", "package-manager", "--plain"])
         .assert()
         .success()
@@ -3211,7 +3561,7 @@ fn test_repo_package_manager_output_modes() {
 
 #[test]
 fn test_old_programs_command_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("programs")
         .assert()
         .failure()
@@ -3220,7 +3570,7 @@ fn test_old_programs_command_fails() {
 
 #[test]
 fn test_old_editors_command_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("editors")
         .assert()
         .failure()
@@ -3229,7 +3579,7 @@ fn test_old_editors_command_fails() {
 
 #[test]
 fn test_old_utilities_command_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("utilities")
         .assert()
         .failure()
@@ -3238,7 +3588,7 @@ fn test_old_utilities_command_fails() {
 
 #[test]
 fn test_old_language_package_managers_command_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("language-package-managers")
         .assert()
         .failure()
@@ -3247,7 +3597,7 @@ fn test_old_language_package_managers_command_fails() {
 
 #[test]
 fn test_old_os_package_managers_command_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("os-package-managers")
         .assert()
         .failure()
@@ -3256,7 +3606,7 @@ fn test_old_os_package_managers_command_fails() {
 
 #[test]
 fn test_old_tts_clients_command_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("tts-clients")
         .assert()
         .failure()
@@ -3265,7 +3615,7 @@ fn test_old_tts_clients_command_fails() {
 
 #[test]
 fn test_old_terminal_apps_command_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("terminal-apps")
         .assert()
         .failure()
@@ -3274,7 +3624,7 @@ fn test_old_terminal_apps_command_fails() {
 
 #[test]
 fn test_old_audio_players_command_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("audio-players")
         .assert()
         .failure()
@@ -3283,7 +3633,7 @@ fn test_old_audio_players_command_fails() {
 
 #[test]
 fn test_old_agents_command_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("agents")
         .assert()
         .failure()
@@ -3292,7 +3642,7 @@ fn test_old_agents_command_fails() {
 
 #[test]
 fn test_old_notification_helpers_command_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("notification-helpers")
         .assert()
         .failure()
@@ -3305,7 +3655,7 @@ fn test_old_notification_helpers_command_fails() {
 
 #[test]
 fn test_services_subcommand_text_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("services")
         .assert()
         .success()
@@ -3315,7 +3665,7 @@ fn test_services_subcommand_text_output() {
 
 #[test]
 fn test_services_subcommand_json_output() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["services", "--json"])
         .assert()
         .success()
@@ -3325,7 +3675,7 @@ fn test_services_subcommand_json_output() {
 
 #[test]
 fn test_services_state_all() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["services", "--state", "all"])
         .assert()
         .success()
@@ -3334,7 +3684,7 @@ fn test_services_state_all() {
 
 #[test]
 fn test_services_state_running() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["services", "--state", "running"])
         .assert()
         .success()
@@ -3343,7 +3693,7 @@ fn test_services_state_running() {
 
 #[test]
 fn test_services_state_stopped() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["services", "--state", "stopped"])
         .assert()
         .success()
@@ -3357,7 +3707,7 @@ fn test_services_state_stopped() {
 #[test]
 fn test_enrichment_flags_in_help() {
     // Top-level help should mention --plain and repo, but not --deep
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("--help")
         .assert()
         .success()
@@ -3368,7 +3718,7 @@ fn test_enrichment_flags_in_help() {
 
 #[test]
 fn test_filesystem_help_mentions_scoped_flags() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["filesystem", "--help"])
         .assert()
         .success()
@@ -3378,7 +3728,7 @@ fn test_filesystem_help_mentions_scoped_flags() {
 
 #[test]
 fn test_git_status_help_mentions_refresh_remotes() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "git-status", "--help"])
         .assert()
         .success()
@@ -3388,7 +3738,7 @@ fn test_git_status_help_mentions_refresh_remotes() {
 
 #[test]
 fn test_repo_help_mentions_latest_versions() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "--help"])
         .assert()
         .success()
@@ -3402,8 +3752,8 @@ fn test_git_status_json_is_git_info() {
     // blob. The top-level `repo_root` field is unique to `GitInfo`'s shape
     // (RepoInfo serializes its root field as `root`).
     let (_dir, path) = create_test_repo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&path)
+    common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "git-status", "--json"])
         .assert()
         .success()
@@ -3414,7 +3764,7 @@ fn test_git_status_json_is_git_info() {
 
 #[test]
 fn test_repo_package_dependencies_help_mentions_ui() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "package-dependencies", "--help"])
         .assert()
         .success()
@@ -3423,7 +3773,7 @@ fn test_repo_package_dependencies_help_mentions_ui() {
 
 #[test]
 fn test_repo_deps_is_not_an_alias() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "deps"])
         .assert()
         .failure()
@@ -3435,8 +3785,14 @@ fn test_repo_branches_json_shape() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["--base", path.to_str().unwrap(), "repo", "branches", "--json"])
+    let output = common::owned_sniff_command()
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "branches",
+            "--json",
+        ])
         .assert()
         .success()
         .get_output()
@@ -3465,7 +3821,10 @@ fn test_repo_branches_json_shape() {
         "ahead",
         "behind",
     ] {
-        assert!(obj.contains_key(key), "branch is missing key `{key}`: {json}");
+        assert!(
+            obj.contains_key(key),
+            "branch is missing key `{key}`: {json}"
+        );
     }
 
     assert!(current["name"].is_string(), "branch has name: {json}");
@@ -3495,7 +3854,7 @@ fn test_repo_branches_json_shape() {
 fn repo_json_at(path: &Path, args: &[&str]) -> Value {
     let mut full = vec!["--base", path.to_str().unwrap()];
     full.extend_from_slice(args);
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(&full)
         .assert()
         .success()
@@ -3642,7 +4001,7 @@ fn test_repo_dependencies_filters_dev_dependencies() {
     )
     .unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -3666,7 +4025,11 @@ fn test_repo_dependencies_filters_dev_dependencies() {
         .as_array()
         .expect("dependencies key is an array");
 
-    assert_eq!(deps.len(), 1, "only dev dependencies should be emitted: {json}");
+    assert_eq!(
+        deps.len(),
+        1,
+        "only dev dependencies should be emitted: {json}"
+    );
     assert_eq!(deps[0]["name"], "insta");
     assert_eq!(deps[0]["family"], "dev_dependencies");
     assert_eq!(deps[0]["package"], "app");
@@ -3703,7 +4066,7 @@ fn test_repo_aggregate_dependencies_are_cwd_invariant() {
     std::fs::write(path.join("crates/app-b/src/lib.rs"), "pub fn b() {}\n").unwrap();
 
     let aggregate_deps = |base: &Path| -> Value {
-        let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+        let output = common::owned_sniff_command()
             .args(["--base", base.to_str().unwrap(), "repo", "--json"])
             .assert()
             .success()
@@ -3738,7 +4101,7 @@ fn test_repo_aggregate_dependencies_are_cwd_invariant() {
 #[test]
 fn test_invalid_refresh_remotes_on_remote_subcommand_fails() {
     // --refresh-remotes is only valid on git-status, not on remote
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "remote", "origin", "--refresh-remotes"])
         .assert()
         .failure()
@@ -3754,17 +4117,14 @@ fn test_verbose_with_software_adds_columns() {
     // In a non-TTY context, terminal width defaults to 80 columns which may be
     // too narrow for the verbose programs table. Accept either the rendered table
     // or the graceful width error message.
-    run_isolated_software(&["software", "-v"])
-        .success()
-        .stdout(
-            predicate::str::contains("Binary")
-                .or(predicate::str::contains("could not be rendered")),
-        );
+    run_isolated_software(&["software", "-v"]).success().stdout(
+        predicate::str::contains("Binary").or(predicate::str::contains("could not be rendered")),
+    );
 }
 
 #[test]
 fn test_verbose_with_hardware_shows_details() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["hardware", "-v"])
         .assert()
         .success()
@@ -3777,7 +4137,7 @@ fn test_verbose_with_hardware_shows_details() {
 
 #[test]
 fn test_invalid_subcommand_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("invalid-subcommand")
         .assert()
         .failure();
@@ -3786,7 +4146,10 @@ fn test_invalid_subcommand_fails() {
 #[test]
 fn test_old_flag_syntax_fails() {
     // Old --hardware flag should not work (not a valid subcommand or flag)
-    assert_cmd::Command::cargo_bin("sniff").unwrap().arg("--hardware").assert().failure();
+    common::owned_sniff_command()
+        .arg("--hardware")
+        .assert()
+        .failure();
 }
 
 // ============================================================================
@@ -3796,7 +4159,7 @@ fn test_old_flag_syntax_fails() {
 #[test]
 fn test_repo_remote_help() {
     // Remote subcommand is documented via `sniff repo --help`
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "--help"])
         .assert()
         .success()
@@ -3806,7 +4169,7 @@ fn test_repo_remote_help() {
 #[test]
 fn test_help_mentions_remote_via_repo() {
     // Remote inspection is now under `sniff repo --help`
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "--help"])
         .assert()
         .success()
@@ -3820,7 +4183,7 @@ fn test_help_mentions_remote_via_repo() {
 
 #[test]
 fn test_software_editors_shows_table_without_install() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "editors"])
         .assert()
         .success()
@@ -3831,7 +4194,7 @@ fn test_software_editors_shows_table_without_install() {
 
 #[test]
 fn test_software_editors_install_invalid_name_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "editors", "install", "nonexistent-editor-xyz"])
         .assert()
         .failure()
@@ -3841,7 +4204,7 @@ fn test_software_editors_install_invalid_name_fails() {
 
 #[test]
 fn test_software_utilities_install_invalid_name_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "utilities", "install", "nonexistent-util-xyz"])
         .assert()
         .failure()
@@ -3851,7 +4214,7 @@ fn test_software_utilities_install_invalid_name_fails() {
 
 #[test]
 fn test_software_install_invalid_name_fails() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "install", "nonexistent-program-xyz"])
         .assert()
         .failure()
@@ -3860,7 +4223,7 @@ fn test_software_install_invalid_name_fails() {
 
 #[test]
 fn test_software_editors_install_help_works() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "editors", "install", "--help"])
         .assert()
         .success()
@@ -3870,7 +4233,7 @@ fn test_software_editors_install_help_works() {
 #[test]
 fn test_help_mentions_software_install() {
     // Top-level help mentions software editors with install support
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .arg("--help")
         .assert()
         .success()
@@ -3880,7 +4243,7 @@ fn test_help_mentions_software_install() {
 #[test]
 fn test_software_editors_json_still_works_with_install_subcommand() {
     // --json flag should still work for listing (no install action)
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["software", "editors", "--json"])
         .assert()
         .success();
@@ -3892,7 +4255,7 @@ fn test_software_editors_json_still_works_with_install_subcommand() {
 
 #[test]
 fn test_plain_flag_strips_escape_codes() {
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args(["os", "--plain"])
         .output()
         .expect("failed to run sniff os --plain");
@@ -3908,7 +4271,7 @@ fn test_plain_flag_strips_escape_codes() {
 #[test]
 fn test_plain_with_json_ignores_plain() {
     // --plain --json should produce normal JSON (plain is irrelevant for JSON)
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["os", "--plain", "--json"])
         .assert()
         .success()
@@ -3923,8 +4286,8 @@ fn test_plain_with_json_ignores_plain() {
 #[test]
 fn test_repo_git_status_subcommand() {
     let (_dir, path) = create_test_repo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&path)
+    common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "git-status"])
         .assert()
         .success();
@@ -3932,7 +4295,7 @@ fn test_repo_git_status_subcommand() {
 
 #[test]
 fn test_repo_help_shows_examples() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "--help"])
         .assert()
         .success()
@@ -4028,7 +4391,7 @@ fn test_repo_has_merge_conflict_surfaces_corrupt_index() {
     test_commit_file(&path, "src/main.rs", "fn main() {}");
     corrupt_index(&path);
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4056,10 +4419,57 @@ fn test_repo_hash_surfaces_corrupt_commit_object() {
         .to_string();
     corrupt_loose_object(&path, &sha);
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--base", path.to_str().unwrap(), "repo", "hash", &sha])
         .assert()
         .failure();
+}
+
+/// `repo hash` and `repo git-status` link a commit only when a local
+/// remote-tracking ref contains it. The unpushed tip carries no remote-tracking
+/// decoration and must not be linked, and neither command may fetch.
+#[test]
+fn test_repo_hash_and_git_status_link_only_remote_contained_commits() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "pushed.txt", "pushed");
+    let repo = git2::Repository::open(&path).unwrap();
+    let pushed_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+    repo.remote("origin", "git@github.com:o/r.git").unwrap();
+    repo.reference("refs/remotes/origin/main", pushed_oid, true, "test remote tip")
+        .unwrap();
+    test_commit_file(&path, "unpushed.txt", "unpushed");
+    let unpushed = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    let pushed = pushed_oid.to_string();
+    let pushed_url = format!("https://github.com/o/r/commit/{pushed}");
+
+    let stdout = |args: &[&str]| {
+        let output = common::owned_sniff_command()
+            .args(["--base", path.to_str().unwrap()])
+            .args(args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        String::from_utf8(output).unwrap()
+    };
+
+    assert!(stdout(&["repo", "hash", &pushed]).contains(&pushed_url));
+    assert!(!stdout(&["repo", "hash", &unpushed]).contains("github.com/o/r/commit"));
+
+    // Rendered links wrap at the terminal width, so match the short-hash label
+    // and the start of its link target rather than the full URL.
+    let status = stdout(&["repo", "git-status"]);
+    let linked = |sha: &str| format!("[{}](https://github.com/o/r/commit/", &sha[..7]);
+    assert!(status.contains(&linked(&pushed)), "{status}");
+    assert!(!status.contains(&linked(&unpushed)), "{status}");
+    assert!(status.contains(&format!("[{}]", &unpushed[..7])), "{status}");
 }
 
 /// Corrupt the HEAD commit object of a freshly-built test repo and return its
@@ -4086,7 +4496,7 @@ fn repo_with_corrupt_head() -> (tempfile::TempDir, PathBuf) {
 fn test_repo_git_status_surfaces_corrupt_history() {
     let (_dir, path) = repo_with_corrupt_head();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--base", path.to_str().unwrap(), "repo", "git-status"])
         .assert()
         .failure();
@@ -4098,7 +4508,7 @@ fn test_repo_git_status_surfaces_corrupt_history() {
 fn test_repo_recent_commits_surfaces_corrupt_history() {
     let (_dir, path) = repo_with_corrupt_head();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--base", path.to_str().unwrap(), "repo", "recent-commits"])
         .assert()
         .failure();
@@ -4110,7 +4520,7 @@ fn test_repo_recent_commits_surfaces_corrupt_history() {
 fn test_repo_source_code_changes_surfaces_corrupt_history() {
     let (_dir, path) = repo_with_corrupt_head();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4145,7 +4555,7 @@ fn test_repo_git_status_reports_packed_checkout_branch() {
     let (_dir, path) = create_test_repo();
     let branch = pack_and_prune_head_branch(&path);
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4180,7 +4590,7 @@ fn test_repo_git_status_branch_surfaces_malformed_remote_ref() {
     std::fs::create_dir_all(remote_ref.parent().unwrap()).unwrap();
     std::fs::write(&remote_ref, b"not a valid ref target\n").unwrap();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4201,7 +4611,7 @@ fn test_repo_git_status_branch_absent_short_hex_succeeds() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4221,7 +4631,7 @@ fn test_repo_git_status_branch_absent_valid_length_hex_succeeds() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4240,7 +4650,7 @@ fn test_repo_git_status_branch_absent_ordinary_name_succeeds() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4274,7 +4684,7 @@ fn test_repo_dirty_source_code_returns_source_files() {
     // Create a dirty source file
     std::fs::write(path.join("src/main.rs"), "fn main() { dirty }").unwrap();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4298,7 +4708,7 @@ fn test_repo_staged_source_code_returns_staged_only() {
     // Modify b.rs without staging
     std::fs::write(path.join("src/b.rs"), "b modified").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4328,7 +4738,7 @@ fn test_repo_staged_files_uses_new_path() {
     test_stage_file(&path, "docs/guide.md", "# Updated Guide");
 
     // staged-files should now go through the new path (all files, not just source)
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4350,7 +4760,7 @@ fn test_repo_staged_files_json_uses_new_shape() {
     test_commit_file(&path, "src/main.rs", "fn main() {}");
     test_stage_file(&path, "src/main.rs", "fn main() { updated }");
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4380,7 +4790,7 @@ fn test_repo_unstaged_files_json_uses_new_shape() {
     // Modify without staging
     std::fs::write(path.join("src/main.rs"), "fn main() { updated }").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4409,7 +4819,7 @@ fn test_repo_untracked_files_json_uses_new_shape() {
     // Create a new file without adding it to git
     std::fs::write(path.join("new_file.rs"), "// new").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4442,7 +4852,7 @@ fn test_repo_dirty_files_returns_all_file_types() {
     std::fs::write(path.join("src/main.rs"), "fn main() { dirty }").unwrap();
     std::fs::write(path.join("config.json"), "{\"key\": true}").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4464,7 +4874,7 @@ fn test_repo_file_list_no_results_exits_1() {
     // Commit a file, no dirty files
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4480,7 +4890,7 @@ fn test_repo_file_list_no_error_exits_0() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4497,7 +4907,7 @@ fn test_repo_file_list_on_error_to_stderr() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4517,7 +4927,7 @@ fn test_repo_file_list_on_error_plus_no_error_to_stdout() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4544,7 +4954,7 @@ fn test_blast_radius_dirty_matches_documents() {
     // Dirty the source file
     std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4567,7 +4977,7 @@ fn test_blast_radius_staged_matches_documents() {
     // Stage a modification
     test_stage_file(&path, "src/main.rs", "fn main() { staged }");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4588,7 +4998,7 @@ fn test_blast_radius_last_commit_matches_documents() {
     // Commit the source file last (it will be in HEAD)
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4607,7 +5017,7 @@ fn test_blast_radius_no_matches_exits_1() {
     test_commit_file(&path, "src/main.rs", "fn main() {}");
     // No dirty files -> no blast radius matches
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["--base", path.to_str().unwrap(), "blast-radius", "dirty"])
         .assert()
         .code(1);
@@ -4618,7 +5028,7 @@ fn test_blast_radius_no_error_exits_0() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4635,7 +5045,7 @@ fn test_blast_radius_on_error_to_stderr() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4658,7 +5068,7 @@ fn test_blast_radius_json_output() {
     test_commit_file(&path, "docs/guide.md", doc);
     std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4691,7 +5101,7 @@ fn test_blast_radius_list_format() {
     test_commit_file(&path, "docs/guide.md", doc);
     std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4714,7 +5124,7 @@ fn test_docs_stdout_stderr_split() {
         "---\ntitle: Readme\n---\n# Readme\n",
     );
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args(["--base", path.to_str().unwrap(), "docs", "--plain"])
         .assert()
         .success();
@@ -4740,7 +5150,7 @@ fn test_docs_blast_radius_filter() {
     let doc_without = "---\ntitle: Readme\n---\n# Readme\n";
     test_commit_file(&path, "docs/readme.md", doc_without);
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4768,7 +5178,7 @@ fn test_repo_dirty_source_code_with_list_flag() {
     test_commit_file(&path, "src/main.rs", "fn main() {}");
     std::fs::write(path.join("src/main.rs"), "fn main() { dirty }").unwrap();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4793,7 +5203,7 @@ fn test_repo_unstaged_source_code_returns_modified_only() {
     // Modify b.rs without staging
     std::fs::write(path.join("src/b.rs"), "b modified").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -4813,451 +5223,683 @@ fn test_repo_unstaged_source_code_returns_modified_only() {
 }
 
 // ============================================================================
-// Recent Commits CLI Integration Tests (Step 14)
+// Recent Commits CLI Integration Tests
 // ============================================================================
 
-#[test]
-fn test_repo_recent_commits_default_period() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
+const COMMIT_FAMILY_SUBCOMMANDS: [&str; 3] = [
+    "recent-commits",
+    "source-code-changes",
+    "documentation-changes",
+];
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args(["--base", path.to_str().unwrap(), "repo", "recent-commits"])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_recent_commits_with_period() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "1d",
-        ])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_recent_commits_with_count_period() {
-    let (_dir, path) = create_test_repo();
-    for i in 0..5 {
-        test_commit_file(&path, &format!("src/file{i}.rs"), "fn main() {}");
-    }
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "2",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
-    let commits = json["commits"].as_array().expect("commits array");
-    assert_eq!(commits.len(), 2, "expected exactly 2 commits");
-    assert_eq!(
-        json["period_label"].as_str().unwrap(),
-        "last 2 commits",
-        "period label should describe the count"
-    );
-}
-
-#[test]
-fn test_repo_source_code_changes_with_count_period() {
-    let (_dir, path) = create_test_repo();
-    for i in 0..3 {
-        test_commit_file(&path, &format!("src/file{i}.rs"), "fn main() {}");
-    }
-
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "source-code-changes",
-            "2",
-        ])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_recent_commits_with_json() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    // JSON output should contain commit fields
-    assert!(
-        stdout.contains("\"commits\""),
-        "JSON should have commits array"
-    );
-    assert!(
-        stdout.contains("\"period_label\""),
-        "JSON should have period_label"
-    );
-}
-
-#[test]
-fn test_repo_recent_commits_with_plain() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--plain",
-        ])
+/// Run `sniff --base <path> repo <args>` and return its output.
+fn run_repo(path: &Path, args: &[&str]) -> std::process::Output {
+    common::owned_sniff_command()
+        .args(["--base", path.to_str().unwrap(), "repo"])
+        .args(args)
         .output()
-        .expect("failed to run sniff");
+        .expect("run sniff repo")
+}
 
+/// Run a commit-family command in JSON mode, requiring success and a bare
+/// JSON array on stdout.
+fn run_commit_json(path: &Path, args: &[&str]) -> Vec<Value> {
+    let output = run_repo(path, args);
+    assert!(
+        output.status.success(),
+        "{args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Plain output should not have ANSI escape codes
+    let value: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("{args:?} stdout is not JSON ({error}): {stdout}"));
+    value
+        .as_array()
+        .unwrap_or_else(|| panic!("{args:?} stdout is not a bare array: {value}"))
+        .clone()
+}
+
+fn headings(commits: &[Value]) -> Vec<&str> {
+    commits
+        .iter()
+        .map(|commit| commit["heading"].as_str().expect("heading is a string"))
+        .collect()
+}
+
+fn file_paths(commit: &Value) -> Vec<&str> {
+    commit["files"]
+        .as_array()
+        .expect("files is an array")
+        .iter()
+        .map(|file| file["path"].as_str().expect("path is a string"))
+        .collect()
+}
+
+/// Commit several files at once with `message`.
+fn commit_files_with_message(repo_path: &Path, files: &[(&str, &str)], message: &str) {
+    let repo = git2::Repository::open(repo_path).unwrap();
+    let mut index = repo.index().unwrap();
+    for (relative, content) in files {
+        let full = repo_path.join(relative);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, content).unwrap();
+        index.add_path(Path::new(relative)).unwrap();
+    }
+    index.write().unwrap();
+    let sig = repo.signature().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head])
+        .unwrap();
+}
+
+/// Commit `files` on `HEAD` as Ada at a fixed `seconds` timestamp and return
+/// the new commit id. An empty `files` list makes an empty commit.
+fn commit_files_at(
+    repo_path: &Path,
+    files: &[(&str, &str)],
+    message: &str,
+    seconds: i64,
+) -> git2::Oid {
+    let repo = git2::Repository::open(repo_path).unwrap();
+    let mut index = repo.index().unwrap();
+    for (relative, content) in files {
+        let full = repo_path.join(relative);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, content).unwrap();
+        index.add_path(Path::new(relative)).unwrap();
+    }
+    index.write().unwrap();
+    let sig = git2::Signature::new("Ada Lovelace", "ada@example.com", &git2::Time::new(seconds, 0))
+        .unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let parents: Vec<git2::Commit<'_>> = repo
+        .head()
+        .ok()
+        .and_then(|head| head.peel_to_commit().ok())
+        .into_iter()
+        .collect();
+    let parent_refs: Vec<&git2::Commit<'_>> = parents.iter().collect();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)
+        .unwrap()
+}
+
+/// Run bare `sniff repo --json` and return the aggregate object.
+fn run_aggregate_json(path: &Path) -> Value {
+    let output = run_repo(path, &["--json"]);
     assert!(
-        !stdout.contains("\x1b["),
-        "Plain output should not have ANSI escape codes"
+        output.status.success(),
+        "repo --json failed: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
+    serde_json::from_slice(&output.stdout).expect("repo --json stdout must be JSON")
 }
 
+/// The aggregate's three commit families are the focused commands' default
+/// bare arrays, byte-for-byte in value: last 10 regardless of age, with
+/// author, file types, attribution, and local links, and with the sibling
+/// projections pruned identically.
 #[test]
-fn test_repo_source_code_changes() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
+fn test_repo_aggregate_commit_families_match_the_focused_commands() {
+    // 2020-01-01T00:00:00Z: far older than the removed 3-day aggregate window.
+    const OLD: i64 = 1_577_836_800;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    let repo = git2::Repository::init(&path).unwrap();
+    repo.remote("origin", "https://github.com/acme/widgets.git")
+        .unwrap();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "source-code-changes",
-            "1w",
-        ])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_source_code_changes_with_json() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "source-code-changes",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(
-        stdout.contains("\"commits\""),
-        "JSON should have commits array"
+    commit_files_at(
+        &path,
+        &[
+            ("Cargo.toml", "[workspace]\nmembers = [\"pkg-a/lib\", \"pkg-b/lib\"]\n"),
+            (
+                "pkg-a/lib/Cargo.toml",
+                "[package]\nname = \"pkg-a\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+            ),
+            ("pkg-a/lib/src/lib.rs", "pub fn a() {}\n"),
+            (
+                "pkg-b/lib/Cargo.toml",
+                "[package]\nname = \"pkg-b\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+            ),
+            ("pkg-b/lib/src/lib.rs", "pub fn b() {}\n"),
+        ],
+        "chore: scaffold workspace",
+        OLD,
     );
-}
-
-#[test]
-fn test_repo_documentation_changes() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "docs/guide.md", "# Guide\n");
-
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "documentation-changes",
-            "1w",
-        ])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_documentation_changes_with_json() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "docs/guide.md", "# Guide\n");
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "documentation-changes",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(
-        stdout.contains("\"commits\""),
-        "JSON should have commits array"
-    );
-}
-
-#[test]
-fn test_source_code_changes_json_filters_commits_and_files() {
-    // Two commits: one touches a source file, one touches only docs.
-    // `source-code-changes --json` must keep only the source commit and
-    // tag the payload with `"filter": "source_code"`.
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-    test_commit_file(&path, "README.md", "# readme");
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "source-code-changes",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let value: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
-
-    assert_eq!(
-        value["filter"], "source_code",
-        "source-code-changes --json must include `filter: source_code`: {value}"
-    );
-
-    let commits = value["commits"].as_array().expect("commits must be array");
-    // Only the source-touching commit should remain after filtering.
-    assert_eq!(
-        commits.len(),
-        1,
-        "expected exactly one commit after source-code filtering: {value}"
-    );
-
-    // All files left in the kept commit must look like source code.
-    for commit in commits {
-        let files = commit["files"].as_array().expect("files must be array");
-        assert!(!files.is_empty(), "filtered commit must keep its files");
-        for file in files {
-            let path_str = file["path"].as_str().expect("path is a string");
-            assert!(
-                !path_str.ends_with(".md"),
-                "source-code filter must not keep markdown: {path_str}"
-            );
+    let mut pushed = None;
+    for i in 1..=9 {
+        let seconds = OLD + i * 3_600;
+        let (files, message): (Vec<(String, String)>, String) = match i % 3 {
+            0 => (
+                vec![(format!("docs/guide{i}.md"), format!("# Guide {i}\n"))],
+                format!("docs: guide {i}"),
+            ),
+            1 => (
+                vec![("pkg-a/lib/src/lib.rs".to_string(), format!("pub fn a() {{ /* {i} */ }}\n"))],
+                format!("feat(pkg-a): source change {i}"),
+            ),
+            _ => (
+                vec![
+                    ("pkg-b/lib/src/lib.rs".to_string(), format!("pub fn b() {{ /* {i} */ }}\n")),
+                    ("pkg-b/lib/README.md".to_string(), format!("# pkg-b {i}\n")),
+                ],
+                format!("fix(pkg-b): mixed change {i}"),
+            ),
+        };
+        let borrowed: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(file, content)| (file.as_str(), content.as_str()))
+            .collect();
+        let id = commit_files_at(&path, &borrowed, &message, seconds);
+        if i == 5 {
+            pushed = Some(id);
         }
     }
-}
+    commit_files_at(&path, &[], "chore: empty marker", OLD + 10 * 3_600);
+    let pushed = pushed.unwrap();
+    repo.reference("refs/remotes/origin/main", pushed, true, "fixture remote tip")
+        .unwrap();
 
-#[test]
-fn test_documentation_changes_json_filters_commits_and_files() {
-    // Two commits: one touches a source file, one touches docs.
-    // `documentation-changes --json` must keep only doc commits and tag
-    // the payload with `"filter": "documentation"`.
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-    test_commit_file(&path, "README.md", "# readme");
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "documentation-changes",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let value: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
-
-    assert_eq!(
-        value["filter"], "documentation",
-        "documentation-changes --json must include `filter: documentation`: {value}"
-    );
-
-    let commits = value["commits"].as_array().expect("commits must be array");
-    assert!(
-        !commits.is_empty(),
-        "expected at least one doc commit: {value}"
-    );
-
-    for commit in commits {
-        let files = commit["files"].as_array().expect("files must be array");
-        assert!(!files.is_empty(), "filtered commit must keep its files");
-        for file in files {
-            let path_str = file["path"].as_str().expect("path is a string");
-            assert!(
-                !path_str.ends_with(".rs"),
-                "documentation filter must not keep .rs files: {path_str}"
-            );
-        }
-    }
-}
-
-#[test]
-fn test_filtered_commit_json_trims_packages() {
-    // `source-code-changes` and `documentation-changes` should NOT include
-    // the full `packages` metadata for brevity.
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-    test_commit_file(&path, "README.md", "# readme");
-
-    for (subcommand, label) in [
-        ("source-code-changes", "source_code"),
-        ("documentation-changes", "documentation"),
+    let aggregate = run_aggregate_json(&path);
+    for (key, command) in [
+        ("recent_commits", "recent-commits"),
+        ("source_code_changes", "source-code-changes"),
+        ("documentation_changes", "documentation-changes"),
     ] {
-        let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-            .args([
-                "--base",
-                path.to_str().unwrap(),
-                "repo",
-                subcommand,
-                "--json",
-            ])
-            .assert()
-            .success();
-
-        let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-        let value: Value = serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
-
+        let focused = run_commit_json(&path, &[command, "--json"]);
         assert_eq!(
-            value["filter"], label,
-            "{subcommand} --json must include `filter: {label}`"
+            aggregate[key],
+            Value::Array(focused),
+            "aggregate `{key}` must equal `repo {command} --json`"
         );
-        assert!(
-            value.get("packages").is_none(),
-            "{subcommand} --json must NOT include full `packages` metadata: {value}"
-        );
+    }
+
+    let recent = aggregate["recent_commits"].as_array().unwrap();
+    assert_eq!(recent.len(), 10, "last 10 of 11 commits, however old");
+    assert_eq!(recent[0]["heading"], "empty marker");
+    assert_eq!(recent[0]["files"], serde_json::json!([]));
+    assert!(
+        recent
+            .iter()
+            .all(|commit| commit["datetime"].as_str().unwrap().starts_with("2020-01-01")),
+        "old quiet history must still be reported: {recent:?}"
+    );
+    assert_eq!(
+        recent[0]["author"],
+        serde_json::json!({"name": "Ada Lovelace", "email": "ada@example.com"})
+    );
+    let pushed_hash = pushed.to_string();
+    let pushed_commit = recent
+        .iter()
+        .find(|commit| commit["hash"] == pushed_hash.as_str())
+        .expect("the pushed commit is inside the last 10");
+    assert_eq!(pushed_commit["remote"], Value::Bool(true));
+    assert_eq!(
+        pushed_commit["commit_url"],
+        format!("https://github.com/acme/widgets/commit/{pushed_hash}")
+    );
+    assert_eq!(pushed_commit["packages"], serde_json::json!(["pkg-b"]));
+    assert_eq!(pushed_commit["file_types"]["documentation"], true);
+    assert_eq!(recent[1]["remote"], Value::Bool(false));
+    assert!(recent[1].get("commit_url").is_none());
+
+    // Sibling projections prune files, drop emptied commits, and keep
+    // whole-commit facts.
+    let source = aggregate["source_code_changes"].as_array().unwrap();
+    let documentation = aggregate["documentation_changes"].as_array().unwrap();
+    assert!(source.iter().flat_map(file_paths).all(|file| file.ends_with(".rs")));
+    assert!(documentation.iter().flat_map(file_paths).all(|file| file.ends_with(".md")));
+    // Of the last 10: three source-only, three docs-only, and three mixed
+    // commits; the empty commit touches neither category.
+    assert_eq!(source.len(), 6, "{aggregate}");
+    assert_eq!(documentation.len(), 6, "{aggregate}");
+    let pruned_mixed = source
+        .iter()
+        .find(|commit| commit["hash"] == pushed_hash.as_str())
+        .expect("mixed commit keeps its source file");
+    assert_eq!(file_paths(pruned_mixed), ["pkg-b/lib/src/lib.rs"]);
+    assert_eq!(pruned_mixed["file_types"], pushed_commit["file_types"]);
+}
+
+/// A family with no matching commits embeds `[]`, exactly as its focused
+/// command emits.
+#[test]
+fn test_repo_aggregate_embeds_empty_commit_families_as_empty_arrays() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let aggregate = run_aggregate_json(&path);
+    assert_eq!(aggregate["documentation_changes"], serde_json::json!([]));
+    assert_eq!(
+        aggregate["documentation_changes"],
+        Value::Array(run_commit_json(&path, &["documentation-changes", "--json"]))
+    );
+    assert!(!aggregate["recent_commits"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn test_recent_commits_defaults_to_the_last_ten_as_a_bare_json_array() {
+    let (_dir, path) = create_test_repo();
+    for i in 0..12 {
+        test_commit_file(&path, &format!("src/file{i}.rs"), "fn main() {}");
+    }
+
+    let commits = run_commit_json(&path, &["recent-commits", "--json"]);
+    assert_eq!(commits.len(), 10, "no period must select the last 10 commits");
+    assert_eq!(
+        file_paths(&commits[0]),
+        ["src/file11.rs"],
+        "newest commit comes first"
+    );
+
+    let mut keys: Vec<&str> = commits[0]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "author",
+            "bullet_points",
+            "datetime",
+            "description",
+            "file_types",
+            "files",
+            "hash",
+            "heading",
+            "operation",
+            "remote",
+            "scope",
+        ]
+    );
+    assert_eq!(commits[0]["heading"], "add file");
+    assert_eq!(
+        commits[0]["author"],
+        serde_json::json!({"name": "Test", "email": "test@test.com"})
+    );
+    assert_eq!(commits[0]["remote"], Value::Bool(false));
+    assert_eq!(
+        commits[0]["files"][0],
+        serde_json::json!({"kind": "added", "path": "src/file11.rs", "added": 1, "removed": 0})
+    );
+
+    assert_eq!(run_commit_json(&path, &["recent-commits", "2", "--json"]).len(), 2);
+}
+
+#[test]
+fn test_commit_family_json_ignores_display_flags() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(
+        &path,
+        "src/main.rs",
+        "fn main() {}",
+        "feat(cli): add main\n\nMore detail.\n\n- first point",
+    );
+    test_commit_file(&path, "README.md", "# readme");
+
+    for subcommand in COMMIT_FAMILY_SUBCOMMANDS {
+        let baseline = run_repo(&path, &[subcommand, "--json"]);
+        for display in [&["-v", "--show-author"][..], &["-c"][..]] {
+            let mut args = vec![subcommand, "--json"];
+            args.extend_from_slice(display);
+            let output = run_repo(&path, &args);
+            assert!(output.status.success(), "{args:?}");
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&baseline.stdout),
+                "{args:?} must not change JSON"
+            );
+        }
     }
 }
 
 #[test]
-fn test_recent_commits_json_unchanged() {
-    // Regression guard — `recent-commits --json` must NOT include the
-    // `filter` field that the filtered variants add.
+fn test_commit_family_empty_results_succeed_with_empty_output() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
-    test_commit_file(&path, "README.md", "# readme");
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--json",
-        ])
-        .assert()
-        .success();
+    for subcommand in COMMIT_FAMILY_SUBCOMMANDS {
+        let json = run_repo(&path, &[subcommand, "2099-01-01", "--json"]);
+        assert!(json.status.success(), "{subcommand} --json must exit 0");
+        assert_eq!(String::from_utf8_lossy(&json.stdout).trim(), "[]", "{subcommand}");
+        assert!(json.stderr.is_empty(), "{subcommand} --json stderr: {:?}", json.stderr);
 
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let value: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+        for format in [&[][..], &["--plain"][..]] {
+            let mut args = vec![subcommand, "2099-01-01"];
+            args.extend_from_slice(format);
+            let text = run_repo(&path, &args);
+            assert!(text.status.success(), "{args:?} must exit 0");
+            assert!(text.stdout.is_empty(), "{args:?} stdout: {:?}", text.stdout);
+            assert!(
+                String::from_utf8_lossy(&text.stderr).contains("No commits matched."),
+                "{args:?} stderr: {}",
+                String::from_utf8_lossy(&text.stderr)
+            );
+        }
+    }
 
-    let obj = value.as_object().expect("payload must be a JSON object");
-    assert!(
-        !obj.contains_key("filter"),
-        "recent-commits --json must NOT include `filter`: {value}"
-    );
-    assert!(
-        obj.contains_key("commits"),
-        "recent-commits --json must include `commits`"
-    );
-    assert!(
-        obj.contains_key("period_label"),
-        "recent-commits --json must include `period_label`"
-    );
+    // A filter that matches nothing is the same successful empty result.
+    assert!(run_commit_json(&path, &["recent-commits", "--author", "nobody", "--json"]).is_empty());
+    // Only documentation files were never committed.
+    assert!(run_commit_json(&path, &["documentation-changes", "--json"]).is_empty());
 }
 
 #[test]
-fn test_repo_recent_commits_no_error_flag() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
+fn test_commit_family_invalid_inputs_are_typed_failures() {
+    let (_mono_dir, mono) = create_cli_monorepo();
+    let (_plain_dir, plain) = create_test_repo();
+    test_commit_file(&plain, "src/main.rs", "fn main() {}");
 
-    // Use a future date - valid period that returns no commits
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "2099-01-01",
-            "--no-error",
-        ])
-        .assert()
-        .success();
+    for (path, args, stderr_fragment) in [
+        (&plain, vec!["invalid-period"], "invalid-period"),
+        (&plain, vec!["0"], "0"),
+        (&plain, vec!["--branch", "no-such-branch"], "no-such-branch"),
+        (&plain, vec!["abcdef1234567"], "abcdef1234567"),
+        (&plain, vec!["--package", "pkg-a"], "onorepo"),
+        (&mono, vec!["--package", "nonexistent"], "pkg-a"),
+        (&mono, vec!["--package-area", "nonexistent"], "pkg-b"),
+    ] {
+        for subcommand in COMMIT_FAMILY_SUBCOMMANDS {
+            let mut full = vec![subcommand];
+            full.extend_from_slice(&args);
+            full.push("--json");
+            let output = run_repo(path, &full);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!output.status.success(), "{full:?} must fail");
+            assert!(output.stdout.is_empty(), "{full:?} stdout: {:?}", output.stdout);
+            assert!(stderr.contains(stderr_fragment), "{full:?} stderr: {stderr}");
+        }
+    }
+
+    // The default selection is a count, so the guidance must name that form.
+    for period in ["notaperiod", "0"] {
+        let output = run_repo(&plain, &["recent-commits", period]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{period} must fail");
+        assert!(output.stdout.is_empty(), "{period} stdout: {:?}", output.stdout);
+        assert!(stderr.contains("positive count (e.g., 10)"), "{period} stderr: {stderr}");
+    }
+}
+
+/// A duration scope too large for `chrono::Duration` used to abort the binary
+/// inside a panicking constructor; it must read as ordinary invalid input.
+#[test]
+fn test_commit_family_rejects_oversized_duration_scopes() {
+    let (_dir, path) = create_test_repo();
+
+    for period in [
+        "9223372036854775807h",
+        "9223372036854775807d",
+        "9223372036854775807w",
+        "9223372036854775807mo",
+        "9223372036854775807y",
+    ] {
+        for subcommand in COMMIT_FAMILY_SUBCOMMANDS {
+            let args = [subcommand, period, "--json"];
+            let output = run_repo(&path, &args);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
+            assert!(!output.status.success(), "{args:?} must fail");
+            assert_ne!(output.status.code(), Some(101), "{args:?} panicked: {stderr}");
+            assert!(!stderr.contains("panicked"), "{args:?} stderr: {stderr}");
+            assert!(output.stdout.is_empty(), "{args:?} stdout: {:?}", output.stdout);
+            assert!(
+                stderr.contains("invalid period specifier") && stderr.contains(period),
+                "{args:?} stderr: {stderr}"
+            );
+        }
+    }
 }
 
 #[test]
-fn test_repo_recent_commits_invalid_period_error() {
+fn test_recent_commits_plain_output_is_the_library_plain_report() {
     let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    test_commit_file_with_message(
+        &path,
+        "src/main.rs",
+        "fn main() {}",
+        "feat(cli): add main\n\nMore detail.\n\n- first point",
+    );
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "invalid-period",
-        ])
-        .assert()
-        .failure();
+    let normal = String::from_utf8(run_repo(&path, &["recent-commits", "--plain"]).stdout).unwrap();
+    let lines: Vec<&str> = normal.lines().collect();
+    assert!(lines[0].starts_with("- ["), "{normal}");
+    assert!(lines[0].contains("] feat(cli) at "), "{normal}");
+    assert!(lines[0].ends_with(": add main"), "{normal}");
+    assert_eq!(lines[1..4], ["  Files Impacted:", "  - added: src/main.rs", ""], "{normal}");
+    assert!(lines[4].ends_with(": initial"), "{normal}");
+    assert_eq!(lines[5], "  Files Impacted: none", "empty initial commit: {normal}");
+    for marker in ["**", "\x1b", "](", "file://", "<bold>", "\\["] {
+        assert!(!normal.contains(marker), "{marker:?} in plain output: {normal}");
+    }
+
+    let verbose =
+        String::from_utf8(run_repo(&path, &["recent-commits", "--plain", "-v"]).stdout).unwrap();
+    assert!(
+        verbose.contains(
+            ": add main\n  More detail.\n\n  Details:\n\n  - first point\n\n  Files Impacted:\n  - added: src/main.rs\n"
+        ),
+        "{verbose}"
+    );
+
+    let compact =
+        String::from_utf8(run_repo(&path, &["recent-commits", "--plain", "-c", "--show-author"]).stdout)
+            .unwrap();
+    let compact_lines: Vec<&str> = compact.lines().collect();
+    assert_eq!(compact_lines.len(), 2, "{compact}");
+    assert!(compact_lines[0].contains("] feat(cli) by Test at "), "{compact}");
+    assert!(compact_lines[1].contains("] by Test at "), "{compact}");
 }
 
 #[test]
-fn test_repo_recent_commits_on_error_flag() {
+fn test_recent_commits_terminal_output_renders_library_prose() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(
+        &path,
+        "src/main.rs",
+        "fn main() {}",
+        "fix(cli): handle <red>tags</red> and _em_ literally",
+    );
+
+    let output = run_repo(&path, &["recent-commits"]);
+    assert!(output.status.success());
+    let stdout =
+        biscuit_terminal::prelude::strip_escape_codes(String::from_utf8_lossy(&output.stdout).into_owned());
+
+    assert!(
+        stdout.contains("fix(cli) at "),
+        "operation and scope render as text: {stdout}"
+    );
+    assert!(
+        stdout.contains("handle <red>tags</red> and _em_ literally"),
+        "commit text must not be read as markup: {stdout}"
+    );
+    assert!(stdout.contains("Files Impacted:"), "{stdout}");
+    assert!(stdout.contains("src/main.rs](file://"), "file link: {stdout}");
+    for leaked in ["<bold>", "<italic>", "<blue>", "\\[", "**"] {
+        assert!(!stdout.contains(leaked), "{leaked:?} leaked: {stdout}");
+    }
+}
+
+#[test]
+fn test_source_and_documentation_changes_project_their_files() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(&path, "src/main.rs", "fn main() {}", "feat: add main");
+    test_commit_file_with_message(&path, "README.md", "# readme", "docs: add readme");
+    commit_files_with_message(
+        &path,
+        &[("src/lib.rs", "pub fn lib() {}"), ("docs/guide.md", "# Guide")],
+        "feat: add lib and guide",
+    );
+
+    let all = run_commit_json(&path, &["recent-commits", "--json"]);
+    assert_eq!(file_paths(&all[0]), ["docs/guide.md", "src/lib.rs"]);
+
+    let source = run_commit_json(&path, &["source-code-changes", "--json"]);
+    assert_eq!(headings(&source), ["add lib and guide", "add main"]);
+    assert_eq!(file_paths(&source[0]), ["src/lib.rs"]);
+    assert_eq!(
+        source[0]["file_types"]["documentation"],
+        Value::Bool(true),
+        "file_types still describe the whole commit"
+    );
+
+    let documentation = run_commit_json(&path, &["documentation-changes", "--json"]);
+    assert_eq!(headings(&documentation), ["add lib and guide", "add readme"]);
+    assert_eq!(file_paths(&documentation[0]), ["docs/guide.md"]);
+
+    let source_plain =
+        String::from_utf8(run_repo(&path, &["source-code-changes", "--plain"]).stdout).unwrap();
+    assert!(source_plain.starts_with("Source Code Changes\n\n- ["), "{source_plain}");
+    assert!(source_plain.contains("  - added: src/lib.rs\n"), "{source_plain}");
+    assert!(!source_plain.contains("guide.md"), "{source_plain}");
+    assert!(!source_plain.contains("README.md"), "{source_plain}");
+
+    let documentation_plain =
+        String::from_utf8(run_repo(&path, &["documentation-changes", "--plain"]).stdout).unwrap();
+    assert!(
+        documentation_plain.starts_with("Documentation Changes\n\n- ["),
+        "{documentation_plain}"
+    );
+    assert!(!documentation_plain.contains(".rs"), "{documentation_plain}");
+}
+
+#[test]
+fn test_recent_commits_filters_run_through_the_library() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(&path, "src/a.rs", "a", "feat(cli): add a");
+    test_commit_file_with_message(&path, "src/b.rs", "b", "refactor(lib): simplify b");
+    test_commit_file_with_message(&path, "src/c.rs", "c", "fix(cli): repair c");
+    test_commit_file_with_message(&path, "docs/d.md", "d", "Planning(sniff): record d");
+    test_commit_file_with_message(&path, "e.png", "e", "chore: add image");
+
+    let operations = run_commit_json(
+        &path,
+        &["recent-commits", "--operation", "feat", "--operation", "planning", "--json"],
+    );
+    assert_eq!(headings(&operations), ["record d", "add a"]);
+
+    let scoped = run_commit_json(&path, &["recent-commits", "--scope", "CLI", "--json"]);
+    assert_eq!(headings(&scoped), ["repair c", "add a"]);
+
+    let combined = run_commit_json(
+        &path,
+        &["recent-commits", "--scope", "cli", "--operation", "fix", "--json"],
+    );
+    assert_eq!(headings(&combined), ["repair c"]);
+
+    let by_author = run_commit_json(&path, &["recent-commits", "--author", "TEST.COM", "--json"]);
+    assert_eq!(by_author.len(), 6);
+
+    let images = run_commit_json(&path, &["recent-commits", "--images", "--json"]);
+    assert_eq!(headings(&images), ["add image"]);
+    let documentation = run_commit_json(&path, &["recent-commits", "--documentation", "--json"]);
+    assert_eq!(headings(&documentation), ["record d"]);
+
+    // Count selection is satisfied by matching commits found during the walk.
+    let last_source = run_commit_json(&path, &["recent-commits", "2", "--source-code", "--json"]);
+    assert_eq!(headings(&last_source), ["repair c", "simplify b"]);
+}
+
+#[test]
+fn test_recent_commits_operation_filter_accepts_breaking_change_commits() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(&path, "src/a.rs", "a", "feat!: breaking without scope");
+    test_commit_file_with_message(&path, "src/b.rs", "b", "feat(api)!: breaking with scope");
+    test_commit_file_with_message(&path, "src/c.rs", "c", "fix: unrelated");
+
+    let breaking = run_commit_json(&path, &["recent-commits", "--operation", "feat", "--json"]);
+    assert_eq!(
+        headings(&breaking),
+        ["breaking with scope", "breaking without scope"]
+    );
+    assert_eq!(breaking[0]["operation"], Value::from("feat"));
+    assert_eq!(breaking[0]["scope"], Value::from("api"));
+    assert_eq!(breaking[1]["operation"], Value::from("feat"));
+    assert_eq!(breaking[1]["scope"], Value::Null);
+
+    let scoped = run_commit_json(&path, &["recent-commits", "--scope", "api", "--json"]);
+    assert_eq!(headings(&scoped), ["breaking with scope"]);
+}
+
+#[test]
+fn test_recent_commits_branch_is_a_history_base() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(&path, "src/a.rs", "a", "feat: before branch");
+    {
+        let repo = git2::Repository::open(&path).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &head, false).unwrap();
+    }
+    test_commit_file_with_message(&path, "src/b.rs", "b", "feat: after branch");
+
+    let head = run_commit_json(&path, &["recent-commits", "--json"]);
+    assert_eq!(headings(&head)[..2], ["after branch", "before branch"]);
+
+    let feature = run_commit_json(&path, &["recent-commits", "--branch", "feature", "--json"]);
+    assert_eq!(headings(&feature), ["before branch", "initial"]);
+}
+
+#[test]
+fn test_recent_commits_hash_period_walks_back_to_the_hash() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
+    test_commit_file_with_message(&path, "src/lib.rs", "pub fn lib() {}", "feat: add lib");
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "2099-01-01",
-            "--on-error",
-            "No recent commits",
-            "--plain",
-        ])
-        .assert()
-        .code(1)
-        .stderr(predicate::str::contains("No recent commits"));
+    let parent_hash = {
+        let repo = git2::Repository::open(&path).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        head.parent(0).unwrap().id().to_string()
+    };
+
+    let commits = run_commit_json(&path, &["recent-commits", &parent_hash[..10], "--json"]);
+    assert_eq!(headings(&commits), ["add lib", "add file"]);
+    assert_eq!(commits[1]["hash"], Value::String(parent_hash));
+}
+
+#[test]
+fn test_recent_commits_package_filters_and_attribution_in_a_monorepo() {
+    let (_dir, path) = create_cli_monorepo();
+    test_commit_file_with_message(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}", "feat: a2");
+    test_commit_file_with_message(&path, "pkg-b/lib/src/lib.rs", "pub fn b2() {}", "feat: b2");
+
+    let package = run_commit_json(&path, &["recent-commits", "--package", "pkg-a", "--json"]);
+    assert_eq!(headings(&package), ["a2", "initial monorepo"]);
+    assert_eq!(package[0]["packages"], serde_json::json!(["pkg-a"]));
+    assert_eq!(package[0]["package_areas"], serde_json::json!(["pkg-a"]));
+    assert_eq!(file_paths(&package[0]), ["pkg-a/lib/src/lib.rs"]);
+
+    let area = run_commit_json(&path, &["recent-commits", "--package-area", "pkg-b", "--json"]);
+    assert_eq!(headings(&area), ["b2", "initial monorepo"]);
+}
+
+#[test]
+fn test_recent_commits_no_change_commit_is_reported_with_no_files() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    {
+        let repo = git2::Repository::open(&path).unwrap();
+        let sig = repo.signature().unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let tree = head.tree().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "chore: empty marker", &tree, &[&head])
+            .unwrap();
+    }
+
+    let commits = run_commit_json(&path, &["recent-commits", "--json"]);
+    assert_eq!(commits[0]["heading"], "empty marker");
+    assert_eq!(commits[0]["files"], serde_json::json!([]));
+
+    let plain = String::from_utf8(run_repo(&path, &["recent-commits", "1", "--plain"]).stdout).unwrap();
+    assert!(plain.ends_with(": empty marker\n  Files Impacted: none\n"), "{plain}");
 }
 
 // ============================================================================
-// Recent Commits CLI — Hash, Package, and Date routing tests
+// Monorepo and single-package repository fixtures
 // ============================================================================
 
 /// Create a monorepo-style test repo for CLI testing.
@@ -5400,490 +6042,6 @@ members = ["pkg-a/lib", "pkg-b/lib", "."]
     (dir, path)
 }
 
-#[test]
-fn test_repo_recent_commits_with_hash_period() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-    test_commit_file(&path, "src/lib.rs", "pub fn lib() {}");
-
-    let repo = git2::Repository::open(&path).unwrap();
-    let head = repo.head().unwrap().peel_to_commit().unwrap();
-    // Get the parent commit hash to use as boundary
-    let parent = head.parent(0).unwrap();
-    let parent_hash = parent.id().to_string();
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            &parent_hash,
-            "--plain",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(!stdout.is_empty(), "Hash-based query should produce output");
-}
-
-#[test]
-fn test_repo_recent_commits_with_today_period() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "today",
-            "--plain",
-        ])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_recent_commits_with_date_period() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "2020-01-01",
-            "--plain",
-        ])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_repo_recent_commits_action_filter_single_action() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file_with_message(
-        &path,
-        "src/feature.rs",
-        "pub fn feature() {}",
-        "feat(cli): add action filter",
-    );
-    test_commit_file_with_message(
-        &path,
-        "src/fix.rs",
-        "pub fn fix() {}",
-        "fix(cli): tighten recent commit filtering",
-    );
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--action",
-            "feat",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"]
-        .as_array()
-        .expect("Should have commits array");
-
-    assert_eq!(commits.len(), 1, "Only feat commits should remain");
-    assert_eq!(
-        commits[0]["description"].as_str(),
-        Some("feat(cli): add action filter")
-    );
-}
-
-#[test]
-fn test_repo_recent_commits_action_filter_or_semantics() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file_with_message(
-        &path,
-        "src/feature.rs",
-        "pub fn feature() {}",
-        "feat(cli): add action filter",
-    );
-    test_commit_file_with_message(
-        &path,
-        "src/refactor.rs",
-        "pub fn refactor() {}",
-        "refactor(cli): simplify commit filtering",
-    );
-    test_commit_file_with_message(
-        &path,
-        "src/fix.rs",
-        "pub fn fix() {}",
-        "fix(cli): tighten recent commit filtering",
-    );
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--action",
-            "feat",
-            "--action",
-            "refactor",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"]
-        .as_array()
-        .expect("Should have commits array");
-    let descriptions: Vec<&str> = commits
-        .iter()
-        .filter_map(|commit| commit["description"].as_str())
-        .collect();
-
-    assert_eq!(
-        descriptions.len(),
-        2,
-        "feat and refactor commits should remain"
-    );
-    assert!(descriptions.contains(&"feat(cli): add action filter"));
-    assert!(descriptions.contains(&"refactor(cli): simplify commit filtering"));
-    assert!(!descriptions.contains(&"fix(cli): tighten recent commit filtering"));
-}
-
-#[test]
-fn test_repo_recent_commits_package_filter() {
-    let (_dir, path) = create_cli_monorepo();
-    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}");
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--package",
-            "pkg-a",
-            "--plain",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(
-        !stdout.is_empty(),
-        "Package-filtered query should produce output"
-    );
-}
-
-#[test]
-fn test_repo_recent_commits_package_area_filter() {
-    let (_dir, path) = create_cli_monorepo();
-    test_commit_file(&path, "pkg-b/lib/src/lib.rs", "pub fn b2() {}");
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--package-area",
-            "pkg-b",
-            "--plain",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(
-        !stdout.is_empty(),
-        "Package-area filtered query should produce output"
-    );
-}
-
-#[test]
-fn test_repo_recent_commits_package_json_scoped() {
-    let (_dir, path) = create_cli_monorepo();
-    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}");
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--package",
-            "pkg-a",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-
-    // The packages array should only contain the filtered package
-    if let Some(packages) = json["packages"].as_array() {
-        for pkg in packages {
-            assert_eq!(
-                pkg["name"], "pkg-a",
-                "JSON packages should be scoped to the filter"
-            );
-        }
-    }
-
-    // No files from pkg-b should appear in any commit
-    if let Some(commits) = json["commits"].as_array() {
-        for commit in commits {
-            if let Some(files) = commit["files"].as_array() {
-                for file in files {
-                    let f = file.as_str().unwrap_or("");
-                    assert!(
-                        !f.starts_with("pkg-b/"),
-                        "Filtered JSON should not contain pkg-b files, got: {}",
-                        f
-                    );
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn test_repo_recent_commits_unknown_package_error() {
-    let (_dir, path) = create_cli_monorepo();
-    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}");
-
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--package",
-            "nonexistent",
-        ])
-        .assert()
-        .failure();
-}
-
-// ============================================================================
-// Recent Commits CLI — Empty commit and exact payload tests
-// ============================================================================
-
-#[test]
-fn test_repo_recent_commits_json_includes_empty_commits() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    // Create an empty commit on top
-    let repo = git2::Repository::open(&path).unwrap();
-    let sig = repo.signature().unwrap();
-    let head = repo.head().unwrap().peel_to_commit().unwrap();
-    let tree = head.tree().unwrap();
-    repo.commit(
-        Some("HEAD"),
-        &sig,
-        &sig,
-        "chore: empty marker",
-        &tree,
-        &[&head],
-    )
-    .unwrap();
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"]
-        .as_array()
-        .expect("Should have commits array");
-
-    // Find the empty commit
-    let empty = commits
-        .iter()
-        .find(|c| c["description"].as_str() == Some("chore: empty marker"));
-    assert!(empty.is_some(), "Empty commit should appear in JSON output");
-    let empty = empty.unwrap();
-    let files = empty["files"].as_array().expect("Should have files array");
-    assert!(files.is_empty(), "Empty commit should have files: []");
-}
-
-#[test]
-fn test_repo_recent_commits_json_exact_commit_fields() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"]
-        .as_array()
-        .expect("Should have commits array");
-
-    // Should have at least 2 commits (initial + add file)
-    assert!(
-        commits.len() >= 2,
-        "Should have at least 2 commits, got {}",
-        commits.len()
-    );
-
-    // Verify each commit has required fields
-    for commit in commits {
-        assert!(commit["hash"].is_string(), "Commit should have hash");
-        assert!(
-            commit["datetime"].is_string(),
-            "Commit should have datetime"
-        );
-        assert!(commit["files"].is_array(), "Commit should have files array");
-        assert!(
-            commit["description"].is_string(),
-            "Commit should have description"
-        );
-        assert!(
-            commit["bullet_points"].is_array(),
-            "Commit should have bullet_points"
-        );
-    }
-}
-
-#[test]
-fn test_repo_source_code_changes_json_exact_fields() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "source-code-changes",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"]
-        .as_array()
-        .expect("Should have commits array");
-
-    // At least one commit should have a .rs file
-    let has_rs_file = commits.iter().any(|c| {
-        c["files"].as_array().is_some_and(|files| {
-            files
-                .iter()
-                .any(|f| f["path"].as_str().is_some_and(|s| s.ends_with(".rs")))
-        })
-    });
-    assert!(has_rs_file, "Source code changes should include .rs files");
-}
-
-#[test]
-fn test_repo_documentation_changes_json_exact_fields() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "docs/guide.md", "# Guide\n");
-
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "documentation-changes",
-            "--json",
-        ])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"]
-        .as_array()
-        .expect("Should have commits array");
-
-    // At least one commit should have a .md file
-    let has_md_file = commits.iter().any(|c| {
-        c["files"].as_array().is_some_and(|files| {
-            files
-                .iter()
-                .any(|f| f["path"].as_str().is_some_and(|s| s.ends_with(".md")))
-        })
-    });
-    assert!(
-        has_md_file,
-        "Documentation changes should include .md files"
-    );
-}
-
-#[test]
-fn test_repo_recent_commits_plain_output_exact_structure() {
-    let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "src/main.rs", "fn main() {}");
-
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .args([
-            "--base",
-            path.to_str().unwrap(),
-            "repo",
-            "recent-commits",
-            "--plain",
-        ])
-        .output()
-        .expect("failed to run sniff");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Plain output should contain markdown structure
-    assert!(
-        stdout.contains("[") && stdout.contains("] at "),
-        "Plain output should have `[hash] at TIME` commit markers, got:\n{stdout}"
-    );
-    assert!(
-        stdout.contains("**Files Impacted:**"),
-        "Plain output should have files section, got:\n{stdout}"
-    );
-    assert!(
-        stdout.contains("add file"),
-        "Plain output should include the commit description, got:\n{stdout}"
-    );
-    assert!(
-        stdout.contains("src/main.rs"),
-        "Plain output should list the committed file, got:\n{stdout}"
-    );
-}
-
 // ============================================================================
 // repo packages Subcommand Tests
 // ============================================================================
@@ -5891,7 +6049,7 @@ fn test_repo_recent_commits_plain_output_exact_structure() {
 #[test]
 fn test_repo_packages_csv_default() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -5908,7 +6066,7 @@ fn test_repo_packages_csv_default() {
 #[test]
 fn test_repo_packages_md_format() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -5926,7 +6084,7 @@ fn test_repo_packages_md_format() {
 #[test]
 fn test_repo_packages_list_format() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -5944,7 +6102,7 @@ fn test_repo_packages_list_format() {
 #[test]
 fn test_repo_packages_md_and_list_conflict() {
     let (_dir, path) = create_cli_monorepo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -5960,7 +6118,7 @@ fn test_repo_packages_md_and_list_conflict() {
 #[test]
 fn test_repo_packages_package_area_filter() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -5979,7 +6137,7 @@ fn test_repo_packages_package_area_filter() {
 #[test]
 fn test_repo_packages_verbose_shows_root_dir() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6005,7 +6163,7 @@ fn test_repo_packages_verbose_shows_root_dir() {
 #[test]
 fn test_repo_packages_verbose_does_not_emit_tracing() {
     let (_dir, path) = create_cli_monorepo();
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6029,7 +6187,7 @@ fn test_repo_packages_verbose_does_not_emit_tracing() {
 #[test]
 fn test_repo_packages_json_output() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6055,7 +6213,7 @@ fn test_repo_packages_json_output() {
 fn test_repo_packages_no_error_empty_filter() {
     let (_dir, path) = create_cli_monorepo();
     // Filter that matches nothing — without --no-error should exit 1
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6072,7 +6230,7 @@ fn test_repo_packages_no_error_empty_filter() {
 fn test_repo_packages_no_error_allows_empty_filter() {
     let (_dir, path) = create_cli_monorepo();
     // Filter that matches nothing — with --no-error should exit 0
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6089,7 +6247,7 @@ fn test_repo_packages_no_error_allows_empty_filter() {
 #[test]
 fn test_repo_packages_on_error_message() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6112,7 +6270,7 @@ fn test_repo_packages_on_error_message() {
 #[test]
 fn test_repo_packages_no_error_json_empty_filter() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6132,7 +6290,7 @@ fn test_repo_packages_no_error_json_empty_filter() {
 #[test]
 fn test_repo_packages_no_error_json_with_flag() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6157,7 +6315,7 @@ fn test_repo_packages_no_error_json_with_flag() {
 #[test]
 fn test_repo_package_areas_csv_default() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6174,7 +6332,7 @@ fn test_repo_package_areas_csv_default() {
 #[test]
 fn test_repo_package_areas_md_format() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6192,7 +6350,7 @@ fn test_repo_package_areas_md_format() {
 #[test]
 fn test_repo_package_areas_list_format() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6210,7 +6368,7 @@ fn test_repo_package_areas_list_format() {
 #[test]
 fn test_repo_package_areas_md_and_list_conflict() {
     let (_dir, path) = create_cli_monorepo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6226,7 +6384,7 @@ fn test_repo_package_areas_md_and_list_conflict() {
 #[test]
 fn test_repo_package_areas_package_area_filter() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6245,7 +6403,7 @@ fn test_repo_package_areas_package_area_filter() {
 #[test]
 fn test_repo_package_areas_positional_filter() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6264,7 +6422,7 @@ fn test_repo_package_areas_positional_filter() {
 #[test]
 fn test_repo_package_areas_positional_filter_negation() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6283,7 +6441,7 @@ fn test_repo_package_areas_positional_filter_negation() {
 #[test]
 fn test_repo_package_areas_verbose_shows_root_dir() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6309,7 +6467,7 @@ fn test_repo_package_areas_verbose_shows_root_dir() {
 #[test]
 fn test_repo_package_areas_root_area_verbose_renders_dot_slash() {
     let (_dir, path) = create_cli_monorepo_with_root_package();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6335,7 +6493,7 @@ fn test_repo_package_areas_root_area_verbose_renders_dot_slash() {
 #[test]
 fn test_repo_package_areas_verbose_does_not_emit_tracing() {
     let (_dir, path) = create_cli_monorepo();
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6359,7 +6517,7 @@ fn test_repo_package_areas_verbose_does_not_emit_tracing() {
 #[test]
 fn test_repo_package_areas_json_output() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6384,7 +6542,7 @@ fn test_repo_package_areas_json_output() {
 #[test]
 fn test_repo_package_areas_json_perf_stdout_is_valid_json() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6422,7 +6580,7 @@ fn test_repo_package_areas_json_perf_stdout_is_valid_json() {
 #[test]
 fn test_repo_package_areas_no_error_empty_filter() {
     let (_dir, path) = create_cli_monorepo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6438,7 +6596,7 @@ fn test_repo_package_areas_no_error_empty_filter() {
 #[test]
 fn test_repo_package_areas_no_error_allows_empty_filter() {
     let (_dir, path) = create_cli_monorepo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6455,7 +6613,7 @@ fn test_repo_package_areas_no_error_allows_empty_filter() {
 #[test]
 fn test_repo_package_areas_on_error_message() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6478,7 +6636,7 @@ fn test_repo_package_areas_on_error_message() {
 #[test]
 fn test_repo_package_areas_no_error_json_empty_filter() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6498,7 +6656,7 @@ fn test_repo_package_areas_no_error_json_empty_filter() {
 #[test]
 fn test_repo_package_areas_no_error_json_with_flag() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6519,7 +6677,9 @@ fn test_repo_package_areas_no_error_json_with_flag() {
 #[test]
 fn test_repo_root_json_perf_stdout_is_valid_json() {
     // `repo root --json --perf` must produce parseable JSON on stdout.
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let (_dir, path) = create_test_repo();
+    let assert = common::owned_sniff_command()
+        .ambient_context(&path)
         .args(["repo", "root", "--json", "--perf"])
         .assert()
         .success();
@@ -6537,8 +6697,8 @@ fn test_repo_root_is_absolute_without_base_from_subdir() {
     let subdir = repo_path.join("nested/deep");
     std::fs::create_dir_all(&subdir).unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&subdir)
+    let assert = common::owned_sniff_command()
+        .ambient_context(&subdir)
         .args(["repo", "root"])
         .assert()
         .success();
@@ -6567,7 +6727,7 @@ fn test_repo_dirty_files_json_perf_stdout_is_valid_json() {
     test_commit_file(&path, "src/main.rs", "fn main() {}");
     std::fs::write(path.join("src/main.rs"), "fn main() { dirty }").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6588,7 +6748,7 @@ fn test_repo_recent_commits_json_perf_stdout_is_valid_json() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6600,15 +6760,17 @@ fn test_repo_recent_commits_json_perf_stdout_is_valid_json() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let _: Value = serde_json::from_str(stdout.trim())
+    let value: Value = serde_json::from_str(stdout.trim())
         .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
-    assert!(stdout.contains("commits"), "should contain commits key");
+    // `--perf` wraps a bare array as `{ data, performance }`.
+    assert!(value["data"].is_array(), "commits array under data: {value}");
+    assert!(value["performance"].is_object(), "performance report: {value}");
 }
 
 #[test]
 fn test_repo_has_merge_conflict_json_perf_stdout_is_valid_json() {
     let (_dir, path) = create_test_repo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6637,7 +6799,7 @@ fn test_package_json_empty_name_stable_shape() {
     // A bare git repo with no packages — `repo package --json` must emit
     // `{ "name": "" }` instead of prose / no output.
     let (_dir, path) = create_test_repo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6655,7 +6817,7 @@ fn test_package_json_empty_name_stable_shape() {
 #[test]
 fn test_package_area_json_empty_name_stable_shape() {
     let (_dir, path) = create_test_repo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6676,7 +6838,7 @@ fn test_root_json_outside_git_repo_stable_shape() {
     // `{ "root": "" }` so JSON consumers see a stable shape rather than
     // a Box<dyn Error> bubble.
     let dir = tempfile::tempdir().unwrap();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             dir.path().to_str().unwrap(),
@@ -6711,7 +6873,7 @@ fn assert_package_family_shape_when_non_monorepo(
     // Modify so there's something to scan.
     std::fs::write(path.join("src/main.rs"), "fn main() { dirty }").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6793,7 +6955,7 @@ fn test_dirty_packages_json_does_not_emit_prose_error_for_non_monorepo() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6828,7 +6990,7 @@ fn test_repo_deps_json_shape() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6867,7 +7029,7 @@ fn test_repo_pr_help_documents_bitbucket_draft_limitation() {
     // The --status flag's help text must call out the Bitbucket draft
     // limitation so users know `--status draft` returns nothing for
     // Bitbucket-hosted repositories.
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "pr", "--help"])
         .assert()
         .success()
@@ -6886,7 +7048,7 @@ fn test_repo_pr_help_documents_bitbucket_draft_limitation() {
 fn test_has_merge_conflict_json_false() {
     let (_dir, path) = create_test_repo();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6916,7 +7078,7 @@ fn test_has_merge_conflict_json_false() {
 fn test_is_current_package_area_dirty_json_outside_area_emits_false() {
     let (_dir, path) = create_test_repo();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -6939,7 +7101,7 @@ fn test_is_current_package_area_dirty_json_outside_area_emits_false() {
 fn test_is_current_package_area_dirty_json_clean() {
     let (_dir, path) = create_cli_monorepo();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.join("pkg-a").to_str().unwrap(),
@@ -6968,7 +7130,7 @@ fn test_is_current_package_area_dirty_json_clean() {
 fn test_package_area_has_source_code_changes_json_clean() {
     let (_dir, path) = create_cli_monorepo();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.join("pkg-a").to_str().unwrap(),
@@ -6991,7 +7153,7 @@ fn test_package_root_json_when_present() {
     let (_dir, path) = create_cli_monorepo();
     let pkg_a_lib = path.join("pkg-a/lib");
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             pkg_a_lib.to_str().unwrap(),
@@ -7021,7 +7183,7 @@ fn test_package_name_json() {
     let (_dir, path) = create_cli_monorepo();
     let pkg_a_lib = path.join("pkg-a/lib");
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             pkg_a_lib.to_str().unwrap(),
@@ -7167,7 +7329,7 @@ fn test_repo_subcommand_json_shapes_are_distinct() {
         let mut args: Vec<&str> = vec!["--base", cwd.to_str().unwrap(), "repo"];
         args.extend_from_slice(sub_args);
         args.push("--json");
-        let output = assert_cmd::Command::cargo_bin("sniff").unwrap()
+        let output = common::owned_sniff_command()
             .args(&args)
             .assert()
             .get_output()
@@ -7210,7 +7372,7 @@ fn test_git_status_json_perf_attaches_performance_field() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -7249,7 +7411,7 @@ fn test_is_current_package_area_dirty_json_perf_attaches_performance_field() {
     let (_dir, path) = create_cli_monorepo();
     let pkg_a = path.join("pkg-a/lib");
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             pkg_a.to_str().unwrap(),
@@ -7285,7 +7447,7 @@ fn test_is_current_package_area_dirty_json_perf_attaches_performance_field() {
 fn test_repo_structure_filter_json_filters_packages() {
     let (_dir, path) = create_cli_monorepo();
 
-    let assert_all = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert_all = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -7307,7 +7469,7 @@ fn test_repo_structure_filter_json_filters_packages() {
         "unfiltered structure should list all 2 monorepo packages: {json_all}"
     );
 
-    let assert_filtered = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert_filtered = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -7359,7 +7521,7 @@ fn test_package_area_json_resolves_to_real_area() {
     let (_dir, path) = create_cli_monorepo_distinct_area_and_package();
     let cwd = path.join("alpha/core");
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             cwd.to_str().unwrap(),
@@ -7382,7 +7544,7 @@ fn test_package_area_root_json_when_present() {
     let (_dir, path) = create_cli_monorepo_distinct_area_and_package();
     let cwd = path.join("alpha/core");
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             cwd.to_str().unwrap(),
@@ -7414,7 +7576,7 @@ fn test_git_status_json_with_package_scope() {
     let (_dir, path) = create_cli_monorepo();
     test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}");
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -7454,7 +7616,7 @@ fn test_is_current_package_area_dirty_json_true_branch() {
     test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a() {}");
     std::fs::write(path.join("pkg-a/lib/src/lib.rs"), "pub fn a() { dirty }").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.join("pkg-a/lib").to_str().unwrap(),
@@ -7489,7 +7651,7 @@ fn test_package_area_has_source_code_changes_json_true_branch() {
     test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a() {}");
     std::fs::write(path.join("pkg-a/lib/src/lib.rs"), "pub fn a() { dirty }").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.join("pkg-a/lib").to_str().unwrap(),
@@ -7520,7 +7682,7 @@ fn test_package_area_has_source_code_changes_json_docs_only_is_false() {
     test_commit_file(&path, "pkg-a/lib/README.md", "# pkg-a");
     std::fs::write(path.join("pkg-a/lib/README.md"), "# pkg-a (dirty)").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.join("pkg-a/lib").to_str().unwrap(),
@@ -7595,7 +7757,7 @@ fn create_test_repo_with_two_worktrees() -> (tempfile::TempDir, PathBuf, PathBuf
 fn test_git_status_from_linked_worktree_renders_case_a() {
     let (_dir, _repo, _even, ahead) = create_test_repo_with_two_worktrees();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             ahead.to_str().unwrap(),
@@ -7672,7 +7834,7 @@ fn test_git_status_from_linked_worktree_renders_case_a() {
 fn test_git_status_from_main_worktree_renders_case_b() {
     let (_dir, repo, _even, _ahead) = create_test_repo_with_two_worktrees();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             repo.to_str().unwrap(),
@@ -7729,7 +7891,7 @@ fn test_git_status_json_worktree_ahead_is_lazy_by_default() {
     let (_dir, repo, _even, _ahead) = create_test_repo_with_two_worktrees();
 
     let read_ahead = |args: &[&str]| -> u64 {
-        let assert = assert_cmd::Command::cargo_bin("sniff").unwrap().args(args).assert().success();
+        let assert = common::owned_sniff_command().args(args).assert().success();
         let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
         let json: Value = serde_json::from_str(stdout.trim())
             .unwrap_or_else(|e| panic!("not JSON: {e}\n{stdout}"));
@@ -7770,7 +7932,7 @@ fn test_git_status_text_and_json_agree_on_current_worktree() {
     let (_dir, _repo, _even, ahead) = create_test_repo_with_two_worktrees();
     let base = ahead.to_str().unwrap();
 
-    let json_assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let json_assert = common::owned_sniff_command()
         .args(["--base", base, "repo", "git-status", "--json"])
         .assert()
         .success();
@@ -7790,7 +7952,7 @@ fn test_git_status_text_and_json_agree_on_current_worktree() {
         "JSON marks exactly the running worktree as current: {json}"
     );
 
-    let text_assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let text_assert = common::owned_sniff_command()
         .args(["--base", base, "repo", "git-status", "--plain"])
         .assert()
         .success();
@@ -7805,7 +7967,7 @@ fn test_git_status_text_and_json_agree_on_current_worktree() {
 fn test_repo_worktree_inside_linked_worktree_returns_name() {
     let (_dir, _repo_path, worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             worktree_path.to_str().unwrap(),
@@ -7824,7 +7986,7 @@ fn test_repo_worktree_inside_linked_worktree_returns_name() {
 fn test_repo_worktree_inside_main_worktree_exits_1() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args(["--base", repo_path.to_str().unwrap(), "repo", "worktree"])
         .assert()
         .failure()
@@ -7838,7 +8000,7 @@ fn test_repo_worktree_inside_main_worktree_exits_1() {
 fn test_repo_worktree_no_error_exits_0() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -7855,7 +8017,7 @@ fn test_repo_worktree_no_error_exits_0() {
 fn test_repo_worktree_on_error_to_stderr() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -7874,7 +8036,7 @@ fn test_repo_worktree_on_error_to_stderr() {
 fn test_repo_worktree_json_success() {
     let (_dir, _repo_path, worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             worktree_path.to_str().unwrap(),
@@ -7896,7 +8058,7 @@ fn test_repo_worktree_json_success() {
 fn test_repo_worktree_json_failure_no_error() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -7919,7 +8081,7 @@ fn test_repo_worktree_json_failure_no_error() {
 fn test_repo_worktree_verbose_includes_path() {
     let (_dir, _repo_path, worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             worktree_path.to_str().unwrap(),
@@ -7943,7 +8105,7 @@ fn test_repo_worktree_verbose_includes_path() {
 
 #[test]
 fn test_repo_worktree_help_mentions_subcommand() {
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args(["repo", "--help"])
         .assert()
         .success()
@@ -7958,7 +8120,7 @@ fn test_repo_worktree_help_mentions_subcommand() {
 fn test_repo_worktrees_default_output() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args(["--base", repo_path.to_str().unwrap(), "repo", "worktrees"])
         .assert()
         .success();
@@ -7984,7 +8146,7 @@ fn test_repo_worktrees_default_output() {
     }
 
     // The default output must be byte-identical to `--list`.
-    let list = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let list = common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -8005,7 +8167,7 @@ fn test_repo_worktrees_default_output() {
 fn test_repo_worktrees_md_output() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -8029,7 +8191,7 @@ fn test_repo_worktrees_md_output() {
 fn test_repo_worktrees_list_output() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -8058,7 +8220,7 @@ fn test_repo_worktrees_list_output() {
 fn test_repo_worktrees_csv_output() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -8085,7 +8247,7 @@ fn test_repo_worktrees_csv_output() {
 fn test_repo_worktrees_verbose_output() {
     let (_dir, repo_path, worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -8121,7 +8283,7 @@ fn test_repo_worktrees_list_verbose_composes_and_has_no_leading_space() {
     // byte-identical to `--list -v`.
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    let list_v = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let list_v = common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -8146,7 +8308,7 @@ fn test_repo_worktrees_list_verbose_composes_and_has_no_leading_space() {
         );
     }
 
-    let bare_v = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let bare_v = common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -8166,7 +8328,7 @@ fn test_repo_worktrees_md_verbose_keeps_bullet_and_metadata() {
     // `--md -v` must keep the markdown bullet AND append metadata.
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -8197,7 +8359,7 @@ fn test_repo_worktrees_csv_verbose_single_line_with_metadata() {
     // `--csv -v` must stay a single comma-separated line and gain metadata.
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -8230,7 +8392,7 @@ fn test_repo_worktrees_csv_verbose_single_line_with_metadata() {
 fn test_repo_worktrees_json_output() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -8258,7 +8420,7 @@ fn test_repo_worktrees_json_output() {
 fn test_repo_worktrees_plain_verbose_no_escape_codes() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -8285,8 +8447,8 @@ fn test_repo_worktrees_plain_verbose_no_escape_codes() {
 fn test_repo_worktrees_current_marker_from_main_worktree() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&repo_path)
+    let assert = common::owned_sniff_command()
+        .ambient_context(&repo_path)
         .args(["repo", "worktrees"])
         .assert()
         .success();
@@ -8307,8 +8469,8 @@ fn test_repo_worktrees_current_marker_from_main_worktree() {
 fn test_repo_worktrees_current_marker_from_linked_worktree() {
     let (_dir, _repo_path, worktree_path) = create_test_repo_with_worktree();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
-        .current_dir(&worktree_path)
+    let assert = common::owned_sniff_command()
+        .ambient_context(&worktree_path)
         .args(["repo", "worktrees"])
         .assert()
         .success();
@@ -8338,7 +8500,7 @@ fn test_repo_worktrees_detached_head() {
     let head_commit = wt_repo.head().unwrap().peel_to_commit().unwrap();
     wt_repo.set_head_detached(head_commit.id()).unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             repo_path.to_str().unwrap(),
@@ -8449,7 +8611,7 @@ edition = "2024"
 fn test_repo_package_flag_returns_single_package() {
     let (_dir, path) = create_cli_monorepo_with_nested_areas();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -8473,7 +8635,7 @@ fn test_repo_package_flag_returns_single_package() {
 fn test_repo_package_area_flag_uses_prefix_semantics() {
     let (_dir, path) = create_cli_monorepo_with_nested_areas();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -8499,7 +8661,7 @@ fn test_repo_package_area_flag_uses_prefix_semantics() {
 fn test_repo_package_and_area_flags_overlap_succeeds() {
     let (_dir, path) = create_cli_monorepo_with_nested_areas();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -8525,7 +8687,7 @@ fn test_repo_package_and_area_flags_overlap_succeeds() {
 fn test_repo_package_and_area_flags_non_overlap_errors() {
     let (_dir, path) = create_cli_monorepo_with_nested_areas();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -8559,7 +8721,7 @@ fn test_repo_package_and_area_flags_non_overlap_errors() {
 fn test_repo_unknown_package_errors_with_valid_list() {
     let (_dir, path) = create_cli_monorepo_with_nested_areas();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -8591,7 +8753,7 @@ fn test_repo_unknown_package_errors_with_valid_list() {
 fn test_repo_unknown_package_area_errors_with_valid_list() {
     let (_dir, path) = create_cli_monorepo_with_nested_areas();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -8627,7 +8789,7 @@ fn test_repo_unknown_package_area_errors_with_valid_list() {
 fn test_repo_positional_filter_and_package_flag_combine() {
     let (_dir, path) = create_cli_monorepo_with_nested_areas();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -8662,7 +8824,7 @@ fn test_repo_dirty_files_short_p_flag_scopes_to_package() {
     )
     .unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -8694,7 +8856,7 @@ fn test_repo_dirty_files_short_p_flag_scopes_to_package() {
 fn test_repo_git_status_package_with_area_name_errors() {
     let (_dir, path) = create_cli_monorepo_with_nested_areas();
 
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -8729,7 +8891,7 @@ fn test_repo_git_status_package_with_area_name_errors() {
 fn test_repo_area_inside_package_returns_package_name() {
     let (_dir, path) = create_cli_monorepo();
     let inside_pkg_a = path.join("pkg-a/lib/src");
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args(["--base", inside_pkg_a.to_str().unwrap(), "repo", "area"])
         .assert()
         .success();
@@ -8741,7 +8903,7 @@ fn test_repo_area_inside_package_returns_package_name() {
 fn test_repo_area_at_area_dir_returns_area_name() {
     let (_dir, path) = create_cli_monorepo();
     let area_dir = path.join("pkg-a");
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args(["--base", area_dir.to_str().unwrap(), "repo", "area"])
         .assert()
         .success();
@@ -8752,7 +8914,7 @@ fn test_repo_area_at_area_dir_returns_area_name() {
 #[test]
 fn test_repo_area_at_repo_root_returns_root() {
     let (_dir, path) = create_cli_monorepo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args(["--base", path.to_str().unwrap(), "repo", "area"])
         .assert()
         .success();
@@ -8764,7 +8926,7 @@ fn test_repo_area_at_repo_root_returns_root() {
 fn test_repo_area_json_emits_name_outcome() {
     let (_dir, path) = create_cli_monorepo();
     let inside_pkg_b = path.join("pkg-b/lib");
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             inside_pkg_b.to_str().unwrap(),
@@ -8783,7 +8945,7 @@ fn test_repo_area_json_emits_name_outcome() {
 #[test]
 fn test_repo_area_non_monorepo_repo_silent_failure() {
     let (_dir, path) = create_test_repo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args(["--base", path.to_str().unwrap(), "repo", "area"])
         .assert()
         .failure();
@@ -8799,7 +8961,7 @@ fn test_repo_area_non_monorepo_repo_silent_failure() {
 #[test]
 fn test_repo_area_non_monorepo_verbose_message_on_stderr() {
     let (_dir, path) = create_test_repo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -8822,7 +8984,7 @@ fn test_repo_area_non_monorepo_verbose_message_on_stderr() {
 #[test]
 fn test_repo_area_not_in_repo_verbose_message_on_stderr() {
     let dir = tempfile::tempdir().unwrap();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             dir.path().to_str().unwrap(),
@@ -8845,7 +9007,7 @@ fn test_repo_area_not_in_repo_verbose_message_on_stderr() {
 #[test]
 fn test_repo_area_no_error_zero_exit_when_no_monorepo() {
     let (_dir, path) = create_test_repo();
-    assert_cmd::Command::cargo_bin("sniff").unwrap()
+    common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -8860,7 +9022,7 @@ fn test_repo_area_no_error_zero_exit_when_no_monorepo() {
 #[test]
 fn test_repo_area_on_error_prints_message_to_stdout() {
     let (_dir, path) = create_test_repo();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             path.to_str().unwrap(),
@@ -8883,7 +9045,7 @@ fn test_repo_area_on_error_prints_message_to_stdout() {
 #[test]
 fn test_repo_git_status_outside_git_repo_is_graceful() {
     let dir = tempfile::tempdir().unwrap();
-    let assert = assert_cmd::Command::cargo_bin("sniff").unwrap()
+    let assert = common::owned_sniff_command()
         .args([
             "--base",
             dir.path().to_str().unwrap(),

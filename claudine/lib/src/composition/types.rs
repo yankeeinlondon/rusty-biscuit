@@ -310,9 +310,10 @@ pub enum ModelResolutionReason {
     ProviderEnv(&'static str),
     /// Generic `MODEL` environment variable.
     GenericEnv,
-    /// Single frontmatter `model` value validated against catalog.
+    /// Single frontmatter `model` value, forwarded as declared.
     FrontmatterSingle,
-    /// Frontmatter `model` list resolved to first valid match.
+    /// Frontmatter `model` list resolved to its first catalog-recognized
+    /// entry, else its first entry.
     FrontmatterList,
     /// Provider's built-in default (no explicit model chosen).
     ProviderDefault,
@@ -820,7 +821,7 @@ pub struct CompositionExecutionRequest {
     pub operation: Option<String>,
     /// Enable provider-specific sandboxing.
     pub sandbox: bool,
-    /// Use only repo-scoped resources via a shadow HOME.
+    /// Use only repo-scoped resources via a provider overlay.
     pub repo: bool,
     /// Show what would be executed without launching the child.
     pub dry_run: bool,
@@ -920,7 +921,7 @@ pub struct CompositionExecutionRequest {
     /// the command coordinator has already committed the hop against the shared
     /// [`handoff_ledger`][Self::handoff_ledger], so the executor must **not**
     /// route the target's `initialize` a second time through the setup pipeline.
-    /// Instead the harness loop's staged bootstrap (narrow initialize-shell gate
+    /// Instead the harness loop's staged bootstrap (shell-free bootstrap validation
     /// → the target's own `initialize` → stabilized reread → full audit) owns the
     /// target's `initialize`, exactly as an in-harness adoption does — the one
     /// canonical R4 staging for every route. `None` for a directly-invoked

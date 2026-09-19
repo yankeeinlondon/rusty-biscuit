@@ -1,0 +1,8 @@
+# PILOT named types for _mappings.schema.yaml. Separate from _types.yaml so the
+# mapping file never shares a namespace with platform-document properties.
+$schema:
+    Id: "string(pattern(^[a-z0-9][a-z0-9_.-]*$))"
+    AdapterId: enum(discord,discord-webhook,slack,slack-webhook,telegram,whatsapp,signal)
+    Fingerprint: "{ input: string(required), kind: enum(code_file,research_fact; required), digest: string(pattern(^sha256:[0-9a-f]{64}$); required) }"
+    Review: "{ status: enum(proposed,accepted,rejected; required), proposed_by: string(required), reviewed_by: string, reviewed_on: date }"
+    Assessment: "{ id: Id(required)@this, adapter: AdapterId(required)@this, platform_doc: string(required), facts: Id[](min(1); required)@this, status: enum(implemented,partial,missing,unassessed; required), stale_reason: enum(fingerprint_changed,never_reviewed,fact_removed), summary: string(required), code_refs: string[](required), test_refs: string[](required), assessed_revision: string(required), fingerprints: Fingerprint[](min(1); required)@this, review: Review(required)@this, requires_messenger_update: boolean(required), follow_up: string }"

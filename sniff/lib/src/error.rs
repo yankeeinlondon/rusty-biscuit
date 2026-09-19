@@ -291,9 +291,14 @@ pub enum SniffError {
     #[error("commit {hash} is not reachable from HEAD")]
     HashNotReachable { hash: String },
 
+    /// A branch named as a recent-commits history base resolves to neither a
+    /// local branch nor a remote-tracking branch.
+    #[error("branch '{name}' not found as a local or remote-tracking branch")]
+    UnknownBranch { name: String },
+
     /// Invalid period specifier for recent-commits queries.
     #[error(
-        "invalid period specifier: '{0}'. Expected duration (e.g., 3d, 1w), date (YYYY-MM-DD), hash, 'today', or 'yesterday'."
+        "invalid period specifier: '{0}'. Expected a positive count (e.g., 10), duration (e.g., 3d, 1w), date (YYYY-MM-DD), hash, 'today', or 'yesterday'."
     )]
     InvalidPeriod(String),
 

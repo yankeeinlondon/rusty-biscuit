@@ -67,6 +67,31 @@ host-terminal gotcha below. Cannot deliver Kitty keyboard-protocol bytes
 **Use `spawn_shell` by default.** `spawn_program` is for tests that must
 control the process tree (no shell wrapper, absolute path required).
 
+### The pane's shell reads login files, not interactive ones
+
+**Every** backend spawns an outer `-l` login shell (which is where
+`PATH` is assembled) that `exec`s an interactive shell with its **rc
+files suppressed** — `bash --norc -i`, `zsh -f -i`, `unset ENV` for
+POSIX `sh`. The interactive rc is where Atuin, starship, fzf, and zoxide
+install themselves; an Atuin first-run picker rendered into the pane
+swallowed a sent command line and stalled a claudine L2 test until its
+exit marker timed out. Consequences:
+
+- Pane `PATH` is **login-profile only**. A `~/.bashrc` PATH edit does
+  not reach the pane — pass an absolute path or an explicit `PATH` env
+  pair.
+- The prompt is the shell's stock `PS1` (`bash-5.3$`, `host%`). Never
+  grep a captured frame for a literal the stock prompt contains.
+- The outer shell still runs the login profile, so a profile that
+  sources an rc file unconditionally still executes it — but
+  non-interactively, in a shell that is then replaced. Anything guarded
+  on `$-` containing `i` never reaches the pane.
+- The invocation is built once in `lib.rs` (`login_shell_script`,
+  `login_shell_argv`, `login_shell_command_line`) so backends cannot
+  drift. tmux needs `-e` to set pane environment: a variable set on the
+  `tmux` client does not reach a session created against an
+  already-running server.
+
 Assert *styling* on `raw`; assert *visible text* on `plain`.
 
 ## `available()` and skip-clean
@@ -290,9 +315,20 @@ thing to reach for first:
 
 ## Defensive cleanup
 
-Panes/sessions/windows are tagged with the creating pid; later runs
-close only tagged resources whose process is no longer alive — active
+Panes/sessions/windows are tagged with an owning pid; later runs close
+only tagged resources whose process is no longer alive — active
 concurrent runs are left alone.
+
+The owning pid is the spawning process unless `BISCUIT_HARNESS_OWNER_PID`
+names a live process, in which case that pid is stamped instead. `_test_l2`
+exports its own pid before the broker spawns: the broker exits as soon as it
+has spawned, so a pane tagged with the broker's pid is "dead-owner" from the
+first test on, and any reaper on the host — a second L2 run in another
+worktree, say — killed the shared session under the tests. The symptom was
+`tmux send-keys failed` on the first send of a run that passes when rerun
+alone (2026-09-18, sniff-cli). The env-var guard on the shared session name
+still applies inside the run; the owner pid is what protects it from
+everyone else.
 
 - `cleanup_stale_terminal_harness_resources()` is callable for explicit
   suite setup or local maintenance.

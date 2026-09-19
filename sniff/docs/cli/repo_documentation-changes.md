@@ -1,126 +1,91 @@
 ---
 blast_radius:
-  - sniff/cli/src/args.rs
-  - sniff/cli/src/commands.rs
+  - sniff/cli/src/args/recent_commits.rs
   - sniff/cli/src/output/recent_commits.rs
-  - sniff/lib/src/filesystem/git/recent_commits.rs
-  - sniff/lib/src/filesystem/blast_radius.rs
+  - sniff/lib/src/filesystem/git/recent_commits/render.rs
+  - sniff/lib/src/filesystem/git/recent_commits/collect.rs
+  - sniff/lib/src/filesystem/path_kind.rs
 ---
 
 # The `sniff repo documentation-changes` Subcommand
 
-Lists documentation changes within a time period in a **commit-centric** layout: one block per commit, with only the commit's documentation files surfaced under **Files Impacted**. Commits that did not touch any documentation files are skipped entirely. This shares the same rendering template as `recent-commits` and `source-code-changes`, so the three commands differ only in which files they include.
+Lists recent documentation changes in a **commit-centric** layout: one block per commit, with only the commit's documentation files surfaced under **Files Impacted**. Commits that did not touch any documentation files are skipped entirely.
+
+This is a preset over the same pipeline as [`sniff repo recent-commits`](./repo_recent-commits.md). It accepts the same period, filters, and verbosity flags, selects the same commits, and then _projects_ them onto documentation. The three commit-family commands differ only in which files they list.
 
 ## What Counts as Documentation
 
-File classification uses the sniff file-type registry. A file is considered documentation if:
+File classification uses the library's canonical classifier (`sniff::filesystem::path_kind::classify_path`), which places every file in exactly one category. A file is documentation when it is not a CI/CD definition and its file-type registry association is **Documentation**:
 
-- Its association is **Documentation** (e.g., `README`, `CHANGELOG`, `CONTRIBUTING` without extension)
-- Its extension matches a known documentation format: `.md`, `.mdx`, `.rst`, `.txt`, `.adoc`
+- bare `README`, `CHANGELOG`, and `CONTRIBUTING` files (with or without `.md`)
+- the extensions `.md`, `.mdx`, `.rst`, `.txt`, `.adoc`, `.org`, and `.tex`
 
-Source code, configuration, and other non-documentation files are excluded.
+A registry file name keeps its own category despite its extension, so `requirements.txt` is configuration. Source code, web assets, images, configuration, CI/CD definitions, and other files are excluded.
+
+> **Behavior change:** `.html` and `.htm` files used to count as documentation. They are now web assets and no longer appear here.
+
+## Selection, Then Projection
+
+The command first selects commits exactly as `recent-commits` would, then prunes each commit's files to documentation and drops commits left with none:
+
+- With no period, the selection is the **last 10 commits**, so the output can show fewer than 10 commits (or none) when some of them changed no documentation.
+- A moved file is kept when either its new path or its original path is documentation.
+- To _select_ the last 10 commits that changed documentation, add `--documentation`: `sniff repo documentation-changes --documentation`.
 
 ## Default Behavior
 
-When no period is specified, defaults to `3d` (last 3 days). Output is rendered as Markdown with a heading that includes the period label, followed by one block per commit:
-
 ```
-### Documentation Changes (today)
+Documentation Changes
 
 - [e0a1034] docs(sniff) at 10:12am Today: document commit-centric changes layout
-
-    **Description:**
-
-    - Add examples matching the new per-commit block
-    - Note the change-kind prefix in Files Impacted
-
-    **Files Impacted:**
-
-    - modified: sniff/docs/cli/repo_source-code-changes.md
-    - modified: sniff/docs/cli/repo_documentation-changes.md
+  Files Impacted:
+  - modified: sniff/docs/cli/repo_source-code-changes.md
+  - modified: sniff/docs/cli/repo_documentation-changes.md
 
 - [a1b5d77] docs(sniff) at 12:32pm Today: add program-installation documentation placeholder
-
-    **Files Impacted:**
-
-    - added: sniff/docs/topics/program-installation.md
+  Files Impacted:
+  - added: sniff/docs/topics/program-installation.md
 ```
 
 Notes:
 
-- **Files Impacted** lists only documentation files; any non-doc files touched by the same commit are hidden from this view.
-- Each file is prefixed by its change kind (`added`, `modified`, `deleted`, `renamed`, `copied`).
-- File paths are rendered as clickable OSC8 hyperlinks (pointing to `file://` URIs) in terminals that support them.
-- Commit timestamps are displayed in the viewer's local timezone with `Today`/`Yesterday` labels.
-- Terminal styling (bold hash, blue conventional prefix with dim scope, italic `at`, bold time) is shared with [`sniff repo recent-commits`](./repo_recent-commits.md#styled-terminal-output); see that document for the full styling table. `--plain` strips all ANSI escapes.
+- The `Documentation Changes` heading appears only when at least one commit remains.
+- **Files Impacted** lists only documentation files; any other files touched by the same commit are hidden from this view.
+- Headers, links, local-time labels, wrapping, and styling are the same as in [`sniff repo recent-commits`](./repo_recent-commits.md#default-behavior). The styling is defined in the [Recent Commits topic](../topics/repo/recent-commits.md#styling).
 
-## Period Argument
+## Period Argument and Flags
 
 ```
-sniff repo documentation-changes [PERIOD]
+sniff repo documentation-changes [PERIOD] [OPTIONS]
 ```
 
-The optional `PERIOD` argument accepts several formats:
+`PERIOD` accepts a count (`10`), duration (`3d`, `1w`), date (`YYYY-MM-DD`), `today`, `yesterday`, or a hash; the default is the last 10 commits. See [Period Argument](./repo_recent-commits.md#period-argument) for the exact semantics and duration units.
 
-| Format | Example | Meaning |
-|--------|---------|---------|
-| Duration | `3d`, `1w`, `2mo`, `6h` | Relative duration from now |
-| Named | `today` | Since midnight UTC today |
-| Named | `yesterday` | Midnight-to-midnight UTC yesterday |
-| Date | `2026-04-01` | All commits on that date (YYYY-MM-DD) |
-| Hash | `a1b2c3d` | All commits from that hash to HEAD |
-| Count | `10`, `25` | The last N commits reachable from HEAD (bare positive integer) |
+The flags are identical to `recent-commits`:
 
-An all-digit argument is always interpreted as a count, even when it is long enough to look like a SHA. See [`sniff repo recent-commits`](./repo_recent-commits.md#period-argument) for details.
+| Flag | Description |
+|------|-------------|
+| `--operation <OPERATION>` | Keep conventional commits with this operation (any word); repeat to match any of several |
+| `--scope <SCOPE>` | Keep conventional commits with this scope |
+| `--author <NAME\|EMAIL>` | Keep commits whose author name or email contains this text |
+| `--branch <BRANCH>` | Walk history from this branch instead of `HEAD` (local first, then remote-tracking) |
+| `--package <PKG>` / `--package-area <AREA>` | Keep commits touching this monorepo package or package area |
+| `--source-code`, `--web`, `--images`, `--documentation`, `--configuration`, `--cicd` | Keep commits that change every listed file category |
+| `--show-author` | Show each commit's author in its header line |
+| `-v`, `--verbose` / `-c`, `--compact` | Add descriptions and bullet points / show header lines only |
 
-### Duration Units
-
-| Unit | Aliases |
-|------|---------|
-| Hours | `h`, `hour`, `hours` |
-| Days | `d`, `day`, `days` |
-| Weeks | `w`, `wk`, `week`, `weeks` |
-| Months | `mo`, `m`, `month`, `months` (30 days) |
-| Years | `y`, `yr`, `year`, `years` (365 days) |
-
-## Arguments and Flags
-
-| Argument | Description |
-|----------|-------------|
-| `[PERIOD]` | Time period (default: `3d`) |
-| `--action <feat\|chore\|refactor\|test\|style\|fix>` | Filter to one or more conventional commit actions |
-| `--package <PKG>` | Scope to commits touching a specific package |
-| `--package-area <AREA>` | Scope to commits touching a specific package area |
-| `--no-error` | Exit 0 with no output when no results found |
-| `--on-error <MESSAGE>` | Message to display when no results found |
-
-## Conventional Commit Action Filtering
-
-Use `--action` to keep only commits whose summary matches one of these conventional commit actions: `feat`, `chore`, `refactor`, `test`, `style`, `fix`.
-
-The flag may be repeated; multiple `--action` values are OR'd together. Non-conventional commits are excluded when `--action` filtering is active.
-
-## Package Scoping
-
-In monorepos, `--package` and `--package-area` filter commits before file grouping. Only commits that touched files within the specified scope are considered:
-
-```bash
-sniff repo documentation-changes 1w --package sniff
-sniff repo documentation-changes --package-area homelab
-```
+See [Filtering](./repo_recent-commits.md#filtering) and [Verbosity](./repo_recent-commits.md#verbosity) for details. `--action`, `--no-error`, and `--on-error` have been removed.
 
 ## Examples
 
 ```bash
-sniff repo documentation-changes                    # Last 3 days (default)
+sniff repo documentation-changes                    # Documentation files in the last 10 commits
+sniff repo documentation-changes --documentation    # The last 10 commits that changed documentation
 sniff repo documentation-changes 1w                 # Last week
-sniff repo documentation-changes today              # Since midnight
+sniff repo documentation-changes today              # Since local midnight
 sniff repo documentation-changes yesterday          # Yesterday only
-sniff repo documentation-changes 2026-04-01         # Specific date
-sniff repo documentation-changes a1b2c3d            # From hash to HEAD
-sniff repo documentation-changes 10                  # The last 10 commits
-sniff repo documentation-changes --action feat      # Only conventional feat commits
-sniff repo documentation-changes --action chore --action refactor
+sniff repo documentation-changes 2026-04-01         # That local day only
+sniff repo documentation-changes --operation docs   # Only conventional docs commits
 sniff repo documentation-changes 2w --package sniff # Last 2 weeks, sniff package only
 ```
 
@@ -130,67 +95,27 @@ sniff repo documentation-changes 2w --package sniff # Last 2 weeks, sniff packag
 sniff --json repo documentation-changes 1w
 ```
 
-Returns a filtered `CommitDescSet` so the JSON view matches what text
-mode shows — only commits with at least one documentation file are
-included, and within each kept commit the `files` array is reduced to
-documentation paths only. A top-level `"filter": "documentation"`
-field lets JSON consumers tell this output apart from a raw
-`recent-commits` payload (`recent-commits --json` does **not** include
-`filter`):
+Returns the same **bare array** as `recent-commits --json`, projected so it matches the text view: only commits with at least one documentation file are included, and each kept commit's `files` array holds only documentation files. There is no `filter` field or envelope.
 
-```json
-{
-  "filter": "documentation",
-  "commits": [
-    {
-      "hash": "5e8f2a1b...",
-      "datetime": "2026-04-09T16:00:00+00:00",
-      "packages": ["sniff"],
-      "package_areas": ["sniff"],
-      "files": [
-        { "path": "sniff/docs/cli/repo_recent-commits.md", "kind": "modified" }
-      ],
-      "description": "docs(sniff): add CLI docs for recent-commits subcommand",
-      "bullet_points": [
-        "Documented period argument formats",
-        "Added JSON output examples"
-      ]
-    }
-  ],
-  "period_label": "last 1w",
-  "repo_root": "/absolute/path/to/repo"
-}
-```
+Commit-level fields still describe the **whole commit**: `file_types`, `packages`, `package_areas`, `remote`, and `commit_url` are not recomputed from the pruned files. A kept commit can therefore report `"source_code": true` in `file_types` even though no source file is listed.
 
-Each `files` item is a record of `{ path, kind }` where `kind` is one of `added`, `modified`, `deleted`, `renamed`, `copied`.
+See the [Recent Commits Schema](../topics/repo/recent-commits-schema.md) for every field. With `--perf`, the array is wrapped as `{ "data": [ ... ], "performance": { ... } }`.
 
 ## Plain Output (`--plain`)
 
-Adding `--plain` strips all ANSI escape codes and OSC8 hyperlinks from the text output. File paths are rendered as plain text instead of clickable links.
+`--plain` prints the same report as bare text, with no escape codes, hyperlinks, or Markdown markers. The heading prints as a bare `Documentation Changes` line.
 
-## No-Result Behavior
+## Empty Results and Exit Codes
 
-When no documentation files are found in the period (either no commits exist or no commits touched documentation), the default is to exit with code 1. This can be customized:
+When no selected commit touched documentation, the command still succeeds: `--json` prints `[]`, and text modes print nothing to stdout and `No commits matched.` to stderr. The exit code is `0`.
 
-```bash
-sniff repo documentation-changes --no-error
-sniff repo documentation-changes --on-error "No doc changes in this period"
-sniff repo documentation-changes --no-error --on-error "All quiet"
-```
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| `0` | One or more documentation files found |
-| `1` | No documentation changes (default behavior) |
-| `0` | No documentation changes with `--no-error` |
+Invalid periods, unknown branches, unreachable hashes, unknown packages or areas, and package filters outside a monorepo are errors: the message goes to stderr and the exit code is non-zero.
 
 ## Related Commands
 
 | Command | Purpose |
 |---------|---------|
-| [`sniff repo recent-commits`](./repo_recent-commits.md) | Commits in a period, grouped by commit |
-| [`sniff repo source-code-changes`](./repo_source-code-changes.md) | Source code files changed in a period, grouped by file |
+| [`sniff repo recent-commits`](./repo_recent-commits.md) | The same commits with every changed file |
+| [`sniff repo source-code-changes`](./repo_source-code-changes.md) | The same commits, listing only their source-code files |
 | [`sniff repo dirty-files`](./repo_dirty-files.md) | All uncommitted file changes |
 | [`sniff blast-radius`](./repo_blast-radius.md) | Docs whose blast radius intersects changed code |

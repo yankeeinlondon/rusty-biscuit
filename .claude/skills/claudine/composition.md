@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-dca548733b4c3279
-last_updated: 2026-09-10
+hash: ef46db3751d8e999-011ba429f1105fc0
+last_updated: 2026-09-17
 ---
 # Claudine Composition
 
@@ -91,6 +91,30 @@ required runtime groups, and supplies the resulting evidence to
 Missing supplied evidence remains a partial-capture diagnostic; canonical
 paths do not recover it from ambient CWD, HOME, environment, Git, or host
 discovery.
+
+### Binding time: eager `ctx`, lazy `current`, lazy functions
+
+`ctx` and `current` are the same data structure, and so are `env` and
+`current_env`; they differ only in *when* each key is evaluated.
+
+| Surface | Binding |
+|---------|---------|
+| `ctx.<key>` | Eager — captured once at the start of the run, shared by the whole run |
+| `current.<key>` | Lazy — the same keys as `ctx`, each evaluated when referenced |
+| `env.<key>` | Eager — the frozen invocation snapshot |
+| `current_env.<key>` | Lazy — the same keys as `env`, re-read when referenced |
+
+Expression functions are evaluated lazily, at call time. When a context
+variable and a function share a name — `ctx.recent_commits` and
+`recent_commits(count)` are the first pair — they share one definition and
+output format: the variable is the eager snapshot, the function is the lazy,
+parameterized form, and both are projected from one descriptor entry so
+`claudine context` and `claudine context --expressions` cannot drift. This is
+a clean break: `current.ctx.*` and `current.env.*` are removed, not aliased
+(ratified 2026-09-11 in the more-context spec, rulings R29–R33; implementation
+pending — until it lands, lifecycle handlers still see the old `current.ctx.*`
+/ `current.env.*` shape). See
+[lifecycle.md — Binding Time: Early vs Late](lifecycle.md#binding-time-early-vs-late).
 
 File provenance does not choose the provider child's working directory.
 Canonical `::shell` composition remains pinned to
@@ -205,7 +229,7 @@ matrix, supported token shapes, and the open-questions list.
 
 ## Direct Composition
 
-Direct composition takes a Markdown file, composes it through Darkmatter, and sends the composed content as a prompt to an agentic CLI. No files are mutated.
+Direct composition takes a Markdown file, composes it through Darkmatter, and sends the composed content as a prompt to an agentic CLI. Composition does not rewrite the source; lifecycle actions and the provider may mutate files.
 
 ```sh
 claudine compose @commit.md
@@ -215,14 +239,14 @@ claudine compose --codex @commit.md
 Steps:
 
 1. **Resolve** — resolve the file reference using `biscuit-file::FileReference`. A bare **implicit** path (`foo.md`, `dir/foo.md`) resolves from the source document's directory first, then the repository root; an **explicit** `./`/`../` path resolves from the source directory only; `@` is a magic-root search, `&` pins to the repository root, `^` searches package root then package-area root then repository root, `~/` is the user's home, `vault:` a configured vault, `%` a recursive modifier, and absolute paths resolve to themselves
-2. **Compose** — run the Markdown through Darkmatter's compose pipeline (transclusion, interpolation, shell commands, conditionals)
+2. **Initialize and compose** — for live staged documents, bootstrap shell-free frontmatter, reject initialization shell actions, run `initialize`, and reread before body discovery; then audit and compose through Darkmatter (see [Documents That Declare `initialize`](#documents-that-declare-initialize))
 3. **Prepare** — extract the effective (composed) frontmatter; this is the single source of truth for all downstream decisions
 4. **Select provider** — choose which agentic CLI to use (see Provider Selection below)
 5. **Execute** — run a non-interactive session (or interactive with `-i`) through the wrapper-grade pipeline
 
 The composed prompt is sent to the provider. Output streams to the terminal with Markdown-to-terminal rendering in non-interactive mode.
 
-> **Deferred lifecycle keys.** The Prepare stage composes every frontmatter key *except* the seven lifecycle event keys (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`). Those keep their authored `{{ … }}` spans raw in `effective_frontmatter`; Claudine interpolates them through Darkmatter a **second time, at event-time**, so they can read the runtime globals (`err`, `timing`, `current`) and the live document state. See [lifecycle.md — When Lifecycle Properties Interpolate](lifecycle.md#when-lifecycle-properties-interpolate). The single exception is `shell` commands (positional `shell: "…"` or key/value `command:`), resolved against early-binding surfaces at pre-flight so the approved command is byte-identical to the executed one.
+> **Deferred lifecycle keys.** The Prepare stage composes every frontmatter key *except* the seven lifecycle event keys (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`). Those keep their authored `{{ … }}` spans raw in `effective_frontmatter`; Claudine interpolates them through Darkmatter a **second time, at event-time**, so they can read the runtime globals (`err`, `timing`, `current`, `current_env`) and the live document state. See [lifecycle.md — When Lifecycle Properties Interpolate](lifecycle.md#when-lifecycle-properties-interpolate). The single exception is `shell` commands (positional `shell: "…"` or key/value `command:`), resolved against early-binding surfaces at pre-flight so the approved command is byte-identical to the executed one.
 
 ## Inline Composition
 
@@ -412,7 +436,7 @@ This behavior is implemented by [`reconcile_inline_artifact`] in the closure
 module, using `inline_hash_options`, `plan_hash_save`, `restore_properties_text`,
 and `apply_hash_save_text`.
 
-[`reconcile_inline_artifact`]: ../../lib/src/composition/closure.rs
+[`reconcile_inline_artifact`]: ../../../claudine/lib/src/composition/closure.rs
 
 ### Inline Conventions
 
@@ -503,7 +527,7 @@ Every composition error rooted in a prompt file's YAML frontmatter appends the
 authored frontmatter — delimiters included — as a `CodeBlock`: syntax
 highlighted, line-numbered so block line N equals source-file line N, and with
 the offending line highlighted when the error's property maps to a locatable
-key. This covers the lifecycle guards (interpolation leak, undefined variable,
+key. This covers the lifecycle guards (nested span in a literal, undefined variable,
 say/effect/shape errors), the prompt/agent/model/interactive type errors, the
 schema errors (load, validation, missing, unsupported-interactive), the
 inline-compose / sequence mismatch, and body-composition failures
@@ -577,7 +601,7 @@ model: gpt-4o
 model: [gpt-4o, o3-mini]
 ```
 
-List-valued `agent` is treated as author preference order: the first installed provider wins. List-valued `model` is validated against the provider's model catalog; the first valid entry wins. When a catalog is unavailable (e.g., Gemini, Kimi, Goose in v1), frontmatter `model` is gracefully skipped rather than treated as an error.
+List-valued `agent` is treated as author preference order: the first installed provider wins. A frontmatter `model` is always forwarded to the provider: the provider is the authority on which ids it accepts, and Claudine's compiled model catalog is a drift signal, not a gate. A list-valued `model` resolves to the first entry the catalog recognizes, else to its first entry. When the resolved frontmatter model is outside the provider's expected offerings (for OpenCode that baseline is the `opencode/*` aggregator ids, so any provider configured in `opencode.jsonc`, such as `minimax/…` or `zai-coding-plan/…`, qualifies), composition prints one `warning: [model] …` naming the value and the provider, suppressed by `--silent`, and launches with the value unchanged. `--dry-run` resolves the same way and prints the same warning.
 
 ### Model Resolution
 
@@ -586,15 +610,15 @@ Model selection follows a single chain independent of TTY mode:
 1. **CLI `--model`**
 2. **Provider-specific env var** (`CODEX_MODEL`, `CLAUDE_MODEL`, `OPENCODE_MODEL`, etc.)
 3. **Generic `MODEL` env var**
-4. **Frontmatter `model`** (validated against catalog when available)
+4. **Frontmatter `model`** (always forwarded; the catalog orders list hints and warns on an unrecognized value)
 5. **Provider default** (`None` — let the provider choose)
 
-### OpenCode Non-TTY Requirement
+### Providers That Require a Model in Non-Interactive Mode
 
-OpenCode requires a model in non-interactive mode. If no model survives the resolution chain when running OpenCode in non-TTY mode, Claudine emits a hard error before launching the provider:
+A provider whose catalog sets `model_required_in_non_tty` (OpenCode today) cannot launch non-interactively without a model. When nothing in the chain above resolves one, the shared prep stage (`exec_prep::resolve_model_and_validate`, the same function for every provider and for the direct wrapper) looks for one on the provider's behalf through two data sources: the catalog's `model_env_vars` (`OPENCODE_MODEL`), applied exactly like an explicit `--model`, then the provider's own configured default through the `WrapperProfile::configured_default_model` hook. For OpenCode that is the `model` key of `opencode.jsonc` / `opencode.json` (then the legacy `config.json`) under `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`, parsed JSONC-tolerant. A discovered default is delivered exactly like an explicit `--model` — pushed on argv and exported as `MODEL` — and reported in the preflight preamble: Claudine reads the file in its own environment but launches the child in a rewritten one, so a provider left to rediscover its default can run a model Claudine did not report. Only when neither names a model does Claudine fail before launch:
 
 ```
-OpenCode requires a model in non-interactive mode; set --model, OPENCODE_MODEL, or MODEL
+No model specified! OpenCode requires a model in non-interactive mode.
 ```
 
 ### Shorthand Flags
@@ -635,7 +659,7 @@ Everything up to the seam runs normally:
 - Selected-executable availability validation and path resolution are skipped;
   the selected agent does not need to be installed or present on `PATH`.
 
-The seam sits in `wrap::composition::pipeline::execute_composition_request_inner_with_guard`, immediately after provider/model selection resolves. Everything past it is skipped: selected-executable validation/path resolution, MCP shadow-HOME materialization, argv and system-prompt overlay construction, the child-CWD switch, the lifecycle runtime, and the provider spawn. Installed-provider inventory may still run when agent selection or the rendered resolution breakdown needs it; that inventory never makes the selected executable a dry-run prerequisite.
+The seam sits in `wrap::composition::pipeline::execute_composition_request_inner_with_guard`, immediately after provider/model selection resolves. Everything past it is skipped: selected-executable validation/path resolution, provider-overlay planning and materialization, argv and system-prompt overlay construction, the child-CWD switch, the lifecycle runtime, and the provider spawn. Installed-provider inventory may still run when agent selection or the rendered resolution breakdown needs it; that inventory never makes the selected executable a dry-run prerequisite.
 
 **Dry run fires no lifecycle events and has no filesystem side effects of its own.** Because the seam is ahead of lifecycle dispatch, `initialize`/`blocked`/`finalize` never fire, so a stack carrying `append_line`, `set_frontmatter`, or `shell` cannot touch the workspace during a run the user asked to be a rehearsal, and no dynamic `proxy` route can be traversed. For `inline-compose` the source file is likewise **never mutated** (`last_updated` is untouched).
 
@@ -714,19 +738,19 @@ Composition runs execute the full seven-event lifecycle declared in the prompt's
 initialize → start → (success | blocked | failure) → finalize → loop
 ```
 
-- **`initialize`** fires after the prompt file is resolved and frontmatter has parsed, but before schema validation and shell pre-flight. A `skip` control action here opts the whole document out cleanly.
+- **`initialize`** fires after the prompt file is resolved and frontmatter has parsed, before body discovery, shell preflight, and the schema verdict. Shell actions and bootstrap frontmatter shell expansion are forbidden regardless of approval. A `skip` control action here opts the whole document out cleanly.
 - **`start`** fires after schema validation and the lifecycle shell-audit pass succeed, immediately before provider invocation.
 - **`success`/`blocked`/`failure`** are the terminal events. Schema-validation failures and shell-audit denials produce `blocked`; provider errors produce `failure`. The **completion verdict** sits immediately before them (`… → provider → inline closure → verdict → success | failure → finalize`), so it — not the provider's exit code alone — chooses which one fires. It runs once per composition: once per sequence step and once per loop iteration.
 - **`finalize`** fires once per iteration, immediately after the terminal event.
 - **`loop`** is the post-`finalize` gate. Lifecycle concerns authored inside the `loop:` block run first, then the `while`/`until` condition is evaluated, then per-iteration mutations are applied only when continuing.
 
-Legacy prompts that only declare `start`, `success`, `blocked`, and `failure` continue to behave the same way. See [lifecycle.md](lifecycle.md) for the full lifecycle reference, including stacks, control actions, the `err`/`timing`/`current` globals, and examples.
+Legacy prompts that only declare `start`, `success`, `blocked`, and `failure` continue to behave the same way. See [lifecycle.md](lifecycle.md) for the full lifecycle reference, including stacks, control actions, the `err`/`timing`/`current`/`current_env` globals, and examples.
 
 Each lifecycle property interpolates **when its event fires**, not during the initial compose — Darkmatter defers the seven lifecycle keys from compose-time resolution (so their `{{ … }}` spans survive raw in `effective_frontmatter`) and Claudine re-interpolates each property/action string through Darkmatter just-in-time, against the live document state plus the in-scope late-binding globals. Resolution fails closed before any side effect dispatches. See [lifecycle.md — Binding Time: Early vs Late](lifecycle.md#binding-time-early-vs-late).
 
 ### Loop vs lifecycle interpolation
 
-Claudine renders `{{ … }}` templates on two frontmatter surfaces: **loop action values** (`set`/`append`/`prepend`/`merge`, via `looping::actions::render_action_value`) and **lifecycle event text** (via the Darkmatter DM2 substrate `SubtreeCompose`). Both consume the *same* Darkmatter expression core — `parse` / `evaluate` / `ExpressionFinder` / `scalar_string` over an `EvaluationLookup` — so the loop renderer is **not** a second expression engine; it is a loop-specific value renderer sharing that core. A shared conformance matrix pins the overlap: literal/mixed strings, whole-value typed expansion, arrays/objects, the `doc` namespace, functions, string-literal escaping, and malformed-expression fail-closed behavior all resolve **identically** from the same input and state.
+Claudine renders `{{ … }}` templates on two frontmatter surfaces: **loop action values** (`set`/`append`/`prepend`/`merge`, via `looping::actions::render_action_value`) and **lifecycle event text** (via the Darkmatter DM2 substrate `SubtreeCompose`). The loop/capability API keeps the positional spelling `set(key, value)`; Claudine lifecycle YAML uses only `set: {property: value}`. Both consume the *same* Darkmatter expression core — `parse` / `evaluate` / `ExpressionFinder` / `scalar_string` over an `EvaluationLookup` — so the loop renderer is **not** a second expression engine; it is a loop-specific value renderer sharing that core. A shared conformance matrix pins the overlap: literal/mixed strings, whole-value typed expansion, arrays/objects, the `doc` namespace, functions, string-literal escaping, and malformed-expression fail-closed behavior all resolve **identically** from the same input and state.
 
 Three semantic differences are deliberate and keep the two renderers separate rather than merging the loop path into DM2:
 
@@ -834,6 +858,29 @@ The decision to prompt for missing required values depends **only** on the six s
 
 ### Documents That Declare `initialize`
 
+For live `compose` and `inline-compose`, an authored `initialize` key selects
+staged preparation, even when its value is empty or malformed. A newly adopted
+proxy target enters staged initialization too. The bootstrap composes only
+frontmatter and lifecycle inputs through Darkmatter's shared projection; it
+retains document identity, caller provenance, and the captured resolution
+context, but produces no composed prompt and never follows body includes.
+
+The order is: shell-free bootstrap → reject initialization shell actions → run
+`initialize` once → reread the stabilized document → discover and approve the
+full body/lifecycle shell surface → finish canonical preparation and the schema
+verdict → launch. Initialization can therefore create an absent file used by
+an unconditional include or by nested `file_exists(log)` / `phase > 1` blocks.
+The full audit remains condition-blind and reuses prior approvals. A surviving
+missing include blocks launch through the existing typed diagnostic.
+
+`--dry-run` does not initialize or follow dynamic proxies, so a dependency that
+only initialization creates can still fail discovery. Sequences retain their
+separate static-preflight boundary: create required includes **before starting
+the sequence**. A prior task in that sequence cannot satisfy preflight. A task's
+prompt is composed before its own initialization; changes to an existing
+include during that initialization do not enter that already-composed prompt.
+
+
 A document declaring an `initialize` lifecycle stack defers the full invocation-boundary verdict and missing-value collection. Explicitly supplied eager file partials are still completed before initialization, as described above. `initialize` runs before schema validation (R4), and it can add or repair the very property a verdict would reject — writing frontmatter with `set_frontmatter`, or producing a file a `file`-typed property points at. Judging first would fail the document for a violation the next stage is about to fix, and prompting the caller would ask a question the document is about to answer itself.
 
 The verdict is instead reached by the **stabilized reread**: canonical preparation re-reads the document after `initialize` returns and validates that read. A violation that survives `initialize` is therefore reported *after* the document's own `initialize` has run and *through* its own `blocked`/`finalize` stacks, as the same typed `CompositionError` a directly-invoked document reports. A proxied target follows the identical order through its staged bootstrap, which is what makes the diagnostic route-independent.
@@ -883,7 +930,7 @@ Plain `ctx.*` in a composed document describes the caller's **launch context** �
 - **Reuse is observable and attributable.** Every canonical preparation carries a Claudine-local document-epoch token whose recorder owns that epoch's launch construction, same-epoch extensions, ambient fallbacks, and populated-context observations under the stable consumer names `preflight`, `body`, `effective-frontmatter`, `loop-condition`, and `lifecycle`. The recorder is separate from Darkmatter's `ComposeContext`; overlapping parallel sequence workers therefore cannot contribute to one another's exact maps. Performance reports project both invocation totals and each sorted epoch map. Canonical preparation records a fallback on the owning epoch if its prepared context is absent, so dropping the snapshot cannot pass a zero-fallback assertion invisibly.
 - **Target identity is layered, not captured.** `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` reflect the resolved target's environment overrides applied on top of the launch snapshot, preserving target-identity precedence on every route.
 - **The source context stays source-relative.** The active document's `SourceContext` (its authoring base, repository identity, and `FileResolutionContext`) remains authoritative for document-authored file references, transclusion, `$schema` discovery, and provenance. Source-relative resolution is unchanged by this contract.
-- **`current.ctx.*` is unchanged.** It remains live event-time state, captured when the event fires, and is explicitly *not* a fallback for a missing prepared `ctx.*`.
+- **`current.<key>` is unchanged.** It remains live event-time state, evaluated when referenced, and is explicitly *not* a fallback for a missing prepared `ctx.*` (spelling per the ratified mirror — ratified 2026-09-11 in the more-context spec, rulings R29–R33; implementation pending — until it lands, lifecycle handlers still see the old `current.ctx.*` / `current.env.*` shape).
 
 In sequences, the graph phase runs before per-task target selection, so graph-resolved shell bytes cannot legally reference target identity: a command referencing `ctx.agent`, `ctx.model`, `env.AGENT`, or `env.MODEL` fails graph preflight with a typed target-identity rejection directing the author to the task that owns the target. Static bracket access such as `ctx["agent"]` is canonicalized to the same identity path. A computed index rooted at `ctx` or `env` also fails closed because its dynamic key could select a target-dependent leaf; computed indexes under other namespaces are unaffected. Per-task and just-in-time audits — where the selected target's environment is available — continue to expand those roots. The capture-owner drift guard in `cli/tests/composition_seams.rs` rejects any new direct prepared-context capture outside the invocation owner and its allowlisted compatibility sites.
 
@@ -928,7 +975,7 @@ Every entry into canonical preparation declares **why**, and each reason has exa
 | Resume | a fresh read from disk | no | yes | inherits the active document's |
 | Next loop iteration | the stamped structural plan | no | no | reuses the owning loop's plan |
 
-Direct and proxy-target differ **only** in the read basis — that identity is the equivalence contract in table form. A proxy target reads fresh because the handoff commits to a document the source may never have touched.
+The table describes live entry. Direct documents with an authored `initialize` key and newly adopted proxy targets use staged boot; direct documents without that key retain eager preparation. A proxy target reads fresh because the handoff commits to a document the source may never have touched.
 
 `initialize` fires once per **active document**, not once per attempt: a retry or resume re-enters a document that has already initialized. A loop iteration skips validation because it re-materializes against an already-audited structural plan and therefore cannot introduce command bytes the audit never saw.
 
@@ -938,7 +985,7 @@ Retry and resume replace only the **provider-attempt slice** of the active docum
 
 **Launch identity is rebuilt at the fresh-read boundary, not snapshotted at adoption.** Every retry/resume re-materializes the active document from disk and recomputes the whole launch bundle against *that* read — provider, the profile and binary it selects, the resume protocol that profile supports, model, interactivity, the permission mode `--yolo` actually achieves for that pair, the structured-output shape it implies, the MCP tag set lexed from the refreshed body, the provider argv, and the environment overlay (`harness_orch/loop_control/target_launch.rs::rebuild_launch_identity`, called at every fresh-read boundary). An attempt therefore launches with the identity the document it is about to run resolves to now, not with an adoption-time snapshot.
 
-**One rebuild per attempt, and it *is* the launch.** The rebuilt bundle is both what the child is spawned with and what the compatibility key below is computed from, so the key can never describe a plan the child did not receive. Argv and MCP injection come from `wrap/launch_plan.rs::build_launch_plan`, a re-entrant, side-effect-free builder the invocation feeds once with the results of every effect it performed (temp files, shadow HOME, MCP tag ambiguity resolutions — which is why a retry never re-prompts for an ambiguous tag). A rebuild whose facets match the invocation's gets that recorded plan back verbatim, so an unchanged document is byte-identical to the invocation by construction. System-prompt *delivery* is re-applied per provider and so moves with the provider; its *content* is composed once at invocation.
+**One rebuild per attempt, and it *is* the launch.** The rebuilt bundle is both what the child is spawned with and what the compatibility key below is computed from, so the key can never describe a plan the child did not receive. Argv and MCP injection come from `wrap/launch_plan.rs::build_launch_plan`, a re-entrant, side-effect-free builder the invocation feeds once with the results of every effect it performed (temp files, the provider overlay plan, MCP tag ambiguity resolutions — which is why a retry never re-prompts for an ambiguous tag). A rebuild whose facets match the invocation's gets that recorded plan back verbatim, so an unchanged document is byte-identical to the invocation by construction. System-prompt *delivery* is re-applied per provider and so moves with the provider; its *content* is composed once at invocation.
 
 Retry and resume want opposite things from that rebuild. A **retry** opens a fresh session, so there is nothing to conflict with: it simply launches under the refreshed plan, and a document that changed `agent:`, `interactive:`, its permission mode, or its MCP `#tag`s before the retry gets a child spawned from the refreshed plan rather than the invocation's. A **resume** reuses a session the old plan opened, so a moved facet is a genuine conflict and refuses.
 
@@ -954,8 +1001,8 @@ Retry and resume want opposite things from that rebuild. A **retry** opens a fre
 
 The target's stabilized frontmatter is the basis for the target's decisions. What is rebuilt per target today:
 
-- **Context** — the prepared document stores the exact `ComposeContext` it composed against, captured once per document epoch from the invocation's launch context (see [Launch-Anchored Prepared Context](#launch-anchored-prepared-context)) with the resolved target's identity overrides applied. Body interpolation, effective frontmatter, lifecycle DM2 lookup, schema and file evaluation, and shell preflight all read that one stored snapshot; nothing recaptures ambient context at runtime, which matters because the wrapper deliberately moves the process CWD to the repo root. `current.ctx.*` remains live as a late-binding surface, and is explicitly *not* a fallback for a missing prepared `ctx.*`.
-- **`initialize` and shell** — the target runs its own `initialize` behind a narrow safety gate that approves every potentially-selected `initialize` shell command first ("initialize before full pre-flight" never means "execute unapproved shell"), then rereads the stabilized target so initialize-time mutations are visible, then runs the full audit over every remaining lifecycle and template shell surface, reusing approvals the narrow gate already granted rather than re-prompting. An `initialize` proxy may chain another proxy; the chain stabilizes before any launch.
+- **Context** — the prepared document stores the exact `ComposeContext` it composed against, captured once per document epoch from the invocation's launch context (see [Launch-Anchored Prepared Context](#launch-anchored-prepared-context)) with the resolved target's identity overrides applied. Body interpolation, effective frontmatter, lifecycle DM2 lookup, schema and file evaluation, and shell preflight all read that one stored snapshot; nothing recaptures ambient context at runtime, which matters because the wrapper deliberately moves the process CWD to the repo root. `current.<key>` remains live as a late-binding surface, and is explicitly *not* a fallback for a missing prepared `ctx.*` (spelling per the ratified mirror — ratified 2026-09-11 in the more-context spec, rulings R29–R33; implementation pending — until it lands, lifecycle handlers still see the old `current.ctx.*` / `current.env.*` shape).
+- **`initialize` and shell** — the target runs shell-free `initialize`, rereads the stabilized target so initialization mutations are visible, and then audits the remaining lifecycle and template shell surfaces. Shell actions in initialization and shell expansion in bootstrap frontmatter are forbidden regardless of approvals. Early failure/finalize handlers remain shell-free until successful preflight reaches `start`. An `initialize` proxy may chain another proxy; the chain stabilizes before any launch.
 - **Schema and diagnostics** — the target's `$schema` validates the target's effective frontmatter (including any `with:` overlay), and a given failure has one typed identity whichever route reached it.
 - **Launch identity** — when the handoff surfaces to the command-owned coordinator, `compose/prep.rs::prepare_and_run_active_document` re-prepares the target as a fresh document and re-enters the production selection/MCP/argv pipeline, rebuilding from the target's own frontmatter under explicit-CLI precedence: provider selection, profile/binary sub-selection, the argv entrypoint and flags, MCP runtime injection, the effective child environment, interactivity and structured-output mode, dispatch/correlation configuration, model selection, document-loop ownership/recognition, child CWD, and system-prompt delivery. A proxied target therefore selects its authored `agent:`/`model:`, gets its own provider binary and MCP server set, and acquires its own `loop:`, matching a direct invocation. Verified by L2 equivalence rows including a provider *switch* (`level2_lifecycle_equivalence_target_launch_bundle_matches_direct_run`, router `goose` → target `codex`; `level2_lifecycle_equivalence_target_mcp_injection_matches_direct_run`, router `codex` → target `gemini`).
 
@@ -1163,17 +1210,17 @@ See Sequences for the complete authoring and execution contract.
 
 ## Architecture
 
-Both commands follow the same six-stage pipeline, with lifecycle events woven around the stages:
+Both commands share canonical preparation. Live staged entry uses this order; direct documents without `initialize` retain eager preparation:
 
 ```
-Resolve → Initialize → Pre-Flight → Prepare → Start → Select Provider → Launch → (Success | Blocked | Failure) → Finalize → Loop
+Resolve → Shell-free bootstrap → Initialize → Stabilized reread → Full audit / Prepare → Start → Launch → (Success | Blocked | Failure) → Finalize → Loop
 ```
 
 - **Resolve**: canonical commands use
   `composition::resolve_composition_source_in_context()` with the invocation's
   launch `FileResolutionContext`, then derive one `SourceContext` from the
   resolved path
-- **Initialize**: `LifecycleRunGuard::emit_initialize_once()` fires the `initialize` lifecycle event; a `skip` control action here exits cleanly before any later stage
+- **Bootstrap and initialize**: `prepare_bootstrap()` produces only the effective frontmatter/lifecycle surface. The coordinator rejects initialization shell actions and bootstrap shell expansion, dispatches `initialize` once, and rereads before full body discovery; `skip` exits before reading the body. Provider selection supplies early-binding context before composition.
 - **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see Pre-Flight Shell Approval)
 - **Prepare**: `composition::prepare::service::prepare_document()` — the canonical preparation service every entry reason routes through (direct, proxy target, retry, resume, loop iteration) — composes through Darkmatter via `prepare_direct()` / `prepare_inline()` with the pre-approved command set, source `FileResolutionContext`, and supplied runtime evidence, and produces a `PreparedComposition` with `effective_frontmatter`. There is exactly one composer per mode; see [Document Handoffs](#document-handoffs-and-the-equivalence-contract)
 - **Start**: `LifecycleRunGuard::emit_start_once()` fires the `start` lifecycle event after schema validation and shell audit pass

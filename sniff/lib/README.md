@@ -377,7 +377,7 @@ Comprehensive filesystem analysis including Git, monorepo detection, language br
 6. **Document Discovery** (`filesystem::docs`) - Markdown documents with content hashing
 7. **Blast Radius** (`filesystem::blast_radius`) - Impact analysis for changed source files
 8. **Justfile Detection** (`filesystem::just`) - Justfile discovery and recipe parsing
-9. **Recent Commits** (`filesystem::git::recent_commits`) - Duration/hash/date-based commit queries
+9. **Recent Commits** (`filesystem::git::recent_commits`) - `RecentCommits::collect` with count/duration/date/hash selection, filters, remote links, and JSON/Prose/Markdown/plain reports ([topic](../docs/topics/repo/recent-commits.md))
 
 #### Git Detection
 

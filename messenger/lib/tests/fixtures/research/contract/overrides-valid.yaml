@@ -1,0 +1,20 @@
+---
+# A reviewed override keyed to a fact and field, with evidence, reason,
+# author, review date, and the target/schema hashes it was reviewed against.
+# Expect: valid.
+$schema: ../../../../../docs/research/platforms/_overrides.schema.yaml
+schema_version: 1
+overrides:
+- id: ovr.fx.content
+  platform_id: discord
+  fact: c.fx.content.service_max
+  field: unit
+  effective_value: unicode_scalars
+  target_hash: xxh64:e411ea8353eb4024
+  schema_hash: xxh64:d766403489d161d9
+  evidence:
+  - src.fx.sdk
+  reason: SDK evidence resolves the unit.
+  author: maintainer
+  review_by: 2027-09-17
+---

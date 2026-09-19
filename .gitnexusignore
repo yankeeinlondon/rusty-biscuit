@@ -1,0 +1,12 @@
+target/
+**/node_modules
+
+schematic/definitions/src/openai/
+schematic/gen/
+claudine/gen/
+darkmater/lib/tests/fixtures/mermaid/
+schematic/postman/
+
+**/benches/
+**/tests/
+

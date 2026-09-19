@@ -66,12 +66,16 @@ sniff repo --json
 #   "staged": { "files": [], "source_code": [], "documentation": [], "packages": [], "package_areas": [] },
 #   "unstaged": { "files": [], "source_code": [], "documentation": [], "packages": [], "package_areas": [] },
 #   "untracked": { "files": [], "source_code": [], "documentation": [], "packages": [], "package_areas": [] },
-#   "recent_commits": { "commits": [], "period": { ... }, ... },
+#   "recent_commits": [ { "hash": "...", "heading": "...", "files": [ ... ], ... } ],
+#   "source_code_changes": [ ... ],
+#   "documentation_changes": [ ... ],
 #   ...
 # }
 # consolidated aggregate with snake_case keys. Focused child commands keep
 # their own richer shapes, while this aggregate avoids duplicated full package
-# catalogs and groups change data into ScopeBucket objects.
+# catalogs and groups change data into ScopeBucket objects. The three commit
+# families are the exception: each embeds exactly the bare array its focused
+# command (`repo recent-commits --json`, etc.) emits for the last 10 commits.
 #
 # Note: the focused `sniff repo is-monorepo --json` leaf uses a different
 # snake_case object shape (`{ "is_monorepo": ... }`); see its subcommand docs.

@@ -1,0 +1,3 @@
+$schema:
+    facts: "Fact[](min(1); required)@./p4_types.yaml"
+    "<pattern::^(prompt|hash)$>": any

@@ -1,11 +1,13 @@
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 use predicates::prelude::*;
 
 #[test]
 fn test_compose_basic() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_compose_basic");
+    fixture
+        .command()
         .args(["compose", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
@@ -16,10 +18,12 @@ fn test_compose_basic() {
 
 #[test]
 fn test_compose_markdown_plus_renders_disclosure_as_details() {
+    let fixture =
+        CliProcessFixture::named("test_compose_markdown_plus_renders_disclosure_as_details");
     // `md compose --output markdown-plus` must route the composed document
     // through the MarkdownPlus fold, emitting `<details>`/`<summary>` HTML
     // rather than preserving the `::disclosure` DSL verbatim.
-    md_cmd()
+    fixture.command()
         .args(["compose", "--output", "markdown-plus", "-"])
         .write_stdin(
             "::disclosure\nLicense *Agreement*\n::details\nKeep your **hands** off.\n::end-disclosure\n",
@@ -33,10 +37,11 @@ fn test_compose_markdown_plus_renders_disclosure_as_details() {
         .stdout(predicate::str::contains("::disclosure").not());
 }
 
-
 #[test]
 fn test_compose_with_state() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_compose_with_state");
+    fixture
+        .command()
         .args(["compose", "-", "--state", r#"{"name":"Alice"}"#])
         .write_stdin("# Hello {{ name }}")
         .assert()
@@ -46,7 +51,9 @@ fn test_compose_with_state() {
 
 #[test]
 fn test_compose_output_html() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_compose_output_html");
+    fixture
+        .command()
         .args(["compose", "-", "--output", "html"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
@@ -54,10 +61,11 @@ fn test_compose_output_html() {
         .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
 }
 
-
 #[test]
 fn test_compose_strips_frontmatter() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_compose_strips_frontmatter");
+    fixture
+        .command()
         .args(["compose", "-"])
         .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
         .assert()
@@ -76,20 +84,22 @@ fn test_compose_strips_frontmatter() {
 /// frontmatter block.
 #[test]
 fn test_compose_strips_frontmatter_when_values_contain_shell_substitution() {
-    let temp_dir = tempfile::TempDir::new().unwrap();
-    let md_path = temp_dir.path().join("test.md");
-    std::fs::write(
-        &md_path,
+    let fixture = CliProcessFixture::named(
+        "test_compose_strips_frontmatter_when_values_contain_shell_substitution",
+    );
+    let md_path = fixture.write_file(
+        "cwd/test.md",
         "---\nreview: \"\"\ndir: \"$(dirname \"{{review}}\")\"\n---\nBody: {{review}}\n",
-    )
-    .unwrap();
+    );
 
     // Approve shell commands so the pipeline runs to completion.
-    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
-    std::fs::write(&whitelist_path, "prefix dirname\n").unwrap();
+    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix dirname\n");
 
-    md_cmd()
-        .current_dir(temp_dir.path())
+    // Real `dirname` shell expansion is part of this regression's observable result.
+    fixture
+        .command_builder()
+        .host_path()
+        .build()
         .arg("compose")
         .arg(&md_path)
         .arg("review=docs/foo.md")
@@ -107,19 +117,21 @@ fn test_compose_strips_frontmatter_when_values_contain_shell_substitution() {
 /// succeed so exactly one frontmatter block is emitted.
 #[test]
 fn test_compose_frontmatter_flag_emits_single_block_with_nested_quotes() {
-    let temp_dir = tempfile::TempDir::new().unwrap();
-    let md_path = temp_dir.path().join("test.md");
-    std::fs::write(
-        &md_path,
+    let fixture = CliProcessFixture::named(
+        "test_compose_frontmatter_flag_emits_single_block_with_nested_quotes",
+    );
+    let md_path = fixture.write_file(
+        "cwd/test.md",
         "---\nreview: \"\"\ndir: \"$(dirname \"{{review}}\")\"\n---\nBody\n",
-    )
-    .unwrap();
+    );
 
-    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
-    std::fs::write(&whitelist_path, "prefix dirname\n").unwrap();
+    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix dirname\n");
 
-    let output = md_cmd()
-        .current_dir(temp_dir.path())
+    // Real `dirname` shell expansion is needed before the frontmatter is emitted.
+    let output = fixture
+        .command_builder()
+        .host_path()
+        .build()
         .arg("compose")
         .arg("--frontmatter")
         .arg(&md_path)
@@ -152,19 +164,20 @@ fn test_compose_frontmatter_flag_emits_single_block_with_nested_quotes() {
 /// expanded result in the `--frontmatter` output.
 #[test]
 fn test_compose_runs_frontmatter_shell_with_nested_quotes() {
-    let temp_dir = tempfile::TempDir::new().unwrap();
-    let md_path = temp_dir.path().join("test.md");
-    std::fs::write(
-        &md_path,
+    let fixture =
+        CliProcessFixture::named("test_compose_runs_frontmatter_shell_with_nested_quotes");
+    let md_path = fixture.write_file(
+        "cwd/test.md",
         "---\npath: \"docs/foo.md\"\ndir: \"$(dirname \"{{path}}\")\"\n---\nok\n",
-    )
-    .unwrap();
+    );
 
-    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
-    std::fs::write(&whitelist_path, "prefix dirname\n").unwrap();
+    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix dirname\n");
 
-    md_cmd()
-        .current_dir(temp_dir.path())
+    // Real `dirname` shell expansion is the behavior observed in frontmatter.
+    fixture
+        .command_builder()
+        .host_path()
+        .build()
         .arg("compose")
         .arg("--frontmatter")
         .arg(&md_path)
@@ -172,5 +185,3 @@ fn test_compose_runs_frontmatter_shell_with_nested_quotes() {
         .success()
         .stdout(predicate::str::contains("dir: docs"));
 }
-
-

@@ -43,3 +43,14 @@ tracing-subscriber = { version = "0.3", features = ["registry"] }
 [[test]]
 name = "real_provider"
 required-features = ["real-tests"]
+
+# Declared rather than defaulted (2026-09-07-faster-claudine-tests, Phase 6).
+# CI runs L1 with no features, which deliberately leaves the `real_provider`
+# target out of the compile graph: its four identities drive an installed and
+# authenticated provider end-to-end and are gated behind `real-tests` plus
+# `CLAUDINE_CONTRACT_REAL=1`. `real` is not a CI tier — `just test-real` from
+# the `claudine` area is their only route, and that is the intended one.
+[package.metadata.ci.tests]
+tiers = ["L1"]
+features = []
+local-features = []

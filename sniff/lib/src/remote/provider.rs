@@ -8,11 +8,10 @@ use async_trait::async_trait;
 
 use super::snapshot::RemoteRepoSnapshot;
 use super::types::{
-    at_or_after, at_or_before, CanonicalPullRequestState, CiCdInfo, CiCdJob, CiCdJobPage,
-    CiCdJobQuery, CiCdJobReference, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
-    OrgRepoRef, ProviderCapabilities, PullRequestInfo, PullRequestPage, PullRequestQuery,
-    PullRequestRecord, PullRequestReference, PullRequestState, RemoteReport, RepoMetadata,
-    TagsAndReleases,
+    CanonicalPullRequestState, CiCdInfo, CiCdJob, CiCdJobPage, CiCdJobQuery, CiCdJobReference,
+    DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo, OrgRepoRef, ProviderCapabilities,
+    PullRequestInfo, PullRequestPage, PullRequestQuery, PullRequestRecord, PullRequestReference,
+    PullRequestState, RemoteReport, RepoMetadata, TagsAndReleases, at_or_after, at_or_before,
 };
 use crate::error::SniffError;
 
@@ -131,7 +130,9 @@ pub trait RemoteRepoProvider: Send + Sync {
         query.validate_canonical()?;
         validate_pr_filters(self.provider(), &query)?;
         if query.state.is_none() {
-            query.state = Some(super::types::QueryValues::One(CanonicalPullRequestState::Open));
+            query.state = Some(super::types::QueryValues::One(
+                CanonicalPullRequestState::Open,
+            ));
         }
         let state = query
             .state
@@ -148,7 +149,10 @@ pub trait RemoteRepoProvider: Send + Sync {
         let total = items.len();
         let offset = parse_cursor(query.cursor.as_deref())?;
         let limit = query.limit.unwrap_or(20);
-        let items = items.into_iter().skip(offset).take(limit)
+        let items = items
+            .into_iter()
+            .skip(offset)
+            .take(limit)
             .map(|details| pr_record(self.provider(), owner, repo, details))
             .collect::<Vec<_>>();
         let next = offset + items.len();
@@ -307,7 +311,11 @@ pub trait RemoteRepoProvider: Send + Sync {
         // not short-circuit the others.
         let (org_info, documents, pull_requests, issues, tags_and_releases, cicd, org_repos) = tokio::join!(
             async { self.get_org_info(owner).await.ok() },
-            async { self.list_documents_with(&snapshot).await.unwrap_or_default() },
+            async {
+                self.list_documents_with(&snapshot)
+                    .await
+                    .unwrap_or_default()
+            },
             async {
                 self.list_pull_requests(owner, repo, PullRequestState::Open)
                     .await
@@ -360,10 +368,7 @@ fn parse_cursor(cursor: Option<&str>) -> Result<usize, SniffError> {
         })
 }
 
-fn validate_pr_filters(
-    provider: GitProvider,
-    query: &PullRequestQuery,
-) -> Result<(), SniffError> {
+fn validate_pr_filters(provider: GitProvider, query: &PullRequestQuery) -> Result<(), SniffError> {
     for (field, present) in [
         ("assignee", query.assignee.is_some()),
         ("reviewer", query.reviewer.is_some()),
@@ -405,24 +410,64 @@ fn pr_record(
 }
 
 fn pr_matches(item: &PullRequestInfo, query: &PullRequestQuery) -> bool {
-    query.state.as_ref().is_none_or(|states| states.as_slice().iter().any(|state| match state {
-        CanonicalPullRequestState::Open => item.state.eq_ignore_ascii_case("open") || item.state.eq_ignore_ascii_case("opened"),
-        CanonicalPullRequestState::Closed => item.merged_at.is_none() && (item.state.eq_ignore_ascii_case("closed") || item.state.eq_ignore_ascii_case("declined") || item.state.eq_ignore_ascii_case("superseded")),
-        CanonicalPullRequestState::Merged => item.merged_at.is_some() || item.state.eq_ignore_ascii_case("merged"),
-    }))
-        && query.source_branch.as_ref().is_none_or(|branch| item.source_branch.as_ref() == Some(branch))
-        && query.target_branch.as_ref().is_none_or(|branch| item.target_branch.as_ref() == Some(branch))
-        && query.author.as_ref().is_none_or(|author| item.author.eq_ignore_ascii_case(author))
-        && query.labels.iter().all(|label| item.labels.iter().any(|actual| actual.eq_ignore_ascii_case(label)))
-        && query.created_after.as_deref().is_none_or(|bound| at_or_after(&item.created_at, bound))
-        && query.created_before.as_deref().is_none_or(|bound| at_or_before(&item.created_at, bound))
-        && query.updated_after.as_deref().is_none_or(|bound| item.updated_at.as_deref().is_some_and(|value| at_or_after(value, bound)))
-        && query.updated_before.as_deref().is_none_or(|bound| item.updated_at.as_deref().is_some_and(|value| at_or_before(value, bound)))
+    query.state.as_ref().is_none_or(|states| {
+        states.as_slice().iter().any(|state| match state {
+            CanonicalPullRequestState::Open => {
+                item.state.eq_ignore_ascii_case("open") || item.state.eq_ignore_ascii_case("opened")
+            }
+            CanonicalPullRequestState::Closed => {
+                item.merged_at.is_none()
+                    && (item.state.eq_ignore_ascii_case("closed")
+                        || item.state.eq_ignore_ascii_case("declined")
+                        || item.state.eq_ignore_ascii_case("superseded"))
+            }
+            CanonicalPullRequestState::Merged => {
+                item.merged_at.is_some() || item.state.eq_ignore_ascii_case("merged")
+            }
+        })
+    }) && query
+        .source_branch
+        .as_ref()
+        .is_none_or(|branch| item.source_branch.as_ref() == Some(branch))
+        && query
+            .target_branch
+            .as_ref()
+            .is_none_or(|branch| item.target_branch.as_ref() == Some(branch))
+        && query
+            .author
+            .as_ref()
+            .is_none_or(|author| item.author.eq_ignore_ascii_case(author))
+        && query.labels.iter().all(|label| {
+            item.labels
+                .iter()
+                .any(|actual| actual.eq_ignore_ascii_case(label))
+        })
+        && query
+            .created_after
+            .as_deref()
+            .is_none_or(|bound| at_or_after(&item.created_at, bound))
+        && query
+            .created_before
+            .as_deref()
+            .is_none_or(|bound| at_or_before(&item.created_at, bound))
+        && query.updated_after.as_deref().is_none_or(|bound| {
+            item.updated_at
+                .as_deref()
+                .is_some_and(|value| at_or_after(value, bound))
+        })
+        && query.updated_before.as_deref().is_none_or(|bound| {
+            item.updated_at
+                .as_deref()
+                .is_some_and(|value| at_or_before(value, bound))
+        })
         && query.draft.is_none_or(|draft| item.draft == draft)
         && query.search.as_ref().is_none_or(|text| {
             let text = text.to_ascii_lowercase();
             item.title.to_ascii_lowercase().contains(&text)
-                || item.body.as_ref().is_some_and(|body| body.to_ascii_lowercase().contains(&text))
+                || item
+                    .body
+                    .as_ref()
+                    .is_some_and(|body| body.to_ascii_lowercase().contains(&text))
         })
 }
 
@@ -432,7 +477,9 @@ fn pr_matches(item: &PullRequestInfo, query: &PullRequestQuery) -> bool {
 /// `descending` only has meaning relative to a sort key.
 fn sort_prs(items: &mut [PullRequestInfo], sort: Option<&str>, descending: bool) {
     match sort {
-        None | Some("created") => items.sort_by(|left, right| left.created_at.cmp(&right.created_at)),
+        None | Some("created") => {
+            items.sort_by(|left, right| left.created_at.cmp(&right.created_at))
+        }
         Some("updated") => items.sort_by(|left, right| left.updated_at.cmp(&right.updated_at)),
         _ => return,
     }
@@ -577,7 +624,10 @@ mod tests {
             _repo: &str,
             _state: PullRequestState,
         ) -> Result<Vec<PullRequestInfo>, SniffError> {
-            Ok(vec![pr_entry(1, "Alpha", "alice"), pr_entry(2, "Beta", "bob")])
+            Ok(vec![
+                pr_entry(1, "Alpha", "alice"),
+                pr_entry(2, "Beta", "bob"),
+            ])
         }
 
         async fn list_issues(
@@ -689,20 +739,34 @@ mod tests {
 
     #[tokio::test]
     async fn structured_pr_queries_retain_identity_filter_and_page() {
-        let provider = FakeProvider { workflow_runs: vec![], runs_fail: false, detected: None };
-        let exact = provider.get_pull_request("owner", "repo", 2).await.unwrap().unwrap();
+        let provider = FakeProvider {
+            workflow_runs: vec![],
+            runs_fail: false,
+            detected: None,
+        };
+        let exact = provider
+            .get_pull_request("owner", "repo", 2)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(exact.identity.number, Some(2));
         assert_eq!(exact.identity.namespace, "owner");
 
-        let page = provider.query_pull_requests("owner", "repo", PullRequestQuery {
-            author: Some("alice".to_string()),
-            labels: vec!["ready".to_string()],
-            limit: Some(1),
-            ..Default::default()
-        }).await.unwrap();
+        let page = provider
+            .query_pull_requests(
+                "owner",
+                "repo",
+                PullRequestQuery {
+                    author: Some("alice".to_string()),
+                    labels: vec!["ready".to_string()],
+                    limit: Some(1),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(page.total, Some(1));
         assert_eq!(page.items[0].details.title, "Alpha");
         assert!(page.next.is_none());
     }
-
 }

@@ -16,6 +16,7 @@ pub mod reporting;
 pub mod semantic;
 pub mod stderr;
 pub mod summary;
+pub mod task_ledger;
 pub mod thinking;
 pub mod token_usage;
 pub mod tool_display;

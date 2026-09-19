@@ -4,7 +4,7 @@
 //! the real `prompts/review.md`: a supplied `spec=` partial must be offered for
 //! completion *before* the router's first `initialize` guard dereferences it
 //! with `frontmatter(spec, ...)`. Two test binaries drive that flow — the PTY
-//! suite (`level2_provided_partial_file_pty.rs`) for ordering and data flow,
+//! suite (`level1_review_router_partial_pty.rs`) for ordering and data flow,
 //! and the real-terminal capture (`level2_provided_partial_file_capture.rs`)
 //! for what a terminal emulator actually draws — and both must see byte-identical
 //! topology, so the fixture lives here rather than in either binary.

@@ -47,6 +47,38 @@ pub fn blake3_hash_bytes(data: &[u8]) -> [u8; 32] {
     *blake3::hash(data).as_bytes()
 }
 
+/// Computes the BLAKE3 hash of everything `reader` yields, as a hex string.
+///
+/// Streaming, so a caller checksumming a multi-gigabyte artifact — a CI build
+/// archive, a model file — never holds it in memory. Reaches the same digest as
+/// [`blake3_hash_bytes`] over the same bytes.
+///
+/// ## Examples
+///
+/// ```rust
+/// use biscuit_hash::{blake3_hash, blake3_hash_reader};
+///
+/// let mut source = "Hello, World!".as_bytes();
+/// assert_eq!(blake3_hash_reader(&mut source).unwrap(), blake3_hash("Hello, World!"));
+/// ```
+///
+/// ## Errors
+///
+/// Propagates the first read error `reader` returns.
+pub fn blake3_hash_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<String> {
+    let mut hasher = blake3::Hasher::new();
+    // 64 KiB: large enough that syscall overhead disappears, small enough to
+    // stay off the stack-size cliff on every platform's default thread stack.
+    let mut buffer = vec![0_u8; 64 * 1024];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            return Ok(hasher.finalize().to_hex().to_string());
+        }
+        hasher.update(&buffer[..read]);
+    }
+}
+
 /// Computes BLAKE3 hash of the input string after trimming whitespace.
 ///
 /// ## Examples
@@ -122,6 +154,48 @@ mod tests {
             blake3_hash_trimmed("\n\nhello\n\n"),
             blake3_hash_trimmed("hello")
         );
+    }
+
+    #[test]
+    fn test_blake3_hash_reader_matches_the_in_memory_digest() {
+        let mut source = "Hello, World!".as_bytes();
+        assert_eq!(
+            blake3_hash_reader(&mut source).expect("reading a slice cannot fail"),
+            blake3_hash("Hello, World!")
+        );
+    }
+
+    #[test]
+    fn test_blake3_hash_reader_spans_more_than_one_buffer() {
+        // Longer than the 64 KiB read buffer, so the digest is only correct if
+        // every chunk reached the hasher in order.
+        let body = "biscuit".repeat(40_000);
+        let mut source = body.as_bytes();
+        assert_eq!(
+            blake3_hash_reader(&mut source).expect("reading a slice cannot fail"),
+            blake3_hash(&body)
+        );
+    }
+
+    #[test]
+    fn test_blake3_hash_reader_of_nothing_is_the_empty_digest() {
+        let mut source: &[u8] = b"";
+        assert_eq!(
+            blake3_hash_reader(&mut source).expect("reading a slice cannot fail"),
+            blake3_hash("")
+        );
+    }
+
+    #[test]
+    fn test_blake3_hash_reader_propagates_a_read_failure() {
+        struct Broken;
+        impl std::io::Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("device on fire"))
+            }
+        }
+        let error = blake3_hash_reader(&mut Broken).expect_err("a failing reader must not hash");
+        assert!(error.to_string().contains("device on fire"));
     }
 
     #[test]

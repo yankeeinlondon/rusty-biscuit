@@ -48,6 +48,17 @@
 //!   and
 //!   `launch_plan::tests::rewriting_the_discovered_system_prompt_moves_no_delivered_content`;
 //!   the projections themselves by the tests in this module.
+//! - **Overlay-derived** (`overlay`): read from the provider overlay plan the
+//!   attempt's rebuild resolved
+//!   ([`RebuiltLaunchIdentity::overlay`][super::loop_control::target_launch::RebuiltLaunchIdentity::overlay]).
+//!   That is the invocation's recorded plan while the provider holds still, and
+//!   the target provider's own plan after a move. The facet folds the whole
+//!   plan: the reason set, the provider-owned environment patch (the selector
+//!   and any state it pins), the provider-visible root, and the excluded
+//!   resource set. It is read from the plan rather than from
+//!   [`AttemptLaunch::env`] because the exclusions and the reason set never
+//!   reach the environment, and they decide which configuration and resources
+//!   the provider sees.
 //! - **Provider-contributed** ([`SessionCompatibilityKey::extra`]): not yet
 //!   populated. No provider adapter currently contributes a precise resume
 //!   identity, so the map is left empty rather than filled with a heuristic. The
@@ -59,6 +70,7 @@ use std::path::Path;
 
 use claudine::composition::SessionCompatibilityKey;
 use claudine::provider::Provider;
+use claudine::provider_overlay::OverlayPlan;
 
 use super::super::profile::WrapperProfile;
 use super::AttemptLaunch;
@@ -100,6 +112,7 @@ pub(crate) fn session_compat_key(
     document_mcp_tags: &[String],
     launch: &AttemptLaunch,
     write_posture: Option<&str>,
+    overlay: Option<&OverlayPlan>,
 ) -> SessionCompatibilityKey {
     let child_env = &launch.env;
     SessionCompatibilityKey {
@@ -120,6 +133,7 @@ pub(crate) fn session_compat_key(
         structured_output: format!("{use_structured}:{structured_codex}"),
         system_prompt: system_prompt_digest(canonical_args),
         mcp_servers: mcp_signal_set(canonical_args, child_env, document_mcp_tags),
+        overlay: overlay_facet(overlay),
         extra: std::collections::BTreeMap::new(),
     }
 }
@@ -135,6 +149,42 @@ fn permission_facet(yolo: bool, write_posture: Option<&str>) -> String {
         Some(posture) => format!("{mode};write={posture}"),
         None => mode.to_string(),
     }
+}
+
+/// The overlay facet: every part of the plan that decides which configuration
+/// and resources the provider reads, in a deterministic order.
+///
+/// The launch's own overlay root is spelled `<overlay>`: its name is unique per
+/// launch and says nothing about the view, so a rebuilt plan with the same
+/// provider, reasons, patch shape, and exclusions keys equal.
+fn overlay_facet(overlay: Option<&OverlayPlan>) -> String {
+    let Some(plan) = overlay else {
+        return "none".to_string();
+    };
+    let spell = |path: &Path| match plan.storage_root().and_then(|root| path.strip_prefix(root).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "<overlay>".to_string(),
+        Some(rest) => format!("<overlay>/{}", rest.display()),
+        None => path.display().to_string(),
+    };
+    let reasons: Vec<&'static str> = plan.reasons().iter().map(<&'static str>::from).collect();
+    let mut patch: Vec<String> = plan
+        .env_patch()
+        .iter()
+        .map(|(name, value)| format!("{}={}", name.to_string_lossy(), spell(Path::new(value))))
+        .collect();
+    patch.sort();
+    let root = plan
+        .provider_visible_root()
+        .map_or_else(|| "none".to_string(), spell);
+    let excluded: Vec<String> = plan.excluded_resources().into_iter().collect();
+    format!(
+        "provider={};reasons={};env={};root={};exclude={}",
+        plan.provider().as_slug(),
+        reasons.join("+"),
+        patch.join("|"),
+        root,
+        excluded.join(","),
+    )
 }
 
 /// The value of `key` in the effective child environment.

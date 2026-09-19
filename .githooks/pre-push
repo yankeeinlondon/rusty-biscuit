@@ -371,14 +371,14 @@ resolve_trigger_contexts() {
 # path set; CI plans `--all` for it.
 plan_trigger_scope() {
     if is_zero_oid "$SCOPE_BASE"; then
-        (cd "$TRIGGER_ROOT" && python3 scripts/ci/affected_scope.py \
+        (cd "$TRIGGER_ROOT" && python3 scripts/ci/affected_scope.py --event "$SCOPE_EVENT" \
             --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA" --all)
     elif git diff --quiet "$SCOPE_BASE" "$TRIGGER_SHA" --; then
-        (cd "$TRIGGER_ROOT" && python3 scripts/ci/affected_scope.py \
+        (cd "$TRIGGER_ROOT" && python3 scripts/ci/affected_scope.py --event "$SCOPE_EVENT" \
             --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA" --)
     else
         git diff --name-only -z "$SCOPE_BASE" "$TRIGGER_SHA" \
-            | (cd "$TRIGGER_ROOT" && xargs -0 python3 scripts/ci/affected_scope.py \
+            | (cd "$TRIGGER_ROOT" && xargs -0 python3 scripts/ci/affected_scope.py --event "$SCOPE_EVENT" \
                 --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA" --)
     fi
 }
@@ -386,7 +386,7 @@ plan_trigger_scope() {
 # The same cells `just ci-local --plan` prints, from the same renderer when it
 # is built; the refusal itself comes from constraints.py, not from here.
 render_trigger_plan() {
-    PLAN_BIN="${BISCUIT_CI_PLAN_BIN:-$REPO_ROOT/scripts/target/release/ci-plan}"
+    PLAN_BIN="${BISCUIT_CI_PLAN_BIN:-$REPO_ROOT/target/release/ci-plan}"
     if [ -x "$PLAN_BIN" ] && "$PLAN_BIN" "$PLAN_REVIEW_FILE"; then
         return 0
     fi
@@ -472,6 +472,14 @@ review_ref_update() {
     # CI validates the REMOTE branch; a renamed refspec keeps the local name
     # in force too, so a constraint recorded under either name is not lost.
     REMOTE_BRANCH="${REMOTE_REF#refs/heads/}"
+    # The GitHub event this update triggers: a push to main, otherwise the
+    # pull request the branch has or will have. The plan schedules its
+    # environments by it, and CI refuses a scope receipt planned for another.
+    if [ "$REMOTE_REF" = "refs/heads/main" ]; then
+        SCOPE_EVENT="push"
+    else
+        SCOPE_EVENT="pull_request"
+    fi
     set -- --branch "$REMOTE_BRANCH"
     case "$LOCAL_REF" in
         refs/heads/*) LOCAL_BRANCH="${LOCAL_REF#refs/heads/}" ;;

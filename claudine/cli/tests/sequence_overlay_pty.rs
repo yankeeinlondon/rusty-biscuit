@@ -1,12 +1,12 @@
 //! Level 1 PTY tests for `claudine sequence` interactive schema-property
 //! collection.
 //!
-//! Split out of `level2_schema_prompt_pty.rs`: this binary owns the
+//! Split out of the schema-prompt PTY binary: this one owns the
 //! sequence-overlay coverage (cross-step prompt deduplication, per-step
 //! overlay satisfaction, status reporting, and the pre-prompt /
 //! agent-resolution gate that must fire before any provider launches).
 //! The schema-prompt and inline-compose coverage stays in
-//! `level2_schema_prompt_pty.rs`. Shared PTY harness helpers live in
+//! `level1_schema_prompt_pty.rs`. Shared PTY harness helpers live in
 //! `common::pty`.
 //!
 //! ## Tier
@@ -26,9 +26,11 @@
 //! `real_`/`slow_`, so any of those prefixes would have left this binary
 //! running in no canonical recipe at all.
 //!
-//! Gating: `#![cfg(unix)]`, `require_level!(Level::L1, pty_available(), ...)`
-//! so the test skips cleanly without a PTY and panics under
-//! `BISCUIT_TEST_LEVEL_REQUIRED=1`.
+//! Gating: `#![cfg(unix)]` is the only exclusion, because `expectrl`'s
+//! `OsSession` is Unix-only. On a selected platform
+//! `expect_level!(Level::L1, pty_available(), ...)` **fails** when the PTY is
+//! missing rather than skipping: Level 1 is the mandatory suite, where a skip
+//! is indistinguishable from a pass.
 //!
 //! Run via the canonical recipe:
 //!
@@ -38,20 +40,17 @@
 
 #![cfg(unix)]
 
-#[allow(deprecated)]
-use assert_cmd::cargo::cargo_bin;
 use expectrl::Session;
 use expectrl::session::OsSession;
 use std::fs;
 use std::io::Write;
 use std::process::Command;
 use std::time::{Duration, Instant};
-use tempfile::tempdir;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Level, expect_level};
 
 mod common;
 use common::pty::*;
-use common::{augmented_path, pty_available, write_executable};
+use common::{CliProcessFixture, pty_available, write_executable};
 
 // ============================================================================
 // `claudine sequence` Interactive Mode (review-5 High finding)
@@ -69,25 +68,19 @@ use common::{augmented_path, pty_available, write_executable};
 // both contracts can be observed end-to-end.
 
 /// Build a fresh PTY-spawnable `Command` for `claudine sequence --goose <file>`
-/// with the workspace's `bin` dir on PATH and HOME set to the workspace so
-/// `prompt_for_missing` reads the default (`true`) instead of any real
-/// user config.
-fn sequence_command(
-    workspace_dir: &std::path::Path,
-    bin_dir: &std::path::Path,
-    md_file: &std::path::Path,
-) -> Command {
-    stage_default_config(workspace_dir);
-    let mut cmd = Command::new(cargo_bin("claudine"));
+/// against the fixture's own `HOME`, so `prompt_for_missing` reads the default
+/// (`true`) instead of any real user config.
+fn sequence_command(fixture: &CliProcessFixture, md_file: &std::path::Path) -> Command {
+    stage_default_config(fixture.home());
+    // `expectrl` needs a live `std::process::Command`; the builder's raw
+    // surface hands one over carrying the same policy.
+    let mut cmd = fixture.command_std();
     cmd.args(["sequence", "--goose", md_file.to_str().unwrap()]);
-    cmd.env("HOME", workspace_dir);
-    cmd.env("PATH", augmented_path(bin_dir));
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env_remove("NO_COLOR");
     cmd.env_remove("CLAUDINE_PLAIN");
     cmd.env_remove("CI");
-    cmd.current_dir(workspace_dir);
     cmd
 }
 
@@ -105,22 +98,19 @@ fn stage_goose_counter_stub(bin_dir: &std::path::Path, count_path: &std::path::P
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn pty_sequence_prompt_dedupes_and_launches_all_steps() {
     // Both steps require `topic` but the schema only declares it once.
     // The interactive collector must prompt for `topic` EXACTLY ONCE
     // (dedupe), reuse the answer for every step, and only launch the
     // provider AFTER the prompt has been satisfied.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("sequence-overlay-pty");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    stage_goose_counter_stub(&bin_dir, &count_path);
+    stage_goose_counter_stub(fixture.bin_dir(), &count_path);
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         concat!(
@@ -136,7 +126,7 @@ fn pty_sequence_prompt_dedupes_and_launches_all_steps() {
     )
     .unwrap();
 
-    let cmd = sequence_command(workspace.path(), &bin_dir, &md_file);
+    let cmd = sequence_command(&fixture, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     // The label is built from the property name plus type hint. Wait for
@@ -211,7 +201,6 @@ fn pty_sequence_prompt_dedupes_and_launches_all_steps() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn pty_sequence_step_overlay_satisfies_required_property() {
     // The reserved overlay key `state` is set to each step's generated
     // `step_state` **object** (`name`/`id`/`index`/`count`/…). A schema that
@@ -228,18 +217,16 @@ fn pty_sequence_step_overlay_satisfies_required_property() {
     // report must honor the per-step effective override map: `state`
     // must appear as Valid for every step (because the overlay supplies
     // it) even while the user is being prompted for the missing `topic`.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let prompts_path = workspace.path().join("all-prompts.txt");
+    let fixture = CliProcessFixture::named("sequence-overlay-pty");
+    let prompts_path = fixture.cwd().join("all-prompts.txt");
 
     // Goose stub: append the `-t <prompt>` argument from each invocation
     // to a single file so the test can inspect each step's composed
     // prompt afterward.
     write_executable(
-        &bin_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 prev=""
 for arg in "$@"; do
@@ -255,7 +242,7 @@ exit 0
 "#,
     );
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         concat!(
@@ -272,7 +259,7 @@ exit 0
     )
     .unwrap();
 
-    let mut cmd = sequence_command(workspace.path(), &bin_dir, &md_file);
+    let mut cmd = sequence_command(&fixture, &md_file);
     cmd.env("CLAUDINE_PROMPTS_FILE", &prompts_path);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
@@ -331,7 +318,6 @@ exit 0
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn pty_sequence_status_report_honors_setter_supplied_required() {
     // The schema requires TWO properties, `topic` and `tier`. The user
     // supplies `tier` via a CLI `--set` / shorthand setter, so the
@@ -344,16 +330,14 @@ fn pty_sequence_status_report_honors_setter_supplied_required() {
     // user `--set` overrides and the per-step overlay, so `tier` would
     // appear as missing in the pre-prompt diagnostic even though every
     // step's prepare step had already accepted the supplied value.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
+    let fixture = CliProcessFixture::named("sequence-overlay-pty");
+    let marker = fixture.cwd().join("launched.flag");
 
-    stage_goose_stub(&bin_dir, &marker);
+    stage_goose_stub(fixture.bin_dir(), &marker);
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         concat!(
@@ -373,22 +357,19 @@ fn pty_sequence_status_report_honors_setter_supplied_required() {
     // Same as `sequence_command`, but appends a shorthand setter
     // `tier=gold` after the file argument so only `topic` should remain
     // missing once the overlay/setter merge has run.
-    stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin("claudine"));
+    stage_default_config(fixture.home());
+    let mut cmd = fixture.command_std();
     cmd.args([
         "sequence",
         "--goose",
         md_file.to_str().unwrap(),
         "tier=gold",
     ]);
-    cmd.env("HOME", workspace.path());
-    cmd.env("PATH", augmented_path(&bin_dir));
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env_remove("NO_COLOR");
     cmd.env_remove("CLAUDINE_PLAIN");
     cmd.env_remove("CI");
-    cmd.current_dir(workspace.path());
 
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
@@ -440,25 +421,26 @@ fn pty_sequence_status_report_honors_setter_supplied_required() {
 // stderr gate it prompts.
 
 /// Build a `claudine sequence <file>` command with NO explicit provider flag,
-/// so the live agent-resolution gate runs. `PATH` is restricted to `bin_dir`
-/// alone (not [`augmented_path`]) so only the staged stub providers count as
-/// installed and the classified agent state is deterministic on any host.
+/// so the live agent-resolution gate runs. `PATH` is the fixture `bin` alone
+/// (`fake_only_path`) so only the staged stub providers count as installed and
+/// the classified agent state is deterministic on any host.
 fn sequence_command_no_provider(
-    workspace_dir: &std::path::Path,
-    bin_dir: &std::path::Path,
+    fixture: &CliProcessFixture,
     md_file: &std::path::Path,
 ) -> Command {
-    stage_default_config(workspace_dir);
-    let mut cmd = Command::new(cargo_bin("claudine"));
+    stage_default_config(fixture.home());
+    let mut cmd = fixture
+        .command_builder()
+        // Only the staged stub providers may count as installed, so the
+        // classified agent state is deterministic on any host.
+        .fake_only_path()
+        .build_std();
     cmd.args(["sequence", md_file.to_str().unwrap()]);
-    cmd.env("HOME", workspace_dir);
-    cmd.env("PATH", bin_dir);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env_remove("NO_COLOR");
     cmd.env_remove("CLAUDINE_PLAIN");
     cmd.env_remove("CI");
-    cmd.current_dir(workspace_dir);
     cmd
 }
 
@@ -480,17 +462,14 @@ fn stage_provider_launch_stub(
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn pty_sequence_invalid_agent_shows_preprompt_before_review() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-    stage_provider_launch_stub(&bin_dir, "goose", &marker);
+    let fixture = CliProcessFixture::named("sequence-overlay-pty");
+    let marker = fixture.cwd().join("launched.flag");
+    stage_provider_launch_stub(fixture.bin_dir(), "goose", &marker);
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         concat!(
@@ -505,7 +484,7 @@ fn pty_sequence_invalid_agent_shows_preprompt_before_review() {
     )
     .unwrap();
 
-    let cmd = sequence_command_no_provider(workspace.path(), &bin_dir, &md_file);
+    let cmd = sequence_command_no_provider(&fixture, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     // The styled `Invalid Agent:` pre-prompt must render BEFORE the review
@@ -537,19 +516,16 @@ fn pty_sequence_invalid_agent_shows_preprompt_before_review() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn pty_sequence_zero_installed_list_shows_preprompt_before_review() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
+    let fixture = CliProcessFixture::named("sequence-overlay-pty");
+    let marker = fixture.cwd().join("launched.flag");
     // A runnable provider must exist so the review picker has an option to
     // choose from once the zero-installed-list breakdown is shown.
-    stage_provider_launch_stub(&bin_dir, "goose", &marker);
+    stage_provider_launch_stub(fixture.bin_dir(), "goose", &marker);
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     // An all-invalid list resolves to zero installed providers regardless of
     // host, mirroring the L1 `sequence_dry_run_zero_installed_list_*` fixture.
     fs::write(
@@ -566,7 +542,7 @@ fn pty_sequence_zero_installed_list_shows_preprompt_before_review() {
     )
     .unwrap();
 
-    let cmd = sequence_command_no_provider(workspace.path(), &bin_dir, &md_file);
+    let cmd = sequence_command_no_provider(&fixture, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     // `installed/valid` is the single-token signature of the zero-installed
@@ -596,23 +572,20 @@ fn pty_sequence_zero_installed_list_shows_preprompt_before_review() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
     // The core gate fix: `sequence doc.md > out.md` keeps `stderr` on the
     // terminal but redirects `stdout` to a file. The agent-resolution gate
     // keys off `stderr` only, so the prompting state must reach the review
     // screen (emitting the pre-prompt) rather than aborting with the no-TTY
     // `agent resolution failed` error the old `stdin && stdout` gate produced.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-    stage_provider_launch_stub(&bin_dir, "goose", &marker);
-    stage_default_config(workspace.path());
+    let fixture = CliProcessFixture::named("sequence-overlay-pty");
+    let marker = fixture.cwd().join("launched.flag");
+    stage_provider_launch_stub(fixture.bin_dir(), "goose", &marker);
+    stage_default_config(fixture.home());
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         concat!(
@@ -626,8 +599,10 @@ fn pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
     )
     .unwrap();
 
-    let out_file = workspace.path().join("out.md");
-    let claudine_bin = cargo_bin("claudine");
+    let out_file = fixture.cwd().join("out.md");
+    // The binary comes from the builder, not from a hand-rolled `cargo_bin`.
+    let staged = fixture.command_std();
+    let claudine_bin = staged.get_program().to_os_string();
 
     // Drive through `/bin/sh -c` so the shell, not expectrl, owns the `>`
     // redirect: the child claudine inherits stderr+stdin from the PTY but
@@ -635,18 +610,23 @@ fn pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
     let mut cmd = Command::new("/bin/sh");
     cmd.arg("-c").arg(format!(
         "'{}' sequence '{}' > '{}'",
-        claudine_bin.display(),
+        std::path::Path::new(&claudine_bin).display(),
         md_file.display(),
         out_file.display(),
     ));
-    cmd.env("HOME", workspace.path());
-    cmd.env("PATH", &bin_dir);
+    // The shell is the child expectrl owns and claudine is its grandchild, so
+    // the fixture policy is applied to the shell and inherited from there.
+    // Fake-only `PATH` for the same reason `sequence_command_no_provider` uses
+    // it: only the staged stubs may count as installed.
+    fixture
+        .command_builder()
+        .fake_only_path()
+        .apply_policy_to(&mut cmd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env_remove("NO_COLOR");
     cmd.env_remove("CLAUDINE_PLAIN");
     cmd.env_remove("CI");
-    cmd.current_dir(workspace.path());
 
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
@@ -677,7 +657,6 @@ fn pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn pty_sequence_auto_selectable_skips_review_and_launches() {
     // The review-5 High finding: auto-selectable states (`Selected` /
     // `ListOneInstalled`) must bypass the review screen on a TTY, exactly like
@@ -685,15 +664,13 @@ fn pty_sequence_auto_selectable_skips_review_and_launches() {
     // A one-installed-list hint (`agent: [goose, gemini]` with only `goose`
     // staged) classifies as `ListOneInstalled`, so the provider must launch with
     // no alternate-screen review UI and no keyboard input.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-    stage_provider_launch_stub(&bin_dir, "goose", &marker);
+    let fixture = CliProcessFixture::named("sequence-overlay-pty");
+    let marker = fixture.cwd().join("launched.flag");
+    stage_provider_launch_stub(fixture.bin_dir(), "goose", &marker);
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         concat!(
@@ -707,7 +684,7 @@ fn pty_sequence_auto_selectable_skips_review_and_launches() {
     )
     .unwrap();
 
-    let cmd = sequence_command_no_provider(workspace.path(), &bin_dir, &md_file);
+    let cmd = sequence_command_no_provider(&fixture, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     // Drain the PTY until the stub records a launch, accumulating the full raw

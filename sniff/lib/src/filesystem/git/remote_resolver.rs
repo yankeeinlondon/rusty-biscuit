@@ -116,10 +116,14 @@ pub(crate) fn resolve_remote(
 
     let selected = if let Some(name) = requested {
         if !names.iter().any(|candidate| candidate == name) {
-            return Err(SniffError::RemoteNotConfigured { name: name.to_string() });
+            return Err(SniffError::RemoteNotConfigured {
+                name: name.to_string(),
+            });
         }
         if configured_url(repo, name).is_none() {
-            return Err(SniffError::RemoteUrlMissing { name: name.to_string() });
+            return Err(SniffError::RemoteUrlMissing {
+                name: name.to_string(),
+            });
         }
         Some(name.to_string())
     } else {
@@ -147,17 +151,32 @@ pub(crate) fn resolve_remote(
 pub(super) fn select_preferred_remote<'a>(
     candidates: impl IntoIterator<Item = &'a str>,
 ) -> Option<&'a str> {
-    let mut names = candidates.into_iter().collect::<Vec<_>>();
-    names.sort_unstable();
-    names
-        .iter()
-        .find(|name| **name == "origin")
-        .or_else(|| names.iter().find(|name| **name != "upstream"))
-        .or_else(|| names.first())
-        .copied()
+    preferred_remote_order(candidates).into_iter().next()
 }
 
-fn configured_url(repo: &gix::Repository, name: &str) -> Option<String> {
+/// Every candidate in preferred-remote order: `origin`, the other
+/// non-`upstream` remotes alphabetically, then `upstream`. Duplicates are
+/// removed.
+///
+/// [`select_preferred_remote`] is the first element of this order, so commit
+/// linking walks remotes in the same order that picks the preferred remote.
+pub(super) fn preferred_remote_order<'a>(
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> Vec<&'a str> {
+    let mut names = candidates.into_iter().collect::<Vec<_>>();
+    names.sort_unstable();
+    names.dedup();
+    let rank = |name: &str| match name {
+        "origin" => 0,
+        "upstream" => 2,
+        _ => 1,
+    };
+    // Stable sort keeps the alphabetical order within each rank.
+    names.sort_by_key(|name| rank(name));
+    names
+}
+
+pub(super) fn configured_url(repo: &gix::Repository, name: &str) -> Option<String> {
     repo.config_snapshot()
         .string(format!("remote.{name}.url").as_str())
         .map(|value| value.to_string())
@@ -167,12 +186,13 @@ fn configured_url(repo: &gix::Repository, name: &str) -> Option<String> {
 fn resolve_named(repo: &gix::Repository, name: String) -> Result<ResolvedRemote> {
     let fetch_url = configured_url(repo, &name)
         .ok_or_else(|| SniffError::RemoteUrlMissing { name: name.clone() })?;
-    let push_url = repo.config_snapshot()
+    let push_url = repo
+        .config_snapshot()
         .string(format!("remote.{name}.pushurl").as_str())
         .map(|value| value.to_string())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| fetch_url.clone());
-    let (endpoint, namespace, repository) = parse_identity(&fetch_url);
+    let (endpoint, namespace, repository) = super::commit_links::parse_remote_identity(&fetch_url);
     let api_flavor = GitHostingProvider::from_url(&fetch_url).into();
     Ok(ResolvedRemote {
         name,
@@ -186,33 +206,3 @@ fn resolve_named(repo: &gix::Repository, name: String) -> Result<ResolvedRemote>
     })
 }
 
-fn parse_identity(remote: &str) -> (Option<RemoteEndpoint>, Option<String>, Option<String>) {
-    let (endpoint, path) = if let Ok(url) = url::Url::parse(remote) {
-        (
-            url.host_str().map(|host| RemoteEndpoint {
-                scheme: url.scheme().to_string(),
-                host: host.to_string(),
-                port: url.port(),
-            }),
-            url.path().trim_matches('/').to_string(),
-        )
-    } else if let Some((_, after_at)) = remote.split_once('@') {
-        let Some((host, path)) = after_at.split_once(':') else {
-            return (None, None, None);
-        };
-        (
-            Some(RemoteEndpoint {
-                scheme: "ssh".to_string(),
-                host: host.to_string(),
-                port: None,
-            }),
-            path.trim_matches('/').to_string(),
-        )
-    } else {
-        return (None, None, None);
-    };
-    let mut segments = path.split('/').filter(|segment| !segment.is_empty()).collect::<Vec<_>>();
-    let repository = segments.pop().map(|segment| segment.trim_end_matches(".git").to_string());
-    let namespace = (!segments.is_empty()).then(|| segments.join("/"));
-    (endpoint, namespace, repository)
-}

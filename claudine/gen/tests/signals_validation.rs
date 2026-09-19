@@ -14,9 +14,13 @@ use claudine_gen::{GenError, SIGNAL_SLUGS, build_signals};
 
 /// The real claudine package-area root.
 fn real_area() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("gen crate lives under the claudine package area")
+    static AREA: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    AREA.get_or_init(|| {
+        biscuit_test_harness::manifest_dir!()
+            .parent()
+            .expect("gen crate lives under the claudine package area")
+            .to_path_buf()
+    })
 }
 
 struct Fixture {
@@ -62,8 +66,16 @@ impl Fixture {
 
 /// Untampered corpus compiles, twice, byte-identically (the determinism
 /// contract behind the drift test).
+///
+/// Was `real_corpus_builds_deterministically`. `real_` is a tier marker for a
+/// test needing an external device or API, and every canonical recipe filters
+/// on it — so this one compiled on every run and executed on none, while
+/// `just test-real` covers only `claudine-contract` and `claudine-cli`. The
+/// "real" it meant was the *shipped* corpus as opposed to this file's tampered
+/// fixtures, which is an ordinary L1 subject: it reads files in the checkout
+/// and finishes in 0.09 s.
 #[test]
-fn real_corpus_builds_deterministically() {
+fn shipped_corpus_builds_deterministically() {
     let fixture = Fixture::new();
     let first = fixture.build().expect("real corpus must compile");
     let second = fixture.build().expect("real corpus must compile twice");

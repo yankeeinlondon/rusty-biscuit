@@ -16,6 +16,12 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use url::Url;
 
+/// The operations [`ComposeOptions::only_frontmatter_surface`] may keep enabled.
+const FRONTMATTER_SURFACE_OPERATIONS: [ComposeOperation; 2] = [
+    ComposeOperation::FrontmatterInterpolation,
+    ComposeOperation::FrontmatterShellExpansion,
+];
+
 /// One immutable caller override paired with the context that authored it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallerInputRecord {
@@ -659,6 +665,59 @@ impl ComposeOptions {
     /// Returns true if the given operation is enabled.
     pub fn is_enabled(&self, op: ComposeOperation) -> bool {
         self.enabled_operations.contains(op)
+    }
+
+    /// Restricts composition to the effective frontmatter surface: frontmatter
+    /// interpolation and frontmatter `$(...)` expansion, and nothing that reads
+    /// the body.
+    ///
+    /// The result keeps every other option (caller inputs, exclusions, schema
+    /// deferral, file resolution, pre-approved commands) and only narrows the
+    /// operation set, intersecting with what is already enabled — a frontmatter
+    /// operation the caller disabled stays disabled.
+    ///
+    /// The composed document's body is the unchanged input body: no
+    /// transclusion is dereferenced, no body directive or `::block` condition is
+    /// evaluated, and no remote transclusion is prefetched. Keys the caller
+    /// excluded (for example a deferred lifecycle subtree) keep their `{{ }}`
+    /// spans. Its up-front pre-approval check covers frontmatter commands only
+    /// (see [`collect_frontmatter_shell_commands`]).
+    ///
+    /// It exists so a staged run can read the frontmatter that drives an
+    /// initialization step before that step creates the files the body
+    /// includes; the projected content must never be used as a prompt.
+    ///
+    /// [`collect_frontmatter_shell_commands`]: crate::markdown::compose::preflight::collect::collect_frontmatter_shell_commands
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::Markdown;
+    /// use darkmatter::markdown::compose::ComposeOptions;
+    ///
+    /// let md: Markdown = "---\nname: \"{{ 'x' }}\"\n---\n::file ./missing.md\n".into();
+    /// let options = ComposeOptions::new().only_frontmatter_surface();
+    /// assert!(options.is_frontmatter_surface_only());
+    ///
+    /// let (projected, _report) = md.compose_with(options).unwrap();
+    /// assert_eq!(projected.frontmatter().as_map()["name"], "x");
+    /// assert!(projected.content().contains("::file ./missing.md"));
+    /// ```
+    #[must_use]
+    pub fn only_frontmatter_surface(mut self) -> Self {
+        self.enabled_operations = FRONTMATTER_SURFACE_OPERATIONS
+            .iter()
+            .copied()
+            .filter(|op| self.enabled_operations.contains(*op))
+            .collect();
+        self
+    }
+
+    /// Returns true when no enabled operation reads the document body.
+    pub fn is_frontmatter_surface_only(&self) -> bool {
+        self.enabled_operations
+            .iter()
+            .all(|op| FRONTMATTER_SURFACE_OPERATIONS.contains(&op))
     }
 
     /// Sets the compose source as a file path.

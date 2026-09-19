@@ -42,7 +42,7 @@ default:
     echo
 
 # builds the integration for the host platform
-install:
+install *args="":
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -54,7 +54,7 @@ install:
     (cd "$repo_root" && just _ensure-build-deps)
     echo "Installing the Binary"
     echo
-    cargo install --path "$pkg_dir" || exit 1
+    cargo install --locked --path "$pkg_dir" {{ args }} || exit 1
     echo
     echo -e "✅ {{BOLD}}{{NAME}}{{RESET}} was built successfully"
 

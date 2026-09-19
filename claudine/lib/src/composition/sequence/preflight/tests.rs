@@ -41,20 +41,14 @@ fn write_yaml(dir: &Path, name: &str, value: &Value) {
     .unwrap();
 }
 
-// Fixture loads must not discover the runner's monorepo for every matrix case.
-fn resolve_fixture_source(path: &str) -> Result<ResolvedCompositionSource, CompositionError> {
-    let base = Path::new(path).parent().expect("fixture source has a parent");
-    let resolution = biscuit_file::FileResolutionContext::from_snapshot(
-        base,
-        Some(base.to_path_buf()),
-        std::collections::HashMap::new(),
-    );
-    crate::composition::resolve_composition_source_in_context(path, &resolution)
-}
-
 /// Resolve a written Markdown source and build its preflight graph.
 fn graph_for(path: &str) -> Result<PreflightGraph, CompositionError> {
-    let source = resolve_fixture_source(path)?;
+    // `resolve_fixture_source`, not the ambient entry point: every fixture here
+    // is an absolute path inside its own `TempDir`, so the process CWD's
+    // repository topology decides nothing about how it resolves. Nested
+    // references still re-anchor on their authoring directory, which is what
+    // these tests actually assert.
+    let source = crate::composition::resolve_fixture_source(path)?;
     let plan = resolve_sequence_plan(&source)?.expect("fixture declares a sequence");
     build_preflight_graph(&plan, &source)
 }
@@ -101,7 +95,7 @@ mod loading {
             &[("sequence", json!([{ "name": "external", "task": task_ref }]))],
             "Sequence body.\n",
         );
-        let source = resolve_fixture_source(&source_path).unwrap();
+        let source = crate::composition::resolve_fixture_source(&source_path).unwrap();
         let plan = resolve_sequence_plan(&source)
             .unwrap()
             .expect("fixture declares a sequence");
@@ -200,7 +194,7 @@ mod loading {
             )],
             "Body.\n",
         );
-        let resolved = resolve_fixture_source(&source).unwrap();
+        let resolved = crate::composition::resolve_fixture_source(&source).unwrap();
         let plan = resolve_sequence_plan(&resolved)
             .unwrap()
             .expect("fixture declares a sequence");
@@ -677,7 +671,7 @@ mod blocked {
             &[("kind", json!("sequence")), ("sequence", json!(["a"]))],
             "Body.\n",
         );
-        let resolved = resolve_fixture_source(&source).unwrap();
+        let resolved = crate::composition::resolve_fixture_source(&source).unwrap();
         assert!(reject_non_sequence_kind(&resolved).is_ok());
     }
 }
@@ -1356,7 +1350,7 @@ mod shell {
                 "sequence",
                 json!([{
                     "name": "one",
-                    "side_effect": { "set": ["ready", "{{ true }}"] },
+                    "side_effect": { "set": {"ready": "{{ true }}"} },
                     "setup": [ {
                         "action": [ {
                             "action": "shell",
@@ -1488,5 +1482,133 @@ mod steps {
             ),
             "got: {error}",
         );
+    }
+}
+
+// -- referenced-document lifecycle pre-scan --------------------------------
+
+mod lifecycle_literals {
+    use super::*;
+
+    const DEFECT_SAY: &str = "{{ ok ? 'done in {{area}}' : 'failed' }}";
+
+    /// One sequence per reference spelling, each naming a prompt whose
+    /// `success.say` nests a span in a literal. The graph resolves the
+    /// reference through the request snapshot, so the pre-scan sees exactly
+    /// the document execution would compose.
+    #[test]
+    #[serial_test::serial(file_resolution_snapshot)]
+    fn every_reference_spelling_reaches_the_referenced_document() {
+        let request = TempDir::new().unwrap();
+        let root = dunce::canonicalize(request.path()).unwrap();
+        let sequences = root.join("sequences");
+        let magic = root.join("magic");
+        let package = root.join("package");
+        let env_root = root.join("env");
+        let nested = sequences.join("nested");
+        for dir in [&sequences, &magic, &package, &env_root, &nested] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let success = json!({ "say": DEFECT_SAY });
+        let cases: [(&str, &Path, &str); 6] = [
+            ("./nested/explicit.md", &nested, "explicit.md"),
+            ("nested/implicit.md", &nested, "implicit.md"),
+            ("@magic.md", &magic, "magic.md"),
+            ("&root.md", &root, "root.md"),
+            ("^package.md", &package, "package.md"),
+            ("{{CLAUDINE_PRESCAN_ROOT}}/env.md", &env_root, "env.md"),
+        ];
+        let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
+            &root,
+            None,
+            std::collections::HashMap::from([(
+                "CLAUDINE_PRESCAN_ROOT".to_string(),
+                env_root.display().to_string(),
+            )]),
+        )
+        .with_repository_root(root.clone())
+        .with_package_area(package.clone())
+        .add_magic_path(magic.clone(), biscuit_file::PathPosition::Start);
+
+        for (reference, dir, file) in cases {
+            write_source(dir, file, &[("success", success.clone())], "Prompt.\n");
+            let source = write_source(
+                &sequences,
+                "seq.md",
+                &[(
+                    "sequence",
+                    json!([
+                        { "name": "clean", "shell": "true" },
+                        { "name": "defect", "prompt": reference },
+                    ]),
+                )],
+                "Body.\n",
+            );
+            let resolved = crate::composition::resolve_fixture_source(&source).unwrap();
+            let plan = resolve_sequence_plan(&resolved).unwrap().unwrap();
+            let graph = build_preflight_graph_with_context_and_resolution(
+                &plan,
+                &resolved,
+                darkmatter::markdown::compose::ComposeContext::capture(),
+                Some(&snapshot),
+            )
+            .unwrap_or_else(|error| panic!("{reference}: graph failed: {error}"));
+
+            match graph.validate_prompt_lifecycle_literals() {
+                Err(CompositionError::LifecycleNestedSpanInLiteral {
+                    source_path,
+                    property,
+                    nested,
+                    ..
+                }) => {
+                    assert_eq!(
+                        source_path,
+                        dunce::canonicalize(dir.join(file)).unwrap(),
+                        "{reference}"
+                    );
+                    assert_eq!(property, "success.say", "{reference}");
+                    assert_eq!(nested, "{{area}}", "{reference}");
+                }
+                other => panic!("{reference}: expected a nested-span rejection, got {other:?}"),
+            }
+            fs::remove_file(dir.join(file)).unwrap();
+        }
+    }
+
+    #[test]
+    fn clean_mixed_and_unparseable_documents_are_left_to_their_turn() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        write_source(
+            root,
+            "clean.md",
+            &[("success", json!({ "say": "{{ 'done in ' + area }}", "info": "a {{ x ? 'in {{x}}' : 'y' }} b" }))],
+            "Prompt.\n",
+        );
+        // An unparseable lifecycle block is its own turn's error, not the
+        // pre-scan's; the nested span beside it is caught there by prepare.
+        write_source(
+            root,
+            "broken.md",
+            &[("success", json!({ "speak": "typo", "say": DEFECT_SAY }))],
+            "Prompt.\n",
+        );
+        let source = write_source(
+            root,
+            "seq.md",
+            &[(
+                "sequence",
+                json!([
+                    { "name": "clean", "prompt": "clean.md" },
+                    { "name": "broken", "prompt": "broken.md" },
+                ]),
+            )],
+            "Body.\n",
+        );
+        let graph = graph_for(&source).unwrap();
+        assert_eq!(graph.prompt_documents.len(), 2);
+        graph
+            .validate_prompt_lifecycle_literals()
+            .expect("only a parseable single-pass defect is rejected up front");
     }
 }

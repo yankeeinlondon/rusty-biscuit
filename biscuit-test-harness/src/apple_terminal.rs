@@ -163,7 +163,8 @@ fn next_registry_seq() -> u64 {
     SEQ.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Records `window_id` in the registry as owned by the current process.
+/// Records `window_id` in the registry as owned by the owning process (see
+/// [`super::owner_process_id`]).
 ///
 /// Call only for windows the harness genuinely created (`owned == true`):
 /// registering a reused window we don't own would later authorize the
@@ -171,7 +172,7 @@ fn next_registry_seq() -> u64 {
 fn register_window(window_id: i64) {
     let entry = RegistryEntry {
         window_id,
-        owner_pid: current_process_id(),
+        owner_pid: super::owner_process_id(),
         seq: next_registry_seq(),
     };
     append_registry_entry(&registry_path(), entry);
@@ -818,8 +819,8 @@ fn existing_window_ids() -> Option<Vec<i64>> {
 ///
 /// ## Why a shell allowlist, not [`super::detect_shell`]
 ///
-/// The harness spawns `exec <detect_shell()> -l`, but a Terminal.app window
-/// reports the *login* shell macOS started it with — which is the user's
+/// The harness execs the shell [`super::detect_shell`] picked, but a
+/// Terminal.app window reports the *login* shell macOS started it with — the user's
 /// `UserShell` (commonly `zsh`, shown as `-zsh`), not whatever
 /// `detect_shell()` (which prefers `bash`) selected. Matching only the
 /// detected shell therefore never recognized a real leaked window, so they
@@ -941,6 +942,12 @@ impl TerminalHarness for AppleTerminalHarness {
     /// window cannot accidentally receive keystrokes meant for the
     /// developer's foreground app.
     ///
+    /// The `do script` line `exec`s away the shell Terminal.app started
+    /// for its own reasons and replaces it with the harness's two-stage
+    /// login shell, whose interactive stage runs with rc files
+    /// suppressed — see
+    /// [`configure_login_shell`](super::configure_login_shell).
+    ///
     /// Cargo's target binary directory is prepended to `PATH` so CLI
     /// binaries (`bt`, `question`) resolve without an absolute path.
     /// Color-forcing env vars (`FORCE_COLOR`, `CLICOLOR_FORCE`) are set
@@ -970,12 +977,11 @@ impl TerminalHarness for AppleTerminalHarness {
         let window_tag = unique_window_tag();
         let mut shell_cmd = String::new();
 
-        if let Some(bin_dir) =
-            super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"))
-        {
-            shell_cmd.push_str("PATH=");
+        let bin_dir = super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"));
+        if let Some(bin_dir) = &bin_dir {
+            shell_cmd.push_str("BISCUIT_TEST_BIN_DIR=");
             shell_cmd.push_str(&shell_quote(&bin_dir.to_string_lossy()));
-            shell_cmd.push_str(":$PATH ");
+            shell_cmd.push(' ');
         }
         if !self.preserve_capabilities {
             // Force-color env vars are gated because they flip `bt`'s
@@ -999,9 +1005,7 @@ impl TerminalHarness for AppleTerminalHarness {
         if env::var_os("COLORTERM").is_none() {
             shell_cmd.push_str("COLORTERM=truecolor ");
         }
-        shell_cmd.push_str("exec ");
-        shell_cmd.push_str(&shell);
-        shell_cmd.push_str(" -l");
+        shell_cmd.push_str(&super::login_shell_command_line(&shell, bin_dir.is_some()));
 
         // Snapshot the frontmost process *before* `do script` so we can
         // restore focus afterwards. The outer `try` blocks let the script
@@ -1251,7 +1255,13 @@ fn unique_window_tag() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    format!("{WINDOW_TITLE_PREFIX}{}-{n}", current_process_id())
+    // Owner first (what the reaper checks), then the spawning process so
+    // test processes sharing an owner under `_test_l2` never reuse a tag.
+    format!(
+        "{WINDOW_TITLE_PREFIX}{}-{}-{n}",
+        super::owner_process_id(),
+        current_process_id()
+    )
 }
 
 /// Wraps `s` in single quotes and escapes embedded single quotes using
@@ -1320,6 +1330,20 @@ mod tests {
         let got = applescript_escape(s);
         assert!(got.contains(r#"\""#));
         assert!(!got.contains('\n'));
+    }
+
+    /// The `do script` payload crosses two quoting layers — POSIX single
+    /// quotes around the `-c` script, then AppleScript's own escaping — and
+    /// has to survive both intact.
+    #[test]
+    fn login_shell_command_line_survives_the_applescript_escape() {
+        let line = super::super::login_shell_command_line("bash", true);
+        let escaped = applescript_escape(&format!("BISCUIT_TEST_BIN_DIR='/b' {line}"));
+        assert!(
+            escaped.contains(r#"-c 'unset ENV BASH_ENV; export PATH=\"$BISCUIT_TEST_BIN_DIR:$PATH\"; unset BISCUIT_TEST_BIN_DIR; exec \"$0\" --norc -i' bash"#),
+            "{escaped}"
+        );
+        assert!(!escaped.contains('\n'), "a newline would break the literal");
     }
 
     #[test]
@@ -1514,7 +1538,9 @@ mod tests {
     fn unique_window_tag_includes_harness_prefix_and_pid() {
         let tag = unique_window_tag();
         assert!(tag.starts_with(WINDOW_TITLE_PREFIX));
-        assert_eq!(pid_from_tag(&tag, WINDOW_TITLE_PREFIX), Some(current_process_id()));
+        assert_eq!(pid_from_tag(&tag, WINDOW_TITLE_PREFIX), Some(crate::owner_process_id()));
+        assert!(tag.contains(&format!("-{}-", current_process_id())), "{tag}");
+        assert_ne!(tag, unique_window_tag());
     }
 
     /// On non-macOS hosts `available()` must be false unconditionally so

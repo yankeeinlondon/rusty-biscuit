@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
@@ -10,12 +10,11 @@ use tracing::{debug, instrument, warn};
 use crate::request::GitRequest;
 use crate::{Result, SniffError};
 
-use super::recent_commits::CommitDescSet;
+use super::recent_commits::{RecentCommits, RecentCommitsOptions};
 use super::worktree::WorktreeEntry;
+use crate::filesystem::repo::RepoInfo;
 
-const AGGREGATE_COMMIT_WINDOW_DAYS: i64 = 3;
-
-const CONVENTIONAL_COMMIT_RE: &str = r"^([a-zA-Z0-9-]+)(?:\(([^)]*)\))?: (.+)$";
+const CONVENTIONAL_COMMIT_RE: &str = r"^([a-zA-Z0-9-]+)(?:\(([^)]*)\))?!?: (.+)$";
 
 /// Git user configuration.
 ///
@@ -61,7 +60,8 @@ pub struct GitConfig {
 /// Parsed conventional commit.
 ///
 /// Represents a commit message following the conventional commits spec:
-/// `type(scope): description`
+/// `type(scope): description`, where the scope and the breaking-change `!` are
+/// both optional.
 ///
 /// ## Examples
 ///
@@ -72,6 +72,11 @@ pub struct GitConfig {
 /// assert_eq!(commit.operation, Some("feat".to_string()));
 /// assert_eq!(commit.scope, Some("cli".to_string()));
 /// assert_eq!(commit.description, "add new flag");
+///
+/// let breaking = ConventionalCommit::parse("feat(api)!: drop the legacy route");
+/// assert_eq!(breaking.operation, Some("feat".to_string()));
+/// assert_eq!(breaking.scope, Some("api".to_string()));
+/// assert_eq!(breaking.description, "drop the legacy route");
 ///
 /// let plain = ConventionalCommit::parse("Regular commit message");
 /// assert_eq!(plain.operation, None);
@@ -93,6 +98,10 @@ impl ConventionalCommit {
     /// Only parses the first line of the message. If the message doesn't
     /// follow conventional commit format, returns a struct with only
     /// the description populated.
+    ///
+    /// A breaking-change `!` before the colon is accepted and consumed: the
+    /// operation and scope are reported as for the non-breaking form, and the
+    /// marker itself is not retained on any field.
     pub fn parse(message: &str) -> Self {
         let first_line = message.lines().next().unwrap_or("").trim();
 
@@ -121,6 +130,60 @@ impl ConventionalCommit {
             }
         }
     }
+}
+
+/// Split a commit message into a description and its bullet points.
+///
+/// Every non-bullet line is joined into the description, and every `- ` or
+/// `* ` line becomes a bullet point. `repo git-status` uses this for its
+/// commit details; recent-commits reports use their own heading/description
+/// split (spec Decision 15).
+pub fn parse_commit_message(message: &str) -> (String, Vec<String>) {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        return (String::new(), Vec::new());
+    }
+
+    let paragraphs: Vec<&str> = trimmed.split("\n\n").collect();
+    let mut description = String::new();
+    let mut bullet_points = Vec::new();
+
+    let mut first_para_consumed = false;
+    for para in &paragraphs {
+        let lines: Vec<&str> = para.lines().collect();
+        let mut para_description_parts = Vec::new();
+
+        for line in &lines {
+            let stripped = line.trim();
+            if let Some(bullet) = stripped
+                .strip_prefix("- ")
+                .or_else(|| stripped.strip_prefix("* "))
+            {
+                bullet_points.push(bullet.to_string());
+            } else if !stripped.is_empty() {
+                para_description_parts.push(stripped.to_string());
+            }
+        }
+
+        if !para_description_parts.is_empty() {
+            if !first_para_consumed || description.is_empty() {
+                description = para_description_parts.join(" ");
+                first_para_consumed = true;
+            } else {
+                description.push(' ');
+                description.push_str(&para_description_parts.join(" "));
+            }
+        } else if !bullet_points.is_empty() && !first_para_consumed {
+            first_para_consumed = true;
+        } else if bullet_points.is_empty()
+            && para_description_parts.is_empty()
+            && lines.iter().all(|l| l.trim().is_empty())
+        {
+            // blank paragraph separator — just continue
+        }
+    }
+
+    (description, bullet_points)
 }
 
 /// File change status in the working tree.
@@ -351,7 +414,9 @@ impl GitHostingProvider {
                 symbol: "[sh]",
                 self_hosted: false,
                 host_based_detection_reliable: true,
-                browser_base_url: Some("https://sr.ht"),
+                // Git repositories are browsed under the `git.sr.ht` service
+                // host; the site root serves no repository page.
+                browser_base_url: Some("https://git.sr.ht"),
             },
             Self::SelfHosted => GitHostingProviderMetadata {
                 display_name: "Self-Hosted",
@@ -581,7 +646,6 @@ impl GitRepo {
         }
         std::cell::Ref::map(self.ref_decorations.borrow(), |opt| opt.as_ref().unwrap())
     }
-
 }
 
 impl GitRepo {
@@ -821,7 +885,11 @@ impl GitRepo {
     pub fn try_branches(&self) -> Result<Vec<LocalBranchInfo>> {
         self.ensure_cache();
         let current = self.try_current_branch()?;
-        super::remote_refresh::get_local_branches_fallible(&self.gix.borrow(), current.as_deref(), true)
+        super::remote_refresh::get_local_branches_fallible(
+            &self.gix.borrow(),
+            current.as_deref(),
+            true,
+        )
     }
 
     /// Branch projection for `sniff repo branches`.
@@ -1056,7 +1124,9 @@ impl GitRepo {
                 super::remote_refresh::get_tracking_status_from_snapshot(
                     &self.gix.borrow(),
                     Some(current_branch),
-                    ref_snapshot.as_ref().expect("tracking request observes refs"),
+                    ref_snapshot
+                        .as_ref()
+                        .expect("tracking request observes refs"),
                 )?
             } else {
                 Vec::new()
@@ -1112,16 +1182,17 @@ impl GitRepo {
     /// This companion is deliberately crate-private: aggregate projection is
     /// a library operation, not a metadata flag or a field on [`GitInfo`]. The
     /// retained repository handle lets branch, worktree, and history
-    /// observations reuse discovery, with one ref snapshot for branch facts.
-    pub(crate) fn observe_aggregate_evidence(&self) -> Result<GitAggregateEvidence> {
+    /// observations reuse discovery. One ref snapshot serves both branch facts
+    /// and commit linking, and `structure` is the request's already-detected
+    /// package catalog, so commit attribution reads no manifests of its own.
+    pub(crate) fn observe_aggregate_evidence(
+        &self,
+        structure: Option<&RepoInfo>,
+    ) -> Result<GitAggregateEvidence> {
         self.ensure_cache();
         let current_branch = self.try_current_branch()?;
-        let refs = super::remote_refresh::RefSnapshot::observe(
-            &self.gix.borrow(),
-            true,
-            true,
-            false,
-        )?;
+        let refs =
+            super::remote_refresh::RefSnapshot::observe(&self.gix.borrow(), true, true, false)?;
         let branches = self.with_cached_gix(|repo| {
             super::remote_refresh::get_branch_info_from_snapshot(
                 repo,
@@ -1137,11 +1208,13 @@ impl GitRepo {
             })?;
         let current_worktree =
             self.with_cached_gix(super::worktree::current_worktree_name_from_gix);
-        let commits = super::recent_commits::get_recent_commits_by_duration_with_repo(
+        // The default selection, so every aggregate commit family is a
+        // projection of exactly what the focused commands collect by default.
+        let commits = RecentCommits::collect_observed(
             self,
-            Duration::days(AGGREGATE_COMMIT_WINDOW_DAYS),
-            &format!("last {AGGREGATE_COMMIT_WINDOW_DAYS}d"),
-            None,
+            &RecentCommitsOptions::new(),
+            structure,
+            &refs,
         )?;
 
         Ok(GitAggregateEvidence {
@@ -1228,7 +1301,7 @@ pub(crate) struct GitAggregateEvidence {
     pub(crate) branches: Vec<BranchInfo>,
     pub(crate) worktrees: Vec<WorktreeEntry>,
     pub(crate) current_worktree: Option<String>,
-    pub(crate) commits: CommitDescSet,
+    pub(crate) commits: RecentCommits,
 }
 
 /// Represents whether the local branch is behind remote tracking branches.
@@ -1546,7 +1619,12 @@ fn parse_org_repo(url: &str) -> (Option<String>, Option<String>) {
 fn preferred_remote(remotes: &[RemoteInfo]) -> Option<&RemoteInfo> {
     let usable = remotes
         .iter()
-        .filter(|remote| remote.url.as_deref().is_some_and(|url| !url.trim().is_empty()))
+        .filter(|remote| {
+            remote
+                .url
+                .as_deref()
+                .is_some_and(|url| !url.trim().is_empty())
+        })
         .collect::<Vec<_>>();
     let selected =
         super::remote_resolver::select_preferred_remote(usable.iter().map(|r| r.name.as_str()))?;
@@ -1904,9 +1982,7 @@ mod tests {
         let info = crate::performance::with_current_collector(Some(collector.clone()), || {
             git_repo.detect_with_request(&request).unwrap()
         });
-        let counters = collector
-            .snapshot(std::time::Duration::ZERO)
-            .counters;
+        let counters = collector.snapshot(std::time::Duration::ZERO).counters;
 
         assert_eq!(
             counters
@@ -1917,7 +1993,11 @@ mod tests {
             "branches, tracking, remote tips, and decorations share one pass: {counters:?}"
         );
         assert!(info.recent.iter().any(|commit| !commit.refs.is_empty()));
-        assert!(info.branches.iter().any(|candidate| candidate.name == branch));
+        assert!(
+            info.branches
+                .iter()
+                .any(|candidate| candidate.name == branch)
+        );
         assert!(info.tracking.iter().any(|status| status.remote == "origin"));
         let origin = info
             .remotes
@@ -1934,17 +2014,14 @@ mod tests {
         let linked_path = dir.path().join("linked-native-path");
         repo.worktree("linked", &linked_path, None).unwrap();
 
-        let request = GitRequest::full().metadata(
-            crate::request::GitMetadataRequest::none().worktrees(true),
-        );
+        let request =
+            GitRequest::full().metadata(crate::request::GitMetadataRequest::none().worktrees(true));
         let git_repo = GitRepo::discover(dir.path()).unwrap().unwrap();
         let collector = crate::performance::PerformanceCollector::new_shared();
         let info = crate::performance::with_current_collector(Some(collector.clone()), || {
             git_repo.detect_with_request(&request).unwrap()
         });
-        let counters = collector
-            .snapshot(std::time::Duration::ZERO)
-            .counters;
+        let counters = collector.snapshot(std::time::Duration::ZERO).counters;
 
         assert_eq!(
             counters
@@ -1957,15 +2034,10 @@ mod tests {
         let linked = info.worktrees.get("master").or_else(|| {
             info.worktrees
                 .values()
-                .find(|worktree| {
-                    worktree.filepath == std::fs::canonicalize(&linked_path).unwrap()
-                })
+                .find(|worktree| worktree.filepath == std::fs::canonicalize(&linked_path).unwrap())
         });
         let linked = linked.expect("linked worktree is projected from metadata");
-        assert_eq!(
-            linked.filepath,
-            std::fs::canonicalize(linked_path).unwrap()
-        );
+        assert_eq!(linked.filepath, std::fs::canonicalize(linked_path).unwrap());
         assert!(!linked.sha.is_empty());
         assert!(!linked.is_current);
     }
@@ -1976,17 +2048,14 @@ mod tests {
         let linked_path = dir.path().join("current-linked");
         repo.worktree("current-linked", &linked_path, None).unwrap();
 
-        let request = GitRequest::full().metadata(
-            crate::request::GitMetadataRequest::none().worktrees(true),
-        );
+        let request =
+            GitRequest::full().metadata(crate::request::GitMetadataRequest::none().worktrees(true));
         let git_repo = GitRepo::discover(&linked_path).unwrap().unwrap();
         let collector = crate::performance::PerformanceCollector::new_shared();
         let info = crate::performance::with_current_collector(Some(collector.clone()), || {
             git_repo.detect_with_request(&request).unwrap()
         });
-        let counters = collector
-            .snapshot(std::time::Duration::ZERO)
-            .counters;
+        let counters = collector.snapshot(std::time::Duration::ZERO).counters;
 
         assert_eq!(
             counters
@@ -1999,11 +2068,97 @@ mod tests {
         let current = info
             .worktrees
             .values()
-            .find(|worktree| {
-                worktree.filepath == std::fs::canonicalize(&linked_path).unwrap()
-            })
+            .find(|worktree| worktree.filepath == std::fs::canonicalize(&linked_path).unwrap())
             .expect("current linked worktree is present");
         assert!(current.is_current);
         assert!(!current.sha.is_empty());
+    }
+
+    mod conventional_commit_tests {
+        use super::*;
+
+        #[test]
+        fn breaking_marker_without_scope_keeps_the_operation() {
+            let commit = ConventionalCommit::parse("feat!: breaking without scope");
+
+            assert_eq!(commit.operation.as_deref(), Some("feat"));
+            assert_eq!(commit.scope, None);
+            assert_eq!(commit.description, "breaking without scope");
+        }
+
+        #[test]
+        fn breaking_marker_after_scope_keeps_the_operation_and_scope() {
+            let commit = ConventionalCommit::parse("feat(api)!: breaking with scope");
+
+            assert_eq!(commit.operation.as_deref(), Some("feat"));
+            assert_eq!(commit.scope.as_deref(), Some("api"));
+            assert_eq!(commit.description, "breaking with scope");
+        }
+
+        #[test]
+        fn marker_outside_the_prefix_stays_non_conventional() {
+            for subject in ["!feat: leading", "feat!(api): before the scope"] {
+                let commit = ConventionalCommit::parse(subject);
+
+                assert_eq!(commit.operation, None, "{subject}");
+                assert_eq!(commit.scope, None, "{subject}");
+                assert_eq!(commit.description, subject, "{subject}");
+            }
+        }
+
+        #[test]
+        fn marker_inside_the_description_is_left_alone() {
+            let commit = ConventionalCommit::parse("feat(api): still! breaking");
+
+            assert_eq!(commit.operation.as_deref(), Some("feat"));
+            assert_eq!(commit.scope.as_deref(), Some("api"));
+            assert_eq!(commit.description, "still! breaking");
+        }
+    }
+
+    mod parse_commit_message_tests {
+        use super::*;
+
+        #[test]
+        fn simple_message() {
+            let (desc, bullets) = parse_commit_message("feat(cli): add new flag");
+            assert_eq!(desc, "feat(cli): add new flag");
+            assert!(bullets.is_empty());
+        }
+
+        #[test]
+        fn message_with_bullets() {
+            let msg = "feat(sniff): add recent commits\n\n- added period parsing\n- added CommitDesc struct";
+            let (desc, bullets) = parse_commit_message(msg);
+            assert_eq!(desc, "feat(sniff): add recent commits");
+            assert_eq!(bullets.len(), 2);
+            assert_eq!(bullets[0], "added period parsing");
+            assert_eq!(bullets[1], "added CommitDesc struct");
+        }
+
+        #[test]
+        fn message_with_asterisk_bullets() {
+            let msg = "fix: resolve issue\n\n* fixed bug A\n* fixed bug B";
+            let (desc, bullets) = parse_commit_message(msg);
+            assert_eq!(desc, "fix: resolve issue");
+            assert_eq!(bullets.len(), 2);
+            assert_eq!(bullets[0], "fixed bug A");
+        }
+
+        #[test]
+        fn empty_message() {
+            let (desc, bullets) = parse_commit_message("");
+            assert!(desc.is_empty());
+            assert!(bullets.is_empty());
+        }
+
+        #[test]
+        fn multi_paragraph_with_mixed_content() {
+            let msg = "feat: big feature\n\nFirst paragraph.\n\n- bullet one\n- bullet two";
+            let (desc, bullets) = parse_commit_message(msg);
+            assert!(desc.contains("feat: big feature"));
+            assert!(desc.contains("First paragraph."));
+            assert_eq!(bullets.len(), 2);
+        }
     }
 }

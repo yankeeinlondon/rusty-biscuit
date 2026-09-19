@@ -2200,13 +2200,13 @@ fn test_padright_snapshot() {
 /// that explicitly document the removal are exempt.
 #[test]
 fn public_docs_do_not_advertise_removed_atomic_tokens() {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let manifest_dir = biscuit_test_harness::manifest_dir!();
     let docs = [
-        format!("{manifest_dir}/README.md"),
-        format!("{manifest_dir}/../README.md"),
-        format!("{manifest_dir}/../docs/components/compose.md"),
-        format!("{manifest_dir}/../docs/components/index.md"),
-        format!("{manifest_dir}/../docs/components/prose.md"),
+        manifest_dir.join("README.md"),
+        manifest_dir.join("../README.md"),
+        manifest_dir.join("../docs/components/compose.md"),
+        manifest_dir.join("../docs/components/index.md"),
+        manifest_dir.join("../docs/components/prose.md"),
     ];
 
     let banned = [
@@ -2232,7 +2232,8 @@ fn public_docs_do_not_advertise_removed_atomic_tokens() {
             for token in &banned {
                 assert!(
                     !line.contains(token),
-                    "{path}:{} advertises removed Prose atomic token {token:?}:\n{line}",
+                    "{}:{} advertises removed Prose atomic token {token:?}:\n{line}",
+                    path.display(),
                     idx + 1,
                 );
             }

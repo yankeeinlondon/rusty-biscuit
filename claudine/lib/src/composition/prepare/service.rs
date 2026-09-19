@@ -14,6 +14,7 @@
 #[cfg(test)]
 mod tests;
 
+use super::bootstrap::BootstrapPreparation;
 use super::entry::DocumentEntryReason;
 use super::PrepareOptions;
 use crate::composition::error::CompositionError;
@@ -132,4 +133,58 @@ pub fn prepare_document(
     prepared.entry = entry;
     prepared.schema_verdict_deferred = schema == SchemaStage::DeferToStabilizedReread;
     Ok(prepared)
+}
+
+/// One request to take a document's initialize-bootstrap read.
+#[derive(Debug)]
+pub struct BootstrapRequest<'a> {
+    /// Why this document is being staged. Must be an entry that emits
+    /// `initialize` ([`Direct`][DocumentEntryReason::Direct] or
+    /// [`ProxyTarget`][DocumentEntryReason::ProxyTarget]); retry, resume, and
+    /// loop iterations never stage again.
+    pub entry: DocumentEntryReason,
+    /// Which composer the stabilized reread will run.
+    pub mode: CompositionMode,
+    /// The resolved, loaded document, with any caller overlay already merged
+    /// into its authored frontmatter.
+    pub source: &'a ResolvedCompositionSource,
+    /// The assembled input layers plus this document's target-specific context.
+    pub options: PrepareOptions,
+}
+
+/// Read a document's effective frontmatter and lifecycle surface before its
+/// `initialize` runs, without discovering its body.
+///
+/// Assembles options exactly as [`prepare_document`] does, then composes only
+/// the frontmatter surface: no transclusion is dereferenced and no body
+/// `::shell` runs, so a body that includes a file `initialize` will create does
+/// not fail here. The schema verdict is withheld. Bootstrap frontmatter shell
+/// expansion is forbidden even when `options` carries approvals.
+///
+/// ## Errors
+///
+/// The frontmatter-side failures of [`prepare_document`]: a compose or
+/// frontmatter shell-expansion failure, a removed validation key, an invalid
+/// selection hint, or a lifecycle parse / C3 resolution / static-guard failure,
+/// with the same typed variants.
+///
+/// ## Panics
+///
+/// In debug builds, when `entry` is not an entry that emits `initialize`.
+pub fn prepare_bootstrap(
+    request: BootstrapRequest<'_>,
+) -> Result<BootstrapPreparation, CompositionError> {
+    let BootstrapRequest {
+        entry,
+        mode,
+        source,
+        mut options,
+    } = request;
+    debug_assert!(
+        entry.stages().emits_initialize,
+        "only an entry that emits `initialize` takes a bootstrap read, not {}",
+        entry.label()
+    );
+    options.defer_schema_verdict = true;
+    super::compose_bootstrap(entry, mode, source, options)
 }

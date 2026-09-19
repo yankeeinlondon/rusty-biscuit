@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use biscuit_test_harness::manifest_dir;
 use tempfile::TempDir;
 use tree_hugger::{ProgrammingLanguage, TreeFile, TreeHuggerError};
 
@@ -121,7 +122,7 @@ fn captures_exports_for_javascript() -> Result<(), TreeHuggerError> {
 }
 
 fn fixture_path(file: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    manifest_dir!()
         .join("tests")
         .join("fixtures")
         .join(file)

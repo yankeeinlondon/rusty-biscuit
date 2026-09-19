@@ -715,7 +715,11 @@ mod tests {
         assert_eq!(first.get(COUNTER), 3);
 
         let ((), second) = testing::measure(|| increment_counter(COUNTER, 1));
-        assert_eq!(second.get(COUNTER), 1, "counts must not accumulate across calls");
+        assert_eq!(
+            second.get(COUNTER),
+            1,
+            "counts must not accumulate across calls"
+        );
     }
 
     #[test]

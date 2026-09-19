@@ -1031,8 +1031,7 @@ fn join_list(name: &str, args: &[Value], sep: &str) -> Result<Value, String> {
     Ok(Value::String(list_element_strings(items).join(sep)))
 }
 
-/// `as_line_separated(list)` — newline-joined; the explicit form of the default
-/// bare-array rendering.
+/// `as_line_separated(list)` — newline-joined, one element per line.
 pub fn as_line_separated(args: &[Value]) -> Result<Value, String> {
     join_list("as_line_separated", args, "\n")
 }
@@ -1051,6 +1050,37 @@ pub fn as_tsv(args: &[Value]) -> Result<Value, String> {
 /// `as_space_separated(list)` — space-separated.
 pub fn as_space_separated(args: &[Value]) -> Result<Value, String> {
     join_list("as_space_separated", args, " ")
+}
+
+/// Shared body for the two serializers: null-propagate, require an array,
+/// serialize the whole value.
+///
+/// Unlike [`join_list`], an empty list keeps its container and renders `[]`.
+fn serialize_list(
+    name: &str,
+    args: &[Value],
+    render: fn(&Value) -> String,
+) -> Result<Value, String> {
+    require_args(name, args, 1)?;
+    if args[0].is_null() {
+        return Ok(Value::Null);
+    }
+    require_array(name, &args[0])?;
+    Ok(Value::String(render(&args[0])))
+}
+
+/// `as_json(list)` — compact JSON; the explicit spelling of the default
+/// bare-array rendering, and byte-identical to it for every array.
+pub fn as_json(args: &[Value]) -> Result<Value, String> {
+    serialize_list("as_json", args, scalar_string)
+}
+
+/// `as_json5(list)` — compact single-line JSON5.
+///
+/// Delegates to `biscuit-file`, the repository's JSON5 authority, so the
+/// quoting and unquoted-key rules stay in one place.
+pub fn as_json5(args: &[Value]) -> Result<Value, String> {
+    serialize_list("as_json5", args, biscuit_file::json5::to_json5_compact)
 }
 
 /// Indentation for a Markdown-list nesting level (two spaces per level).
@@ -2955,6 +2985,124 @@ mod tests {
                 s(&as_unordered_list(&list).unwrap()),
                 "- a\n  - b\n    - c\n    - d"
             );
+        }
+
+        /// `as_csv` on a one-item list yields the element alone, with no
+        /// separator and no brackets — the property that makes it the right
+        /// migration for a prose list that is usually a single package.
+        #[test]
+        fn csv_of_a_one_item_array_is_bare_text() {
+            assert_eq!(s(&as_csv(&v(json!(["darkmatter"]))).unwrap()), "darkmatter");
+        }
+
+        /// Sample arrays covering the shapes the two serializers must handle,
+        /// including quote, backslash, newline, and non-ASCII payloads.
+        fn json_shapes() -> Vec<Value> {
+            vec![
+                json!([]),
+                json!(["a", "b", "c"]),
+                json!(["a", 2, 3.5, true, null]),
+                json!([["a", "b"], ["c"]]),
+                json!([{ "package": "darkmatter", "deps": ["renderable"] }]),
+                json!([r#"say "hi""#]),
+                json!([r"C:\temp\new"]),
+                json!(["line one\nline two"]),
+                json!(["héllo", "日本語", "emoji 🍪", "tab\there"]),
+            ]
+        }
+
+        #[test]
+        fn as_json_matches_bare_array_rendering_for_every_shape() {
+            for shape in json_shapes() {
+                assert_eq!(
+                    s(&as_json(&v(shape.clone())).unwrap()),
+                    scalar_string(&shape),
+                    "as_json disagreed with the bare-array rendering of {shape}"
+                );
+            }
+        }
+
+        #[test]
+        fn as_json_renders_compact_json() {
+            assert_eq!(s(&as_json(&v(json!(["a", 2, true]))).unwrap()), r#"["a",2,true]"#);
+            assert_eq!(
+                s(&as_json(&v(json!([r#"say "hi""#, "a\\b", "x\ny"]))).unwrap()),
+                r#"["say \"hi\"","a\\b","x\ny"]"#
+            );
+            assert_eq!(s(&as_json(&v(json!(["日本語 🍪"]))).unwrap()), r#"["日本語 🍪"]"#);
+        }
+
+        #[test]
+        fn as_json5_renders_compact_json5() {
+            assert_eq!(s(&as_json5(&v(json!(["a", 2, true]))).unwrap()), "['a', 2, true]");
+            assert_eq!(
+                s(&as_json5(&v(json!([r#"say "hi""#, "a\\b", "x\ny"]))).unwrap()),
+                r#"['say "hi"', 'a\\b', 'x\ny']"#
+            );
+            assert_eq!(s(&as_json5(&v(json!(["日本語 🍪"]))).unwrap()), "['日本語 🍪']");
+        }
+
+        /// Unquoted keys and single-quoted strings are the `biscuit-file`
+        /// formatter's idiom; a key needing quotes keeps them.
+        #[test]
+        fn as_json5_uses_the_formatter_object_idiom() {
+            let list = v(json!([{ "package": "darkmatter", "dev deps": ["renderable"] }]));
+            assert_eq!(
+                s(&as_json5(&list).unwrap()),
+                "[{'dev deps': ['renderable'], package: 'darkmatter'}]"
+            );
+        }
+
+        #[test]
+        fn as_json5_output_parses_back_to_the_original_value() {
+            for shape in json_shapes() {
+                let rendered = s(&as_json5(&v(shape.clone())).unwrap());
+                let parsed = biscuit_file::Json5::from_str(&rendered)
+                    .unwrap_or_else(|e| panic!("`{rendered}` should parse as JSON5: {e}"));
+                assert_eq!(parsed.value(), &shape, "round trip changed {shape}");
+            }
+        }
+
+        /// The joiners collapse an empty list to the empty string; the two
+        /// serializers keep the container instead, so the explicit spelling of
+        /// the bare-array default agrees with it on every input.
+        #[test]
+        fn json_serializers_preserve_the_empty_container() {
+            let empty = v(json!([]));
+            assert_eq!(s(&as_json(&empty).unwrap()), "[]");
+            assert_eq!(s(&as_json5(&empty).unwrap()), "[]");
+        }
+
+        #[test]
+        fn json_serializers_end_without_a_newline() {
+            let list = v(json!(["a"]));
+            assert!(!s(&as_json(&list).unwrap()).ends_with('\n'));
+            assert!(!s(&as_json5(&list).unwrap()).ends_with('\n'));
+        }
+
+        #[test]
+        fn json_serializers_follow_the_family_argument_conventions() {
+            assert_eq!(as_json(&v(json!(null))).unwrap(), json!(null));
+            assert_eq!(as_json5(&v(json!(null))).unwrap(), json!(null));
+
+            for err in [
+                as_json(&v(json!("scalar"))).unwrap_err(),
+                as_json5(&v(json!({ "a": 1 }))).unwrap_err(),
+            ] {
+                assert!(err.contains("array argument"), "unexpected error: {err}");
+            }
+
+            assert!(as_json(&[]).is_err());
+            assert!(as_json5(&vv(json!([]), json!([]))).is_err());
+        }
+
+        #[test]
+        fn json_serializers_dispatch_by_canonical_name_and_alias() {
+            let call = |name: &str| dispatch(name, &v(json!(["a", 1]))).unwrap().unwrap();
+            assert_eq!(call("as_json"), json!(r#"["a",1]"#));
+            assert_eq!(call("asjson"), json!(r#"["a",1]"#));
+            assert_eq!(call("as_json5"), json!("['a', 1]"));
+            assert_eq!(call("asjson5"), json!("['a', 1]"));
         }
     }
 

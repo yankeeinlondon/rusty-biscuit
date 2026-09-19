@@ -1,11 +1,13 @@
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 use predicates::prelude::*;
 
 #[test]
 fn test_compose_frontmatter_interpolation_basic() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_compose_frontmatter_interpolation_basic");
+    fixture
+        .command()
         .args(["compose", "-"])
         .write_stdin("---\nbase: /docs\nspec: \"{{base}}/spec.md\"\n---\nSpec: {{spec}}")
         .assert()
@@ -15,7 +17,9 @@ fn test_compose_frontmatter_interpolation_basic() {
 
 #[test]
 fn test_compose_frontmatter_interpolation_nested_state() {
-    md_cmd()
+    let fixture = CliProcessFixture::named("test_compose_frontmatter_interpolation_nested_state");
+    fixture
+        .command()
         .args([
             "compose",
             "-",
@@ -30,8 +34,11 @@ fn test_compose_frontmatter_interpolation_nested_state() {
 
 #[test]
 fn test_compose_frontmatter_interpolation_ctx_in_frontmatter_only() {
+    let fixture =
+        CliProcessFixture::named("test_compose_frontmatter_interpolation_ctx_in_frontmatter_only");
     // ctx.today referenced only in frontmatter — must still resolve
-    md_cmd()
+    fixture
+        .command()
         .args(["compose", "-"])
         .write_stdin("---\nstamp: \"{{ctx.today}}\"\n---\nDate: {{stamp}}")
         .assert()
@@ -46,9 +53,11 @@ fn test_compose_frontmatter_interpolation_ctx_in_frontmatter_only() {
 
 #[test]
 fn test_compose_frontmatter_double_pipe_fallback() {
+    let fixture = CliProcessFixture::named("test_compose_frontmatter_double_pipe_fallback");
     // || in frontmatter interpolation should work the same as | (fallback operator).
     // When the variable is empty, the fallback value should be used.
-    md_cmd()
+    fixture
+        .command()
         .args(["compose", "-"])
         .write_stdin(
             "---\nplan: \"\"\nresolved: '{{plan || \"plan.md\"}}'\n---\nFile: {{resolved}}",
@@ -60,8 +69,10 @@ fn test_compose_frontmatter_double_pipe_fallback() {
 
 #[test]
 fn test_compose_frontmatter_double_pipe_with_set_value() {
+    let fixture = CliProcessFixture::named("test_compose_frontmatter_double_pipe_with_set_value");
     // When --set provides a non-empty value, it should take precedence over the fallback
-    md_cmd()
+    fixture
+        .command()
         .args(["compose", "-", "--set", r#"{"plan":"custom.md"}"#])
         .write_stdin(
             "---\nplan: \"\"\nresolved: '{{plan || \"plan.md\"}}'\n---\nFile: {{resolved}}",
@@ -73,10 +84,12 @@ fn test_compose_frontmatter_double_pipe_with_set_value() {
 
 #[test]
 fn test_compose_frontmatter_nested_quotes_in_interpolation() {
+    let fixture =
+        CliProcessFixture::named("test_compose_frontmatter_nested_quotes_in_interpolation");
     // Regression test: double quotes inside {{ }} expressions in YAML
     // frontmatter values (e.g., {{ plan || "plan.md" }}) should not break
     // YAML parsing. The frontmatter parser protects expressions before parsing.
-    md_cmd()
+    fixture.command()
         .args([
             "compose",
             "-",
@@ -105,6 +118,8 @@ fn test_compose_frontmatter_nested_quotes_in_interpolation() {
 /// path argument against the file's directory.
 #[test]
 fn test_compose_invalid_file_reference_reports_cause_not_mechanism() {
+    let fixture =
+        CliProcessFixture::named("test_compose_invalid_file_reference_reports_cause_not_mechanism");
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("prompt.md");
     std::fs::write(
@@ -113,7 +128,8 @@ fn test_compose_invalid_file_reference_reports_cause_not_mechanism() {
     )
     .unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .args(["compose", path.to_str().unwrap()])
         .assert()
         .failure()

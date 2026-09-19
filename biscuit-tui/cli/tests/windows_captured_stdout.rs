@@ -10,17 +10,23 @@
 //! to the console (`CONOUT$`) and deliver ONLY the submitted value to the
 //! captured stream — no TUI chrome, no ANSI/escape (`0x1b`) bytes.
 //!
-//! ## Why this is an executable, cross-compile-checked test (not a manual gate)
+//! ## Tier: ordinary L1, Windows-only
 //!
-//! Earlier this file returned early unless `BISCUIT_TUI_WINDOWS_CONSOLE_TEST=1`
-//! AND a human pressed Enter, so it "never ran" in any automated suite. That gap
-//! is closed here: the Enter keystroke is now injected **deterministically**
-//! into the attached console's input buffer with `WriteConsoleInputW`, so no
-//! human keypress is required. The test follows the proven claudine precedent
-//! (`claudine/cli/tests/level3_wrap_ctrl_c.rs`): it is `#[cfg(windows)]` and
-//! `#[ignore]`d (not early-returning), so it COMPILES on every Windows target
-//! and RUNS only when explicitly invoked with `--ignored` on a real Windows
-//! console.
+//! This is an L1 test that the `windows-latest` L1 cell discovers and runs like
+//! any other: it carries no tier prefix, no ignore attribute, and no dedicated
+//! recipe or workflow. `#![cfg(windows)]` is how the tier contract expresses
+//! "Windows-only" — on every other target the file compiles to nothing.
+//!
+//! The test calls `AllocConsole` and rewires this process's standard handles
+//! with `SetStdHandle`, which is a **process-wide** mutation. It is safe inside
+//! a parallel suite only because nextest runs one test per process; under
+//! `cargo test` the rewiring would land on every other test in the binary. The
+//! canonical recipes run nextest, and the L1 filterset selects this test once
+//! and nothing from the `level2_` / `level3_` files.
+//!
+//! The Enter keystroke is injected **deterministically** into the attached
+//! console's input buffer with `WriteConsoleInputW`, so no human keypress is
+//! required.
 //!
 //! ## Why `WriteConsoleInputW` (not crossterm event injection)
 //!
@@ -32,23 +38,21 @@
 //!
 //! ## Why the test self-establishes and PROVES the console precondition
 //!
-//! A bare `cargo test` under GitHub Actions runs with its stdout/stderr wired to
+//! A test process under GitHub Actions runs with its stdout/stderr wired to
 //! pipes, not a console — Actions captures the process. A child `question` would
 //! then inherit a non-console stderr and take the headless bail path
 //! (`run_standalone_with_chrome` errors when both stdout AND stderr are
 //! non-terminals), so a green run would NOT exercise the attached-console
-//! contract at all. `--nocapture` only disables the Rust harness buffer; it does
-//! not turn the Actions pipe into a console.
+//! contract at all.
 //!
 //! To make a green run real evidence, the test does not *assume* a console: it
 //! **attaches one** with `AllocConsole` (a no-op-equivalent when one already
-//! exists), rewires the process std handles onto `CONOUT$` / `CONIN$` so the
+//! exists), rewires its stderr and stdin onto `CONOUT$` / `CONIN$` so the
 //! inherited child streams are real console buffers, and then **proves** the
 //! precondition — `stderr.is_terminal()` AND `CONOUT$` openable — panicking with
-//! a specific diagnostic if either fails. Because the test is `#[ignore]`d and
-//! run via `--ignored`, that panic surfaces as a visible CI failure. It also
-//! prints a `F2 precondition HELD` line so a green Actions log *records* that the
-//! precondition genuinely held, exactly as the review demands.
+//! a specific diagnostic if either fails. It also prints a `F2 precondition HELD`
+//! line so a green log *records* that the precondition genuinely held, exactly
+//! as the review demands.
 //!
 //! ## Why stdout is piped but stderr/stdin are inherited consoles
 //!
@@ -58,26 +62,19 @@
 //! real console to render into; stdin stays a console so the injected
 //! `WriteConsoleInputW` Enter reaches the child's event loop.
 //!
-//! ## Verification status
-//!
-//! The dev host is macOS, so this test's runtime pass must be observed on a
-//! Windows host / CI; on macOS it is *cross-compile-checked* for
-//! `x86_64-pc-windows-gnu`, which is the maximum honest verification from this
-//! host. The Windows-host gates are the path-filtered
-//! `.github/workflows/biscuit-tui-windows-captured-stdout.yml` workflow and
-//! `just test-windows-captured-stdout`. The repro recipe lives in
-//! `features/2026-06-19-review-findings/windows-captured-stdout-repro.md`.
-//!
-//! Because the test now proves the attached-console precondition (and fails
-//! loudly if it cannot establish one), a green Windows-host run IS reliable
-//! evidence that the captured-stdout-with-console contract held — not merely
-//! that the binary compiled.
+//! This process's *own* stdout is deliberately left on the harness pipe: it is
+//! never inherited by the child, and redirecting it onto `CONOUT$` would send
+//! the `F2 precondition HELD` line to the allocated console instead of the
+//! suite's captured output, where the evidence is read. Its stderr goes back on
+//! the harness pipe the moment the child exits, for the same reason: a failing
+//! assertion must produce a diagnostic in the cell's output, not on a console
+//! nobody is watching.
 #![cfg(windows)]
 
 use std::io::{IsTerminal, Read};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, TRUE};
 use windows::Win32::Storage::FileSystem::{
@@ -85,8 +82,8 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::Win32::System::Console::{
     AllocConsole, GetStdHandle, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD,
-    KEY_EVENT_RECORD_0, STD_ERROR_HANDLE, STD_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
-    SetStdHandle, WriteConsoleInputW,
+    KEY_EVENT_RECORD_0, STD_ERROR_HANDLE, STD_HANDLE, STD_INPUT_HANDLE, SetStdHandle,
+    WriteConsoleInputW,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::VK_RETURN;
 use windows::core::PCWSTR;
@@ -151,9 +148,40 @@ fn redirect_std_handle_to_console(std_handle: STD_HANDLE, device: &[u16]) -> boo
     unsafe { SetStdHandle(std_handle, handle).is_ok() }
 }
 
-/// Attach a console to this process if it has none, then wire the process std
-/// handles to real console buffers so an inheriting child sees a console on
-/// stdout (unused here — child stdout is piped), stderr, and stdin.
+/// This process's current value for a standard handle, or `None` when there is
+/// no usable one.
+fn current_std_handle(std_handle: STD_HANDLE) -> Option<HANDLE> {
+    // SAFETY: `std_handle` is a valid STD_* identifier. `GetStdHandle` borrows
+    // nothing and transfers no ownership — the returned handle must not be
+    // closed, and this function never closes it.
+    unsafe { GetStdHandle(std_handle) }
+        .ok()
+        .filter(|handle| !handle.is_invalid())
+}
+
+/// Put a standard handle back where the caller found it.
+///
+/// The child needs an inherited console stderr, but every assertion *after* the
+/// child exits must reach the test harness's captured output instead: a panic
+/// written to `CONOUT$` fails the cell with an empty diagnostic.
+fn restore_std_handle(std_handle: STD_HANDLE, handle: Option<HANDLE>) {
+    let Some(handle) = handle else { return };
+    // SAFETY: `handle` was obtained from `GetStdHandle` for this same
+    // `std_handle` and has not been closed; `SetStdHandle` only records it for
+    // subsequent resolution.
+    unsafe {
+        let _ = SetStdHandle(std_handle, handle);
+    }
+}
+
+/// Attach a console to this process if it has none, then wire the process
+/// stderr and stdin handles to real console buffers so an inheriting child sees
+/// a console on both.
+///
+/// `STD_OUTPUT_HANDLE` is deliberately left alone: the child's stdout is piped,
+/// never inherited, and redirecting this process's stdout onto `CONOUT$` would
+/// route [`assert_console_precondition`]'s `F2 precondition HELD` line to the
+/// allocated console instead of the test harness's captured output.
 ///
 /// `AllocConsole` allocates a fresh console for a process that has none; if one
 /// already exists it fails (classically `ERROR_ACCESS_DENIED`), which is the
@@ -178,18 +206,14 @@ fn establish_console() -> String {
     // inherited child streams are console buffers regardless.
     let err_ok = redirect_std_handle_to_console(STD_ERROR_HANDLE, &CONOUT);
     let in_ok = redirect_std_handle_to_console(STD_INPUT_HANDLE, &CONIN);
-    // stdout is rewired too for completeness, though this test pipes the child's
-    // stdout rather than inheriting it.
-    let out_ok = redirect_std_handle_to_console(STD_OUTPUT_HANDLE, &CONOUT);
 
-    format!("{alloc}; std-redirect out={out_ok} err={err_ok} in={in_ok}")
+    format!("{alloc}; std-redirect err={err_ok} in={in_ok}")
 }
 
 /// Prove the F2 precondition: this process's stderr is a real console
 /// (`is_terminal`) AND `CONOUT$` is openable. Panics with a specific diagnostic
-/// otherwise — under `--ignored` that is a visible CI failure, which is the
-/// point: a passing run now means the attached-console contract was genuinely
-/// exercised.
+/// otherwise, failing the L1 cell: a passing run must mean the attached-console
+/// contract was genuinely exercised, never that a console could not be found.
 fn assert_console_precondition(alloc_summary: &str) {
     let stderr_is_console = std::io::stderr().is_terminal();
     let conout = open_console_device(&CONOUT);
@@ -209,7 +233,7 @@ fn assert_console_precondition(alloc_summary: &str) {
          this run does NOT verify the captured-stdout-with-console contract",
     );
 
-    // Recorded in the (--nocapture) CI log so a green run documents that the
+    // Recorded in the suite's captured stdout so a green run documents that the
     // precondition genuinely held, not merely that the binary compiled.
     println!(
         "F2 precondition HELD: console attached, stderr.is_terminal()=true, CONOUT$ usable [{alloc_summary}]"
@@ -261,27 +285,75 @@ fn inject_enter() -> bool {
     ok.is_ok() && written == records.len() as u32
 }
 
+/// Deadline for the child to accept an injected Enter and exit. Measured need
+/// on a native `windows-latest`-class host at CI thread count is ~45 ms; this
+/// is ~40× that, so a timeout means the submit path is broken, not slow.
+const SUBMIT_DEADLINE: Duration = Duration::from_secs(2);
+/// How often the readiness loop observes the child and decides whether to
+/// re-inject.
+const POLL_INTERVAL: Duration = Duration::from_millis(25);
+/// Re-inject Enter if the child has still not exited this long after the
+/// previous injection — covers a record that landed before the prompt's event
+/// loop began reading, without a fixed pre-injection sleep.
+const REINJECT_AFTER: Duration = Duration::from_millis(500);
+
+/// Inject Enter and observe the child until it exits, re-injecting on the
+/// [`REINJECT_AFTER`] cadence.
+///
+/// ## Returns
+///
+/// `Err` with a ready-to-panic diagnostic when the child has not exited by
+/// [`SUBMIT_DEADLINE`] — reported rather than panicked so the caller can put
+/// stderr back on the harness pipe first, and stating how many console-input
+/// writes were attempted and accepted, because "the prompt never submitted" and
+/// "the console refused the record" are different defects.
+fn submit_and_wait(child: &mut Child) -> Result<ExitStatus, String> {
+    let started = Instant::now();
+    let mut last_injection: Option<Instant> = None;
+    let (mut attempted, mut accepted) = (0_usize, 0_usize);
+
+    loop {
+        if let Some(status) = child.try_wait().expect("poll question for exit") {
+            return Ok(status);
+        }
+
+        let now = Instant::now();
+        if last_injection.is_none_or(|prior| now.duration_since(prior) >= REINJECT_AFTER) {
+            attempted += 1;
+            accepted += usize::from(inject_enter());
+            last_injection = Some(now);
+        }
+
+        if now.duration_since(started) >= SUBMIT_DEADLINE {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "question did not exit within {SUBMIT_DEADLINE:?} of the first injected Enter \
+                 ({accepted}/{attempted} console-input writes accepted) — the captured-stdout \
+                 contract was NOT exercised",
+            ));
+        }
+
+        thread::sleep(POLL_INTERVAL);
+    }
+}
+
 /// On a real Windows console, `question` with stdout captured to a pipe must
 /// render its prompt to the console and deliver ONLY the submitted value to the
 /// captured stream — no ESC (`0x1b`) byte, i.e. no TUI/ANSI chrome.
 ///
-/// `#[ignore]`d because it needs a real attached console to render into and to
-/// accept the injected console-input record. The test self-establishes that
-/// console (`AllocConsole` + `SetStdHandle` onto `CONOUT$`/`CONIN$`) and fails
-/// loudly via [`assert_console_precondition`] if it cannot, so a green run is
-/// real evidence. The path-filtered
-/// `.github/workflows/biscuit-tui-windows-captured-stdout.yml` workflow runs it
-/// in CI; to run the same gate manually on a Windows host:
-///
-/// ```text
-/// just test-windows-captured-stdout
-/// ```
+/// Ordinary L1: the `windows-latest` cell discovers and runs it. The attached
+/// console it needs is self-established ([`establish_console`]) and proved
+/// ([`assert_console_precondition`]), so a green run is real evidence rather
+/// than a run that quietly found no console.
 #[test]
-#[ignore = "requires a Windows host; self-attaches a console and proves the precondition, but only runs under --ignored on Windows (cross-compile-checked on the macOS dev host)"]
 fn captured_stdout_receives_only_value_no_tui_bytes() {
     // Establish and PROVE the attached-console precondition BEFORE spawning the
     // child. A bail here (panic) is intentional: it means this run cannot verify
     // the F2 contract, and that must be a visible failure, not a silent pass.
+    // That panic is visible because the only way the assertion fails is that the
+    // console redirect below did NOT take — leaving stderr on the harness pipe.
+    let harness_stderr = current_std_handle(STD_ERROR_HANDLE);
     let alloc_summary = establish_console();
     assert_console_precondition(&alloc_summary);
 
@@ -296,27 +368,25 @@ fn captured_stdout_receives_only_value_no_tui_bytes() {
         .spawn()
         .expect("spawn question");
 
-    // Let the prompt render its first frame and install its event loop before we
-    // inject the submit keystroke; injecting earlier could race the loop and the
-    // record would be discarded. The delay is bounded (deterministic, no human
-    // in the loop).
-    thread::sleep(Duration::from_millis(750));
-    let injected = inject_enter();
-    if !injected {
-        // A second deterministic Enter covers the rare case where the first
-        // record landed before the loop was reading. Still no human keypress.
-        thread::sleep(Duration::from_millis(250));
-        let _ = inject_enter();
-    }
+    // Submit under a bounded observation loop rather than a fixed pre-injection
+    // sleep: the console input buffer queues the record, so the prompt's event
+    // loop need not be reading yet, and a submit that never lands must fail
+    // loudly instead of being absorbed by a longer wait.
+    let mut pipe = child.stdout.take().expect("captured stdout pipe");
+    let outcome = submit_and_wait(&mut child);
 
+    // The console was only ever needed by the child. Put stderr back on the
+    // harness pipe so every diagnostic below lands in the cell's output instead
+    // of the console this test attached.
+    restore_std_handle(STD_ERROR_HANDLE, harness_stderr);
+    let status = outcome.unwrap_or_else(|why| panic!("{why}"));
+
+    // Read after exit: `question` writes only the chosen value to stdout, far
+    // below the pipe buffer, so the child cannot block on a full pipe while the
+    // readiness loop is observing it.
     let mut captured = Vec::new();
-    child
-        .stdout
-        .take()
-        .expect("captured stdout pipe")
-        .read_to_end(&mut captured)
+    pipe.read_to_end(&mut captured)
         .expect("read captured stdout");
-    let status = child.wait().expect("wait for question");
 
     assert!(status.success(), "question exited non-zero: {status:?}");
 

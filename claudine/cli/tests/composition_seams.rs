@@ -67,6 +67,14 @@ const COMPOSE_WITH_ALLOWLIST: &[AllowedSite] = &[
         reason: "the canonical inline-compose composer (the sanctioned owner)",
     },
     AllowedSite {
+        site: "composition::prepare::compose_bootstrap",
+        calls: 1,
+        reason: "the canonical initialize-bootstrap read: the same option assembly \
+                 as the two composers above, narrowed to the frontmatter surface; \
+                 it produces no prompt, so it is a stage of the sanctioned owner, \
+                 not a second composer",
+    },
+    AllowedSite {
         site: "system_prompt::prepare::compose_prompt_markdown",
         calls: 1,
         reason: "system-prompt documents compose outside the prompt pipeline; \
@@ -192,6 +200,15 @@ const PROXY_TRANSITION_SITE_BASELINE: &[AllowedSite] = &[
                  recognition reruns for the target (R7)",
     },
     AllowedSite {
+        site: "composition::staged_boot::route_staged_initialize",
+        calls: 1,
+        reason: "CONSUMER — the command coordinator's staged boot for a document \
+                 that authors `initialize` routes that event itself, before any \
+                 body read, and commits the proxy it selects against the invocation \
+                 ledger (`pipeline::commit_initialize_proxy`) while the document's \
+                 guard is live, surfacing the committed handoff to `compose::prep`",
+    },
+    AllowedSite {
         site: "coordinator::transition::map_abort",
         calls: 1,
         reason: "PRODUCER — maps the lifecycle control outcome onto the shared \
@@ -238,6 +255,7 @@ const TRANSITION_PATH_FILES: &[&str] = &[
     "cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs",
     "cli/src/commands/wrap/harness_orch/loop_control/proxy.rs",
     "cli/src/commands/wrap/harness_orch/prompt.rs",
+    "cli/src/commands/wrap/composition/staged_boot.rs",
     "lib/src/composition/coordinator/commit.rs",
     "lib/src/composition/coordinator/document.rs",
     "lib/src/composition/coordinator/handoff.rs",
@@ -736,7 +754,7 @@ fn scan_all(finder: impl Fn(&[u8]) -> Vec<Occurrence>) -> Vec<Found> {
 
 /// The `claudine/` package-area root (this test binary lives in `claudine/cli`).
 fn area_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("claudine/cli has a parent")
         .to_path_buf()

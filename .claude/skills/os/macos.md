@@ -28,13 +28,26 @@ conditions that masquerade as repository defects.
 - **Real Linux runs:** Docker Desktop provides a `linux/arm64` kernel. `open
   -a Docker`, poll `docker info` (about 20 s), then run the package tests in a
   container. PTY-backed L2 tests pass there too. Mount the source as a copy
-  (`rsync -a --exclude=target/ --exclude=.git`) because a worktree's `.git`
-  is a file pointing outside the container. Two traps: keep
+  (`rsync -a --exclude=target/ --exclude=.git --exclude=.gitnexus/`) because a worktree's `.git`
+  is a file pointing outside the container. Excluding `.gitnexus/` is required: its
+  parsed-file store churns during indexing, so rsync exits 23 on vanished files. Two traps: keep
   `CARGO_TARGET_DIR` on a host mount (`-v /tmp/x-target:/t -e
   CARGO_TARGET_DIR=/t`), since the VM overlay is small and fills; and a
   whole-package `cargo nextest run` OOM-kills the linker in the default VM,
   so use `--memory=7g`, `CARGO_BUILD_JOBS=2`, and targeted `--lib` /
   `--test <name>` runs. podman's VM does not start on this host.
+  On 2026-09-17, bind mounts under `/tmp` failed ("error while creating mount
+  source path '/private/tmp/…': mkdir /private: read-only file system"): the
+  host's Docker file sharing does not cover `/private/tmp`. Put both the
+  source copy and the target dir under `$HOME` (for example
+  `~/.cache/rb-linux/{src,target}`). `rust:1` needs
+  `apt-get install libdbus-1-dev pkg-config` for `messenger --features desktop`,
+  plus `libasound2-dev` for anything that reaches Playa's `native-playback`
+  (all of `claudine-cli`).
+  Run the container command with `bash -c`, not `bash -lc`: the login shell
+  resets `PATH` and drops `/usr/local/cargo/bin`, so every `cargo` call fails
+  with "command not found" while a trailing pipe can still exit 0. `rust:1`
+  has no `cargo-nextest`; `cargo test --test <name>` avoids a slow install.
 - **Windows compile evidence:** the `x86_64-pc-windows-gnu` target; details
   and the msvc prohibition are in [windows.md](windows.md).
 - **Behavioral Windows and WSL2 evidence:** the build hosts
@@ -67,6 +80,15 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   empty program frame. It can reproduce in isolation, so isolation does not
   discriminate; the tell is prompt text in the `plain:` block and no program
   output. Dismiss or configure the tool on the host; do not chase the diff.
+- **`tmux send-keys failed` on the first send of an L2 run, green when rerun
+  alone.** Another test run on this host (a second worktree's `just test-l2`
+  or pre-push hook; check `ps` for `biscuit-harness-broker`, `nextest`, or
+  `just ci-local`) spawned its own harness and its stale-resource reaper
+  killed this run's shared session, whose tag named the already-exited
+  broker. Fixed by tagging with the recipe's pid
+  (`BISCUIT_HARNESS_OWNER_PID`, see the `biscuit-test-harness` skill); the
+  send error now carries tmux's own message and the live session list. If
+  it recurs, read that list before blaming the test.
 - **Terminal detection forks `defaults`.** On an iTerm2 host,
   `biscuit_terminal::Terminal::default()` spawns `defaults read
   com.googlecode.iterm2 New Bookmarks` up to three times (font name, size,
@@ -134,3 +156,22 @@ Strip ANSI before matching libtest's output. lldb refuses Apple-signed
 platform binaries but attaches to locally built ones. Resolve the binary with
 the same `-p` selection the recipe uses, or feature unification names a
 different artifact.
+
+## CI shell and runtime inspection (2026-09-15)
+
+`/bin/bash` is 3.2: associative arrays and `${args[*]@Q}` are unavailable, and
+empty indexed arrays need `${args[@]+"${args[@]}"}` under `set -u`. The
+cross-check shipping tests must use `/bin/bash` explicitly on macOS. Python CI
+helpers support Python 3.9; `TestCase.enterContext` requires a newer interpreter,
+so temporary resources use `addCleanup` or a context manager.
+
+System dylibs may exist only in dyld's shared cache. `otool -L` reads an emitted
+binary's dependencies, but an absent `/usr/lib/*.dylib` file does not establish
+that its dependency is missing. `dyld_info -uuid <install-name>` observes cached
+library identities without loading test programs or opening a window.
+
+When walking shared-cache dependencies, `dyld_info -linked_dylibs` marks
+`weak-link` imports that dyld permits to be absent. macOS 27's libobjc lists
+`/usr/lib/libobjc-env.dylib` this way; treating it as a required library falsely
+rejects valid programs. Traverse required dependencies and preserve the weak
+import distinction.

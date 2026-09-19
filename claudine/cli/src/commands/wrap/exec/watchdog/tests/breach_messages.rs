@@ -5,10 +5,18 @@
 //! recent-subagent diagnostic.
 
 use super::super::*;
+use claudine::stream::progress::SilenceOrigin;
 
 #[test]
 fn format_step_timeout_breach_message_no_outstanding() {
-    let msg = format_step_timeout_breach_message(Duration::from_secs(180), &[], &[], &[], None);
+    let msg = format_step_timeout_breach_message(
+        Duration::from_secs(180),
+        SilenceOrigin::Activity,
+        &[],
+        &[],
+        &[],
+        None,
+    );
     assert!(msg.contains("3m 0s"));
     assert!(msg.contains("step_timeout"));
     assert!(!msg.contains("subagent"));
@@ -27,6 +35,7 @@ fn format_step_timeout_breach_message_lists_outstanding() {
     };
     let msg = format_step_timeout_breach_message(
         Duration::from_secs(1800),
+        SilenceOrigin::Activity,
         std::slice::from_ref(&snap),
         &[],
         &[],
@@ -48,6 +57,7 @@ fn format_step_timeout_breach_message_lists_stuck_tools() {
     };
     let msg = format_step_timeout_breach_message(
         Duration::from_secs(180),
+        SilenceOrigin::Activity,
         &[],
         std::slice::from_ref(&tool),
         &[],
@@ -73,11 +83,18 @@ fn format_step_timeout_breach_message_opencode_names_subagent_count() {
     let ctx = OpenCodeBreachContext {
         subagent_done_count: 3,
         step_in_flight: true,
+        first_step_completed: true,
         recent_subagents: recent,
         now: Instant::now(),
     };
-    let msg =
-        format_step_timeout_breach_message(Duration::from_secs(180), &[], &[], &[], Some(ctx));
+    let msg = format_step_timeout_breach_message(
+        Duration::from_secs(180),
+        SilenceOrigin::Activity,
+        &[],
+        &[],
+        &[],
+        Some(ctx),
+    );
     assert!(msg.contains("3 subagents observed"), "got: {msg}");
     assert!(msg.contains("step boundary was still open"), "got: {msg}");
 }
@@ -101,11 +118,18 @@ fn format_step_timeout_breach_message_opencode_lists_recent_descriptions() {
     let ctx = OpenCodeBreachContext {
         subagent_done_count: 5,
         step_in_flight: false,
+        first_step_completed: true,
         recent_subagents: recent,
         now: Instant::now(),
     };
-    let msg =
-        format_step_timeout_breach_message(Duration::from_secs(180), &[], &[], &[], Some(ctx));
+    let msg = format_step_timeout_breach_message(
+        Duration::from_secs(180),
+        SilenceOrigin::Activity,
+        &[],
+        &[],
+        &[],
+        Some(ctx),
+    );
     assert!(msg.contains("5 subagents observed"), "got: {msg}");
     assert!(msg.contains("Recent subagents:"), "got: {msg}");
     // Newest first: Desc-4 should appear before Desc-3
@@ -119,11 +143,18 @@ fn format_step_timeout_breach_message_opencode_no_recent_subagents() {
     let ctx = OpenCodeBreachContext {
         subagent_done_count: 0,
         step_in_flight: true,
+        first_step_completed: true,
         recent_subagents: std::collections::VecDeque::new(),
         now: Instant::now(),
     };
-    let msg =
-        format_step_timeout_breach_message(Duration::from_secs(180), &[], &[], &[], Some(ctx));
+    let msg = format_step_timeout_breach_message(
+        Duration::from_secs(180),
+        SilenceOrigin::Activity,
+        &[],
+        &[],
+        &[],
+        Some(ctx),
+    );
     assert!(msg.contains("step_timeout"), "got: {msg}");
     assert!(
         !msg.contains("subagents observed"),
@@ -132,5 +163,83 @@ fn format_step_timeout_breach_message_opencode_no_recent_subagents() {
     assert!(
         msg.contains("step boundary was still open"),
         "step_in_flight hint must appear: {msg}"
+    );
+}
+
+/// A child that never wrote anything is a launch problem, not a mid-run
+/// stall, and the operator needs to be told which one they have.
+#[test]
+fn format_step_timeout_breach_message_names_a_startup_stall() {
+    let msg = format_step_timeout_breach_message(
+        Duration::from_secs(180),
+        SilenceOrigin::Launch,
+        &[],
+        &[],
+        &[],
+        None,
+    );
+    assert!(
+        msg.contains("no output since the wrapped process launched 3m 0s ago"),
+        "startup breach must be worded from launch: {msg}"
+    );
+    assert!(msg.contains("step_timeout"), "got: {msg}");
+    assert!(
+        !msg.contains("no stream activity"),
+        "startup wording must replace the mid-run phrasing: {msg}"
+    );
+}
+
+/// The other half of the distinction the spec requires: OpenCode did emit
+/// activity, but never reached a `step_finish`, so the stall happened before
+/// its first completed step.
+#[test]
+fn format_step_timeout_breach_message_opencode_names_a_stall_before_the_first_step() {
+    let ctx = OpenCodeBreachContext {
+        subagent_done_count: 0,
+        step_in_flight: false,
+        first_step_completed: false,
+        recent_subagents: std::collections::VecDeque::new(),
+        now: Instant::now(),
+    };
+    let msg = format_step_timeout_breach_message(
+        Duration::from_secs(180),
+        SilenceOrigin::Activity,
+        &[],
+        &[],
+        &[],
+        Some(ctx),
+    );
+    assert!(
+        msg.contains("no stream activity for 3m 0s"),
+        "activity-anchored wording is required here: {msg}"
+    );
+    assert!(
+        msg.contains("never completed a step"),
+        "a pre-first-step stall must be named: {msg}"
+    );
+}
+
+/// Counter-case: once a step boundary has been observed the pre-first-step
+/// note must not appear, otherwise it says nothing.
+#[test]
+fn format_step_timeout_breach_message_opencode_omits_first_step_note_after_a_step_finish() {
+    let ctx = OpenCodeBreachContext {
+        subagent_done_count: 0,
+        step_in_flight: false,
+        first_step_completed: true,
+        recent_subagents: std::collections::VecDeque::new(),
+        now: Instant::now(),
+    };
+    let msg = format_step_timeout_breach_message(
+        Duration::from_secs(180),
+        SilenceOrigin::Activity,
+        &[],
+        &[],
+        &[],
+        Some(ctx),
+    );
+    assert!(
+        !msg.contains("never completed a step"),
+        "a completed step must suppress the pre-first-step note: {msg}"
     );
 }

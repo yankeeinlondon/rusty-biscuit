@@ -9,6 +9,8 @@ pub mod prelude;
 pub mod prepared;
 pub mod provider;
 pub mod receipt;
+#[cfg(feature = "research")]
+pub mod research;
 pub mod target;
 pub mod validate;
 

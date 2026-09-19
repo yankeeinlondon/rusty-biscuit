@@ -1,0 +1,990 @@
+{
+  "families": [
+    {
+      "id": "catalog-types-unit",
+      "package": "claudine-catalog-types",
+      "match": {
+        "suites": [
+          "claudine-catalog-types"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit",
+      "package": "claudine",
+      "match": {
+        "suites": [
+          "claudine"
+        ]
+      },
+      "exclude": {
+        "modules": [
+          "composition::sequence::task",
+          "config::atomic",
+          "model_catalog",
+          "render::assistant_stream",
+          "render::thinking_stream"
+        ],
+        "tests": [
+          "composition::looping::engine::tests::seed_state::seeded_loop_repro_runs_to_completion_with_live_derived_variable"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-task-shell",
+      "package": "claudine",
+      "match": {
+        "suites": [
+          "claudine"
+        ],
+        "modules": [
+          "composition::sequence::task"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-atomic-config",
+      "package": "claudine",
+      "match": {
+        "suites": [
+          "claudine"
+        ],
+        "modules": [
+          "config::atomic"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-model-catalog",
+      "package": "claudine",
+      "match": {
+        "suites": [
+          "claudine"
+        ],
+        "modules": [
+          "model_catalog"
+        ]
+      }
+    },
+    {
+      "id": "lib-unit-clock-streams",
+      "package": "claudine",
+      "match": {
+        "suites": [
+          "claudine"
+        ],
+        "modules": [
+          "render::assistant_stream",
+          "render::thinking_stream"
+        ]
+      }
+    },
+    {
+      "id": "lib-override-seeded-loop",
+      "package": "claudine",
+      "match": {
+        "suites": [
+          "claudine"
+        ],
+        "tests": [
+          "composition::looping::engine::tests::seed_state::seeded_loop_repro_runs_to_completion_with_live_derived_variable"
+        ]
+      }
+    },
+    {
+      "id": "lib-corpus-replay",
+      "package": "claudine",
+      "match": {
+        "suites": [
+          "claudine::protocol_fixture_replay",
+          "claudine::kimi_wire",
+          "claudine::typed_stream_protocols",
+          "claudine::opencode_stderr_lifecycle",
+          "claudine::semantic_fidelity",
+          "claudine::deprecated_compatibility"
+        ]
+      }
+    },
+    {
+      "id": "lib-structural-guards",
+      "package": "claudine",
+      "match": {
+        "suites": [
+          "claudine::boundary_lint",
+          "claudine::canonical_dispatch",
+          "claudine::diagnostic_detail_conformance"
+        ]
+      }
+    },
+    {
+      "id": "lib-agent-errors-fleet",
+      "package": "claudine",
+      "match": {
+        "suites": [
+          "claudine::agent_errors_fleet"
+        ]
+      },
+      "exclude": {
+        "tests": [
+          "exhausted_remediation_fails_finalize_and_preserves_findings"
+        ]
+      }
+    },
+    {
+      "id": "lib-override-agent-errors-remediation",
+      "package": "claudine",
+      "match": {
+        "suites": [
+          "claudine::agent_errors_fleet"
+        ],
+        "tests": [
+          "exhausted_remediation_fails_finalize_and_preserves_findings"
+        ]
+      }
+    },
+    {
+      "id": "lib-model-catalog-integration",
+      "package": "claudine",
+      "match": {
+        "suites": [
+          "claudine::model_catalog_integration"
+        ]
+      }
+    },
+    {
+      "id": "lib-tts-contract",
+      "package": "claudine",
+      "match": {
+        "suites": [
+          "claudine::tts_phase1_contract",
+          "claudine::tts_phase5_contract"
+        ]
+      }
+    },
+    {
+      "id": "contract-unit",
+      "package": "claudine-contract",
+      "match": {
+        "suites": [
+          "claudine-contract"
+        ]
+      }
+    },
+    {
+      "id": "contract-real-provider",
+      "package": "claudine-contract",
+      "match": {
+        "suites": [
+          "claudine-contract::real_provider"
+        ]
+      }
+    },
+    {
+      "id": "cli-unit",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::bin/claudine"
+        ]
+      },
+      "exclude": {
+        "modules": [
+          "commands::wrap::exec",
+          "completion"
+        ]
+      }
+    },
+    {
+      "id": "cli-unit-child-exec",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::bin/claudine"
+        ],
+        "modules": [
+          "commands::wrap::exec"
+        ]
+      }
+    },
+    {
+      "id": "cli-unit-completion-engine",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::bin/claudine"
+        ],
+        "modules": [
+          "completion"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-fixture",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::agent_cwd",
+          "claudine-cli::argv_normalization",
+          "claudine-cli::characterization_error_routes",
+          "claudine-cli::command_routing",
+          "claudine-cli::compose_caller_file_provenance",
+          "claudine-cli::compose_header_first",
+          "claudine-cli::contextual_errors",
+          "claudine-cli::ctx_launch_anchor",
+          "claudine-cli::detached_audio",
+          "claudine-cli::handle_repo_config",
+          "claudine-cli::hooks_cli",
+          "claudine-cli::inline_compose_sequence_mismatch",
+          "claudine-cli::mcp_cli",
+          "claudine-cli::prompt_reporting",
+          "claudine-cli::propagated_context_fixtures",
+          "claudine-cli::sequence_schema",
+          "claudine-cli::wrap_antigravity_exit_signal",
+          "claudine-cli::wrap_basics",
+          "claudine-cli::wrap_compose_agent",
+          "claudine-cli::wrap_compose_exec",
+          "claudine-cli::wrap_compose_preflight",
+          "claudine-cli::wrap_compose_validation",
+          "claudine-cli::wrap_direct_argv",
+          "claudine-cli::wrap_incomplete_subagents",
+          "claudine-cli::wrap_inline_compose",
+          "claudine-cli::wrap_inline_compose_interactive",
+          "claudine-cli::wrap_opencode",
+          "claudine-cli::wrap_opencode_models",
+          "claudine-cli::wrap_provider_flags",
+          "claudine-cli::wrap_structured_stream",
+          "claudine-cli::wrap_watchdog_startup_stall",
+          "claudine-cli::wrap_watchdog_timeout"
+        ]
+      },
+      "exclude": {
+        "tests": [
+          "agents_and_commands_route_to_empty_state_messages"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-fixture-selftest",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::cli_process_fixture"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-completion-ui",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::completion_cli",
+          "claudine-cli::completion_compose",
+          "claudine-cli::completion_inline_compose",
+          "claudine-cli::completion_sequence",
+          "claudine-cli::completion_setter"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-source-scan-guards",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::error_guards",
+          "claudine-cli::test_placement",
+          "claudine-cli::dispatch_inventory",
+          "claudine-cli::spawn_inventory",
+          "claudine-cli::spawn_site_guard",
+          "claudine-cli::run_harness_loop_call_sites",
+          "claudine-cli::composition_seams",
+          "claudine-cli::diagnostic_discovery"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-shipped-corpus",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::shipped_prompt_contract",
+          "claudine-cli::shipped_prompt_route_drift"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-md-fixture",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::inline_compose_hash"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-perf-budget",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::wrap_perf",
+          "claudine-cli::sequence_perf",
+          "claudine-cli::system_prompt_perf_bench"
+        ]
+      },
+      "exclude": {
+        "tests": [
+          "compose_perf_stdout_matches_non_perf",
+          "inline_compose_perf_stdout_matches_non_perf"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-raw-compose",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::compose_cli",
+          "claudine-cli::compose_schema_cli",
+          "claudine-cli::compose_removed_validation_keys",
+          "claudine-cli::compose_system_prompt_lifetime",
+          "claudine-cli::composition_outputs",
+          "claudine-cli::inline_compose_cli",
+          "claudine-cli::compose_interactive_timeout_cli"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-raw-sequence-loop",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::sequence_cli",
+          "claudine-cli::loop_cli",
+          "claudine-cli::wrap_sequence_composition",
+          "claudine-cli::sequence_groups",
+          "claudine-cli::sequence_magic_reference",
+          "claudine-cli::sequence_prompt_property",
+          "claudine-cli::sequence_errors_cli",
+          "claudine-cli::sequence_jit",
+          "claudine-cli::sequence_sources_cli"
+        ]
+      },
+      "exclude": {
+        "tests": [
+          "compose_loop_rate_limit_pause_waits_then_continues"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-raw-context-resources",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::context_command",
+          "claudine-cli::skills_integration",
+          "claudine-cli::errors_command",
+          "claudine-cli::effective_diagnostic_render",
+          "claudine-cli::completion_contract",
+          "claudine-cli::completion_perf",
+          "claudine-cli::handle_deadline",
+          "claudine-cli::level1_structured_error_message",
+          "claudine-cli::completion_resolution_round_trip",
+          "claudine-cli::compose_ttff_perf",
+          "claudine-cli::handle_blocking_output",
+          "claudine-cli::protect_cli",
+          "claudine-cli::provider_error_finalize",
+          "claudine-cli::shipped_prompts"
+        ]
+      },
+      "exclude": {
+        "tests": [
+          "context_reports_preserve_all_columns_at_minimum_supported_width"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-pty",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::level1_compose_autocomplete_failure_pty",
+          "claudine-cli::level1_inline_compose_mismatch_pty",
+          "claudine-cli::sequence_overlay_pty"
+        ]
+      }
+    },
+    {
+      "id": "cli-l1-live-child",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::wrap_sigint",
+          "claudine-cli::wrap_ctrl_c_windows",
+          "claudine-cli::sequence_ctrl_c_windows"
+        ]
+      }
+    },
+    {
+      "id": "cli-l2-lifecycle",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::level2_lifecycle_control",
+          "claudine-cli::level2_lifecycle_dispatch",
+          "claudine-cli::level2_lifecycle_loop",
+          "claudine-cli::level2_lifecycle_action_forms"
+        ]
+      }
+    },
+    {
+      "id": "cli-l2-render-capture",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::level2_context_capture",
+          "claudine-cli::level2_dry_run_approval_capture",
+          "claudine-cli::level2_dry_run_metadata_capture",
+          "claudine-cli::level2_file_resolution_capture",
+          "claudine-cli::level2_incomplete_subagents_capture",
+          "claudine-cli::level2_inline_compose_mismatch_capture",
+          "claudine-cli::level2_interrupt_feedback_capture",
+          "claudine-cli::level2_invalid_file_reference_capture",
+          "claudine-cli::level2_malformed_frontmatter_capture",
+          "claudine-cli::level2_perf_capture",
+          "claudine-cli::level2_prompt_reporting_capture",
+          "claudine-cli::level2_removed_validation_key_capture",
+          "claudine-cli::level2_schema_parse_capture",
+          "claudine-cli::level2_sequence_task_stream_capture",
+          "claudine-cli::level2_stalled_generation_capture",
+          "claudine-cli::level2_typed_error_render_capture"
+        ]
+      }
+    },
+    {
+      "id": "cli-l2-autocomplete",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::level2_auto_complete_chooser",
+          "claudine-cli::level2_auto_complete_operation_file",
+          "claudine-cli::level2_explicit_operation_file_miss"
+        ]
+      }
+    },
+    {
+      "id": "cli-l2-pty",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::level2_dry_run_pty",
+          "claudine-cli::level2_provided_partial_file_pty",
+          "claudine-cli::level2_schema_prompt_pty",
+          "claudine-cli::level2_pty_tests"
+        ]
+      }
+    },
+    {
+      "id": "cli-l2-ctrl-c",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::level2_wrap_ctrl_c_tmux",
+          "claudine-cli::level2_wrap_ctrl_c_loop_wedge_tmux"
+        ]
+      }
+    },
+    {
+      "id": "cli-l3-keyboard",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::level3_auto_complete_chooser",
+          "claudine-cli::level3_linux_sequence_ctrl_c",
+          "claudine-cli::level3_sequence_ctrl_c",
+          "claudine-cli::level3_windows_sequence_ctrl_c",
+          "claudine-cli::level3_wrap_ctrl_c"
+        ]
+      }
+    },
+    {
+      "id": "cli-real-provider",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::real_opencode_yolo_subagent"
+        ]
+      }
+    },
+    {
+      "id": "cli-override-loop-rate-limit",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::loop_cli"
+        ],
+        "tests": [
+          "compose_loop_rate_limit_pause_waits_then_continues"
+        ]
+      }
+    },
+    {
+      "id": "cli-override-empty-state-routing",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::command_routing"
+        ],
+        "tests": [
+          "agents_and_commands_route_to_empty_state_messages"
+        ]
+      }
+    },
+    {
+      "id": "cli-override-context-width",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::context_command"
+        ],
+        "tests": [
+          "context_reports_preserve_all_columns_at_minimum_supported_width"
+        ]
+      }
+    },
+    {
+      "id": "cli-override-perf-parity",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::wrap_perf"
+        ],
+        "tests": [
+          "compose_perf_stdout_matches_non_perf",
+          "inline_compose_perf_stdout_matches_non_perf"
+        ]
+      }
+    },
+    {
+      "id": "gen-unit",
+      "package": "claudine-gen",
+      "match": {
+        "suites": [
+          "claudine-gen"
+        ]
+      }
+    },
+    {
+      "id": "gen-artifact-pipeline",
+      "package": "claudine-gen",
+      "match": {
+        "suites": [
+          "claudine-gen::pipeline",
+          "claudine-gen::drift",
+          "claudine-gen::fixtures_provenance",
+          "claudine-gen::registry_coverage",
+          "claudine-gen::vocabulary",
+          "claudine-gen::signals_sidecar_mirror",
+          "claudine-gen::signals_validation",
+          "claudine-gen::agent_errors_check"
+        ]
+      }
+    },
+    {
+      "id": "gen-generate-ux",
+      "package": "claudine-gen",
+      "match": {
+        "suites": [
+          "claudine-gen::generate_ux"
+        ]
+      }
+    },
+    {
+      "id": "gen-l2-report",
+      "package": "claudine-gen",
+      "match": {
+        "suites": [
+          "claudine-gen::level2_report_terminal"
+        ]
+      }
+    },
+    {
+      "id": "rz-core-unit",
+      "package": "rendezvous-core",
+      "match": {
+        "suites": [
+          "rendezvous-core"
+        ]
+      }
+    },
+    {
+      "id": "rz-daemon-unit",
+      "package": "rendezvous-daemon",
+      "match": {
+        "suites": [
+          "rendezvous-daemon"
+        ]
+      }
+    },
+    {
+      "id": "rz-daemon-integration",
+      "package": "rendezvous-daemon",
+      "match": {
+        "suites": [
+          "rendezvous-daemon::pairing_and_sync",
+          "rendezvous-daemon::peer_discovery",
+          "rendezvous-daemon::phase6_integration"
+        ]
+      }
+    },
+    {
+      "id": "rz-client-unit",
+      "package": "rendezvous-client",
+      "match": {
+        "suites": [
+          "rendezvous-client"
+        ]
+      }
+    },
+    {
+      "id": "rz-client-integration",
+      "package": "rendezvous-client",
+      "match": {
+        "suites": [
+          "rendezvous-client::local_round_trip",
+          "rendezvous-client::session_log_round_trip"
+        ]
+      }
+    }
+  ],
+  "exclusions": [
+    {
+      "package": "claudine",
+      "name": "a_successful_command_reaps_its_backgrounded_descendant",
+      "gate": "cfg(unix) / cfg(windows) pair",
+      "route": "both arms exist; the unix arm runs here, the windows twin on windows-latest"
+    },
+    {
+      "package": "claudine",
+      "name": "declined_device_namespace_falls_back_to_plain_text",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine",
+      "name": "display_label_declined_portable_spelling_keeps_native_text",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine",
+      "name": "handle_command_quotes_native_windows_executable_path",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine",
+      "name": "non_transient_windows_persist_error_is_not_retried",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine",
+      "name": "system_shell_runner_preserves_nested_quotes",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine",
+      "name": "the_system_shell_captures_a_pipeline",
+      "gate": "cfg(unix) / cfg(windows) pair",
+      "route": "both arms exist; the unix arm runs here, the windows twin on windows-latest"
+    },
+    {
+      "package": "claudine",
+      "name": "the_system_shell_kills_a_backgrounded_descendant_holding_stdout",
+      "gate": "cfg(unix) / cfg(windows) pair",
+      "route": "both arms exist; the unix arm runs here, the windows twin on windows-latest"
+    },
+    {
+      "package": "claudine",
+      "name": "the_system_shell_preserves_nested_quotes",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine",
+      "name": "the_system_shell_times_out_a_nested_tree",
+      "gate": "cfg(unix) / cfg(windows) pair",
+      "route": "both arms exist; the unix arm runs here, the windows twin on windows-latest"
+    },
+    {
+      "package": "claudine",
+      "name": "transient_windows_persist_errors_are_narrowly_classified",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine",
+      "name": "transient_windows_persist_retries_are_bounded",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine",
+      "name": "transient_windows_retries_reuse_the_written_temp_file",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine",
+      "name": "unix_absolute_sensitive_paths_are_detected",
+      "gate": "cfg(target_os = \"linux\")",
+      "route": "ubuntu-latest and wsl2-ubuntu legs"
+    },
+    {
+      "package": "claudine",
+      "name": "windows_drive_and_unc_targets_use_valid_file_uris",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine",
+      "name": "windows_resource_link_creates_file_symlink",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine",
+      "name": "windows_resource_link_reports_already_linked_file",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine",
+      "name": "windows_resource_link_skips_real_file_collision",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "child_env_invariant_accepts_windows_key_spelling",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "ctrl_c_terminates_wrapped_child_on_windows",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "file_url_uses_windows_drive_uri_shape",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "job_close_terminates_a_descendant_when_the_wait_scope_ends",
+      "gate": "cfg(all(test, windows))",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "level3_linux_sequence_ctrl_c_fans_out_to_parallel_children",
+      "gate": "cfg(target_os = \"linux\") on the test module",
+      "route": "ubuntu-latest and wsl2-ubuntu `just test-l3`"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "level3_windows_sequence_ctrl_c_fans_out_to_parallel_children",
+      "gate": "cfg(windows) on the test module",
+      "route": "windows-latest `just test-l3`"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "non_unix_wait_loop_returns_on_child_exit",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "perf_enter_compose_partial_meets_target",
+      "gate": "cfg(unix) / cfg(not(unix)) pair",
+      "route": "both arms exist; the unix arm runs here, the non-unix twin on windows-latest"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "portable_text_declines_unc_namespace_rewriting",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "repeated_wait_scopes_do_not_grow_the_process_handle_count",
+      "gate": "cfg(all(test, windows))",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "repository_suggestions_do_not_follow_directory_symlinks",
+      "gate": "cfg(unix) / cfg(windows) pair",
+      "route": "both arms exist; the unix arm runs here, the windows twin on windows-latest"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "sequence_ctrl_c_fans_out_to_parallel_children_on_windows",
+      "gate": "cfg(windows) on the test module",
+      "route": "windows-latest `just test-cli`"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "windows_completion_termination_uses_job_object_path",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "windows_drive_hyperlink_encodes_reserved_characters",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "claudine-cli",
+      "name": "windows_unc_hyperlink_uses_authority_and_encodes_path",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-client",
+      "name": "a_real_busy_pipe_is_connected_once_an_instance_frees_up",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-client",
+      "name": "a_real_pipe_that_stays_busy_gives_up_at_the_deadline",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-client",
+      "name": "a_real_saturated_pipe_reports_the_code_the_retry_loop_recognizes",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-core",
+      "name": "windows_accepts_pipes_and_rejects_sockets",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-core",
+      "name": "windows_default_is_a_sid_qualified_pipe",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-core",
+      "name": "windows_derivation_refuses_a_unix_identity",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-core",
+      "name": "windows_override_rejects_a_filesystem_path",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-core",
+      "name": "windows_override_rejects_malformed_pipe_names",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-core",
+      "name": "windows_override_wins_and_stays_a_pipe_name",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-daemon",
+      "name": "a_data_root_owned_by_another_account_is_rejected",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-daemon",
+      "name": "a_directory_owned_by_another_account_is_rejected",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-daemon",
+      "name": "a_remote_form_client_is_refused_while_the_local_one_is_served",
+      "gate": "cfg(windows) on the parent module declaration",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-daemon",
+      "name": "a_second_daemon_cannot_take_a_running_daemon_s_name",
+      "gate": "cfg(windows) on the parent module declaration",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-daemon",
+      "name": "concurrent_clients_are_each_given_an_instance",
+      "gate": "cfg(windows) on the parent module declaration",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-daemon",
+      "name": "created_directories_are_owned_by_this_account",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-daemon",
+      "name": "dropping_the_handle_releases_the_name",
+      "gate": "cfg(windows) on the parent module declaration",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-daemon",
+      "name": "shutdown_releases_the_name",
+      "gate": "cfg(windows) on the parent module declaration",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-daemon",
+      "name": "the_acceptor_stays_available_across_connections",
+      "gate": "cfg(windows) on the parent module declaration",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-daemon",
+      "name": "the_current_user_descriptor_names_this_account_and_nobody_else",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-daemon",
+      "name": "the_data_root_is_created_owned_by_this_account",
+      "gate": "cfg(windows)",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-daemon",
+      "name": "the_handle_reports_the_name_it_bound",
+      "gate": "cfg(windows) on the parent module declaration",
+      "route": "windows-latest leg"
+    },
+    {
+      "package": "rendezvous-daemon",
+      "name": "the_pipe_dacl_names_this_user_and_nobody_else",
+      "gate": "cfg(windows) on the parent module declaration",
+      "route": "windows-latest leg"
+    }
+  ]
+}

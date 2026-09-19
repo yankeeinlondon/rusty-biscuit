@@ -106,3 +106,8 @@ trace/*
 # Python bytecode from scripts/ci test runs
 __pycache__/
 *.pyc
+
+# Messenger research pipeline: per-worktree local state (runs, publication
+# journal and staging) and interrupted atomic-replacement temps
+messenger/.research-state/
+*.publish-tmp

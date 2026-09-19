@@ -1,0 +1,8 @@
+# No --- fences: md reads no frontmatter and reports the file vacuously valid,
+# even though `assessments` is missing and `adapter: nope` is not an AdapterId.
+$schema: ../../_mappings.schema.yaml
+schema_version: 0
+inspected_revision: d57faf7e8
+fingerprint_algorithm: [sha256-file]
+assessments:
+  - { id: map.a, adapter: nope }

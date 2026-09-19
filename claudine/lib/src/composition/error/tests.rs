@@ -47,22 +47,23 @@ fn file_link_absolutizes_a_missing_relative_path() {
 }
 
 #[test]
-fn enrich_wraps_lifecycle_leak_with_excerpt() {
+fn enrich_wraps_lifecycle_nested_span_with_excerpt() {
     let source = source_from(
-        "---\nreview_file: x\nsuccess:\n    message: \"at {{review-file}}\"\n---\nbody\n",
+        "---\nreview_file: x\nsuccess:\n    message: \"{{ ok ? 'at {{review_file}}' : 'x' }}\"\n---\nbody\n",
     );
-    let err = CompositionError::LifecycleInterpolationLeak {
+    let err = CompositionError::LifecycleNestedSpanInLiteral {
         source_path: PathBuf::from("review.md"),
         property: "success.message".to_string(),
-        expression: "review-file".to_string(),
-        reason: String::new(),
+        literal: "'at {{review_file}}'".to_string(),
+        nested: "{{review_file}}".to_string(),
+        suggestion: Some("ok ? 'at ' + review_file : 'x'".to_string()),
     }
     .enrich_frontmatter(&source, true);
 
     assert!(matches!(err, CompositionError::WithFrontmatter { .. }));
     assert!(err.frontmatter_excerpt().is_some());
-    // Display still delegates to the inner leak diagnostic.
-    assert!(err.to_string().contains("interpolation leaked"), "got: {err}");
+    // Display still delegates to the inner nested-span diagnostic.
+    assert!(err.to_string().contains("nests `{{review_file}}`"), "got: {err}");
 }
 
 #[test]
@@ -79,6 +80,8 @@ fn already_emitted_wraps_once_and_delegates_display() {
         event: "success".to_string(),
         surface: "when".to_string(),
         message: "boom".to_string(),
+        property: None,
+        reason: Default::default(),
     };
     let display = err.to_string();
     let marked = err.already_emitted();
@@ -2557,6 +2560,58 @@ fn proxy_with_not_mapping_renders_and_locates_the_with_line() {
         rendered.contains("with: {}"),
         "the hint must offer the empty-mapping equivalence: {rendered}"
     );
+}
+
+#[test]
+fn runtime_set_shape_diagnostics_share_render_highlight_and_machine_identity() {
+    let cases = [
+        CompositionError::LifecycleSetPositionalRemoved {
+            source_path: PathBuf::from("reported.md"),
+            property: "initialize.stack[0]".to_string(),
+            path: "action[1].set".to_string(),
+        },
+        CompositionError::LifecycleSetLongFormRemoved {
+            source_path: PathBuf::from("reported.md"),
+            property: "initialize.stack[0]".to_string(),
+            path: "action[1].set".to_string(),
+        },
+        CompositionError::LifecycleSetNotMapping {
+            source_path: PathBuf::from("reported.md"),
+            property: "initialize.stack[0]".to_string(),
+            path: "action[1].set".to_string(),
+            actual: "whole-mapping interpolation".to_string(),
+        },
+        CompositionError::LifecycleSetInvalidKey {
+            source_path: PathBuf::from("reported.md"),
+            property: "initialize.stack[0]".to_string(),
+            path: "action[1].set".to_string(),
+            key: "{{ destination }}".to_string(),
+            message: "destination keys must be literal".to_string(),
+        },
+    ];
+
+    for error in cases {
+        assert_eq!(error.code(), "composition.lifecycle_invalid");
+        assert!(matches!(
+            error.frontmatter_block_spec(),
+            Some(FrontmatterHighlight::Property(ref property))
+                if property == "initialize.stack[0].action[1].set"
+        ));
+        let detail = error.detail();
+        assert_eq!(
+            detail["property"],
+            serde_json::json!("initialize.stack[0].action[1].set")
+        );
+        assert!(detail["message"].as_str().is_some_and(|message| !message.is_empty()));
+
+        let rendered = render(&error);
+        assert!(rendered.contains("reported.md"), "{rendered}");
+        assert!(
+            rendered.contains("initialize.stack[0].action[1].set"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("set: {property: value}"), "{rendered}");
+    }
 }
 
 #[test]

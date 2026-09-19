@@ -9,6 +9,7 @@
 mod assistant_stream;
 mod event_renderer;
 mod final_message;
+mod incomplete_subagents;
 mod metrics_report;
 mod prompt;
 mod stream;
@@ -21,6 +22,7 @@ pub use event_renderer::{
     pending_matches_tool_call, strip_progress_verb,
 };
 pub use final_message::FinalMessage;
+pub use incomplete_subagents::IncompleteSubagents;
 pub use metrics_report::MetricsReport;
 pub use stream::StreamRenderable;
 pub use task_stream::{

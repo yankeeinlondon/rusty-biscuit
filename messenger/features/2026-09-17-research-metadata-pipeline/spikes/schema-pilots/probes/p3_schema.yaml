@@ -1,0 +1,3 @@
+$schema:
+    items: "Item[](min(1); required)@./p3_types.yaml"
+    "<pattern::^(prompt|hash)$>": any

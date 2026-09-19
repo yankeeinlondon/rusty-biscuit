@@ -82,6 +82,7 @@ fn plan_inputs() -> launch_plan::LaunchPlanInputs {
         has_model_env: false,
         mcp: None,
         opencode_config_base: None,
+        kilo_config_base: None,
         codex_last_message_path: PathBuf::from("/tmp/claudine-test-last-message.txt"),
         // The provider-shaped keys the fixture invocation wrote, none of which
         // existed beforehand — so a rebuild that stops writing one clears it.
@@ -90,11 +91,19 @@ fn plan_inputs() -> launch_plan::LaunchPlanInputs {
             (std::ffi::OsString::from("MODEL"), None),
             (std::ffi::OsString::from("OPENCODE_CONFIG_CONTENT"), None),
             (
-                std::ffi::OsString::from("HOME"),
-                Some(std::ffi::OsString::from("/home/real")),
+                std::ffi::OsString::from("CODEX_HOME"),
+                Some(std::ffi::OsString::from("/home/real/codex")),
             ),
         ]),
-        codex_sqlite_home: None,
+        overlay: Some(launch_plan::OverlayRebuildInputs {
+            repo_resources: false,
+            mcp_requested: false,
+            home: claudine::invocation_context::HomeBaseline::from_parts(
+                None,
+                Default::default(),
+            ),
+            env: claudine::invocation_context::EnvBaseline::default(),
+        }),
         workspace_cwd: PathBuf::from("/repo"),
         write_grant_env: HashMap::new(),
         invocation: launch_plan::RecordedLaunch {
@@ -111,6 +120,7 @@ fn plan_inputs() -> launch_plan::LaunchPlanInputs {
             args: vec![RECORDED_ARGV.to_string()],
             env_overlay: vec![("YOLO".into(), "false".into())],
             structured_codex: false,
+            overlay: None,
         },
         replay_supported: true,
     }
@@ -149,6 +159,19 @@ fn installed_without(absent: &[Provider]) -> InstalledProviderSnapshot {
     snapshot
 }
 
+/// An environment carrying none of the variables model precedence consults.
+///
+/// Every fixture below uses it, because these tests run in the binary's shared
+/// test process and the precedence chain's steps 2 and 3 read the *process*
+/// environment. A Claudine-wrapped agent session exports `MODEL` into every
+/// command it launches, so a suite run from inside one saw an ambient `opus`
+/// out-rank each fixture's frontmatter — and the process environment cannot be
+/// scrubbed from here, since `std::env::set_var` is unsound while sibling
+/// tests share the process.
+fn no_ambient_env(_key: &str) -> Option<String> {
+    None
+}
+
 /// The invocation intent an unchanged run resolves against: Goose,
 /// non-interactive, nothing explicit, MCP in play so a body tag counts.
 fn intent() -> LaunchRebuildIntent {
@@ -164,6 +187,7 @@ fn intent() -> LaunchRebuildIntent {
         fallback_provider_reason: ProviderResolutionReason::FavoriteAgent,
         dispatch_context: invocation_dispatch_context(),
         launch_plan_inputs: plan_inputs(),
+        env_lookup: no_ambient_env,
     }
 }
 
@@ -305,6 +329,50 @@ fn rebuild_keeps_explicit_cli_model_authoritative() {
     );
 }
 
+/// The rebuild's environment seam feeds the *real* precedence chain, both of
+/// its environment steps.
+///
+/// Without this, [`no_ambient_env`] would be indistinguishable from a seam that
+/// dropped environment precedence altogether: every other fixture here supplies
+/// an empty environment, so all of them would still pass while a production run
+/// silently stopped honoring `MODEL` and `GOOSE_MODEL`.
+#[test]
+fn the_supplied_environment_outranks_the_targets_frontmatter_model() {
+    let target = target_with_model(Some("llamacpp/frontmatter"));
+
+    let mut generic = intent();
+    generic.env_lookup = |key| (key == "MODEL").then(|| "llamacpp/from-generic-env".to_string());
+    let rebuild = rebuild_target_launch(&generic, None, None, Path::new("."), &target).unwrap();
+    assert_eq!(
+        value_of(&rebuild.env_overrides, "MODEL"),
+        Some("llamacpp/from-generic-env"),
+        "a `MODEL` in the supplied environment must reach the shared chain's step 3",
+    );
+
+    // Goose is the fixture provider, so `GOOSE_MODEL` is its step-2 variable.
+    let mut provider_specific = intent();
+    provider_specific.env_lookup = |key| match key {
+        "GOOSE_MODEL" => Some("llamacpp/from-provider-env".to_string()),
+        "MODEL" => Some("llamacpp/from-generic-env".to_string()),
+        _ => None,
+    };
+    let rebuild =
+        rebuild_target_launch(&provider_specific, None, None, Path::new("."), &target).unwrap();
+    assert_eq!(
+        value_of(&rebuild.env_overrides, "MODEL"),
+        Some("llamacpp/from-provider-env"),
+        "the provider's own model variable must reach step 2, ahead of the generic `MODEL`",
+    );
+
+    // The control: with the same document and an empty environment, the
+    // frontmatter wins — so the two assertions above discriminate.
+    let rebuild = rebuild_target_launch(&intent(), None, None, Path::new("."), &target).unwrap();
+    assert_eq!(
+        value_of(&rebuild.env_overrides, "MODEL"),
+        Some("llamacpp/frontmatter"),
+    );
+}
+
 /// The environment an attempt's child actually receives: the invocation's base,
 /// then the rebuilt plan's patch, then the document's `AGENT`/`MODEL`/`YOLO`
 /// triple — the same order [`super::super::super::build_harness_launch`] applies
@@ -384,13 +452,13 @@ fn rebuild_omits_model_when_target_pins_none() {
 
 /// Review-9 finding 2 — the same rule for provider-specific base values. A
 /// retry that leaves OpenCode must not hand the new provider OpenCode's inline
-/// config, and one that leaves a shadow-HOME provider must get its real home
-/// back rather than the previous provider's shadow.
+/// config, and one that leaves an overlay provider must get the user's own
+/// selector value back rather than the previous provider's overlay.
 #[test]
 fn a_provider_switch_clears_the_opening_providers_environment() {
     let base = [
         ("OPENCODE_CONFIG_CONTENT", "{\"opening\":true}"),
-        ("HOME", "/shadow/opencode"),
+        ("CODEX_HOME", "/home/real/.claudine/.codex"),
         ("PATH", "/usr/bin"),
     ];
     let rebuilt = rebuild_launch_identity(
@@ -411,10 +479,10 @@ fn a_provider_switch_clears_the_opening_providers_environment() {
         "OpenCode's inline config must not reach a Gemini retry; got {env:?}",
     );
     assert_eq!(
-        env.get(std::ffi::OsStr::new("HOME")).map(|v| v.as_os_str()),
-        Some(std::ffi::OsStr::new("/home/real")),
-        "a shadow HOME the rebuild does not re-materialize must fall back to the \
-         real one; got {env:?}",
+        env.get(std::ffi::OsStr::new("CODEX_HOME")).map(|v| v.as_os_str()),
+        Some(std::ffi::OsStr::new("/home/real/codex")),
+        "an overlay selector the rebuild does not re-apply must fall back to the \
+         user's ambient value; got {env:?}",
     );
 }
 

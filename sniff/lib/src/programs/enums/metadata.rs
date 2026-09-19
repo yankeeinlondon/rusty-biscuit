@@ -3948,8 +3948,7 @@ impl CategoryEnum for TestRunner {
 mod burnttoast_tests {
     use super::*;
 
-    const SLEEPING_CHILD: &str =
-        "programs::enums::metadata::burnttoast_tests::child_sleeps";
+    const SLEEPING_CHILD: &str = "programs::enums::metadata::burnttoast_tests::child_sleeps";
 
     fn test_child_args(name: &str) -> Vec<std::ffi::OsString> {
         [name, "--exact", "--ignored", "--nocapture"]

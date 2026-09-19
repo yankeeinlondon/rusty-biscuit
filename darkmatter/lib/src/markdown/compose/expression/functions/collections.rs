@@ -13,4 +13,6 @@ pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding { canonical: "as_space_separated", aliases: &["asspaceseparated"], evaluation: EvaluationMode::Pure, handler: Some(FunctionHandler::Pure(super::as_space_separated)) },
     FunctionBinding { canonical: "as_unordered_list", aliases: &["asunorderedlist"], evaluation: EvaluationMode::Pure, handler: Some(FunctionHandler::Pure(super::as_unordered_list)) },
     FunctionBinding { canonical: "as_ordered_list", aliases: &["asorderedlist"], evaluation: EvaluationMode::Pure, handler: Some(FunctionHandler::Pure(super::as_ordered_list)) },
+    FunctionBinding { canonical: "as_json", aliases: &["asjson"], evaluation: EvaluationMode::Pure, handler: Some(FunctionHandler::Pure(super::as_json)) },
+    FunctionBinding { canonical: "as_json5", aliases: &["asjson5"], evaluation: EvaluationMode::Pure, handler: Some(FunctionHandler::Pure(super::as_json5)) },
 ];

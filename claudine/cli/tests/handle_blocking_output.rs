@@ -7,14 +7,12 @@ use serde_json::Value;
 #[cfg(unix)]
 mod common;
 #[cfg(unix)]
-use common::{TestWorkspace, write};
+use common::{CliProcessFixture, write};
 
 #[cfg(unix)]
 #[test]
 fn handle_flushes_blocking_payload_before_nonzero_exit() {
-    let workspace = TestWorkspace::named("claudine-handle-blocking-output");
-    let home_dir = workspace.path().join("home");
-    std::fs::create_dir_all(&home_dir).unwrap();
+    let fixture = CliProcessFixture::named("claudine-handle-blocking-output");
 
     let config = serde_json::json!({
         "preferred_agent": "gemini",
@@ -32,14 +30,12 @@ fn handle_flushes_blocking_payload_before_nonzero_exit() {
         }
     });
     write(
-        &home_dir.join(".claudine/config.json"),
+        &fixture.home().join(".claudine/config.json"),
         &serde_json::to_string_pretty(&config).unwrap(),
     );
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command()
         .args(["handle", "turn_complete", "--provider", "gemini"])
         .write_stdin(r#"{"hook_event_name":"AfterAgent","session_id":"flush-test-1"}"#)
         .assert()

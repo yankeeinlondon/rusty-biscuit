@@ -1,5 +1,5 @@
 //! Auto-select state classification, unsupported-property lookup helpers, and
-//! the shared interrupted-run predicate.
+//! the shared interrupted-run and missing-include preflight predicates.
 
 use super::*;
 use claudine::composition::{InteractiveShape, TextFormat};
@@ -154,5 +154,37 @@ fn the_interrupt_flag_covers_exits_no_host_reports_as_130() {
             run_was_interrupted(exit_code, &flag),
             "exit {exit_code} with the interrupt flag set is an interruption"
         );
+    }
+}
+
+fn transclusion_io(kind: std::io::ErrorKind) -> CompositionError {
+    use darkmatter::markdown::MarkdownError;
+    use darkmatter::markdown::compose::TransclusionError;
+
+    CompositionError::PreFlightDiscoveryFailed(MarkdownError::Transclusion(Box::new(
+        TransclusionError::Io(std::io::Error::new(kind, "File not found: generated/notes.md")),
+    )))
+}
+
+#[test]
+fn only_a_not_found_include_at_preflight_earns_the_missing_include_note() {
+    use darkmatter::markdown::MarkdownError;
+    use darkmatter::markdown::compose::TransclusionError;
+
+    assert!(is_missing_include(&transclusion_io(std::io::ErrorKind::NotFound)));
+
+    let unrelated = [
+        transclusion_io(std::io::ErrorKind::PermissionDenied),
+        CompositionError::PreFlightDiscoveryFailed(MarkdownError::Transclusion(Box::new(
+            TransclusionError::MaxDepthExceeded { max_depth: 8 },
+        ))),
+        // The same missing include outside sequence preflight is not this note's
+        // concern: direct compose keeps its own boundary.
+        CompositionError::ComposeFailed(MarkdownError::Transclusion(Box::new(
+            TransclusionError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "gone")),
+        ))),
+    ];
+    for error in &unrelated {
+        assert!(!is_missing_include(error), "{error}");
     }
 }

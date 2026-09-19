@@ -50,7 +50,7 @@ use std::error::Error as StdError;
 use darkmatter::markdown::compose::subtree::InjectedGlobal;
 use serde_json::{Map, Value};
 
-use super::super::error::CompositionError;
+use super::super::error::{CompositionError, LifecycleEvaluationReason};
 use crate::diagnostics::DiagnosticSnapshot;
 use crate::error::ClaudineError;
 use crate::harness::concise_message;
@@ -118,6 +118,17 @@ pub struct LifecycleErrorInfo {
     /// `LifecycleErrorInfo` small — it is the `Err` type of several hot
     /// `Result`-returning lifecycle helpers.
     pub snapshot: Option<Box<DiagnosticSnapshot>>,
+
+    /// Dotted lifecycle property that raised (`success.say`,
+    /// `start.stack[0].when`), attached by the executor with
+    /// [`Self::at_property`]. Not projected into `err.*`.
+    pub property: Option<String>,
+
+    /// Why an event-time evaluation failed, recovered by downcasting the reported
+    /// error itself to [`LifecycleExprError`](super::executor::LifecycleExprError)
+    /// (the source chain is not walked).
+    /// Not projected into `err.*`.
+    pub reason: LifecycleEvaluationReason,
 }
 
 impl LifecycleErrorInfo {
@@ -140,7 +151,13 @@ impl LifecycleErrorInfo {
     /// [`Diagnostic`](crate::diagnostics::Diagnostic) facets so `err.code` / `err.detail.*` project alongside the
     /// legacy aliases.
     pub fn from_composition_error(err: &CompositionError) -> Self {
-        Self::from_selection("CompositionError", variant_name_from_debug(err), err)
+        let mut info = Self::from_selection("CompositionError", variant_name_from_debug(err), err);
+        if let (Some(snapshot), Some(excerpt)) =
+            (info.snapshot.as_mut(), err.frontmatter_excerpt())
+        {
+            snapshot.frontmatter_excerpt = Some(excerpt.clone());
+        }
+        info
     }
 
     /// Build the snapshot from an arbitrary error, preferring the effective
@@ -154,10 +171,25 @@ impl LifecycleErrorInfo {
     /// same failure renders.
     pub fn from_error_or_action(verb: impl Into<String>, error: &(dyn StdError + 'static)) -> Self {
         let variant = verb.into();
-        match Self::select(error) {
+        let mut info = match Self::select(error) {
             Some(snapshot) => Self::from_snapshot("LifecycleAction", variant, snapshot),
             None => Self::from_action_failure(variant, error.to_string()),
+        };
+        if let Some(super::executor::LifecycleExprError::SurvivingSpan { span }) =
+            error.downcast_ref::<super::executor::LifecycleExprError>()
+        {
+            info.reason = LifecycleEvaluationReason::SurvivingSpan { span: span.clone() };
         }
+        info
+    }
+
+    /// Attach the lifecycle property that raised, unless a more specific one
+    /// was already recorded.
+    pub fn at_property(mut self, property: impl Into<String>) -> Self {
+        if self.property.is_none() {
+            self.property = Some(property.into());
+        }
+        self
     }
 
     /// Build from the diagnostic
@@ -177,6 +209,8 @@ impl LifecycleErrorInfo {
                 variant,
                 msg: concise_message(&error.to_string()),
                 snapshot: None,
+                property: None,
+                reason: LifecycleEvaluationReason::Expression,
             },
         }
     }
@@ -189,6 +223,8 @@ impl LifecycleErrorInfo {
             variant,
             msg: snapshot.message.clone(),
             snapshot: Some(Box::new(snapshot)),
+            property: None,
+            reason: LifecycleEvaluationReason::Expression,
         }
     }
 
@@ -259,6 +295,8 @@ impl LifecycleErrorInfo {
             variant,
             msg,
             snapshot,
+            property: None,
+            reason: LifecycleEvaluationReason::Expression,
         }
     }
 

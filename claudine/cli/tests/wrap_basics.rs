@@ -4,12 +4,16 @@
 //! `common::wrap`.
 
 use predicates::str::contains;
+// Consumed only by the `#[cfg(unix)]` cases below; ungated, the Windows
+// check (`just check-windows`) reports both imports unused.
+#[cfg(unix)]
 use std::fs;
 mod common;
+#[cfg(unix)]
 use common::wrap::*;
-use common::{CliProcessFixture, strip_ansi, write_dry_run_provider_stub};
 #[cfg(unix)]
 use common::write_executable;
+use common::{CliProcessFixture, strip_ansi, write_dry_run_provider_stub};
 
 #[test]
 fn help_lists_wrapper_subcommands() {
@@ -187,14 +191,22 @@ exit 0
     );
 }
 
+/// A Codex repository prompt overlay without `--repo` (spec L1 contract 5):
+/// the repo prompt reaches Codex through `CODEX_HOME`, `HOME` stays the launch
+/// home, and Codex's SQLite state — databases and their sidecars — stays at the
+/// pre-overlay `~/.codex`, pinned by `CODEX_SQLITE_HOME`, never in the overlay.
 #[cfg(unix)]
 #[test]
-fn codex_wrapper_uses_shadow_home_for_repo_prompt_overlay_without_repo_flag() {
-    let fixture = CliProcessFixture::named("wrap-basics-shadow-home");
+fn codex_wrapper_uses_a_provider_overlay_for_repo_prompts_without_repo_flag() {
+    let fixture = CliProcessFixture::named("wrap-basics-prompt-overlay");
     fixture.seed_user_config();
     let env_path = fixture.cwd().join("env.txt");
 
-    fs::create_dir_all(fixture.home().join(".codex")).unwrap();
+    let codex_home = fixture.home().join(".codex");
+    fs::create_dir_all(&codex_home).unwrap();
+    for state in ["state_5.sqlite", "state_5.sqlite-wal", "logs_2.sqlite-shm"] {
+        fs::write(codex_home.join(state), "live").unwrap();
+    }
     fs::create_dir_all(fixture.cwd().join(".claude/commands")).unwrap();
     fs::write(
         fixture.cwd().join(".claude/commands/review.md"),
@@ -207,11 +219,16 @@ fn codex_wrapper_uses_shadow_home_for_repo_prompt_overlay_without_repo_flag() {
         r#"#!/bin/sh
 {
   printf 'HOME=%s\n' "$HOME"
-  if [ -L "$HOME/.codex/prompts/review.md" ]; then
+  printf 'CODEX_HOME=%s\n' "$CODEX_HOME"
+  printf 'CODEX_SQLITE_HOME=%s\n' "$CODEX_SQLITE_HOME"
+  if [ -L "$CODEX_HOME/prompts/review.md" ]; then
     printf 'HAS_REPO_PROMPT=1\n'
   else
     printf 'HAS_REPO_PROMPT=0\n'
   fi
+  for state in "$CODEX_HOME"/*.sqlite*; do
+    if [ -e "$state" ]; then printf 'OVERLAY_STATE=%s\n' "$(basename "$state")"; fi
+  done
 } > "$CLAUDINE_ENV_FILE"
 exit 0
 "#,
@@ -225,11 +242,21 @@ exit 0
         .success();
 
     let env_lines = fs::read_to_string(&env_path).unwrap();
-    assert!(env_lines.contains(&format!(
-        "HOME={}",
-        fixture.home().join(".claudine").display()
-    )));
-    assert!(env_lines.contains("HAS_REPO_PROMPT=1"));
+    assert!(env_lines.contains(&format!("HOME={}\n", fixture.home().display())));
+    let launches = fixture.home().join(".claudine").join("overlays").join("codex");
+    assert!(
+        env_lines.contains(&format!("CODEX_HOME={}{}", launches.display(), std::path::MAIN_SEPARATOR)),
+        "{env_lines}"
+    );
+    assert!(env_lines.contains("HAS_REPO_PROMPT=1"), "{env_lines}");
+    assert!(
+        env_lines.contains(&format!("CODEX_SQLITE_HOME={}\n", codex_home.display())),
+        "{env_lines}"
+    );
+    assert!(
+        !env_lines.contains("OVERLAY_STATE="),
+        "SQLite state was placed in the overlay:\n{env_lines}"
+    );
 }
 
 #[cfg(unix)]

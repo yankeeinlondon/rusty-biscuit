@@ -24,8 +24,8 @@ use claudine::composition::{
     AgentResolutionState, CompositionClosurePlan, CompositionError, CompositionExecutionRequest,
     CompositionMode, InlineClosurePlan, IterationSummarySignals, ModelResolutionReason,
     ResolvedExecutionTarget, SelectionReason, SessionInteractivitySource, agent_state_breakdown,
-    build_installed_snapshot, build_picker_plan, classify_agent_resolution,
-    invalid_agent_message, resolve_target_non_tty_with_catalog,
+    build_installed_snapshot, build_picker_plan, classify_agent_resolution, invalid_agent_message,
+    resolve_target_non_tty_with_catalog,
 };
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::stream::stderr::Verbosity;
@@ -35,23 +35,24 @@ use inquire::Select;
 use sniff::programs::InstalledAiClients;
 
 use super::env;
+use super::exec::switch_process_cwd;
 use super::profile::{self, WrapperProfile};
 use super::{
     HarnessPromptMode, HarnessPromptState, apply_composition_shell_overrides,
     materialized_harness_prompt_from_prepared, resolve_binary_path_direct, run_harness_loop,
     structured_verbosity, wrap_terminal,
 };
-use super::exec::switch_process_cwd;
 use crate::log;
 
 pub(crate) mod dry_run;
 pub(crate) mod launch;
-mod preflight;
 mod pipeline;
+mod preflight;
 pub(crate) mod prep_context;
 mod provider_args;
 pub(crate) mod runner;
 pub(crate) mod selection;
+pub(crate) mod staged_boot;
 pub(crate) mod target;
 pub(crate) mod timeouts;
 
@@ -60,23 +61,24 @@ pub(crate) use selection::{
     SelectionConfig, load_selection_config, load_selection_config_for_repo,
 };
 pub(crate) use target::{
-    agent_prompt_message, composition_dispatch_context, eagerly_resolve_target,
-    install_agent_env_for_composition, provider_for_state_non_tty, refresh_for_model_validation,
+    ModelResolveMode, agent_prompt_message, composition_dispatch_context,
+    eagerly_resolve_target, install_agent_env_for_composition, provider_for_state_non_tty,
+    refresh_for_model_validation, resolve_document_model, resolve_document_model_from,
     resolve_execution_target, scoped_picker_plan_for_state,
 };
+#[cfg(test)]
+pub(crate) use target::{picker_scope_for_state, resolve_live_target_with_tty};
 pub(crate) use timeouts::{
     TimeoutResolutionInput, build_prompt_timing_context, format_interactive_timeout_conflict,
     frontmatter_timeout_duration, resolve_single_timeout, resolve_stall_timeout, resolve_timeouts,
 };
-#[cfg(test)]
-pub(crate) use target::{picker_scope_for_state, resolve_live_target_with_tty};
 
+use launch::enforce_repo_launch_detection;
+pub(crate) use launch::select_launch_workspace;
 #[cfg(test)]
 pub(crate) use launch::{
     launch_workspace_fallback_count_for_tests, reset_launch_workspace_fallbacks_for_tests,
 };
-pub(crate) use launch::select_launch_workspace;
-use launch::enforce_repo_launch_detection;
 use preflight::{
     PreflightBlockedOutcome, emit_preflight_blocked_and_finalize, preflight_blocked_control_error,
     setup_phase_deferred,
@@ -187,6 +189,30 @@ pub(crate) fn execute_composition_attempt(
         perf_enabled,
         Some(guard),
         skip_preflight,
+    )
+}
+
+/// Execute a staged document's first attempt under the guard that already
+/// emitted its `initialize`.
+///
+/// The command coordinator ran the staged boot (shell-free bootstrap read,
+/// `initialize`, stabilized reread), so `request.prepared` is the post-
+/// `initialize` read. The pipeline does not route `initialize` again, and it
+/// still runs the full lifecycle audit over that read.
+pub(crate) fn execute_staged_composition(
+    request: CompositionExecutionRequest,
+    verbose: u8,
+    startup_timings: Option<crate::perf::StartupTimings>,
+    perf_enabled: bool,
+    guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+) -> Result<SingleCompositionOutcome> {
+    pipeline::execute_composition_request_inner_with_guard(
+        request,
+        verbose,
+        startup_timings,
+        perf_enabled,
+        Some(guard),
+        false,
     )
 }
 

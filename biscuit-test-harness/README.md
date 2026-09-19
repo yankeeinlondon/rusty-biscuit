@@ -75,11 +75,11 @@ let output = Command::new(bin_exe!("so-you-say")).arg("--help").output()?;
 ```
 
 The `env!` form bakes in an absolute path under the *build* host's target
-directory. That is fine wherever the runner built the binary, and wrong for the
-`wsl2-ubuntu` CI leg, which executes a `cargo nextest archive` built elsewhere
-and extracted into a temp directory — every spawn there fails with
-`NotFound`. `bin_exe!` reads nextest's run-time republication of the path first
-and keeps the compile-time value as the fallback.
+directory. **Every** hosted CI cell now executes a `cargo nextest archive` built
+by another job and extracted into a temp directory — not just the `wsl2-ubuntu`
+leg — so every spawn through `env!` fails there with `NotFound`. `bin_exe!`
+reads nextest's run-time republication of the path first and keeps the
+compile-time value as the fallback.
 
 ## The `TerminalHarness` trait
 
@@ -104,6 +104,45 @@ Every backend implements one **shell-model-first** contract:
   shell, no `PATH` augmentation, no prompt-readiness wait, no
   color-forcing. Only WezTerm, Kitty, and tmux override it; callers
   supply absolute paths and handle their own settling.
+
+#### The pane's shell reads login files, not interactive ones
+
+**Every** backend spawns two shells: an outer `-l` login shell that runs
+the host's *profile* files (where `PATH` is assembled), which then
+`exec`s an interactive shell with its **rc files suppressed**
+(`bash --norc -i`, `zsh -f -i`, `unset ENV` for POSIX `sh`).
+
+The interactive rc file is where Atuin, starship, fzf, and zoxide
+install themselves, and a prompt-replacement or first-run picker there
+reaches into the pane the harness is driving: an Atuin first-run prompt
+swallowed the command line sent by
+`level2_initialize_proxy_block_auto_detects_osc8_in_wezterm` until its
+exit marker timed out. Consequences for test authors:
+
+- The pane's `PATH` comes from the **login profile only**. A host that
+  edits `PATH` in `~/.bashrc` will not see those entries in the pane.
+  Pass an absolute path or an explicit `PATH` env pair for anything
+  outside `/etc/profile`'s reach.
+- The prompt is the shell's stock `PS1` (`bash-5.3$`, `host%`), not the
+  developer's theme. Never grep a captured frame for a literal that the
+  stock prompt contains.
+- The *outer* shell still runs the login profile, so an rc file that a
+  profile sources unconditionally still executes there — it just runs in
+  a non-interactive shell that is replaced a moment later. Anything an
+  rc file guards behind `$-` containing `i` (which is how prompt hooks
+  and pickers guard themselves) never reaches the pane.
+  `level2_tmux_pane_shell_skips_the_interactive_rc` holds this line.
+- Terminal.app has a third shell in front of both: macOS starts the
+  window's own login shell before AppleScript can say anything, and
+  `do script` is delivered to *that* shell. The harness's line `exec`s it
+  away, so the shell it drives is still the rc-suppressed one.
+
+The invocation is built once — `login_shell_script`, `login_shell_argv`,
+and `login_shell_command_line` in `lib.rs` — so no backend can drift from
+the policy. Backends differ only in how the words reach the pane: an argv
+for WezTerm, Kitty, and tmux (which needs `-e` for environment, because a
+variable set on the `tmux` *client* does not reach a session created
+against an already-running server), a shell command line for Terminal.app.
 
 ### Sending input — pick the right channel
 
@@ -235,7 +274,8 @@ Terminal.app is GUI-automated via `osascript` and is the most fragile
 backend. Several issues bite anyone editing `apple_terminal.rs`:
 
 1. **Window identity (title-independent registry).** Spawned windows get a
-   custom title (`biscuit-test-terminal-<pid>`), but it is not load-bearing:
+   custom title (`biscuit-test-terminal-<owner pid>-<pid>-<n>`), but it is not
+   load-bearing:
    an interactive shell prompt can overwrite the window title, and identity
    must survive that. Every owned spawn records its window id in
    `${TMPDIR}/biscuit-test-terminal-registry.jsonl`; the reaper closes

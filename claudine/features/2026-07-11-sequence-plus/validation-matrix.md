@@ -82,7 +82,7 @@ Executed evidence and must never be written up as an attended one.
 |---------|-------|
 | `just test` (from `claudine/`) | L1 — lib unit + CLI integration |
 | `just test` (from `biscuit-file/`) | L1 — `ListFormat` |
-| `just test` (from `darkmatter/`) | L1 — `set(…)`, name coercion, `last(list)` |
+| `just test` (from `darkmatter/`) | L1 — capability `set(key, value)`, name coercion, `last(list)` |
 | `just test-l2 --no-fail-fast` (from `claudine/`) | L2 — real terminal (tmux) |
 | `just lint` (each of the three areas) | clippy |
 | `just test-l3` (from `claudine/`) | L3 — real OS keyboard via WezTerm + cliclick; refuses to run unattended |

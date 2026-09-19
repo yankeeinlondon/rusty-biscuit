@@ -1,6 +1,6 @@
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 use predicates::prelude::*;
 
 // =============================================================================
@@ -30,17 +30,20 @@ Spec resolved: {{ spec }}\n\
 
 #[test]
 fn test_compose_motivating_spec_ternary_resolves_when_spec_present() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("plan.md"), "# Plan\n").unwrap();
-    std::fs::write(dir.path().join("spec.md"), "# Spec\n").unwrap();
-    std::fs::write(dir.path().join("template.md"), MOTIVATING_SPEC_TERNARY).unwrap();
+    let fixture =
+        CliProcessFixture::named("test_compose_motivating_spec_ternary_resolves_when_spec_present");
+    fixture.write_file("cwd/plan.md", "# Plan\n");
+    fixture.write_file("cwd/spec.md", "# Spec\n");
+    fixture.write_file("cwd/template.md", MOTIVATING_SPEC_TERNARY);
 
     // `file_exists(possible_spec)` is true → the ternary resolves `spec` to the
     // path, the optional `file` field validates, and `::block when="spec"`
     // renders its body. Run from the document directory so the `file`-typed
     // schema fields resolve their references against the sibling files.
-    md_cmd()
-        .current_dir(dir.path())
+    fixture
+        .command_builder()
+        .ambient_context(fixture.cwd())
+        .build()
         .arg("compose")
         .arg("--frontmatter")
         .arg("template.md")
@@ -52,16 +55,19 @@ fn test_compose_motivating_spec_ternary_resolves_when_spec_present() {
 
 #[test]
 fn test_compose_motivating_spec_ternary_absent_when_spec_missing() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("plan.md"), "# Plan\n").unwrap();
+    let fixture =
+        CliProcessFixture::named("test_compose_motivating_spec_ternary_absent_when_spec_missing");
+    fixture.write_file("cwd/plan.md", "# Plan\n");
     // No spec.md sibling.
-    std::fs::write(dir.path().join("template.md"), MOTIVATING_SPEC_TERNARY).unwrap();
+    fixture.write_file("cwd/template.md", MOTIVATING_SPEC_TERNARY);
 
     // `file_exists(possible_spec)` is false → the ternary resolves `spec` to the
     // empty string. Decision A treats an empty non-required `file` field as
     // absent (compose still succeeds) and `::block when="spec"` is excluded.
-    md_cmd()
-        .current_dir(dir.path())
+    fixture
+        .command_builder()
+        .ambient_context(fixture.cwd())
+        .build()
         .arg("compose")
         .arg("template.md")
         .assert()

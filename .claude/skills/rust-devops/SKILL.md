@@ -18,6 +18,7 @@ measured results override generic ecosystem guidance.
 | Work | Read first |
 |---|---|
 | CI scope, pre-push behavior, local evidence, GitHub Actions, release-plz | [CI/CD and releases](./ci-cd.md) |
+| How release-plz itself works, and how to configure its workflow | `docs/cicd/release-plz-ci.md` (tool-level, repository-neutral) |
 | Distribution channels and installers | [Deployment platforms](./deployment-platforms.md) |
 | Compiler caching and build storage | [kache](./kache.md), then `docs/kache-strategy.md` for rusty-biscuit |
 | Embedded Git implementation | [git2](./git2.md) or [gitoxide](./gitoxide.md), according to the decision below |

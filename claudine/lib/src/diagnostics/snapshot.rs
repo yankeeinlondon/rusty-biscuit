@@ -40,6 +40,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{Diagnostic, code_spec, next_registered_cause, null_detail_for};
+use crate::composition::FrontmatterExcerpt;
 use crate::harness::runtime::concise_message;
 
 /// Schema version stamped into every [`DiagnosticSnapshot`].
@@ -83,6 +84,12 @@ pub struct DiagnosticSnapshot {
     /// `cause.cause` is unrepresentable in v1 rather than merely undocumented.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<DiagnosticCause>,
+
+    /// In-process source appendix retained across an intentional snapshot
+    /// boundary. It is never serialized: frontmatter remains absent from
+    /// `err.*`, machine output, persistence, and wire representations.
+    #[serde(skip)]
+    pub frontmatter_excerpt: Option<FrontmatterExcerpt>,
 }
 
 /// The one-level cause projection of a [`DiagnosticSnapshot`].
@@ -126,6 +133,7 @@ impl DiagnosticSnapshot {
             detail: diagnostic.detail(),
             message: concise_message(&diagnostic.to_string()),
             cause: next_registered_cause(diagnostic).map(DiagnosticCause::from_diagnostic),
+            frontmatter_excerpt: None,
         }
     }
 
@@ -177,6 +185,7 @@ impl DiagnosticSnapshot {
             detail: null_detail_for(spec.code),
             message,
             cause: None,
+            frontmatter_excerpt: None,
         })
     }
 }

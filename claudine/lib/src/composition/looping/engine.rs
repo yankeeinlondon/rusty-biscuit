@@ -308,11 +308,17 @@ pub fn execute_loop_with_config(
 /// exits. Under `fail_fast: true`, iterations ending in `blocked` or `failure`
 /// emit `finalize` through the executor and then exit before the loop gate.
 /// Under `fail_fast: false`, failed iterations reach the loop gate.
+///
+/// `initialize_frontmatter` is the full bootstrap namespace, separate from
+/// iteration-control state. Its live mutations remain visible to catch
+/// handlers; `runtime_state` carries `set` writes into subsequent preparations.
 #[allow(clippy::too_many_arguments)]
 pub fn execute_loop_with_lifecycle<E>(
     prompt_path: &Path,
     config: &LoopConfig,
     initial_frontmatter: Map<String, Value>,
+    initialize_frontmatter: &Map<String, Value>,
+    runtime_state: Option<&crate::composition::RuntimeState>,
     options: LoopExecutionOptions,
     lifecycle_config: &LifecycleConfig,
     lifecycle_ctx: &LifecycleRuntimeContext<'_>,
@@ -360,9 +366,10 @@ where
     // Emit initialize once before any iteration runs.
     let (init_timing, init_current) =
         capture_loop_lifecycle_globals(base_dir, lifecycle_ctx.launch_area, loop_start);
-    let init_ctx = build_loop_stack_context(
+    let initialize_live = std::sync::Mutex::new(initialize_frontmatter.clone());
+    let mut init_ctx = build_loop_stack_context(
         LifecycleSignal::Initialize,
-        &initial_frontmatter,
+        initialize_frontmatter,
         lifecycle_ctx,
         effect_engine,
         shell_runner,
@@ -372,6 +379,8 @@ where
         Some(&init_timing),
         Some(&init_current),
     );
+    init_ctx.live_frontmatter = Some(&initialize_live);
+    init_ctx.runtime_state = runtime_state;
     let init_outcome = guard.execute_event(LifecycleSignal::Initialize, &init_ctx);
     let init_result = execute_loop_catch_protocol(
         &mut guard,

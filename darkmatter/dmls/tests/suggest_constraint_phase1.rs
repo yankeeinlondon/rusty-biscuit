@@ -4,9 +4,9 @@
 //! no real terminal or terminal harness is involved, so they are Level 1
 //! integration tests and run under `just test`.
 
-use std::{sync::mpsc, time::Duration};
+mod common;
 
-use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
+use common::{LspFixture, LspWorkspace};
 use serde_json::{Value, json};
 
 const INLINE: &str = include_str!("fixtures/suggest_constraint/inline.md");
@@ -17,105 +17,27 @@ const UNIONS: &str = include_str!("fixtures/suggest_constraint/unions.md");
 const RAW_SCHEMA: &str = include_str!("fixtures/suggest_constraint/raw-schema.json");
 const RAW_CONSUMER: &str = include_str!("fixtures/suggest_constraint/raw-consumer.md");
 
-struct ClientFixture {
-    client: Connection,
-    server_outcome: mpsc::Receiver<Result<(), String>>,
-    next_id: i32,
-    notifications: Vec<Notification>,
+/// Initialize params for the suggestion sessions: a Neovim-shaped client that
+/// advertises workspace configuration support.
+fn suggestions_initialize_params(root: &std::path::Path) -> Value {
+    let root_uri = url::Url::from_directory_path(root).unwrap();
+    json!({
+        "processId": null,
+        "clientInfo": { "name": "Neovim", "version": "0.11.0" },
+        "capabilities": {
+            "general": { "positionEncodings": ["utf-8", "utf-16"] },
+            "workspace": { "configuration": true }
+        },
+        "workspaceFolders": [
+            { "uri": root_uri.as_str(), "name": "suggestions" }
+        ]
+    })
 }
 
-impl ClientFixture {
-    fn start() -> Self {
-        let (server_side, client_side) = Connection::memory();
-        let (outcome_tx, outcome_rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let result = dmls::run_server(server_side, dmls::RunOptions::default())
-                .map_err(|error| error.to_string());
-            let _ = outcome_tx.send(result);
-        });
-        Self {
-            client: client_side,
-            server_outcome: outcome_rx,
-            next_id: 0,
-            notifications: Vec::new(),
-        }
-    }
-
-    fn initialize(&mut self, root: &std::path::Path) {
-        let root_uri = url::Url::from_directory_path(root).unwrap();
-        let response = self.request(
-            "initialize",
-            json!({
-                "processId": null,
-                "clientInfo": { "name": "Neovim", "version": "0.11.0" },
-                "capabilities": {
-                    "general": { "positionEncodings": ["utf-8", "utf-16"] },
-                    "workspace": { "configuration": true }
-                },
-                "workspaceFolders": [
-                    { "uri": root_uri.as_str(), "name": "suggestions" }
-                ]
-            }),
-        );
-        assert!(response.error.is_none(), "initialize failed: {:?}", response.error);
-        self.notify("initialized", json!({}));
-    }
-
-    fn request(&mut self, method: &str, params: Value) -> Response {
-        self.next_id += 1;
-        let id = RequestId::from(self.next_id);
-        self.client
-            .sender
-            .send(Message::Request(Request::new(id.clone(), method.to_string(), params)))
-            .expect("send request");
-        loop {
-            match self
-                .client
-                .receiver
-                .recv_timeout(Duration::from_secs(10))
-                .expect("response before timeout")
-            {
-                Message::Response(response) if response.id == id => return response,
-                Message::Notification(notification) => self.notifications.push(notification),
-                Message::Request(_) => {}
-                other => panic!("unexpected message while waiting for response: {other:?}"),
-            }
-        }
-    }
-
-    fn notify(&self, method: &str, params: Value) {
-        self.client
-            .sender
-            .send(Message::Notification(Notification::new(method.to_string(), params)))
-            .expect("send notification");
-    }
-
-    fn diagnostics(&mut self, uri: &str) -> Vec<Value> {
-        loop {
-            if let Some(position) = self.notifications.iter().rposition(|notification| {
-                notification.method == "textDocument/publishDiagnostics"
-                    && notification.params["uri"] == json!(uri)
-            }) {
-                return self.notifications.remove(position).params["diagnostics"]
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default();
-            }
-            match self
-                .client
-                .receiver
-                .recv_timeout(Duration::from_secs(10))
-                .expect("diagnostics before timeout")
-            {
-                Message::Notification(notification) => self.notifications.push(notification),
-                Message::Request(_) => {}
-                other => panic!("unexpected message while waiting for diagnostics: {other:?}"),
-            }
-        }
-    }
-
-    fn completion(&mut self, uri: &str, line: u32, character: u32) -> Vec<Value> {
-        self.request(
+/// Completion labels at `line`/`character`, as the suggestion tests assert them.
+fn completion(fixture: &mut LspFixture<'_>, uri: &str, line: u32, character: u32) -> Vec<Value> {
+    fixture
+        .request(
             "textDocument/completion",
             json!({
                 "textDocument": { "uri": uri },
@@ -127,24 +49,9 @@ impl ClientFixture {
         .as_array()
         .cloned()
         .expect("completion array")
-    }
-
-    fn shutdown(self) {
-        let mut fixture = self;
-        let response = fixture.request("shutdown", Value::Null);
-        assert!(response.error.is_none(), "shutdown failed: {:?}", response.error);
-        fixture.notify("exit", Value::Null);
-        assert_eq!(
-            fixture
-                .server_outcome
-                .recv_timeout(Duration::from_secs(10))
-                .expect("server thread finished"),
-            Ok(())
-        );
-    }
 }
 
-fn open(fixture: &ClientFixture, uri: &str, language_id: &str, text: &str) {
+fn open(fixture: &LspFixture<'_>, uri: &str, language_id: &str, text: &str) {
     fixture.notify(
         "textDocument/didOpen",
         json!({
@@ -177,15 +84,15 @@ fn labels(items: &[Value]) -> Vec<&str> {
 
 #[test]
 fn suggest_phase1_inline_warning_has_exact_argument_range() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("inline.md");
     std::fs::write(&path, INLINE).unwrap();
     let uri = url::Url::from_file_path(path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "markdown", INLINE);
-    let diagnostics = fixture.diagnostics(uri.as_str());
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     let suggestion = diagnostics
         .iter()
         .find(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_suggestion"))
@@ -197,15 +104,15 @@ fn suggest_phase1_inline_warning_has_exact_argument_range() {
 #[test]
 fn suggest_phase1_decoy_field_does_not_steal_diagnostic_span() {
     let text = "---\ndecoy: number(suggest(1, many, 2))\n$schema:\n  count: number(min(0); suggest(1, many, 2))\ncount: 1\n---\n\nbody\n";
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("decoy.md");
     std::fs::write(&path, text).unwrap();
     let uri = url::Url::from_file_path(path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "markdown", text);
-    let diagnostics = fixture.diagnostics(uri.as_str());
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
 
     let suggestions: Vec<&Value> = diagnostics
         .iter()
@@ -226,7 +133,7 @@ fn suggest_phase1_decoy_field_does_not_steal_diagnostic_span() {
 
 #[test]
 fn suggest_phase1_standalone_ranges() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let pure_path = workspace.path().join("pure.yaml");
     let tagged_path = workspace.path().join("tagged.yaml");
     std::fs::write(&pure_path, PURE).unwrap();
@@ -234,19 +141,19 @@ fn suggest_phase1_standalone_ranges() {
     let pure_uri = url::Url::from_file_path(&pure_path).unwrap();
     let tagged_uri = url::Url::from_file_path(&tagged_path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, pure_uri.as_str(), "yaml", PURE);
     open(&fixture, tagged_uri.as_str(), "yaml", TAGGED);
 
-    let pure_diagnostics = fixture.diagnostics(pure_uri.as_str());
+    let pure_diagnostics = fixture.wait_for_diagnostics(pure_uri.as_str());
     let pure_suggestion = pure_diagnostics
         .iter()
         .find(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_suggestion"))
         .expect("pure-envelope warning");
     assert_invalid_suggestion(pure_suggestion, 2, 35, 39);
 
-    let tagged_diagnostics = fixture.diagnostics(tagged_uri.as_str());
+    let tagged_diagnostics = fixture.wait_for_diagnostics(tagged_uri.as_str());
     let tagged_suggestion = tagged_diagnostics
         .iter()
         .find(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_suggestion"))
@@ -256,7 +163,7 @@ fn suggest_phase1_standalone_ranges() {
 }
 
 fn assert_whole_file_envelope_completion(schema_name: &str, schema: &str) {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let schema_path = workspace.path().join(schema_name);
     let consumer_path = workspace.path().join("consumer.md");
     let consumer = format!("---\n$schema: ./{schema_name}\ncolor: gr\ncount: \n---\n");
@@ -264,11 +171,11 @@ fn assert_whole_file_envelope_completion(schema_name: &str, schema: &str) {
     std::fs::write(&consumer_path, &consumer).unwrap();
     let consumer_uri = url::Url::from_file_path(consumer_path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, consumer_uri.as_str(), "markdown", &consumer);
 
-    let color = fixture.completion(consumer_uri.as_str(), 2, 9);
+    let color = completion(&mut fixture, consumer_uri.as_str(), 2, 9);
     assert_eq!(labels(&color), vec!["green"]);
     assert_eq!(color[0]["textEdit"]["newText"], json!("\"green\""));
     assert_eq!(
@@ -279,7 +186,7 @@ fn assert_whole_file_envelope_completion(schema_name: &str, schema: &str) {
         })
     );
 
-    let count = fixture.completion(consumer_uri.as_str(), 3, 7);
+    let count = completion(&mut fixture, consumer_uri.as_str(), 3, 7);
     assert_eq!(labels(&count), vec!["1", "2"]);
     assert_eq!(count[0]["textEdit"]["newText"], json!("1"));
     assert_eq!(count[1]["textEdit"]["newText"], json!("2"));
@@ -307,28 +214,28 @@ fn suggest_phase1_tagged_whole_file_reference_completion() {
 
 #[test]
 fn suggest_phase1_completion_positions() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("completion.md");
     std::fs::write(&path, COMPLETION).unwrap();
     let uri = url::Url::from_file_path(path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "markdown", COMPLETION);
 
-    let scalar = fixture.completion(uri.as_str(), 6, 9);
+    let scalar = completion(&mut fixture, uri.as_str(), 6, 9);
     assert_eq!(labels(&scalar), vec!["green"]);
     assert_eq!(scalar[0]["textEdit"]["newText"], json!("\"green\""));
 
-    let nested = fixture.completion(uri.as_str(), 8, 10);
+    let nested = completion(&mut fixture, uri.as_str(), 8, 10);
     assert_eq!(labels(&nested), vec!["slow"]);
     assert_eq!(nested[0]["textEdit"]["newText"], json!("\"slow\""));
 
-    let block_array = fixture.completion(uri.as_str(), 10, 6);
+    let block_array = completion(&mut fixture, uri.as_str(), 10, 6);
     assert_eq!(labels(&block_array), vec!["alpha"]);
     assert_eq!(block_array[0]["textEdit"]["newText"], json!("\"alpha\""));
 
-    let flow_array = fixture.completion(uri.as_str(), 11, 12);
+    let flow_array = completion(&mut fixture, uri.as_str(), 11, 12);
     assert_eq!(labels(&flow_array), vec!["0.25", "0.5", "1"]);
     assert_eq!(flow_array[0]["textEdit"]["newText"], json!("0.25"));
     fixture.shutdown();
@@ -336,7 +243,7 @@ fn suggest_phase1_completion_positions() {
 
 #[test]
 fn suggest_phase1_union_selection_and_raw_schema_exclusion() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let union_path = workspace.path().join("unions.md");
     let raw_path = workspace.path().join("raw-schema.json");
     let consumer_path = workspace.path().join("raw-consumer.md");
@@ -346,21 +253,21 @@ fn suggest_phase1_union_selection_and_raw_schema_exclusion() {
     let union_uri = url::Url::from_file_path(union_path).unwrap();
     let consumer_uri = url::Url::from_file_path(consumer_path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, union_uri.as_str(), "markdown", UNIONS);
     open(&fixture, consumer_uri.as_str(), "markdown", RAW_CONSUMER);
 
-    let property_union = fixture.completion(union_uri.as_str(), 7, 10);
+    let property_union = completion(&mut fixture, union_uri.as_str(), 7, 10);
     assert_eq!(labels(&property_union), vec!["second"]);
     // `root` is declared in both discriminant-less root-union arms, so the
     // effective shape merges the arms per-key: the shared property becomes the
     // union of both arms' atoms and its suggestions merge in arm-declaration
     // order.
-    let root_union = fixture.completion(union_uri.as_str(), 8, 8);
+    let root_union = completion(&mut fixture, union_uri.as_str(), 8, 8);
     assert_eq!(labels(&root_union), vec!["arm-one", "arm-two"]);
     assert!(
-        fixture.completion(consumer_uri.as_str(), 2, 9).is_empty(),
+        completion(&mut fixture, consumer_uri.as_str(), 2, 9).is_empty(),
         "raw JSON Schema annotations must not activate suggestion completion"
     );
     fixture.shutdown();
@@ -369,16 +276,16 @@ fn suggest_phase1_union_selection_and_raw_schema_exclusion() {
 #[test]
 fn suggest_phase1_root_union_filters_invalid_from_later_arm() {
     let text = "---\n$schema:\n  - root: string\n  - root: number(suggest(1, many, 2))\nroot: \n---\n";
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("root-union.md");
     std::fs::write(&path, text).unwrap();
     let uri = url::Url::from_file_path(path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "markdown", text);
 
-    let items = fixture.completion(uri.as_str(), 4, 6);
+    let items = completion(&mut fixture, uri.as_str(), 4, 6);
     let labels: Vec<&str> = items.iter().filter_map(|item| item["label"].as_str()).collect();
     assert_eq!(labels, vec!["1", "2"]);
     fixture.shutdown();
@@ -391,16 +298,16 @@ fn suggest_phase1_root_union_filters_invalid_from_later_arm() {
 #[test]
 fn suggest_phase1_numeric_prefix_uses_decoded_text() {
     let text = "---\n$schema:\n  val: number(suggest(003.5))\nval: 00\n---\n";
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("numeric-prefix.md");
     std::fs::write(&path, text).unwrap();
     let uri = url::Url::from_file_path(path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "markdown", text);
 
-    let items = fixture.completion(uri.as_str(), 3, 7);
+    let items = completion(&mut fixture, uri.as_str(), 3, 7);
     assert_eq!(labels(&items), vec!["3.5"]);
     assert_eq!(items[0]["textEdit"]["newText"], json!("3.5"));
     fixture.shutdown();
@@ -411,16 +318,16 @@ fn suggest_phase1_numeric_prefix_uses_decoded_text() {
 #[test]
 fn suggest_phase1_invalid_sibling_omitted_from_completion() {
     let text = "---\n$schema:\n  count: number(min(0); suggest(1, many, 2))\ncount: \n---\n\nbody\n";
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("invalid-sibling.md");
     std::fs::write(&path, text).unwrap();
     let uri = url::Url::from_file_path(path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "markdown", text);
 
-    let items = fixture.completion(uri.as_str(), 3, 7);
+    let items = completion(&mut fixture, uri.as_str(), 3, 7);
     assert_eq!(labels(&items), vec!["1", "2"]);
     fixture.shutdown();
 }
@@ -430,16 +337,16 @@ fn suggest_phase1_invalid_sibling_omitted_from_completion() {
 #[test]
 fn suggest_phase1_bare_block_array_dash() {
     let text = "---\ntitle: café\n$schema:\n  tags: string(suggest(alpha, beta))[]\ntags:\n  -\n---\n";
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("bare-dash.md");
     std::fs::write(&path, text).unwrap();
     let uri = url::Url::from_file_path(path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "markdown", text);
 
-    let items = fixture.completion(uri.as_str(), 5, 3);
+    let items = completion(&mut fixture, uri.as_str(), 5, 3);
     assert_eq!(labels(&items), vec!["alpha", "beta"]);
     assert_eq!(items[0]["textEdit"]["newText"], json!("\"alpha\""));
     assert_eq!(
@@ -457,16 +364,16 @@ fn suggest_phase1_bare_block_array_dash() {
 #[test]
 fn suggest_phase1_block_array_dash_space() {
     let text = "---\ntitle: café\n$schema:\n  tags: string(suggest(alpha, beta))[]\ntags:\n  - \n---\n";
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("dash-space.md");
     std::fs::write(&path, text).unwrap();
     let uri = url::Url::from_file_path(path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "markdown", text);
 
-    let items = fixture.completion(uri.as_str(), 5, 4);
+    let items = completion(&mut fixture, uri.as_str(), 5, 4);
     assert_eq!(labels(&items), vec!["alpha", "beta"]);
     assert_eq!(items[0]["textEdit"]["newText"], json!("\"alpha\""));
     assert_eq!(
@@ -484,16 +391,16 @@ fn suggest_phase1_block_array_dash_space() {
 #[test]
 fn suggest_phase1_block_array_partial_value() {
     let text = "---\ntitle: café\n$schema:\n  tags: string(suggest(alpha, beta))[]\ntags:\n  - al\n---\n";
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("dash-partial.md");
     std::fs::write(&path, text).unwrap();
     let uri = url::Url::from_file_path(path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "markdown", text);
 
-    let items = fixture.completion(uri.as_str(), 5, 6);
+    let items = completion(&mut fixture, uri.as_str(), 5, 6);
     assert_eq!(labels(&items), vec!["alpha"]);
     assert_eq!(items[0]["textEdit"]["newText"], json!("\"alpha\""));
     assert_eq!(
@@ -511,16 +418,16 @@ fn suggest_phase1_block_array_partial_value() {
 #[test]
 fn suggest_phase1_nested_property_from_later_root_arm() {
     let text = "---\n$schema:\n  - settings: string\n  - settings: \"{ mode: string(suggest(fast, slow)) }\"\nsettings:\n  mode: \n---\n\nbody\n";
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("nested-later-arm.md");
     std::fs::write(&path, text).unwrap();
     let uri = url::Url::from_file_path(path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "markdown", text);
 
-    let items = fixture.completion(uri.as_str(), 5, 8);
+    let items = completion(&mut fixture, uri.as_str(), 5, 8);
     assert_eq!(labels(&items), vec!["fast", "slow"]);
     fixture.shutdown();
 }
@@ -531,15 +438,15 @@ fn suggest_phase1_nested_property_from_later_root_arm() {
 /// removes the warning.
 #[test]
 fn suggest_phase5_inline_warning_removed_after_correction() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("inline.md");
     let uri = url::Url::from_file_path(&path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "markdown", INLINE);
 
-    let diagnostics = fixture.diagnostics(uri.as_str());
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     let suggestion = diagnostics
         .iter()
         .find(|d| d["code"] == json!("dm.schema.invalid_suggestion"))
@@ -556,7 +463,7 @@ fn suggest_phase5_inline_warning_removed_after_correction() {
         }),
     );
 
-    let diagnostics = fixture.diagnostics(uri.as_str());
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     let has_suggestion = diagnostics
         .iter()
         .any(|d| d["code"] == json!("dm.schema.invalid_suggestion"));
@@ -569,7 +476,7 @@ fn suggest_phase5_inline_warning_removed_after_correction() {
 /// consuming Markdown document referencing it gets no suggestion diagnostics.
 #[test]
 fn suggest_phase5_standalone_warning_not_duplicated_on_consumer() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let schema_path = workspace.path().join("pure.yaml");
     let consumer_path = workspace.path().join("consumer.md");
     std::fs::write(&schema_path, PURE).unwrap();
@@ -578,13 +485,13 @@ fn suggest_phase5_standalone_warning_not_duplicated_on_consumer() {
     let schema_uri = url::Url::from_file_path(&schema_path).unwrap();
     let consumer_uri = url::Url::from_file_path(&consumer_path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, consumer_uri.as_str(), "markdown", consumer_text);
     open(&fixture, schema_uri.as_str(), "yaml", PURE);
 
     // The schema document has the warning.
-    let schema_diagnostics = fixture.diagnostics(schema_uri.as_str());
+    let schema_diagnostics = fixture.wait_for_diagnostics(schema_uri.as_str());
     let schema_suggestion = schema_diagnostics
         .iter()
         .find(|d| d["code"] == json!("dm.schema.invalid_suggestion"))
@@ -592,7 +499,7 @@ fn suggest_phase5_standalone_warning_not_duplicated_on_consumer() {
     assert_invalid_suggestion(schema_suggestion, 2, 35, 39);
 
     // The consuming Markdown document does NOT duplicate it.
-    let consumer_diagnostics = fixture.diagnostics(consumer_uri.as_str());
+    let consumer_diagnostics = fixture.wait_for_diagnostics(consumer_uri.as_str());
     let consumer_has_suggestion = consumer_diagnostics
         .iter()
         .any(|d| d["code"] == json!("dm.schema.invalid_suggestion"));
@@ -607,16 +514,16 @@ fn suggest_phase5_standalone_warning_not_duplicated_on_consumer() {
 /// A malformed tagged envelope publishes a `dm.schema.document_malformed` error.
 #[test]
 fn suggest_phase5_malformed_tagged_envelope_error() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("bad.yaml");
     std::fs::write(&path, "kind: schema\n").unwrap();
     let uri = url::Url::from_file_path(&path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "yaml", "kind: schema\n");
 
-    let diagnostics = fixture.diagnostics(uri.as_str());
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     let malformed = diagnostics
         .iter()
         .find(|d| d["code"] == json!("dm.schema.document_malformed"))
@@ -630,16 +537,16 @@ fn suggest_phase5_malformed_tagged_envelope_error() {
 /// Closing a standalone schema document clears its diagnostics.
 #[test]
 fn suggest_phase5_close_clears_diagnostics() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let path = workspace.path().join("pure.yaml");
     std::fs::write(&path, PURE).unwrap();
     let uri = url::Url::from_file_path(&path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "yaml", PURE);
 
-    let diagnostics = fixture.diagnostics(uri.as_str());
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
         diagnostics
             .iter()
@@ -652,7 +559,7 @@ fn suggest_phase5_close_clears_diagnostics() {
         json!({ "textDocument": { "uri": uri.as_str() } }),
     );
 
-    let diagnostics = fixture.diagnostics(uri.as_str());
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
         diagnostics.is_empty(),
         "closing must clear diagnostics: {diagnostics:?}"
@@ -665,18 +572,18 @@ fn suggest_phase5_close_clears_diagnostics() {
 /// completion, hover, and validation continue operating.
 #[test]
 fn suggest_phase5_schema_remains_active_alongside_warnings() {
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = LspWorkspace::new();
     let text = "---\n$schema:\n  color: string(suggest(red, green, blue))\n  count: number(min(0); suggest(1, many, 2))\ncolor: red\ncount: 1\n---\n\nbody\n";
     let path = workspace.path().join("doc.md");
     std::fs::write(&path, text).unwrap();
     let uri = url::Url::from_file_path(&path).unwrap();
 
-    let mut fixture = ClientFixture::start();
-    fixture.initialize(workspace.path());
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "markdown", text);
 
     // The invalid suggestion warning is present.
-    let diagnostics = fixture.diagnostics(uri.as_str());
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
         diagnostics
             .iter()
@@ -694,7 +601,7 @@ fn suggest_phase5_schema_remains_active_alongside_warnings() {
             "contentChanges": [{ "text": changed }]
         }),
     );
-    let diagnostics = fixture.diagnostics(uri.as_str());
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
         diagnostics
             .iter()

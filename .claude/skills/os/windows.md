@@ -13,6 +13,17 @@ helper that resolves it is named so it is not re-derived.
    spellings outright. Route through `biscuit_file::canonicalize_simplified`
    (dunce-backed). Raw `canonicalize` is only safe inside a closed key space
    that never leaves the process.
+
+   Two concrete instances live in `cargo nextest`'s own argument grammar
+   (found 2026-09-14, `scripts/ci-build-archive.rs`): `--tool-config-file` is
+   split on the colon after the tool name, and `--workspace-remap` is compared
+   against ordinary paths. A verbatim value breaks both. `repo-deps` is the one
+   place that may not reach for `biscuit_file` — the planner calls `ci-build`
+   on every scope calculation, so that binary is deliberately kept to
+   `biscuit-hash` plus `biscuit-terminal` — so it carries a six-line
+   `canonical_path` that strips the prefix for a drive-qualified path under 260
+   characters and leaves a long or UNC one alone. Anywhere else, use
+   `biscuit_file`.
 2. **`dirs::home_dir()` on Windows uses the known-folder API and ignores
    `USERPROFILE` and `HOME`.** Hermetic test homes silently do not apply, so
    a Windows test reads the machine's real `~/.claudine`. Use
@@ -22,6 +33,10 @@ helper that resolves it is named so it is not re-derived.
    Bash), so a fixture that relocates the home for a Python tool such as
    `scripts/ci/constraints.py` must set both `HOME` and `USERPROFILE`; a
    shell `$HOME` literal is a Unix-only spelling.
+   Claudine's provider overlay still resolves through the known folder, so a
+   Windows launch test names its roots instead: the provider selector (e.g.
+   `CODEX_HOME`) for the source and `CLAUDINE_OVERLAY_DIR` for overlay
+   storage (`level2_provider_overlay_capture.rs`, 2026-09-16).
 3. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); no
    developer machine does.** Short-versus-long spelling bugs reproduce only
    on CI. `current_dir()` reports the spelling it was given; `canonicalize`
@@ -37,12 +52,44 @@ helper that resolves it is named so it is not re-derived.
    preserves them; when a Windows-only failure shows a path missing one
    backslash, suspect Markdown escape handling, not path resolution.
 
+6. **`$PWD` in a `shell: bash` step is an MSYS path; `$RUNNER_TEMP` in the
+   same shell is a Windows one.** Git Bash answers `/d/a/repo/repo` for the
+   checkout and `D:\a\_temp` for the temp directory, and a CI step routinely
+   hands both to native programs. `cargo-nextest`'s `--workspace-remap`,
+   `INSTA_WORKSPACE_ROOT`, and `BISCUIT_JUNIT_*` cannot open the first; MSYS
+   `test`/`mkdir` cope with the second only by conversion. `just _native_path`
+   (`just/devops.just`) answers the one spelling both layers accept —
+   `cygpath -m`, drive-qualified with forward slashes, no verbatim prefix.
+   Measured 2026-09-14 on `build-win-native`: `/w/…/rusty-biscuit` →
+   `W:/…/rusty-biscuit`, `D:\a\_temp/build` → `D:/a/_temp/build`. In CI,
+   `_ci_build_verify` computes it once and publishes it as its `workspace`
+   step output.
+7. **Backslashes do not survive a `just` recipe's `*args` list.** A recipe
+   pastes `{{ args }}` raw into `forwarded=({{ args }})`, so bash word-splits
+   it *and* processes backslash escapes:
+   `--archive-file=C:\Users\ken\…\x.tar.zst` reaches the command as
+   `C:Usersken…x.tar.zst`, and the tool reports a missing file for a path
+   nobody typed. Pass what `just _native_path` answers. A recipe parameter
+   interpolated inside **single quotes** (`'{{ path }}'`) is safe, which is why
+   `_native_path` itself can be handed a native spelling; an array literal is
+   not. `_archive_file_check` refuses an unreadable `--archive-file` and names
+   this hazard rather than letting the mangled value reach nextest.
+8. **A `file://` URI must carry neither the verbatim prefix nor a `\`.**
+   Percent-encoding a canonicalized Windows path yields
+   `file://%5C%5C%3F%5CC:/…`, which no terminal opens, and a drive-absolute
+   path still needs the extra leading `/` that makes `file:///C:/…`. Normalize
+   separators to `/`, strip `\\?\` (mapping `\\?\UNC\server\share` to the URI
+   authority `server/share`), then prefix. Test the spellings as string
+   literals so the macOS and Linux cells cover them too — `fs::canonicalize`
+   only produces the verbatim form on Windows, so a fixture built from it is
+   dead code everywhere else. Found 2026-09-14 in `scripts/drift.rs::file_uri`.
+
 Contract to test against: `ctx.repo_root`, `package_root`,
 `package_area_root`, and `area_root` are portable `/`-separated strings
 without verbatim prefixes on every OS (`biscuit_file::to_portable_string`).
 Compare against that, never against `to_string_lossy()`.
 
-6. **A user-typed path fragment never matches walker output by raw text.**
+9. **A user-typed path fragment never matches walker output by raw text.**
    `ignore::Walk` yields native `\` paths; the fragment is whatever was typed,
    `/` on every platform. Claudine's partial-file and operation-file
    autocomplete compared them raw and found zero candidates on Windows for
@@ -95,10 +142,30 @@ Compare against that, never against `to_string_lossy()`.
   `HANDLE_FLAG_INHERIT` on the current process's stdio before setting the
   detached creation flags (needs `windows-sys` features `Win32_Foundation`
   and `Win32_System_Console`). Unix never sees this; fds are close-on-exec.
+- **`python3` is an App Execution Alias, not an interpreter.** Windows ships a
+  stub at `python3.exe` that *spawns successfully* and then exits non-zero with
+  "Python was not found; run without arguments to install from the Microsoft
+  Store". `Command::new("python3").output()` returning `Ok` is therefore not
+  evidence an interpreter exists, and every "skip where python3 is missing"
+  guard written against `Err` fails on Windows instead of skipping. Probe
+  `--version` and require `status.success()`, and try `python` as well — the
+  hosted `windows-latest` image installs the real interpreter under that name.
+  Found 2026-09-14 by the first native-Windows run of `repo-deps`
+  (`scripts/ci-rollup-tests.rs::python_interpreter`).
 - **A `.cmd`/`.bat` cannot receive an argument containing a newline** ("batch
   file arguments are invalid"). A fake provider that receives a multi-line
   prompt must be a compiled `.exe`; see the rustc-built fixture in claudine's
   `inline_compose_hash.rs`.
+- **Overriding `USERPROFILE` alone breaks the per-user known folders.**
+  `dirs::data_local_dir()` / `data_dir()` go through `SHGetKnownFolderPath`,
+  which resolves `LocalAppData`/`RoamingAppData` *beneath `USERPROFILE`* and
+  verifies the directory exists; `LOCALAPPDATA`/`APPDATA` are not consulted.
+  A fixture that points `USERPROFILE` at a bare temp home therefore gets
+  `None` from `dirs` (zed-dmls: "unable to determine the required per-user
+  directory") while the same binary works under the host profile. Fix: create
+  `home\AppData\Local` and `home\AppData\Roaming` under the fixture home.
+  Measured on build-win-native, 2026-09-10; `dirs::home_dir()` itself
+  (`FOLDERID_Profile`) is fine with a bare directory.
 - **Open handles block delete and rename.** A `File`, temp dir, mmap, or
   child that still holds a handle makes cleanup assertions fail on Windows
   only. Drop before asserting. Even after owned handles are closed, Playa's
@@ -107,12 +174,73 @@ Compare against that, never against `to_string_lossy()`.
   reader or host scanner during `MoveFileExW(REPLACE_EXISTING)`. Retry those
   two errors for a short bounded interval while preserving atomic replacement;
   never delete the destination first.
+- **`std::fs::rename` and `tempfile::persist` differ against open readers.**
+  Rust std opens files with `FILE_SHARE_DELETE`, and `std::fs::rename` over a
+  destination held by such a handle succeeds (the holder keeps the old bytes).
+  `tempfile::NamedTempFile::persist` over the same holder fails with error 5.
+  A holder opened *without* delete sharing (CRT `_wopen`, editors, scanners)
+  blocks both with error 5; error 32 was not observed. Renaming a directory
+  that contains an open file also fails with error 5. Prefer `std::fs::rename`
+  plus the bounded retry above for replace-in-place. Measured on
+  build-win-native (NTFS), 2026-09-17; see
+  `messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/findings.md`.
+- **A PowerShell function's output stream is not its return value.** Every
+  native command inside a function writes its stdout into that function's
+  output, so `$code = Invoke-Thing` binds an *array* whose first element is
+  some program's chatter, and `exit $code` reports that. Symptom: a remote run
+  whose tier exited 1 is summarized as a pass (`cross-check --os windows`,
+  build-win-native, 2026-09-14). Assign a `$script:`-scoped variable at every
+  failure point and call the function as `Invoke-Thing | Out-Host`, which keeps
+  the log on the console without binding it. `$LASTEXITCODE` after each native
+  command is still the right check — the bug is in how the result leaves the
+  function, not in how it is read.
 - **Ctrl+C and the exit-130 contract are Unix-only in Claudine today.** The
   Windows termination path is a bare `child.wait()` with no console control
   handler, and the child sits in `CREATE_NEW_PROCESS_GROUP`. Do not accept a
   cross-platform Ctrl+C acceptance criterion as met until a
   `SetConsoleCtrlHandler` path exists; see the claudine skill's
   `signal-handling.md`, "Windows parity".
+
+## Attaching a console inside a nextest process
+
+`biscuit-tui/cli/tests/windows_captured_stdout.rs` is ordinary `windows-latest`
+**L1** evidence inside `biscuit-tui-cli`'s own cell — not an `#[ignore]`d test
+behind a hand-invoked recipe or workflow. Everything below was measured on
+`build-win-native` at the CI thread count (`--test-threads 4`), 2026-09-14.
+
+- **Process-wide handle rewiring is safe only because nextest gives each test
+  its own process.** `AllocConsole` + `SetStdHandle` mutate process state; under
+  `cargo test`'s shared harness they would corrupt every sibling test in the
+  binary. Say so in the test's `//!` docs — it is the reason the tier is L1
+  rather than a serialized L3.
+- **`AllocConsole` returning `ERROR_ACCESS_DENIED` (0x80070005) is the normal
+  path, not a failure.** A console is usually already present, and the API
+  reports that as access denied. Treat "already present or failed" as one state
+  and assert the *precondition you actually need* — `stderr.is_terminal()` and
+  `CONOUT$` openable — instead of the call's return value.
+- **Redirecting a std handle to `CONOUT$` makes everything printed afterwards
+  invisible to nextest.** The line goes to the attached console, not to the
+  harness pipe. Two consequences, both found the hard way: a success diagnostic
+  printed after the redirect never reaches the log (`grep -c` returns 0), and —
+  worse — an assertion that panics *after* the redirect leaves nextest reporting
+  `FAIL` with an empty message. Redirect only the handle the contract requires
+  (stderr here; the stdout redirect was deleted as unnecessary), capture the
+  original handle before redirecting, and restore it the moment the child exits
+  so later failures are reported through the pipe.
+- **The console input buffer queues injected records**, so a written input
+  record survives the child not having started its event loop yet. The 750 ms /
+  250 ms fixed sleeps this test shipped with were covering a measured
+  requirement of **0 ms**: the test's real work is ~45 ms and the sleep *was*
+  its 0.78 s runtime. A bounded readiness loop — 2 s deadline, 25 ms poll,
+  re-inject at 500 ms — replaced them; no passing run has needed the second
+  injection. Keep the loop anyway: it converts a timing assumption into an
+  assertion that fails loudly at its own deadline rather than at nextest's 90 s
+  `ci` termination ceiling, and it kills and reaps the child so the cell reports
+  `FAIL` rather than `LEAK`.
+- Six consecutive clean runs, zero flakes (392 run / 392 passed / 7 skipped).
+  Runs that died in `git fetch` with `ssh: connect to host github.com port 22`
+  are a build-host network fault, not a test result — exclude them rather than
+  counting them as failures.
 
 ## The `windows-latest` leg
 
@@ -138,6 +266,12 @@ because overlapping host-network detections fail-fast the test process
   SDK, and `aws-lc-sys` is non-optional through reqwest → rustls for most of
   the workspace. Re-add the target with `rustup target add
   x86_64-pc-windows-gnu` after a toolchain change; it does not always survive.
+  The same target also dies in `blake3` with `cc-rs: failed to find tool
+  "ml64.exe"`: its SIMD assembly needs the MSVC assembler, which a macOS host
+  has no more of than it has `windows.h`. Anything that enables
+  `biscuit-hash`'s `blake3` feature inherits that — `repo-deps` does, for
+  `ci-build`'s archive checksums. Check such a `#[cfg(windows)]` block with the
+  throwaway-probe technique below.
 - Crates that reach `duckdb-sys` (rendezvous-daemon and anything with it as a
   dev-dependency) overflow mingw's COFF section limit. The claudine area's
   `just check-windows` recipe sets `-Wa,-mbig-obj` and a separate target dir;

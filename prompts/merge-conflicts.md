@@ -15,11 +15,16 @@ initialize:
 
 You are in the **{{ctx.branch}}** of the **{{ctx.repo}}** repo. A merge has recently been performed and there are the following merge conflicts:
 
-{{ conflicts }}
+{{ as_unordered_list(conflicts) }}
+
+Recent git commits include (last 10):
+
+{{ ctx.recent_commits }}
 
 ## File Type Tips
 
 - `.vscode/settings.json`: often just a case of both branches having added new words to the "cSpell.words" dictionary. In these cases you should include a unique list of all words added across the two branches
+- `codebook.toml`: same principle -- aka, additive -- but for the codebook spell checker used in Zed editor
 - `.zed/settings.json`: 
     - treat conflicts as "additive" where possible (e.g., if both branches mutated different _keys_ in the JSON then accept both)
     - if the key with the conflict is an array or object the we should try to be "additive" at this level unless there is a good reason not to be

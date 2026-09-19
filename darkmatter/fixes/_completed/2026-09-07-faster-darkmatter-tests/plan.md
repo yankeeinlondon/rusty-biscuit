@@ -1,0 +1,1697 @@
+---
+total_phases: 11
+created: 2026-09-07
+phase: 11
+agent: codex/gpt-5
+yolo: "true"
+fix: 2026-09-07-faster-darkmatter-tests
+spec: darkmatter/fixes/2026-09-07-faster-darkmatter-tests/spec.md
+source_files_during_phase_1:
+    - tools/test-audit/package.json
+    - tools/test-audit/tsconfig.json
+    - tools/test-audit/vitest.config.ts
+    - tools/test-audit/justfile
+    - tools/test-audit/.gitignore
+    - tools/test-audit/src/cli.ts
+    - tools/test-audit/src/config.ts
+    - tools/test-audit/src/config-command.ts
+    - tools/test-audit/src/command.ts
+    - tools/test-audit/src/args.ts
+    - tools/test-audit/src/errors.ts
+    - tools/test-audit/src/version.ts
+    - tools/test-audit/src/nextest-log.ts
+    - tools/test-audit/src/capture/command.ts
+    - tools/test-audit/src/fetch/command.ts
+    - tools/test-audit/src/junit/parse.ts
+    - tools/test-audit/src/junit/manifest.ts
+    - tools/test-audit/src/junit/collect.ts
+    - tools/test-audit/src/junit/compare.ts
+    - tools/test-audit/src/junit/render.ts
+    - tools/test-audit/src/junit/command.ts
+    - tools/test-audit/src/reconcile/listings.ts
+    - tools/test-audit/src/reconcile/families.ts
+    - tools/test-audit/src/reconcile/inventory.ts
+    - tools/test-audit/src/reconcile/sources.ts
+    - tools/test-audit/src/reconcile/gate.ts
+    - tools/test-audit/src/reconcile/command.ts
+    - tools/test-audit/src/reconcile/sources-command.ts
+    - tools/test-audit/src/attribute/index.ts
+    - tools/test-audit/src/attribute/command.ts
+    - tools/test-audit/src/measure/index.ts
+    - tools/test-audit/src/measure/runner.ts
+    - tools/test-audit/src/measure/command.ts
+    - tools/test-audit/src/counters/index.ts
+    - tools/test-audit/src/counters/command.ts
+    - tools/test-audit/tests/config.test.ts
+    - tools/test-audit/tests/capture.test.ts
+    - tools/test-audit/tests/junit.test.ts
+    - tools/test-audit/tests/junit-claudine-compat.test.ts
+    - tools/test-audit/tests/reconcile.test.ts
+    - tools/test-audit/tests/sources.test.ts
+    - tools/test-audit/tests/reconcile-claudine-compat.test.ts
+    - tools/test-audit/tests/attribute.test.ts
+    - tools/test-audit/tests/attribute-claudine-compat.test.ts
+    - tools/test-audit/tests/measure.test.ts
+    - tools/test-audit/tests/measure-claudine-compat.test.ts
+    - tools/test-audit/tests/nextest-log.test.ts
+    - tools/test-audit/tests/counters.test.ts
+    - tools/test-audit/fixtures/junit/nextest-l1-excerpt.xml
+    - pnpm-workspace.yaml
+    - pnpm-lock.yaml
+    - scripts/ci/affected_scope.py
+    - scripts/ci/test_affected_scope.py
+    - .github/workflows/ci.yml
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/audit.config.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/capture.sh
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/baseline/local/run.sh
+    - sniff/fixes/2026-09-07-faster-sniff-tests/audit.config.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/audit.config.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/junit-metrics.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/inventory-reconciler.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/attribution.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement-runner.ts
+docs_updated_during_phase_1:
+    - docs/dependencies.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/log.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/plan.md
+docs_created_during_phase_1:
+    - tools/test-audit/README.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/log.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/baseline/34008778001/junit-gate.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/sources.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/baseline/34008778001/junit-gate.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/sources.md
+skills_files_updated_during_phase_1:
+    - .claude/skills/rust-testing/SKILL.md
+    - .claude/skills/rust-testing/test-suite-audits.md
+    - .claude/skills/rust-testing/test-audit-tooling.md
+    - .claude/skills/sniff/SKILL.md
+source_files_during_phase_2: []
+docs_updated_during_phase_2:
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/plan.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/log.md
+docs_created_during_phase_2:
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/inventory.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/families.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/sources.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/sources.md
+skills_files_updated_during_phase_2:
+    - .claude/skills/rust-testing/test-audit-tooling.md
+packages_during_phase_2:
+    - darkmatter
+    - darkmatter-cli
+    - dmls
+    - zed-dmls-cli
+source_files_during_phase_3:
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe.sh
+docs_updated_during_phase_3:
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/inventory.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/log.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/plan.md
+docs_created_during_phase_3:
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/local-l1-by-binary.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/local-l2-by-binary.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-ubuntu-latest-L1.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-ubuntu-latest-L2.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-ubuntu-latest-browser.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-macos-latest-L1.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-macos-latest-L2.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-windows-latest-L1.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-wsl2-ubuntu-L1.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-outside.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-outside.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-pkg-cwd.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-pkg-cwd.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-burst-outside.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-burst-outside.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-burst-pkg-cwd.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-burst-pkg-cwd.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-identity.txt
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/budgets-pending.json
+skills_files_updated_during_phase_3:
+    - .claude/skills/rust-testing/test-audit-tooling.md
+packages_during_phase_3:
+    - darkmatter
+    - darkmatter-cli
+    - dmls
+    - zed-dmls-cli
+source_files_during_phase_4:
+    - darkmatter/cli/tests/common/fixture.rs
+    - darkmatter/cli/tests/common/mod.rs
+    - darkmatter/cli/tests/md_process_fixture.rs
+    - darkmatter/justfile
+docs_updated_during_phase_4:
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/plan.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/log.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/inventory.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+packages_during_phase_4:
+    - darkmatter-cli
+source_files_during_phase_5:
+    - darkmatter/cli/tests/spawn_site_guard.rs
+    - darkmatter/cli/tests/common/source_scan.rs
+    - darkmatter/justfile
+docs_updated_during_phase_5:
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/plan.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/log.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/inventory.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+packages_during_phase_5:
+    - darkmatter-cli
+source_files_during_phase_6:
+    - darkmatter/cli/tests/clean.rs
+    - darkmatter/cli/tests/clean_frontmatter.rs
+    - darkmatter/cli/tests/clean_json.rs
+    - darkmatter/cli/tests/clean_schema.rs
+    - darkmatter/cli/tests/code_block.rs
+    - darkmatter/cli/tests/common/fixture.rs
+    - darkmatter/cli/tests/common/mod.rs
+    - darkmatter/cli/tests/compose_base_schema.rs
+    - darkmatter/cli/tests/compose_basic.rs
+    - darkmatter/cli/tests/compose_interpolation.rs
+    - darkmatter/cli/tests/compose_layout.rs
+    - darkmatter/cli/tests/compose_page_blocks.rs
+    - darkmatter/cli/tests/compose_perf.rs
+    - darkmatter/cli/tests/compose_refs_and_missing.rs
+    - darkmatter/cli/tests/compose_remote_caching.rs
+    - darkmatter/cli/tests/compose_schema.rs
+    - darkmatter/cli/tests/compose_schema_file_rewrite.rs
+    - darkmatter/cli/tests/compose_shell.rs
+    - darkmatter/cli/tests/compose_state_set.rs
+    - darkmatter/cli/tests/compose_terminal_detection.rs
+    - darkmatter/cli/tests/compose_transclusion.rs
+    - darkmatter/cli/tests/delta.rs
+    - darkmatter/cli/tests/get_set_rm.rs
+    - darkmatter/cli/tests/graph.rs
+    - darkmatter/cli/tests/hash.rs
+    - darkmatter/cli/tests/hash_directory.rs
+    - darkmatter/cli/tests/hash_kind_save_diff.rs
+    - darkmatter/cli/tests/help.rs
+    - darkmatter/cli/tests/layout_fill.rs
+    - darkmatter/cli/tests/layout_flags.rs
+    - darkmatter/cli/tests/layout_style_frontmatter.rs
+    - darkmatter/cli/tests/render_basic.rs
+    - darkmatter/cli/tests/rm.rs
+    - darkmatter/cli/tests/schema_about.rs
+    - darkmatter/cli/tests/schema_detect.rs
+    - darkmatter/cli/tests/schema_triggers.rs
+    - darkmatter/cli/tests/schema_validate.rs
+    - darkmatter/cli/tests/schema_validate_baseline.rs
+    - darkmatter/cli/tests/spawn_site_guard.rs
+    - darkmatter/cli/tests/toc.rs
+    - darkmatter/cli/tests/validate_refs.rs
+    - darkmatter/dmls/zed-dmls-cli/tests/cli.rs
+docs_updated_during_phase_6:
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/inventory.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/log.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+packages_during_phase_6:
+    - darkmatter-cli
+    - zed-dmls-cli
+source_files_during_phase_7:
+    - darkmatter/justfile
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/layout/page/tests.rs
+    - darkmatter/lib/src/markdown/code_block.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/alias.rs
+    - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+    - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+    - darkmatter/lib/tests/browser_render.rs
+    - darkmatter/lib/tests/disclosure_render_targets.rs
+    - darkmatter/lib/tests/expression_regression.rs
+    - darkmatter/lib/tests/image_pixel_classification.rs
+    - darkmatter/lib/tests/image_test_support/mod.rs
+    - darkmatter/lib/tests/level2_render_tree_terminal/images.rs
+    - darkmatter/lib/tests/level2_render_tree_terminal/support/mod.rs
+    - darkmatter/lib/tests/level3_image_painting.rs
+    - darkmatter/lib/tests/meta_schema_phase4.rs
+    - darkmatter/lib/tests/schemas_literal_expression.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/tests/no_side_effects.rs
+docs_updated_during_phase_7:
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/audit.config.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/families.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/inventory.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/log.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/plan.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+packages_during_phase_7:
+    - darkmatter
+    - dmls
+source_files_during_phase_8:
+    - darkmatter/cli/tests/common/mod.rs
+    - darkmatter/cli/tests/common/level2.rs
+    - darkmatter/cli/tests/compose_remote_caching.rs
+    - darkmatter/cli/tests/level2_errors.rs
+    - darkmatter/cli/tests/level2_schema_about.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/tests/fixtures/editor_neovim/init.lua
+    - darkmatter/dmls/tests/level2_editor_neovim.rs
+    - darkmatter/dmls/tests/lsp_session.rs
+    - darkmatter/dmls/tests/stdio_subprocess.rs
+    - darkmatter/lib/tests/level3_image_painting.rs
+    - darkmatter/lib/tests/level3_popover.rs
+docs_updated_during_phase_8:
+    - darkmatter/docs/dependencies.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/inventory.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/log.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/plan.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
+packages_during_phase_8:
+    - darkmatter
+    - darkmatter-cli
+    - dmls
+source_files_during_phase_9:
+    - darkmatter/cli/tests/common/mod.rs
+docs_updated_during_phase_9:
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/log.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/plan.md
+docs_created_during_phase_9:
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/cohorts.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/plan.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/provenance.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/report.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/runs.jsonl
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/targets.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/work-evidence.md
+skills_files_updated_during_phase_9: []
+packages_during_phase_9:
+    - darkmatter
+    - darkmatter-cli
+    - dmls
+    - zed-dmls-cli
+source_files_during_phase_10:
+    - tools/test-audit/tests/attribute.test.ts
+docs_updated_during_phase_10:
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/plan.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/log.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/inventory.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/families.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/sources.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/sources.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/captures.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/cli-bare.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/cli-terminal.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/dmls-bare.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/dmls-terminal.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/l1-local-all.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/lib-bare.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/lib-browser.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/lib-effects.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/lib-terminal.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/lib-terminal-browser.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/zed-cli-bare.json
+docs_created_during_phase_10: []
+skills_files_updated_during_phase_10: []
+packages_during_phase_10:
+    - "@rusty-biscuit/test-audit"
+    - darkmatter
+    - darkmatter-cli
+    - dmls
+    - zed-dmls-cli
+source_files_during_phase_11: []
+docs_updated_during_phase_11:
+    - darkmatter/README.md
+    - darkmatter/cli/README.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/log.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/plan.md
+docs_created_during_phase_11:
+    - darkmatter/features/_unscheduled/promote-cli-process-fixture/spec.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/results.md
+    - darkmatter/fixes/_unscheduled/test-suite-residuals/spec.md
+skills_files_updated_during_phase_11:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/rust-testing/SKILL.md
+packages_during_phase_11:
+    - darkmatter
+    - darkmatter-cli
+    - dmls
+    - zed-dmls-cli
+source_code:
+    - tools/test-audit/package.json
+    - tools/test-audit/tsconfig.json
+    - tools/test-audit/vitest.config.ts
+    - tools/test-audit/justfile
+    - tools/test-audit/.gitignore
+    - tools/test-audit/src/cli.ts
+    - tools/test-audit/src/config.ts
+    - tools/test-audit/src/config-command.ts
+    - tools/test-audit/src/command.ts
+    - tools/test-audit/src/args.ts
+    - tools/test-audit/src/errors.ts
+    - tools/test-audit/src/version.ts
+    - tools/test-audit/src/nextest-log.ts
+    - tools/test-audit/src/capture/command.ts
+    - tools/test-audit/src/fetch/command.ts
+    - tools/test-audit/src/junit/parse.ts
+    - tools/test-audit/src/junit/manifest.ts
+    - tools/test-audit/src/junit/collect.ts
+    - tools/test-audit/src/junit/compare.ts
+    - tools/test-audit/src/junit/render.ts
+    - tools/test-audit/src/junit/command.ts
+    - tools/test-audit/src/reconcile/listings.ts
+    - tools/test-audit/src/reconcile/families.ts
+    - tools/test-audit/src/reconcile/inventory.ts
+    - tools/test-audit/src/reconcile/sources.ts
+    - tools/test-audit/src/reconcile/gate.ts
+    - tools/test-audit/src/reconcile/command.ts
+    - tools/test-audit/src/reconcile/sources-command.ts
+    - tools/test-audit/src/attribute/index.ts
+    - tools/test-audit/src/attribute/command.ts
+    - tools/test-audit/src/measure/index.ts
+    - tools/test-audit/src/measure/runner.ts
+    - tools/test-audit/src/measure/command.ts
+    - tools/test-audit/src/counters/index.ts
+    - tools/test-audit/src/counters/command.ts
+    - tools/test-audit/tests/config.test.ts
+    - tools/test-audit/tests/capture.test.ts
+    - tools/test-audit/tests/junit.test.ts
+    - tools/test-audit/tests/junit-claudine-compat.test.ts
+    - tools/test-audit/tests/reconcile.test.ts
+    - tools/test-audit/tests/sources.test.ts
+    - tools/test-audit/tests/reconcile-claudine-compat.test.ts
+    - tools/test-audit/tests/attribute.test.ts
+    - tools/test-audit/tests/attribute-claudine-compat.test.ts
+    - tools/test-audit/tests/measure.test.ts
+    - tools/test-audit/tests/measure-claudine-compat.test.ts
+    - tools/test-audit/tests/nextest-log.test.ts
+    - tools/test-audit/tests/counters.test.ts
+    - tools/test-audit/fixtures/junit/nextest-l1-excerpt.xml
+    - pnpm-workspace.yaml
+    - pnpm-lock.yaml
+    - scripts/ci/affected_scope.py
+    - scripts/ci/test_affected_scope.py
+    - .github/workflows/ci.yml
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/audit.config.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/capture.sh
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/baseline/local/run.sh
+    - sniff/fixes/2026-09-07-faster-sniff-tests/audit.config.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/audit.config.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/junit-metrics.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/inventory-reconciler.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/attribution.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement-runner.ts
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe.sh
+    - darkmatter/cli/tests/common/fixture.rs
+    - darkmatter/cli/tests/common/mod.rs
+    - darkmatter/cli/tests/md_process_fixture.rs
+    - darkmatter/justfile
+    - darkmatter/cli/tests/spawn_site_guard.rs
+    - darkmatter/cli/tests/common/source_scan.rs
+    - darkmatter/cli/tests/clean.rs
+    - darkmatter/cli/tests/clean_frontmatter.rs
+    - darkmatter/cli/tests/clean_json.rs
+    - darkmatter/cli/tests/clean_schema.rs
+    - darkmatter/cli/tests/code_block.rs
+    - darkmatter/cli/tests/compose_base_schema.rs
+    - darkmatter/cli/tests/compose_basic.rs
+    - darkmatter/cli/tests/compose_interpolation.rs
+    - darkmatter/cli/tests/compose_layout.rs
+    - darkmatter/cli/tests/compose_page_blocks.rs
+    - darkmatter/cli/tests/compose_perf.rs
+    - darkmatter/cli/tests/compose_refs_and_missing.rs
+    - darkmatter/cli/tests/compose_remote_caching.rs
+    - darkmatter/cli/tests/compose_schema.rs
+    - darkmatter/cli/tests/compose_schema_file_rewrite.rs
+    - darkmatter/cli/tests/compose_shell.rs
+    - darkmatter/cli/tests/compose_state_set.rs
+    - darkmatter/cli/tests/compose_terminal_detection.rs
+    - darkmatter/cli/tests/compose_transclusion.rs
+    - darkmatter/cli/tests/delta.rs
+    - darkmatter/cli/tests/get_set_rm.rs
+    - darkmatter/cli/tests/graph.rs
+    - darkmatter/cli/tests/hash.rs
+    - darkmatter/cli/tests/hash_directory.rs
+    - darkmatter/cli/tests/hash_kind_save_diff.rs
+    - darkmatter/cli/tests/help.rs
+    - darkmatter/cli/tests/layout_fill.rs
+    - darkmatter/cli/tests/layout_flags.rs
+    - darkmatter/cli/tests/layout_style_frontmatter.rs
+    - darkmatter/cli/tests/render_basic.rs
+    - darkmatter/cli/tests/rm.rs
+    - darkmatter/cli/tests/schema_about.rs
+    - darkmatter/cli/tests/schema_detect.rs
+    - darkmatter/cli/tests/schema_triggers.rs
+    - darkmatter/cli/tests/schema_validate.rs
+    - darkmatter/cli/tests/schema_validate_baseline.rs
+    - darkmatter/cli/tests/toc.rs
+    - darkmatter/cli/tests/validate_refs.rs
+    - darkmatter/dmls/zed-dmls-cli/tests/cli.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/layout/page/tests.rs
+    - darkmatter/lib/src/markdown/code_block.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/alias.rs
+    - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+    - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+    - darkmatter/lib/tests/browser_render.rs
+    - darkmatter/lib/tests/disclosure_render_targets.rs
+    - darkmatter/lib/tests/expression_regression.rs
+    - darkmatter/lib/tests/image_pixel_classification.rs
+    - darkmatter/lib/tests/image_test_support/mod.rs
+    - darkmatter/lib/tests/level2_render_tree_terminal/images.rs
+    - darkmatter/lib/tests/level2_render_tree_terminal/support/mod.rs
+    - darkmatter/lib/tests/level3_image_painting.rs
+    - darkmatter/lib/tests/meta_schema_phase4.rs
+    - darkmatter/lib/tests/schemas_literal_expression.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/tests/no_side_effects.rs
+    - darkmatter/cli/tests/common/level2.rs
+    - darkmatter/cli/tests/level2_errors.rs
+    - darkmatter/cli/tests/level2_schema_about.rs
+    - darkmatter/dmls/tests/fixtures/editor_neovim/init.lua
+    - darkmatter/dmls/tests/level2_editor_neovim.rs
+    - darkmatter/dmls/tests/lsp_session.rs
+    - darkmatter/dmls/tests/stdio_subprocess.rs
+    - darkmatter/lib/tests/level3_popover.rs
+documentation:
+    - docs/dependencies.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/log.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/plan.md
+    - tools/test-audit/README.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/log.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/baseline/34008778001/junit-gate.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/sources.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/baseline/34008778001/junit-gate.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/sources.md
+    - .claude/skills/rust-testing/SKILL.md
+    - .claude/skills/rust-testing/test-suite-audits.md
+    - .claude/skills/rust-testing/test-audit-tooling.md
+    - .claude/skills/sniff/SKILL.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/inventory.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/families.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/sources.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/local-l1-by-binary.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/local-l2-by-binary.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-ubuntu-latest-L1.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-ubuntu-latest-L2.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-ubuntu-latest-browser.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-macos-latest-L1.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-macos-latest-L2.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-windows-latest-L1.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/ci-wsl2-ubuntu-L1.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-outside.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-outside.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-pkg-cwd.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-pkg-cwd.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-burst-outside.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-burst-outside.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-burst-pkg-cwd.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-burst-pkg-cwd.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/launch-probe-identity.txt
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/attribution/budgets-pending.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/audit.config.json
+    - darkmatter/docs/dependencies.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/cohorts.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/plan.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/provenance.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/report.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/runs.jsonl
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/targets.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/work-evidence.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/captures.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/cli-bare.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/cli-terminal.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/dmls-bare.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/dmls-terminal.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/l1-local-all.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/lib-bare.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/lib-browser.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/lib-effects.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/lib-terminal.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/lib-terminal-browser.json
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/zed-cli-bare.json
+    - darkmatter/README.md
+    - darkmatter/cli/README.md
+    - darkmatter/features/_unscheduled/promote-cli-process-fixture/spec.md
+    - darkmatter/fixes/2026-09-07-faster-darkmatter-tests/results.md
+    - darkmatter/fixes/_unscheduled/test-suite-residuals/spec.md
+    - .claude/skills/darkmatter/SKILL.md
+packages:
+    - "@rusty-biscuit/test-audit"
+    - darkmatter
+    - darkmatter-cli
+    - dmls
+    - zed-dmls-cli
+---
+
+# Execution plan — Faster Darkmatter tests through isolated composition and complete evaluation
+
+Converts [spec.md](spec.md) into eleven ordered phases. Spec sections are
+referenced as **RB1**–**RB5** (Required behavior 1–5) and acceptance bullets as
+**AC1**–**AC8**, in the order they appear in the spec.
+
+## Grounding facts (verified against this working tree, 2026-09-07)
+
+Checked, not assumed. A phase that contradicts one of these should stop and
+re-derive rather than proceed — the spec is explicit that it is a draft and not
+evidence that every suspected cost is present.
+
+- **The `md` spawn population is 504 sites across 38 files.**
+  `grep -c 'md_cmd('` over `darkmatter/cli/tests` returns 510 occurrences; 8 of
+  those are the `fn md_cmd()` definitions themselves, leaving **502 call
+  sites**. `schema_validate_baseline.rs` carries **2 more** inline
+  `assert_cmd::Command::cargo_bin("md")` spawns (lines 74, 101) with no helper
+  at all — the spec's evidence section misses these.
+- **The seven private `md_cmd()` copies are confirmed**, each an exact
+  `assert_cmd::Command::cargo_bin("md").unwrap()` with no CWD/home/PATH
+  defaults: `schema_triggers.rs:7`, `code_block.rs:18`, `schema_about.rs:7`,
+  `compose_schema_file_rewrite.rs:23`, `compose_schema.rs:14`,
+  `schema_validate.rs:8`, `schema_detect.rs:8`. The shared one is
+  `common/mod.rs:11`.
+- **Per-file `md_cmd()` census** (the guard's own count supersedes this in
+  Phase 5; the seven private-definition files are marked ★):
+
+  | file | sites | file | sites |
+  |---|---|---|---|
+  | `clean.rs` | 48 | `clean_schema.rs` | 11 |
+  | `schema_validate.rs` ★ | 38 | `compose_base_schema.rs` | 9 |
+  | `hash_kind_save_diff.rs` | 32 | `validate_refs.rs` | 8 |
+  | `code_block.rs` ★ | 32 | `rm.rs` | 8 |
+  | `get_set_rm.rs` | 31 | `help.rs` | 8 |
+  | `clean_frontmatter.rs` | 30 | `compose_shell.rs` | 8 |
+  | `layout_flags.rs` | 29 | `compose_basic.rs` | 8 |
+  | `compose_state_set.rs` | 26 | `layout_style_frontmatter.rs` | 7 |
+  | `hash_directory.rs` | 23 | `compose_transclusion.rs` | 7 |
+  | `schema_about.rs` ★ | 17 | `compose_interpolation.rs` | 7 |
+  | `render_basic.rs` | 17 | `schema_detect.rs` ★ | 6 |
+  | `hash.rs` | 15 | `clean_json.rs` | 6 |
+  | `compose_schema.rs` ★ | 15 | `compose_refs_and_missing.rs` | 5 |
+  | `schema_triggers.rs` ★ | 14 | `layout_fill.rs` | 4 |
+  | `graph.rs` | 12 | `toc.rs` / `delta.rs` | 3 each |
+  | `compose_remote_caching.rs` | 12 | `compose_terminal_detection.rs` | 2 |
+  | | | `compose_schema_file_rewrite.rs` ★ | 2 |
+  | | | `compose_perf.rs` | 2 |
+  | | | `compose_page_blocks.rs` | 2 |
+  | | | `compose_layout.rs` | 2 |
+
+- **`zed-dmls-cli` is 6 raw spawns in one 119-line file** (`tests/cli.rs`), and
+  they are *already partly isolated*: every one that touches state passes
+  explicit `--staging-dir` / `--zed-data-dir` / `--zed-log` into a per-test
+  `TempDir`, and two set `PATH=""`. None controls CWD or home. This is the
+  cohort the spec allows to close by **justified disposition** rather than
+  migration; decide it on evidence in Phase 6D, not by default.
+- **The HTTP fixture has exactly one consumer.** `mock_http_server`
+  (`cli/tests/common/mod.rs:42-83`) detaches a `thread::spawn` accept loop with
+  no join handle, no shutdown, and no bound other than the response vector; it
+  is used only by `compose_remote_caching.rs` (8 servers). Failure before the
+  expected accept count strands the thread for the life of the test binary
+  process.
+- **Process/protocol sites outside the CLI**: `dmls/tests/stdio_subprocess.rs`
+  spawns `bin_exe!("dmls")` raw (`:69`) and polls on a 20 ms sleep (`:141`);
+  `dmls/tests/level2_editor_neovim.rs` shells out to `nvim` (`:86`, `:151`) and
+  polls its capture deadline on a fixed 200 ms sleep (`:377`);
+  `cli/tests/level2_schema_about.rs:93` shells out to `tmux`;
+  `cli/tests/common/level2.rs` sleeps at `:179`, `:285`, `:410`;
+  `cli/tests/level2_errors.rs` at `:42`, `:58`;
+  `lib/tests/level3_popover.rs` has six `tokio::time::sleep` calls and
+  `lib/tests/level3_image_painting.rs:108` a 400 ms one.
+- **Test population is ≈7,879 attributes** across the four packages
+  (`darkmatter` lib 6466 = 5695 embedded + 771 in `tests/`; `darkmatter-cli`
+  737 = 139 + 598; `dmls` 648 = 519 + 129; `zed-dmls-cli` 28 = 22 + 6).
+  One hand-written row per identity is not a credible deliverable; RB1's
+  "reviewed row **or explicitly enumerated family**" has to be closed
+  mechanically.
+- **The area's nextest override surface is empty.** `.config/nextest.toml`
+  carries 18 per-test `slow-timeout` overrides and 3 `test-group` bindings, and
+  **none of them scopes darkmatter, darkmatter-cli, dmls, or zed-dmls-cli** —
+  they are all claudine, sniff, or biscuit-terminal. AC5-equivalent work here is
+  therefore *preventive*: `git diff main -- .config/nextest.toml` must stay
+  **empty** for the whole fix, not merely free of additions.
+- **Two distinct L1 cohorts already exist by construction.** `_tier_filter L1`
+  excludes `level2_/level3_/browser_/real_/slow_`; `darkmatter/justfile`'s
+  `test` recipe sets `BISCUIT_L1_INCLUDE_SLOW=1` under CI, which drops the
+  `slow_` exclusion. The area has exactly **one** `slow_`-prefixed test and
+  **11** `#[ignore]` attributes, so the local/CI population delta is small and
+  fully enumerable — RB5's "distinct cohorts" requirement is cheap to satisfy
+  precisely here.
+- **All four packages declare `[package.metadata.ci.tests]`** — lib: tiers
+  `L1, L2, browser`, features `terminal-tests, browser-tests`, backend
+  `wezterm`, `l1-include-slow`; cli: `L1, L2`, `terminal-tests`, backends
+  `tmux, wezterm`; dmls: `L1, L2`, `terminal-tests`, backend `tmux`,
+  runner-tools `neovim, zed-extension`; zed-dmls-cli: `L1` only. No declaration
+  gap to close.
+- **The Zed WASM extension IS reachable from CI.** `_package-ci.yml:519` runs
+  `cd darkmatter && just zed-verify`, and `dmls`'s `runner-tools` declares
+  `zed-extension`. The spec presumes it is outside recipe selection; correct
+  that in the inventory — the route exists, it is just not `just test`.
+- **Bench and fuzz entry points**: `darkmatter/lib/Cargo.toml` declares **16**
+  `[[bench]]` targets (`schema_validation`, `effective_schema_ownership`,
+  `render_tree`, `compose_pipeline`, `render_pipeline`, `prose_highlighter`,
+  `render_pipeline_steps`, `compose_schema_transclusion`, `render_code_heavy`,
+  `reference_graph`, `phase6_interpolation`, `phase8_render`, `phase9_remote`,
+  `phase10_residuals`, `phase11_evidence`, `clean_hot_paths`), plus a real
+  `darkmatter/lib/fuzz` directory driven by `just fuzz` and
+  `.github/workflows/fuzz-nightly.yml`. The area also owns `just bench-dmls`,
+  which generates a synthetic corpus under `../target/dmls-bench/`.
+- **A prior remediation already landed and must not be redone.**
+  `lib/tests/ambient_ctx_capture.rs` opens with a module doc stating it builds a
+  purpose-built two-package fixture repository *precisely because* a full
+  `ComposeContext::capture()` walks the whole checkout ("seconds on a developer
+  machine and over a minute on a cold two-core CI guest"). Phase 7 verifies and
+  records it; it does not rewrite it.
+- **`common/mod.rs` is 323 lines.** claudine's equivalent
+  (`claudine/cli/tests/common/mod.rs`) is **782**. Adding a comparable fixture
+  inline would push the shared module to ~770 and past the 500-line soft cap
+  that `just lint-files` reports (roots `./cli/src`, `./cli/tests`). That recipe
+  is advisory — it is not wired into `just lint` and does not exit non-zero —
+  but the fixture still belongs in its own `common/fixture.rs` module rather
+  than inline.
+- **`just lint` calls `check-zed`**, which hard-fails when the `wasm32-wasip2`
+  rustup target is absent. Provision it once before the first lint checkpoint,
+  or every checkpoint reads as a false red.
+- **The reference implementation's shape**: `CliProcessFixture` (claudine
+  `common/mod.rs:179`) plus `ClaudineCommandBuilder` (`:361`), with named
+  escapes `fake_only_path()`, `host_path()`, `ambient_context(dir)`,
+  `inherit_no_env()`, and a `checkout_containment_error()` precondition. The
+  environment policy is applied inline in `build()` (`:453`).
+
+## Assumptions and stated decisions
+
+1. **Fixture placement is settled by the spec**: area-local, in
+   `darkmatter/cli/tests/common/`, mirroring claudine — plus a tracked
+   promotion follow-up (spec § Open Questions, third design). Phase 11 files
+   that follow-up; no phase here promotes anything into `test_toolkit`.
+2. **Naming mirrors the reference so the later promotion is a rename, not a
+   redesign**: `CliProcessFixture` + `MdCommandBuilder`, with the same escape
+   vocabulary. Divergence in escape names is the main thing that would make the
+   follow-up expensive.
+3. **The inventory is family-based with a mechanical completeness proof.** A
+   TypeScript reconciler (house convention — TS scripts, never Python) joins
+   `cargo nextest list --message-format json` against the inventory's declared
+   families and **fails** on any identity assigned to zero or more than one row.
+4. **Sibling-fix contamination is a recorded variable, not a gate.** This branch
+   also carries `claudine/fixes/2026-09-07-faster-claudine-tests`. The two touch
+   disjoint packages, but `claudine-cli` consumes darkmatter's `md` binary as a
+   CI runner-tool fixture. Every baseline and candidate measurement records the
+   exact revision and whether sibling test-only changes were present; a
+   darkmatter budget is never derived from a run whose revision is unrecorded.
+5. **Scope discipline on assertions.** Fixture migration, assertion repair, and
+   test-population changes land in **separate reviewable commits**
+   (`CLAUDE.md` § Scope discipline). A migration commit whose diff also changes
+   an assertion gets split before review.
+6. **No new override, retry, tier change, timeout increase, or disabled
+   assertion** may be introduced at any point (AC6, AC7).
+   `git diff main -- .config/nextest.toml` must be **empty** at every
+   checkpoint — darkmatter owns none today and must own none at the end.
+7. **Nothing is committed or pushed by an implementing agent.** Commit, push,
+   and merge are separate operator actions per `CLAUDE.md`.
+
+---
+
+## Execution and evidence policy (all phases)
+
+This policy governs every phase checkpoint below. A checkpoint records the
+proof required; it does not require repeating a command whose applicable
+result is already recorded. Implementation, PR review, and final performance
+verification are separate milestones.
+
+- During implementation, run focused tests for the changed binaries or library
+  modules through the canonical recipes. Run the combined area L1 suite and
+  lint after a coherent batch of changes, not after every file or subphase.
+  A shared fixture change requires its affected consumers to be covered.
+- Keep one validation ledger in `log.md`: command, selected packages/tests,
+  features, profile, platform, source state (including dirty changes), result,
+  build/setup time, runner elapsed, and artifact link. Reuse a result only
+  while its relevant sources, dependencies, fixtures, configuration, and
+  environment remain unchanged. A new failure or relevant change invalidates
+  the affected evidence, not every prior gate.
+- Phase 1 refactors the existing Claudine TypeScript analysis tools into one
+  maintained, reusable implementation. Later phases consume that implementation
+  with area-specific data; do not fork copies into each fix directory.
+  Document-only phases run changed analysis-tool checks, not Rust package
+  suites or unrelated package gates. Preserve malformed-input and completeness
+  failures without repeating unchanged parser or mutation demonstrations.
+- Capture each distinct recipe/CI feature selection once per relevant source
+  state and derive family membership from those captures. Keep every test in
+  the audit, but document common setup and proof once per enumerated family.
+  Reuse suite artifacts for attribution; run isolated experiments only to
+  answer a specific unresolved cost question.
+- Run L2/L3/browser/real tiers when their code, shared fixtures, dependencies,
+  or execution routes changed, and at final verification where required by
+  acceptance. Use canonical recipes, preserve focus, and keep unavailable
+  evidence pending. Diagnose an unrelated environment failure once and link
+  the reproduction; do not repeat the whole tier until the relevant code or
+  environment changes. New or unexplained failures still require diagnosis.
+- Preserve the baseline source state and build artifacts before editing. One
+  warm diagnostic run per required population is enough to begin attribution;
+  collect the five alternating baseline/candidate samples together in the
+  measurement phase. Keep separate build directories for the two states and
+  stable feature selections; do not clean caches or alternate rebuilds in a
+  single target directory. Avoid competing builds and measurements on the
+  same host; parallel work is useful only while it does not contend for those
+  resources or shared files.
+- Missing repeated CI samples or unavailable hosts do not block implementation
+  or opening a PR. Keep budgets pending until compatible CI baseline evidence
+  exists; ratify them before judging candidate performance. Preserve the
+  required final sample counts and platform coverage. Do not claim final
+  verification or archive the fix while required evidence remains pending.
+- Keep evidence in one place: `inventory.md` owns family dispositions and
+  budgets, `log.md` owns run records, and `results.md` links those records and
+  summarizes outcomes. Update phase checkboxes and a short status; do not
+  duplicate transcripts or requirement-to-test narratives across documents.
+
+## Phase 1 — Shared TypeScript analysis tools, baseline, and evidence discipline
+
+The plan starts at `phase: 1` and retains eleven phases. This phase includes
+analysis-tool implementation and skill documentation; Darkmatter application
+and test optimization still begins in Phase 4. Preserve the baseline source
+state and raw artifacts before refactoring tools, then process baseline and
+candidate evidence with the same recorded tool version.
+
+### Phase 1A — Refactor the Claudine tools for reuse across package areas
+
+Darkmatter and then Sniff are the immediate required consumers. Phase 1 must
+meet both areas' analysis needs; Sniff is not an optional portability example.
+Claudine compatibility remains required. This phase delivers tooling and area
+configuration, not Sniff's test remediation or its full performance campaign.
+
+- [x] Read both areas' active performance specs and plans before settling the
+      shared contracts. Record a compact requirement-to-command/configuration
+      mapping for Darkmatter and Sniff, using their actual manifests and recipes
+      to resolve feature and execution routes. Close tooling gaps for both in
+      this phase rather than leaving Sniff to fork or redesign the engine.
+- [x] Read `junit-metrics.ts`, `inventory-reconciler.ts`, `attribution.ts`, and
+      their tests in `claudine/fixes/2026-09-07-faster-claudine-tests/`.
+      Inventory actual callers and output contracts; run GitNexus impact
+      analysis before modifying existing symbols. Preserve a source snapshot
+      and representative input/output fixtures without interrupting concurrent
+      Claudine work or changing its recorded evidence.
+- [x] Establish one TypeScript tool package at a stable, shared tooling path
+      outside any dated fix directory. Prefer an existing suitable tooling
+      location; record the chosen path and ownership in the Phase 1 log.
+      Keep command dispatch, input parsing, validation, aggregation, and report
+      rendering separable without building a plugin system or a new test runner.
+      Test execution remains with Nextest and the canonical Just recipes.
+- [x] Replace hard-coded Claudine roots, package lists, family declarations,
+      environment matrices, expected tests, and timeout budgets with explicit,
+      validated configuration. Support different package/tier/feature selections
+      on different environments; do not assume a rectangular four-host matrix.
+      Keep package policy and investigation data outside the shared engine.
+      Claudine-specific watchdog floors and `launch-cwd-probe.ts` remain local
+      unless a concrete second consumer needs their behavior.
+- [x] Deliver usable configurations for Darkmatter's four packages and Sniff's
+      library/CLI pair. Darkmatter must keep local-default and CI-selected
+      slow-test populations separate and represent DMLS, browser, terminal,
+      and Zed verification routes. Sniff must distinguish `remote`, `network`,
+      and `test-fixtures` selections; deterministic, native-detector, and real
+      resource families; and the separately timed sanity cohort. Represent
+      non-Nextest routes explicitly without treating an inventory row as
+      evidence that the route executed.
+- [x] Support both areas' comparison provenance and work-count evidence as
+      data: Darkmatter discovery/composition/effect/HTTP observations; Sniff
+      request shape, counter version, acquisition-versus-execution boundaries,
+      and collector-propagation evidence. Keep native Windows and WSL distinct.
+      Reject or mark incompatible comparisons explicitly, including Sniff
+      comparisons spanning the coordinated production-caching change. Do not
+      infer missing counter evidence from timings or embed either product's
+      detector behavior in the shared tool.
+- [x] Use Nextest JSON listings and JUnit plus the staging manifest as the
+      primary inputs. Replace the handwritten XML scanner with an established
+      parser; reject malformed or inconsistent evidence. Prefer structured
+      reports for attribution. Retain human-readable log parsing only as a
+      bounded compatibility adapter for existing captures that cannot be
+      regenerated, with a documented supported format and useful errors.
+- [x] Replace the handwritten Rust lexer with an established parser or an
+      existing repository source-analysis facility where suitable. Keep source
+      discovery separate from runner discovery: macro expansion and platform
+      exclusions must not silently become claims of complete executable
+      coverage. Unsupported syntax or unresolved source/runner differences need
+      explicit diagnostics and dispositions. Do not implement a general Rust
+      parser in TypeScript or add a bespoke Rust service for this refactor.
+- [x] Preserve evidence integrity: unique identities and family assignment;
+      missing artifacts/tests and invalid durations rejected; failures, skips,
+      and retries disclosed; compatible baseline/candidate populations checked;
+      build/setup, runner elapsed, and summed test duration kept separate.
+      A sum of durations is not cohort wall time. Known pending environments
+      remain pending rather than satisfying a passing gate.
+- [x] Make invocation reproducible: declare the supported Node version, pin
+      runtime/parser dependencies through the repository's package-manager and
+      lockfile conventions, enable TypeScript checking, and provide documented
+      Just commands for analysis and tool verification. Wire the tool's own
+      checks into an appropriate existing CI route when its inputs change;
+      ordinary Rust test runs must not acquire a Node dependency. Use portable
+      path handling and argument passing; verify macOS/Linux/Windows behavior
+      where available and report missing platform evidence explicitly.
+- [x] Reuse meaningful existing tests and add focused regressions for changed
+      contracts. Exercise Claudine compatibility and both required consumers,
+      Darkmatter and Sniff, with representative structured artifacts captured
+      from their actual package/feature selections. Run listing reconciliation,
+      report validation, family attribution, and comparison through the shared
+      commands for each area. Use small synthetic negative fixtures to prove
+      rejection of missing feature coverage, incompatible cohorts/counter
+      provenance, and incomplete environment matrices. Missing hosted artifacts
+      remain pending; fixtures prove tool behavior, not hosted performance.
+      Preserve malformed-input, missing-test, duplicate-assignment, and
+      incomplete-capture failures. Compare old and new outputs on preserved
+      Claudine inputs, documenting intentional corrections instead of blindly
+      preserving parser defects. Do not rerun Rust suites to test report parsing.
+- [x] Migrate Claudine entry points safely: retain thin compatibility wrappers
+      or documented replacement commands where existing plans need them, with
+      one shared implementation and no duplicated parsing logic. Coordinate
+      edits to active Claudine files; do not delete historical artifacts.
+      Record the tool version used for every new report. Darkmatter's later
+      phases must call the shared commands, not copy the source. Update Sniff's
+      active performance plan to consume the delivered commands/configuration
+      and remove instructions to rebuild or adapt Claudine scripts. Its Phase 1
+      still captures its own baseline; it must not repeat the shared refactor.
+- [x] Update `.claude/skills/rust-testing/SKILL.md` (the existing skill meant by
+      `rust-test`) in this phase, with a concise entry linking to detailed
+      guidance in `test-suite-audits.md` or a focused sibling document. Document
+      installation, canonical commands, configuration, artifact collection,
+      family reconciliation, timing interpretation, pending/failure semantics,
+      and validation reuse. Include working Darkmatter and Sniff examples,
+      Claudine compatibility commands, and minimal onboarding steps for another
+      area. Verify the examples against
+      fixtures; update affected dependency docs and Markdown hashes through the
+      repository's prescribed tooling. Do not create a competing `rust-test`
+      skill or defer this documentation until Phase 11.
+
+**Checkpoint 1A** — one shared implementation serves both Darkmatter and Sniff
+through validated configurations and exercised commands; their requirement
+mapping has no unresolved tooling gaps. Claudine compatibility, reproducible
+typecheck/tests, a CI verification route, Sniff's consumption handoff, and the
+`rust-testing` skill examples for both immediate consumers are present.
+Document missing platform/performance evidence separately from tooling
+readiness. No performance claim depends on silently changing the interpreter.
+
+### Phase 1B — Capture and validate Darkmatter's baseline
+
+- [x] Record the baseline identity: revision SHA, `git status --porcelain`
+      (dirty state), `rustc`/`cargo`/`cargo-nextest` versions, profile, host
+      platform and core count, and whether sibling-fix changes are present in
+      the tree (assumption 4).
+- [x] Provision `rustup target add wasm32-wasip2` so `just lint` → `check-zed`
+      does not read as a false red at any checkpoint; record if it was already
+      present.
+- [x] Confirm `git diff main -- .config/nextest.toml` is empty and capture that
+      as the fix's starting invariant.
+- [x] Preserve a reproducible baseline source state and its build directory.
+      Warm the test artifacts through the required recipes, then collect one
+      diagnostic local-default L1 run (`just test`) and one sanity run
+      (`just sanity`). Record build/setup, runner elapsed, and summed test
+      duration separately. Collect the five alternating baseline/candidate
+      runs together in Phase 9; there is no candidate to alternate with yet.
+- [x] Collect one baseline run each for `just doctest`, `just test-l2`,
+      `just test-browser`, and `just test-l3`. Where a harness (WezTerm, tmux,
+      Chrome, neovim) is absent, record **"pending — harness unavailable"**
+      explicitly; a clean skip is not evidence of passing.
+- [x] Collect the **CI-selected** cohort separately by re-running L1 with
+      `BISCUIT_L1_INCLUDE_SLOW=1`, and enumerate the exact identity delta
+      against the local cohort (expected: the single `slow_` test — confirm,
+      do not assume).
+- [x] Read `ci.yml`'s matrix to enumerate which environment legs are actually
+      configured for the four darkmatter packages. **Do not presume four legs**;
+      write down what the workflow declares (`_package-ci.yml` natives plus the
+      `_wsl-ci.yml` guest, if selected).
+- [x] Reuse compatible existing baseline CI artifacts per configured leg,
+      recording source state, features, workflow, runner image, and failures.
+      Store them under `baseline/<run-id>/`. One valid baseline run per leg
+      supports initial attribution; collect additional baseline samples when
+      variability or the budget decision requires them. Missing CI baseline
+      legs keep their budgets pending but do not block fixture implementation.
+      Keep local observations separate from CI claims.
+- [x] Use Phase 1A's shared commands with Darkmatter configuration to validate
+      the captured reports. Store configuration and evidence in this fix
+      directory; record the shared tool version and link its existing test
+      results. Add only missing Darkmatter-specific data or focused regressions,
+      never another metrics/reconciler implementation.
+- [x] Identify the work counters available for later proof — the library's
+      `effects-instrumentation` feature (process-wide effect counters),
+      `MockHttpServer::request_count()`, and any compose/discovery counters the
+      inventory finds — and record which of the four required signals
+      (discovery, composition, effects, HTTP requests) each covers. Note gaps as
+      Phase 7/8 work, not as a reason to fall back on timing.
+
+**Validation checkpoint 1** — checkpoint 1A is satisfied, including shared-tool
+verification and the `rust-testing` skill update; reproducible baseline
+source/build state and initial local runs are recorded with three costs
+separated; shared metrics validation passes. Available CI artifacts are linked
+and missing legs or harnesses remain pending. This opens Darkmatter fixture
+implementation. Full alternating measurement belongs to Phase 9; CI budget
+ratification remains pending where inputs are missing.
+
+---
+
+## Phase 2 — Complete inventory (RB1, AC1) ‖ runs during Phase 1's CI window
+
+Use existing captures, reports, and validated tools. Run only changed
+analysis-tool checks; do not run Rust package gates for document-only work.
+
+Inventory and analysis only; no Rust application or test changes. Produces `inventory.md` in this fix directory.
+
+- [x] Build the enumeration substrate: `cargo nextest list --message-format
+      json` for each of the four packages under **every** feature selection a
+      canonical recipe or CI leg uses — bare, `terminal-tests`,
+      `browser-tests`, `effects-instrumentation` — recording the command,
+      revision, toolchain, and features beside each capture.
+- [x] Capture the source-side population separately (attribute scan over
+      `#[test]`, `#[tokio::test]`, `#[rstest]`, plus `#[ignore]` and `#[cfg]`
+      gates; expected ≈7,879 attributes) and **diff it against runner
+      discovery**. Every source test the runner never lists becomes a
+      cfg/feature exclusion row carrying its reason and actual execution route.
+- [x] Enumerate the 11 `#[ignore]` sites and the single `slow_` test
+      individually, each with its execution route and why it is gated.
+- [x] Inventory the non-nextest entry points as first-class rows:
+      `just doctest` (lib + cli), the **16** `lib/benches` targets,
+      `darkmatter/lib/fuzz` (via `just fuzz` and `fuzz-nightly.yml`), and
+      `just bench-dmls` with its generated corpus under `../target/dmls-bench/`.
+- [x] Give the Zed WASM extension rows carrying its **real** route:
+      `just check-zed` (standalone `cargo check --target wasm32-wasip2`,
+      workspace-excluded) and `just zed-verify` (package + manifest/archive
+      assertions), the latter executed in CI at `_package-ci.yml:519`. Correct
+      the spec's presumption that it sits outside recipe selection.
+- [x] Record `dmls/vscode-dmls` as a **documented absence** row: no in-repo
+      automated tests, manual packaging check only via
+      `just install-vscode-package`. Absence is not coverage.
+- [x] Inventory shared fixture machinery as first-class rows: `cli/tests/common/
+      mod.rs` (`md_cmd`, `md_file`, `mock_http_server`, `baseline::*`,
+      `layout::*`), `cli/tests/common/level2.rs`,
+      `lib/tests/level2_render_tree_terminal/support/mod.rs`,
+      `lib/tests/layout_matrix_support/mod.rs`, and
+      `lib/tests/error_snapshots/helpers.rs`.
+- [x] Write the per-family rows. Each records: behavior proved and whether the
+      assertions distinguish a plausible failure; required boundary and external
+      inputs (CWD, home/config/cache, environment, repository, installed tools,
+      network, terminal, browser); shared setup; effect execution; waiting and
+      timing floors; resource ownership and cleanup; shared-state coordination
+      (including the `#[serial]` sites in `clean_counters.rs`,
+      `layout_snapshots.rs`, `reference_integration.rs`,
+      `level2_render_tree_terminal/file_links.rs`); tier, features, platforms;
+      canonical recipe; measured cost with provenance; disposition.
+- [x] A family row is valid **only** when its members are explicitly listed and
+      share the same setup and proof. Anything that differs gets its own row.
+- [x] Record the override census as its own short table and state the finding
+      plainly: **darkmatter owns zero nextest overrides today**, so the
+      obligation is preventive (assumption 6), and the one L1 timing floor in
+      the area is the local/CI `slow_` split, not a runner override.
+- [x] Reconcile canonical recipes against the justfile: note that `test-real`
+      is a declared no-op for this area, and confirm `sanity`, `test`,
+      `test-l2`, `test-l3`, `test-browser`, `doctest`, `coverage`, `bench`,
+      `fuzz`, `lint`, `all` all exist and select the four packages.
+- [x] Run Phase 1's shared reconciler with Darkmatter configuration over the
+      listings plus the declared families;
+      link its output from `inventory.md`. It must exit 0 with every identity
+      assigned to exactly one row.
+- [x] Give every row a disposition: satisfactory, remediation in this fix, or
+      linked follow-up naming the unmet requirement and the deferral reason.
+      **No row may be dispositioned by a timing threshold** — a fast test is
+      still reviewed for correctness and accidental effects.
+
+**Validation checkpoint 2** — the reconciler exits 0; the inventory covers all
+four packages, every tier, doctests, all 16 benches, the fuzz target, gated and
+ignored tests, the WASM-extension route, the vscode absence row, and every
+shared helper; every row carries a disposition and an execution route.
+
+**Phase 2 status (2026-09-08): checkpoint met.** `inventory.md` + `families.json`;
+`test-audit reconcile` exits 0 over 7,853 identities in 63 families. Grounding
+facts corrected by the inventory: `#[ignore]` sites are 5 (not 11); darkmatter
+**does** own nextest overrides (four targets, one dead); six feature-gated tests
+have no local route; 44 in-process tests are mis-tiered by a `browser_` prefix.
+See `inventory.md` § Population and § Runner override census, and `log.md`.
+
+---
+
+## Phase 3 — Attribution and ratified budgets (RB5, first half)
+
+Attribute from stored suite reports first. Run only experiments that resolve
+a specific uncertainty. Missing CI budgets remain pending and must be ratified
+before candidate performance is judged; they do not block implementation.
+
+Analysis only. Uses Phase 1 local evidence and the Phase 2 inventory;
+CI-dependent budget conclusions may remain pending. Resolves the spec's four
+baseline-review decisions **with numbers**.
+
+- [x] Attribute cost by family against the Phase 1 baseline, keeping build,
+      elapsed, and summed-duration columns separate throughout.
+- [x] Answer decision 1 — *how much cost belongs to composition, discovery,
+      rendering, and test setup?* Split the 504-site `md` cohort's cost into
+      process launch, ambient discovery, and actual command work; a
+      per-invocation launch cost multiplied by 504 is a hypothesis until
+      measured, not a finding.
+- [x] Answer decision 2 — *which command paths genuinely require host tools
+      beyond a minimal set?* Enumerate them from the inventory
+      (`compose_shell.rs`'s shell expansion, git-dependent context tests,
+      the tmux/WezTerm/neovim/Chrome tiers) and mark each as a named fixture
+      escape or a genuine tool test.
+- [x] Answer decision 3 — *which DMLS/extension checks are reachable from
+      existing recipes?* Using the Phase 2 route rows, state for each dmls and
+      zed-dmls surface which recipe reaches it and which CI leg runs it.
+- [x] Answer decision 4 — *which repeated corpus/setup operations can be
+      consolidated without reducing diagnostic quality?* Measure the shipped
+      corpus scans (`example-docs` consumers in `lib/tests/style_frontmatter.rs`
+      and `cli/tests/level2_frontmatter_tables.rs`, plus the `baseline::` JSON
+      fixture loaders) and the repeated schema-corpus work in
+      `meta_schema_*.rs` / `schemas_*_table.rs` before proposing any merge.
+- [x] Ratify per-family numeric budgets **on the existing CI runners**, written
+      into `inventory.md` **beside the baseline table** so budget review and
+      evidence review are one act. Local timing may attribute cost; it may not
+      set a target.
+- [x] Do **not** extrapolate a speedup from an unprofiled substage. Cite
+      [the redundant-walk results](../2026-07-16-redundant-walk/results.md) in
+      the attribution section as the standing reason attribution precedes any
+      percentage target.
+- [x] For any **production** defect surfaced during attribution (composition,
+      expression semantics, cache freshness), open a linked spec with the
+      evidence and leave the code alone — production changes are out of scope.
+
+**Validation checkpoint 3** — each of the spec's four decisions has a written
+answer backed by a measurement; budgets sit next to the baseline in
+`inventory.md`; no budget was derived from a local run alone; production
+findings are filed, not fixed.
+Missing CI inputs leave budget ratification pending; link the missing evidence
+and continue implementation without inventing a target.
+
+**Phase 3 status (2026-09-08): checkpoint met within the plan's pending
+clause.** All four decisions answered with measurements in `inventory.md`
+§ Attribution; per-family per-leg observed budgets sit beside the baseline in
+§ Budgets. Ratification itself is **pending by gate**: one green CI baseline
+run per leg exists (34008778001) and `test-audit attribute budgets` refuses
+to derive budgets until each leg has three consecutive green runs — the
+recorded refusal, the resampling route (`gh run rerun 34008778001`,
+operator-gated; Phase 9 decides), and the filled
+`attribution/budgets-pending.json` are the linked missing evidence. No
+percentage target was set (redundant-walk results cited); no new production
+defect surfaced, so nothing was filed. See `log.md` § Phase 3.
+
+---
+
+## Phase 4 — The deterministic CLI fixture (RB2, infrastructure)
+
+First Darkmatter fixture code phase. Requires checkpoint 1's shared-tool
+verification, preserved baseline, and local checks, not completion of CI sampling. Phases 5–6 depend on the fixture contract and its focused verification.
+
+- [x] Add `darkmatter/cli/tests/common/fixture.rs` and re-export from
+      `common/mod.rs`. Keeping it out of `mod.rs` holds the shared module near
+      its current 323 lines instead of ~770, which the area's 500-line soft-cap
+      report would otherwise flag.
+- [x] Implement `CliProcessFixture` with a per-test disposable root that stays
+      alive through process completion **and** cleanup — a `NamedTempFile`
+      dropped before `assert()` is the classic version of this bug. Each test
+      constructs its own fixture and lends it to the builder; no two parallel
+      tests share a root.
+- [x] Make every launch input explicit in `MdCommandBuilder::build()`:
+      **CWD** (fixture root, never the runner's); **home/config/cache**
+      (`HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, and on Windows
+      `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA`, `LOCALAPPDATA`);
+      **darkmatter cache root** (`--cache-root` / its env equivalent — remote
+      artifacts must never land in the developer's real cache);
+      **rendering inputs** (`COLUMNS`, `LINES`, `TERM`, `COLORTERM`,
+      `NO_COLOR`, `FORCE_COLOR`); **application environment** (any `DM_*` /
+      darkmatter-namespaced variables, swept by prefix); **Git plumbing**
+      (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_CONFIG_*`, plus
+      `GIT_CONFIG_NOSYSTEM=1`); and **PATH**.
+- [x] Default `PATH` to a minimal native tool set plus fixture stubs. Preserve
+      **Windows executable resolution** — `PATHEXT` and the console variables
+      must survive `env_clear`, or every Windows spawn silently fails to
+      resolve.
+- [x] Reject temporary roots inside the checkout, **including via symlink**:
+      canonicalize both the fixture root and the checkout root before the
+      containment comparison, and fail with a named error (mirror claudine's
+      `checkout_containment_error`). On macOS this also normalizes
+      `/tmp` → `/private/tmp`.
+- [x] Provide named escapes with call-site-readable intent — `host_path()`
+      (a real host tool is the subject), `fake_only_path()` (absence is the
+      assertion), `ambient_context(dir)` (inherited-context behavior is the
+      subject), `inherit_no_env()` — and require each use to carry a comment
+      naming the tool or proof it needs.
+- [x] Provide topology builders for the tests that need real structure:
+      disposable git repository init (repository-local identity only, no host
+      hooks or signing), nested-directory schema lookup, and relative-reference
+      layouts. **Copy shipped content byte-for-byte and preserve relative
+      reference relationships when isolation requires relocation** — do not
+      rewrite references to absolute paths, which would erase relative-
+      resolution coverage entirely.
+- [x] Keep `md_file()` and `baseline::*` working, or migrate their callers in
+      the same change; do not leave two competing temp-file conventions.
+- [x] Prove the fixture non-vacuous: write a fixture-level test that a hostile
+      inherited environment (`GIT_DIR` at a throwaway repo, relocated `HOME`,
+      `COLUMNS=44`, `FORCE_COLOR=1`, a poisoned `PATH`, and a checkout-ancestor
+      `TMPDIR`) leaves the fixture's observed defaults unchanged. Use
+      **disposable state only** — never edit the real checkout or the user's
+      configuration.
+- [x] Verify Windows behavior by compiling the Windows arms
+      (`cargo check -p darkmatter-cli --tests --target x86_64-pc-windows-gnu`)
+      where the mingw toolchain is present; otherwise name `windows-latest`
+      as the authority and record the check as **pending**. Prefer `cfg!(windows)`
+      over `#[cfg]` where both arms should compile everywhere.
+
+**Validation checkpoint 4** — Focused fixture and affected-consumer tests
+pass, including hostile-environment and Windows-resolution proof; shared
+helper size and override invariants hold. Run area L1 and lint once for the
+completed fixture batch and record their reusable results.
+
+**Phase 4 status (2026-09-08): checkpoint met.**
+`common/fixture.rs` (`CliProcessFixture` + `MdCommandBuilder`, both command
+surfaces sharing one `ChildEnvironment` policy) + `md_process_fixture.rs`
+(17 self-tests proving the contract *from outside* through a recording stub
+executed by `md compose`, including the named hostile-environment test,
+symlink containment, and both-surface drift). Notes for later phases: md has
+no env form of `--cache-root`, so the builder pins the `dirs::cache_dir()`
+fallback (`XDG_CACHE_HOME`/`LOCALAPPDATA`) at the fixture and cache tests
+pass the flag explicitly; md normalizes a missing `TERM` to `dumb` for its
+shell children, so probe-based TERM assertions check for `[dumb]`, not `[]`;
+the stdin-compose shell whitelist anchors at the launch directory (base-dir
+fallback), so probe fixtures seed `.darkmatter-shell-whitelist` at cwd and
+home. `just test` (area L1) 7,678 passed / 0 failed; `just lint` green;
+Windows arms compiled via `x86_64-pc-windows-gnu` (one real cross-platform
+fix: cfg-gated import); `.config/nextest.toml` untouched (the pre-existing
+main-diff there is the sibling claudine fix's removals, no darkmatter
+additions). Both new files registered in `lint-files` `ACCEPTED_OVERCAP`
+(the mechanism the area defines for reviewed single-responsibility
+exceptions). See `log.md` § Phase 4.
+
+---
+
+## Phase 5 — Structural protection against new bypasses (RB2)
+
+Depends on Phase 4. Lands with a **temporary, reasoned** migration exemption
+list that Phase 6 burns to zero.
+
+- [x] Add the smallest maintainable guard: a source-scanning test in
+      `darkmatter/cli/tests` that detects (a) `assert_cmd::Command::cargo_bin
+      ("md")` / `Command::cargo_bin("md")` outside the fixture, and (b) a
+      private `fn md_cmd()` redefinition. Model it on claudine's
+      `spawn_site_guard.rs`, not on a new mechanism.
+- [x] Add the isolation arm: a fixture-built command that is then handed
+      `.current_dir(...)`, `.env("PATH", …)`, `.env_remove("PATH")`, or
+      `.env_clear()` is an attempt to undo the defaults and is a violation
+      unless it goes through a named escape.
+- [x] Seed `SPAWN_ALLOWLIST` with the 38 files Phase 6 will migrate, each
+      entry carrying a reason string. Implement the **stale-entry** arm: an
+      allow-list entry for a file that no longer violates must **fail**, so the
+      list cannot rot.
+- [x] Write the two negative tests AC2/AC3 require — one raw-spawn violation
+      and one attempt to undo defaults — and prove both detectors non-vacuous:
+      apply a neuter, show the named failure, restore, and `diff` the file back
+      to identical. Transcribe the neuter/restore into the phase log.
+- [x] Add detector negatives so the guard does not fire on prose, string
+      literals, comments, or a legitimate `bin_exe!("dmls")` in another package.
+- [x] Decide and record the guard's scope for `dmls` and `zed-dmls-cli`: either
+      extend the same guard to those test directories or state in the inventory
+      why their spawn populations (1 and 6 sites) are governed differently.
+
+**Validation checkpoint 5** — The guard runs in L1, its census is reconciled,
+and focused tests reject raw spawns, isolation bypasses, and stale entries.
+Reuse Phase 4 fixture evidence where inputs are unchanged; guard-only changes
+do not require another full area run.
+
+**Phase 5 status (2026-09-08): checkpoint met.** `spawn_site_guard.rs` (18
+tests) on claudine's exact mechanics: three spawn forms (`cargo_bin("md")`,
+`md_cmd(…)` calls — which catch the seven private `fn md_cmd()` redefinitions
+on both their definition line and body — and preventive `bin_exe!("md")`),
+four isolation forms (claudine's fifth, `augmented_path`, has no darkmatter
+equivalent), `SPAWN_ALLOWLIST` seeded with all 38 files keyed by 6A/6B/6C
+batch reasons, one `ISOLATION_ALLOWLIST` entry (`md_process_fixture.rs`'s
+parent-side `git()` `.current_dir` sites). Census reconciled at **518 sites /
+38 files / 41 governed** (= the plan's 502 calls + 2 inline, decomposed per
+site), written to `md-`prefixed JSONL artifacts in the staging dir. All three
+named failures (raw spawn, stale entry, isolation escape) demonstrated live
+by neuter/restore cycles transcribed in `log.md` § Phase 5. Scope decision
+recorded in `inventory.md` § Guard scope: dmls' single live-child stdio site
+is Phase 8's; zed-dmls-cli's six sites are Phase 6D's and are unburnable
+under this guard until the `test_toolkit` promotion. Area L1 7,696 passed /
+0 failed (Phase 4's 7,678 + the guard's 18); `just lint` green; Windows arms
+compile-verified; `.config/nextest.toml` untouched.
+
+---
+
+## Phase 6 — Migration burn-down (RB2, AC2, AC3)
+
+Batches **6A, 6B, 6C are mutually parallelizable** — disjoint file sets, each
+deleting only its own allow-list entries. **6D is independent** and may run
+alongside. **6E is the closure gate** and runs last. Each batch ends with
+its affected tests green
+before the next merges; the guard's stale-entry arm catches a mis-merge.
+
+### Phase 6A — the seven private helpers plus the two orphan spawns (‖ 6B, 6C)
+
+The spec's named target. Highest risk of drift, so it goes first.
+
+- [x] Delete the private `fn md_cmd()` in `schema_validate.rs` (38 sites),
+      `code_block.rs` (32), `schema_about.rs` (17), `compose_schema.rs` (15),
+      `schema_triggers.rs` (14), `schema_detect.rs` (6),
+      `compose_schema_file_rewrite.rs` (2), routing every call through a
+      per-test `CliProcessFixture`.
+- [x] Migrate `schema_validate_baseline.rs`'s two inline
+      `assert_cmd::Command::cargo_bin("md")` spawns (`:74`, `:101`) — these are
+      **not** in the spec's evidence list and are otherwise easy to miss.
+- [x] Schema-lookup tests build their required directory topology inside the
+      fixture. Where a test relied on the runner's CWD to find a schema, make
+      that dependency explicit rather than deleting the case.
+- [x] Delete this batch's `SPAWN_ALLOWLIST` entries and confirm the stale-entry
+      arm would fire if one were left behind.
+
+### Phase 6B — clean / hash / frontmatter family (‖ 6A, 6C)
+
+- [x] Migrate `clean.rs` (48), `hash_kind_save_diff.rs` (32),
+      `get_set_rm.rs` (31), `clean_frontmatter.rs` (30),
+      `hash_directory.rs` (23), `hash.rs` (15), `clean_schema.rs` (11),
+      `clean_json.rs` (6), `rm.rs` (8), `delta.rs` (3), `toc.rs` (3).
+- [x] `hash_directory.rs` and `graph.rs` walk directories: give each a fixture
+      topology it owns, so the walked tree is the fixture's and not whatever
+      the runner's CWD happens to contain.
+- [x] Preserve the **repeated read/write/read** round trip for persisted values
+      (frontmatter set/rm, hash save) — the fixture relocation must not
+      collapse a round trip into a single write.
+- [x] Delete this batch's allow-list entries.
+
+### Phase 6C — compose / layout / render / graph family (‖ 6A, 6B)
+
+- [x] Migrate `layout_flags.rs` (29), `compose_state_set.rs` (26),
+      `render_basic.rs` (17), `graph.rs` (12), `compose_remote_caching.rs` (12),
+      `compose_base_schema.rs` (9), `validate_refs.rs` (8), `help.rs` (8),
+      `compose_shell.rs` (8), `compose_basic.rs` (8),
+      `layout_style_frontmatter.rs` (7), `compose_transclusion.rs` (7),
+      `compose_interpolation.rs` (7), `compose_refs_and_missing.rs` (5),
+      `layout_fill.rs` (4), `compose_terminal_detection.rs` (2),
+      `compose_perf.rs` (2), `compose_page_blocks.rs` (2),
+      `compose_layout.rs` (2).
+- [x] `compose_shell.rs` genuinely needs a shell: route it through
+      `host_path()` with a call-site comment, and keep its real shell-expansion
+      coverage. Do not stub the behavior under test.
+- [x] `compose_terminal_detection.rs` and the `layout_*` files assert rendering
+      **policy**: make their terminal capability inputs explicit fixture values
+      rather than inherited ones, which is also what makes them stop depending
+      on the operator's terminal.
+- [x] `compose_refs_and_missing.rs`, `validate_refs.rs`, and `graph.rs` cover
+      relative-reference and source-context behavior: build disposable
+      repositories inside the fixture and **keep the references relative**
+      (AC3's named requirement).
+- [x] `compose_remote_caching.rs` migrates its `md` spawns here; its HTTP
+      fixture is Phase 8's work — do not entangle the two commits.
+- [x] Delete this batch's allow-list entries.
+
+### Phase 6D — `zed-dmls-cli` disposition (‖ 6A–6C)
+
+- [x] Evaluate the 6 `Command::cargo_bin("zed-dmls")` sites against the fixture
+      contract. They already isolate staging/data/log directories into a
+      per-test `TempDir` and two of them null out `PATH`; what they do **not**
+      control is CWD and home.
+- [x] Either migrate them to a `zed-dmls`-flavored fixture, or record a
+      **specifically justified disposition** in `inventory.md` naming exactly
+      which contract inputs are already explicit, which are not, and why the
+      residual exposure is acceptable. A generic "already uses TempDir" is not
+      a justification.
+- [x] Whichever route is taken, add the missing CWD/home control or state in
+      writing that the commands provably ignore both.
+
+### Phase 6E — burn-down closure (depends on 6A–6D)
+
+- [x] Assert `SPAWN_ALLOWLIST` contains **zero generic migration exemptions**
+      (AC2). Any survivor carries a specific technical necessity **and** an
+      equivalent isolation proof, written at the entry.
+- [x] Confirm the guard's governed population now covers every migrated file
+      and that its census matches the Phase 5 count minus the migrations.
+- [x] Add the contamination probes AC3 requires, using **disposable state
+      only**: hostile inherited CWD; relocated home/config/cache; `GIT_DIR` /
+      `GIT_WORK_TREE` pointed at a throwaway repo; poisoned `PATH`; inherited
+      rendering inputs (`COLUMNS=44`, `FORCE_COLOR=1`, `NO_COLOR=1`);
+      darkmatter application variables; and a checkout-ancestor `TMPDIR`. Each
+      probe must leave unrelated test results **unchanged**.
+- [x] Reconcile the test count: report additions and removals **separately**,
+      never netted, so a lost test cannot read as an optimization.
+
+**Validation checkpoint 6** — All migrated binaries and contamination probes
+pass; zero generic exemptions remain and coverage changes reconcile. Run one
+combined area L1/lint checkpoint after the migration batches and affected L2
+coverage for shared-helper changes. Reuse applicable batch results.
+
+**Phase 6 status (2026-09-08): checkpoint met.** All 518 guarded raw spawn
+sites migrated to per-test fixtures; the closure census is 0 raw sites across
+41 scanned L1 files and the shared `md_cmd()` helper is deleted. Phase 6A
+passed 118/118 focused tests, 6B passed 202/202 (220/220 with the guard), 6C
+passed 194/194, and 6D passed 6/6. Test identities changed by exactly 0 added
+and 0 removed. The combined gates passed: `just test` 7,696/7,696 (50
+tier-filtered skips), `just lint`, and `just test-l2` (18/18 library, 69/69
+CLI, 3/3 DMLS). See `log.md` § Phase 6.
+
+---
+
+## Phase 7 — Composition boundary and passive-path proof (RB3, AC5) ‖ with Phase 6
+
+Library-side. Mostly disjoint from Phase 6's files; serialize only where both
+touch the same binary.
+
+- [x] Audit the library test consumers of `ComposeContext::capture()` —
+      `shell_block_integration.rs`, `reference_integration.rs`,
+      `ambient_ctx_capture.rs`, `expression_regression.rs`,
+      `git_context_integration.rs` — plus the embedded-test capture sites in
+      `compose/context/`, `compose/tests/`, `compose/cache/hashing.rs`, and
+      `reference/file_tree/`.
+- [x] Supply explicit test context through the existing `ComposeOptions` request
+      API wherever discovery is **incidental**. Never recapture CWD or
+      repository state downstream — that is a standing area boundary, not a
+      test convenience.
+- [x] **Verify and record, do not rewrite**, `ambient_ctx_capture.rs`: its
+      module doc already documents a purpose-built fixture repository chosen for
+      exactly this reason. Re-remediating it is the assume-then-falsify pattern
+      the spec warns against.
+- [x] **Retain** representative end-to-end tests for context capture,
+      lazy demand-driven capture (only referenced `ctx.*` groups observed),
+      source provenance, and CLI-to-library wiring. Name each retained test in
+      the inventory so a later reader can see the coverage was deliberate.
+- [x] Retain real composition wherever shell expansion, transclusion,
+      interpolation, hashing, or persisted state **is** the behavior under test.
+- [x] Prove passive paths are effect-free with **counters, not speed**: use the
+      library's `effects-instrumentation` feature to assert schema validation,
+      trigger matching, completion, and hover construct no `EffectEngine` and
+      attempt no network access. Cover the DMLS side via
+      `dmls/tests/no_side_effects.rs` and extend it where the inventory found
+      an unguarded passive path. A fast result is not proof of absence of I/O.
+- [x] Extend the shared passive shipped-artifact corpus coverage rather than
+      adding another full-corpus scan. Where Phase 3 justified consolidating
+      repeated corpus work (`meta_schema_*`, `schemas_*_table`,
+      `example-docs` consumers), keep one shared passive corpus test that is
+      *extended* per regression, plus representative normal-invocation tests
+      through the real shipped artifacts.
+- [x] Where an exhaustive representation matrix can prove the same contract at a
+      cheaper API boundary, move it — and record the replacement coverage and
+      the additional failure the replacement still detects.
+- [x] Repair tautological or stale assertions in **separately reviewable
+      commits**. For each: the original failing input where one exists, the
+      defect the old assertion could not distinguish, and what the replacement
+      now detects.
+
+  Phase 7 found one skip-as-pass assertion defect: the exact real-Mermaid input
+  could pass after producing no SVG. Its isolated test hunk now records a
+  missing `mmdc` through the shared gate and fails when an installed toolchain
+  produces no SVG. No assertion bodies changed in the 44 routing-only renames.
+  Two stale comments misattached to the shared PNG fixture/helper were removed
+  in the isolated support-module hunk. Per the session instruction, these
+  separately reviewable changes remain uncommitted.
+
+**Validation checkpoint 7** — Changed library tests pass with passive-path
+counters or sentinels, named shipped-artifact coverage, and replacement proof
+for changed assertions. Run affected doctests if their inputs changed; combine
+the broad L1/lint checkpoint with Phase 8 when practical.
+
+---
+
+## Phase 8 — Resource ownership: network, process, protocol, rendering (RB4, AC4) ‖ with Phase 7
+
+- [x] Rewrite `mock_http_server` (`cli/tests/common/mod.rs:42-83`) to **own its
+      worker**: retain the `JoinHandle`, bind a local ephemeral endpoint, bound
+      request handling, and expose explicit shutdown. Implement `Drop` (or an
+      explicit close) so that **failure before the expected request count does
+      not strand the accept loop**.
+- [x] Give the server a documented termination bound and prove it: a test that
+      never issues the expected request must still tear the server down within
+      that bound. A detached worker is not accepted as normal cleanup.
+- [x] Keep and extend the request-count/content verification in
+      `compose_remote_caching.rs` (8 servers), preserving coverage of remote
+      consent (`--allow-host`), cache freshness, refresh, TTL, and error
+      behavior — all without public-network access.
+- [x] Replace the fixed 200 ms deadline poll in
+      `dmls/tests/level2_editor_neovim.rs:377` with synchronization on the
+      **final asserted condition**, with a deadline. Same for the 20 ms poll in
+      `dmls/tests/stdio_subprocess.rs:141`.
+- [x] Make DMLS protocol tests synchronize on **protocol responses** rather than
+      arbitrary sleeps, and isolate their workspace and cache state per test —
+      `lsp_session.rs` is 5,530 lines and is the main beneficiary.
+- [x] Give `dmls/tests/stdio_subprocess.rs`'s raw `bin_exe!("dmls")` child
+      bounded cleanup on success, failure, **and cancellation**; no orphan
+      child on a panicking assertion.
+- [x] Audit the L2 sleep sites — `cli/tests/common/level2.rs:179,285,410`,
+      `cli/tests/level2_errors.rs:42,58`,
+      `cli/tests/level2_schema_about.rs:38,63`,
+      `lib/tests/level2_render_tree_terminal/support/mod.rs:48` — and convert
+      each readiness sleep into bounded observation of the final asserted
+      condition. Retain any sleep that **is** the timeout contract and justify
+      its budget, polling cadence, and shutdown margin in the inventory row.
+- [x] Audit the L3 sleeps (`lib/tests/level3_popover.rs` ×6,
+      `lib/tests/level3_image_painting.rs:108`) the same way. L3 stays opt-in;
+      where the harness is unavailable, record the evidence as **pending**.
+- [x] Rendering policy tests use explicit terminal capabilities or document
+      models where sufficient; **keep** real-terminal tests for terminal
+      behavior and headless browser tests for computed layout and style.
+- [x] Verify **no terminal or browser window gains focus** in any tier touched,
+      and that browser tests remain headless with no host input injection.
+- [x] Prove cleanup empirically, not by inspection: run the affected tiers under
+      nextest's leak detection and confirm no survivors. Treat a spurious
+      LEAK-FAIL as the known nextest artifact it is and say so rather than
+      papering over it.
+
+**Validation checkpoint 8** — Affected HTTP, protocol, process, and rendering
+tests pass, including teardown when expected interaction never occurs. Run
+affected L2/browser coverage through canonical recipes, recording unavailable
+harnesses as pending. Verify no surviving workers/children or focus changes;
+reuse the combined Phase 7/8 L1/lint result.
+
+---
+
+## Phase 9 — Local measurement (RB5, first evidence tranche)
+
+Requires Phases 4–8 implemented with applicable checks passing; diagnosed
+unrelated environment failures remain explicitly pending.
+
+- [x] Warm the preserved baseline and candidate artifacts, then collect
+      **five alternating warm runs per revision** of each required full L1
+      population. Extract changed-cohort identities, counts, and summed test
+      durations from those same reports; do not also run every cohort in
+      isolation. A cohort's summed duration is not its isolated wall time.
+      Run a separate cohort experiment only when selection, resource needs,
+      or an explicit latency claim cannot be represented by the suite runs.
+      Record source state, toolchain, features, profile, platform, concurrency,
+      fixture inputs, cache state, and commands. Keep revision-specific build
+      directories warm and prevent concurrent edits or competing workloads
+      during measurement. Reuse earlier samples only if their provenance and
+      alternating sequence match this protocol.
+- [x] Record for every run: revision, dirty state, platform, cache state,
+      environment, exact commands, test identities, failures, and skips.
+- [x] Keep the **local-default** and **CI-selected** (`BISCUIT_L1_INCLUDE_SLOW=1`)
+      cohorts as separate populations end to end; never compare one against the
+      other.
+- [x] Measure any cold-build claim in an **isolated build directory** — never by
+      clearing the developer's working cache.
+- [x] Execute each **changed** timeout, readiness, or concurrency
+      contract ten times under representative suite load. Count compatible
+      candidate measurement runs toward those ten executions and run only the
+      remaining repetitions with a fixed representative load cohort. Record
+      the target set, spread, failures, and leak results. Do not repeat
+      unchanged tests separately merely because their file was migrated.
+- [x] Prove eliminated discovery, composition, effects, and HTTP requests with
+      **work counters or sentinel effects**, independent of timing. A timing
+      improvement is not evidence that a walk was removed.
+- [x] Keep build/setup, runner elapsed, and summed test duration separate in
+      every table, alongside identities, counts, failures, skips, timeouts,
+      retries, and slow cases.
+- [x] Record local numbers as **attribution only**. They establish no CI target
+      (Phase 3's budgets do).
+
+**Validation checkpoint 9** — five alternating runs per revision cover both full L1
+populations and their changed cohorts through shared reports; ten executions
+cover each changed timing/concurrency contract; each eliminated-work claim has a counter or sentinel behind it; both
+cohorts are reported separately.
+
+**Phase 9 status (2026-09-08): checkpoint met locally.** The accepted
+`measurement/report.md` gate exits 0: five alternating baseline/candidate runs
+for each separate L1 population, stable identities, zero failures/timeouts/
+leaks/retries, and at least ten candidate executions per available changed
+timing contract. Ten canonical L2 repetitions passed; L3 remains pending under
+the unattended focus gate. `measurement/work-evidence.md` carries the counter
+and sentinel mapping. Local results are attribution only; no cold-build or CI
+target is claimed. One loaded HTTP fixture race discovered during warm-up was
+fixed and its failed sample retained. See `log.md` § Phase 9.
+
+---
+
+## Phase 10 — CI evidence (RB5, second tranche; AC6)
+
+Operator-gated: push and read. No implementing agent commits or pushes.
+
+Use the configured package/environment matrix captured in Phase 1; do
+not assume every package runs on every host.
+
+- [x] Complete one consolidated validation of the affected scope before
+      push handoff. Inspect the actual recipe expansion: if `just ci-local`
+      already includes lint, run it once without a preceding
+      `just ci-local --lint-only`. Credit equivalent current-state checks in
+      the validation ledger only where the workflow supports that reuse;
+      otherwise run the required gate once. Record scope, features, and any
+      checks still missing. This step does not authorize a commit or push.
+- [x] Compile-verify the Windows arms where the mingw toolchain is present;
+      state the limitation explicitly where it is not.
+- [x] Open or hand off the PR once implementation and applicable local
+      checks are ready; do not wait for repeated performance CI samples.
+      Use the first candidate run on every configured package/environment leg
+      for cross-platform correctness review, then accumulate **three
+      consecutive green candidate runs per leg** for final performance
+      verification. Reuse qualifying normal CI runs; request extra runs only
+      for missing samples. Keep source state, workflow definition, runner
+      image, and features comparable, and record every intervening failure.
+      Baseline gaps and missing samples remain pending; PR readiness does not
+      imply merge readiness or completion of the performance criteria.
+- [ ] Compare **matched identities within each environment** against that
+      environment's own Phase 1 baseline. Show added, removed, and gated tests
+      **separately**; do not require identical cross-platform counts.
+- [ ] Run the Phase 1 reconciler as the gate over both baseline and candidate
+      sets; it must fail on malformed reports, missing artifacts or tests,
+      duplicate identities, invalid durations, and failed runs.
+- [ ] Compare against Phase 3's ratified budgets. **Report misses and their
+      causes**; do not invent a universal speedup percentage and do not close a
+      miss by adjusting the budget after the fact.
+- [x] Confirm CI slow-test and feature coverage is **unchanged**:
+      `BISCUIT_L1_INCLUDE_SLOW=1` still selects the same population, the
+      `terminal-tests` / `browser-tests` features are still enabled where
+      declared, and `just zed-verify` still runs. Coverage may not be reduced to
+      improve timing.
+- [x] Run the affected L2/L3/browser tiers through their canonical recipes only
+      where the resources exist. Record unavailable runtime evidence as
+      **pending**, never as passing.
+- [ ] Re-confirm `git diff main -- .config/nextest.toml` is empty.
+
+**Validation checkpoint 10 (final performance evidence; not PR opening)**
+
+three consecutive green runs exist per configured
+leg, with intervening failures disclosed; every budget is met or its miss is
+explained; no override, retry, timeout increase, tier change, or disabled
+assertion was used to reach a number.
+
+---
+
+## Phase 11 — Closure: `results.md`, follow-up, drift, acceptance sweep
+
+- [ ] Write `results.md` in this fix directory with: ratified budgets and the
+      comparable timing and work-count evidence (three costs separate, per leg,
+      per cohort); coverage changes (tests added, removed, moved boundary, and
+      the replacement proof for each changed assertion); failures and skips;
+      residual findings; and **separate** implementation / verified-locally /
+      verified-on-CI completion claims.
+      **Pending:** the report exists and contains every locally available
+      section, but ratification requires two more compatible baseline samples
+      and three candidate CI samples per configured leg.
+- [x] Give every deferred finding evidence, a reason, and a linked owner
+      document. **Generic fixture migration may not be deferred** (AC2).
+- [x] File the tracked follow-up the spec's Open Questions require: a
+      `darkmatter/features/_unscheduled/` (or `.claude`-appropriate) spec to
+      promote the stabilized fixture core into `test_toolkit`, with claudine as
+      the second consumer and a named owner. Without an owner, the third design
+      decays into the first.
+- [x] Update the `darkmatter` and `rust-testing` skills plus area READMEs
+      **only where the fixture or test workflow actually changed**. Verify
+      Phase 1's shared-tool guidance remains accurate; update only subsequent
+      changes instead of rewriting that documentation
+      (`CLAUDE.md` § Drift Maintenance). Where a comment or doc now contradicts
+      the code, the code is correct — fix or delete the comment and say so.
+- [x] Confirm no production API changed. If one did, verify downstream
+      consumers by impact analysis (Claudine consumes darkmatter), **not** by a
+      workspace-wide default test run.
+- [x] Sweep the acceptance criteria using one compact status-and-evidence table:
+  - [x] **AC1** — every test/family, including extension and higher-tier
+        surfaces, has an explicit disposition and execution route; no
+        timing-based exclusions (reconciler output attached).
+  - [x] **AC2** — all deterministic CLI spawns use the fixture contract or a
+        specifically justified equivalent; no generic migration exemptions
+        remain; negative guard tests and stale-entry failure are present.
+  - [x] **AC3** — hostile inherited CWD/home/cache/Git/rendering/application
+        inputs do not affect unrelated tests; relative-reference and
+        source-context behavior remain covered using disposable repositories.
+  - [x] **AC4** — HTTP/process/protocol fixtures terminate within documented
+        bounds when the expected interaction never occurs; no detached worker
+        or child is accepted as cleanup.
+  - [x] **AC5** — passive paths are provably effect-free, shipped-artifact
+        coverage is present, and every assertion/population change has a
+        replacement proof.
+  - [x] **AC6** — `just test` and `just lint` pass; changed terminal and browser
+        helpers verified through `just test-l2` and `just test-browser`; L3
+        remains opt-in with unavailable evidence recorded; CI slow-test and
+        feature coverage unreduced.
+  - [ ] **AC7** — `results.md` complete, with ratified budgets, comparable
+        evidence, failures/skips, and the three separate status claims; no
+        retry or timeout-limit increase used as a performance fix.
+  - [x] **AC8** — area skills/READMEs describe the changed fixture and test
+        workflow; downstream verification, if needed, was by impact.
+- [x] Reconcile the final gate ledger instead of restarting all gates.
+      Credit passing checks from implementation, measurement, and pre-push
+      validation when their relevant source state and environment are still
+      applicable. Run only missing or invalidated checks. If a full-suite
+      run already covers a package subset with the required features, do not
+      repeat that subset just to obtain a second green command. Record known
+      environment failures as pending with links; do not retry them without
+      a relevant change.
+- [x] Prepare `results.md` and the acceptance review while CI runs. Record
+      each criterion as verified, pending, or an explicitly permitted
+      deferral, with an evidence link; keep the detailed record in its owning
+      document. Final closure still requires the specified measurement samples
+      and applicable acceptance evidence. Pending evidence does not prevent
+      PR review, but it does prevent claiming that verification is complete.
+- [ ] Required final coverage: `just lint`, `just doctest`, `just test`,
+      applicable `just test-l2` and `just test-browser`, and the Zed checks.
+      Credit `just check-zed` when already executed by `just lint`; retain
+      `just zed-verify`'s distinct CI coverage. Credit sanity correctness
+      when its selection is covered by L1; any sanity latency claim requires
+      timing the actual sanity recipe. Do not run `just all` on top of its
+      already verified constituent gates.
+      **Pending:** all available local gates are credited in `log.md`; L3 is
+      unavailable by focus policy and candidate `just zed-verify` remains CI
+      evidence that cannot exist before a commit and push.
+
+**Validation checkpoint 11** — all eight acceptance criteria are answered with
+evidence or an explicitly linked deferral; `results.md` keeps the three
+completion claims separate; the `test_toolkit` promotion follow-up exists with
+an owner; no gate was weakened to close a criterion.
+
+---
+
+## Parallelism map
+
+| Can run concurrently | Why it is safe |
+|---|---|
+| Phase 2 ‖ Phase 1's CI window | Phase 2 is document-only; it lands no code, so it cannot contaminate the attribution window. |
+| Phase 6A ‖ 6B ‖ 6C ‖ 6D | Disjoint file sets; each batch deletes only its own allow-list entries, and the guard's stale-entry arm catches a mis-merge. |
+| Phase 7 ‖ Phase 8 | Different concerns (composition boundary vs. resource ownership) and largely different files. |
+| Phase 7/8 ‖ Phase 6 | Library and dmls files vs. CLI test binaries. Serialize only where both touch `cli/tests/common/`. |
+
+**Strictly serial**: Phase 1 → Phase 4 (preserve the baseline source state and initial
+local evidence before editing; CI sampling may continue); Phase 4 → Phase 5 → Phase 6 (the fixture must exist before the guard
+can sanction it, and the guard before the burn-down can be proven complete);
+Phases 6–8 → Phase 9 → Phase 10 → Phase 11 (evidence follows the change it
+measures).
+
+PR preparation and closure-document drafting may overlap CI sampling. The
+sequence below governs final performance verification and archive readiness,
+not permission to open a PR with pending evidence.
+
+## Dependency order (summary)
+
+```text
+1 ──┬─→ 4 ─→ 5 ─→ 6A ─┐
+    │           6B ─┤
+    │           6C ─┼→ 6E ─┬→ 9 ─→ 10 ─→ 11
+    │           6D ─┘      │
+    └─→ 2 ─→ 3 ────────────┴→ 7 ‖ 8 ──┘
+```
+
+## Out of scope (guard rails)
+
+Named so a phase does not quietly widen. Anything here that turns out to be
+necessary becomes a linked follow-up, not an in-flight expansion:
+
+- production composition changes, expression-semantics or cache-freshness
+  changes, rendering redesign, editor feature development, and global CI
+  infrastructure changes (spec § Evidence and scope);
+- promoting the fixture into `test_toolkit` inside this fix, or migrating
+  claudine as part of it — that is the tracked follow-up, filed in Phase 11;
+- adding any nextest override, retry, tier change, timeout increase, or
+  disabled assertion as a substitute for a fix — darkmatter owns zero overrides
+  today and must own zero at the end;
+- weakening the spawn or isolation detector, or dropping the stale-entry
+  failure, to resolve a false positive — the sanctioned resolution is an
+  allow-list entry naming the command the site targets;
+- rewriting `ambient_ctx_capture.rs`, whose fixture-repository remediation
+  already landed for exactly this reason;
+- reducing CI slow-test or feature coverage, moving tests to a slower tier, or
+  narrowing a population to improve a timing number;
+- fixing a production defect found during attribution in place of filing it.

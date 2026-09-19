@@ -124,6 +124,7 @@ pub(super) fn run_sequence_steps(
 
     let mut interrupt_observed = false;
     for step_index in 0..total_steps {
+        crate::budget::enter_stage(&run.plan.steps[step_index].name);
         if run.interrupted.load(Ordering::SeqCst) {
             interrupt_observed = true;
             if let Some(acc) = perf_accumulator.as_mut() {
@@ -167,6 +168,7 @@ pub(super) fn run_sequence_steps(
         let start = std::time::Instant::now();
         let outcome = run_one_step(run, step_index, &runtime_state);
         let duration = start.elapsed();
+        let interrupted_step = matches!(outcome, StepOutcome::Interrupted { .. });
 
         let (success, error, error_snapshot, provider, agent_perf, compose_perf, tasks) =
             match outcome {
@@ -197,7 +199,11 @@ pub(super) fn run_sequence_steps(
                 tasks,
             } => (
                 false,
-                Some("interrupted by SIGINT".to_string()),
+                Some(if crate::budget::stopped_by_exhaustion() {
+                    "stopped: execution budget exhausted".to_string()
+                } else {
+                    "interrupted by SIGINT".to_string()
+                }),
                 None,
                 None,
                 agent_perf,
@@ -205,7 +211,6 @@ pub(super) fn run_sequence_steps(
                 tasks,
             ),
         };
-        let interrupted_step = error.as_deref() == Some("interrupted by SIGINT");
 
         if let Some(acc) = perf_accumulator.as_mut() {
             acc.add_step(crate::perf::SequenceStepPerf {

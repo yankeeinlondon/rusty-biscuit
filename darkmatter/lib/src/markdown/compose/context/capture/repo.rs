@@ -190,7 +190,7 @@ pub(super) fn populate_monorepo_area(cap: &ContextCapture, values: &mut Map<Stri
 /// Each scoped package becomes `{ package: <name>, <list_field>: [<edges>] }`.
 /// `list_field` is `dependencies` for `depends_on` and `users` for `used_by`,
 /// matching the base schema's documented object shape. Rendering (nested bullets
-/// via `as_unordered_list`, line-separated by default) is the caller's choice;
+/// via `as_unordered_list`, compact JSON by default) is the caller's choice;
 /// the composed verb wording of the old pre-rendered form is dropped (spec).
 fn render_dependency_objects(
     scope: &[&Package],
@@ -230,8 +230,9 @@ mod tests {
 
     #[test]
     fn repo_root_has_no_trailing_slash() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let (values, _, _, _) = capture_runtime_context_for_groups(root, &[ContextGroup::Repo]);
+        let root = biscuit_test_harness::manifest_dir!();
+        let (values, _, _, _) =
+            capture_runtime_context_for_groups(&root, &[ContextGroup::Repo]);
         if let Some(Value::String(rr)) = values.get("repo_root") {
             assert!(
                 !rr.ends_with('/'),

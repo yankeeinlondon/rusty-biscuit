@@ -323,13 +323,14 @@ impl WezTermHarness {
     }
 
     /// Returns a unique window title we stamp on the spawned WezTerm
-    /// window so System Events can target it precisely. Includes the
-    /// pane id (already unique within a WezTerm instance) so concurrent
-    /// runs of the same harness don't collide.
+    /// window so System Events can target it precisely. Carries the owning
+    /// process id (see [`super::owner_process_id`]) and the pane id (already
+    /// unique within a WezTerm instance) so concurrent runs of the same
+    /// harness don't collide.
     fn unique_window_title(&self) -> String {
         format!(
             "{PANE_TITLE_PREFIX}{}-{}",
-            current_process_id(),
+            super::owner_process_id(),
             self.pane_id()
         )
     }
@@ -691,7 +692,9 @@ impl TerminalHarness for WezTermHarness {
     /// The cargo target directory containing `bt` and `question` is
     /// prepended to `PATH` so CLI binaries resolve without an absolute
     /// path. Color-forcing env vars are applied so SGR output in
-    /// captures is deterministic.
+    /// captures is deterministic. The interactive shell the harness
+    /// drives runs with its rc files suppressed — see
+    /// [`configure_login_shell`](super::configure_login_shell).
     fn spawn_shell(&mut self) -> io::Result<()> {
         if !Self::available() {
             return Err(io::Error::other("WezTerm not available"));

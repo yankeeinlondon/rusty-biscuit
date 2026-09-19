@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import io
 import json
 import os
 import subprocess
@@ -11,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from reuse_validation import check_validation, find_validation, main, record_receipt
+from reuse_validation import check_validation, find_validation, main, nightly_base, record_receipt
 
 REPO = "owner/repo"
 BASE, HEAD, MERGE, TREE = (c * 40 for c in "abcd")
@@ -147,17 +148,20 @@ class ValidationTests(unittest.TestCase):
 
 
 class ReceiptTests(unittest.TestCase):
-    def test_receipt_records_checkout_tree_instead_of_pr_head(self) -> None:
-        with patch("reuse_validation.git_revision", side_effect=[MERGE, BASE, HEAD, TREE]):
-            self.assertEqual(record_receipt({"pull_request": PR}, MERGE), RECEIPT)
+    def test_receipt_records_the_tree_of_the_pr_head_checkout(self) -> None:
+        with patch("reuse_validation.git_revision", side_effect=[HEAD, TREE]):
+            self.assertEqual(record_receipt({"pull_request": PR}), RECEIPT)
 
-    def test_receipt_rejects_overridden_checkout_or_wrong_merge_parents(self) -> None:
-        for revisions in ([HEAD], [MERGE, HEAD], [MERGE, BASE, BASE]):
-            with self.subTest(revisions=revisions), patch(
-                "reuse_validation.git_revision", side_effect=revisions
+    def test_receipt_rejects_a_checkout_that_is_not_the_pr_head(self) -> None:
+        # GitHub's synthetic merge is what `pull_request` checks out by default;
+        # `ci.yml` overrides that with the head, and a receipt from any other
+        # revision would name a tree this run did not test.
+        for checkout in (MERGE, BASE):
+            with self.subTest(checkout=checkout), patch(
+                "reuse_validation.git_revision", return_value=checkout
             ):
                 with self.assertRaises(ValueError):
-                    record_receipt({"pull_request": PR}, MERGE)
+                    record_receipt({"pull_request": PR})
 
     def test_check_writes_reuse_output_and_original_run_link(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -178,6 +182,78 @@ class ReceiptTests(unittest.TestCase):
             self.assertEqual(output.read_text(encoding="utf-8"), "reuse=true\nrun_id=295\n")
             self.assertIn("https://github.com/owner/repo/actions/runs/295",
                           summary.read_text(encoding="utf-8"))
+
+
+class NightlyBaseTests(unittest.TestCase):
+    """The nightly plans the diff since the last successful nightly on main
+    (fixes/2026-09-19-nightly-scope); with none, the full workspace."""
+
+    OLDER, NEWER, FOREIGN = ("1" * 40, "2" * 40, "3" * 40)
+
+    def run_record(self, run_id: int, sha: str, **overrides) -> dict:
+        return {
+            "id": run_id, "event": "schedule", "path": ".github/workflows/ci.yml",
+            "head_sha": sha, "status": "completed", "conclusion": "success",
+            "repository": {"full_name": REPO}, **overrides,
+        }
+
+    def base(self, runs: list[dict], ancestors: set[str] | None = None) -> tuple[str, str]:
+        api = Mock(return_value={"workflow_runs": runs})
+        ancestors = {self.OLDER, self.NEWER} if ancestors is None else ancestors
+        sha, reason = nightly_base(REPO, api, lambda sha: sha in ancestors)
+        endpoint = api.call_args.args[0]
+        self.assertIn("event=schedule", endpoint)
+        self.assertIn("branch=main", endpoint)
+        return sha, reason
+
+    def test_the_newest_successful_ancestor_nightly_is_the_base(self) -> None:
+        sha, reason = self.base([self.run_record(10, self.OLDER), self.run_record(11, self.NEWER)])
+        self.assertEqual(self.NEWER, sha)
+        self.assertIn("run 11", reason)
+
+    def test_a_failed_or_incomplete_nightly_is_never_the_base(self) -> None:
+        runs = [
+            self.run_record(10, self.OLDER),
+            self.run_record(11, self.NEWER, conclusion="failure"),
+            self.run_record(12, self.NEWER, status="in_progress", conclusion=None),
+        ]
+        self.assertEqual(self.OLDER, self.base(runs)[0])
+
+    def test_a_nightly_this_head_does_not_descend_from_is_skipped(self) -> None:
+        # A history rewrite, or a run on a head since dropped: diffing from it
+        # would describe changes this head never made.
+        runs = [self.run_record(10, self.OLDER), self.run_record(11, self.FOREIGN)]
+        self.assertEqual(self.OLDER, self.base(runs)[0])
+
+    def test_another_workflow_repository_or_event_is_not_a_nightly(self) -> None:
+        runs = [
+            self.run_record(10, self.OLDER, path=".github/workflows/fuzz-nightly.yml"),
+            self.run_record(11, self.OLDER, event="workflow_dispatch"),
+            self.run_record(12, self.OLDER, repository={"full_name": "other/repo"}),
+        ]
+        sha, reason = self.base(runs)
+        self.assertEqual("", sha)
+        self.assertIn("full workspace", reason)
+
+    def test_no_nightly_at_all_plans_the_full_workspace(self) -> None:
+        self.assertEqual("", self.base([])[0])
+
+    def test_the_command_prints_the_base_and_survives_api_failure(self) -> None:
+        env = {"GITHUB_REPOSITORY": REPO}
+        with patch.dict(os.environ, env), patch(
+            "reuse_validation.nightly_base", return_value=(self.NEWER, "why")
+        ), patch("sys.argv", ["reuse_validation.py", "nightly-base"]), patch(
+            "sys.stdout", new_callable=io.StringIO
+        ) as out:
+            main()
+        self.assertEqual(self.NEWER + "\n", out.getvalue())
+        with patch.dict(os.environ, env), patch(
+            "reuse_validation.nightly_base", side_effect=RuntimeError("rate limited")
+        ), patch("sys.argv", ["reuse_validation.py", "nightly-base"]), patch(
+            "sys.stdout", new_callable=io.StringIO
+        ) as out:
+            main()
+        self.assertEqual("\n", out.getvalue())
 
 
 if __name__ == "__main__":

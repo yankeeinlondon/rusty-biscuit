@@ -17,8 +17,10 @@
 # package with unchanged direct reverse dependencies (compiled inside that
 # cell; Open Question 1, Option B), and this recipe executes neither, so an
 # examples-only compile break or a broken unchanged consumer surfaces in CI
-# rather than pre-push. Widening the condition would add a compile pass to
-# every push, which is a cost decision, not a drift fix.
+# rather than pre-push. On this host's own OS the package's passing L1 receipt
+# satisfies the check cell, so such a break surfaces only on the other OSes.
+# Widening the condition would add a compile pass to every push, which is a
+# cost decision, not a drift fix.
 #
 # The lint gate deliberately builds without features: that is CI's invocation,
 # and it is where incomplete `terminal-tests`/`daemon-tests`-style gating
@@ -85,6 +87,17 @@
 # try to overwrite one and fail before any test runs. `BISCUIT_CI_TARGET_DIR`
 # may relocate the reserved directory, but it must remain exclusive to
 # unwrapped local-CI runs.
+#
+# That one reserved directory is also this recipe's answer to CI's producer:
+# every tier it runs is a child of this process and shares that target tree, so
+# the compile CI performs once in `ci-build produce` happens here once too,
+# without serializing an archive. Nothing would consume one — there is no second
+# machine and no second path. What the run still owes a reader is the planned
+# BUILD KEY of the cells it is about to run, printed below, because that key is
+# the only thing by which a local result and a CI result can be said to have
+# compiled the same program. The separated case — another host, another
+# checkout — is `just cross-check`, which uses the same `ci-build` producer,
+# manifest, verifier, and archive-mode tier recipes CI uses.
 #
 # Usage:
 #   just ci-local                       affected packages vs origin/main
@@ -289,14 +302,29 @@ ci-local *args="":
         # compiles on demand: a pre-trigger review must not start a build.
         # Without the prebuilt binary the same cells render as plain lines.
         echo "Constraint store: ${constraints_dir}"
-        plan_bin="${BISCUIT_CI_PLAN_BIN:-scripts/target/release/ci-plan}"
+        plan_bin="${BISCUIT_CI_PLAN_BIN:-target/release/ci-plan}"
         if [[ -x "${plan_bin}" ]] && "${plan_bin}" "${plan_view}"; then
             :
         else
+            # The same change inventory the renderer and `ci-reporting` show,
+            # read from the same plan field so the three cannot disagree about
+            # what changed (spec section 7).
+            echo
+            jq -r '.change_inventory as $i
+                | if ($i.diff_available // false) | not then
+                    "Change inventory: no diff was consulted — \($i.reason // "the plan recorded no reason")"
+                  else
+                    "Change inventory: \($i.counts.total // 0) changed path(s)",
+                    ($i.paths // {} | to_entries[] | select(.value | length > 0)
+                      | "  \(.key) (\(.value | length)) — \(.value | join(", "))")
+                  end' "${plan_view}"
             echo
             echo "Resolved plan (cell / execution / origin / state)"
             echo "------------------------------------------------"
             jq -r '.cells[] | "  \(.package)/\(.environment)/\(.gate)  \(.execution)  \(.origin)  \(.state)  — \(.selection_reason)"' "${plan_view}"
+            if [[ "$(jq -r '.cells | length' "${plan_view}")" == "0" ]]; then
+                echo "  No package test is required: the resolved plan schedules no package cell."
+            fi
             if [[ "$(jq -r '(.evidence_rejections // []) | length' "${plan_view}")" != "0" ]]; then
                 echo
                 echo "Rejected evidence"
@@ -317,6 +345,14 @@ ci-local *args="":
     fi
 
     echo "CI scope: ${count} package(s) (class=${change_class}, full_scope=${full_scope}${full_gates:+ for ${full_gates}})"
+    # An affirmative scheduling decision, never a warning: the change reached no
+    # gating package, so the run names what it did change and says the gates it
+    # is not running are the ones nothing required (spec section 7).
+    if (( count == 0 )) && [[ -s "${plan_view}" ]]; then
+        jq -r '(.change_inventory.paths // {}) | to_entries[] | select(.value | length > 0)
+            | "Changed  : \(.key) (\(.value | length)) — \(.value | join(", "))"' "${plan_view}"
+        echo "No package test is required: the resolved plan schedules no package cell."
+    fi
     echo "Gates   : $([[ ${run_lint} == 1 ]] && printf 'lint ')$([[ ${run_check} == 1 ]] && printf 'check ')$([[ ${run_test} == 1 ]] && printf 'L1 ')$([[ ${run_l2} == 1 ]] && printf 'L2')"
     echo "------------------------------------------------"
     if (( dry_run == 1 )); then
@@ -377,15 +413,14 @@ ci-local *args="":
 
 
     # The host's environment names which of a plan's cells are this run's; a
-    # fed plan needs it for every tier, `--l2` for the backend proof.
+    # fed plan needs it for every tier, `--l2` for the backend proof, and the
+    # build-key report below reads it whenever the host can answer. Detection is
+    # best-effort for that report and required for the other two, so a host
+    # without sniff keeps working and only loses the report.
     local_environment=""
-    if (( run_l2 == 1 )) || [[ -n "${plan_in}" ]]; then
-        if ! command -v sniff > /dev/null 2>&1 || ! command -v jq > /dev/null 2>&1; then
-            echo "ci-local: --l2 and --plan-in require sniff and jq; run 'just init'." >&2
-            exit 2
-        fi
-        os_json="$(sniff os --json)"
-        case "$(jq -r '.os_type' <<<"${os_json}")" in
+    if command -v sniff > /dev/null 2>&1 && command -v jq > /dev/null 2>&1 \
+        && os_json="$(sniff os --json 2>/dev/null)"; then
+        case "$(jq -r '.os_type // ""' <<<"${os_json}" 2>/dev/null)" in
             MacOS) local_environment="macos-latest" ;;
             Windows) local_environment="windows-latest" ;;
             Linux)
@@ -395,18 +430,53 @@ ci-local *args="":
                     local_environment="ubuntu-latest"
                 fi
                 ;;
-            *) echo "ci-local: unsupported host reported by sniff." >&2; exit 2 ;;
         esac
+    fi
+    if (( run_l2 == 1 )) || [[ -n "${plan_in}" ]]; then
+        if ! command -v sniff > /dev/null 2>&1 || ! command -v jq > /dev/null 2>&1; then
+            echo "ci-local: --l2 and --plan-in require sniff and jq; run 'just init'." >&2
+            exit 2
+        fi
+        if [[ -z "${local_environment}" ]]; then
+            echo "ci-local: unsupported host reported by sniff." >&2
+            exit 2
+        fi
+    fi
+
+    # Every tier below runs in this process tree against one target directory,
+    # so the cells sharing a planned build key are exactly the cells sharing
+    # that tree. Nothing is archived — there is no second machine to hand one
+    # to — but the key is reported, so a local result and a CI result can be
+    # compared by what actually decides whether they compiled the same program.
+    # Grouped by key rather than by package, so a package that somehow resolved
+    # two keys for this environment shows as the two lines it is.
+    if [[ -n "${local_environment}" ]] \
+        && [[ -s "${plan_file}" ]] \
+        && [[ "$(jq -r '(.builds // []) | length' "${plan_file}")" != "0" ]]; then
+        echo
+        echo "Build keys for ${local_environment} (one local target tree, no archive serialized)"
+        echo "  target: ${CARGO_TARGET_DIR}"
+        jq -r --arg e "${local_environment}" '
+            [.cells[] | select(.environment == $e and (.build // "") != "")]
+            | group_by([.package, .build])[]
+            | "  \(.[0].package)  \(.[0].build)  \([.[] | .gate] | unique | join(", "))"
+        ' "${plan_file}"
+        echo "------------------------------------------------"
     fi
 
     # Validate scheduling before treating package results as reusable evidence.
     selftest_log="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-selftest.XXXXXX")"
     # `test_resolved_plan.py` carries the sniff area-drift contract (AC15),
-    # which only runs where sniff is installed — a developer host, not a
-    # hosted runner. `test_runner_loss.py` derives every producer's composite
-    # job label from the shipped workflows, so a rename that would silently
-    # kill runner-loss attribution fails here rather than on a dead runner.
-    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py test_publish_gaps.py test_runner_loss.py; do
+    # which runs wherever sniff is installed: a developer host, and `ci.yml`'s
+    # `area-drift` job, which builds it. `test_runner_loss.py` derives every
+    # producer's composite job label from the shipped workflows, so a rename
+    # that would silently kill runner-loss attribution fails here rather than
+    # on a dead runner.
+    # `test_build_key.py` defends the single hashing boundary: a planner that
+    # fell back to a second digest would still emit a plan, and every
+    # downstream comparison against a producer's manifest would stop meaning
+    # anything. It is ~0.1s wherever `scripts/target` already holds `ci-build`.
+    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py; do
         if python3 "scripts/ci/${suite}" > "${selftest_log}" 2>&1; then
             passed+=("ci-infra ${suite}")
         else

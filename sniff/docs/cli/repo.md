@@ -46,6 +46,14 @@ These flags apply to all `sniff repo` subcommands:
 | [`git-status`](./repo_git-status.md) | Branch, commits, working tree status, and worktree info |
 | [`hash <SHA>`](./repo_hash.md) | Inspect a specific commit by hash (full or short) |
 
+### Commit History
+
+| Subcommand | Description |
+|------------|-------------|
+| [`recent-commits [PERIOD]`](./repo_recent-commits.md) | Recent commits (default: the last 10) with filters and compact/normal/verbose reports; `--json` emits a bare array |
+| [`source-code-changes [PERIOD]`](./repo_source-code-changes.md) | The same commits, listing only their source-code files |
+| [`documentation-changes [PERIOD]`](./repo_documentation-changes.md) | The same commits, listing only their documentation files |
+
 ### Worktree
 
 | Subcommand | Description |
@@ -137,6 +145,7 @@ When `sniff repo` is invoked without a subcommand and with `--json`, the output 
 - Worktrees and branches appear once as top-level `worktrees` and `branches` arrays.
 - Change data is grouped into four `ScopeBucket` objects: `dirty`, `staged`, `unstaged`, and `untracked`. Each bucket contains `files`, `source_code`, `documentation`, `packages`, and `package_areas` arrays.
 - `git_status` is a lean aggregate projection with current branch, config, compact file changes, and dirty/staged/unstaged/untracked counts. Use `sniff repo git-status --json` for the focused rich shape.
+- `recent_commits`, `source_code_changes`, and `documentation_changes` embed the **same bare JSON arrays** that `sniff repo recent-commits --json`, `sniff repo source-code-changes --json`, and `sniff repo documentation-changes --json` emit with default options: the last 10 commits, collected once and projected three ways. There is no period label or filter envelope, and there is no time window, so in a quiet repository these commits can reach arbitrarily far back. Remote links come from locally recorded remote-tracking refs only.
 - **Excluded children:** `hash` (requires a parameter), `remote`, and `pr` (network-primary) are omitted from the aggregate. No network requests are made by the aggregate.
 
 ```bash

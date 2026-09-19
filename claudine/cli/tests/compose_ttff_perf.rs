@@ -27,14 +27,12 @@
 //! to be built and is sensitive to host load. Run explicitly with
 //! `cargo test -p claudine-cli --test compose_ttff_perf -- --ignored`.
 
-use std::fs;
 use std::io::Read;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
-use tempfile::tempdir;
 
 mod common;
-use common::{augmented_path, write_executable};
+use common::{CliProcessFixture, write, write_executable};
 
 /// Documented upper bound for the execution header (first stderr byte).
 ///
@@ -48,26 +46,22 @@ const TTFF_BUDGET: Duration = Duration::from_millis(1500);
 #[test]
 #[ignore = "perf gate; run explicitly with --ignored"]
 fn compose_emits_first_stderr_byte_within_budget() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("compose-ttff-perf");
     // Goose binary that just exits 0 — the execution header must arrive
     // long before the agent itself runs, so the agent body is irrelevant.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 exit 0
 "#,
     );
-    let md_file = workspace.path().join("prompt.md");
-    fs::write(&md_file, "# perf body\n").unwrap();
+    let md_file = fixture.cwd().join("prompt.md");
+    write(&md_file, "# perf body\n");
 
-    let bin = common::claudine_bin();
-    let mut cmd = Command::new(bin);
-    cmd.env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .args(["compose", "--goose", md_file.to_str().unwrap()])
+    // The child is read from while it runs — the time to *first* stderr byte is
+    // the measurement — so this is the builder's raw-command surface.
+    let mut cmd = fixture.command_std();
+    cmd.args(["compose", "--goose", md_file.to_str().unwrap()])
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());

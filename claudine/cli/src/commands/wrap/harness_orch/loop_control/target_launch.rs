@@ -111,7 +111,7 @@
 //!
 //! Argv and MCP injection come from [`super::super::super::launch_plan`], a
 //! re-entrant builder the invocation feeds once with the results of every side
-//! effect it performed (temp files, shadow HOME, ambiguity resolutions). A
+//! effect it performed (temp files, the provider overlay plan, ambiguity resolutions). A
 //! rebuild whose facets match the invocation's gets that recorded plan back
 //! verbatim, so an unchanged document is byte-identical to the invocation by
 //! construction; a rebuild that moved a facet replays the producers around the
@@ -217,6 +217,18 @@ pub(crate) struct LaunchRebuildIntent {
     /// rebuild can re-derive argv and the environment overlay without repeating
     /// any of them. See [`crate::commands::wrap::launch_plan`].
     pub(crate) launch_plan_inputs: crate::commands::wrap::launch_plan::LaunchPlanInputs,
+    /// Where model precedence steps 2 and 3 — the provider-specific model
+    /// variables and the generic `MODEL` — read their values.
+    ///
+    /// Production passes [`claudine::composition::ambient_env_lookup`]; the
+    /// field exists so the rebuild's unit tests can be reproducible under
+    /// whatever the developer's shell exports. They run in the same process as
+    /// every other test in the binary, so scrubbing the process environment is
+    /// not available to them: `std::env::set_var` is unsound while sibling
+    /// tests are running, and a Claudine-wrapped session exports `MODEL` into
+    /// every command it launches — which is the ambient value that silently
+    /// out-ranked these fixtures' frontmatter.
+    pub(crate) env_lookup: fn(&str) -> Option<String>,
 }
 
 /// The launch properties a resume cannot renegotiate, recomputed from one
@@ -253,6 +265,10 @@ pub(crate) struct RebuiltLaunchIdentity {
     /// The effective inline write-grant posture, `None` for a run that writes
     /// no document. Part of the permission facet the session key compares.
     pub(crate) write_posture: Option<String>,
+    /// The provider overlay this attempt launches under — the plan whose
+    /// selector [`Self::launch_env`] applies. Folded into the session key's
+    /// overlay facet.
+    pub(crate) overlay: Option<claudine::provider_overlay::OverlayPlan>,
     /// Stdout noise prefixes for the rebuilt profile in the rebuilt session
     /// mode (empty when interactive, matching the invocation's own gate).
     pub(crate) stdout_noise: &'static [&'static str],
@@ -338,7 +354,8 @@ pub(crate) fn rebuild_launch_identity(
         Vec::new()
     };
 
-    let (model, model_reason) = resolve_launch_model(provider, cli_model, repo_root, document);
+    let (model, model_reason) =
+        resolve_launch_model(provider, cli_model, repo_root, document, intent.env_lookup);
 
     // The single re-entrant rebuild. `--yolo` is a request; whether it *applies*
     // is the profile's decision in this mode, and the plan is what makes it —
@@ -361,8 +378,7 @@ pub(crate) fn rebuild_launch_identity(
     let use_structured = facets.use_structured();
     let plan = launch_plan::build_launch_plan(&intent.launch_plan_inputs, &facets)?;
 
-    let env_overrides =
-        launch_env_overrides(provider, model.as_deref(), plan.yolo_applied);
+    let env_overrides = launch_env_overrides(provider, model.as_deref(), plan.yolo_applied);
 
     // `env_overrides` can only *set*, and it is applied over a base child
     // environment the invocation stamped its own resolved `MODEL` into. A
@@ -373,12 +389,7 @@ pub(crate) fn rebuild_launch_identity(
     // whatever `MODEL` the child environment carries is the caller's own ambient
     // value — invocation-fixed, and not this rebuild's to delete.
     let mut launch_env = plan.env_overlay;
-    let invocation_resolved_a_model = intent
-        .launch_plan_inputs
-        .invocation
-        .facets
-        .model
-        .is_some();
+    let invocation_resolved_a_model = intent.launch_plan_inputs.invocation.facets.model.is_some();
     if invocation_resolved_a_model && model.is_none() {
         launch_env.push(launch_plan::EnvChange::Remove("MODEL".into()));
     }
@@ -473,6 +484,7 @@ pub(crate) fn rebuild_launch_identity(
         system_prompt_artifacts: plan.system_prompt_artifacts,
         warnings: plan.warnings,
         write_posture: plan.write_posture,
+        overlay: plan.overlay,
     })
 }
 
@@ -517,9 +529,10 @@ fn select_rebuilt_provider(
     let Some(snapshot) = intent.installed_snapshot.as_ref() else {
         return Ok(match hint {
             AgentHint::Single(provider) => *provider,
-            AgentHint::List(providers) => {
-                providers.first().copied().unwrap_or(intent.fallback_provider)
-            }
+            AgentHint::List(providers) => providers
+                .first()
+                .copied()
+                .unwrap_or(intent.fallback_provider),
         });
     };
     let state = claudine::composition::classify_agent_resolution(hints, snapshot);
@@ -575,8 +588,8 @@ pub(super) struct TargetLaunchRebuild {
 }
 
 /// Resolve the model the refreshed document launches with, under R6 precedence:
-/// explicit `--model` beats the document's own `model:`, validated against the
-/// same catalog a direct invocation uses.
+/// explicit `--model` beats the document's own `model:`, through the same
+/// shared resolver a direct invocation uses (no refresh, no repeat warning).
 ///
 /// One answer serves both the launch plan's argv and the `MODEL` environment, so
 /// the two cannot describe different models.
@@ -585,6 +598,7 @@ fn resolve_launch_model(
     cli_model: Option<&str>,
     repo_root: Option<&Path>,
     document: &MaterializedHarnessPrompt,
+    env_lookup: fn(&str) -> Option<String>,
 ) -> (Option<String>, ModelResolutionReason) {
     let selection_config =
         crate::commands::wrap::composition::load_selection_config_for_repo(repo_root);
@@ -592,11 +606,13 @@ fn resolve_launch_model(
         Some(cfg) => ModelCatalogService::with_overrides(cfg.model_overrides.clone()),
         None => ModelCatalogService::new(),
     };
-    claudine::composition::resolve_model_with_hints(
+    crate::commands::wrap::composition::resolve_document_model_from(
+        &catalog,
         provider,
         &document.selection_hints,
         cli_model,
-        Some(&catalog),
+        crate::commands::wrap::composition::ModelResolveMode::REBUILD,
+        env_lookup,
     )
 }
 
@@ -620,9 +636,9 @@ fn launch_env_overrides(
 ///
 /// `cli_model` is the explicit `--model`, which stays authoritative over any
 /// target frontmatter `model:`. The model is re-resolved against the target's
-/// own [`EffectiveSelectionHints`] with the same catalog validation a direct
-/// invocation performs, so a target that pins its own valid `model:` resolves
-/// it, and an invalid one falls back exactly as it would directly.
+/// own [`EffectiveSelectionHints`] with the same catalog semantics as a direct
+/// invocation: the catalog may order list hints and warn on an unrecognized
+/// value during initial preparation, but it never demotes the document model.
 pub(super) fn rebuild_target_launch(
     intent: &LaunchRebuildIntent,
     cli_model: Option<&str>,
@@ -655,7 +671,9 @@ pub(super) fn rebuild_target_launch(
         darkmatter::markdown::compose::ComposeContext::capture_for_content(launch_area, &scan)
     });
     for (key, value) in &env_overrides {
-        prepared_context.env_mut().insert(key.clone(), value.clone());
+        prepared_context
+            .env_mut()
+            .insert(key.clone(), value.clone());
     }
 
     Ok(TargetLaunchRebuild {

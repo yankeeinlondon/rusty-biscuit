@@ -195,7 +195,10 @@ fn opencode_interactive_prompt_without_dash_keeps_space_separated_flag() {
     let delivery = p.prompt_delivery(&args, "review the spec", false).unwrap();
     let mut applied = Vec::new();
     delivery.apply_to(&mut applied);
-    assert_eq!(applied, vec!["--prompt".to_string(), "review the spec".to_string()]);
+    assert_eq!(
+        applied,
+        vec!["--prompt".to_string(), "review the spec".to_string()]
+    );
 }
 
 #[test]
@@ -676,21 +679,9 @@ fn run_direct_wrap_pipeline_simulation(
     // 3. apply_non_interactive
     let _ = profile.apply_non_interactive_flags(&mut child_args);
 
-    // 4. Model resolution (specifically OpenCode simulation)
-    if provider == Provider::OpenCode {
-        let snapshot = OpenCodeEnvSnapshot {
-            opencode_model_env: None,
-            opencode_config_model: None,
-        };
-        let _ = apply_opencode_model_resolution(
-            &mut child_args,
-            &mut |k, v| env_overrides.push((k, v)),
-            false,
-            Some("test-model"),
-            true,
-            &snapshot,
-        );
-    }
+    // 4. Model resolution: the shared stage applies an explicit model through
+    //    the profile for every provider.
+    let _ = profile.apply_model(&mut child_args, &mut env_overrides, "test-model");
 
     // 5. Output format (simulation of --format stream-json)
     let _ = profile.apply_output_format(&mut child_args, OutputFormat::Stream);
@@ -749,11 +740,8 @@ fn test_all_providers_flags_before_double_dash() {
         Provider::OpenCode,
         Provider::Goose,
     ] {
-        let args = run_direct_wrap_pipeline_simulation(
-            provider,
-            &[],
-            "some generic prompt --with-flag",
-        );
+        let args =
+            run_direct_wrap_pipeline_simulation(provider, &[], "some generic prompt --with-flag");
         if let Some(pos) = args.iter().position(|a| a == "--") {
             for arg in &args[pos + 1..] {
                 if arg != "some generic prompt --with-flag" {

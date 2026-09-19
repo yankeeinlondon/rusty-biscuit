@@ -16,6 +16,8 @@ iteration: |-
 review: {{ dirname(spec) + '/' + 'review-' + iteration + '.md' }}
 plan: {{ dirname(spec) + '/' + 'review-plan-' + iteration + '.md' }}
 ---
+::file "../_no_formatting.md"
+
 # Create Plan from Feature Review
 
 ## Key Documents

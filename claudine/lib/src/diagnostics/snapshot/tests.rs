@@ -300,6 +300,8 @@ fn an_unknown_code_and_detail_survive_the_err_star_projection() {
         variant: "when".to_string(),
         msg: snapshot.message.clone(),
         snapshot: Some(Box::new(snapshot)),
+        property: None,
+        reason: crate::composition::LifecycleEvaluationReason::Expression,
     };
     let value = info.to_value();
 

@@ -38,6 +38,15 @@ features their tier requires.
   scanner had, but without its `O(content × rules × keylen)` cost. Already
   compiled transitively via `regex`, so it adds no build cost.
 
+## Expression List Serialization
+
+- `biscuit-file` with the `json5` feature supplies `json5::to_json5_compact`,
+  which backs the `as_json5(…)` expression function. The feature is named
+  explicitly in `lib/Cargo.toml` rather than relied on through
+  `biscuit-file`'s defaults, so the call site survives a change to that
+  default set. JSON output uses `serde_json` directly; no second JSON5
+  implementation is carried here.
+
 ## Shell Directive Execution
 
 - `shared_child` backs the child-process wait in
@@ -98,6 +107,8 @@ protocol-focused:
   file-reference resolution conventions.
 - `biscuit-hash` — xxHash content-hash identity for the Phase 3 invalidation
   engine (`WorkspaceIndex`).
+- `wait-timeout` (test-only) — bounded, cross-platform reaping for the real
+  `dmls` stdio subprocess lifecycle test.
 
 ## DMLS Zed CLI (`darkmatter/dmls/zed-dmls-cli`)
 

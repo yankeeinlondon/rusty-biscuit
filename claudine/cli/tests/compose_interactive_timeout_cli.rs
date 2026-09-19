@@ -15,11 +15,8 @@
 
 #![cfg(unix)]
 
-use std::fs;
-use tempfile::tempdir;
-
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write, write_executable};
 
 /// Stage a `goose` stub that records every launch by appending to
 /// `count_path`, so a test can prove the provider was (or was not) launched.
@@ -39,24 +36,18 @@ fn compose_frontmatter_interactive_rejects_step_timeout() {
     // though `--interactive` was never passed. This is the exact gap the
     // review found: the early CLI guards only see `shared.interactive`, so the
     // resolved-mode executor check is the one that has to fire.
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
-    stage_goose_counter(&bin_dir, &count_path);
+    let fixture = CliProcessFixture::named("compose-interactive-timeout");
+    let count_path = fixture.cwd().join("call-count.txt");
+    stage_goose_counter(fixture.bin_dir(), &count_path);
 
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
+    let md_file = fixture.cwd().join("plan.md");
+    write(
         &md_file,
         "---\ninteractive: true\n---\nOpen a dialog.\n",
-    )
-    .unwrap();
+    );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&bin_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--goose",
@@ -86,24 +77,18 @@ fn compose_frontmatter_interactive_rejects_frontmatter_timeout() {
     // key), not the CLI. With `interactive: true` also authored, the resolved
     // mode is interactive and the resolved timeout plan includes the
     // frontmatter timeout — so the conflict must fire.
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
-    stage_goose_counter(&bin_dir, &count_path);
+    let fixture = CliProcessFixture::named("compose-interactive-timeout");
+    let count_path = fixture.cwd().join("call-count.txt");
+    stage_goose_counter(fixture.bin_dir(), &count_path);
 
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
+    let md_file = fixture.cwd().join("plan.md");
+    write(
         &md_file,
         "---\ninteractive: true\ntimeout: 5m\n---\nOpen a dialog.\n",
-    )
-    .unwrap();
+    );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&bin_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -128,20 +113,15 @@ fn compose_frontmatter_interactive_header_shows_interactive_badge() {
     // the header must carry the `Interactive` badge. Pre-fix the header was
     // built from `shared.interactive` (false here), so no badge appeared and
     // the first status line contradicted the actual run.
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
-    stage_goose_counter(&bin_dir, &count_path);
+    let fixture = CliProcessFixture::named("compose-interactive-timeout");
+    let count_path = fixture.cwd().join("call-count.txt");
+    stage_goose_counter(fixture.bin_dir(), &count_path);
 
-    let md_file = workspace.path().join("plan.md");
-    fs::write(&md_file, "---\ninteractive: true\n---\nOpen a dialog.\n").unwrap();
+    let md_file = fixture.cwd().join("plan.md");
+    write(&md_file, "---\ninteractive: true\n---\nOpen a dialog.\n");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&bin_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -161,20 +141,15 @@ fn compose_default_non_interactive_header_omits_interactive_badge() {
     // frontmatter and no `-i` flag resolves to the default non-interactive
     // mode, which renders NO interactivity badge. This pins the contrast so a
     // future regression that always emits the badge is caught.
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
-    stage_goose_counter(&bin_dir, &count_path);
+    let fixture = CliProcessFixture::named("compose-interactive-timeout");
+    let count_path = fixture.cwd().join("call-count.txt");
+    stage_goose_counter(fixture.bin_dir(), &count_path);
 
-    let md_file = workspace.path().join("plan.md");
-    fs::write(&md_file, "---\n---\nOpen a dialog.\n").unwrap();
+    let md_file = fixture.cwd().join("plan.md");
+    write(&md_file, "---\n---\nOpen a dialog.\n");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&bin_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -193,24 +168,18 @@ fn compose_no_interactive_overrides_frontmatter_and_allows_timeout() {
     // `--no-interactive` wins over `interactive: true`, so the resolved mode
     // is non-interactive and timeouts are valid again. The provider must
     // launch normally with `--step-timeout` applied.
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
-    stage_goose_counter(&bin_dir, &count_path);
+    let fixture = CliProcessFixture::named("compose-interactive-timeout");
+    let count_path = fixture.cwd().join("call-count.txt");
+    stage_goose_counter(fixture.bin_dir(), &count_path);
 
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
+    let md_file = fixture.cwd().join("plan.md");
+    write(
         &md_file,
         "---\ninteractive: true\n---\nOpen a dialog.\n",
-    )
-    .unwrap();
+    );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&bin_dir))
-        .current_dir(workspace.path())
+    fixture
+        .command()
         .args([
             "compose",
             "--no-interactive",

@@ -10,7 +10,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 use biscuit_file::{Conditional, FetchError, FetchPolicy, PolicyClient, fetch_blocking};
 use gix::bstr::ByteSlice;
 
-use super::{ApiFlavor, resolve_remote_at};
+use super::commit_links::canonical_repository_url;
+use super::{ApiFlavor, GitHostingProvider, resolve_remote_at};
 use crate::{Result, SniffError};
 
 /// Checks a branch against the remote's live Git ref advertisement.
@@ -72,11 +73,7 @@ fn normalize_branch(branch: &str) -> Result<String> {
 ///
 /// Deterministic URL classifications do not perform network I/O. Ambiguous
 /// self-hosted URLs are probed only after the exact host passes `policy`.
-pub fn remote_vendor_at(
-    path: &Path,
-    remote: Option<&str>,
-    policy: &FetchPolicy,
-) -> Result<String> {
+pub fn remote_vendor_at(path: &Path, remote: Option<&str>, policy: &FetchPolicy) -> Result<String> {
     let Some(resolved) = resolve_remote_at(path, remote)? else {
         return Ok(String::new());
     };
@@ -98,7 +95,9 @@ pub fn remote_vendor_at(
         ApiFlavor::SourceHut => "source_hut",
         // The probe never returns `Unknown`; it errors instead.
         ApiFlavor::Unknown => {
-            return Err(SniffError::UnsupportedProvider { url: resolved.fetch_url });
+            return Err(SniffError::UnsupportedProvider {
+                url: resolved.fetch_url,
+            });
         }
     };
     Ok(token.to_string())
@@ -132,12 +131,19 @@ fn current_branch(path: &Path) -> Result<String> {
     let Some(repo) = super::open::trusted_discover(path)? else {
         return Err(SniffError::NotARepository(path.to_path_buf()));
     };
-    let head = repo.head().map_err(|error| SniffError::git("head", error))?;
+    let head = repo
+        .head()
+        .map_err(|error| SniffError::git("head", error))?;
     let name = head
         .referent_name()
         .and_then(|name| name.shorten().to_str().ok())
         .filter(|name| !name.is_empty())
-        .ok_or_else(|| SniffError::git("current_branch", std::io::Error::other("HEAD is detached or unborn")))?;
+        .ok_or_else(|| {
+            SniffError::git(
+                "current_branch",
+                std::io::Error::other("HEAD is detached or unborn"),
+            )
+        })?;
     Ok(name.to_string())
 }
 
@@ -158,45 +164,28 @@ fn smart_http_advertisement_url(remote: &super::ResolvedRemote) -> Result<url::U
     Ok(url)
 }
 
+/// The HTTPS Git endpoint for a remote whose transport carries no HTTP(S) URL.
+///
+/// The endpoint is the repository's canonical HTTPS location — the same
+/// mapping [`commit_links::canonical_repository_url`] builds browser links
+/// from — so an SSH-only provider cannot be normalized one way for links and
+/// another for ref advertisement. Only these three providers publish an HTTPS
+/// Git endpoint derivable from the configured remote; every other provider
+/// falls back to its branch API.
 fn provider_https_git_url(remote: &super::ResolvedRemote) -> Result<url::Url> {
-    let host = remote.host.as_deref().unwrap_or_default();
-    let path = remote_git_path(&remote.fetch_url).unwrap_or_default();
-    let endpoint = match remote.api_flavor {
-        ApiFlavor::AzureDevOps => {
-            let segments = path
-                .strip_prefix("v3/")
-                .unwrap_or(&path)
-                .split('/')
-                .filter(|segment| !segment.is_empty())
-                .collect::<Vec<_>>();
-            if segments.len() != 3 {
-                return unsupported_provider_git_endpoint(remote);
-            }
-            format!(
-                "https://dev.azure.com/{}/{}/_git/{}",
-                urlencoding::encode(segments[0]),
-                urlencoding::encode(segments[1]),
-                urlencoding::encode(segments[2].trim_end_matches(".git"))
-            )
-        }
-        ApiFlavor::AwsCodeCommit if !host.is_empty() && path.starts_with("v1/repos/") => {
-            format!("https://{host}/{path}")
-        }
-        ApiFlavor::SourceHut if host.ends_with(".sr.ht") && !path.is_empty() => {
-            format!("https://{host}/{path}")
-        }
-        _ => return unsupported_provider_git_endpoint(remote),
+    let provider = GitHostingProvider::from_url(&remote.fetch_url);
+    if !matches!(
+        provider,
+        GitHostingProvider::AzureDevOps
+            | GitHostingProvider::AwsCodeCommit
+            | GitHostingProvider::SourceHut
+    ) {
+        return unsupported_provider_git_endpoint(remote);
+    }
+    let Some(endpoint) = canonical_repository_url(provider, &remote.fetch_url) else {
+        return unsupported_provider_git_endpoint(remote);
     };
     url::Url::parse(&endpoint).map_err(|error| unreachable_url(&endpoint, error))
-}
-
-fn remote_git_path(remote: &str) -> Option<String> {
-    if let Ok(url) = url::Url::parse(remote) {
-        return Some(url.path().trim_matches('/').to_string());
-    }
-    let (_, after_at) = remote.split_once('@')?;
-    let (_, path) = after_at.split_once(':')?;
-    Some(path.trim_matches('/').to_string())
 }
 
 fn unsupported_provider_git_endpoint<T>(remote: &super::ResolvedRemote) -> Result<T> {
@@ -213,15 +202,18 @@ fn fetch_git_advertisement(
 ) -> Result<(u16, Vec<u8>)> {
     let remote_host = remote.host.as_deref().unwrap_or_default();
     if !policy.is_allowed(remote_host) {
-        return Err(SniffError::RemotePolicyDenied { host: remote_host.to_string() });
+        return Err(SniffError::RemotePolicyDenied {
+            host: remote_host.to_string(),
+        });
     }
     let endpoint_host = url.host_str().unwrap_or_default();
     if !provider_endpoint_allowed(remote_host, endpoint_host, remote.api_flavor) {
-        return Err(SniffError::RemotePolicyDenied { host: endpoint_host.to_string() });
+        return Err(SniffError::RemotePolicyDenied {
+            host: endpoint_host.to_string(),
+        });
     }
 
-    if url::Url::parse(&remote.fetch_url)
-        .is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
+    if url::Url::parse(&remote.fetch_url).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
     {
         let effective_policy = policy.clone().allow_host(endpoint_host);
         let client = PolicyClient::new().map_err(|error| unreachable(url, error))?;
@@ -244,7 +236,10 @@ fn fetch_git_advertisement(
     };
     let response = request.send().map_err(|error| unreachable(url, error))?;
     let status = response.status().as_u16();
-    let body = response.bytes().map_err(|error| unreachable(url, error))?.to_vec();
+    let body = response
+        .bytes()
+        .map_err(|error| unreachable(url, error))?
+        .to_vec();
     Ok((status, body))
 }
 
@@ -324,7 +319,10 @@ pub(crate) struct TestProviderDiscoveryGuard {
 #[cfg(test)]
 impl TestProviderDiscoveryGuard {
     pub(crate) fn origins(&self) -> Vec<String> {
-        self.origins.lock().expect("test discovery origins lock").clone()
+        self.origins
+            .lock()
+            .expect("test discovery origins lock")
+            .clone()
     }
 }
 
@@ -349,8 +347,8 @@ pub(crate) fn register_test_provider_discovery(
     flavor: ApiFlavor,
     version: &str,
 ) -> TestProviderDiscoveryGuard {
-    let token = NEXT_TEST_PROVIDER_DISCOVERY_TOKEN
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let token =
+        NEXT_TEST_PROVIDER_DISCOVERY_TOKEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let origins = Arc::new(Mutex::new(Vec::new()));
     let entry = TestProviderDiscoveryEntry {
         token,
@@ -364,7 +362,10 @@ pub(crate) fn register_test_provider_discovery(
         .lock()
         .expect("test provider discovery registry lock")
         .insert(host.to_string(), entry);
-    assert!(replaced.is_none(), "test discovery host `{host}` is already registered");
+    assert!(
+        replaced.is_none(),
+        "test discovery host `{host}` is already registered"
+    );
     TestProviderDiscoveryGuard {
         host: host.to_string(),
         token,
@@ -373,9 +374,7 @@ pub(crate) fn register_test_provider_discovery(
 }
 
 #[cfg(test)]
-fn registered_test_provider_discovery(
-    remote: &url::Url,
-) -> Option<SelfHostedProviderDiscovery> {
+fn registered_test_provider_discovery(remote: &url::Url) -> Option<SelfHostedProviderDiscovery> {
     let entry = TEST_PROVIDER_DISCOVERIES
         .lock()
         .expect("test provider discovery registry lock")
@@ -402,7 +401,9 @@ pub(crate) fn probe_self_hosted_provider(
         })?;
     let host = remote.host_str().unwrap_or_default();
     if !policy.is_allowed(host) {
-        return Err(SniffError::RemotePolicyDenied { host: host.to_string() });
+        return Err(SniffError::RemotePolicyDenied {
+            host: host.to_string(),
+        });
     }
     #[cfg(test)]
     if let Some(discovery) = registered_test_provider_discovery(&remote) {
@@ -422,7 +423,10 @@ pub(crate) fn probe_self_hosted_provider(
         ("/api/v3/meta", ApiFlavor::GitHub),
         ("/api/v4/version", ApiFlavor::GitLab),
         ("/api/v1/version", ApiFlavor::Gitea),
-        ("/rest/api/1.0/application-properties", ApiFlavor::BitbucketDataCenter),
+        (
+            "/rest/api/1.0/application-properties",
+            ApiFlavor::BitbucketDataCenter,
+        ),
         ("/_apis/connectionData", ApiFlavor::AzureDevOps),
     ] {
         let mut endpoint = remote.clone();
@@ -432,7 +436,9 @@ pub(crate) fn probe_self_hosted_provider(
         } else {
             endpoint.set_query(None);
         }
-        if endpoint.host_str() != Some(host) || !policy.is_allowed(endpoint.host_str().unwrap_or_default()) {
+        if endpoint.host_str() != Some(host)
+            || !policy.is_allowed(endpoint.host_str().unwrap_or_default())
+        {
             return Err(SniffError::RemotePolicyDenied {
                 host: endpoint.host_str().unwrap_or_default().to_string(),
             });
@@ -440,7 +446,9 @@ pub(crate) fn probe_self_hosted_provider(
         let request = client
             .get(endpoint.clone())
             .header(reqwest::header::USER_AGENT, "sniff/provider-discovery");
-        let response = request.send().map_err(|error| unreachable(&endpoint, error))?;
+        let response = request
+            .send()
+            .map_err(|error| unreachable(&endpoint, error))?;
         let status = response.status().as_u16();
         if (300..400).contains(&status) {
             return Err(SniffError::RemoteUnreachable {
@@ -485,7 +493,9 @@ pub(crate) fn probe_self_hosted_provider(
                 discovery.flavor,
                 &token,
             );
-            let response = request.send().map_err(|error| unreachable(&endpoint, error))?;
+            let response = request
+                .send()
+                .map_err(|error| unreachable(&endpoint, error))?;
             let retry_status = response.status().as_u16();
             if (300..400).contains(&retry_status) {
                 return Err(SniffError::RemoteUnreachable {
@@ -577,12 +587,11 @@ pub(crate) fn probe_self_hosted_provider(
             let request = client
                 .get(endpoint.clone())
                 .header(reqwest::header::USER_AGENT, "sniff/provider-discovery");
-            let request = crate::credentials::authenticate_provider_request(
-                request,
-                selected_flavor,
-                &token,
-            );
-            let response = request.send().map_err(|error| unreachable(endpoint, error))?;
+            let request =
+                crate::credentials::authenticate_provider_request(request, selected_flavor, &token);
+            let response = request
+                .send()
+                .map_err(|error| unreachable(endpoint, error))?;
             let status = response.status().as_u16();
             if (300..400).contains(&status) {
                 return Err(SniffError::RemoteUnreachable {
@@ -635,8 +644,11 @@ pub(crate) fn probe_self_hosted_provider(
     }
     match discoveries.as_slice() {
         [discovery] => Ok(discovery.clone()),
-        [] => Err(focused_error
-            .unwrap_or_else(|| SniffError::UnsupportedProvider { url: remote.to_string() })),
+        [] => Err(
+            focused_error.unwrap_or_else(|| SniffError::UnsupportedProvider {
+                url: remote.to_string(),
+            }),
+        ),
         _ => unreachable!("one discovery per identified provider flavor"),
     }
 }
@@ -651,14 +663,22 @@ fn discovery_from_signature(
     };
     let (flavor, version) = match flavor {
         ApiFlavor::GitHub
-            if body.get("installed_version").and_then(serde_json::Value::as_str).is_some() => (
-            flavor,
-            body.get("installed_version")
+            if body
+                .get("installed_version")
                 .and_then(serde_json::Value::as_str)
-                .filter(|version| server_version_shape(version)),
-        ),
+                .is_some() =>
+        {
+            (
+                flavor,
+                body.get("installed_version")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|version| server_version_shape(version)),
+            )
+        }
         ApiFlavor::GitLab
-            if body.get("revision").and_then(serde_json::Value::as_str)
+            if body
+                .get("revision")
+                .and_then(serde_json::Value::as_str)
                 .is_some_and(|revision| !revision.trim().is_empty()) =>
         {
             (
@@ -668,11 +688,22 @@ fn discovery_from_signature(
                     .filter(|version| server_version_shape(version)),
             )
         }
-        ApiFlavor::Gitea if body.get("version").and_then(serde_json::Value::as_str).is_some() => {
-            let version = body.get("version").and_then(serde_json::Value::as_str).filter(|version| {
-                version.to_ascii_lowercase().contains("forgejo") || server_version_shape(version)
-            });
-            let flavor = if version.is_some_and(|version| version.to_ascii_lowercase().contains("forgejo")) {
+        ApiFlavor::Gitea
+            if body
+                .get("version")
+                .and_then(serde_json::Value::as_str)
+                .is_some() =>
+        {
+            let version = body
+                .get("version")
+                .and_then(serde_json::Value::as_str)
+                .filter(|version| {
+                    version.to_ascii_lowercase().contains("forgejo")
+                        || server_version_shape(version)
+                });
+            let flavor = if version
+                .is_some_and(|version| version.to_ascii_lowercase().contains("forgejo"))
+            {
                 ApiFlavor::Forgejo
             } else {
                 flavor
@@ -680,10 +711,15 @@ fn discovery_from_signature(
             (flavor, version)
         }
         ApiFlavor::BitbucketDataCenter
-            if body.get("displayName").and_then(serde_json::Value::as_str)
+            if body
+                .get("displayName")
+                .and_then(serde_json::Value::as_str)
                 .is_some_and(|name| name.to_ascii_lowercase().contains("bitbucket")) =>
         {
-            (flavor, body.get("version").and_then(serde_json::Value::as_str))
+            (
+                flavor,
+                body.get("version").and_then(serde_json::Value::as_str),
+            )
         }
         ApiFlavor::AzureDevOps
             if body
@@ -694,7 +730,9 @@ fn discovery_from_signature(
                     .get("deploymentId")
                     .and_then(serde_json::Value::as_str)
                     .is_some_and(|id| !id.trim().is_empty())
-                && body.get("deploymentType").and_then(serde_json::Value::as_str)
+                && body
+                    .get("deploymentType")
+                    .and_then(serde_json::Value::as_str)
                     == Some("OnPremises") =>
         {
             (flavor, None)
@@ -702,7 +740,10 @@ fn discovery_from_signature(
         _ => return Ok(None),
     };
     if flavor == ApiFlavor::AzureDevOps {
-        return Ok(Some(SelfHostedProviderDiscovery { flavor, version: None }));
+        return Ok(Some(SelfHostedProviderDiscovery {
+            flavor,
+            version: None,
+        }));
     }
     let version = version
         .filter(|version| !version.trim().is_empty())
@@ -721,7 +762,12 @@ fn server_version_shape(version: &str) -> bool {
     let version = version.trim_start_matches(|character: char| !character.is_ascii_digit());
     version.split('.').take(3).count() == 3
         && version.split('.').take(3).all(|part| {
-            !part.is_empty() && part.chars().take_while(|character| character.is_ascii_digit()).count() > 0
+            !part.is_empty()
+                && part
+                    .chars()
+                    .take_while(|character| character.is_ascii_digit())
+                    .count()
+                    > 0
         })
 }
 
@@ -759,7 +805,9 @@ fn provider_branch_exists(
         ApiFlavor::Bitbucket => optional_bearer(request, &["BITBUCKET_TOKEN"]),
         _ => request,
     };
-    let response = request.send().map_err(|error| unreachable(&endpoint, error))?;
+    let response = request
+        .send()
+        .map_err(|error| unreachable(&endpoint, error))?;
     let status = response.status().as_u16();
     match status {
         200..=299 => Ok(true),
@@ -796,18 +844,18 @@ fn provider_branch_endpoint(remote: &super::ResolvedRemote, branch: &str) -> Res
     let namespace = urlencoding::encode(namespace);
     let repository = urlencoding::encode(repository);
     let endpoint = match remote.api_flavor {
-        ApiFlavor::GitHub if host.eq_ignore_ascii_case("github.com") => format!(
-            "https://api.github.com/repos/{namespace}/{repository}/branches/{branch}"
-        ),
-        ApiFlavor::GitHub => format!(
-            "https://{host}/api/v3/repos/{namespace}/{repository}/branches/{branch}"
-        ),
+        ApiFlavor::GitHub if host.eq_ignore_ascii_case("github.com") => {
+            format!("https://api.github.com/repos/{namespace}/{repository}/branches/{branch}")
+        }
+        ApiFlavor::GitHub => {
+            format!("https://{host}/api/v3/repos/{namespace}/{repository}/branches/{branch}")
+        }
         ApiFlavor::GitLab => format!(
             "https://{host}/api/v4/projects/{namespace}%2F{repository}/repository/branches/{branch}"
         ),
-        ApiFlavor::Gitea | ApiFlavor::Forgejo => format!(
-            "https://{host}/api/v1/repos/{namespace}/{repository}/branches/{branch}"
-        ),
+        ApiFlavor::Gitea | ApiFlavor::Forgejo => {
+            format!("https://{host}/api/v1/repos/{namespace}/{repository}/branches/{branch}")
+        }
         ApiFlavor::Bitbucket => format!(
             "https://api.bitbucket.org/2.0/repositories/{namespace}/{repository}/refs/branches/{branch}"
         ),
@@ -850,8 +898,7 @@ fn codecommit_git_credentials(
         (Some(username), Some(password)) => Ok(request.basic_auth(username, Some(password))),
         _ => Err(SniffError::InvalidCredentials {
             provider: "AWS CodeCommit".to_string(),
-            message: "set AWS_CODECOMMIT_GIT_USERNAME and AWS_CODECOMMIT_GIT_PASSWORD"
-                .to_string(),
+            message: "set AWS_CODECOMMIT_GIT_USERNAME and AWS_CODECOMMIT_GIT_PASSWORD".to_string(),
         }),
     }
 }
@@ -860,11 +907,17 @@ fn unreachable(url: &url::Url, error: impl std::fmt::Display) -> SniffError {
     let mut sanitized = url.clone();
     let _ = sanitized.set_username("");
     let _ = sanitized.set_password(None);
-    SniffError::RemoteUnreachable { url: sanitized.to_string(), message: error.to_string() }
+    SniffError::RemoteUnreachable {
+        url: sanitized.to_string(),
+        message: error.to_string(),
+    }
 }
 
 fn unreachable_url(url: &str, error: impl std::fmt::Display) -> SniffError {
-    SniffError::RemoteUnreachable { url: url.to_string(), message: error.to_string() }
+    SniffError::RemoteUnreachable {
+        url: url.to_string(),
+        message: error.to_string(),
+    }
 }
 
 fn status_error(provider: ApiFlavor, status: u16) -> SniffError {
@@ -878,7 +931,10 @@ fn status_error(provider: ApiFlavor, status: u16) -> SniffError {
             provider,
             message: "Git ref advertisement was forbidden".to_string(),
         },
-        429 => SniffError::RateLimited { provider, retry_after: None },
+        429 => SniffError::RateLimited {
+            provider,
+            retry_after: None,
+        },
         status => SniffError::RemoteApi {
             provider,
             status,
@@ -916,15 +972,37 @@ mod tests {
     #[test]
     fn provider_fallback_endpoints_preserve_nested_identity_and_exact_branch() {
         let cases = [
-            (ApiFlavor::GitHub, "github.com", "https://api.github.com/repos/group%2Fnested/project/branches/release%2Fv1"),
-            (ApiFlavor::GitLab, "gitlab.com", "https://gitlab.com/api/v4/projects/group%2Fnested%2Fproject/repository/branches/release%2Fv1"),
-            (ApiFlavor::Gitea, "gitea.example.com", "https://gitea.example.com/api/v1/repos/group%2Fnested/project/branches/release%2Fv1"),
-            (ApiFlavor::Forgejo, "forgejo.example.com", "https://forgejo.example.com/api/v1/repos/group%2Fnested/project/branches/release%2Fv1"),
-            (ApiFlavor::Bitbucket, "bitbucket.org", "https://api.bitbucket.org/2.0/repositories/group%2Fnested/project/refs/branches/release%2Fv1"),
+            (
+                ApiFlavor::GitHub,
+                "github.com",
+                "https://api.github.com/repos/group%2Fnested/project/branches/release%2Fv1",
+            ),
+            (
+                ApiFlavor::GitLab,
+                "gitlab.com",
+                "https://gitlab.com/api/v4/projects/group%2Fnested%2Fproject/repository/branches/release%2Fv1",
+            ),
+            (
+                ApiFlavor::Gitea,
+                "gitea.example.com",
+                "https://gitea.example.com/api/v1/repos/group%2Fnested/project/branches/release%2Fv1",
+            ),
+            (
+                ApiFlavor::Forgejo,
+                "forgejo.example.com",
+                "https://forgejo.example.com/api/v1/repos/group%2Fnested/project/branches/release%2Fv1",
+            ),
+            (
+                ApiFlavor::Bitbucket,
+                "bitbucket.org",
+                "https://api.bitbucket.org/2.0/repositories/group%2Fnested/project/refs/branches/release%2Fv1",
+            ),
         ];
         for (flavor, host, expected) in cases {
             assert_eq!(
-                provider_branch_endpoint(&remote(flavor, host), "release/v1").unwrap().as_str(),
+                provider_branch_endpoint(&remote(flavor, host), "release/v1")
+                    .unwrap()
+                    .as_str(),
                 expected
             );
         }
@@ -939,7 +1017,15 @@ mod tests {
                 "https://dev.azure.com/acme/widgets/_git/project",
             ),
             (
-                remote(ApiFlavor::AwsCodeCommit, "git-codecommit.us-west-2.amazonaws.com"),
+                remote(ApiFlavor::AzureDevOps, "ssh.dev.azure.com"),
+                "ssh://git@ssh.dev.azure.com/v3/acme/My%20Project/My%20Repo",
+                "https://dev.azure.com/acme/My%20Project/_git/My%20Repo",
+            ),
+            (
+                remote(
+                    ApiFlavor::AwsCodeCommit,
+                    "git-codecommit.us-west-2.amazonaws.com",
+                ),
                 "ssh://git-codecommit.us-west-2.amazonaws.com/v1/repos/project",
                 "https://git-codecommit.us-west-2.amazonaws.com/v1/repos/project",
             ),
@@ -959,7 +1045,10 @@ mod tests {
     #[test]
     fn branch_normalization_accepts_only_local_head_names() {
         assert_eq!(normalize_branch("main").unwrap(), "main");
-        assert_eq!(normalize_branch("refs/heads/release/v1").unwrap(), "release/v1");
+        assert_eq!(
+            normalize_branch("refs/heads/release/v1").unwrap(),
+            "release/v1"
+        );
         for invalid in [
             "refs/tags/v1",
             "refs/remotes/origin/main",

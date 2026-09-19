@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-c770ae4731a7a009
-last_updated: 2026-09-02
+hash: ef46db3751d8e999-9cfed90a3795c28a
+last_updated: 2026-09-16
 ---
 # Compose Pipeline
 
@@ -233,6 +233,10 @@ the `$()` ternary condition/branch) is local-only, so a remote URL argument
 fails loudly there; only body interpolation carries a remote runtime. See
 `darkmatter/docs/topics/darkmatter-expressions.md`.
 
+How text becomes an AST — scanning, lexing, the grammar ladder, and which
+surfaces treat a malformed expression as fatal rather than a warning — is in
+`darkmatter/docs/topics/parsing/`.
+
 ### Context Values (`ctx.*`)
 
 Context is captured once per compose run and reused across the full document
@@ -311,12 +315,25 @@ All date/time variables have `_utc` variants (e.g., `today_utc`, `day_utc`,
 (plus UTC variants).
 
 List-valued variables (`string[]` / `object[]`) are real arrays. A bare
-`{{ ctx.foo }}` renders an array **line-separated** (one element per line). For
-other shapes use the list-formatting functions: `as_csv`, `as_tsv`,
-`as_space_separated`, `as_line_separated`, `as_unordered_list`, and
-`as_ordered_list` (the Markdown-list renderers auto-nest nested arrays and the
-`depends_on` / `used_by` object shape). The former `_list` twin variables (e.g.
+`{{ ctx.foo }}` embedded in text renders an array as **compact JSON**
+(`["a","b","c"]`, and `[]` when empty); `as_json(ctx.foo)` is the explicit
+spelling of that default. For other shapes use the list-formatting functions:
+`as_csv`, `as_tsv`, `as_space_separated`, `as_line_separated`,
+`as_unordered_list`, `as_ordered_list`, `as_json`, and `as_json5` (the
+Markdown-list renderers auto-nest nested arrays and the `depends_on` /
+`used_by` object shape). The former `_list` twin variables (e.g.
 `ctx.dirty_files_list`) are removed — use `{{ as_unordered_list(ctx.dirty_files) }}`.
+
+Only a value embedded in _surrounding text_ is stringified. A frontmatter value
+whose entire trimmed content is one span (`path: "{{ ctx.packages }}"`) still
+resolves to a typed array, as do loop mutations over a single typed span and
+typed dynamic sequence sources.
+
+**Migration.** A bare `{{ ctx.foo }}` used to render newline-joined. Documents
+that relied on that move to `{{ as_line_separated(ctx.foo) }}`, which is
+unchanged, or to whichever explicit function matches the intent —
+`as_unordered_list` for Markdown bullets, `as_csv` for a prose list, `as_json` /
+`as_json5` when the structure is the point.
 
 Full specification lives in `darkmatter/docs/topics/context-variables.md`.
 
@@ -382,6 +399,28 @@ Inline: `{{ evaluated }}`             # always interpolated
 {{ not_evaluated_by_default }}        # skipped unless opted in
 ```
 ```
+
+### Braces Inside String Literals
+
+A quoted literal inside an expression is inert text. The body and mixed
+frontmatter strings rescan their output, so `{{ "in {{ area }}" }}` happens to
+resolve there. A value that is **exactly one** `{{ … }}` span takes the
+whole-value path, evaluates once, and never rescans, so the braces survive
+raw. Claudine lifecycle values are single-pass and are refused before launch.
+Build strings with `+` (`{{ area ? "in " + area : "at root" }}`), which works
+on every surface. `lint_expression` / `lint_spanned`
+(`compose::expression::lint`) find the defect in authored source and return a
+proven-equivalent `+` rewrite. `is_whole_value_span` is the shared syntactic
+classifier, and the caller decides whether its surface is single-pass. See
+`darkmatter/docs/inline/interpolation.md#braces-inside-string-literals`.
+
+### Escaping an Opener
+
+`\{{` (an odd run of backslashes before `{{`) and `\{\{` are not spans in any
+scan mode. An even run (`\\{{`) escapes itself, so the span stays active.
+Compose keeps every backslash, and the Markdown renderer resolves the escape.
+Use it for prose that quotes Handlebars, Jinja, or similar syntax. Use
+`{{{ … }}}` when the composed output itself should contain `{{ … }}`.
 
 ## ComposeReport
 
@@ -454,6 +493,20 @@ commands, authorize the union once, and pass the merged set back via
 candidates. The lower-level `collect_shell_commands(&md, &options)` returns the
 raw `ShellCommandEntry` list. See
 `docs/inline/preflight-checks.md`.
+
+### Frontmatter-surface projection
+
+`ComposeOptions::only_frontmatter_surface()` narrows a compose to frontmatter
+interpolation and frontmatter `$(...)` expansion (intersected with what is
+already enabled). The body comes back exactly as authored: no transclusion is
+dereferenced, no body directive or `::block when` is evaluated. With a
+pre-approved set, its up-front check uses
+`collect_frontmatter_shell_commands(&md, &options)` (frontmatter commands only,
+excluded keys contribute none) instead of the graph walk, so a missing include
+cannot fail it. Use it to read the frontmatter that drives a step (e.g. a
+lifecycle `initialize`) that creates files the body includes; never use the
+projected body as a prompt. Full compose and `compose_preflight` still fail on
+the missing include.
 
 ## Shell Command Caching
 

@@ -190,6 +190,24 @@ Treat a wall of single-backend failures as an **environment** signal, not a code
 regression — confirm the same test passes on an available backend before
 suspecting the renderer.
 
+## Pitfall 5 — wait for the printed sentinel, and not by its bare name
+
+`settle()` on this backend is a fixed 400 ms sleep, and `bt`'s first launch in
+a freshly spawned window runs its real capability probes against Terminal.app
+(`preserve_capabilities(true)`), which took about 1.6 s on the development Mac
+under the pre-push hook. A test that sleeps and takes one capture sees the
+opening sentinel and nothing else, and fails a renderer that is working. Poll
+with a deadline instead (`common::capture_until` in `biscuit-terminal-cli`'s
+tests), as the rust-testing contract already requires.
+
+The predicate has a trap of its own: the shell **echoes the command line**, and
+that echo contains both sentinel names. A wait on `plain.contains("__BT_END__")`
+is satisfied by the echo and returns before `bt` has printed anything. The
+printed sentinel differs from the echo only in having a real newline before it
+where the echo has the two literal characters `\n`, so match on the newline
+form — `split("__BT_START__\n")` then `split_once("\n__BT_END__")` — and use
+the same function for the wait and for the assertion's bounded region.
+
 ## Checklist before touching this harness
 
 - [ ] Run only via `just test-l2` (or a single-test broker invocation, `-j 1`).

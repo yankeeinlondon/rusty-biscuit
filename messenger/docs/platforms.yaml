@@ -1,0 +1,273 @@
+---
+# Messenger research roster: identity and coverage for the research fleet.
+#
+# The roster owns platform, interface, and adapter identity; research
+# documents own external facts; adapter code plus reviewed mappings own
+# implementation status. Nothing here is a platform fact.
+#
+# The `---` fences are required: `md schema validate` reads only frontmatter,
+# and an unfenced file is reported "valid by default" without validation.
+# Validate with `md schema validate messenger/docs/platforms.yaml`.
+#
+# Interface IDs are stable and never reused. Sending interfaces map the
+# adapter IDs persisted by `ProviderKind::as_str()`; research-only companions
+# map no adapter and never count as implemented adapters.
+#
+# Curated sources are the reconciliation pass's starting list only (cap
+# below, shared across a platform's interfaces). They do not limit discovery
+# or evidence citations. The initial lists are `proposed`: every curated-list
+# change, including this seed, requires human approval.
+$schema: ./platforms.schema.yaml
+roster_version: 1
+refresh_interval_days: 30
+curated_source_cap: 10
+
+platforms:
+    - platform_id: discord
+      name: Discord
+      status: active
+      file: discord.md
+      website: https://discord.com
+      api_url: https://discord.com/developers/docs
+      interfaces:
+          - interface_id: discord_bot_api
+            role: sending_adapter
+            api_identity: Discord HTTP API (bot token)
+            adapters: [discord]
+            identification_url: https://docs.discord.com/developers/resources/message
+          - interface_id: discord_webhook
+            role: sending_adapter
+            api_identity: Discord HTTP API (execute webhook)
+            adapters: [discord-webhook]
+            identification_url: https://docs.discord.com/developers/resources/webhook
+          - interface_id: discord_gateway
+            role: research_only
+            api_identity: Discord Gateway (WebSocket events)
+            adapters: []
+            identification_url: https://docs.discord.com/developers/events/gateway
+            relationships:
+                - kind: receives_events_for
+                  target: discord_bot_api
+          - interface_id: discord_interactions
+            role: research_only
+            api_identity: Discord interactions (application commands and message components)
+            adapters: []
+            identification_url: https://docs.discord.com/developers/interactions/receiving-and-responding
+            relationships:
+                - kind: responds_to_interactions_from
+                  target: discord_bot_api
+      curated_sources:
+          - url: https://docs.discord.com/developers/resources/message
+            contribution: Create Message payload fields, content and embed limits including the combined embed budget, attachments, allowed mentions, and message flags.
+            interfaces: [discord_bot_api]
+            review: proposed
+          - url: https://docs.discord.com/developers/resources/webhook
+            contribution: Execute Webhook parameters, username and avatar overrides, the wait flag, and which message fields webhooks accept.
+            interfaces: [discord_webhook]
+            review: proposed
+          - url: https://docs.discord.com/developers/reference
+            contribution: API versioning, rate-limit headers and buckets, error response envelope, and uploading files.
+            interfaces: [discord_bot_api, discord_webhook]
+            review: proposed
+          - url: https://docs.discord.com/developers/events/gateway
+            contribution: Gateway intents, including privileged message content, which govern inbound text visibility.
+            interfaces: [discord_gateway]
+            review: proposed
+          - url: https://github.com/discord/discord-api-spec
+            contribution: Machine-readable OpenAPI description of the HTTP API; cross-checks field names and bounds against the prose documentation.
+            interfaces: [discord_bot_api, discord_webhook]
+            review: proposed
+          - url: https://github.com/twilight-rs/twilight
+            contribution: Source of the twilight SDK Messenger uses; its client-side validators can reject payloads before any request.
+            interfaces: [discord_bot_api, discord_webhook]
+            review: proposed
+
+    - platform_id: slack
+      name: Slack
+      status: active
+      file: slack.md
+      website: https://slack.com
+      api_url: https://docs.slack.dev
+      interfaces:
+          - interface_id: slack_web_api
+            role: sending_adapter
+            api_identity: Slack Web API (chat.postMessage, bot token)
+            adapters: [slack]
+            identification_url: https://docs.slack.dev/reference/methods/chat.postMessage/
+          - interface_id: slack_incoming_webhook
+            role: sending_adapter
+            api_identity: Slack incoming webhooks
+            adapters: [slack-webhook]
+            identification_url: https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/
+          - interface_id: slack_events_api
+            role: research_only
+            api_identity: Slack Events API (HTTP delivery)
+            adapters: []
+            identification_url: https://docs.slack.dev/apis/events-api/
+            relationships:
+                - kind: receives_events_for
+                  target: slack_web_api
+          - interface_id: slack_socket_mode
+            role: research_only
+            api_identity: Slack Socket Mode (WebSocket delivery)
+            adapters: []
+            identification_url: https://docs.slack.dev/apis/events-api/using-socket-mode/
+            relationships:
+                - kind: receives_events_for
+                  target: slack_web_api
+          - interface_id: slack_interactivity
+            role: research_only
+            api_identity: Slack interactivity payloads (block actions and view submissions)
+            adapters: []
+            identification_url: https://docs.slack.dev/interactivity/handling-user-interaction/
+            relationships:
+                - kind: responds_to_interactions_from
+                  target: slack_web_api
+      curated_sources:
+          - url: https://docs.slack.dev/reference/methods/chat.postMessage/
+            contribution: Arguments, the text recommendation versus truncation threshold, blocks and attachments, response fields, warnings, and error codes for the Web API send.
+            interfaces: [slack_web_api]
+            review: proposed
+          - url: https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/
+            contribution: Incoming-webhook payloads, threading, and plain-text error responses.
+            interfaces: [slack_incoming_webhook]
+            review: proposed
+          - url: https://docs.slack.dev/reference/block-kit/blocks/
+            contribution: Block-specific text and element limits and aggregate block counts.
+            interfaces: [slack_web_api, slack_incoming_webhook]
+            review: proposed
+          - url: https://docs.slack.dev/messaging/formatting-message-text/
+            contribution: mrkdwn grammar, escaping, and mention and link syntax.
+            interfaces: [slack_web_api, slack_incoming_webhook]
+            review: proposed
+          - url: https://docs.slack.dev/apis/web-api/rate-limits/
+            contribution: Rate-limit tiers, the posting limit per channel, and Retry-After behavior.
+            interfaces: [slack_web_api, slack_incoming_webhook]
+            review: proposed
+          - url: https://github.com/slackapi/slack-api-specs
+            contribution: Machine-readable Web API description; cross-checks argument names and response shapes.
+            interfaces: [slack_web_api]
+            review: proposed
+
+    - platform_id: telegram
+      name: Telegram
+      status: active
+      file: telegram.md
+      website: https://telegram.org
+      api_url: https://core.telegram.org/bots/api
+      interfaces:
+          - interface_id: telegram_bot_api
+            role: sending_adapter
+            api_identity: Telegram Bot API
+            adapters: [telegram]
+            identification_url: https://core.telegram.org/bots/api
+      curated_sources:
+          - url: https://core.telegram.org/bots/api
+            contribution: Every send method, text and caption limits, parse modes and entities, media groups, inline keyboards and callbacks, polls, updates, and the error envelope.
+            interfaces: [telegram_bot_api]
+            review: proposed
+          - url: https://core.telegram.org/bots/api-changelog
+            contribution: Bot API release chronology with version numbers and dates.
+            interfaces: [telegram_bot_api]
+            review: proposed
+          - url: https://core.telegram.org/bots/faq
+            contribution: Documented broadcast and per-chat rate guidance and privacy-mode behavior.
+            interfaces: [telegram_bot_api]
+            review: proposed
+          - url: https://core.telegram.org/bots/features
+            contribution: Bot features overview covering privacy mode, commands, inline keyboards, and web apps.
+            interfaces: [telegram_bot_api]
+            review: proposed
+          - url: https://github.com/tdlib/telegram-bot-api
+            contribution: Source of the local Bot API server; hosting-mode differences such as file-size limits.
+            interfaces: [telegram_bot_api]
+            review: proposed
+
+    - platform_id: whatsapp
+      name: WhatsApp
+      status: active
+      file: whatsapp.md
+      website: https://business.whatsapp.com
+      api_url: https://developers.facebook.com/docs/whatsapp/cloud-api/
+      interfaces:
+          - interface_id: whatsapp_cloud_api
+            role: sending_adapter
+            api_identity: WhatsApp Business Platform Cloud API (Graph API messages)
+            adapters: [whatsapp]
+            identification_url: https://developers.facebook.com/docs/whatsapp/cloud-api/overview
+          - interface_id: whatsapp_webhooks
+            role: research_only
+            api_identity: WhatsApp Cloud API webhooks (messages and statuses)
+            adapters: []
+            identification_url: https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks
+            relationships:
+                - kind: receives_events_for
+                  target: whatsapp_cloud_api
+      curated_sources:
+          - url: https://developers.facebook.com/docs/whatsapp/cloud-api/overview
+            contribution: Cloud API scope, message types, and Graph API versioning.
+            interfaces: [whatsapp_cloud_api]
+            review: proposed
+          - url: https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks
+            contribution: Inbound message and delivery-status webhook payloads.
+            interfaces: [whatsapp_webhooks]
+            review: proposed
+          - url: https://developers.facebook.com/docs/graph-api/changelog
+            contribution: Graph API version chronology and deprecation dates that govern Cloud API versions.
+            interfaces: [whatsapp_cloud_api]
+            review: proposed
+          - url: https://whatsapp.github.io/WhatsApp-Nodejs-SDK/api-reference/messages/interactive/
+            contribution: Interactive button and list message shapes with field names; secondary to Meta's primary reference.
+            interfaces: [whatsapp_cloud_api]
+            review: proposed
+
+    - platform_id: signal
+      name: Signal
+      status: active
+      file: signal.md
+      website: https://signal.org
+      api_url: https://github.com/AsamK/signal-cli
+      notes: Messenger talks to Signal only through signal-cli's JSON-RPC interface; a REST wrapper's behavior is not evidence for it.
+      interfaces:
+          - interface_id: signal_cli_jsonrpc
+            role: sending_adapter
+            api_identity: signal-cli JSON-RPC (HTTP and daemon)
+            adapters: [signal]
+            identification_url: https://github.com/AsamK/signal-cli/blob/master/man/signal-cli-jsonrpc.5.adoc
+      curated_sources:
+          - url: https://github.com/AsamK/signal-cli/blob/master/man/signal-cli-jsonrpc.5.adoc
+            contribution: JSON-RPC methods, parameters, notifications, and error objects of the interface Messenger uses.
+            interfaces: [signal_cli_jsonrpc]
+            review: proposed
+          - url: https://github.com/AsamK/signal-cli/blob/master/man/signal-cli.1.adoc
+            contribution: Command semantics (send, attachments, mentions, text styles, quotes) that the JSON-RPC methods mirror.
+            interfaces: [signal_cli_jsonrpc]
+            review: proposed
+          - url: https://github.com/AsamK/signal-cli
+            contribution: Bridge source, releases, and changelog; primary evidence for bridge-side validation and version behavior.
+            interfaces: [signal_cli_jsonrpc]
+            review: proposed
+          - url: https://github.com/signalapp/Signal-Server
+            contribution: Service source; the only public evidence for service-side limits behind the bridge.
+            interfaces: [signal_cli_jsonrpc]
+            review: proposed
+
+excluded:
+    - subject: email
+      kind: platform
+      status: excluded
+      reason: Email remains existing research outside the first fleet.
+      existing_research: messenger/docs/research/platforms/email.md
+    - subject: desktop
+      kind: provider
+      status: excluded
+      reason: Desktop notifications are outside the initial contract; adding them needs a roster entry and any schema changes.
+    - subject: apns
+      kind: provider
+      status: excluded
+      reason: Mobile push is outside the initial contract; adding it needs a roster entry and any schema changes.
+    - subject: fcm
+      kind: provider
+      status: excluded
+      reason: Mobile push is outside the initial contract; adding it needs a roster entry and any schema changes.
+---

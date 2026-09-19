@@ -128,7 +128,7 @@ that it can receive a message during an active run.
   with `*` characters, together with delivery details. Implement secret detection
   as shared, reusable functionality; reuse or consolidate existing heuristics
   rather than creating a steering-specific duplicate.
-- Follow [the typed knowledge pipeline](../../docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md):
+- Follow [the typed knowledge pipeline](docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md):
   per-provider prose and schema-validated frontmatter, deterministic consumption,
   generated provider metadata, and a cross-provider summary.
 - Refine this specification interactively before implementation. Execute research

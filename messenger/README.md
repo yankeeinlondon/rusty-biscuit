@@ -106,7 +106,8 @@ For provider setup instructions, CLI configuration, and library usage examples, 
 
 - `lib/`: library crate and provider adapters
 - `cli/`: command-line interface
-- `docs/research/platforms/`: provider-specific implementation research
+- `docs/platforms.yaml`: the provider research roster (platforms, interfaces, curated sources)
+- `docs/research/platforms/`: provider research documents, schemas, and the fleet prompt
 - `docs/research/notifications/`: API notes and design references
 
 ## Development
@@ -118,6 +119,8 @@ just build
 just test
 just lint
 ```
+
+Provider research has its own offline recipes (`just research-validate`, `research-generate`, `research-check`, `research-report`, `research-publish`, `research-cleanup`) and one budgeted agent recipe (`just research-refresh`). The workflow is in the [User Guide](./docs/user-guide.md#provider-research).
 
 ## Release Notes
 

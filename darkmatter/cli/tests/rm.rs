@@ -1,8 +1,7 @@
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 use predicates::prelude::*;
-
 
 // =============================================================================
 //                      RM SUBCOMMAND TESTS
@@ -10,6 +9,7 @@ use predicates::prelude::*;
 
 #[test]
 fn test_rm_removes_single_property() {
+    let fixture = CliProcessFixture::named("rm-test-rm-removes-single-property");
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("test.md");
     std::fs::write(
@@ -18,7 +18,8 @@ fn test_rm_removes_single_property() {
     )
     .unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .args(["rm", file.to_str().unwrap(), "author"])
         .assert()
         .success();
@@ -32,6 +33,7 @@ fn test_rm_removes_single_property() {
 
 #[test]
 fn test_rm_removes_multiple_properties() {
+    let fixture = CliProcessFixture::named("rm-test-rm-removes-multiple-properties");
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("test.md");
     std::fs::write(
@@ -40,7 +42,8 @@ fn test_rm_removes_multiple_properties() {
     )
     .unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .args(["rm", file.to_str().unwrap(), "author", "tags"])
         .assert()
         .success();
@@ -55,6 +58,7 @@ fn test_rm_removes_multiple_properties() {
 
 #[test]
 fn test_rm_nonexistent_key_fails() {
+    let fixture = CliProcessFixture::named("rm-test-rm-nonexistent-key-fails");
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("test.md");
     std::fs::write(
@@ -63,7 +67,8 @@ fn test_rm_nonexistent_key_fails() {
     )
     .unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .args(["rm", file.to_str().unwrap(), "missing"])
         .assert()
         .failure()
@@ -72,6 +77,7 @@ fn test_rm_nonexistent_key_fails() {
 
 #[test]
 fn test_rm_partial_nonexistent_fails() {
+    let fixture = CliProcessFixture::named("rm-test-rm-partial-nonexistent-fails");
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("test.md");
     std::fs::write(
@@ -80,7 +86,8 @@ fn test_rm_partial_nonexistent_fails() {
     )
     .unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .args(["rm", file.to_str().unwrap(), "title", "missing"])
         .assert()
         .failure()
@@ -94,6 +101,7 @@ fn test_rm_partial_nonexistent_fails() {
 
 #[test]
 fn test_rm_with_json_output() {
+    let fixture = CliProcessFixture::named("rm-test-rm-with-json-output");
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("test.md");
     std::fs::write(
@@ -102,7 +110,8 @@ fn test_rm_with_json_output() {
     )
     .unwrap();
 
-    let output = md_cmd()
+    let output = fixture
+        .command()
         .args(["rm", file.to_str().unwrap(), "author", "--json"])
         .assert()
         .success()
@@ -121,6 +130,7 @@ fn test_rm_with_json_output() {
 
 #[test]
 fn test_rm_with_verbose_output() {
+    let fixture = CliProcessFixture::named("rm-test-rm-with-verbose-output");
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("test.md");
     std::fs::write(
@@ -129,7 +139,8 @@ fn test_rm_with_verbose_output() {
     )
     .unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .args(["rm", file.to_str().unwrap(), "author", "-v"])
         .assert()
         .success()
@@ -138,6 +149,7 @@ fn test_rm_with_verbose_output() {
 
 #[test]
 fn test_rm_preserves_body_content() {
+    let fixture = CliProcessFixture::named("rm-test-rm-preserves-body-content");
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("test.md");
     let body = "# Heading\n\nParagraph with **bold** text.\n\n- list item\n";
@@ -147,7 +159,8 @@ fn test_rm_preserves_body_content() {
     )
     .unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .args(["rm", file.to_str().unwrap(), "author"])
         .assert()
         .success();
@@ -160,11 +173,13 @@ fn test_rm_preserves_body_content() {
 
 #[test]
 fn test_rm_requires_at_least_one_prop() {
+    let fixture = CliProcessFixture::named("rm-test-rm-requires-at-least-one-prop");
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("test.md");
     std::fs::write(&file, "---\ntitle: Hello\n---\n\n# Content\n").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .args(["rm", file.to_str().unwrap()])
         .assert()
         .failure();

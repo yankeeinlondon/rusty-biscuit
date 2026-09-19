@@ -1,0 +1,2 @@
+$schema:
+    a: number(required)

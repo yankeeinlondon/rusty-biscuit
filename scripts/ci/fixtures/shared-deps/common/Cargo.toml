@@ -1,0 +1,9 @@
+[package]
+name = "shared-deps-common"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "shared_deps_common"
+path = "src/lib.rs"

@@ -10,11 +10,16 @@ use tempfile::TempDir;
 fn make_source(dir: &TempDir, document: &str) -> ResolvedCompositionSource {
     let file = dir.path().join("test.md");
     fs::write(&file, document).unwrap();
-    resolve_composition_source(file.to_str().unwrap()).unwrap()
+    // Anchored on the fixture directory rather than the ambient CWD: these
+    // documents are absolute paths inside their own `TempDir`, so the monorepo
+    // topology the ambient entry point walks decides nothing here. The tests
+    // below that *do* assert independence from the process CWD use
+    // `make_source_in` and keep the ambient entry point.
+    crate::composition::resolve_fixture_source(file.to_str().unwrap()).unwrap()
 }
 
 fn shipped_implement_plan() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .ancestors()
         .nth(2)
         .expect("repository root is two levels above claudine/lib")
@@ -133,12 +138,10 @@ fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
     assert_eq!(
         commands,
         [
-            "git add ..",
-            "just commit",
-            "gitnexus analyze --force",
-            "git add ..",
-            "git commit -m \"\"",
-            "gitnexus analyze --force",
+            format!("git add {}", prepared.source_repo_root.as_ref().unwrap().display()),
+            "just commit".to_string(),
+            "git add ..".to_string(),
+            "git commit -m \"\"".to_string(),
         ],
         "preflight is condition-blind, so both branches must resolve without an unknown-root error",
     );

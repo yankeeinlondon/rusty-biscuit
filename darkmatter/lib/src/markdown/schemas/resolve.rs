@@ -2894,7 +2894,7 @@ mod schema_plus_phase1 {
     // ── Fixture validation (acceptance corpus) ───────────────────────────
 
     fn feature_dir() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
+        biscuit_test_harness::manifest_dir!()
             .join("..")
             .join("features")
             .join("_completed")

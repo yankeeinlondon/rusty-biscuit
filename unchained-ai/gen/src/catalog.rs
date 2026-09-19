@@ -11,7 +11,7 @@
 //! in `tests/catalog_drift.rs` relies on this.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use chrono::{DateTime, FixedOffset};
 use schemars::JsonSchema;
@@ -297,7 +297,7 @@ pub fn build_catalog(generated_at: String) -> ModelsCatalog {
 /// files under `lib/src/rigging/providers/models/` keeps offline re-emission
 /// deterministic for the drift test.
 pub fn catalog_generated_at() -> Result<String, CatalogError> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let dir = biscuit_test_harness::manifest_dir!()
         .join("..")
         .join("lib")
         .join("src")

@@ -1,0 +1,16 @@
+[package]
+name = "publication-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Throwaway spike: multi-artifact snapshot publication for messenger research metadata"
+
+# Standalone: deliberately NOT a member of the rusty-biscuit workspace.
+[workspace]
+
+[dependencies]
+serde_json = "1"
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+
+[dev-dependencies]
+tempfile = "3"

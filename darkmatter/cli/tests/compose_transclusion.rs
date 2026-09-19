@@ -1,22 +1,12 @@
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 use predicates::prelude::*;
-
-fn initialize_repository(root: &std::path::Path) {
-    let git_dir = root.join(".git");
-    std::fs::create_dir_all(git_dir.join("objects")).unwrap();
-    std::fs::create_dir_all(git_dir.join("refs/heads")).unwrap();
-    std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
-    std::fs::write(
-        git_dir.join("config"),
-        "[core]\nrepositoryformatversion = 0\nbare = false\n",
-    )
-    .unwrap();
-}
 
 #[test]
 fn test_compose_set_variables_available_during_validation() {
+    let fixture =
+        CliProcessFixture::named("test_compose_set_variables_available_during_validation");
     // Regression test: --set variables must be available during reference
     // validation so that interpolated transclusion paths resolve correctly.
     // Previously, validation ran before --set was parsed, causing
@@ -35,7 +25,8 @@ fn test_compose_set_variables_available_during_validation() {
     let template_path = temp_dir.path().join("template.md");
     std::fs::write(&template_path, "# Task\n\n::file features/{{plan}}\n").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .arg("compose")
         .arg(&template_path)
         .args(["--set", r#"{"plan":"my-plan.md"}"#])
@@ -46,21 +37,24 @@ fn test_compose_set_variables_available_during_validation() {
 
 #[test]
 fn compose_with_the_shipped_baseline_renders_ctx_cwd_from_the_launch_directory() {
-    let launch = tempfile::tempdir().unwrap();
-    let prompt = launch.path().join("cwd.md");
-    std::fs::write(&prompt, "Launch: {{ ctx.cwd }}\n").unwrap();
+    let fixture = CliProcessFixture::named(
+        "compose_with_the_shipped_baseline_renders_ctx_cwd_from_the_launch_directory",
+    );
+    let launch = fixture.cwd();
+    let prompt = fixture.write_file("cwd/cwd.md", "Launch: {{ ctx.cwd }}\n");
 
     // ctx.cwd carries the child's `current_dir()` spelling: symlink-resolved
     // on Unix (macOS /var/folders), exactly as-launched on Windows, where CI
     // tempdirs use 8.3 short names that `canonicalize` would re-spell.
     #[cfg(windows)]
-    let expected_launch = launch.path().to_path_buf();
+    let expected_launch = launch.to_path_buf();
     #[cfg(not(windows))]
-    let expected_launch =
-        std::fs::canonicalize(launch.path()).expect("canonical launch directory");
+    let expected_launch = std::fs::canonicalize(launch).expect("canonical launch directory");
 
-    md_cmd()
-        .current_dir(launch.path())
+    fixture
+        .command_builder()
+        .ambient_context(launch)
+        .build()
         .arg("compose")
         .arg(&prompt)
         .assert()
@@ -73,6 +67,8 @@ fn compose_with_the_shipped_baseline_renders_ctx_cwd_from_the_launch_directory()
 
 #[test]
 fn test_compose_state_variables_available_during_validation() {
+    let fixture =
+        CliProcessFixture::named("test_compose_state_variables_available_during_validation");
     // Same as above but using --state instead of --set
     let temp_dir = tempfile::TempDir::new().unwrap();
 
@@ -89,7 +85,8 @@ fn test_compose_state_variables_available_during_validation() {
     let template_path = temp_dir.path().join("template.md");
     std::fs::write(&template_path, "# Docs\n\n::file docs/{{doc.doc}}\n").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .arg("compose")
         .arg(&template_path)
         .args(["--state", r#"{"doc":"readme.md"}"#])
@@ -98,12 +95,11 @@ fn test_compose_state_variables_available_during_validation() {
         .stdout(predicate::str::contains("Readme content."));
 }
 
-
 #[test]
 fn test_compose_link_relative_same_repo() {
-    let dir = tempfile::tempdir().unwrap();
-    let repo = dir.path().join("repo");
-    initialize_repository(&repo);
+    let fixture = CliProcessFixture::named("test_compose_link_relative_same_repo");
+    let repo = fixture.workspace_path().join("repo");
+    assert!(fixture.initialize_repository_at(&repo));
     let docs = repo.join("docs");
     let assets = repo.join("assets");
     std::fs::create_dir_all(&docs).unwrap();
@@ -114,7 +110,12 @@ fn test_compose_link_relative_same_repo() {
     std::fs::write(&source_file, "# Source\n\n![img](../assets/logo.png)\n").unwrap();
     std::fs::write(&logo_file, "png").unwrap();
 
-    let output = md_cmd().arg("compose").arg(&source_file).output().unwrap();
+    let output = fixture
+        .command()
+        .arg("compose")
+        .arg(&source_file)
+        .output()
+        .unwrap();
 
     assert!(output.status.success(), "command should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -147,9 +148,9 @@ fn test_compose_link_relative_same_repo() {
 
 #[test]
 fn test_compose_link_transcluded_child() {
-    let dir = tempfile::tempdir().unwrap();
-    let repo = dir.path().join("repo");
-    initialize_repository(&repo);
+    let fixture = CliProcessFixture::named("test_compose_link_transcluded_child");
+    let repo = fixture.workspace_path().join("repo");
+    assert!(fixture.initialize_repository_at(&repo));
 
     let docs = repo.join("docs");
     let components = repo.join("components");
@@ -164,7 +165,12 @@ fn test_compose_link_transcluded_child() {
     std::fs::write(&child_file, "[link](./sibling.md)\n").unwrap();
     std::fs::write(&sibling_file, "sibling content\n").unwrap();
 
-    let output = md_cmd().arg("compose").arg(&parent_file).output().unwrap();
+    let output = fixture
+        .command()
+        .arg("compose")
+        .arg(&parent_file)
+        .output()
+        .unwrap();
 
     assert!(output.status.success(), "command should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -183,6 +189,7 @@ fn test_compose_link_transcluded_child() {
 
 #[test]
 fn test_compose_env_var_substitution_one_warning() {
+    let fixture = CliProcessFixture::named("test_compose_env_var_substitution_one_warning");
     let dir = tempfile::tempdir().unwrap();
     let project_root = dir.path().join("project");
     std::fs::create_dir_all(&project_root).unwrap();
@@ -203,7 +210,8 @@ fn test_compose_env_var_substitution_one_warning() {
     let md_file = dir.path().join("test.md");
     std::fs::write(&md_file, format!("[config]({abs_target_markdown})\n")).unwrap();
 
-    let output = md_cmd()
+    let output = fixture
+        .command()
         .env("PROJECT_ROOT", &abs_root)
         .arg("compose")
         .arg(&md_file)
@@ -254,9 +262,9 @@ fn test_compose_env_var_substitution_one_warning() {
 
 #[test]
 fn test_compose_html_spaced_attributes() {
-    let dir = tempfile::tempdir().unwrap();
-    let repo = dir.path().join("repo");
-    initialize_repository(&repo);
+    let fixture = CliProcessFixture::named("test_compose_html_spaced_attributes");
+    let repo = fixture.workspace_path().join("repo");
+    assert!(fixture.initialize_repository_at(&repo));
 
     let page_file = repo.join("page.md");
     let other_file = repo.join("other.md");
@@ -270,7 +278,12 @@ fn test_compose_html_spaced_attributes() {
     std::fs::write(&other_file, "other content\n").unwrap();
     std::fs::write(&img_file, "png").unwrap();
 
-    let output = md_cmd().arg("compose").arg(&page_file).output().unwrap();
+    let output = fixture
+        .command()
+        .arg("compose")
+        .arg(&page_file)
+        .output()
+        .unwrap();
 
     assert!(output.status.success(), "command should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);

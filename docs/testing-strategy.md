@@ -3,7 +3,7 @@ title: Testing Strategy
 status: living
 audience: technical person but with no knowledge of this monorepo
 created: 2026-05-24
-updated: 2026-09-12
+updated: 2026-09-15
 ---
 
 # Rusty Biscuit Testing Strategy
@@ -299,10 +299,12 @@ just all
 ```
 
 Root `just test` is the one exception to area iteration. It discovers every
-workspace package from `cargo metadata`, resolves each package's declared
-features, and hands all of them to a single nextest invocation with
-`--no-fail-fast`, so one scheduler sees every test binary and one failure
-cannot hide the rest. Ctrl+C stops it immediately with exit code 130, and
+workspace package from `cargo metadata`, narrows that set when selectors are
+given, resolves each selected package's declared features, and hands them to a
+single nextest invocation with `--no-fail-fast`, so one scheduler sees every
+selected test binary and one failure cannot hide the rest. Selector-narrowed
+runs inherit the flag by design; see the `rust-testing` skill for why.
+Ctrl+C stops it immediately with exit code 130, and
 `just check-test-interrupts` verifies that contract for every area.
 
 ### How an area's justfile is built
@@ -669,9 +671,12 @@ Level 1 suite against your local working tree on standing clones on real build
 hosts, reached over SSH and declared by the `BUILD_LINUX`, `BUILD_WIN`,
 `BUILD_WSL`, and `BUILD_MACOS` environment variables. An unset variable means
 that host is unavailable from this machine. `--os` picks one platform and
-defaults to every declared platform except your own. The WSL2 path deliberately
-uses the same prebuilt nextest archive mode CI uses, so a failure reproduces
-faithfully.
+defaults to every declared platform except your own. Every path — not just
+WSL2 — uses the same `ci-build` producer, manifest, verifier, and archive-mode
+recipes CI uses: the archive and its manifest are transferred, verified on the
+destination, and extracted at a different path with the producer's target
+directory hidden, so a compile-time path assumption fails there rather than only
+in CI.
 
 No commit and no push is needed. This is the expected step for a change that
 touches path handling, process spawning, or terminal behavior, because those
@@ -703,7 +708,7 @@ run.
 | Tier | Linux | Windows | macOS | WSL2 |
 | --- | --- | --- | --- | --- |
 | Compile check, declared examples/benches | dedicated job | dedicated job | dedicated job | no |
-| Level 1 | full | full | full | full, from a prebuilt archive |
+| Level 1 | full | full | full | full, from the Linux archive |
 | Level 2 | yes, tmux | policy gap | yes, tmux | policy gap |
 | Browser | yes | policy gap | policy gap | policy gap |
 | Level 3 | opt-in | opt-in | opt-in | no |
@@ -723,9 +728,16 @@ Other things worth knowing about the matrix:
 - **Windows runs the full Level 1 suite for a selected package** because it is
   the platform most prone to silent API and type drift that only appears at run
   time. Windows-only tests stay behind `#[ignore]` or a `level3_` prefix.
+- **Every test cell runs from an archive another job compiled.** One native
+  owner per planned build key produces it; L1, L2, browser, and WSL2 verify its
+  digest, checksums, inventory, and runtime ABI and then execute it with no
+  Cargo, rustc, or linker in reach. A consumer that finds its build missing,
+  corrupt, or incompatible refuses — it never compiles a replacement, and the
+  cell is `MISSING`, not a test failure. Anything resolved at *compile* time to
+  a builder path therefore breaks on every OS, not just in the guest.
 - **WSL2 follows Linux code paths** and is never evidence for native Windows.
-  It runs from an archive built on Linux, which is why anything resolved at
-  compile time to a builder path breaks there and nowhere else.
+  It consumes the same Linux artifact, checksum, and realized digest as the
+  native Linux cells while publishing its own separate result.
 - **Native compile checks cover declared examples and benches** with explicit
   target selectors. An additional Ubuntu check compiles unchanged direct
   consumers inside the changed package's cell. Checks do not deny warnings;
@@ -754,6 +766,11 @@ Other things worth knowing about the matrix:
   or `!cancelled()` so the area rollup still provides cell-level diagnosis,
   while `fail-fast: false` lets sibling OS legs finish. The policy-free
   `ci-gate` folds all blocking jobs.
+- **Each cell reports its stages apart.** Producer queue, compile+archive, and
+  upload; consumer download, verify, extract, and execute — so a timing
+  comparison cannot credit a change with time that merely moved into transfer or
+  setup. Every executing cell also displays the planned key, realized digest,
+  and producer it ran.
 - **Sharding was removed.** Compiling the test binaries is most of a shard's
   cost and every shard pays it in full, so four shards cost roughly three times
   the compute to save a couple of minutes. Level 1 runs with `--no-fail-fast`

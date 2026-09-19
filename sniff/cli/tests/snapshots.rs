@@ -1,8 +1,9 @@
 use serde_json::{Value, json};
 
+mod common;
+
 fn run_stdout(args: &[&str]) -> String {
-    let output = assert_cmd::Command::cargo_bin("sniff")
-        .unwrap()
+    let output = common::owned_sniff_command()
         .args(args)
         .assert()
         .success()
@@ -360,8 +361,7 @@ fn create_degenerate_cargo_fixture() -> (tempfile::TempDir, std::path::PathBuf) 
 }
 
 fn run_repo_structure(base: &std::path::Path) -> String {
-    let output = assert_cmd::Command::cargo_bin("sniff")
-        .unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             base.to_str().unwrap(),
@@ -382,8 +382,7 @@ fn run_repo_structure(base: &std::path::Path) -> String {
 }
 
 fn run_repo_structure_json(base: &std::path::Path) -> serde_json::Value {
-    let output = assert_cmd::Command::cargo_bin("sniff")
-        .unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             base.to_str().unwrap(),
@@ -614,8 +613,8 @@ serde = "1"
 /// the projection:
 ///
 /// - `git_status.config` reads the host's global gitconfig.
-/// - `branches[].sha`, `recent_commits`, and the two commit-change families
-///   carry commit ids and timestamps.
+/// - `branches[].sha` and the commit families' `hash` and `datetime` carry
+///   commit ids and timestamps; each family keeps its other fields.
 /// - `worktrees[].path`, `root`, and `structure.root` are temp paths.
 /// - `git_status.file_changes` order is *not* deterministic: the gix status
 ///   walk is parallel, which reproduces on clean HEAD. Sorted here rather than
@@ -721,12 +720,28 @@ fn stable_aggregate_json(json: &Value) -> Value {
         "unstaged": json["unstaged"],
         "untracked": json["untracked"],
         "has_merge_conflict": json["has_merge_conflict"],
-        "commit_family_keys": {
-            "recent_commits": json["recent_commits"]["period"]["label"],
-            "source_code_changes": json["source_code_changes"]["filter"],
-            "documentation_changes": json["documentation_changes"]["filter"],
-        },
+        "recent_commits": stable_commit_family(&json["recent_commits"]),
+        "source_code_changes": stable_commit_family(&json["source_code_changes"]),
+        "documentation_changes": stable_commit_family(&json["documentation_changes"]),
     })
+}
+
+/// A commit-family array without the per-run `hash` and `datetime`.
+fn stable_commit_family(family: &Value) -> Value {
+    let commits = family
+        .as_array()
+        .unwrap_or_else(|| panic!("commit family must be a bare array: {family}"));
+    commits
+        .iter()
+        .map(|commit| {
+            let mut commit = commit.clone();
+            let fields = commit.as_object_mut().expect("commit object");
+            fields.remove("hash");
+            fields.remove("datetime");
+            commit
+        })
+        .collect::<Vec<_>>()
+        .into()
 }
 
 /// Replace every occurrence of the fixture root with `[BASE]`.
@@ -750,11 +765,7 @@ fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
     portable_roots.sort_by_key(|root| std::cmp::Reverse(root.len()));
     roots.sort_by_key(|root| std::cmp::Reverse(root.as_os_str().len()));
 
-    fn redact_strings(
-        value: &mut Value,
-        roots: &[std::path::PathBuf],
-        portable_roots: &[String],
-    ) {
+    fn redact_strings(value: &mut Value, roots: &[std::path::PathBuf], portable_roots: &[String]) {
         match value {
             Value::String(text) => {
                 for root in roots {
@@ -803,8 +814,7 @@ fn redact_base_paths_normalizes_windows_separators() {
 }
 
 fn run_repo_aggregate_json(base: &std::path::Path) -> Value {
-    let output = assert_cmd::Command::cargo_bin("sniff")
-        .unwrap()
+    let output = common::owned_sniff_command()
         .args(["--base", base.to_str().unwrap(), "repo", "--json"])
         .env("NO_COLOR", "1")
         .output()

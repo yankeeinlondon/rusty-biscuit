@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 import schema  # noqa: E402
-from affected_scope import legacy_scope_document
+from affected_scope import change_inventory, legacy_scope_document
 from local_evidence import (  # noqa: E402
     NOTES_PREFIX,
     SCOPE_NOTES_REF,
@@ -153,6 +153,9 @@ class ScopeReceiptTests(RepositoryFixture):
             "base": self.base,
             "head": self.head,
             "change_class": "package",
+            # The real producer, so a fixture plan cannot describe a shape the
+            # planner no longer emits.
+            "change_inventory": change_inventory(["alpha/src/lib.rs"], False),
             "full_scope": False,
             "full_scope_gates": [],
             "areas": [{"area": "pkg", "selection_reason": "source change", "packages": ["alpha"]}],
@@ -168,6 +171,8 @@ class ScopeReceiptTests(RepositoryFixture):
                     "check_args": "-p alpha",
                     "l2_backends": [],
                     "runner_tools": [],
+                    "archive_includes": [],
+                    "sidecars": [],
                     "companion_suites": [],
                     "l1_include_slow": False,
                     "native": {},
@@ -202,6 +207,37 @@ class ScopeReceiptTests(RepositoryFixture):
                     "target_kinds": ["lib", "test"],
                     "compile_coverage_from": "L1",
                     "selection_reason": "no evidence",
+                    "build": "1111222233334444",
+                }
+            ],
+            "builds": [
+                {
+                    "key": "1111222233334444",
+                    "package": "alpha",
+                    "producer": "macos-latest",
+                    "artifact": "build-alpha-macos-latest-1111222233334444",
+                    "compatible_environments": ["macos-latest"],
+                    "compatibility_reason": "aarch64-apple-darwin archive produced on macos-latest",
+                    "consumers": [{"environment": "macos-latest", "gate": "L1"}],
+                    "identity": {
+                        "source_commit": self.head,
+                        "lockfile": "aaaabbbbccccdddd",
+                        "rust": "1.97.1",
+                        "nextest": "latest",
+                        "host": "aarch64-apple-darwin",
+                        "target": "aarch64-apple-darwin",
+                        "profile": "test",
+                        "rustflags": "",
+                        "cargo_config": [],
+                        "linker": "cc",
+                        "archive_format": "tar.zst",
+                        "package": "alpha",
+                        "target_kinds": ["lib", "test"],
+                        "features": "",
+                        "native": [],
+                        "archive_includes": [],
+                        "sidecars": [],
+                    },
                 }
             ],
             "accepted_evidence": [],
@@ -210,7 +246,7 @@ class ScopeReceiptTests(RepositoryFixture):
             "job_estimate": 1,
             "preflight_os": ["macos-latest"],
             "preflight_reason": "package-local change",
-            "flags": {"ci_tooling": False},
+            "flags": {},
         }
         self.projection = {
             name: [] for name in schema.SCOPE_PROJECTION_FIELDS
@@ -222,7 +258,7 @@ class ScopeReceiptTests(RepositoryFixture):
             "change_class": "package",
             "preflight_reason": "package-local change",
             "job_estimate": 1,
-            "flags": {"ci_tooling": False},
+            "flags": {},
         }
         self.plan_path = self.root / "plan.json"
         self.plan_path.write_text(schema.canonical(self.plan), encoding="utf-8")

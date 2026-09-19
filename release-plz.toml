@@ -14,11 +14,25 @@ git_release_draft = false
 git_tag_enable = true
 git_tag_name = "{{ package }}-v{{ version }}"
 
-# No crates.io publishing
+# No crates.io publishing, and no crates.io READING either.
+#
+# `publish = false` only skips `cargo publish`. Version detection still asked
+# crates.io for each member's "current" version, and a dozen of this
+# workspace's names are taken there by unrelated authors — `research` (2.2.2),
+# `reaper` (2.0.0), `playa`, `worktree`, `queue`, `sniff`, `darkmatter`,
+# `messenger`, `homelab`, `visualizer`, `dmls`, `queue`. release-plz downloaded
+# those strangers' crates and diffed this source against them, which is both
+# the wall of `Package … not found` warnings and a version baseline belonging
+# to someone else's project.
+#
+# `git_only` moves version detection onto this repository's own
+# `{{ package }}-v{{ version }}` tags and contacts no registry at all. It
+# cannot be combined with `publish = true`, which is already the case here.
 publish = false
+git_only = true
 # Disabled: semver-checks builds each crate during version determination, which
 # regenerates the intentionally-untracked, gitignored Cargo.lock files at the
-# nested workspace roots (tree-hugger, scripts, schematic/schema) and the stray
+# nested workspace roots (tree-hugger, schematic/schema) and the stray
 # research locks. Those older release tags still track them, so release-plz's
 # internal `git checkout` then aborts on "local changes would be overwritten".
 # With `publish = false` there is no crates.io consumer for semver gating anyway.

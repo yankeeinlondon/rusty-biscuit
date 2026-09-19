@@ -14,13 +14,12 @@
 //!
 //! In CI, run with `--run-ignored only` on this specific test binary.
 
-use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
 fn nextest_config() -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let path = biscuit_test_harness::manifest_dir!()
         .parent()
         .and_then(|p| p.parent())
         .expect("test-toolkit lives under <repo>/tools/test-toolkit")

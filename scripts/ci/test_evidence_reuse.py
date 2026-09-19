@@ -29,8 +29,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import affected_scope  # noqa: E402
 import local_evidence  # noqa: E402
+import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
+from affected_scope import change_inventory  # noqa: E402
 from local_evidence import NOTES_PREFIX, verified_environment  # noqa: E402
 
 
@@ -159,11 +162,16 @@ class EvidenceFixture(unittest.TestCase):
                 ("wsl2-ubuntu", "L1"),
             )
         ]
-        return {
+        document = {
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": self.base,
             "head": self.head,
             "change_class": "package",
+            # The real producer, so a fixture plan cannot describe a shape the
+            # planner no longer emits.
+            "change_inventory": change_inventory(
+                ["alpha/src/lib.rs", "beta/src/lib.rs"], False
+            ),
             "full_scope": False,
             "full_scope_gates": [],
             "areas": [
@@ -181,6 +189,8 @@ class EvidenceFixture(unittest.TestCase):
                     "check_args": f"-p {name}",
                     "l2_backends": [],
                     "runner_tools": [],
+                    "archive_includes": [],
+                    "sidecars": [],
                     "companion_suites": [],
                     "l1_include_slow": False,
                     "native": {},
@@ -209,14 +219,16 @@ class EvidenceFixture(unittest.TestCase):
                 for name in schema.ENVIRONMENTS
             ],
             "cells": cells,
+            "builds": [],
             "accepted_evidence": [],
             "policy_gaps": [],
             "prohibited_cells": [],
             "job_estimate": len(cells),
             "preflight_os": ["ubuntu-latest"],
             "preflight_reason": "package-local change",
-            "flags": {"ci_tooling": False},
+            "flags": {},
         }
+        return plan_fixtures.attach_builds(document)
 
     def plan_cell(self, package: str, environment: str, gate: str) -> dict:
         return {
@@ -369,6 +381,163 @@ class GateInputIdentityTests(EvidenceFixture):
 
     def test_the_rejection_code_is_in_the_shared_vocabulary(self) -> None:
         self.assertIn("gate-inputs-changed", schema.REJECTIONS)
+
+
+class JustRecipeIdentityTests(EvidenceFixture):
+    """Just files enter a cell's identity by recipe, exactly as they enter
+    selection (fixes/2026-09-19-just-recipe-identity).
+
+    The fixture's justfile has one recipe per CI gate, a helper the test gate
+    reaches through a `just <name>` call inside a module, and two recipes CI
+    never runs. Every case asserts the identity and the planner's
+    `just_change_gates` answer for the same edit, which is the contract: the
+    two consumers read one classification.
+    """
+
+    JUSTFILE = (
+        "import 'just/devops.just'\n"
+        "set shell := ['bash', '-cu']\n"
+        "\n"
+        "# CI's test gate\n"
+        "_test pkg *args='':\n"
+        "    cargo nextest run -p {{ pkg }} -E \"$(just _tier_filter sanity)\" {{ args }}\n"
+        "\n"
+        "_lint pkg:\n"
+        "    cargo fmt --check -p {{ pkg }}\n"
+        "    cargo clippy -p {{ pkg }} -- -D warnings\n"
+        "\n"
+        "pre-push:\n"
+        "    just ci-local --l2\n"
+    )
+    DEVOPS = (
+        "_tier_filter tier:\n"
+        "    echo 'test(/(^|::)level2_/)'\n"
+        "\n"
+        "notify message:\n"
+        "    echo {{ message }}\n"
+    )
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write("justfile", self.JUSTFILE)
+        self.write("just/devops.just", self.DEVOPS)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "just files")
+        self.head = self.git("rev-parse", "HEAD")
+        self.plan_path.write_text(schema.canonical(self.plan()), encoding="utf-8")
+
+    def edit(self, relative: str, text: str) -> str:
+        self.write(relative, text)
+        self.git("commit", "-q", "-am", f"edit {relative}")
+        return self.git("rev-parse", "HEAD")
+
+    def identities(self, ref: str) -> dict[str, str]:
+        plan = json.loads(self.plan_path.read_text(encoding="utf-8"))
+        return {
+            gate: local_evidence.gate_input_identity(
+                local_evidence.cell_input_paths(plan, "alpha", gate), ref, gate
+            )
+            for gate in schema.GATES
+        }
+
+    def moved(self, before: str, after: str) -> set[str]:
+        """The planner gates whose identity differs between two revisions."""
+        earlier, later = self.identities(before), self.identities(after)
+        return {
+            local_evidence.planner_gate_of(gate)
+            for gate in schema.GATES
+            if earlier[gate] != later[gate]
+        }
+
+    def selected(self, relative: str, before: str) -> set[str]:
+        """What the planner schedules for the same edit, from the same tree."""
+        gates = affected_scope.just_change_gates(
+            relative,
+            before,
+            self.root,
+            reader=lambda ref, path: self.git("show", f"{ref}:{path}"),
+        )
+        self.assertIsNotNone(gates)
+        return gates
+
+    def test_a_recipe_no_gate_reaches_moves_nothing(self) -> None:
+        before = self.head
+        after = self.edit("just/devops.just", self.DEVOPS.replace("echo {{ message }}", "say {{ message }}"))
+        self.assertEqual(set(), self.moved(before, after))
+        self.assertEqual(set(), self.selected("just/devops.just", before))
+
+        after_root = self.edit("justfile", self.JUSTFILE.replace("just ci-local --l2", "just ci-local"))
+        self.assertEqual(set(), self.moved(before, after_root))
+        self.assertEqual(set(), self.selected("justfile", after))
+
+    def test_a_helper_the_test_gate_calls_moves_only_the_test_tiers(self) -> None:
+        # `_tier_filter` is reached from `_test` through a `just` call in a
+        # module, never named in `CI_RECIPES_BY_GATE` itself.
+        before = self.head
+        after = self.edit("just/devops.just", self.DEVOPS.replace("level2_", "browser_"))
+        self.assertEqual({"test"}, self.moved(before, after))
+        self.assertEqual({"test"}, self.selected("just/devops.just", before))
+
+    def test_the_lint_recipe_moves_only_lint(self) -> None:
+        before = self.head
+        after = self.edit("justfile", self.JUSTFILE.replace("-D warnings", "-W warnings"))
+        self.assertEqual({"lint"}, self.moved(before, after))
+        self.assertEqual({"lint"}, self.selected("justfile", before))
+
+    def test_text_outside_every_recipe_moves_every_gate(self) -> None:
+        before = self.head
+        after = self.edit("justfile", self.JUSTFILE.replace("'bash', '-cu'", "'bash', '-eu'"))
+        self.assertEqual(set(affected_scope.GATES), self.moved(before, after))
+        self.assertEqual(set(affected_scope.GATES), self.selected("justfile", before))
+
+    def test_a_comment_only_edit_moves_nothing(self) -> None:
+        before = self.head
+        after = self.edit("justfile", self.JUSTFILE.replace("# CI's test gate", "# the L1 gate"))
+        self.assertEqual(set(), self.moved(before, after))
+        self.assertEqual(set(), self.selected("justfile", before))
+
+    def test_command_order_inside_a_recipe_is_part_of_the_identity(self) -> None:
+        before = self.head
+        swapped = self.JUSTFILE.replace(
+            "    cargo fmt --check -p {{ pkg }}\n    cargo clippy -p {{ pkg }} -- -D warnings\n",
+            "    cargo clippy -p {{ pkg }} -- -D warnings\n    cargo fmt --check -p {{ pkg }}\n",
+        )
+        self.assertNotEqual(self.JUSTFILE, swapped)
+        after = self.edit("justfile", swapped)
+        self.assertEqual({"lint"}, self.moved(before, after))
+
+    def test_an_older_receipt_survives_an_edit_to_a_recipe_no_gate_reaches(self) -> None:
+        old_head = self.head
+        self.add_note(
+            "macos-latest",
+            self.receipt("macos-latest", [self.receipt_cell("alpha")]),
+            commit=old_head,
+        )
+        self.head = self.edit("just/devops.just", self.DEVOPS.replace("echo {{ message }}", "say {{ message }}"))
+        self.plan_path.write_text(schema.canonical(self.plan()), encoding="utf-8")
+        accepted, rejections = target("verify_cells")(str(self.plan_path), self.base, self.head)
+        self.assertEqual(["alpha/macos-latest/L1"], self.keys(accepted))
+        self.assertEqual([], rejections)
+
+    def test_an_older_receipt_is_rejected_when_the_test_recipe_changed(self) -> None:
+        old_head = self.head
+        self.add_note(
+            "macos-latest",
+            self.receipt("macos-latest", [self.receipt_cell("alpha")]),
+            commit=old_head,
+        )
+        self.head = self.edit("just/devops.just", self.DEVOPS.replace("level2_", "browser_"))
+        self.plan_path.write_text(schema.canonical(self.plan()), encoding="utf-8")
+        accepted, rejections = target("verify_cells")(str(self.plan_path), self.base, self.head)
+        self.assertEqual([], self.keys(accepted))
+        self.assertTrue(
+            any(reason.startswith("gate-inputs-changed:") for reason in rejections), rejections
+        )
+
+    def test_a_tree_with_no_just_files_still_has_an_identity(self) -> None:
+        # The fixture's base commit predates the justfile. An older receipt
+        # there must compare, not crash, and it must differ from the head's.
+        self.assertNotEqual(self.identities(self.base)["L1"], self.identities(self.head)["L1"])
 
 
 class NoteAttachmentTests(EvidenceFixture):
@@ -1135,6 +1304,9 @@ class BackendProofTests(EvidenceFixture):
                 entry["tiers"] = ["L1", "L2"]
                 entry["l2_backends"] = ["tmux"]
         plan["job_estimate"] = len(plan["cells"])
+        # The added L2 cell executes, so it owes a build: the macOS record it
+        # shares with alpha's own L1 cell on that producer.
+        plan_fixtures.attach_builds(plan)
         self.assertEqual([], schema.validate_resolved_plan(plan))
         self.plan_path.write_text(schema.canonical(plan), encoding="utf-8")
 
@@ -1263,6 +1435,38 @@ class CrossCheckPublicationTests(EvidenceFixture):
         self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.keys(accepted))
         self.assertEqual([], rejections)
 
+    def test_a_verified_archive_run_records_the_build_it_actually_ran(self) -> None:
+        """Task 6.3: an exact-tree receipt names the build key and digest.
+
+        The archive is the program the cell tested; without the key and the
+        producer's realized digest the receipt says only that *something*
+        passed on that tree.
+        """
+        contents = self.publish_cross_check(
+            build_key="0f1e2d3c4b5a6978", build_digest="9a8b7c6d5e4f3021"
+        )
+        document = json.loads(contents)
+        self.assertEqual(
+            {"key": "0f1e2d3c4b5a6978", "digest": "9a8b7c6d5e4f3021"},
+            document["cells"][0]["build"],
+        )
+        self.assertEqual([], schema.validate_receipt(document))
+        # And it is still ordinary evidence: naming a build changes nothing
+        # about which cell it satisfies.
+        self.publish(contents, environment="wsl2-ubuntu")
+        accepted, rejections = target("verify_cells")(
+            str(self.plan_path), self.base, self.head
+        )
+        self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.keys(accepted))
+        self.assertEqual([], rejections)
+
+    def test_a_run_that_named_no_archive_records_no_build(self) -> None:
+        # The native path — and every receipt written before archives existed —
+        # must stay valid rather than carry a half-named build.
+        document = json.loads(self.publish_cross_check(build_key="0f1e2d3c4b5a6978"))
+        self.assertNotIn("build", document["cells"][0])
+        self.assertEqual([], schema.validate_receipt(document))
+
     def test_a_patched_tree_publishes_nothing(self) -> None:
         with self.assertRaisesRegex(ValueError, "is not this head's tree"):
             self.publish_cross_check(tested_tree="0" * 40)
@@ -1321,6 +1525,31 @@ class GateGlobalInputTests(EvidenceFixture):
                 inputs = local_evidence.gate_global_inputs(gate)
                 for shared in ("Cargo.lock", "Cargo.toml", "rust-toolchain.toml", ".cargo"):
                     self.assertIn(shared, inputs)
+
+    def test_orchestration_files_move_no_gate_identity(self) -> None:
+        # A workflow decides what CI runs, never what a local gate produces,
+        # so editing one leaves every published cell reusable
+        # (fixes/2026-09-18-ci-cadence, decision 5). Measured on the branch
+        # that motivated it: one workflow edit invalidated 38 cells and cost
+        # a 45-minute pre-push.
+        orchestration = {
+            ".github/ci/environments.json",
+            ".github/workflows/_package-ci.yml",
+            ".github/workflows/_wsl-ci.yml",
+            ".github/workflows/ci.yml",
+            "scripts/ci/affected_scope.py",
+            ".github/actions",
+        }
+        for gate in schema.GATES:
+            with self.subTest(gate=gate):
+                inputs = set(local_evidence.gate_global_inputs(gate))
+                self.assertEqual(set(), inputs & orchestration)
+                # And the inputs that DO change a local gate's product stay.
+                self.assertLessEqual({"Cargo.lock", "rust-toolchain.toml"}, inputs)
+                # The Just files are read by recipe (`JustRecipeIdentityTests`),
+                # never as whole paths: as paths they made every edit under
+                # `just/` invalidate every published cell.
+                self.assertEqual(set(), inputs & {"justfile", "just"})
 
     def test_clippy_configuration_moves_only_the_lint_identity(self) -> None:
         self.assertIn("clippy.toml", local_evidence.gate_global_inputs("lint"))

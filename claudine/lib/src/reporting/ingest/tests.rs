@@ -339,3 +339,63 @@ fn pid_fields_are_aggregated_into_sessions() {
     assert_eq!(claudine_pid, Some(11_111));
     assert_eq!(agent_pid, Some(33_333));
 }
+
+/// SQLite ingestion stores `extra` whole, so the incomplete-sub-agent facts
+/// must survive into `extra_json` and back out through the query layer that
+/// `claudine logs --json` reads. A fixed-schema projection that dropped
+/// unknown extras would break the machine contract without failing any
+/// stream-layer test.
+#[test]
+fn subagent_outcomes_survive_sqlite_ingestion_and_query_projection() {
+    let dir = tempdir().unwrap();
+    let (logs_dir, mut conn) = open_store(&dir);
+
+    let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::SessionEnd);
+    meta.timestamp = Utc.with_ymd_and_hms(2026, 4, 3, 10, 0, 0).unwrap();
+    meta.session_id = Some("incident".to_string());
+    meta.extra
+        .insert("synthetic".to_string(), serde_json::json!(true));
+    meta.extra.insert(
+        "synthetic_kind".to_string(),
+        serde_json::json!("stream_wrapper_summary"),
+    );
+    meta.extra.insert("exit_code".to_string(), serde_json::json!(0));
+    meta.extra.insert(
+        "exit_reason".to_string(),
+        serde_json::json!("incomplete_subagents"),
+    );
+    meta.extra.insert(
+        "subagent_outcomes".to_string(),
+        serde_json::json!([
+            {"task_id": "sa_1", "name": "commit-alpha", "outcome": "stopped", "raw_status": "stopped"},
+            {"name": "orphan", "outcome": "unfinished"}
+        ]),
+    );
+
+    let log_path = logs_dir.join("2026-04-03.jsonl");
+    fs::write(
+        &log_path,
+        format!("{}\n", serde_json::to_string(&meta).unwrap()),
+    )
+    .unwrap();
+
+    sync(&mut conn, &logs_dir, crate::reporting::SyncRequest::All).unwrap();
+
+    let extra_json: String = conn
+        .query_row("SELECT extra_json FROM events LIMIT 1", [], |row| row.get(0))
+        .unwrap();
+    let stored: serde_json::Value = serde_json::from_str(&extra_json).unwrap();
+    let facts = stored["subagent_outcomes"].as_array().unwrap();
+    assert_eq!(facts.len(), 2, "stored extra_json was {extra_json}");
+    assert_eq!(facts[0]["task_id"], serde_json::json!("sa_1"));
+    assert_eq!(facts[0]["raw_status"], serde_json::json!("stopped"));
+    // The anonymous fact keeps its shape: no fabricated provider ID.
+    assert!(facts[1].get("task_id").is_none());
+    assert_eq!(facts[1]["outcome"], serde_json::json!("unfinished"));
+    // The honest native exit rides alongside the semantic failure.
+    assert_eq!(stored["exit_code"], serde_json::json!(0));
+    assert_eq!(
+        stored["exit_reason"],
+        serde_json::json!("incomplete_subagents")
+    );
+}

@@ -8,6 +8,10 @@
 //! - `tool_use` → [`SemanticEvent::ToolCall`]; `tool_result` → [`SemanticEvent::ToolResult`].
 //! - `rate_limit_event` / billing / auth errors → typed [`SemanticEvent::Warning`] or [`SemanticEvent::Error`].
 //! - `task_*` sub-agent events → [`SemanticEvent::SubagentStart`] / [`SemanticEvent::SubagentStop`] / [`SemanticEvent::Info`].
+//!   `task_started` and every terminal observation (`task_completed`, plus a
+//!   `task_notification` whose status is terminal) are also recorded in the
+//!   attempt's [`TaskLedger`], which can fail the session at `finish` even
+//!   when Claude exits 0.
 //! - Anything else that is still valid JSON is preserved as
 //!   [`SemanticEvent::ProviderExtension`] rather than silently dropped.
 
@@ -24,6 +28,7 @@ use super::protocol::claude::{
 };
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::{RateLimitInfo, StreamExecutionSummary};
+use super::task_ledger::{NotificationRouting, TaskLedger, route_notification_status};
 use super::token_usage::NormalizedTokenUsage;
 use crate::provider_id::Provider;
 /// Max number of hook events to buffer before `SessionStart` is emitted.
@@ -85,6 +90,11 @@ pub struct ClaudeSemanticStreamParser<S: SemanticEventSink> {
     pre_init_hook_buffer: Vec<(String, Value)>,
     tool_uses: HashMap<String, (Option<String>, Option<Value>)>,
     pending_tool_use: Option<PendingClaudeToolUse>,
+    /// Authoritative, unbounded record of this attempt's sub-agent tasks.
+    /// Consulted at [`finish`](SemanticStreamParser::finish): a task that
+    /// stopped or never reported a terminal state makes the run a failure even
+    /// though Claude exits 0.
+    task_ledger: TaskLedger,
 }
 
 impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
@@ -113,6 +123,7 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             pre_init_hook_buffer: Vec::new(),
             tool_uses: HashMap::new(),
             pending_tool_use: None,
+            task_ledger: TaskLedger::new(),
         }
     }
 
@@ -615,6 +626,7 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
     fn handle_task_started(&mut self, evt: ClaudeTaskEvent, raw_kind: &str) {
         let name = evt.name.or(evt.task_name);
         let id = evt.task_id.or(evt.id);
+        self.task_ledger.record_start(id.as_deref(), name.as_deref());
         self.sink.on_semantic_event(SemanticEvent::SubagentStart {
             name,
             id,
@@ -622,15 +634,34 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         });
     }
 
-    fn handle_task_completed(&mut self, evt: ClaudeTaskEvent, raw_kind: &str) {
+    /// Normalize a terminal task observation.
+    ///
+    /// The single path for both `task_completed` and a `task_notification`
+    /// whose status is terminal, so a stop and a completion are recorded by
+    /// the same rules and neither can be reduced to a status-free `Info`.
+    fn handle_task_terminal(&mut self, evt: ClaudeTaskEvent, raw_kind: &str) {
         let name = evt.name.or(evt.task_name);
         let id = evt.task_id.or(evt.id);
+        self.task_ledger
+            .record_terminal(id.as_deref(), name.as_deref(), evt.status.as_deref());
         self.sink.on_semantic_event(SemanticEvent::SubagentStop {
             name,
             id,
             status: evt.status,
             extra: self.extra_with(raw_kind),
         });
+    }
+
+    /// Route a `task_notification` by the ledger's status vocabularies.
+    ///
+    /// Only an absent status or an explicit in-flight word stays progress; a
+    /// status Claudine cannot interpret is terminal-and-unresolved, so a future
+    /// provider vocabulary cannot be silently read as a completion.
+    fn handle_task_notification(&mut self, evt: ClaudeTaskEvent, raw_kind: &str) {
+        match route_notification_status(evt.status.as_deref()) {
+            NotificationRouting::Terminal(_) => self.handle_task_terminal(evt, raw_kind),
+            NotificationRouting::Progress => self.handle_task_progress(evt, raw_kind),
+        }
     }
 
     fn handle_task_progress(&mut self, evt: ClaudeTaskEvent, raw_kind: &str) {
@@ -861,11 +892,14 @@ impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S
                     ClaudeEvent::TaskStarted(evt) => {
                         self.handle_task_started(evt, &raw_kind);
                     }
-                    ClaudeEvent::TaskProgress(evt) | ClaudeEvent::TaskNotification(evt) => {
+                    ClaudeEvent::TaskProgress(evt) => {
                         self.handle_task_progress(evt, &raw_kind);
                     }
+                    ClaudeEvent::TaskNotification(evt) => {
+                        self.handle_task_notification(evt, &raw_kind);
+                    }
                     ClaudeEvent::TaskCompleted(evt) => {
-                        self.handle_task_completed(evt, &raw_kind);
+                        self.handle_task_terminal(evt, &raw_kind);
                     }
                     ClaudeEvent::SystemApiRetry(evt) => {
                         self.handle_api_retry(evt, &raw_kind);
@@ -896,8 +930,14 @@ impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S
         }
     }
 
+    /// Fold parser state into the session summary.
+    ///
+    /// The provider's `exit_code` is reported as observed. It is not on its
+    /// own proof of success: the task ledger can flip `is_error` for work the
+    /// provider abandoned before exiting 0.
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
-        super::common::finish_summary(
+        let task_ledger = self.task_ledger;
+        let mut summary = super::common::finish_summary(
             Provider::Claude,
             StreamExecutionSummary {
                 session_id: self.session_id,
@@ -918,7 +958,9 @@ impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S
                 raw_summary: self.raw_summary,
                 ..Default::default()
             },
-        )
+        );
+        task_ledger.apply_to_summary(&mut summary);
+        summary
     }
 }
 

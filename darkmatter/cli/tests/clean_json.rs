@@ -8,7 +8,7 @@
 
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,8 +22,9 @@ fn doc(content: &str) -> (tempfile::TempDir, PathBuf) {
 
 /// Runs `md clean --json` and parses the envelope, asserting STDOUT is valid
 /// JSON and nothing else.
-fn envelope(path: &Path, extra: &[&str]) -> Value {
-    let assert = md_cmd()
+fn envelope(fixture: &CliProcessFixture, path: &Path, extra: &[&str]) -> Value {
+    let assert = fixture
+        .command()
         .arg("clean")
         .arg(path)
         .arg("--json")
@@ -39,8 +40,9 @@ fn envelope(path: &Path, extra: &[&str]) -> Value {
         .unwrap_or_else(|e| panic!("stdout was not a JSON envelope ({e}):\n{stdout}"))
 }
 
-fn stdin_envelope(source: &str) -> Value {
-    let assert = md_cmd()
+fn stdin_envelope(fixture: &CliProcessFixture, source: &str) -> Value {
+    let assert = fixture
+        .command()
         .args(["clean", "-", "--json"])
         .write_stdin(source)
         .assert()
@@ -55,8 +57,11 @@ fn stdin_envelope(source: &str) -> Value {
 /// Golden contract for the flagship repair, including every v1 field.
 #[test]
 fn test_json_envelope_has_exactly_the_documented_top_level_fields() {
+    let fixture = CliProcessFixture::named(
+        "clean-json-test-json-envelope-has-exactly-the-documented-top-level-fields",
+    );
     let (_dir, path) = doc("---\ntitle: @daily-report\n---\n\n# Body\n");
-    let report = envelope(&path, &[]);
+    let report = envelope(&fixture, &path, &[]);
 
     let object = report.as_object().unwrap();
     let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
@@ -118,14 +123,20 @@ fn test_json_envelope_has_exactly_the_documented_top_level_fields() {
 /// certainty classification, a message, and zero or more repairs.
 #[test]
 fn test_json_diagnostic_shape_is_fully_pinned() {
+    let fixture = CliProcessFixture::named("clean-json-test-json-diagnostic-shape-is-fully-pinned");
     let (_dir, path) = doc("---\ntitle: @daily-report\n---\n\n# Body\n");
-    let report = envelope(&path, &[]);
+    let report = envelope(&fixture, &path, &[]);
 
     let diagnostics = report["diagnostics"].as_array().unwrap();
     assert_eq!(diagnostics.len(), 1, "one finding for the flagship input");
 
     let diagnostic = &diagnostics[0];
-    let mut keys: Vec<&str> = diagnostic.as_object().unwrap().keys().map(String::as_str).collect();
+    let mut keys: Vec<&str> = diagnostic
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
     keys.sort_unstable();
     assert_eq!(
         keys,
@@ -153,8 +164,12 @@ fn test_json_diagnostic_shape_is_fully_pinned() {
     let repairs = diagnostic["repairs"].as_array().unwrap();
     assert_eq!(repairs.len(), 1);
     let repair = &repairs[0];
-    let mut repair_keys: Vec<&str> =
-        repair.as_object().unwrap().keys().map(String::as_str).collect();
+    let mut repair_keys: Vec<&str> = repair
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
     repair_keys.sort_unstable();
     assert_eq!(repair_keys, ["explanation", "replacement", "span"]);
     assert_eq!(
@@ -169,9 +184,12 @@ fn test_json_diagnostic_shape_is_fully_pinned() {
 /// Diagnostic and repair spans directly index the whole authored document.
 #[test]
 fn test_json_spans_are_projected_into_document_coordinates() {
+    let fixture = CliProcessFixture::named(
+        "clean-json-test-json-spans-are-projected-into-document-coordinates",
+    );
     let source = "---\ntitle: @daily-report\n---\n\n# Body\n";
     let (_dir, path) = doc(source);
-    let report = envelope(&path, &[]);
+    let report = envelope(&fixture, &path, &[]);
 
     let diagnostic = &report["diagnostics"][0];
     let start = diagnostic["span"]["start"].as_u64().unwrap() as usize;
@@ -186,14 +204,20 @@ fn test_json_spans_are_projected_into_document_coordinates() {
         diagnostic["repairs"][0]["span"],
         json!({ "start": 11, "end": 24 })
     );
-    assert_eq!(report["applied"][0]["span"], json!({ "start": 11, "end": 24 }));
+    assert_eq!(
+        report["applied"][0]["span"],
+        json!({ "start": 11, "end": 24 })
+    );
 }
 
 #[test]
 fn test_json_delimiter_bytes_are_untouched_and_line_ending_repairs_are_audited() {
+    let fixture = CliProcessFixture::named(
+        "clean-json-test-json-delimiter-bytes-are-untouched-and-line-ending-repairs-are-audited",
+    );
     for (name, ending) in [("lf", "\n"), ("crlf", "\r\n"), ("cr", "\r")] {
         let source = format!("  ---  {ending}title: ok{ending} --- {ending}# Body\n");
-        let report = stdin_envelope(&source);
+        let report = stdin_envelope(&fixture, &source);
         let yaml_start = "  ---  ".len() + ending.len();
         let yaml_ending = yaml_start + "title: ok".len();
         let closing_start = yaml_ending + ending.len();
@@ -202,8 +226,16 @@ fn test_json_delimiter_bytes_are_untouched_and_line_ending_repairs_are_audited()
             closing_start + " --- ".len()..closing_start + " --- ".len() + ending.len();
 
         let applied = report["applied"].as_array().unwrap();
-        assert_eq!(report["changed"], ending != "\n", "wrong changed flag for {name}");
-        assert_eq!(applied.len(), usize::from(ending != "\n"), "wrong audit for {name}");
+        assert_eq!(
+            report["changed"],
+            ending != "\n",
+            "wrong changed flag for {name}"
+        );
+        assert_eq!(
+            applied.len(),
+            usize::from(ending != "\n"),
+            "wrong audit for {name}"
+        );
 
         for repair in applied {
             let start = repair["span"]["start"].as_u64().unwrap() as usize;
@@ -219,8 +251,11 @@ fn test_json_delimiter_bytes_are_untouched_and_line_ending_repairs_are_audited()
 /// Every pass-local artifact maps back through earlier length-changing edits.
 #[test]
 fn test_json_stacked_syntax_and_schema_spans_index_authored_lexemes() {
+    let fixture = CliProcessFixture::named(
+        "clean-json-test-json-stacked-syntax-and-schema-spans-index-authored-lexemes",
+    );
     let source = "---\n$schema:\n  title: string\n  release: string\ntitle: @daily-report\nrelease: 1.20\n---\n";
-    let report = stdin_envelope(source);
+    let report = stdin_envelope(&fixture, source);
 
     let diagnostics = report["diagnostics"].as_array().unwrap();
     for code in ["yaml.ambiguous-scalar", "schema.type-mismatch"] {
@@ -253,15 +288,24 @@ fn test_json_stacked_syntax_and_schema_spans_index_authored_lexemes() {
 
 #[test]
 fn test_json_schema_span_uses_authored_crlf_coordinates() {
-    assert_schema_span_for_line_endings("\r\n", 3);
+    let fixture =
+        CliProcessFixture::named("clean-json-test-json-schema-span-uses-authored-crlf-coordinates");
+    assert_schema_span_for_line_endings(&fixture, "\r\n", 3);
 }
 
 #[test]
 fn test_json_schema_span_uses_authored_lone_cr_coordinates() {
-    assert_schema_span_for_line_endings("\r", 3);
+    let fixture = CliProcessFixture::named(
+        "clean-json-test-json-schema-span-uses-authored-lone-cr-coordinates",
+    );
+    assert_schema_span_for_line_endings(&fixture, "\r", 3);
 }
 
-fn assert_schema_span_for_line_endings(line_ending: &str, expected_line: usize) {
+fn assert_schema_span_for_line_endings(
+    fixture: &CliProcessFixture,
+    line_ending: &str,
+    expected_line: usize,
+) {
     let source = [
         "---",
         "$schema: { release: string }",
@@ -270,7 +314,7 @@ fn assert_schema_span_for_line_endings(line_ending: &str, expected_line: usize) 
         "",
     ]
     .join(line_ending);
-    let report = stdin_envelope(&source);
+    let report = stdin_envelope(fixture, &source);
     let diagnostic = report["diagnostics"]
         .as_array()
         .unwrap()
@@ -300,8 +344,11 @@ fn assert_schema_span_for_line_endings(line_ending: &str, expected_line: usize) 
 /// A stream BOM participates in the applied audit with document coordinates.
 #[test]
 fn test_json_bom_repair_is_audited_in_document_coordinates() {
+    let fixture = CliProcessFixture::named(
+        "clean-json-test-json-bom-repair-is-audited-in-document-coordinates",
+    );
     let (_dir, path) = doc("\u{feff}---\ntitle: @daily-report\n---\n\n# Body\n");
-    let report = envelope(&path, &[]);
+    let report = envelope(&fixture, &path, &[]);
 
     assert_eq!(
         report["frontmatter"],
@@ -328,8 +375,9 @@ fn test_json_bom_repair_is_audited_in_document_coordinates() {
 /// Columns are 1-indexed byte columns, not Unicode scalar columns.
 #[test]
 fn test_json_span_columns_are_byte_indexed() {
+    let fixture = CliProcessFixture::named("clean-json-test-json-span-columns-are-byte-indexed");
     let (_dir, path) = doc("---\n\"\u{1f4a1}\": @daily-report\n---\n\n# Body\n");
-    let report = envelope(&path, &[]);
+    let report = envelope(&fixture, &path, &[]);
     let diagnostic = &report["diagnostics"][0];
 
     assert_eq!(diagnostic["span"]["start_line"], json!(2));
@@ -341,8 +389,11 @@ fn test_json_span_columns_are_byte_indexed() {
 /// `repairs` array — not a null, and not an omitted field.
 #[test]
 fn test_json_report_only_diagnostic_has_empty_repairs_array() {
+    let fixture = CliProcessFixture::named(
+        "clean-json-test-json-report-only-diagnostic-has-empty-repairs-array",
+    );
     let (_dir, path) = doc("---\ntitle:\n---\n\n# Body\n");
-    let report = envelope(&path, &[]);
+    let report = envelope(&fixture, &path, &[]);
 
     let diagnostic = report["diagnostics"]
         .as_array()
@@ -368,10 +419,12 @@ fn test_json_report_only_diagnostic_has_empty_repairs_array() {
 /// Both tiers share one v1 diagnostic shape and retain their code ownership.
 #[test]
 fn test_json_combines_syntax_and_schema_diagnostics() {
+    let fixture =
+        CliProcessFixture::named("clean-json-test-json-combines-syntax-and-schema-diagnostics");
     // `ctx` is a Darkmatter baseline key, so the undeclared child raises a
     // schema-tier finding; the empty value raises a syntax-tier one.
     let (_dir, path) = doc("---\nempty:\nctx:\n  nope: 1\n---\n\n# Body\n");
-    let report = envelope(&path, &[]);
+    let report = envelope(&fixture, &path, &[]);
 
     let diagnostics = report["diagnostics"].as_array().unwrap();
     let codes: Vec<&str> = diagnostics
@@ -379,27 +432,38 @@ fn test_json_combines_syntax_and_schema_diagnostics() {
         .map(|d| d["code"].as_str().unwrap())
         .collect();
 
-    assert!(codes.iter().any(|code| code.starts_with("yaml.")), "{codes:?}");
-    assert!(codes.iter().any(|code| code.starts_with("schema.")), "{codes:?}");
+    assert!(
+        codes.iter().any(|code| code.starts_with("yaml.")),
+        "{codes:?}"
+    );
+    assert!(
+        codes.iter().any(|code| code.starts_with("schema.")),
+        "{codes:?}"
+    );
 }
 
 /// Multi-diagnostic ordering is deterministic and repeatable.
 #[test]
 fn test_json_multi_diagnostic_ordering_is_deterministic() {
+    let fixture =
+        CliProcessFixture::named("clean-json-test-json-multi-diagnostic-ordering-is-deterministic");
     let source = "---\ntitle: @daily-report\nempty:\ntags:  [a,  b]\n---\n\n# Body\n";
     let (_dir, path) = doc(source);
 
-    let first: Vec<String> = envelope(&path, &[])["diagnostics"]
+    let first: Vec<String> = envelope(&fixture, &path, &[])["diagnostics"]
         .as_array()
         .unwrap()
         .iter()
         .map(|d| d["code"].as_str().unwrap().to_string())
         .collect();
 
-    assert!(first.len() > 1, "expected several diagnostics, got {first:?}");
+    assert!(
+        first.len() > 1,
+        "expected several diagnostics, got {first:?}"
+    );
 
     let (_dir2, path2) = doc(source);
-    let second: Vec<String> = envelope(&path2, &[])["diagnostics"]
+    let second: Vec<String> = envelope(&fixture, &path2, &[])["diagnostics"]
         .as_array()
         .unwrap()
         .iter()
@@ -413,8 +477,10 @@ fn test_json_multi_diagnostic_ordering_is_deterministic() {
 /// envelope whose structured source/frontmatter fields prove the bypass.
 #[test]
 fn test_json_no_frontmatter_envelope_is_null_and_empty() {
+    let fixture =
+        CliProcessFixture::named("clean-json-test-json-no-frontmatter-envelope-is-null-and-empty");
     let (_dir, path) = doc("# Just A Body\n\nNo frontmatter here.\n");
-    let report = envelope(&path, &[]);
+    let report = envelope(&fixture, &path, &[]);
 
     assert_eq!(report["version"], json!(1));
     assert_eq!(report["source"]["kind"], json!("file"));
@@ -428,8 +494,11 @@ fn test_json_no_frontmatter_envelope_is_null_and_empty() {
 /// D-8: an empty frontmatter block remains present even though analysis is bypassed.
 #[test]
 fn test_json_empty_frontmatter_is_present_with_empty_span() {
+    let fixture = CliProcessFixture::named(
+        "clean-json-test-json-empty-frontmatter-is-present-with-empty-span",
+    );
     let (_dir, path) = doc("---\n---\n\n# Body\n");
-    let report = envelope(&path, &[]);
+    let report = envelope(&fixture, &path, &[]);
 
     assert_eq!(
         report["frontmatter"],
@@ -443,9 +512,13 @@ fn test_json_empty_frontmatter_is_present_with_empty_span() {
 /// and no human suggestion rendering.
 #[test]
 fn test_json_suppresses_document_and_human_rendering_on_stdout() {
+    let fixture = CliProcessFixture::named(
+        "clean-json-test-json-suppresses-document-and-human-rendering-on-stdout",
+    );
     let (_dir, path) = doc("---\ntitle: @daily-report\nempty:\n---\n\n# Unique Heading\n");
 
-    let assert = md_cmd()
+    let assert = fixture
+        .command()
         .arg("clean")
         .arg(&path)
         .arg("--json")
@@ -455,7 +528,10 @@ fn test_json_suppresses_document_and_human_rendering_on_stdout() {
     let stdout = String::from_utf8(output.stdout.clone()).unwrap();
     let stderr = String::from_utf8(output.stderr.clone()).unwrap();
 
-    assert!(!stdout.contains("# Unique Heading"), "document leaked:\n{stdout}");
+    assert!(
+        !stdout.contains("# Unique Heading"),
+        "document leaked:\n{stdout}"
+    );
     assert!(
         !stdout.contains("frontmatter suggestions"),
         "human suggestion rendering leaked:\n{stdout}"
@@ -472,9 +548,11 @@ fn test_json_suppresses_document_and_human_rendering_on_stdout() {
 /// `--save --json` performs the write *and* prints the envelope.
 #[test]
 fn test_json_with_save_writes_file_and_prints_envelope() {
+    let fixture =
+        CliProcessFixture::named("clean-json-test-json-with-save-writes-file-and-prints-envelope");
     let (_dir, path) = doc("---\ntitle: @daily-report\n---\n\n# Body\n");
 
-    let report = envelope(&path, &["--save"]);
+    let report = envelope(&fixture, &path, &["--save"]);
     assert_eq!(report["changed"], Value::Bool(true));
     assert_eq!(report["applied"].as_array().unwrap().len(), 1);
 
@@ -488,8 +566,10 @@ fn test_json_with_save_writes_file_and_prints_envelope() {
 /// `changed` covers the whole document, not only frontmatter repairs.
 #[test]
 fn test_json_changed_reports_body_only_cleanup() {
+    let fixture =
+        CliProcessFixture::named("clean-json-test-json-changed-reports-body-only-cleanup");
     let (_dir, path) = doc("---\ntitle: Fine\n---\n\n# Body  \n");
-    let report = envelope(&path, &[]);
+    let report = envelope(&fixture, &path, &[]);
 
     assert_eq!(report["applied"], Value::Array(vec![]));
     assert_eq!(report["changed"], Value::Bool(true));
@@ -498,9 +578,12 @@ fn test_json_changed_reports_body_only_cleanup() {
 /// `--save --json` prints the envelope instead of the delta report.
 #[test]
 fn test_json_with_save_suppresses_delta_report() {
+    let fixture =
+        CliProcessFixture::named("clean-json-test-json-with-save-suppresses-delta-report");
     let (_dir, path) = doc("---\ntitle: Fine\n---\n\n# Body  \n");
 
-    let assert = md_cmd()
+    let assert = fixture
+        .command()
         .arg("clean")
         .arg(&path)
         .args(["--save", "--json"])
@@ -508,7 +591,10 @@ fn test_json_with_save_suppresses_delta_report() {
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
-    assert!(!stdout.contains("Frontmatter:"), "delta report leaked:\n{stdout}");
+    assert!(
+        !stdout.contains("Frontmatter:"),
+        "delta report leaked:\n{stdout}"
+    );
     let report: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(report["changed"], Value::Bool(true));
 }
@@ -516,7 +602,9 @@ fn test_json_with_save_suppresses_delta_report() {
 /// Stdin input has a structured source with a null path.
 #[test]
 fn test_json_stdin_reports_null_path() {
-    let assert = md_cmd()
+    let fixture = CliProcessFixture::named("clean-json-test-json-stdin-reports-null-path");
+    let assert = fixture
+        .command()
         .args(["clean", "-", "--json"])
         .write_stdin("---\ntitle: @daily-report\n---\n\n# Body\n")
         .assert()
@@ -531,9 +619,13 @@ fn test_json_stdin_reports_null_path() {
 /// Unrepairable YAML still returns the v1 envelope as the sole machine payload.
 #[test]
 fn test_json_unrepairable_frontmatter_exits_one_with_envelope() {
+    let fixture = CliProcessFixture::named(
+        "clean-json-test-json-unrepairable-frontmatter-exits-one-with-envelope",
+    );
     let (_dir, path) = doc("---\ntitle: [unclosed\n---\n\n# Body\n");
 
-    let assert = md_cmd()
+    let assert = fixture
+        .command()
         .arg("clean")
         .arg(&path)
         .arg("--json")
@@ -545,15 +637,20 @@ fn test_json_unrepairable_frontmatter_exits_one_with_envelope() {
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["version"], json!(1));
     assert_eq!(report["source"], json!({ "kind": "file", "path": path }));
-    assert_eq!(report["frontmatter"], json!({
-        "present": true,
-        "span": { "start": 4, "end": 21 },
-    }));
+    assert_eq!(
+        report["frontmatter"],
+        json!({
+            "present": true,
+            "span": { "start": 4, "end": 21 },
+        })
+    );
     assert_eq!(report["applied"], Value::Array(vec![]));
     assert_eq!(report["changed"], Value::Bool(false));
     let diagnostics = report["diagnostics"].as_array().unwrap();
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic["code"] == "yaml.parse"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "yaml.parse"),
         "parse failure missing from envelope: {report}"
     );
     for diagnostic in diagnostics {

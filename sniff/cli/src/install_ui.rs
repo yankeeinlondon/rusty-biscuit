@@ -273,9 +273,10 @@ mod tests {
     fn timeout_warning_is_rendered_as_prose() {
         let mut ui = ui_capture();
         ui.on_event(&InstallInterviewEvent::TimeoutWarning {
-            prose: "<yellow>Warning:</yellow> installing <b>rg</b> did not finish within <b>5s</b> \
+            prose:
+                "<yellow>Warning:</yellow> installing <b>rg</b> did not finish within <b>5s</b> \
                     and was terminated. An installer process may still be running."
-                .into(),
+                    .into(),
         })
         .unwrap();
         let text = String::from_utf8(ui.buffer).unwrap();

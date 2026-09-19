@@ -184,7 +184,7 @@ install *args="":
     @echo ""
     @echo -e "{{ BOLD }}{{ YELLOW }}Installing Homelab CLI ({{ ITALIC }}homey{{ RESET }}{{ BOLD }}{{ YELLOW }}){{ RESET }}"
     @echo
-    @cargo install --path ./cli {{ args }}  || ( just _play error-2 --background && exit 1 )
+    @cargo install --locked --path ./cli {{ args }}  || ( just _play error-2 --background && exit 1 )
     @echo ""
     @echo -e "{{ BOLD }}{{ BLUE }}Homelab CLI ({{ ITALIC }}homey{{ RESET }}{{ BOLD }}{{ BLUE }}) installed{{ RESET }}"
     @echo ""
@@ -192,11 +192,11 @@ install *args="":
     @just _play drop-4
 
 # install server binary
-install-server:
+install-server *args="":
     @just build-frontend
     @echo ""
     @echo -e "{{ BOLD }}{{ YELLOW }}Installing Homelab Server{{ RESET }}"
-    @cargo install --path ./server  || ( just _play error-2 --background  && exit 1 )
+    @cargo install --locked --path ./server {{ args }}  || ( just _play error-2 --background  && exit 1 )
     @echo ""
     @echo -e "{{ BOLD }}{{ BLUE }}Homelab Server installed{{ RESET }}"
     @echo ""
@@ -261,7 +261,7 @@ install-integrations args="":
         echo
         echo -e "Installing the {{ BOLD }}{{ BLUE }}${integration}{{ RESET }} integration"
         echo
-        cargo install --path "./${integration}" {{ args }} || (
+        cargo install --locked --path "./${integration}" {{ args }} || (
             just _play error-2 --background &&
             echo -e "{{ RED }}{{ BOLD }}Error: {{ RESET }}problems installing the {{ BOLD }}${integration}{{ RESET }}!" &&
             exit 1
@@ -374,7 +374,10 @@ lint-frontend:
 # test` AFTER every Rust package had passed, and the rollup parses Rust JUnit
 # only, so `homelab` rendered PASS 222/0/0 on three environments while every
 # `homelab / test` job was red (run 30427703024).
-test-frontend:
+# `args` reach Vitest verbatim, which is how CI asks the suite for machine-
+# readable counts (`--reporter=json --outputFile=...`) without a second recipe
+# that could drift from this one.
+test-frontend *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v pnpm >/dev/null 2>&1; then
@@ -401,7 +404,7 @@ test-frontend:
     echo ""
     cd ./server/frontend
     pnpm install --frozen-lockfile 2>/dev/null || pnpm install
-    pnpm test
+    pnpm test {{ args }}
 
 # typecheck frontend
 typecheck-frontend:
@@ -472,7 +475,7 @@ drift *args="":
     @echo "- step 3: review CLAUDE.md for needed updates"
     @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
     @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- homelab {{ DOCS }} {{ args }}
+    @cargo run -p repo-deps --bin drift -- homelab {{ DOCS }} {{ args }}
     @_speak "the drift recipe for the homelab package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
 
 # No-op recipe: reference color vars so linters won't report them as unused.

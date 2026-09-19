@@ -1,5 +1,5 @@
 use super::{
-    DEFAULT_COMMIT_COUNT, FileListArgs, PackagesFormat, REPO_AFTER_HELP, RecentCommitActionArg,
+    DEFAULT_COMMIT_COUNT, FileListArgs, PackagesFormat, REPO_AFTER_HELP, RecentCommitsArgs,
 };
 use clap::Subcommand;
 
@@ -160,30 +160,9 @@ pub enum RepoAction {
     UnstagedSourceCode(FileListArgs),
     DirtyFiles(FileListArgs),
     HasMergeConflict,
-    RecentCommits {
-        period: Option<String>,
-        actions: Vec<RecentCommitActionArg>,
-        package: Option<String>,
-        package_area: Option<String>,
-        no_error: bool,
-        on_error: Option<String>,
-    },
-    SourceCodeChanges {
-        period: Option<String>,
-        actions: Vec<RecentCommitActionArg>,
-        package: Option<String>,
-        package_area: Option<String>,
-        no_error: bool,
-        on_error: Option<String>,
-    },
-    DocumentationChanges {
-        period: Option<String>,
-        actions: Vec<RecentCommitActionArg>,
-        package: Option<String>,
-        package_area: Option<String>,
-        no_error: bool,
-        on_error: Option<String>,
-    },
+    RecentCommits(RecentCommitsArgs),
+    SourceCodeChanges(RecentCommitsArgs),
+    DocumentationChanges(RecentCommitsArgs),
     Pr {
         status: sniff::remote::PullRequestState,
         verbose: bool,
@@ -584,69 +563,15 @@ pub enum RepoSubcommand {
     /// Exit 0 if merge conflicts are detected, exit 1 otherwise
     #[command(name = "has-merge-conflict")]
     HasMergeConflict,
-    /// Show recent commits for a period
+    /// Show recent commits (default: the last 10)
     #[command(name = "recent-commits")]
-    RecentCommits {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
-        period: Option<String>,
-        /// Filter to conventional commit actions; repeat to OR multiple actions together
-        #[arg(long = "action", value_enum, value_name = "ACTION")]
-        actions: Vec<RecentCommitActionArg>,
-        /// Scope to a specific package
-        #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
-        package: Option<String>,
-        /// Scope to a specific package area
-        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
-        package_area: Option<String>,
-        /// Exit 0 with no output when no results found (default is exit 1)
-        #[arg(long)]
-        no_error: bool,
-        /// Message to display when no results found
-        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
-        on_error: Option<String>,
-    },
-    /// Show source code changes for a period
+    RecentCommits(RecentCommitsArgs),
+    /// Show recent commits, listing only their source-code files
     #[command(name = "source-code-changes")]
-    SourceCodeChanges {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
-        period: Option<String>,
-        /// Filter to conventional commit actions; repeat to OR multiple actions together
-        #[arg(long = "action", value_enum, value_name = "ACTION")]
-        actions: Vec<RecentCommitActionArg>,
-        /// Scope to a specific package
-        #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
-        package: Option<String>,
-        /// Scope to a specific package area
-        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
-        package_area: Option<String>,
-        /// Exit 0 with no output when no results found (default is exit 1)
-        #[arg(long)]
-        no_error: bool,
-        /// Message to display when no results found
-        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
-        on_error: Option<String>,
-    },
-    /// Show documentation changes for a period
+    SourceCodeChanges(RecentCommitsArgs),
+    /// Show recent commits, listing only their documentation files
     #[command(name = "documentation-changes")]
-    DocumentationChanges {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
-        period: Option<String>,
-        /// Filter to conventional commit actions; repeat to OR multiple actions together
-        #[arg(long = "action", value_enum, value_name = "ACTION")]
-        actions: Vec<RecentCommitActionArg>,
-        /// Scope to a specific package
-        #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
-        package: Option<String>,
-        /// Scope to a specific package area
-        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
-        package_area: Option<String>,
-        /// Exit 0 with no output when no results found (default is exit 1)
-        #[arg(long)]
-        no_error: bool,
-        /// Message to display when no results found
-        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
-        on_error: Option<String>,
-    },
+    DocumentationChanges(RecentCommitsArgs),
     /// List pull requests for the current repository's remote
     Pr {
         /// Filter pull requests by state (note: 'draft' returns no results on Bitbucket — drafts are not a Bitbucket Cloud feature)

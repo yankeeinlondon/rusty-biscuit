@@ -55,7 +55,7 @@ share the same SIGTERM → SIGKILL escalation but classify differently:
 
 | `ProcessTermination` | Meaning | Failure routing |
 |---|---|---|
-| `Completed` | Child exited on its own (exit code may still be non-zero) | `AgentFailure` only if exit ≠ 0 |
+| `Completed` | Child exited on its own (exit code may still be non-zero) | `AgentFailure` when exit ≠ 0 **or** the stream summary set `is_error` |
 | `Interrupted` | User pressed Ctrl+C — no synthesized `error_kind` | suppressed (no recovery) |
 | `TimedOut` | `timeout` / `step_timeout` watchdog kill | `Timeout` → `failure` stack `Retry`/`Resume` |
 | `Aborted` | A claudine **content guard** tripped (exit-expression, runaway-repetition, or volume cap — see [timeouts.md](timeouts.md#content-guards-runaway-output)) | `AgentFailure` → `failure` fail-fast |
@@ -308,6 +308,15 @@ sends `SIGTERM` to the child's process group, waits a configurable
 grace period (default `10s`, override via `CLAUDINE_KILL_GRACE`), then
 escalates to `SIGKILL`.
 
+The ladder is armed from the moment the child is spawned, not from its
+first output. `step_timeout` measures silence from the newest of the
+spawn instant, the last stream event, and the last non-whitespace byte,
+so a child that starts successfully and then says nothing reaches this
+same escalation on budget. It arrives as an ordinary
+`ProcessTermination::TimedOut` breach — nothing about the ladder, the
+grace period, or the Windows Ctrl+Break → `TerminateJobObject`
+equivalent below is special-cased for it.
+
 These signals are wrapper-initiated and are independent of any user
 SIGINT. The synthesized `session_end` JSONL event records the breach as
 `error_kind: "timeout"` or `"step_timeout"` so downstream tooling can
@@ -386,7 +395,7 @@ at the top of each `windows_wait_loop` call.
 | Unix — multiplexer Ctrl+C terminates even with a wall-clock `timeout` configured | **Verified on macOS** | `level2_wrap_ctrl_c_tmux.rs::level2_ctrl_c_terminates_wrapped_child_with_timeout_configured` (L2 multiplexer injection) |
 | Unix — visible per-press feedback line renders in a real terminal | **Verified on macOS** | `level2_interrupt_feedback_capture.rs::level2_interrupt_feedback_renders_in_tmux` (L2, asserts the `interrupt received` substring in `frame.raw`) |
 | Unix — process-signal SIGINT during prep exits 130 with notice | **Verified on macOS** | `wrap_sigint.rs::slow_compose_sigint_during_prep_exits_130_with_notice` (lower-level, retained) |
-| Windows — console Ctrl+Break to the wrapped child's process group terminates the Job-Object child | **Real automated test behind a manual Windows-host gate; cross-compile-checked for `x86_64-pc-windows-gnu` on macOS; no recorded green Windows runtime run in this repo yet** | `wrap_ctrl_c_windows.rs::ctrl_c_terminates_wrapped_child_on_windows` (`#[cfg(windows)]`, ordinary L1); runs on the Windows leg of `just test` |
+| Windows — console Ctrl+Break to the wrapped child's process group terminates the Job-Object child | **Verified on `windows-latest`** — CI run `34173378609` (`main` @ `444213eb5`, 2026-09-08) ran it green in 1.25 s, alongside `sequence_ctrl_c_windows` (4.02 s); cross-compile-checked for `x86_64-pc-windows-gnu` on macOS via `just check-windows` | `wrap_ctrl_c_windows.rs::ctrl_c_terminates_wrapped_child_on_windows` (`#[cfg(windows)]`, ordinary L1); runs on the Windows leg of `just test` |
 
 Ctrl+C termination is verified at two distinct injection levels. The genuine
 **L3** proof (`level3_wrap_ctrl_c.rs`) synthesises a real OS Ctrl+C chord with

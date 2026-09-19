@@ -611,3 +611,104 @@ fn a_refused_resume_routes_through_failure_then_finalize_with_err() {
         "the incompatibility stays the active error rather than being replaced"
     );
 }
+
+/// R8 plus Invariant 7: a refreshed plan whose *only* change is the provider
+/// overlay — same provider, model, mode, prompt, and MCP set, but a different
+/// configuration view — cannot resume the live session. The refusal names the
+/// overlay facet alone and routes like any other incompatible resume.
+#[test]
+fn a_resume_whose_only_moved_facet_is_the_overlay_is_refused() {
+    use claudine::provider_overlay::{OverlayPlanner, OverlayReason, OverlayReasons};
+
+    let home = claudine::invocation_context::HomeBaseline::from_parts(
+        Some(std::path::PathBuf::from("/home/u")),
+        Default::default(),
+    );
+    let env = claudine::invocation_context::EnvBaseline::default();
+    let planner = OverlayPlanner::new(&home, &env);
+    let opened = planner
+        .plan(Provider::Codex, OverlayReasons::single(OverlayReason::Mcp))
+        .unwrap();
+    let refreshed = planner
+        .plan(
+            Provider::Codex,
+            [OverlayReason::Mcp, OverlayReason::RepoResources].into_iter().collect(),
+        )
+        .unwrap();
+    let launch = crate::commands::wrap::harness_orch::AttemptLaunch {
+        args: Vec::new(),
+        env: std::collections::HashMap::new(),
+        stdin_seed: None,
+        wire_prompt: None,
+        timeout_config: Default::default(),
+        step_timeout_user_configured: false,
+        stall_timeout: None,
+        stall_timeout_user_configured: false,
+    };
+    let key = |overlay| {
+        crate::commands::wrap::harness_orch::session_key::session_compat_key(
+            Provider::Codex,
+            resume_capable_profile(),
+            Path::new("/usr/bin/codex"),
+            Path::new("/repo"),
+            false,
+            true,
+            true,
+            false,
+            &[],
+            &[],
+            &launch,
+            None,
+            Some(overlay),
+        )
+    };
+    let facets = key(&opened).incompatibilities(&key(&refreshed));
+    assert_eq!(facets, vec!["provider overlay".to_string()]);
+
+    let fx = fixture(serde_json::json!({
+        "failure": {
+            "stack": [
+                {"when": "err", "action": {"append_line": ["events.log", "{{ err.msg }}"]}}
+            ]
+        }
+    }));
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
+    let eng = engine(fx._dir.path());
+    assert!(guard.record_event_emission(LifecycleSignal::Start));
+
+    let report = route_incompatible_resume(
+        &mut guard,
+        &fx.materialized,
+        &fx.source_path,
+        Some(fx._dir.path()),
+        &fx.term,
+        &eng,
+        CompositionError::LifecycleResumeIncompatible {
+            source_path: fx.source_path.clone(),
+            facets,
+        },
+        std::time::Instant::now(),
+    );
+
+    assert_eq!(guard.terminal_signal(), Some(LifecycleSignal::Failure));
+    let log = std::fs::read_to_string(&fx.log_path).unwrap();
+    assert!(
+        log.contains("cannot reuse the live session") && log.contains("provider overlay"),
+        "`failure` observes the refusal naming the overlay facet; got {log:?}"
+    );
+    assert!(
+        report
+            .downcast_ref::<CompositionError>()
+            .is_some_and(|e| matches!(e, CompositionError::LifecycleResumeIncompatible { .. })),
+    );
+}

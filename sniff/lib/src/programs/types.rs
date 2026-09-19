@@ -362,12 +362,12 @@ mod tests {
 
     #[test]
     fn test_executable_source_equality() {
-        assert_eq!(ExecutableSource::Path, ExecutableSource::Path);
-        assert_eq!(
-            ExecutableSource::MacOsAppBundle,
-            ExecutableSource::MacOsAppBundle
-        );
-        assert_ne!(ExecutableSource::Path, ExecutableSource::MacOsAppBundle);
+        let path: ExecutableSource = serde_json::from_str("\"path\"").unwrap();
+        let bundle: ExecutableSource = serde_json::from_str("\"mac_os_app_bundle\"").unwrap();
+
+        assert_eq!(ExecutableSource::Path, path);
+        assert_eq!(ExecutableSource::MacOsAppBundle, bundle);
+        assert_ne!(path, bundle);
     }
 
     #[test]

@@ -68,9 +68,10 @@ fn read_module_content(src_dir: &Path, module_name: &str) -> String {
 /// can reference the schematic-define and schematic-definitions packages with
 /// absolute paths.
 fn schematic_workspace_root() -> &'static str {
-    // CARGO_MANIFEST_DIR is `schematic/gen`, parent is `schematic`
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let workspace = Path::new(manifest_dir).parent().unwrap();
+    // The gen crate's manifest directory is `schematic/gen`; its parent is the
+    // `schematic` package area the generated Cargo.toml points at.
+    let manifest_dir = biscuit_test_harness::manifest_dir!();
+    let workspace = manifest_dir.parent().unwrap();
     // Leak the string to get a 'static lifetime (acceptable for tests)
     Box::leak(workspace.to_str().unwrap().to_string().into_boxed_str())
 }

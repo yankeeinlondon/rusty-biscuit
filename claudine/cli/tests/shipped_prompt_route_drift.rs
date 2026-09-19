@@ -35,7 +35,10 @@
 //! 2. [`fixture_preserves_the_shipped_schema_and_loop_semantics`] compares the
 //!    load-bearing frontmatter keys structurally, so a shipped change to the
 //!    loop or schema cannot be waved through by refreshing the hash alone.
-//! 3. [`shipped_router_carries_no_side_effect_actions`] protects the premise
+//! 3. [`fixture_body_matches_the_shipped_body`] keeps the fixture's delta
+//!    frontmatter-only, so a test composing the fixture exercises the shipped
+//!    body.
+//! 4. [`shipped_router_carries_no_side_effect_actions`] protects the premise
 //!    that the router is safe to execute verbatim. If someone adds a `say:`,
 //!    `effect:`, or `shell:` to the router, this fails and the Level 2 row needs
 //!    a fixture copy of the router too.
@@ -72,8 +75,8 @@ const LOAD_BEARING_PLAN_KEYS: &[&str] = &[
 ];
 
 fn repo_root() -> PathBuf {
-    // CARGO_MANIFEST_DIR is `<repo>/claudine/cli`.
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    // The manifest directory is `<repo>/claudine/cli`.
+    biscuit_test_harness::manifest_dir!()
         .ancestors()
         .nth(2)
         .expect("repository root is two levels above claudine/cli")
@@ -81,7 +84,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/shipped_implement_route")
+    biscuit_test_harness::manifest_dir!().join("tests/fixtures/shipped_implement_route")
 }
 
 fn hashes_file() -> PathBuf {
@@ -174,6 +177,22 @@ fn fixture_preserves_the_shipped_schema_and_loop_semantics() {
              claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md"
         );
     }
+}
+
+/// The fixture's delta is frontmatter-only, so its body must be the shipped
+/// body. `shipped_prompt_contract`'s logging-instruction test composes the
+/// fixture as a stand-in for the shipped prompt and relies on this.
+#[test]
+fn fixture_body_matches_the_shipped_body() {
+    let shipped: Markdown = read_doc(&repo_root().join(SHIPPED_PLAN)).into();
+    let fixture: Markdown = read_doc(&fixture_dir().join("_implement/implement-plan.md")).into();
+
+    assert_eq!(
+        fixture.content(),
+        shipped.content(),
+        "the Level 2 fixture must carry the shipped `{SHIPPED_PLAN}` body unchanged; copy \
+         it into claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md"
+    );
 }
 
 /// The Level 2 row executes the shipped router verbatim, which is only safe

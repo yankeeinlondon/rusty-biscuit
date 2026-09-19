@@ -22,7 +22,7 @@ use serde_json::Value;
 use claudine::stream::protocol::kimi::*;
 
 fn fixture_path(name: &str) -> PathBuf {
-    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut p = biscuit_test_harness::manifest_dir!();
     p.push("src/stream/protocol/fixtures/kimi");
     p.push(name);
     p

@@ -26,7 +26,7 @@ initialize:
             - ensure_file: '{{log}}'
 
 start:
-    message: "🏃 starting fix of suggestions from review #{{ file_index(review) }} of `{{ parent_dir(review) }}` (_using_ {{ctx.agent}}/{{ctx.model}} _in_ {{ctx.area || ctx.repo}})"
+    message: "🏃 implementing _findings_ from review #{{ file_index(review) }} in `{{ parent_dir(review) }}` (_using_ {{ctx.agent}}/{{ctx.model}} _in_ {{ctx.area || ctx.repo}})"
 success:
     message: "✅  implemented review findings from review **#{{ file_index(review) }}** of `{{ parent_dir(review) }}` (area: **{{ctx.area || ctx.repo }}**, wt: **{{ ctx.worktree }}**, branch: **{{ctx.branch}}**)"
     say: "the review findings in {{ without_date(parent_dir(review)) }} were implemented successfully"
@@ -35,6 +35,7 @@ failure:
     message: "💥 implementation of the review #{{iteration}} suggestions from **{{ parent_dir(review) }}** failed to complete ({{err.msg}})!"
     effect: sad-trombone
 ---
+::file "../_no_formatting.md"
 
 # Implement Review Suggestions for {{title_case(without_date(parent_dir(spec)))}}
 
@@ -174,3 +175,5 @@ Now your task is to:
         - set the `implementation_{{iteration}}` frontmatter to "{{ ctx.now }}"
 
 ::end-block
+
+::file "../_os.md"

@@ -17,6 +17,7 @@ mod family;
 mod model_catalog_source;
 mod offering;
 mod platform_kind;
+mod provider_overlay;
 mod resume_support;
 mod signal;
 mod signal_table;
@@ -31,6 +32,9 @@ pub use offering::{
     ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource, ResolvesVia,
 };
 pub use platform_kind::PlatformKind;
+pub use provider_overlay::{
+    OverlayCapability, OverlayReason, OverlayResourceClass, OverlaySelectorShape,
+};
 pub use resume_support::ResumeSupport;
 pub use signal::{
     CapPolicy, CapScope, DetectionMode, DriftObservation, MatchOp, Quantity, QwenLoopType,

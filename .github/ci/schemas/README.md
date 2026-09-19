@@ -6,7 +6,7 @@ is also their validator.
 
 | Document | Version | Written by | Read by |
 |---|---|---|---|
-| Resolved plan | 2 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
+| Resolved plan | 4 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
 | Validation receipt | 2 | the pre-push hook, `scripts/cross-check.sh` | `scripts/ci/local_evidence.py`, the planner, `ci-rollup` |
 | Scope receipt | 1 | the pre-push hook (`local_evidence.py scope-record`) | `ci.yml` through `local_evidence.py scope-verify` |
 
@@ -26,15 +26,18 @@ so Rust tooling can assert against it without running Python. Regenerate it with
 > `just/ci-local.just` read it, and `affected_scope.py::legacy_scope_document`
 > projects it from the same cells — a projection, not a second calculation, so
 > the two documents cannot disagree about what CI will run. It carries the
-> area fan-out (`scheduled_areas`, `area_matrix`, `area_slugs`) as well.
+> area fan-out (`scheduled_areas`, `area_matrix`, `area_slugs`) and the build
+> owner fan-out (`build_owners`). `build_slices`, `build_artifacts`, and
+> `build_runners` retain the package-keyed artifact inventory for diagnostics;
+> they do not determine the job matrix.
 > Deleting it means moving those consumers onto `cells[]` first; the governance
 > metadata of a non-gating package has to move into the plan before the policy
 > half can go.
 >
 > A third document, the rollup's own `ci-results.json`, is **not** defined here:
-> it is Rust-owned by `scripts/ci-rollup.rs` and is at `schema_version: 3`,
-> versioned independently of the plan's 2, the receipt's 2, and the baseline's
-> 2. The plan fields that tool reads are asserted against `contract.json` by
+> it is Rust-owned by `scripts/ci-rollup.rs` and is at `schema_version: 4`,
+> versioned independently of the plan's 4, the receipt's 2, and the baseline's
+> 3. The plan fields that tool reads are asserted against `contract.json` by
 > `plan_fields_match_the_frozen_contract`, so renaming one breaks a test rather
 > than silently dropping a field serde never recognized.
 >
@@ -54,6 +57,28 @@ so Rust tooling can assert against it without running Python. Regenerate it with
 > `reusable`. They are required, so a version-1 scope receipt misses as
 > `scope-schema` and CI calculates scope itself — the miss the receipt
 > contract permits — rather than hitting and then having to re-run selection.
+>
+> Version 3 adds **build records**
+> (`fixes/2026-09-12-single-os-compile/spec.md`): the plan-level `builds[]`
+> list and the per-cell `build` reference that names one of them. A version-2
+> receipt carries no build records at all and misses as `scope-schema` for the
+> same reason — the alternative would be inventing ownership for a selection
+> this tool did not make.
+>
+> Version 3 also added the required `change_inventory`: the changed paths,
+> normalized and bucketed once by the calculator so the plan renderer, the
+> pre-push report, and `ci-reporting` all state the same thing about what
+> changed.
+>
+> Version 4 is those two together. Build records and the change inventory each
+> called themselves version 3 on separate branches, so "3" named two
+> incompatible shapes: a document from either branch passed the version check
+> and then failed on a field it never carried, which reads as corruption rather
+> than as a version skew. 4 names the union, and the validator checks the
+> version before the field set so the report says so. A version-2 or version-3
+> scope receipt misses once as `scope-schema` for the same reason a version-1
+> one did; validation receipts are untouched, so their version stays at 2 and
+> nothing already-recorded is invalidated.
 
 ## Resolved plan
 
@@ -67,6 +92,25 @@ identity** of every cell, artifact, baseline entry, and receipt. **Area is a
 derived grouping field** carried alongside it for presentation and outcome
 ownership. A cell whose `area` disagrees with its package record is invalid.
 
+- `event`, `deferred_environments`, `proven_environments` — optional, absent
+  rather than empty, so a plan resolved without an event is byte-identical to
+  one from before they existed and the version stays at 4 (R9). `event` is
+  the GitHub event the plan was resolved for; `deferred_environments` lists
+  the table's environments that event does not schedule, each with the
+  `events` that do; `proven_environments` lists the environments an earlier
+  run of another event already validated for this tree (a push to `main`
+  after a reused pull request validation plans only the rest). Neither list
+  may name an environment the plan also carries in `environments`.
+- `change_inventory` — the changed paths, normalized to one repository-relative
+  POSIX spelling, de-duplicated, and sorted into exactly one of
+  `configuration`, `documentation`, `source`, `other`, with per-bucket and
+  total counts. A manual full-scope run consulted no diff and records
+  `diff_available: false` with a reason instead of empty buckets, which would
+  read as "nothing changed". It is computed from the paths alone and is a
+  *sibling* of `change_class`, not a summary of it: `change_class` is derived
+  from the gating packages a change selects, so a change to a `gates = false`
+  package's Rust source correctly reports `change_class: documentation` beside
+  a `source` bucket.
 - `areas[]` — one entry per selected area, with the reason it was selected and
   the packages contributing to it. Nested areas such as `claudine/rendezvous`
   are their own entries, never folded into a parent.
@@ -99,6 +143,8 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   satisfy it — false for `check` and for the L1 host a companion suite needs),
   the target kinds covered, which gate supplied the compile coverage, and a
   selection reason.
+- `builds[]` — the run-scoped build records the executing test cells consume
+  (see below). Empty when nothing executes.
 - `accepted_evidence[]`, `policy_gaps[]`, `prohibited_cells[]` — the three
   reasons a cell is not executed, kept as separate lists so none can be
   silently read as another.
@@ -107,6 +153,86 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
 that make a combination meaningful — a reused cell must name its evidence, an
 accepted gap must name its governing policy entry, a prohibited cell can never
 be scheduled — are enforced by `validate_resolved_plan`.
+
+### Build records
+
+A build record is **plumbing, not a result cell**: it describes one immutable
+compile configuration, is keyed `{package, producer environment, build}`, and
+is never baseline-eligible. Result identity stays `{package, environment,
+gate}` and is untouched by any of this.
+
+- `key` — the **planned build key**: sixteen hex digits of xxHash over the
+  canonical form of `identity` below, computed only through `ci-build key`
+  (`scripts/ci/build_key.py`). There is deliberately no second implementation
+  and no fallback: an unavailable helper fails the plan.
+- `identity` — every plan-known compile-affecting input, stored unhashed so a
+  reader can see *why* two cells share or split a key: source commit, lockfile
+  digest, pinned Rust and Nextest, compiler host, target triple, Cargo profile,
+  encoded flags and config, linker, archive format, package, target kinds,
+  isolated feature arguments, native inputs, archive includes, and sidecars.
+- `producer` — the one native environment that compiles it. Two owners for one
+  key is invalid.
+- `artifact` — `build-<package>-<producer>-<key>`. Package-keyed like every
+  other store; `build` is an internal artifact tier, never a result gate.
+- `compatible_environments` and `compatibility_reason` — where the archive may
+  execute, and why. Declared by the producer's contract in
+  `environments.json`, never inferred from an OS name.
+- `consumers[]` — the sorted `{environment, gate}` cells that execute it.
+
+Derivation happens **after** evidence is applied to the cells, so a cell
+satisfied by verified evidence or standing as a governed gap creates no
+consumer demand and an all-reused plan schedules no owner at all. The
+`--apply-to` overlay only *removes* demand — it computes no key, which is what
+keeps the valid-receipt path free of a Rust toolchain. `lint` and `check` cells
+never reference a build: Clippy is another compiler driver and check-only
+target kinds may emit no executable (spec section 6).
+
+`validate_resolved_plan` refuses a dangling reference, an unconsumed build,
+two owners for one key, an artifact-name collision, a consumer outside its
+producer's declared compatibility, unsorted or phantom consumers, a test
+execution with no build, and any build attached to lint or check.
+
+A validation receipt's cell may carry an optional
+`build = {key, digest}`: the planned key and the producer's realized digest of
+the archive whose binaries that cell actually executed, read from the manifest
+the consumer verified rather than from any plan's expectation of it. It is
+optional because a cell that compiled in place has no archive to name, and
+because every receipt written before archives existed must stay readable; both
+fields are present or neither is.
+
+### The producer's manifest
+
+`ci-build produce` writes one `<artifact>.manifest.json` per planned key, at
+`MANIFEST_SCHEMA_VERSION` 2. It is defined in `scripts/ci-build-archive.rs`
+rather than here, because it is Rust-owned on both sides — the producer writes
+it and `ci-build verify` reads it — and is versioned independently of the plan.
+
+It carries the plan's `key` and `identity` verbatim, the producer's *discovered*
+inputs (rustc, Cargo and Nextest versions, compiler host, target, linker, and
+the environment's arch/ABI/libc predicates), the archive's and each sidecar's
+size and BLAKE3 digest, the expected test-binary inventory, the runtime assets
+the archive carries, optional compiler-work counts, and per-stage timings.
+
+`digest` is the **realized build digest**: xxHash over everything above except
+`digest`, `timings`, and `compiler_work`. Those three are excluded because two
+runs that produced byte-identical artifacts have to agree on the digest —
+which also means that editing any *claim* in the manifest breaks it, so tamper
+detection covers the description as well as the bytes.
+
+### The consumer's verdict
+
+`ci-build verify --verdict-out <file>` writes the same document it renders, at
+`VERDICT_SCHEMA_VERSION`: `accepted`, the environment, the key, digest,
+package, and producer it judged, whether the archive's own contents were
+listed, every rejection, and `timings`.
+
+`timings` is `{identity_ms, extract_ms, total_ms}` — identity and checksum
+checks, then the archive's extraction and listing. It is written for a refusal
+too: a cell that never started is exactly the one whose transfer and
+verification cost a reader wants. `extract_ms` is how the consumer's extraction
+stage is reported apart from its test time, because
+`cargo nextest run --archive-file` extracts inside the run. See
+[What each stage cost](../README.md#what-each-stage-cost).
 
 ## Validation receipt
 
@@ -157,14 +283,46 @@ is the verifier's, in R3's order: schema, head, tree, base, then structure.
 CI reads it from the event head only and, on a hit, writes both documents out
 in place of running the planner; verified validation evidence is then applied
 to the carried plan (`affected_scope.py --apply-to`) and the projection is
-re-derived from the result, still without selection. Its miss codes are
-`SCOPE_REJECTIONS`
+re-derived from the result, still without selection. A plan schedules the
+environments of the event it was planned for (its optional `event`), so
+`scope-verify --event` refuses a receipt planned for another event, or for
+none. Its miss codes are `SCOPE_REJECTIONS`
 (`scope-missing`, `scope-schema`, `scope-head-mismatch`, `scope-tree-mismatch`,
-`scope-base-mismatch`, `scope-malformed`), kept apart from the cell rejections
-below because they refuse a whole document rather than one outcome.
+`scope-base-mismatch`, `scope-event-mismatch`, `scope-malformed`), kept apart
+from the cell rejections below because they refuse a whole document rather
+than one outcome.
 
 ## Rejection vocabulary
 
 Every refusal to accept evidence names one code from `schema.REJECTIONS`, so the
 planner, the verifier, and `just ci-local --plan` describe the same refusal the
 same way. Adding a code is a contract change.
+
+### Build rejections
+
+`schema.BUILD_REJECTIONS` is a third, separate vocabulary. `REJECTIONS` refuses
+a cell's *outcome* and `SCOPE_REJECTIONS` refuses a whole scope document; these
+refuse the **inputs** to a cell that has not run yet, and the three are never
+reported in one list.
+
+`ci-build verify` answers them in a versioned verdict document and exits `3` —
+distinct from `2`, which still means the tool itself failed. Every one is an
+infrastructure verdict a workflow reports, never a test result, and **never
+something a consumer may repair by compiling a replacement**. `ci-build`'s own
+`REJECTIONS` constant is asserted against `contract.json`'s
+`vocabulary.build_rejections`, so a code cannot exist on only one side.
+
+| Code | Refuses |
+|---|---|
+| `build-manifest-missing` | no manifest where the consumer was told to look |
+| `build-manifest-malformed` | not JSON, or missing a required field |
+| `build-manifest-schema` | written by another manifest generation |
+| `build-digest-mismatch` | the manifest's own fields no longer hash to its `digest` |
+| `build-key-mismatch` | the plan names no such key, or a different package/producer/artifact/identity for it |
+| `build-source-mismatch` | built at a revision the plan does not resolve |
+| `build-environment-incompatible` | this environment is not in `compatible_environments` |
+| `build-runtime-incompatible` | the host's or the plan environment's arch/ABI/libc is not the one the archive was built for |
+| `build-archive-missing` / `build-archive-corrupt` | the archive is absent, or its size or BLAKE3 digest disagrees |
+| `build-sidecar-missing` / `build-sidecar-corrupt` | the same, for a declared sidecar |
+| `build-asset-missing` | a declared `archive-includes` entry never reached the manifest |
+| `build-inventory-incomplete` / `build-inventory-unexpected` | the archive contains fewer, or more, test binaries than the manifest declares |

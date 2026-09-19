@@ -55,6 +55,14 @@ pub(super) fn debug_assert_child_env(env: &HashMap<OsString, OsString>) {
         contains("HOME") || cfg!(windows) && contains("USERPROFILE"),
         "child env is missing HOME — env::build_child_env likely has a bug"
     );
+    if let Some((name, value)) =
+        crate::commands::wrap::provider_overlay::home_identity_violation(env)
+    {
+        debug_assert!(
+            false,
+            "child env {name:?} is {value:?} — a provider overlay must never move the user home"
+        );
+    }
     debug_assert!(
         contains(claudine::child_environment::AGENT_CWD_ENV),
         "child env is missing AGENT_CWD — the shared child-environment contribution is absent"

@@ -3,10 +3,10 @@
 use biscuit_file::FetchPolicy;
 use serde_json::Value;
 
-use crate::filesystem::git::{ApiFlavor, ResolvedRemote};
 use crate::SniffError;
+use crate::filesystem::git::{ApiFlavor, ResolvedRemote};
 
-use super::provider_url::{parse_provider_url, ReferenceKind};
+use super::provider_url::{ReferenceKind, parse_provider_url};
 use super::types::{at_or_after, at_or_before, optional_timestamp_order, timestamp_order};
 use super::web_link::trusted_web_link;
 use super::{
@@ -143,12 +143,7 @@ impl FocusedProviderClient {
         api_base: &str,
         server_version: &str,
     ) -> Result<Self, SniffError> {
-        Self::with_api_base_and_version(
-            remote,
-            policy,
-            api_base,
-            Some(server_version.to_string()),
-        )
+        Self::with_api_base_and_version(remote, policy, api_base, Some(server_version.to_string()))
     }
 
     fn with_api_base_and_version(
@@ -157,10 +152,11 @@ impl FocusedProviderClient {
         api_base: &str,
         server_version: Option<String>,
     ) -> Result<Self, SniffError> {
-        let mut api_base = url::Url::parse(api_base).map_err(|error| SniffError::RemoteUnreachable {
-            url: api_base.to_string(),
-            message: error.to_string(),
-        })?;
+        let mut api_base =
+            url::Url::parse(api_base).map_err(|error| SniffError::RemoteUnreachable {
+                url: api_base.to_string(),
+                message: error.to_string(),
+            })?;
         if !api_base.path().ends_with('/') {
             api_base.set_path(&format!("{}/", api_base.path().trim_end_matches('/')));
         }
@@ -199,7 +195,9 @@ impl FocusedProviderClient {
     }
 
     /// Resolves a canonical provider job URL without performing network I/O.
-    pub fn job_reference_from_url(raw: &str) -> Result<(ResolvedRemote, CiCdJobReference), SniffError> {
+    pub fn job_reference_from_url(
+        raw: &str,
+    ) -> Result<(ResolvedRemote, CiCdJobReference), SniffError> {
         let (remote, id) = parse_provider_url(raw, ReferenceKind::CiCdJob)?;
         let reference = CiCdJobReference {
             provider: git_provider(remote.api_flavor),
@@ -328,10 +326,7 @@ impl FocusedProviderClient {
     ///
     /// Returns [`SniffError::IncompleteRemoteDomain`] when a page, parent, or
     /// inspection bound stops the walk before provider exhaustion.
-    pub async fn query_cicd_jobs(
-        &self,
-        query: CiCdJobQuery,
-    ) -> Result<CiCdJobPage, SniffError> {
+    pub async fn query_cicd_jobs(&self, query: CiCdJobQuery) -> Result<CiCdJobPage, SniffError> {
         self.require_cicd("CI/CD job query")?;
         validate_job_query(&query, self.remote.api_flavor)?;
         let limit = query.limit.unwrap_or(20);
@@ -389,7 +384,11 @@ impl FocusedProviderClient {
             }
         }
         if !exhausted {
-            return Err(incomplete_domain(self.remote.api_flavor, "job pages", MAX_PAGES));
+            return Err(incomplete_domain(
+                self.remote.api_flavor,
+                "job pages",
+                MAX_PAGES,
+            ));
         }
         Ok(jobs)
     }
@@ -426,17 +425,13 @@ impl FocusedProviderClient {
         let mut jobs_inspected = 0;
         let mut parents_exhausted = false;
         for parent_page in 1..=MAX_PAGES {
-            let params = pagination_params(
-                self.remote.api_flavor,
-                parent_page,
-                MAX_PARENT_EXECUTIONS,
-            );
+            let params =
+                pagination_params(self.remote.api_flavor, parent_page, MAX_PARENT_EXECUTIONS);
             let Some(value) = self.get_json(&parent_path, &params).await? else {
                 parents_exhausted = true;
                 break;
             };
-            let (parents, next_parent_page) =
-                page_items_named(value, &["workflow_runs", "values"]);
+            let (parents, next_parent_page) = page_items_named(value, &["workflow_runs", "values"]);
             let parent_count = parents.len();
             for parent in parents {
                 parents_inspected += 1;
@@ -462,8 +457,7 @@ impl FocusedProviderClient {
                         jobs_exhausted = true;
                         break;
                     };
-                    let (items, next_job_page) =
-                        page_items_named(value, &["jobs", "values"]);
+                    let (items, next_job_page) = page_items_named(value, &["jobs", "values"]);
                     let job_count = items.len();
                     for item in items {
                         jobs_inspected += 1;
@@ -512,10 +506,16 @@ impl FocusedProviderClient {
         path: &str,
         params: &[(String, String)],
     ) -> Result<Option<Value>, SniffError> {
-        let mut endpoint = self.api_base.join(path).map_err(|error| SniffError::RemoteUnreachable {
-            url: self.api_base.to_string(), message: error.to_string(),
-        })?;
-        endpoint.query_pairs_mut().extend_pairs(params.iter().map(|(k, v)| (k, v)));
+        let mut endpoint =
+            self.api_base
+                .join(path)
+                .map_err(|error| SniffError::RemoteUnreachable {
+                    url: self.api_base.to_string(),
+                    message: error.to_string(),
+                })?;
+        endpoint
+            .query_pairs_mut()
+            .extend_pairs(params.iter().map(|(k, v)| (k, v)));
         let remote_host = self.remote.host.as_deref().unwrap_or_default();
         if !self.policy.is_allowed(remote_host) {
             return Err(SniffError::RemotePolicyDenied {
@@ -539,12 +539,13 @@ impl FocusedProviderClient {
                 let (token, variable) = credential(self.remote.api_flavor);
                 (token, variable.to_string())
             }
-            CredentialScope::ProviderAndHost => crate::credentials::host_bound_provider_token(
-                self.remote.api_flavor,
-                remote_host,
-            ),
+            CredentialScope::ProviderAndHost => {
+                crate::credentials::host_bound_provider_token(self.remote.api_flavor, remote_host)
+            }
         };
-        let mut request = client.get(endpoint.clone()).header(reqwest::header::USER_AGENT, "sniff/focused-provider");
+        let mut request = client
+            .get(endpoint.clone())
+            .header(reqwest::header::USER_AGENT, "sniff/focused-provider");
         if let Some(token) = token.as_ref() {
             request = crate::credentials::authenticate_provider_request(
                 request,
@@ -552,29 +553,46 @@ impl FocusedProviderClient {
                 token,
             );
         }
-        let response = request.send().await.map_err(|error| transport(&endpoint, error))?;
+        let response = request
+            .send()
+            .await
+            .map_err(|error| transport(&endpoint, error))?;
         let status = response.status().as_u16();
         match status {
-            200..=299 => response.json().await.map(Some).map_err(|error| SniffError::RemoteApi {
-                provider: provider_name(self.remote.api_flavor), status,
-                message: format!("malformed JSON response: {error}"),
-            }),
+            200..=299 => response
+                .json()
+                .await
+                .map(Some)
+                .map_err(|error| SniffError::RemoteApi {
+                    provider: provider_name(self.remote.api_flavor),
+                    status,
+                    message: format!("malformed JSON response: {error}"),
+                }),
             404 => Ok(None),
             401 if token.is_none() => Err(SniffError::MissingCredentials {
-                provider: provider_name(self.remote.api_flavor), env_var: variable,
+                provider: provider_name(self.remote.api_flavor),
+                env_var: variable,
             }),
             401 => Err(SniffError::InvalidCredentials {
-                provider: provider_name(self.remote.api_flavor), message: "provider rejected credentials".to_string(),
+                provider: provider_name(self.remote.api_flavor),
+                message: "provider rejected credentials".to_string(),
             }),
             403 => Err(SniffError::RemoteForbidden {
-                provider: provider_name(self.remote.api_flavor), message: "provider denied the query".to_string(),
+                provider: provider_name(self.remote.api_flavor),
+                message: "provider denied the query".to_string(),
             }),
-            429 => Err(SniffError::RateLimited { provider: provider_name(self.remote.api_flavor), retry_after: None }),
+            429 => Err(SniffError::RateLimited {
+                provider: provider_name(self.remote.api_flavor),
+                retry_after: None,
+            }),
             300..=399 => Err(SniffError::RemoteUnreachable {
-                url: endpoint.to_string(), message: "redirect blocked".to_string(),
+                url: endpoint.to_string(),
+                message: "redirect blocked".to_string(),
             }),
             status => Err(SniffError::RemoteApi {
-                provider: provider_name(self.remote.api_flavor), status, message: "provider query failed".to_string(),
+                provider: provider_name(self.remote.api_flavor),
+                status,
+                message: "provider query failed".to_string(),
             }),
         }
     }
@@ -583,8 +601,13 @@ impl FocusedProviderClient {
         let base = repo_path(&self.remote);
         let id = path_segment(id);
         Ok(match self.remote.api_flavor {
-            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => format!("repos/{base}/pulls/{id}"),
-            ApiFlavor::GitLab => format!("projects/{}/merge_requests/{id}", encoded_project(&self.remote)),
+            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => {
+                format!("repos/{base}/pulls/{id}")
+            }
+            ApiFlavor::GitLab => format!(
+                "projects/{}/merge_requests/{id}",
+                encoded_project(&self.remote)
+            ),
             ApiFlavor::Bitbucket => format!("repositories/{base}/pullrequests/{id}"),
             _ => return Err(unsupported("pull-request lookup", self.remote.api_flavor)),
         })
@@ -593,16 +616,29 @@ impl FocusedProviderClient {
     fn pr_list_path(&self) -> Result<String, SniffError> {
         let base = repo_path(&self.remote);
         Ok(match self.remote.api_flavor {
-            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => format!("repos/{base}/pulls"),
-            ApiFlavor::GitLab => format!("projects/{}/merge_requests", encoded_project(&self.remote)),
+            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => {
+                format!("repos/{base}/pulls")
+            }
+            ApiFlavor::GitLab => {
+                format!("projects/{}/merge_requests", encoded_project(&self.remote))
+            }
             ApiFlavor::Bitbucket => format!("repositories/{base}/pullrequests"),
             _ => return Err(unsupported("pull-request query", self.remote.api_flavor)),
         })
     }
 
-    fn pr_page_params(&self, query: &PullRequestQuery, page: usize, size: usize) -> Vec<(String, String)> {
+    fn pr_page_params(
+        &self,
+        query: &PullRequestQuery,
+        page: usize,
+        size: usize,
+    ) -> Vec<(String, String)> {
         let mut params = pagination_params(self.remote.api_flavor, page, size);
-        let states = query.state.as_ref().map(super::QueryValues::as_slice).unwrap_or_default();
+        let states = query
+            .state
+            .as_ref()
+            .map(super::QueryValues::as_slice)
+            .unwrap_or_default();
         params.extend(pr_state_params(self.remote.api_flavor, states));
         params
     }
@@ -610,19 +646,34 @@ impl FocusedProviderClient {
     fn job_exact_path(&self, native_id: &str) -> Result<String, SniffError> {
         let base = repo_path(&self.remote);
         Ok(match self.remote.api_flavor {
-            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => format!("repos/{base}/actions/jobs/{}", path_segment(native_id)),
-            ApiFlavor::GitLab => format!("projects/{}/jobs/{}", encoded_project(&self.remote), path_segment(native_id)),
+            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => {
+                format!("repos/{base}/actions/jobs/{}", path_segment(native_id))
+            }
+            ApiFlavor::GitLab => format!(
+                "projects/{}/jobs/{}",
+                encoded_project(&self.remote),
+                path_segment(native_id)
+            ),
             ApiFlavor::Bitbucket => {
-                let (parent, job) = native_id.split_once('/').ok_or_else(|| SniffError::InvalidRemoteQuery {
-                    field: "id", message: "Bitbucket job identity must be parent/job".to_string(),
-                })?;
+                let (parent, job) =
+                    native_id
+                        .split_once('/')
+                        .ok_or_else(|| SniffError::InvalidRemoteQuery {
+                            field: "id",
+                            message: "Bitbucket job identity must be parent/job".to_string(),
+                        })?;
                 format!(
                     "repositories/{base}/pipelines/{}/steps/{}",
                     path_segment(parent),
                     path_segment(job)
                 )
             }
-            _ => return Err(unsupported("exact CI/CD job lookup", self.remote.api_flavor)),
+            _ => {
+                return Err(unsupported(
+                    "exact CI/CD job lookup",
+                    self.remote.api_flavor,
+                ));
+            }
         })
     }
 
@@ -631,16 +682,28 @@ impl FocusedProviderClient {
         Ok(match self.remote.api_flavor {
             ApiFlavor::GitLab => format!("projects/{}/jobs", encoded_project(&self.remote)),
             ApiFlavor::Gitea => format!("repos/{base}/actions/jobs"),
-            _ => return Err(unsupported("direct CI/CD job listing", self.remote.api_flavor)),
+            _ => {
+                return Err(unsupported(
+                    "direct CI/CD job listing",
+                    self.remote.api_flavor,
+                ));
+            }
         })
     }
 
     fn parent_list_path(&self) -> Result<String, SniffError> {
         let base = repo_path(&self.remote);
         Ok(match self.remote.api_flavor {
-            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => format!("repos/{base}/actions/runs"),
+            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => {
+                format!("repos/{base}/actions/runs")
+            }
             ApiFlavor::Bitbucket => format!("repositories/{base}/pipelines"),
-            _ => return Err(unsupported("CI/CD parent traversal", self.remote.api_flavor)),
+            _ => {
+                return Err(unsupported(
+                    "CI/CD parent traversal",
+                    self.remote.api_flavor,
+                ));
+            }
         })
     }
 
@@ -648,7 +711,9 @@ impl FocusedProviderClient {
         let base = repo_path(&self.remote);
         let parent = path_segment(parent);
         Ok(match self.remote.api_flavor {
-            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => format!("repos/{base}/actions/runs/{parent}/jobs"),
+            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => {
+                format!("repos/{base}/actions/runs/{parent}/jobs")
+            }
             ApiFlavor::Bitbucket => format!("repositories/{base}/pipelines/{parent}/steps"),
             _ => return Err(unsupported("CI/CD parent jobs", self.remote.api_flavor)),
         })
@@ -665,12 +730,44 @@ impl FocusedProviderClient {
         let details = PullRequestInfo {
             number,
             title: value_string(&value, &["title"]).unwrap_or_default(),
-            state: value_string(&value, &["state"]).unwrap_or_else(|| "unknown".to_string()).to_ascii_lowercase(),
-            author: nested_string(&value, &[&["user", "login"], &["author", "username"], &["author", "display_name"]]).unwrap_or_else(|| "unknown".to_string()),
+            state: value_string(&value, &["state"])
+                .unwrap_or_else(|| "unknown".to_string())
+                .to_ascii_lowercase(),
+            author: nested_string(
+                &value,
+                &[
+                    &["user", "login"],
+                    &["author", "username"],
+                    &["author", "display_name"],
+                ],
+            )
+            .unwrap_or_else(|| "unknown".to_string()),
             draft: value_bool(&value, &["draft", "work_in_progress"]).unwrap_or(false),
-            source_branch: nested_string(&value, &[&["head", "ref"], &["source", "branch", "name"]]).or_else(|| value_string(&value, &["source_branch"])),
-            target_branch: nested_string(&value, &[&["base", "ref"], &["destination", "branch", "name"]]).or_else(|| value_string(&value, &["target_branch"])),
-            labels: value.get("labels").and_then(Value::as_array).map(|labels| labels.iter().filter_map(|label| label.as_str().map(str::to_string).or_else(|| value_string(label, &["name"]))).collect()).unwrap_or_default(),
+            source_branch: nested_string(
+                &value,
+                &[&["head", "ref"], &["source", "branch", "name"]],
+            )
+            .or_else(|| value_string(&value, &["source_branch"])),
+            target_branch: nested_string(
+                &value,
+                &[&["base", "ref"], &["destination", "branch", "name"]],
+            )
+            .or_else(|| value_string(&value, &["target_branch"])),
+            labels: value
+                .get("labels")
+                .and_then(Value::as_array)
+                .map(|labels| {
+                    labels
+                        .iter()
+                        .filter_map(|label| {
+                            label
+                                .as_str()
+                                .map(str::to_string)
+                                .or_else(|| value_string(label, &["name"]))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
             body: value_string(&value, &["body", "description"]),
             created_at: value_string(&value, &["created_at", "created_on"]).unwrap_or_default(),
             updated_at: value_string(&value, &["updated_at", "updated_on"]),
@@ -684,7 +781,9 @@ impl FocusedProviderClient {
                 host,
                 namespace: self.remote.namespace.clone().unwrap_or_default(),
                 repository: self.remote.repository.clone().unwrap_or_default(),
-                native_id: number.to_string(), display_id: format!("#{number}"), number: Some(number),
+                native_id: number.to_string(),
+                display_id: format!("#{number}"),
+                number: Some(number),
                 web_url,
                 api_url: value_string(&value, &["url"]),
                 original_url: self.original_reference.clone(),
@@ -706,7 +805,11 @@ impl FocusedProviderClient {
     /// `parent` carries the workflow-run/pipeline metadata that only the parent
     /// object holds. It fills a field solely when the job itself has none, so an
     /// inherited value is never invented and never overwrites a job-level one.
-    fn normalize_job(&self, value: Value, parent: Option<ParentContext>) -> Result<CiCdJob, SniffError> {
+    fn normalize_job(
+        &self,
+        value: Value,
+        parent: Option<ParentContext>,
+    ) -> Result<CiCdJob, SniffError> {
         let projected = match self.remote.api_flavor {
             ApiFlavor::GitLab => project_gitlab_job(&value)?,
             ApiFlavor::Bitbucket => project_bitbucket_job(&value)?,
@@ -719,10 +822,13 @@ impl FocusedProviderClient {
         let web_url = trusted_web_link(projected.web_url, &host);
         Ok(CiCdJob {
             reference: CiCdJobReference {
-                provider: git_provider(self.remote.api_flavor), api_flavor: format!("{:?}", self.remote.api_flavor),
-                host, namespace: self.remote.namespace.clone().unwrap_or_default(),
+                provider: git_provider(self.remote.api_flavor),
+                api_flavor: format!("{:?}", self.remote.api_flavor),
+                host,
+                namespace: self.remote.namespace.clone().unwrap_or_default(),
                 repository: self.remote.repository.clone().unwrap_or_default(),
-                native_id: projected.id.clone(), display_id: projected.id,
+                native_id: projected.id.clone(),
+                display_id: projected.id,
                 original_url: web_url.clone(),
             },
             parent: parent.identity,
@@ -881,8 +987,8 @@ fn project_gitlab_job(value: &Value) -> Result<JobProjection, SniffError> {
 /// and `FAILED` must normalize from the result. Branch, commit, trigger, and
 /// actor live only on the parent pipeline.
 fn project_bitbucket_job(value: &Value) -> Result<JobProjection, SniffError> {
-    let native_status = nested_string(value, &[&["state", "name"]])
-        .unwrap_or_else(|| "unknown".to_string());
+    let native_status =
+        nested_string(value, &[&["state", "name"]]).unwrap_or_else(|| "unknown".to_string());
     let result = nested_string(value, &[&["state", "result", "name"]]);
     let completed_on = value_string(value, &["completed_on"]);
     Ok(JobProjection {
@@ -945,8 +1051,10 @@ fn provider_discovery(
             | ApiFlavor::Forgejo
             | ApiFlavor::Bitbucket
     );
-    let cicd_jobs = matches!(flavor, ApiFlavor::GitHub | ApiFlavor::GitLab | ApiFlavor::Bitbucket)
-        || gitea_jobs;
+    let cicd_jobs = matches!(
+        flavor,
+        ApiFlavor::GitHub | ApiFlavor::GitLab | ApiFlavor::Bitbucket
+    ) || gitea_jobs;
     let pull_request_filters = if pull_requests {
         [
             "state",
@@ -1002,10 +1110,7 @@ fn provider_discovery(
             cicd_jobs,
             pagination: pull_requests || cicd_jobs,
             direct_job_listing: matches!(flavor, ApiFlavor::GitLab) || gitea_jobs,
-            bounded_parent_traversal: matches!(
-                flavor,
-                ApiFlavor::GitHub | ApiFlavor::Bitbucket
-            ),
+            bounded_parent_traversal: matches!(flavor, ApiFlavor::GitHub | ApiFlavor::Bitbucket),
             logs: false,
             artifacts: false,
             test_reports: false,
@@ -1061,11 +1166,23 @@ fn validate_pr_query(query: &PullRequestQuery, flavor: ApiFlavor) -> Result<(), 
     if query.cursor.is_some() {
         return Err(SniffError::InvalidRemoteQuery {
             field: "cursor",
-            message: "not part of the canonical query vocabulary; focused queries paginate internally".to_string(),
+            message:
+                "not part of the canonical query vocabulary; focused queries paginate internally"
+                    .to_string(),
         });
     }
-    for (field, present) in [("assignee", query.assignee.is_some()), ("reviewer", query.reviewer.is_some()), ("milestone", query.milestone.is_some()), ("commit", query.commit.is_some())] {
-        if present { return Err(SniffError::UnsupportedRemoteFilter { field, provider: format!("{flavor:?}") }); }
+    for (field, present) in [
+        ("assignee", query.assignee.is_some()),
+        ("reviewer", query.reviewer.is_some()),
+        ("milestone", query.milestone.is_some()),
+        ("commit", query.commit.is_some()),
+    ] {
+        if present {
+            return Err(SniffError::UnsupportedRemoteFilter {
+                field,
+                provider: format!("{flavor:?}"),
+            });
+        }
     }
     Ok(())
 }
@@ -1075,7 +1192,9 @@ fn validate_job_query(query: &CiCdJobQuery, flavor: ApiFlavor) -> Result<(), Sni
     if query.cursor.is_some() {
         return Err(SniffError::InvalidRemoteQuery {
             field: "cursor",
-            message: "not part of the canonical query vocabulary; focused queries paginate internally".to_string(),
+            message:
+                "not part of the canonical query vocabulary; focused queries paginate internally"
+                    .to_string(),
         });
     }
     // Only GitLab job objects carry stage data; matching `stage` anywhere else
@@ -1090,7 +1209,14 @@ fn validate_job_query(query: &CiCdJobQuery, flavor: ApiFlavor) -> Result<(), Sni
 }
 
 fn positive_id(id: &str, field: &'static str) -> Result<(), SniffError> {
-    if id.is_empty() || id == "0" { Err(SniffError::InvalidRemoteQuery { field, message: "must be a positive provider identifier".to_string() }) } else { Ok(()) }
+    if id.is_empty() || id == "0" {
+        Err(SniffError::InvalidRemoteQuery {
+            field,
+            message: "must be a positive provider identifier".to_string(),
+        })
+    } else {
+        Ok(())
+    }
 }
 
 /// Projects the canonical state set onto one provider's list-endpoint vocabulary.
@@ -1149,7 +1275,9 @@ fn pr_state_params(
     vec![("state".to_string(), token.to_string())]
 }
 
-fn page_items(value: Value) -> (Vec<Value>, bool) { page_items_named(value, &["values"]) }
+fn page_items(value: Value) -> (Vec<Value>, bool) {
+    page_items_named(value, &["values"])
+}
 
 fn pagination_params(flavor: ApiFlavor, page: usize, size: usize) -> Vec<(String, String)> {
     let size_key = if flavor == ApiFlavor::Bitbucket {
@@ -1180,30 +1308,72 @@ fn direct_job_pagination_params(
 }
 
 fn page_items_named(value: Value, names: &[&str]) -> (Vec<Value>, bool) {
-    if let Value::Array(items) = value { return (items, false); }
+    if let Value::Array(items) = value {
+        return (items, false);
+    }
     let next = value.get("next").is_some_and(|next| !next.is_null());
-    for name in names { if let Some(items) = value.get(*name).and_then(Value::as_array) { return (items.clone(), next); } }
+    for name in names {
+        if let Some(items) = value.get(*name).and_then(Value::as_array) {
+            return (items.clone(), next);
+        }
+    }
     (Vec::new(), next)
 }
 
 fn pr_matches(item: &PullRequestInfo, query: &PullRequestQuery) -> bool {
-    query.state.as_ref().is_none_or(|states| states.as_slice().iter().any(|state| match state {
-        CanonicalPullRequestState::Open => item.state == "open" || item.state == "opened",
-        CanonicalPullRequestState::Closed => matches!(item.state.as_str(), "closed" | "declined" | "superseded") && item.merged_at.is_none(),
-        CanonicalPullRequestState::Merged => item.state == "merged" || item.merged_at.is_some(),
-    }))
-        && query.source_branch.as_ref().is_none_or(|v| item.source_branch.as_ref() == Some(v))
-        && query.target_branch.as_ref().is_none_or(|v| item.target_branch.as_ref() == Some(v))
-        && query.author.as_ref().is_none_or(|v| item.author.eq_ignore_ascii_case(v))
+    query.state.as_ref().is_none_or(|states| {
+        states.as_slice().iter().any(|state| match state {
+            CanonicalPullRequestState::Open => item.state == "open" || item.state == "opened",
+            CanonicalPullRequestState::Closed => {
+                matches!(item.state.as_str(), "closed" | "declined" | "superseded")
+                    && item.merged_at.is_none()
+            }
+            CanonicalPullRequestState::Merged => item.state == "merged" || item.merged_at.is_some(),
+        })
+    }) && query
+        .source_branch
+        .as_ref()
+        .is_none_or(|v| item.source_branch.as_ref() == Some(v))
+        && query
+            .target_branch
+            .as_ref()
+            .is_none_or(|v| item.target_branch.as_ref() == Some(v))
+        && query
+            .author
+            .as_ref()
+            .is_none_or(|v| item.author.eq_ignore_ascii_case(v))
         && query.draft.is_none_or(|v| item.draft == v)
-        && query.labels.iter().all(|v| item.labels.iter().any(|a| a.eq_ignore_ascii_case(v)))
-        && query.search.as_ref().is_none_or(|v| { let v = v.to_ascii_lowercase(); item.title.to_ascii_lowercase().contains(&v) || item.body.as_ref().is_some_and(|b| b.to_ascii_lowercase().contains(&v)) })
-        && query.created_after.as_deref().is_none_or(|v| at_or_after(&item.created_at, v))
-        && query.created_before.as_deref().is_none_or(|v| at_or_before(&item.created_at, v))
-        && query.updated_after.as_deref().is_none_or(|v| item.updated_at.as_deref().is_some_and(|a| at_or_after(a, v)))
-        && query.updated_before.as_deref().is_none_or(|v| item.updated_at.as_deref().is_some_and(|a| at_or_before(a, v)))
+        && query
+            .labels
+            .iter()
+            .all(|v| item.labels.iter().any(|a| a.eq_ignore_ascii_case(v)))
+        && query.search.as_ref().is_none_or(|v| {
+            let v = v.to_ascii_lowercase();
+            item.title.to_ascii_lowercase().contains(&v)
+                || item
+                    .body
+                    .as_ref()
+                    .is_some_and(|b| b.to_ascii_lowercase().contains(&v))
+        })
+        && query
+            .created_after
+            .as_deref()
+            .is_none_or(|v| at_or_after(&item.created_at, v))
+        && query
+            .created_before
+            .as_deref()
+            .is_none_or(|v| at_or_before(&item.created_at, v))
+        && query.updated_after.as_deref().is_none_or(|v| {
+            item.updated_at
+                .as_deref()
+                .is_some_and(|a| at_or_after(a, v))
+        })
+        && query.updated_before.as_deref().is_none_or(|v| {
+            item.updated_at
+                .as_deref()
+                .is_some_and(|a| at_or_before(a, v))
+        })
 }
-
 
 /// Orders the complete domain, newest-first unless the caller says otherwise.
 ///
@@ -1216,32 +1386,77 @@ fn pr_matches(item: &PullRequestInfo, query: &PullRequestQuery) -> bool {
 /// provider order is preserved verbatim whichever way the flag points.
 fn sort_prs(items: &mut [PullRequestRecord], sort: Option<&str>, descending: bool) {
     match sort {
-        None | Some("created") => items.sort_by(|a, b| timestamp_order(&a.details.created_at, &b.details.created_at)),
-        Some("updated") => items.sort_by(|a, b| optional_timestamp_order(a.details.updated_at.as_deref(), b.details.updated_at.as_deref())),
+        None | Some("created") => {
+            items.sort_by(|a, b| timestamp_order(&a.details.created_at, &b.details.created_at))
+        }
+        Some("updated") => items.sort_by(|a, b| {
+            optional_timestamp_order(
+                a.details.updated_at.as_deref(),
+                b.details.updated_at.as_deref(),
+            )
+        }),
         _ => return,
     }
-    if descending { items.reverse(); }
+    if descending {
+        items.reverse();
+    }
 }
 
 fn job_matches(job: &CiCdJob, query: &CiCdJobQuery) -> bool {
-    query.statuses.as_ref().is_none_or(|statuses| statuses.as_slice().iter().any(|s| s.eq_ignore_ascii_case(&job.normalized_status)))
-        && query.name.as_ref().is_none_or(|v| &job.name == v)
-        && query.stage.as_ref().is_none_or(|v| job.stage.as_ref() == Some(v))
+    query.statuses.as_ref().is_none_or(|statuses| {
+        statuses
+            .as_slice()
+            .iter()
+            .any(|s| s.eq_ignore_ascii_case(&job.normalized_status))
+    }) && query.name.as_ref().is_none_or(|v| &job.name == v)
+        && query
+            .stage
+            .as_ref()
+            .is_none_or(|v| job.stage.as_ref() == Some(v))
         && query.workflow.as_ref().is_none_or(|v| {
             job.parent.name.as_ref() == Some(v)
                 || &job.parent.native_id == v
                 || job.parent.definition_id.as_ref() == Some(v)
                 || job.parent.definition_path.as_ref() == Some(v)
         })
-        && query.parent.as_ref().is_none_or(|v| &job.parent.native_id == v)
-        && query.branch.as_ref().is_none_or(|v| job.branch.as_ref() == Some(v))
-        && query.commit.as_ref().is_none_or(|v| job.commit.as_ref() == Some(v))
-        && query.actor.as_ref().is_none_or(|v| job.actor.as_ref() == Some(v))
-        && query.trigger.as_ref().is_none_or(|v| job.trigger.as_ref() == Some(v))
-        && query.created_after.as_deref().is_none_or(|v| job.created_at.as_deref().is_some_and(|a| at_or_after(a, v)))
-        && query.created_before.as_deref().is_none_or(|v| job.created_at.as_deref().is_some_and(|a| at_or_before(a, v)))
-        && query.updated_after.as_deref().is_none_or(|v| job.updated_at.as_deref().is_some_and(|a| at_or_after(a, v)))
-        && query.updated_before.as_deref().is_none_or(|v| job.updated_at.as_deref().is_some_and(|a| at_or_before(a, v)))
+        && query
+            .parent
+            .as_ref()
+            .is_none_or(|v| &job.parent.native_id == v)
+        && query
+            .branch
+            .as_ref()
+            .is_none_or(|v| job.branch.as_ref() == Some(v))
+        && query
+            .commit
+            .as_ref()
+            .is_none_or(|v| job.commit.as_ref() == Some(v))
+        && query
+            .actor
+            .as_ref()
+            .is_none_or(|v| job.actor.as_ref() == Some(v))
+        && query
+            .trigger
+            .as_ref()
+            .is_none_or(|v| job.trigger.as_ref() == Some(v))
+        && query
+            .created_after
+            .as_deref()
+            .is_none_or(|v| job.created_at.as_deref().is_some_and(|a| at_or_after(a, v)))
+        && query.created_before.as_deref().is_none_or(|v| {
+            job.created_at
+                .as_deref()
+                .is_some_and(|a| at_or_before(a, v))
+        })
+        && query
+            .updated_after
+            .as_deref()
+            .is_none_or(|v| job.updated_at.as_deref().is_some_and(|a| at_or_after(a, v)))
+        && query.updated_before.as_deref().is_none_or(|v| {
+            job.updated_at
+                .as_deref()
+                .is_some_and(|a| at_or_before(a, v))
+        })
 }
 
 /// Captures the run/pipeline metadata its jobs cannot see for themselves.
@@ -1270,7 +1485,10 @@ fn parent_context(value: &Value, id: &str, flavor: ApiFlavor, host: &str) -> Par
             identity,
             branch: nested_string(value, &[&["target", "ref_name"]]),
             commit: nested_string(value, &[&["target", "commit", "hash"]]),
-            actor: nested_string(value, &[&["creator", "nickname"], &["creator", "display_name"]]),
+            actor: nested_string(
+                value,
+                &[&["creator", "nickname"], &["creator", "display_name"]],
+            ),
             trigger: nested_string(value, &[&["trigger", "name"]]),
         };
     }
@@ -1311,28 +1529,128 @@ fn path_segment(identity: &str) -> String {
         _ => urlencoding::encode(identity).into_owned(),
     }
 }
-fn value_string(value: &Value, names: &[&str]) -> Option<String> { names.iter().find_map(|name| value.get(*name).and_then(|v| v.as_str()).map(str::to_string)) }
-fn value_bool(value: &Value, names: &[&str]) -> Option<bool> { names.iter().find_map(|name| value.get(*name).and_then(Value::as_bool)) }
-fn value_u64(value: &Value, names: &[&str]) -> Result<u64, SniffError> { names.iter().find_map(|name| value.get(*name).and_then(Value::as_u64)).ok_or_else(|| malformed("missing numeric identity")) }
-fn value_id(value: &Value, names: &[&str]) -> Option<String> { names.iter().find_map(|name| value.get(*name).and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|id| id.to_string())))) }
-fn string_id(value: &Value, names: &[&str]) -> Result<String, SniffError> { names.iter().find_map(|name| value.get(*name).and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|id| id.to_string())))).ok_or_else(|| malformed("missing job identity")) }
-fn nested_string(value: &Value, paths: &[&[&str]]) -> Option<String> { paths.iter().find_map(|path| path.iter().try_fold(value, |v, key| v.get(*key)).and_then(Value::as_str).map(str::to_string)) }
+fn value_string(value: &Value, names: &[&str]) -> Option<String> {
+    names.iter().find_map(|name| {
+        value
+            .get(*name)
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    })
+}
+fn value_bool(value: &Value, names: &[&str]) -> Option<bool> {
+    names
+        .iter()
+        .find_map(|name| value.get(*name).and_then(Value::as_bool))
+}
+fn value_u64(value: &Value, names: &[&str]) -> Result<u64, SniffError> {
+    names
+        .iter()
+        .find_map(|name| value.get(*name).and_then(Value::as_u64))
+        .ok_or_else(|| malformed("missing numeric identity"))
+}
+fn value_id(value: &Value, names: &[&str]) -> Option<String> {
+    names.iter().find_map(|name| {
+        value.get(*name).and_then(|v| {
+            v.as_str()
+                .map(str::to_string)
+                .or_else(|| v.as_u64().map(|id| id.to_string()))
+        })
+    })
+}
+fn string_id(value: &Value, names: &[&str]) -> Result<String, SniffError> {
+    names
+        .iter()
+        .find_map(|name| {
+            value.get(*name).and_then(|v| {
+                v.as_str()
+                    .map(str::to_string)
+                    .or_else(|| v.as_u64().map(|id| id.to_string()))
+            })
+        })
+        .ok_or_else(|| malformed("missing job identity"))
+}
+fn nested_string(value: &Value, paths: &[&[&str]]) -> Option<String> {
+    paths.iter().find_map(|path| {
+        path.iter()
+            .try_fold(value, |v, key| v.get(*key))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    })
+}
 /// Nested identity that may arrive as a JSON number (GitLab) or string (Bitbucket).
-fn nested_id(value: &Value, paths: &[&[&str]]) -> Option<String> { paths.iter().find_map(|path| path.iter().try_fold(value, |v, key| v.get(*key)).and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|id| id.to_string())))) }
-fn nonempty(value: Option<String>) -> Option<String> { value.filter(|value| !value.trim().is_empty()) }
+fn nested_id(value: &Value, paths: &[&[&str]]) -> Option<String> {
+    paths.iter().find_map(|path| {
+        path.iter()
+            .try_fold(value, |v, key| v.get(*key))
+            .and_then(|v| {
+                v.as_str()
+                    .map(str::to_string)
+                    .or_else(|| v.as_u64().map(|id| id.to_string()))
+            })
+    })
+}
+fn nonempty(value: Option<String>) -> Option<String> {
+    value.filter(|value| !value.trim().is_empty())
+}
 /// Folds one provider's lifecycle token onto [`super::CICD_JOB_STATUSES`].
 ///
 /// `completed` still maps to `success` for providers whose terminal state has no
 /// separate verdict; GitHub and Bitbucket resolve their verdict before calling
 /// this, so a completed-but-failed job never reaches that arm.
-fn normalize_status(status: &str) -> String { match status.to_ascii_lowercase().as_str() { "success" | "successful" | "completed" => "success", "failure" | "failed" | "error" => "failed", "cancelled" | "canceled" | "stopped" | "expired" => "cancelled", "queued" | "pending" | "created" | "ready" => "queued", "running" | "in_progress" => "running", "paused" | "halted" => "manual", "not_run" => "skipped", other => other }.to_string() }
-fn provider_name(flavor: ApiFlavor) -> String { format!("{flavor:?}") }
-fn git_provider(flavor: ApiFlavor) -> GitProvider { match flavor { ApiFlavor::GitHub => GitProvider::GitHub, ApiFlavor::GitLab => GitProvider::GitLab, ApiFlavor::Gitea | ApiFlavor::Forgejo => GitProvider::Gitea, ApiFlavor::Bitbucket => GitProvider::Bitbucket, _ => unreachable!("unsupported focused provider flavor") } }
-fn credential(flavor: ApiFlavor) -> (Option<String>, &'static str) { crate::credentials::provider_token(flavor) }
-fn unsupported(capability: &'static str, flavor: ApiFlavor) -> SniffError { SniffError::UnsupportedRemoteCapability { capability, target: format!("{flavor:?}") } }
-fn incomplete_domain(flavor: ApiFlavor, bound: &'static str, limit: usize) -> SniffError { SniffError::IncompleteRemoteDomain { provider: provider_name(flavor), bound, limit } }
-fn malformed(message: &str) -> SniffError { SniffError::RemoteApi { provider: "provider".to_string(), status: 200, message: format!("malformed response: {message}") } }
-fn transport(url: &url::Url, error: impl std::fmt::Display) -> SniffError { SniffError::RemoteUnreachable { url: url.to_string(), message: error.to_string() } }
+fn normalize_status(status: &str) -> String {
+    match status.to_ascii_lowercase().as_str() {
+        "success" | "successful" | "completed" => "success",
+        "failure" | "failed" | "error" => "failed",
+        "cancelled" | "canceled" | "stopped" | "expired" => "cancelled",
+        "queued" | "pending" | "created" | "ready" => "queued",
+        "running" | "in_progress" => "running",
+        "paused" | "halted" => "manual",
+        "not_run" => "skipped",
+        other => other,
+    }
+    .to_string()
+}
+fn provider_name(flavor: ApiFlavor) -> String {
+    format!("{flavor:?}")
+}
+fn git_provider(flavor: ApiFlavor) -> GitProvider {
+    match flavor {
+        ApiFlavor::GitHub => GitProvider::GitHub,
+        ApiFlavor::GitLab => GitProvider::GitLab,
+        ApiFlavor::Gitea | ApiFlavor::Forgejo => GitProvider::Gitea,
+        ApiFlavor::Bitbucket => GitProvider::Bitbucket,
+        _ => unreachable!("unsupported focused provider flavor"),
+    }
+}
+fn credential(flavor: ApiFlavor) -> (Option<String>, &'static str) {
+    crate::credentials::provider_token(flavor)
+}
+fn unsupported(capability: &'static str, flavor: ApiFlavor) -> SniffError {
+    SniffError::UnsupportedRemoteCapability {
+        capability,
+        target: format!("{flavor:?}"),
+    }
+}
+fn incomplete_domain(flavor: ApiFlavor, bound: &'static str, limit: usize) -> SniffError {
+    SniffError::IncompleteRemoteDomain {
+        provider: provider_name(flavor),
+        bound,
+        limit,
+    }
+}
+fn malformed(message: &str) -> SniffError {
+    SniffError::RemoteApi {
+        provider: "provider".to_string(),
+        status: 200,
+        message: format!("malformed response: {message}"),
+    }
+}
+fn transport(url: &url::Url, error: impl std::fmt::Display) -> SniffError {
+    SniffError::RemoteUnreachable {
+        url: url.to_string(),
+        message: error.to_string(),
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1431,11 +1749,10 @@ mod tests {
                     format!("git@{host}:acme/project.git")
                 };
                 let repository = repository_with_remote(&remote_url);
-                let resolver = crate::filesystem::git::remote_observation::register_test_provider_discovery(
-                    &host,
-                    flavor,
-                    version,
-                );
+                let resolver =
+                    crate::filesystem::git::remote_observation::register_test_provider_discovery(
+                        &host, flavor, version,
+                    );
 
                 let denied_vendor = crate::filesystem::git::remote_observation::remote_vendor_at(
                     repository.path(),
@@ -1466,12 +1783,10 @@ mod tests {
                     .unwrap()
                     .expect("configured remote resolved");
                 assert_eq!(resolved.api_flavor, ApiFlavor::Unknown);
-                let denied_client = FocusedProviderClient::discover(
-                    resolved.clone(),
-                    FetchPolicy::deny_all(),
-                )
-                .await
-                .unwrap_err();
+                let denied_client =
+                    FocusedProviderClient::discover(resolved.clone(), FetchPolicy::deny_all())
+                        .await
+                        .unwrap_err();
                 assert!(matches!(
                     denied_client,
                     SniffError::RemotePolicyDenied { host: ref denied_host }
@@ -1485,7 +1800,10 @@ mod tests {
                 assert_eq!(client.remote().api_flavor, flavor);
                 assert_eq!(client.discovery().api_flavor, flavor);
                 assert_eq!(client.discovery().server_version.as_deref(), Some(version));
-                assert_eq!(client.api_base.as_str(), format!("https://{host}/{api_path}"));
+                assert_eq!(
+                    client.api_base.as_str(),
+                    format!("https://{host}/{api_path}")
+                );
                 let capabilities = client.capabilities();
                 assert!(capabilities.pull_requests);
                 assert!(capabilities.pagination);
@@ -1534,8 +1852,20 @@ mod tests {
     #[test]
     fn stable_gitea_1_25_is_supported_but_its_prerelease_is_not() {
         assert!(parse_server_version("1.25.0").unwrap().at_least((1, 25, 0)));
-        assert!(parse_server_version("1.25.0+gitea-1").unwrap().at_least((1, 25, 0)));
-        assert!(!parse_server_version("1.25.0-rc.1").unwrap().at_least((1, 25, 0)));
-        assert!(!parse_server_version("Forgejo 14.0").unwrap().at_least((14, 0, 1)));
+        assert!(
+            parse_server_version("1.25.0+gitea-1")
+                .unwrap()
+                .at_least((1, 25, 0))
+        );
+        assert!(
+            !parse_server_version("1.25.0-rc.1")
+                .unwrap()
+                .at_least((1, 25, 0))
+        );
+        assert!(
+            !parse_server_version("Forgejo 14.0")
+                .unwrap()
+                .at_least((14, 0, 1))
+        );
     }
 }

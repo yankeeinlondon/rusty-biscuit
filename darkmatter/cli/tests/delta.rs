@@ -1,10 +1,11 @@
 mod common;
 
-use common::md_cmd;
+use common::CliProcessFixture;
 use predicates::prelude::*;
 
 #[test]
 fn test_delta_subcommand_output() {
+    let fixture = CliProcessFixture::named("delta-test-delta-subcommand-output");
     let dir = tempfile::tempdir().unwrap();
     let base = dir.path().join("base.md");
     let updated = dir.path().join("updated.md");
@@ -12,7 +13,8 @@ fn test_delta_subcommand_output() {
     std::fs::write(&base, "# Title\n\nHello\n").unwrap();
     std::fs::write(&updated, "# Title\n\nHello there\n").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .arg("delta")
         .arg(&base)
         .arg(&updated)
@@ -23,6 +25,7 @@ fn test_delta_subcommand_output() {
 
 #[test]
 fn test_delta_subcommand_json_output() {
+    let fixture = CliProcessFixture::named("delta-test-delta-subcommand-json-output");
     let dir = tempfile::tempdir().unwrap();
     let base = dir.path().join("base.md");
     let updated = dir.path().join("updated.md");
@@ -30,7 +33,8 @@ fn test_delta_subcommand_json_output() {
     std::fs::write(&base, "# Title\n\nHello\n").unwrap();
     std::fs::write(&updated, "# Title\n\nHello there\n").unwrap();
 
-    md_cmd()
+    fixture
+        .command()
         .arg("delta")
         .arg(&base)
         .arg(&updated)
@@ -57,14 +61,14 @@ fn test_delta_subcommand_json_output() {
 
 /// Writes `base` and `updated` to a tempdir and returns the full stdout
 /// produced by `md delta` (or `md -v delta` when `verbose` is set).
-fn delta_stdout(base: &str, updated: &str, verbose: bool) -> String {
+fn delta_stdout(fixture: &CliProcessFixture, base: &str, updated: &str, verbose: bool) -> String {
     let dir = tempfile::tempdir().expect("tempdir");
     let base_path = dir.path().join("base.md");
     let updated_path = dir.path().join("updated.md");
     std::fs::write(&base_path, base).expect("write base");
     std::fs::write(&updated_path, updated).expect("write updated");
 
-    let mut cmd = md_cmd();
+    let mut cmd = fixture.command();
     if verbose {
         cmd.arg("-v");
     }
@@ -82,15 +86,17 @@ fn delta_stdout(base: &str, updated: &str, verbose: bool) -> String {
 
 #[test]
 fn delta_golden_no_change() {
-    let out = delta_stdout("# Title\n\nHello\n", "# Title\n\nHello\n", false);
+    let fixture = CliProcessFixture::named("delta-delta-golden-no-change");
+    let out = delta_stdout(&fixture, "# Title\n\nHello\n", "# Title\n\nHello\n", false);
     assert_eq!(out, "\n\u{2713} No changes (0.0% changed)\n\n");
 }
 
 #[test]
 fn delta_golden_frontmatter_change() {
+    let fixture = CliProcessFixture::named("delta-delta-golden-frontmatter-change");
     let base = "---\ntitle: Old\n---\n\n# Title\n\nHello\n";
     let updated = "---\ntitle: New\n---\n\n# Title\n\nHello\n";
-    let out = delta_stdout(base, updated, false);
+    let out = delta_stdout(&fixture, base, updated, false);
     let expected = "\n\u{2713} No changes (0.0% changed)\n\n\
         Frontmatter:\n  ~ title: Updated frontmatter property 'title'\n\n";
     assert_eq!(out, expected);
@@ -98,13 +104,14 @@ fn delta_golden_frontmatter_change() {
 
 #[test]
 fn delta_golden_frontmatter_scalar_type_change() {
+    let fixture = CliProcessFixture::named("delta-delta-golden-frontmatter-scalar-type-change");
     // Same scalar key, different value type. The library parses `true` as
     // a boolean and `"true"` as a string, so the two frontmatters differ —
     // but the change is detected as a regular property update (not a
     // formatting-only change).
     let base = "---\nflag: true\n---\n\n# Doc\n";
     let updated = "---\nflag: \"true\"\n---\n\n# Doc\n";
-    let out = delta_stdout(base, updated, false);
+    let out = delta_stdout(&fixture, base, updated, false);
     let expected = "\n\u{2713} No changes (0.0% changed)\n\n\
         Frontmatter:\n  ~ flag: Updated frontmatter property 'flag'\n\n";
     assert_eq!(out, expected);
@@ -112,9 +119,10 @@ fn delta_golden_frontmatter_scalar_type_change() {
 
 #[test]
 fn delta_golden_preamble_change() {
+    let fixture = CliProcessFixture::named("delta-delta-golden-preamble-change");
     let base = "Old intro\n\n# Title\n";
     let updated = "New intro\n\n# Title\n";
-    let out = delta_stdout(base, updated, false);
+    let out = delta_stdout(&fixture, base, updated, false);
     let expected = "\n\u{2713} No changes (0.0% changed)\n\n\
         Preamble: modified\n\n";
     assert_eq!(out, expected);
@@ -122,9 +130,10 @@ fn delta_golden_preamble_change() {
 
 #[test]
 fn delta_golden_section_added() {
+    let fixture = CliProcessFixture::named("delta-delta-golden-section-added");
     let base = "# Title\n\nHello\n";
     let updated = "# Title\n\nHello\n\n## New\n\nNew content\n";
-    let out = delta_stdout(base, updated, false);
+    let out = delta_stdout(&fixture, base, updated, false);
     let expected = "\n\u{25d0} Moderate changes (36.1% changed)\n\n\
         Added (1):\n  + Title > New\n\n\
         Whitespace only (1):\n  - Title: \x1b[3mblank lines\x1b[0m\n\n  \
@@ -134,9 +143,10 @@ fn delta_golden_section_added() {
 
 #[test]
 fn delta_golden_section_removed() {
+    let fixture = CliProcessFixture::named("delta-delta-golden-section-removed");
     let base = "# Title\n\nHello\n\n## Old\n\nOld content\n";
     let updated = "# Title\n\nHello\n";
-    let out = delta_stdout(base, updated, false);
+    let out = delta_stdout(&fixture, base, updated, false);
     let expected = "\n\u{25d0} Moderate changes (36.1% changed)\n\n\
         Removed (1):\n  - Title > Old\n\n\
         Whitespace only (1):\n  - Title: \x1b[3mblank lines\x1b[0m\n\n  \
@@ -146,9 +156,10 @@ fn delta_golden_section_removed() {
 
 #[test]
 fn delta_golden_section_modified() {
+    let fixture = CliProcessFixture::named("delta-delta-golden-section-modified");
     let base = "# Title\n\nHello world\n";
     let updated = "# Title\n\nHello there\n";
-    let out = delta_stdout(base, updated, false);
+    let out = delta_stdout(&fixture, base, updated, false);
     let expected = "\n\u{25d0} Moderate changes (23.8% changed)\n\n\
         Modified (1):\n  - Title: text edited\n\n";
     assert_eq!(out, expected);
@@ -156,11 +167,12 @@ fn delta_golden_section_modified() {
 
 #[test]
 fn delta_golden_moved_section() {
+    let fixture = CliProcessFixture::named("delta-delta-golden-moved-section");
     // Renaming a heading keeps content identical but changes its path,
     // which the delta engine classifies as a structural move.
     let base = "# Hello\n\n## Section\n\nSee [link](#section)\n";
     let updated = "# Hello\n\n## Renamed\n\nSee [link](#section)\n";
-    let out = delta_stdout(base, updated, false);
+    let out = delta_stdout(&fixture, base, updated, false);
     let expected = "\n\u{2295} Structural only (0.0% changed)\n\n\
         Moved (1):\n  \u{21b7} Hello > Section \u{2192} Hello > Renamed\n\n\
         \u{26a0} Broken links (1):\n  \u{2717} #section at line 6\n\n";
@@ -169,9 +181,10 @@ fn delta_golden_moved_section() {
 
 #[test]
 fn delta_golden_whitespace_only() {
+    let fixture = CliProcessFixture::named("delta-delta-golden-whitespace-only");
     let base = "# Title\n\nHello\n";
     let updated = "# Title\n\n  Hello  \n";
-    let out = delta_stdout(base, updated, false);
+    let out = delta_stdout(&fixture, base, updated, false);
     let expected = "\n~ Whitespace changes only (0.0% changed)\n\n\
         Whitespace only (1):\n  - Title: \x1b[3mtrailing space, interior space\x1b[0m\n\n  \
         \x1b[2m\x1b[3mwhitespace only changes have no visual effect when rendered\x1b[0m\n\n";
@@ -180,9 +193,10 @@ fn delta_golden_whitespace_only() {
 
 #[test]
 fn delta_golden_code_block_modified() {
+    let fixture = CliProcessFixture::named("delta-delta-golden-code-block-modified");
     let base = "# Title\n\n```rust\nlet x = 1;\n```\n";
     let updated = "# Title\n\n```rust\nlet x = 2;\n```\n";
-    let out = delta_stdout(base, updated, false);
+    let out = delta_stdout(&fixture, base, updated, false);
     let expected = "\n\u{25b3} Minor changes (6.2% changed)\n\n\
         Modified (1):\n  - Title: text edited\n\n\
         Code blocks:\n  - \x1b[7mrust\x1b[0m code block in \x1b[1mTitle\x1b[0m \
@@ -192,6 +206,7 @@ fn delta_golden_code_block_modified() {
 
 #[test]
 fn delta_golden_code_block_language_changed() {
+    let fixture = CliProcessFixture::named("delta-delta-golden-code-block-language-changed");
     // Switching the language token exercises the `Language: x → y` branch of
     // `format_code_block_change`. The styled token is the *updated* language
     // (the renderer receives `change.language`, which the engine populates
@@ -199,14 +214,16 @@ fn delta_golden_code_block_language_changed() {
     // transition as `Language: rust → python`.
     let base = "# Title\n\n```rust\nlet x = 1;\n```\n";
     let updated = "# Title\n\n```python\nlet x = 1;\n```\n";
-    let out = delta_stdout(base, updated, false);
+    let out = delta_stdout(&fixture, base, updated, false);
     assert!(
         out.contains("Code blocks:"),
         "expected code-block change section, got:\n{out}"
     );
     assert!(
-        out.contains("\x1b[7mpython\x1b[0m code block in \x1b[1mTitle\x1b[0m \
-            changed its \x1b[1mlanguage\x1b[0m setting: rust \u{2192} python"),
+        out.contains(
+            "\x1b[7mpython\x1b[0m code block in \x1b[1mTitle\x1b[0m \
+            changed its \x1b[1mlanguage\x1b[0m setting: rust \u{2192} python"
+        ),
         "expected styled language-change line, got:\n{out}"
     );
 }
@@ -219,7 +236,8 @@ fn delta_golden_code_block_language_changed() {
 
 #[test]
 fn delta_golden_verbose_no_change() {
-    let out = delta_stdout("# Title\n\nHello\n", "# Title\n\nHello\n", true);
+    let fixture = CliProcessFixture::named("delta-delta-golden-verbose-no-change");
+    let out = delta_stdout(&fixture, "# Title\n\nHello\n", "# Title\n\nHello\n", true);
     let expected = "\n\u{2713} No changes (0.0% changed)\n\n\
         Statistics:\n  Bytes: 15 \u{2192} 15 (0 changed)\n  \
         Sections: 1 \u{2192} 1 (1 unchanged)\n\n";
@@ -228,9 +246,10 @@ fn delta_golden_verbose_no_change() {
 
 #[test]
 fn delta_golden_verbose_frontmatter_and_content() {
+    let fixture = CliProcessFixture::named("delta-delta-golden-verbose-frontmatter-and-content");
     let base = "---\ntitle: Old\n---\n\n# Title\n\nHello\n";
     let updated = "---\ntitle: New\n---\n\n# Title\n\nGoodbye\n";
-    let out = delta_stdout(base, updated, true);
+    let out = delta_stdout(&fixture, base, updated, true);
 
     // Header + statistics block. The percentages and byte counts are
     // deterministic given the input bytes above.
@@ -250,8 +269,10 @@ fn delta_golden_verbose_frontmatter_and_content() {
         "expected Frontmatter Visual Diff section, got:\n{out}"
     );
     assert!(
-        out.contains("\x1b[2m\u{2500}\u{2500}\u{2500} \x1b[0moriginal\x1b[2m \u{2192} \
-            \x1b[0mupdated\x1b[2m \u{2500}\u{2500}\u{2500}\x1b[0m\n"),
+        out.contains(
+            "\x1b[2m\u{2500}\u{2500}\u{2500} \x1b[0moriginal\x1b[2m \u{2192} \
+            \x1b[0mupdated\x1b[2m \u{2500}\u{2500}\u{2500}\x1b[0m\n"
+        ),
         "expected visual diff header rule, got:\n{out}"
     );
     // `Old` highlighted in red (256-color bg 88), `New` in green (bg 28).
@@ -279,11 +300,13 @@ fn delta_golden_verbose_frontmatter_and_content() {
 
 #[test]
 fn delta_golden_verbose_content_only_no_frontmatter_block() {
+    let fixture =
+        CliProcessFixture::named("delta-delta-golden-verbose-content-only-no-frontmatter-block");
     // Content change without frontmatter change: verbose mode should NOT
     // emit the `Frontmatter Visual Diff:` block, only the body visual diff.
     let base = "# Title\n\nHello\n";
     let updated = "# Title\n\nGoodbye\n";
-    let out = delta_stdout(base, updated, true);
+    let out = delta_stdout(&fixture, base, updated, true);
 
     assert!(
         !out.contains("Frontmatter Visual Diff:"),

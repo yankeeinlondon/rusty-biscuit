@@ -376,7 +376,7 @@ You are using the {{env.AGENT}} agent on this task.
 
 The current files in the repo which are dirty and need to be committed are:
 
-{{ctx.dirty_files}}
+{{ as_unordered_list(ctx.dirty_files) }}
 ```
 
 This example illustrates how Frontmatter properties on a page can be used to replace template tags in the body with content.

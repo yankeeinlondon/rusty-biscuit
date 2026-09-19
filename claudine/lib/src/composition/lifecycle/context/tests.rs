@@ -23,6 +23,7 @@ fn snapshot_with(
         detail,
         message: String::new(),
         cause: None,
+        frontmatter_excerpt: None,
     }
 }
 
@@ -62,6 +63,8 @@ fn error_info_to_value_has_kind_variant_msg() {
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
         snapshot: None,
+        property: None,
+        reason: crate::composition::LifecycleEvaluationReason::Expression,
     };
     let value = info.to_value();
     assert_eq!(value.get("kind"), Some(&json!("ClaudineError")));
@@ -233,6 +236,38 @@ fn action_failure_error_kind_projects_provider_facets() {
 }
 
 #[test]
+fn action_failure_error_kind_projects_incomplete_subagent_facets() {
+    // The ratified lifecycle-stack identity for the silent-success shape. The
+    // machine label stays `incomplete_subagents` on the summary; here it must
+    // resolve to a real catalog row rather than falling back to the facet-less
+    // `LifecycleAction` label a `when:` clause cannot usefully match.
+    let info = LifecycleErrorInfo::from_action_failure(
+        "incomplete_subagents",
+        "2 sub-agent tasks did not complete: commit-alpha (stopped), commit-beta (stopped)",
+    );
+    let value = info.to_value();
+    assert_eq!(
+        value.get("code"),
+        Some(&json!("provider.incomplete_subagents"))
+    );
+    assert_eq!(value.get("category"), Some(&json!("provider")));
+    assert_eq!(value.get("disposition"), Some(&json!("unrecoverable")));
+    assert_eq!(value.get("origin"), Some(&json!("provider")));
+    assert_eq!(value.get("severity"), Some(&json!("error")));
+    // `kind`/`variant` are the deprecated spellings of `category`/`code`; the
+    // old facet-less `LifecycleAction` fallback must be gone.
+    assert_eq!(value.get("kind"), Some(&json!("provider")));
+    assert_eq!(
+        value.get("variant"),
+        Some(&json!("provider.incomplete_subagents"))
+    );
+    // Fail-fast: no generic retry handler may pick this up.
+    assert_eq!(value.get("is_transient"), Some(&json!(false)));
+    assert_eq!(value.get("is_throttled"), Some(&json!(false)));
+    assert_eq!(value.get("is_correctable"), Some(&json!(false)));
+}
+
+#[test]
 fn severity_projects_for_classifiable_errors() {
     // Typed-Diagnostic path: a correctable composition error defaults to
     // `error` severity (catalog §1).
@@ -309,6 +344,8 @@ fn cap_detail_promotes_reset_at_and_retry_after_ms_to_top_level() {
                 "retry_after_ms": 5_400_000u64,
             }),
         ))),
+        property: None,
+        reason: crate::composition::LifecycleEvaluationReason::Expression,
     };
     let value = info.to_value();
     // Promoted to the top level …
@@ -336,6 +373,8 @@ fn null_detail_field_promotes_to_null() {
             "error",
             json!({ "doc": "spec.md", "property": "status" }),
         ))),
+        property: None,
+        reason: crate::composition::LifecycleEvaluationReason::Expression,
     };
     let value = info.to_value();
     assert_eq!(value.get("reset_at"), Some(&Value::Null));
@@ -390,6 +429,8 @@ fn injected_globals_attaches_err_timing_current() {
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
         snapshot: None,
+        property: None,
+        reason: crate::composition::LifecycleEvaluationReason::Expression,
     };
     let timing = LifecycleTiming {
         document_ms: Some(100),
@@ -420,6 +461,8 @@ fn err_global_resolves_through_dm2_subtree() {
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
         snapshot: None,
+        property: None,
+        reason: crate::composition::LifecycleEvaluationReason::Expression,
     };
     let globals = lifecycle_injected_globals(Some(&info), None, None);
     let state = state(json!({}));
@@ -457,6 +500,8 @@ fn doc_namespace_reaches_literal_err_property_through_dm2() {
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
         snapshot: None,
+        property: None,
+        reason: crate::composition::LifecycleEvaluationReason::Expression,
     };
     let globals = lifecycle_injected_globals(Some(&info), None, None);
     let state = state(json!({"err": "literal-value"}));
@@ -664,6 +709,7 @@ fn provider_failure_message_precedence_survives_the_constructor() {
         session_id: None,
         final_response: String::new(),
         exit_code: 1,
+        is_error: false,
         termination: crate::harness::ProcessTermination::Completed,
         stderr_text: Some("noise\nlast stderr line".to_string()),
         error_kind: Some("agent_failure".to_string()),

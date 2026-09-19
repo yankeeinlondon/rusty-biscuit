@@ -188,63 +188,6 @@ fn format_ref_decorations(refs: &[sniff::filesystem::git::RefDecoration]) -> Str
     format!(" <dim>(</dim>{}<dim>)</dim>", parts.join("<dim>, </dim>"))
 }
 
-/// Parse a git remote URL to extract owner/repo and browsable URL.
-///
-/// Handles both SSH (`git@github.com:owner/repo.git`) and HTTPS
-/// (`https://github.com/owner/repo.git`) formats.
-///
-/// Returns (owner/repo, browsable_url) tuple.
-fn parse_git_url(
-    url: &str,
-    provider: &sniff::filesystem::git::GitHostingProvider,
-) -> (Option<String>, Option<String>) {
-    // Try to extract owner/repo from URL
-    let owner_repo = if url.contains('@') && url.contains(':') {
-        // SSH format: git@github.com:owner/repo.git
-        url.split(':')
-            .next_back()
-            .map(|s| s.trim_end_matches(".git").to_string())
-    } else if url.contains("://") {
-        // HTTPS format: https://github.com/owner/repo.git
-        url.split('/')
-            .skip(3) // Skip https://hostname/
-            .collect::<Vec<_>>()
-            .join("/")
-            .trim_end_matches(".git")
-            .to_string()
-            .into()
-    } else {
-        None
-    };
-
-    // Build browsable URL based on provider
-    let browse_url = owner_repo.as_ref().and_then(|repo| {
-        provider
-            .browser_base_url()
-            .map(|base| format!("{}/{}", base, repo))
-    });
-
-    (owner_repo, browse_url)
-}
-
-/// Build the commit URL base from the preferred remote (usually "origin").
-///
-/// Returns `(browse_url, provider, remote_name)` if a browsable remote is
-/// found, or `None` if no remote has a resolvable browse URL.
-fn build_commit_url_base(
-    git: &sniff::filesystem::git::GitInfo,
-) -> Option<(String, sniff::filesystem::git::GitHostingProvider, String)> {
-    // Prefer "origin", fall back to the first remote with a URL
-    let remote = git
-        .remotes
-        .iter()
-        .find(|r| r.name == "origin")
-        .or_else(|| git.remotes.first())?;
-    let url = remote.url.as_ref()?;
-    let (_, browse_url) = parse_git_url(url, &remote.provider);
-    browse_url.map(|base| (base, remote.provider, remote.name.clone()))
-}
-
 /// Split a path into directory and filename components.
 fn split_path(path: &str) -> (String, String) {
     if let Some(pos) = path.rfind('/') {
@@ -447,7 +390,10 @@ pub fn render_hash_section(
                     format!("<lime><i>{}</i></lime> {}<b>{}</b>", kind, dir_part, name)
                 }
                 DeltaKind::Modified => {
-                    format!("<yellow><i>{}</i></yellow> {}<b>{}</b>", kind, dir_part, name)
+                    format!(
+                        "<yellow><i>{}</i></yellow> {}<b>{}</b>",
+                        kind, dir_part, name
+                    )
                 }
                 DeltaKind::Deleted => {
                     format!("<red><i>{}</i></red> {}<b>{}</b>", kind, dir_part, name)
@@ -480,47 +426,19 @@ fn build_git_status_items(
     history_count: usize,
     verbose: u8,
 ) -> Vec<String> {
-    // Build commit URL base from the preferred remote (usually "origin").
-    let commit_url_base = build_commit_url_base(git);
-    let url_remote_prefix = commit_url_base
-        .as_ref()
-        .map(|(_, _, name)| format!("{name}/"));
-
     let mut status_items: Vec<String> = Vec::new();
 
     // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom).
-    // `git.recent` is newest-first. A commit is considered pushed once we encounter
-    // (walking newest→oldest) a commit with a remote-tracking ref decoration for the
-    // URL-providing remote; that commit and all older ones are pushed. This is robust
-    // to `--branch <other>` queries where `git.tracking` reflects the checked-out
-    // branch, not the queried one.
+    // `git.recent` is newest-first. Commit links come from the library, which
+    // links a commit only when a local remote-tracking ref contains it; a
+    // lookup failure renders the commits unlinked rather than failing the report.
     let commits: Vec<_> = git.recent.iter().take(history_count).collect();
-    let unpushed_count = url_remote_prefix
-        .as_deref()
-        .map(|prefix| {
-            commits
-                .iter()
-                .take_while(|c| {
-                    !c.refs
-                        .iter()
-                        .any(|r| r.kind == RefKind::RemoteBranch && r.name.starts_with(prefix))
-                })
-                .count()
-        })
-        .unwrap_or(0);
+    let shas: Vec<&str> = commits.iter().map(|commit| commit.sha.as_str()).collect();
+    let links = sniff::filesystem::git::commit_links_at(&git.repo_root, &shas).unwrap_or_default();
 
-    for (display_index, commit) in commits.iter().rev().enumerate() {
-        // display_index 0 = oldest displayed commit, last = most recent.
-        // The most recent `unpushed_count` commits (at the end) are unpushed.
-        let is_pushed = display_index < commits.len().saturating_sub(unpushed_count);
-        let commit_url = if is_pushed {
-            commit_url_base.as_ref().map(|(base, provider, _)| {
-                format!("{}/{}/{}", base, provider.commit_path_segment(), commit.sha)
-            })
-        } else {
-            None
-        };
-        status_items.push(format_commit_line(commit, verbose, commit_url.as_deref()));
+    for (index, commit) in commits.iter().enumerate().rev() {
+        let commit_url = links.get(index).and_then(|link| link.commit_url.as_deref());
+        status_items.push(format_commit_line(commit, verbose, commit_url));
     }
 
     let staged: Vec<_> = git
@@ -542,7 +460,12 @@ fn build_git_status_items(
     // Add staged files
     for file in &staged {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
+        let absolute = git
+            .repo_root
+            .join(&file.path)
+            .display()
+            .to_string()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         // Only show diff stats for modified files (not created/deleted)
@@ -559,7 +482,12 @@ fn build_git_status_items(
     // Add unstaged files
     for file in &modified {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
+        let absolute = git
+            .repo_root
+            .join(&file.path)
+            .display()
+            .to_string()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         let diff_stats = format_diff_stats(file.lines_added, file.lines_removed);
@@ -571,7 +499,12 @@ fn build_git_status_items(
 
     for file in &untracked {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
+        let absolute = git
+            .repo_root
+            .join(&file.path)
+            .display()
+            .to_string()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let line = format!("<dim>untracked: {linked_path}</dim>");
         status_items.push(line);
@@ -585,7 +518,12 @@ fn build_git_status_items(
         .collect();
     for file in &conflicted {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
+        let absolute = git
+            .repo_root
+            .join(&file.path)
+            .display()
+            .to_string()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let line = format!("<red>conflicted: {linked_path}</red>");
         status_items.push(line);
@@ -774,7 +712,9 @@ fn join_alias(prefix: &str, rel: &Path) -> String {
     } else {
         format!(
             "{prefix}/{}",
-            rel.display().to_string().replace(std::path::MAIN_SEPARATOR, "/")
+            rel.display()
+                .to_string()
+                .replace(std::path::MAIN_SEPARATOR, "/")
         )
     }
 }
@@ -799,9 +739,7 @@ fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> St
 
     if let Ok(rel) = base.strip_prefix(target) {
         let ups = rel.components().count();
-        return std::iter::repeat_n("..", ups)
-            .collect::<Vec<_>>()
-            .join("/");
+        return std::iter::repeat_n("..", ups).collect::<Vec<_>>().join("/");
     }
 
     let base_components: Vec<_> = base.components().collect();
@@ -1088,13 +1026,12 @@ pub fn render_git_section(
                 .url
                 .as_ref()
                 .map(|url| {
-                    let (owner_repo, browse_url) = parse_git_url(url, &remote.provider);
                     let provider_label = remote.provider.display_name();
-                    if let Some(ref repo_path) = owner_repo {
-                        let link_url = browse_url.unwrap_or_else(|| url.clone());
+                    if let Some(link) = sniff::filesystem::git::repository_link(url) {
+                        let link_url = link.browser_url.unwrap_or_else(|| url.clone());
                         format!(
                             " - <a href=\"{}\"><blue>{}</blue></a> <i>on</i> <b>{}</b>",
-                            link_url, repo_path, provider_label
+                            link_url, link.owner_repo, provider_label
                         )
                     } else {
                         format!(" <i>on</i> <b>{}</b>", provider_label)

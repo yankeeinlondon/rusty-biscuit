@@ -1,0 +1,3 @@
+$schema:
+    Inner: "{ state: enum(known,unknown; required), value: number }"
+    Fact: "{ id: string(required), knowledge: Inner(required)@this }"

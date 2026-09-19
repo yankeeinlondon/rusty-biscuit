@@ -291,8 +291,6 @@ pub fn stacked_stripped(via_render: &str, tree: &str) -> String {
     )
 }
 
-use std::path::PathBuf;
-
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::filesystem::FileSystem;
@@ -675,7 +673,7 @@ pub fn component_cases() -> Vec<ComponentCase> {
         tree_only!(
             "TerminalImage",
             |s: &Scenario| {
-                let img_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                let img_path = biscuit_test_harness::manifest_dir!()
                     .join("../cli/tests/fixtures/tiny.png");
                 TerminalImage::new(&img_path)
                     .expect("load tiny.png")

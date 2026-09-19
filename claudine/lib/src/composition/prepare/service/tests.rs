@@ -325,7 +325,7 @@ impl Drop for CwdGuard {
 #[test]
 #[serial_test::serial(cwd)]
 fn context_derivation_ignores_a_later_process_cwd_change() {
-    let area = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let area = biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("claudine/lib has a parent")
         .to_path_buf();
@@ -365,7 +365,7 @@ fn context_derivation_ignores_a_later_process_cwd_change() {
 #[test]
 #[serial_test::serial(cwd)]
 fn a_different_launch_anchor_derives_a_different_context() {
-    let area = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let area = biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("claudine/lib has a parent")
         .to_path_buf();

@@ -12,10 +12,14 @@ use darkmatter::markdown::compose::context::{
     ContextVariableDescriptor, context_variable_descriptors,
 };
 use darkmatter::markdown::compose::expression::{
-    expression_function_descriptors, ExpressionFinder, ExpressionFunctionDescriptor, ParseError,
-    SpannedExpr, SpannedExprKind, parse_condition_spanned, parse_spanned,
+    expression_function_descriptors, ExpressionFinder, ExpressionFunctionDescriptor,
+    ExpressionLintKind, ParseError, ParseMode, SpannedExpr, SpannedExprKind, is_whole_value_span,
+    lint_expression, parse_condition_spanned, parse_spanned,
 };
+use darkmatter::markdown::schemas::{DecodedScalar, decode_scalar};
 use darkmatter::markdown::span::SourceSpan;
+
+use crate::overlay::{FmEntry, FmScalarStyle, FmValueKind, FrontmatterAst};
 
 /// One `{{{ … }}}` interpolation literal with a document-relative span.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +89,315 @@ pub fn interpolation_at(text: &str, body_base: usize, offset: usize) -> Option<I
     interpolations(text, body_base)
         .into_iter()
         .find(|interpolation| interpolation.outer.start <= offset && offset <= interpolation.outer.end)
+}
+
+// ── Frontmatter scalar projection ──────────────────────────────────────────
+
+/// How offsets in one frontmatter scalar's analyzed text map back to authored
+/// document bytes.
+///
+/// There is no single correct rule for every YAML scalar: flow quotes and
+/// escapes must be decoded before parsing, literal blocks keep raw line breaks
+/// behind a header and indentation, and folding or a tag changes the text the
+/// evaluator sees. Only styles with an exact map are ever ranged precisely or
+/// edited; everything else widens to the whole scalar and offers no edit.
+/// Matching a decoded span to a separately scanned raw span by ordinal is never
+/// used: repeated spans, escapes, and folding make "the nth span" too weak.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScalarProjection {
+    /// The authored value node span — the fallback range.
+    scalar: SourceSpan,
+    mode: ProjectionMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ProjectionMode {
+    /// Analyzed text is the authored slice starting at `base`: an untagged
+    /// single-line plain scalar.
+    Plain { base: usize },
+    /// Analyzed text is the authored slice starting at `base`, header and
+    /// indentation included: an untagged literal block. Only individual
+    /// `{{ … }}` spans are analyzed in these coordinates; YAML indentation is
+    /// ordinary expression whitespace.
+    Literal { base: usize },
+    /// Analyzed text is the decoded value of an untagged single-line quoted
+    /// scalar, mapped through `map` (raw offsets relative to `base`).
+    Quoted { base: usize, double: bool, map: DecodedScalar },
+    /// No exact map: folded, tagged, multi-line flow, or a decode mismatch.
+    Whole,
+}
+
+impl ScalarProjection {
+    /// The projection and analyzed text for a whole scalar value, such as an
+    /// expression-typed schema value.
+    ///
+    /// Exact only for untagged, single-line plain, single-quoted, and
+    /// double-quoted scalars whose decoded text equals the parser's value; a
+    /// literal block is not exact here because its header precedes the value.
+    /// Returns `None` for a non-scalar entry.
+    pub fn for_value(entry: &FmEntry, document: &str) -> Option<(Self, String)> {
+        let scalar = entry.scalar.as_ref().filter(|_| entry.kind == FmValueKind::Scalar)?;
+        let whole = || {
+            (Self { scalar: entry.value_span.clone(), mode: ProjectionMode::Whole }, scalar.clone())
+        };
+        let Some(raw) = document.get(entry.value_span.clone()) else {
+            return Some(whole());
+        };
+        if entry.tagged || raw.contains(['\n', '\r']) {
+            return Some(whole());
+        }
+        let base = entry.value_span.start;
+        let exact = match entry.scalar_style? {
+            FmScalarStyle::Plain if raw == scalar => ProjectionMode::Plain { base },
+            style @ (FmScalarStyle::SingleQuoted | FmScalarStyle::DoubleQuoted) => {
+                match decode_scalar(raw).filter(|map| map.decoded() == scalar) {
+                    Some(map) => ProjectionMode::Quoted {
+                        base,
+                        double: style == FmScalarStyle::DoubleQuoted,
+                        map,
+                    },
+                    None => return Some(whole()),
+                }
+            }
+            _ => return Some(whole()),
+        };
+        Some((Self { scalar: entry.value_span.clone(), mode: exact }, scalar.clone()))
+    }
+
+    /// Whether ranges and edits in this scalar are exact.
+    pub fn is_exact(&self) -> bool {
+        self.mode != ProjectionMode::Whole
+    }
+
+    /// The authored value node span.
+    pub fn scalar_span(&self) -> SourceSpan {
+        self.scalar.clone()
+    }
+
+    /// Projects an analyzed-text range to authored document bytes, or `None`
+    /// without an exact map.
+    pub fn project(&self, range: std::ops::Range<usize>) -> Option<SourceSpan> {
+        match &self.mode {
+            ProjectionMode::Plain { base } | ProjectionMode::Literal { base } => {
+                Some(base + range.start..base + range.end)
+            }
+            ProjectionMode::Quoted { base, map, .. } => {
+                map.project(range).map(|raw| base + raw.start..base + raw.end)
+            }
+            ProjectionMode::Whole => None,
+        }
+    }
+
+    /// The exact authored range, else the whole scalar.
+    pub fn range(&self, range: std::ops::Range<usize>) -> SourceSpan {
+        self.project(range).unwrap_or_else(|| self.scalar.clone())
+    }
+
+    /// The analyzed-text offset for a document offset inside the scalar, or
+    /// `None` without an exact map.
+    pub fn analyzed_offset(&self, document_offset: usize) -> Option<usize> {
+        match &self.mode {
+            ProjectionMode::Plain { base } | ProjectionMode::Literal { base } => {
+                Some(document_offset.saturating_sub(*base))
+            }
+            ProjectionMode::Quoted { base, map, .. } => {
+                Some(map.decoded_offset(document_offset.saturating_sub(*base)))
+            }
+            ProjectionMode::Whole => None,
+        }
+    }
+
+    /// Encodes analyzed text as an authored fragment of this scalar's style, so
+    /// it can replace a projected range without changing how the rest of the
+    /// scalar decodes. `None` when no safe encoding exists.
+    pub fn encode_fragment(&self, text: &str) -> Option<String> {
+        match &self.mode {
+            ProjectionMode::Literal { .. } => Some(text.to_string()),
+            ProjectionMode::Plain { .. } => {
+                let unsafe_plain = text.contains(['\n', '\r', '\t', ',', '[', ']', '{', '}'])
+                    || text.contains(": ")
+                    || text.contains(" #")
+                    || text.ends_with(':');
+                (!unsafe_plain).then(|| text.to_string())
+            }
+            ProjectionMode::Quoted { double: false, .. } => {
+                (!text.contains(['\n', '\r'])).then(|| text.replace('\'', "''"))
+            }
+            ProjectionMode::Quoted { double: true, .. } => {
+                let mut encoded = String::with_capacity(text.len());
+                for character in text.chars() {
+                    match character {
+                        '\\' => encoded.push_str("\\\\"),
+                        '"' => encoded.push_str("\\\""),
+                        '\n' => encoded.push_str("\\n"),
+                        '\t' => encoded.push_str("\\t"),
+                        other if other.is_control() => return None,
+                        other => encoded.push(other),
+                    }
+                }
+                Some(encoded)
+            }
+            ProjectionMode::Whole => None,
+        }
+    }
+
+    /// Nested `{{ … }}` spans inside `text`'s quoted string literals, through
+    /// Darkmatter's shared lint, projected to authored bytes. `text` is the
+    /// analyzed expression starting at analyzed offset `offset`; the rewrite,
+    /// when offered, replaces exactly that expression's authored range.
+    pub fn nested_span_lints(
+        &self,
+        document: &str,
+        text: &str,
+        offset: usize,
+        mode: ParseMode,
+    ) -> Vec<ProjectedNestedSpan> {
+        let project =
+            |range: std::ops::Range<usize>| self.project(offset + range.start..offset + range.end);
+        lint_expression(text, mode)
+            .into_iter()
+            .map(|lint| {
+                let ExpressionLintKind::NestedSpanInStringLiteral { literal, nested } = lint.kind;
+                let literal_is_single_line = project(literal)
+                    .and_then(|span| document.get(span))
+                    .is_some_and(|authored| !authored.contains(['\n', '\r']));
+                let replacement = lint
+                    .suggestion
+                    .filter(|_| literal_is_single_line)
+                    .and_then(|suggestion| {
+                        Some((project(0..text.len())?, self.encode_fragment(&suggestion)?))
+                    });
+                ProjectedNestedSpan {
+                    range: project(lint.span).unwrap_or_else(|| self.scalar.clone()),
+                    nested,
+                    replacement,
+                }
+            })
+            .collect()
+    }
+}
+
+/// One `{{ … }}` span inside a string-valued frontmatter scalar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontmatterInterpolation<'a> {
+    /// The scalar entry holding the span.
+    pub entry: &'a FmEntry,
+    /// The entry's arena index, for O(depth) [`FrontmatterAst::path_at`].
+    pub index: usize,
+    /// The trimmed expression text the analysis parses.
+    pub text: String,
+    /// Whether the span is the scalar's entire (trimmed) decoded value — the
+    /// syntax shape an owner may evaluate as a whole value. Whether that owner
+    /// is single-pass is the caller's decision.
+    pub whole_value: bool,
+    /// Outer `{{ … }}` range in analyzed-text coordinates.
+    outer: std::ops::Range<usize>,
+    /// Trimmed inner expression range in analyzed-text coordinates.
+    inner: std::ops::Range<usize>,
+    projection: ScalarProjection,
+}
+
+/// A nested-span lint projected into authored document coordinates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectedNestedSpan {
+    /// The nested `{{ … }}` range, or the whole scalar without an exact map.
+    pub range: SourceSpan,
+    /// The nested span's trimmed expression text.
+    pub nested: String,
+    /// The whole-expression rewrite as a YAML-style-encoded replacement for the
+    /// linted expression's authored range (for an interpolation, its
+    /// [`FrontmatterInterpolation::inner_span`]). `None` when the lint has no
+    /// suggestion, the scalar has no exact map, the flagged literal's authored
+    /// slice spans a line break, or no safe encoding exists.
+    pub replacement: Option<(SourceSpan, String)>,
+}
+
+impl FrontmatterInterpolation<'_> {
+    /// The projection this span's ranges go through.
+    pub fn projection(&self) -> &ScalarProjection {
+        &self.projection
+    }
+
+    /// The authored `{{ … }}` range, else the whole scalar.
+    pub fn outer_span(&self) -> SourceSpan {
+        self.projection.range(self.outer.clone())
+    }
+
+    /// The exact authored range of the trimmed inner expression.
+    pub fn inner_span(&self) -> Option<SourceSpan> {
+        self.projection.project(self.inner.clone())
+    }
+
+    /// Projects a range of [`text`](Self::text) to authored bytes, or `None`
+    /// without an exact map.
+    pub fn project(&self, range: std::ops::Range<usize>) -> Option<SourceSpan> {
+        self.projection
+            .project(self.inner.start + range.start..self.inner.start + range.end)
+    }
+
+    /// Nested `{{ … }}` spans inside this expression's quoted string literals,
+    /// through Darkmatter's shared lint, projected to authored bytes.
+    pub fn nested_span_lints(&self, document: &str, mode: ParseMode) -> Vec<ProjectedNestedSpan> {
+        self.projection.nested_span_lints(document, &self.text, self.inner.start, mode)
+    }
+}
+
+/// Every `{{ … }}` span inside a string-valued frontmatter scalar, at any depth
+/// (sequence items included), in document order.
+///
+/// Passive: scanning and projection only, with no composition, shell, or I/O.
+/// Aliases are not scalar entries and contribute nothing at the alias site.
+pub fn frontmatter_interpolations<'a>(
+    document: &str,
+    ast: &'a FrontmatterAst,
+) -> Vec<FrontmatterInterpolation<'a>> {
+    let mut out = Vec::new();
+    for (index, entry) in ast.entries().iter().enumerate() {
+        let Some(scalar) = entry.scalar.as_deref().filter(|_| entry.kind == FmValueKind::Scalar)
+        else {
+            continue;
+        };
+        if !scalar.contains("{{") {
+            continue;
+        }
+        let whole_value = is_whole_value_span(scalar);
+        let raw = document.get(entry.value_span.clone());
+        let (projection, analyzed, scan_from) = match (entry.scalar_style, entry.tagged, raw) {
+            (Some(FmScalarStyle::Literal), false, Some(raw)) => {
+                // Skip the block header line, which may carry a comment.
+                let body = raw.find('\n').map_or(raw.len(), |newline| newline + 1);
+                let projection = ScalarProjection {
+                    scalar: entry.value_span.clone(),
+                    mode: ProjectionMode::Literal { base: entry.value_span.start },
+                };
+                (projection, raw.to_string(), body)
+            }
+            _ => {
+                let Some((projection, analyzed)) = ScalarProjection::for_value(entry, document)
+                else {
+                    continue;
+                };
+                (projection, analyzed, 0)
+            }
+        };
+        for location in ExpressionFinder::find_all_plain(&analyzed[scan_from..]) {
+            let start = scan_from + location.start;
+            let end = scan_from + location.end;
+            let inner_slice = &analyzed[start + 2..end - 2];
+            let leading = inner_slice.len() - inner_slice.trim_start().len();
+            let inner_start = start + 2 + leading;
+            out.push(FrontmatterInterpolation {
+                entry,
+                index,
+                inner: inner_start..inner_start + location.expression.len(),
+                text: location.expression,
+                whole_value,
+                outer: start..end,
+                projection: projection.clone(),
+            });
+        }
+    }
+    out
 }
 
 /// Parses a **value-dialect** expression, span-carrying. This is the body
@@ -623,6 +936,9 @@ pub fn value_completion_partial(value_text: &str, value_start: usize) -> (usize,
 }
 
 #[cfg(test)]
+mod frontmatter_inventory_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -794,7 +1110,7 @@ mod tests {
     #[test]
     fn embedded_vocabulary_matches_the_topic_doc() {
         let doc = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            biscuit_test_harness::manifest_dir!()
                 .join("../docs/topics/darkmatter-expressions.md"),
         )
         .expect("darkmatter-expressions.md should be readable");

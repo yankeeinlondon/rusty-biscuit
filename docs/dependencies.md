@@ -2,6 +2,57 @@
 
 ## Recent Dependency Notes
 
+- `claudine-cli` adds a direct `sysinfo = "0.38.2"` edge (2026-09-17, research
+  metadata pipeline Phase 5). The crate was already in the graph through
+  `sniff`, so the lockfile gains one edge and no package. Budget-ledger crash
+  recovery uses it to check a recorded worker's process start time before
+  signaling that PID. See [`claudine/docs/dependencies.md`](claudine/docs/dependencies.md).
+- `scripts/` (package `repo-deps`) is a **root Cargo workspace member**. It
+  carried a nested `[workspace]` stanza and its own `scripts/Cargo.lock` until
+  the 2026-09-13 cicd-redundancies fix; both are deleted, `"scripts"` is in the
+  root `members` list, and the package now resolves against the one root
+  `Cargo.lock`, the one root `target/`, and the root `.config/nextest.toml`
+  whether Cargo is invoked from the repository root or from `scripts/`. **No
+  dependency version changed to make this possible** — `rstest 0.23`,
+  `quick-xml 0.38`, and `toml 1.0` unified with what the root already resolved.
+  Build output that used to land in `scripts/target/` is stale; it is gitignored
+  and no recipe cleans it up. Call sites select the package rather than its
+  manifest: `-p repo-deps`, not `--manifest-path scripts/Cargo.toml`.
+- `repo-deps` keeps `publish = false`, so root-workspace membership does not
+  enroll it in release-plz or the maintenance audit. Its bins are split across
+  three feature levels: `build-tools` carries `biscuit-hash`,
+  `biscuit-terminal`, `object`, and `find-msvc-tools`; the default `local-tools`
+  includes `build-tools` and adds `cargo_metadata`, `ctrlc`, and `sniff`; and
+  the always-runs merge-gate build stays
+  `cargo build -p repo-deps --no-default-features --bin ci-rollup`, which links
+  none of them.
+- `repo-deps` gains a path dependency on `biscuit-hash`. The `ci-build`
+  compiler-work counter names its event files by an xxHash digest of the rustc
+  command line, and `scripts/ci/affected_scope.py` computes every planned build
+  key through the same boundary — two hashing implementations in one contract is
+  how digests silently diverge. No crate was added for this; `biscuit-hash` and
+  `biscuit-terminal` moved into the `build-tools` feature that `local-tools` now
+  includes. The split exists because the planner calls `ci-build` on every scope
+  calculation, including the pre-push hook's: gating it at `local-tools` would
+  make resolving a plan compile sniff's duckdb and gix closure to answer a hash.
+  `ci-rollup`, the always-runs merge-gate binary, still links none of the
+  monorepo's crates: it is built `--no-default-features`, which deselects both
+  features. That `biscuit-hash` dependency now enables its `blake3` feature as
+  well: `ci-build produce` checksums the archives and sidecars it emits with
+  BLAKE3 (a cryptographic digest, for artifacts crossing a machine boundary)
+  while xxHash stays the fast identity hash for plan keys and counter events.
+  `biscuit-hash` gained `blake3_hash_reader` for it, so a multi-hundred-megabyte
+  archive is streamed rather than read into memory, and no second hashing
+  boundary enters the contract. `blake3` was already an optional `biscuit-hash`
+  dependency; no crate was added.
+- `tools/test-audit` is a TypeScript pnpm-workspace member (registered in the
+  root `pnpm-workspace.yaml`, pinned through the root `pnpm-lock.yaml`), not a
+  Cargo package. It depends on `fast-xml-parser` (JUnit reports),
+  `web-tree-sitter` + `tree-sitter-rust` (prebuilt wasm; source-side test
+  attribute scans), and `zod` (area configuration validation), with
+  `typescript`, `tsx`, and `vitest` as dev dependencies. Node is provisioned
+  only for `test-toolkit`'s `ubuntu-latest` companion-suite cells, which own
+  the tool's typecheck and Vitest suites; Rust test legs never do.
 - `biscuit-test-harness` uses `tempfile` as a regular dependency to retain private
   WezTerm client configuration files through subprocess completion and remove
   them afterward.
@@ -38,6 +89,23 @@
 - `messenger/lib` uses `test-toolkit` only as a development dependency so its
   desktop-stub resolver tests restore `MESSENGER_STUB_BIN_DIR` safely while
   serializing process-environment mutation.
+- `messenger/lib` depends on `darkmatter`, `biscuit-file` (only
+  `file-reference`), `biscuit-hash`, and `serde_path_to_error` only through its
+  opt-in `research` feature (`messenger::research`: typed loading and semantic
+  validation of the provider research contract). Darkmatter is also a
+  development dependency with `effects-instrumentation`, so
+  `tests/research_corpus.rs` can assert that research validation builds no
+  effect engine and attempts no network access. Ordinary send builds
+  (no-default, default, and `desktop` features) depend on none of them.
+  `research` also enables the library's existing optional `sniff` dependency
+  (already used by `desktop`), whose Git work-tree discovery lets `prepare`
+  refuse a research root below the Git top level; no crate was added.
+- `messenger/cli` enables `messenger`'s `research` feature unconditionally for
+  the `messenger research` maintenance commands, so the `messenger` binary
+  carries those four crates; the library's send-only builds are unchanged. Its
+  `tests/research_cli.rs` uses the workspace `biscuit-test-harness` as a
+  development dependency for `bin_exe!`, so the binary resolves on the WSL2
+  nextest-archive leg. No new external crate was added.
 - `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
   stores deterministic ahead/behind and clean-merge results under the user cache
   directory, keyed by canonical repo-root xxHash plus branch tip SHAs.
@@ -1003,6 +1071,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: json, serialization_
 
+- [serde_path_to_error](https://github.com/dtolnay/path-to-error) _v0.1_ [📄](https://docs.rs/serde_path_to_error)
+
+    _Reports the JSON path of a Serde deserialization failure. Used by `messenger`'s `research` feature to point strict-scalar findings at the offending field._
+
+    _Tags: serde, diagnostics_
+
 - [serde_yaml](https://github.com/dtolnay/serde-yaml) _v0.9_
 
     _YAML data format for Serde. DEPRECATED (no longer maintained as of v0.9.34) - migrate to serde_yaml_ng._
@@ -1320,3 +1394,12 @@ This is a Rust workspace with the following modules:
     _Helper macros for testing tracing output with automatic subscriber initialization and log assertions._
 
     _Tags: testing, tracing, logging_
+
+## Single-owner review corrections (2026-09-15)
+
+- `repo-deps`'s `build-tools` feature adds `object` 0.37 for native Windows PE
+  import inspection and `find-msvc-tools` 0.1 for locating the actual MSVC linker.
+  Neither enters the no-default-features rollup binary.
+- `scripts/ci/artifacts/` pins `@actions/artifact` 2.3.2 and its transitive Node
+  dependencies with `package-lock.json`. Hosted owners use it to upload multiple
+  package-keyed artifacts from a shared compilation job.

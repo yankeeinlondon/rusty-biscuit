@@ -50,6 +50,45 @@ The parser, AST, and evaluator live in the [`expression`](../../lib/src/markdown
 - **`expression::evaluate`** — evaluates an `Expr` against any [`EvaluationLookup`](#evaluationlookup-trait)
 - **`expression::parse_condition`** — parses a string in condition mode (`||` is logical OR, `&&` is logical AND)
 
+## How Parsing Works
+
+Text becomes an AST in three stages: **scanning** finds `{{ … }}` regions in a
+document, **lexing** turns the text inside one into tokens, and the **grammar**
+turns those tokens into an AST. Only the first stage is document-aware; surfaces
+where the expression is the whole string — `when="…"`, the public condition API —
+start at lexing.
+
+The principles worth carrying around:
+
+- **One implementation, every surface.** The same lexer, parser, and AST serve
+  body interpolation, frontmatter, `when=` conditions, `$()` ternaries, and the
+  language server. A grammar change is never local to one surface.
+- **Parsing is context-free.** Nothing in these stages reads frontmatter, the
+  filesystem, or the function catalog. The same text always yields the same AST;
+  an unknown variable or an unknown function is an *evaluation* concern, not a
+  parse error.
+- **Identifiers are letters, digits and `_`, and never start with a digit.**
+  Every other character ends an identifier — including `-`, which is always the
+  subtraction operator. A kebab-case frontmatter key such as `spec-name` is
+  therefore reachable only as `doc['spec-name']`, not as `{{ spec-name }}`,
+  which parses as `spec` minus `name`.
+- **Dotted paths are one token.** `a.b.c` lexes as a single variable; a `.`
+  followed by a digit does not fold, which is why `items.0` is rejected and
+  `items[0]` is the array form.
+- **Precedence is the call ladder.** Ternary is loosest, then `||`, `&&`,
+  comparison, `+ -`, `* / %`, unary, then primary and postfix access. Binary
+  operators are left-associative; the ternary is right-associative. Comparisons
+  do **not** chain — `a < b < c` is a parse error, not `(a < b) < c`.
+- **Mode changes exactly one thing.** `||` is fallback when interpolating and
+  logical OR in a condition. `&&` is logical AND in both, and both are lowered
+  into `and(…)` / `or(…)` calls in the AST.
+- **Failure is fatal.** An expression that cannot be parsed or evaluated aborts
+  composition with an error naming the source line, on every surface.
+
+Full detail lives under [Parsing](./parsing/index.md):
+[scanning](./parsing/scanning.md), [lexing](./parsing/lexing.md), and
+[grammar](./parsing/grammar.md).
+
 ## Where Expressions Read Values From
 
 Expressions evaluate against Darkmatter's effective state, which can include:
@@ -406,7 +445,7 @@ refresh it after changing the catalog.
 | Filesystem | `has_command(cmd)` | Returns true when the command is found on PATH or is an existing executable absolute path. |  |
 | Context | `has_skill(name)` | Returns true when a skill directory exists in a user-scoped or local-scoped skill root. |  |
 | Context | `has_local_skill(name)` | Returns true when a skill directory exists in a local-scoped skill root. |  |
-| List Formatting | `as_line_separated(list)` | Joins a list into a newline-separated string (the default bare-array rendering). |  |
+| List Formatting | `as_line_separated(list)` | Joins a list into a newline-separated string, one element per line. |  |
 | List Formatting | `as_csv(list)` | Joins a list into a comma-separated string. | `as_csv(items)` ⇒ `1, 2, 3` |
 | List Formatting | `as_tsv(list)` | Joins a list into a tab-separated string. |  |
 | List Formatting | `as_space_separated(list)` | Joins a list into a space-separated string. | `as_space_separated(items)` ⇒ `1 2 3` |
@@ -425,6 +464,8 @@ refresh it after changing the catalog.
 | CI/CD | `cicd(id)` | Returns one provider-addressable CI/CD job in canonical Markdown form. |  |
 | CI/CD | `cicd_list(query)` | Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
 | CI/CD | `cicd_list(count)` | Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
+| List Formatting | `as_json(list)` | Renders a list as compact JSON — the explicit spelling of how a bare array renders in text. An empty list renders as `[]`. | `as_json(["a", 1])` ⇒ `["a",1]` |
+| List Formatting | `as_json5(list)` | Renders a list as compact single-line JSON5, with single-quoted strings and unquoted object keys where they are valid identifiers. An empty list renders as `[]`. | `as_json5(["a", 1])` ⇒ `['a', 1]` |
 <!-- END GENERATED FUNCTION TABLE -->
 
 ### `date()` format tokens
@@ -969,12 +1010,20 @@ Early access content for admins.
 ## Errors and Unsupported Syntax
 
 Invalid expressions fail composition with a parse or evaluation error that
-includes the source line number.
+includes the source line number. This holds on **every** surface, body
+interpolation included: an expression that cannot be parsed or evaluated is an
+authoring error, never something to paper over by emitting the `{{ … }}`
+verbatim. See [Parsing § Failure handling](./parsing/index.md#failure-handling).
 
 Unsupported or easy-to-misread forms:
 
-- a single `&` (always a lexer error)
+- a single `&`, `|`, or `=` — each is a lexer error; all three are only valid doubled
 - numeric dot access like `foo.0` — use `foo[0]` instead
+- chained comparison like `a < b < c` — use `a < b && b < c`
+- `-` inside a name: `{{ spec-name }}` is `spec` minus `name`, never a reference
+  to a `spec-name` key — use `{{ doc['spec-name'] }}`
+- number forms with an exponent (`1e3`), a leading dot (`.5`), or digit
+  separators (`1_000`)
 
 ## Authoring a New Expression Function
 
@@ -1012,6 +1061,7 @@ it never leaks an unresolved `{{ … }}` literal.
 
 ## See Also
 
+- [Parsing](./parsing/index.md) — scanning, lexing, and grammar in detail
 - [Side Effects](./side-effects.md)
 - [Page Blocks](../inline/page-blocks.md)
 - [Block Transclusion](../transclusion/block-transclusion.md)

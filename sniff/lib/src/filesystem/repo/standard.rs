@@ -1890,7 +1890,11 @@ mod tests {
         let binary = resolved.unwrap();
         assert_eq!(binary.name, "gradle");
         assert_eq!(binary.source, BinarySource::Wrapper);
-        let wrapper_name = if cfg!(windows) { "gradlew.bat" } else { "gradlew" };
+        let wrapper_name = if cfg!(windows) {
+            "gradlew.bat"
+        } else {
+            "gradlew"
+        };
         assert!(binary.path.as_ref().unwrap().ends_with(wrapper_name));
     }
 

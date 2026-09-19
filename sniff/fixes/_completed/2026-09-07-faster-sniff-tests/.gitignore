@@ -1,0 +1,7 @@
+# Raw measurement evidence lives in ~/.rusty-biscuit/ci-evidence/2026-09-07-faster-sniff-tests/
+baseline/
+candidate/
+measurement/
+enumeration/
+sources.json
+report.json

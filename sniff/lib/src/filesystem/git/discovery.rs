@@ -42,7 +42,7 @@ pub(crate) fn head_id_opt(repo: &gix::Repository) -> Result<Option<gix::ObjectId
 /// prefix that matches no object is true absence, while an ambiguous prefix or
 /// an object-database read error means the lookup failed for a reason other
 /// than absence and must surface.
-fn resolve_single_opt(repo: &gix::Repository, spec: &str) -> Result<Option<gix::ObjectId>> {
+pub(crate) fn resolve_single_opt(repo: &gix::Repository, spec: &str) -> Result<Option<gix::ObjectId>> {
     use gix::hash::prefix::from_hex::Error as HexError;
 
     match repo.rev_parse_single(spec) {
@@ -139,9 +139,11 @@ pub(crate) fn collect_ref_decorations(
 pub(crate) fn collect_ref_decorations_fallible(
     repo: &gix::Repository,
 ) -> Result<HashMap<gix::ObjectId, Vec<RefDecoration>>> {
-    Ok(super::remote_refresh::RefSnapshot::observe(repo, true, true, true)?
-        .decorations()
-        .clone())
+    Ok(
+        super::remote_refresh::RefSnapshot::observe(repo, true, true, true)?
+            .decorations()
+            .clone(),
+    )
 }
 
 /// Gets the last N commits from HEAD using a gix revwalk, attaching
@@ -468,6 +470,229 @@ pub(crate) fn get_commit_files_with_cache_fallible(
     // explicit sort keeps the contract regardless of internal ordering.
     result.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(result)
+}
+
+/// Lines added and removed in one committed file change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LineCounts {
+    pub(crate) added: u64,
+    pub(crate) removed: u64,
+}
+
+/// One file changed by a commit, with rewrite source and line statistics.
+///
+/// Produced only by [`committed_file_changes_with_cache`], which enables rename
+/// and copy tracking. `kind` is therefore one of all five [`DeltaKind`]s, and
+/// `original_path` is `Some` exactly when `kind` is `Renamed` or `Copied`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CommittedFileChange {
+    pub(crate) path: PathBuf,
+    pub(crate) kind: DeltaKind,
+    pub(crate) original_path: Option<PathBuf>,
+    /// `None` when either side is binary or is not a blob (for example a
+    /// submodule commit entry). Never a stand-in `0/0`.
+    pub(crate) line_counts: Option<LineCounts>,
+}
+
+/// Rename and copy tracking for committed-tree diffs, matching Git's defaults
+/// for `-M` and `-C`: 50% similarity, copies sourced only from files modified
+/// in the same commit, and empty blobs excluded.
+fn committed_rewrites() -> gix::diff::Rewrites {
+    gix::diff::Rewrites {
+        copies: Some(gix::diff::rewrites::Copies {
+            source: gix::diff::rewrites::CopySource::FromSetOfModifiedFiles,
+            percentage: Some(0.5),
+        }),
+        percentage: Some(0.5),
+        limit: 1000,
+        track_empty: false,
+    }
+}
+
+/// List the files a commit changed relative to its first parent, with rename
+/// and copy detection and per-file line counts.
+///
+/// Unlike [`get_commit_files_with_cache_fallible`], rewrites are tracked, so a
+/// rename surfaces as one `Renamed` record instead of a delete/add pair. The
+/// initial commit and a shallow-boundary commit diff against the empty tree.
+/// Results are sorted by destination path. `cache` is cleared before returning,
+/// so a long walk does not accumulate blob data across commits.
+///
+/// ## Errors
+///
+/// A missing or corrupt commit, tree, parent, blob, or diff failure propagates
+/// as [`SniffError::Git`].
+pub(crate) fn committed_file_changes_with_cache(
+    repo: &gix::Repository,
+    commit_id: gix::ObjectId,
+    cache: &mut gix::diff::blob::Platform,
+) -> Result<Vec<CommittedFileChange>> {
+    let (tree, parent_tree) = commit_trees(repo, commit_id)?;
+    let empty_tree = repo.empty_tree();
+    let old_tree = parent_tree.as_ref().unwrap_or(&empty_tree);
+
+    let mut platform = old_tree.changes().map_err(|e| SniffError::git("diff", e))?;
+    platform.options(|opts| {
+        opts.track_path().track_rewrites(Some(committed_rewrites()));
+    });
+
+    // Line counts need `cache`, which the traversal holds mutably, so changes
+    // are detached here and diffed after the traversal completes.
+    let mut detached = Vec::new();
+    platform
+        .for_each_to_obtain_tree_with_cache(
+            &tree,
+            cache,
+            |change| -> std::result::Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
+                if change.entry_mode().is_tree() || change.location().is_empty() {
+                    return Ok(std::ops::ControlFlow::Continue(()));
+                }
+                detached.push(change.detach());
+                Ok(std::ops::ControlFlow::Continue(()))
+            },
+        )
+        .map_err(|e| SniffError::git("diff", e))?;
+    restore_copy_source_modifications(old_tree, &mut detached)?;
+
+    let mut result = Vec::with_capacity(detached.len());
+    for change in &detached {
+        result.push(committed_file_change(repo, change, cache)?);
+    }
+    cache.clear_resource_cache_keep_allocation();
+
+    result.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(result)
+}
+
+/// Re-add the modification a copy was sourced from.
+///
+/// gix's rewrite tracker marks a copy's source as emitted, so a file that was
+/// both edited and copied in one commit would otherwise vanish from the list.
+/// With [`CopySource::FromSetOfModifiedFiles`](gix::diff::rewrites::CopySource)
+/// every copy source is a modification in this commit, so its pre-image is
+/// read from the parent tree and its post-image is the rewrite's `source_id`.
+fn restore_copy_source_modifications(
+    old_tree: &gix::Tree<'_>,
+    changes: &mut Vec<gix::object::tree::diff::ChangeDetached>,
+) -> Result<()> {
+    use gix::object::tree::diff::ChangeDetached;
+
+    let mut restored: Vec<ChangeDetached> = Vec::new();
+    for change in changes.iter() {
+        let ChangeDetached::Rewrite {
+            source_location,
+            source_entry_mode,
+            source_id,
+            copy: true,
+            ..
+        } = change
+        else {
+            continue;
+        };
+        let already_listed = changes
+            .iter()
+            .chain(restored.iter())
+            .any(|other| other.location() == source_location.as_bstr());
+        if already_listed {
+            continue;
+        }
+        let Some(previous) = old_tree
+            .lookup_entry_by_path(lossy_path(source_location.as_ref()))
+            .map_err(|e| SniffError::git("tree", e))?
+        else {
+            continue;
+        };
+        restored.push(ChangeDetached::Modification {
+            location: source_location.clone(),
+            previous_entry_mode: previous.mode(),
+            previous_id: previous.object_id(),
+            entry_mode: *source_entry_mode,
+            id: *source_id,
+        });
+    }
+    changes.extend(restored);
+    Ok(())
+}
+
+fn committed_file_change(
+    repo: &gix::Repository,
+    change: &gix::object::tree::diff::ChangeDetached,
+    cache: &mut gix::diff::blob::Platform,
+) -> Result<CommittedFileChange> {
+    use gix::object::tree::diff::ChangeDetached;
+
+    let (kind, original_path, precomputed) = match change {
+        ChangeDetached::Addition { .. } => (DeltaKind::Added, None, None),
+        ChangeDetached::Deletion { .. } => (DeltaKind::Deleted, None, None),
+        ChangeDetached::Modification { .. } => (DeltaKind::Modified, None, None),
+        ChangeDetached::Rewrite {
+            source_location,
+            source_id,
+            id,
+            diff,
+            copy,
+            ..
+        } => {
+            let kind = if *copy {
+                DeltaKind::Copied
+            } else {
+                DeltaKind::Renamed
+            };
+            // Similarity detection already diffed the pair; an identical pair
+            // skipped the diff because nothing changed.
+            let precomputed = match diff {
+                Some(stats) => Some(LineCounts {
+                    added: u64::from(stats.insertions),
+                    removed: u64::from(stats.removals),
+                }),
+                None if source_id == id => Some(LineCounts {
+                    added: 0,
+                    removed: 0,
+                }),
+                None => None,
+            };
+            (kind, Some(lossy_path(source_location.as_ref())), precomputed)
+        }
+    };
+
+    let entry_is_blob = change.entry_mode().is_blob_or_symlink()
+        && match change {
+            ChangeDetached::Modification {
+                previous_entry_mode,
+                ..
+            } => previous_entry_mode.is_blob_or_symlink(),
+            ChangeDetached::Rewrite {
+                source_entry_mode, ..
+            } => source_entry_mode.is_blob_or_symlink(),
+            _ => true,
+        };
+
+    let line_counts = match precomputed {
+        Some(counts) => Some(counts),
+        None if entry_is_blob => {
+            performance::increment_counter(counters::GIT_FILE_DIFFS, 1);
+            cache
+                .set_resource_by_change(change.to_ref(), &repo.objects)
+                .map_err(|e| SniffError::git("diff", e))?;
+            gix::object::blob::diff::Platform {
+                resource_cache: &mut *cache,
+            }
+            .line_counts()
+            .map_err(|e| SniffError::git("diff", e))?
+            .map(|stats| LineCounts {
+                added: u64::from(stats.insertions),
+                removed: u64::from(stats.removals),
+            })
+        }
+        None => None,
+    };
+
+    Ok(CommittedFileChange {
+        path: lossy_path(change.location()),
+        kind,
+        original_path,
+        line_counts,
+    })
 }
 
 /// Returns `true` if the commit `oid` touches any file whose path starts with
@@ -987,7 +1212,10 @@ mod path_history_tests {
         .unwrap();
 
         assert_eq!(result.commits_scanned, 3, "must stop at the bound");
-        assert!(result.limit_reached, "stopping at the bound must be visible");
+        assert!(
+            result.limit_reached,
+            "stopping at the bound must be visible"
+        );
         assert!(
             !result.history_exhausted,
             "a bounded stop is not an exhausted history"
@@ -1074,5 +1302,373 @@ mod path_history_tests {
         assert_eq!(result.commits_scanned, 0);
         assert!(result.history_exhausted);
         assert!(!result.limit_reached);
+    }
+}
+
+#[cfg(test)]
+mod committed_file_change_tests {
+    use super::*;
+    use crate::performance::testing;
+    use tempfile::TempDir;
+
+    /// In-process git2 history builder. Trees are assembled from blobs, so no
+    /// worktree, host Git configuration, or hooks participate.
+    struct Fixture {
+        dir: TempDir,
+        repo: git2::Repository,
+    }
+
+    const TEN_LINES: &str = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n";
+    const TEN_LINES_EDITED: &str = "one\ntwo\nthree\nfour\nFIVE\nsix\nseven\neight\nnine\nten\n";
+    const BINARY: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\x01\0\x02";
+    const BINARY_EDITED: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\x03\0\x04";
+
+    impl Fixture {
+        fn new() -> Self {
+            let dir = TempDir::new().unwrap();
+            let repo = git2::Repository::init(dir.path()).unwrap();
+            Self { dir, repo }
+        }
+
+        /// Apply `changes` (`None` deletes) on top of `parent`'s tree and
+        /// commit with `parents`.
+        fn commit(&self, parents: &[git2::Oid], changes: &[(&str, Option<&[u8]>)]) -> git2::Oid {
+            let base_tree = match parents.first() {
+                Some(parent) => self.repo.find_commit(*parent).unwrap().tree().unwrap(),
+                None => {
+                    let empty = self.repo.treebuilder(None).unwrap().write().unwrap();
+                    self.repo.find_tree(empty).unwrap()
+                }
+            };
+            let mut builder = git2::build::TreeUpdateBuilder::new();
+            for (path, content) in changes {
+                match content {
+                    Some(bytes) => {
+                        let blob = self.repo.blob(bytes).unwrap();
+                        builder.upsert(*path, blob, git2::FileMode::Blob);
+                    }
+                    None => {
+                        builder.remove(*path);
+                    }
+                }
+            }
+            let tree_id = builder.create_updated(&self.repo, &base_tree).unwrap();
+            self.commit_tree(parents, tree_id)
+        }
+
+        fn commit_tree(&self, parents: &[git2::Oid], tree_id: git2::Oid) -> git2::Oid {
+            let tree = self.repo.find_tree(tree_id).unwrap();
+            let sig = git2::Signature::new(
+                "Fixture Author",
+                "fixture@example.com",
+                &git2::Time::new(1_700_000_000, 0),
+            )
+            .unwrap();
+            let parents: Vec<git2::Commit> = parents
+                .iter()
+                .map(|id| self.repo.find_commit(*id).unwrap())
+                .collect();
+            let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+            self.repo
+                .commit(None, &sig, &sig, "fixture", &tree, &parent_refs)
+                .unwrap()
+        }
+
+        fn gix(&self) -> gix::Repository {
+            gix::open_opts(self.dir.path(), gix::open::Options::isolated()).unwrap()
+        }
+
+        fn changes(&self, commit: git2::Oid) -> Result<Vec<CommittedFileChange>> {
+            let repo = self.gix();
+            let mut cache = repo.diff_resource_cache_for_tree_diff().unwrap();
+            committed_file_changes_with_cache(&repo, oid(commit), &mut cache)
+        }
+    }
+
+    fn oid(id: git2::Oid) -> gix::ObjectId {
+        gix::ObjectId::from_hex(id.to_string().as_bytes()).unwrap()
+    }
+
+    fn record(
+        path: &str,
+        kind: DeltaKind,
+        original_path: Option<&str>,
+        line_counts: Option<(u64, u64)>,
+    ) -> CommittedFileChange {
+        CommittedFileChange {
+            path: PathBuf::from(path),
+            kind,
+            original_path: original_path.map(PathBuf::from),
+            line_counts: line_counts.map(|(added, removed)| LineCounts { added, removed }),
+        }
+    }
+
+    #[test]
+    fn initial_commit_reports_every_file_added_with_line_counts() {
+        let fx = Fixture::new();
+        let root = fx.commit(
+            &[],
+            &[
+                ("src/lib.rs", Some(b"fn a() {}\nfn b() {}\n")),
+                ("README.md", Some(b"# Title\n")),
+            ],
+        );
+
+        assert_eq!(
+            fx.changes(root).unwrap(),
+            vec![
+                record("README.md", DeltaKind::Added, None, Some((1, 0))),
+                record("src/lib.rs", DeltaKind::Added, None, Some((2, 0))),
+            ]
+        );
+    }
+
+    #[test]
+    fn add_modify_and_delete_carry_exact_line_counts() {
+        let fx = Fixture::new();
+        let root = fx.commit(
+            &[],
+            &[
+                ("keep.txt", Some(TEN_LINES.as_bytes())),
+                ("gone.txt", Some(b"a\nb\nc\n")),
+            ],
+        );
+        let next = fx.commit(
+            &[root],
+            &[
+                ("keep.txt", Some(TEN_LINES_EDITED.as_bytes())),
+                ("gone.txt", None),
+                ("new.txt", Some(b"x\ny\n")),
+            ],
+        );
+
+        assert_eq!(
+            fx.changes(next).unwrap(),
+            vec![
+                record("gone.txt", DeltaKind::Deleted, None, Some((0, 3))),
+                record("keep.txt", DeltaKind::Modified, None, Some((1, 1))),
+                record("new.txt", DeltaKind::Added, None, Some((2, 0))),
+            ]
+        );
+    }
+
+    #[test]
+    fn identical_rename_is_one_renamed_record_without_a_content_diff() {
+        let fx = Fixture::new();
+        let root = fx.commit(&[], &[("old/name.txt", Some(TEN_LINES.as_bytes()))]);
+        let renamed = fx.commit(
+            &[root],
+            &[
+                ("old/name.txt", None),
+                ("new/name.txt", Some(TEN_LINES.as_bytes())),
+            ],
+        );
+
+        let (changes, counts) = testing::measure(|| fx.changes(renamed).unwrap());
+        assert_eq!(
+            changes,
+            vec![record(
+                "new/name.txt",
+                DeltaKind::Renamed,
+                Some("old/name.txt"),
+                Some((0, 0)),
+            )]
+        );
+        assert_eq!(counts.get(counters::GIT_FILE_DIFFS), 0);
+    }
+
+    #[test]
+    fn similar_rename_reuses_similarity_line_counts() {
+        let fx = Fixture::new();
+        let root = fx.commit(&[], &[("a.txt", Some(TEN_LINES.as_bytes()))]);
+        let renamed = fx.commit(
+            &[root],
+            &[("a.txt", None), ("b.txt", Some(TEN_LINES_EDITED.as_bytes()))],
+        );
+
+        let (changes, counts) = testing::measure(|| fx.changes(renamed).unwrap());
+        assert_eq!(
+            changes,
+            vec![record("b.txt", DeltaKind::Renamed, Some("a.txt"), Some((1, 1)))]
+        );
+        assert_eq!(counts.get(counters::GIT_FILE_DIFFS), 0);
+    }
+
+    #[test]
+    fn dissimilar_delete_and_add_stay_separate_records() {
+        let fx = Fixture::new();
+        let root = fx.commit(&[], &[("a.txt", Some(TEN_LINES.as_bytes()))]);
+        let next = fx.commit(
+            &[root],
+            &[("a.txt", None), ("b.txt", Some(b"entirely\ndifferent\n"))],
+        );
+
+        assert_eq!(
+            fx.changes(next).unwrap(),
+            vec![
+                record("a.txt", DeltaKind::Deleted, None, Some((0, 10))),
+                record("b.txt", DeltaKind::Added, None, Some((2, 0))),
+            ]
+        );
+    }
+
+    #[test]
+    fn copy_keeps_its_modified_source_as_a_separate_record() {
+        let fx = Fixture::new();
+        let root = fx.commit(&[], &[("src.txt", Some(TEN_LINES.as_bytes()))]);
+        let copied = fx.commit(
+            &[root],
+            &[
+                ("src.txt", Some(TEN_LINES_EDITED.as_bytes())),
+                ("copy.txt", Some(TEN_LINES.as_bytes())),
+            ],
+        );
+
+        assert_eq!(
+            fx.changes(copied).unwrap(),
+            vec![
+                // Copy line counts compare against the source's post-image.
+                record("copy.txt", DeltaKind::Copied, Some("src.txt"), Some((1, 1))),
+                record("src.txt", DeltaKind::Modified, None, Some((1, 1))),
+            ]
+        );
+    }
+
+    #[test]
+    fn two_copies_of_one_source_restore_the_source_once() {
+        let fx = Fixture::new();
+        let root = fx.commit(&[], &[("src.txt", Some(TEN_LINES.as_bytes()))]);
+        let copied = fx.commit(
+            &[root],
+            &[
+                ("src.txt", Some(TEN_LINES_EDITED.as_bytes())),
+                ("a-copy.txt", Some(TEN_LINES_EDITED.as_bytes())),
+                ("b-copy.txt", Some(TEN_LINES_EDITED.as_bytes())),
+            ],
+        );
+
+        assert_eq!(
+            fx.changes(copied).unwrap(),
+            vec![
+                record("a-copy.txt", DeltaKind::Copied, Some("src.txt"), Some((0, 0))),
+                record("b-copy.txt", DeltaKind::Copied, Some("src.txt"), Some((0, 0))),
+                record("src.txt", DeltaKind::Modified, None, Some((1, 1))),
+            ]
+        );
+    }
+
+    #[test]
+    fn copy_of_an_unmodified_file_is_an_addition() {
+        let fx = Fixture::new();
+        let root = fx.commit(&[], &[("src.txt", Some(TEN_LINES.as_bytes()))]);
+        let copied = fx.commit(&[root], &[("copy.txt", Some(TEN_LINES.as_bytes()))]);
+
+        assert_eq!(
+            fx.changes(copied).unwrap(),
+            vec![record("copy.txt", DeltaKind::Added, None, Some((10, 0)))]
+        );
+    }
+
+    #[test]
+    fn binary_changes_have_no_line_counts_rather_than_zero() {
+        let fx = Fixture::new();
+        let root = fx.commit(&[], &[("logo.png", Some(BINARY))]);
+        let edited = fx.commit(&[root], &[("logo.png", Some(BINARY_EDITED))]);
+
+        assert_eq!(
+            fx.changes(root).unwrap(),
+            vec![record("logo.png", DeltaKind::Added, None, None)]
+        );
+        assert_eq!(
+            fx.changes(edited).unwrap(),
+            vec![record("logo.png", DeltaKind::Modified, None, None)]
+        );
+    }
+
+    #[test]
+    fn merge_commit_diffs_against_its_first_parent_only() {
+        let fx = Fixture::new();
+        let root = fx.commit(&[], &[("base.txt", Some(b"base\n"))]);
+        let mainline = fx.commit(&[root], &[("main.txt", Some(b"main\n"))]);
+        let side = fx.commit(&[root], &[("side.txt", Some(b"side\n"))]);
+        let merged_tree = fx.commit(&[mainline], &[("side.txt", Some(b"side\n"))]);
+        let tree_id = fx.repo.find_commit(merged_tree).unwrap().tree_id();
+        let merge = fx.commit_tree(&[mainline, side], tree_id);
+
+        assert_eq!(
+            fx.changes(merge).unwrap(),
+            vec![record("side.txt", DeltaKind::Added, None, Some((1, 0)))]
+        );
+    }
+
+    #[test]
+    fn no_change_merge_has_an_empty_file_list() {
+        let fx = Fixture::new();
+        let root = fx.commit(&[], &[("base.txt", Some(b"base\n"))]);
+        let mainline = fx.commit(&[root], &[("main.txt", Some(b"main\n"))]);
+        let side = fx.commit(&[root], &[]);
+        let tree_id = fx.repo.find_commit(mainline).unwrap().tree_id();
+        let merge = fx.commit_tree(&[mainline, side], tree_id);
+
+        assert_eq!(fx.changes(merge).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn missing_commit_is_a_git_error() {
+        let fx = Fixture::new();
+        fx.commit(&[], &[("a.txt", Some(b"a\n"))]);
+        let repo = fx.gix();
+        let mut cache = repo.diff_resource_cache_for_tree_diff().unwrap();
+        let missing =
+            gix::ObjectId::from_hex(b"0123456789abcdef0123456789abcdef01234567").unwrap();
+
+        let error = committed_file_changes_with_cache(&repo, missing, &mut cache).unwrap_err();
+        assert!(matches!(error, SniffError::Git { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn content_diffs_are_counted_once_per_diffed_file() {
+        let fx = Fixture::new();
+        let root = fx.commit(&[], &[("a.txt", Some(b"a\n")), ("b.txt", Some(b"b\n"))]);
+
+        let (_, counts) = testing::measure(|| fx.changes(root).unwrap());
+        assert_eq!(counts.get(counters::GIT_FILE_DIFFS), 2);
+    }
+
+    #[test]
+    fn a_reused_cache_yields_identical_results_across_commits() {
+        let fx = Fixture::new();
+        let root = fx.commit(&[], &[("a.txt", Some(TEN_LINES.as_bytes()))]);
+        let next = fx.commit(&[root], &[("a.txt", Some(TEN_LINES_EDITED.as_bytes()))]);
+        let repo = fx.gix();
+        let mut cache = repo.diff_resource_cache_for_tree_diff().unwrap();
+
+        let first = committed_file_changes_with_cache(&repo, oid(next), &mut cache).unwrap();
+        let root_changes = committed_file_changes_with_cache(&repo, oid(root), &mut cache).unwrap();
+        let again = committed_file_changes_with_cache(&repo, oid(next), &mut cache).unwrap();
+
+        assert_eq!(first, again);
+        assert_eq!(
+            root_changes,
+            vec![record("a.txt", DeltaKind::Added, None, Some((10, 0)))]
+        );
+    }
+
+    #[test]
+    fn legacy_file_listing_keeps_rename_tracking_disabled() {
+        let fx = Fixture::new();
+        let root = fx.commit(&[], &[("a.txt", Some(TEN_LINES.as_bytes()))]);
+        let renamed = fx.commit(
+            &[root],
+            &[("a.txt", None), ("b.txt", Some(TEN_LINES.as_bytes()))],
+        );
+
+        assert_eq!(
+            get_commit_files_fallible(&fx.gix(), oid(renamed)).unwrap(),
+            vec![
+                (PathBuf::from("a.txt"), DeltaKind::Deleted),
+                (PathBuf::from("b.txt"), DeltaKind::Added),
+            ]
+        );
     }
 }

@@ -44,6 +44,7 @@ claudine/lib/src/
 ├── harness/      → Shell audit, timeouts, attempt classification, and recovery infrastructure
 ├── hook_adapters/ → Native hook request/response adapters (ProviderAdapter trait) — parse provider hook payloads; distinct from stream/providers (stdout NDJSON parsers)
 ├── interrupt.rs  → Process-scoped user-interrupt state
+├── invocation_context.rs → Immutable launch baseline (`HomeBaseline`, raw-`OsString` `EnvBaseline`) every attempt and provider transition plans from
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── messaging/    → Outbound messaging route resolution and delivery
@@ -53,6 +54,7 @@ claudine/lib/src/
 │   └── providers/common.rs → Format-agnostic helpers shared across provider backends (first_source_id, one_shot_plan constructor)
 ├── protect/      → Regex deny catalog for commands, paths, and MCP responses
 ├── provider/     → Generated metadata registry plus hand-written provider behavior
+├── provider_overlay/ → `OverlayPlanner` → `OverlayPlan` (reasons, verdicts, source root, per-launch storage, provider-owned `OverlaySelector`, state pins, `OverlayLease`) or a pre-spawn `OverlayRefusal`
 ├── render/       → Functional render components (FinalMessage, AgentPrompt/SystemPrompt, EventRenderer + DISPATCH table, MetricsReport, StreamRenderable/AssistantStream); consume data + policy (DisplayPolicy), never `match provider`
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── runaway/      → Content-guard detection and configuration
@@ -67,7 +69,7 @@ claudine/lib/src/
 
 The per-provider modules under `lib/src/provider/<slug>/` split into two halves: `data.rs` is **generated** by `claudine-gen` (crate `claudine/gen`, sharing vocab enums with the leaf `claudine/catalog-types` crate) from roster + facts + research + overrides (regenerate with `claudine providers generate`; drift-checked in CI by the gen crate's drift test / `claudine-gen check`, which also verify the committed `docs/providers/catalog.json` superset), while `behavior.rs` is hand-written. Never edit a `data.rs` by hand — change the owning input file and regenerate.
 
-**Dispatch drift guard (Phase I).** Decentralized `match Provider` / `matches!` / `==` / `!=` dispatch is prevented from regrowing by one site-level guard in `claudine-cli/tests/dispatch_inventory.rs`, covering **both** `lib/src` and `cli/src` (it retired the lib crate's earlier regex `no_unauthorized_match_provider_in_lib` guard). Every conditional, non-exempt dispatch site must be grandfathered in `GUARD_ALLOWLIST` with a tag + reason (the current sites are all `keep` — genuinely behavioral wire/shadow-HOME/stderr-bridge quirks and Claude's canonical linking role); a new one fails until migrated to a `ProviderInfo` field/trait or consciously listed. The live count is the allowlist length printed by the guard; the committed census is `docs/providers/dispatch-inventory.json`.
+**Dispatch drift guard (Phase I).** Decentralized `match Provider` / `matches!` / `==` / `!=` dispatch is prevented from regrowing by one site-level guard in `claudine-cli/tests/dispatch_inventory.rs`, covering **both** `lib/src` and `cli/src` (it retired the lib crate's earlier regex `no_unauthorized_match_provider_in_lib` guard). Every conditional, non-exempt dispatch site must be grandfathered in `GUARD_ALLOWLIST` with a tag + reason (the current sites are all `keep` — genuinely behavioral wire/stderr-bridge quirks and Claude's canonical linking role); a new one fails until migrated to a `ProviderInfo` field/trait or consciously listed. The live count is the allowlist length printed by the guard; the committed census is `docs/providers/dispatch-inventory.json`.
 
 **Child-process environment guard.** `child_environment` captures one absolute
 process-entry launch directory. Ordinary invocations ignore inherited
@@ -82,6 +84,38 @@ compiler-resolved, not a source scan: `std::process::Command::new`,
 default via each crate's `[lints.clippy]` and denied at the crate root under
 `cfg(not(test))`, so tests keep the plain constructors while an ungoverned
 production spawn fails `just lint`.
+
+**Provider overlays never move the home.** `--repo`, Codex/Gemini `--mcp`,
+and Codex repository prompts redirect only the provider, through a
+provider-owned selector (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `GEMINI_CLI_HOME`,
+…) recorded in generated `overlay_selector`/`overlay_capabilities` metadata.
+`HOME`, `USERPROFILE`, `HOMEDRIVE`, and `HOMEPATH` reach the child exactly as
+captured, so nested `git`/`gpg`/`gh` keep the user's identity. An `Unsupported`
+verdict or a build failure is a typed pre-spawn error
+(`provider.overlay_unsupported` / `provider.overlay_failed`); there is no
+fallback launch. The CLI materializes the plan in
+`wrap/provider_overlay.rs` (links on Unix, recursive copies on native Windows,
+live state never mirrored) into a fresh per-launch root under
+`~/.claudine/overlays/<slug>/` (or `<CLAUDINE_OVERLAY_DIR>/<slug>/` when that is absolute,
+read from the launch baseline), owned by an `OverlayLease` the plan holds: the
+root is removed when the last plan clone drops — after the lease's guarded
+`WriteBack` copies changed top-level mirrored files (rotated tokens) back over
+sources that did not change meanwhile; injected MCP config
+(`record_claudine_write`), materializations, excluded and new entries never
+qualify — and a root whose sibling `.lock` exists and is free is swept by the
+next launch without write-back. A write-back that fails, including an overlay
+metadata (other than `NotFound`), source-read, or fingerprint error
+(`WriteBackOutcome::failed`), makes `OverlayLease::release` return
+`OverlayRelease::Retained`: the root is kept and protected by renaming its lock
+file to `<root>.retained` under the held lock (fallbacks: remove the lock file,
+then create the marker; a lockless or marked root is never swept), and the
+marker plus a stderr notice name the recoverable copy's path, never its
+contents. The filesystem calls go through the crate-private `OverlayIo` seam so
+unit tests inject each failure on every OS. Legacy `~/.claudine/<agent-offset>`
+storage is never touched. Every debug spawn re-checks the home variables
+in `exec/spawn/setup.rs::debug_assert_child_env`. Proxy, retry, and resume
+rebuilds restore the baseline's selector values before applying the target's
+plan. See `claudine/docs/topics/repo-isolation.md`.
 
 ## Event Support Matrix
 
@@ -576,6 +610,49 @@ composed against; ambient `ComposeContext::capture()` is not a runtime fallback
 on any prepared path (the wrapper moves process CWD to the repo root, so a
 recapture reads the wrong anchor).
 
+Beside it, `service.rs::prepare_bootstrap` takes a document's
+**initialize-bootstrap read**: the same `canonical_compose_options`, narrowed
+with Darkmatter's `only_frontmatter_surface()`, returning a
+`BootstrapPreparation` (identity, caller layers, effective frontmatter,
+selection hints, C3-stamped `LifecycleConfig`, context snapshot). It holds
+no prompt, closure plan, or schema verdict, and it never dereferences a body
+transclusion, so a body that includes a file `initialize` will create does not
+fail it. `preflight_bootstrap_shell` rejects frontmatter `$(...)`, and the
+bootstrap composer enforces an empty approved-command set even if caller inputs
+carry approvals. Lifecycle parsing rejects initialization shell actions.
+`LifecycleRunGuard` disables the shell runner until `start`, which follows
+preflight, including all early catch chains; the executor independently rejects
+initialization shells. Only `Direct`/`ProxyTarget` entries take a bootstrap read. The
+post-compose steps (hints, lifecycle parse, C3 stamping, static guards) live in
+one `effective_surface` helper shared by all three reads, and `compose_bootstrap`
+is a reasoned `COMPOSE_WITH_ALLOWLIST` entry in `cli/tests/composition_seams.rs`.
+
+The command coordinator (`compose/prep.rs`) calls it for every live document
+whose authored frontmatter has an `initialize` key
+(`wrap::composition::staged_boot::authors_initialize`, the one predicate) — the
+caller's own document or an adopted target. `staged_boot` runs the order:
+shell-free bootstrap read → `initialize` through the pipeline's own
+`route_initialize` (a proxy commits via `pipeline::commit_initialize_proxy`) →
+`reread_and_audit` (fresh disk read + overlay, epoch context extended, full
+body audit) → `prepare_staged(Validate)`. A reread failure fires the document's
+`blocked`/`finalize` once (`route_stabilized_failure`). The single route then
+runs the pipeline under that guard (`execute_staged_composition`, the
+external-guard seam the loop uses), so the pipeline never routes `initialize`
+again. The loop route seeds from the bootstrap
+(`build_loop_seed_from_bootstrap`), the engine emits `initialize`, and iteration
+1 composes the stabilized reread. A harness-adopted target (a sequence task has
+no command ledger) takes `bootstrap_harness_prompt` for boot stages 1-3
+(`BootstrapStage::TargetInitialized`). A dry run and a document without
+`initialize` keep eager discovery.
+
+Sequences do not stage (OQ1 Option A): static preflight
+(`approve_preflight_graph`) composes every referenced prompt document before
+the first step runs, so an include that a step's own `initialize` or an
+earlier step would create fails there as the unchanged typed
+`TransclusionError`, preceded by a stderr `note:` telling the author to create
+the file first. A sequence step's prompt is composed before its `initialize`
+runs; a target that step *proxies* to is still staged inside the harness.
+
 File-valued input keeps its provenance through that service. A reference
 authored in a document resolves from the document's source context; an eager
 `file` value supplied by the caller (`--set` or an immediate `proxy.with`
@@ -694,6 +771,19 @@ to any error path must satisfy, and the guards that check them (`just test`,
 an enclosing **symbol** and require a `tag` and a substantive `reason`.
 `retained` is permanent; any other tag is burn-down debt a follow-up spec closes.
 A stale entry fails its own guard.
+
+**Where the guards named above live.** Every guard that reads the production
+sources is an arm of `SCAN_GUARDS` in `cli/tests/error_guards.rs`, evaluated by
+the single passive corpus test `production_sources_pass_every_scan_backed_guard`
+— they keep the names used here, and a failure reports them by name, but they
+are no longer separate `#[test]` functions. The `syn` parse of `lib/src` +
+`cli/src` + `contract/src` costs ~1.7 s and `scan_production_sources`'s
+`OnceLock` is process-local, so under nextest's process-per-test model twelve
+`#[test]`s meant twelve parses (20.2 s summed against 1.7 s of work). Add a new
+source-backed regression by **extending `SCAN_GUARDS`**, not by adding a
+thirteenth rescanning test. The six guards that need no production scan — the
+allowlist-shape checks, the `scan_text` scanner unit tests, and the runtime
+catalog checks — stay independently selectable.
 
 **Changing an error's behavior** means a pass over its rustdoc in the same
 change, per the repo's authoring discipline — the rendering and propagation

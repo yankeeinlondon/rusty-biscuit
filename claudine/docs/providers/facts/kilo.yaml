@@ -294,3 +294,20 @@ unmapped_native_events:
 # OpenCode's current table (Phase B researches the copy independently; the
 # shared parser selects vocabulary by the wrapped provider's identity, not the
 # parser module name — so Kilo consumes Kilo data, not OpenCode's).
+# Provider-overlay redirection surface (fixes/2026-09-12-shadow-home audit).
+# `KILO_CONFIG_DIR` is ADDITIVE — loaded after the global config and `.kilo`
+# directories so it can override their settings, but the user's global tree
+# still contributes agents, commands, skills, and plugins. No `KILO_DISABLE_*`
+# variable closes it, so it cannot claim repo-only isolation.
+overlay_selector:
+  env_var: KILO_CONFIG_DIR
+  shape: provider_dir
+  relocates:
+  - config
+  additive: true
+  source_root: null
+# MCP arrives inline through `KILO_CONFIG_CONTENT`, which needs no overlay.
+overlay_capabilities:
+  repo_resources: unsupported
+  repo_prompt: unsupported
+  mcp: composable_injection

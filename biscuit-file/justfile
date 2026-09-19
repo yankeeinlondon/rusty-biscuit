@@ -163,7 +163,7 @@ all:
 # ----------------------------------------------------------------------------
 
 # install the biscuit-file CLI
-install:
+install *args="":
     @echo ""
     @echo "Installing biscuit-file CLI"
     @echo "--------------------------"
@@ -172,7 +172,7 @@ install:
     @cargo build -p biscuit-file --release
     @echo ""
     @echo "{{ BOLD }}{{ YELLOW }}Installing biscuit-file CLI{{ RESET }}"
-    @cargo install --locked --path ./cli
+    @cargo install --locked --path ./cli {{ args }}
     @echo ""
 
 # check biscuit-file lib and CLI
@@ -222,7 +222,7 @@ drift *args="":
     @echo "- step 3: review CLAUDE.md for needed updates"
     @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
     @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- biscuit-file {{ DOCS }} {{ args }}
+    @cargo run -p repo-deps --bin drift -- biscuit-file {{ DOCS }} {{ args }}
     @_speak "the drift recipe for the biscuit-file package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
 
 # No-op recipe: reference color vars so linters won't report them as unused.

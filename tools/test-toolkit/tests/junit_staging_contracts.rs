@@ -44,7 +44,7 @@ const BETA: &str = "stage-fixture-beta-cli";
 /// Walk up from this crate until the directory holding the shared `just` recipes
 /// is found. Works from a worktree or a relocated checkout.
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .ancestors()
         .find(|dir| dir.join("just").join("devops.just").is_file())
         .map(Path::to_path_buf)

@@ -1,5 +1,6 @@
 ---
-status: draft
+status: superseded
+superseded_by: ../2026-09-16-expression-type-system/spec.md
 reviewed: false
 created: 2026-07-15
 inputs:
@@ -16,6 +17,20 @@ inputs:
 ---
 
 # Schema-Aware Expression Type System
+
+**Superseded 2026-09-16** by
+[2026-09-16-expression-type-system](../2026-09-16-expression-type-system/spec.md).
+This draft's design body has been re-homed, with dated corrections, into
+that spec's declarations annex
+([declarations-design.md](../2026-09-16-expression-type-system/declarations-design.md))
+as Phase C/E design detail; read the annex, not this document, as the design
+of record. One stance is consciously overturned in the re-homing: this
+draft's claim that schema nullability and optional absence contribute no
+separate `null` type to the union — and its Verification Matrix's "absent →
+type `file`" row — is reversed by the ratified semantics (an optional
+property with declared type A has effective runtime type `A | null`). The
+consolidation is recorded as Resolved Decision 17 in
+[2026-09-15-dasherized-identifiers](../2026-09-15-dasherized-identifiers/spec.md).
 
 ## Status
 

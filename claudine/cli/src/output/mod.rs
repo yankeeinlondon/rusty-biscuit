@@ -412,23 +412,28 @@ pub(crate) fn package_name_display(env_plan: &EnvPlan) -> Option<String> {
     ))
 }
 
+/// The `--repo` info line. When the launch built a filesystem overlay it names
+/// the provider-owned selector and the directory the provider reads from, and
+/// states that the user home is untouched — the overlay is not a home.
 pub(crate) fn repo_flag_info_message(
     term: &Terminal,
-    shadow_home: Option<&std::path::Path>,
+    overlay: Option<&claudine::provider_overlay::OverlayPlan>,
 ) -> String {
-    let shadow_msg = if let Some(path) = shadow_home {
-        format!(
-            " A shadow HOME has been created at <blue>{}</blue> to preserve authentication.",
-            biscuit_file::to_portable_string(path)
-        )
-    } else {
-        String::new()
-    };
+    let overlay_msg = overlay
+        .and_then(|plan| Some((plan.selector()?, plan.provider_visible_root()?)))
+        .map(|(selector, root)| {
+            format!(
+                " <blue>{}</blue> points the provider at its overlay in <blue>{}</blue>; your home directory is unchanged.",
+                selector.env_var(),
+                biscuit_file::to_portable_string(root)
+            )
+        })
+        .unwrap_or_default();
 
     Prose::new(format!(
         "- <blue><bold>Info:</bold></blue> the {} was used; this constrains skills, commands, and subagent definitions to those in the repo.{}",
         *claudine::badges::REPO_FLAG,
-        shadow_msg
+        overlay_msg
     ))
     .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
     .render(term)

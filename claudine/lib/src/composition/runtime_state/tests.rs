@@ -94,6 +94,49 @@ fn set_rejects_empty_and_dotted_keys() {
 }
 
 #[test]
+fn set_batch_is_atomic_reports_priors_and_preserves_explicit_null_presence() {
+    let state = RuntimeState::new();
+    let engine = engine();
+    let mut document = base();
+    document.insert("left".into(), json!("A"));
+    document.insert("right".into(), json!("B"));
+    document.insert("nullable".into(), json!("document fallback"));
+
+    state.set(&engine, "nullable", Value::Null, &document).unwrap();
+    let mut updates = IndexMap::new();
+    updates.insert("left".into(), json!("B"));
+    updates.insert("right".into(), json!("A"));
+    updates.insert("nullable".into(), json!("replacement"));
+
+    let prior = state.set_batch(&engine, &updates, &document).unwrap();
+    assert_eq!(prior["left"], json!("A"));
+    assert_eq!(prior["right"], json!("B"));
+    assert_eq!(prior["nullable"], Value::Null);
+    let first_read = state.snapshot();
+    assert_eq!(first_read.mutations.get("left"), Some(&json!("B")));
+    assert_eq!(first_read.mutations.get("right"), Some(&json!("A")));
+    assert_eq!(first_read.mutations.get("nullable"), Some(&json!("replacement")));
+    assert_eq!(state.snapshot().mutations, first_read.mutations, "read/write/read is stable");
+
+    let empty = IndexMap::new();
+    assert!(state.set_batch(&engine, &empty, &document).unwrap().is_empty());
+}
+
+#[test]
+fn set_batch_rejects_a_late_bad_key_without_publishing_earlier_values() {
+    let state = RuntimeState::new();
+    let engine = engine();
+    let mut updates = IndexMap::new();
+    updates.insert("valid".into(), json!(1));
+    updates.insert("a.b".into(), json!(2));
+
+    state
+        .set_batch(&engine, &updates, &base())
+        .expect_err("the complete batch must be refused");
+    assert!(state.snapshot().mutations.is_empty());
+}
+
+#[test]
 fn outputs_accumulate_in_commit_order() {
     let state = RuntimeState::new();
     state.append_output("first");

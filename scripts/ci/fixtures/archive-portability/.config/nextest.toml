@@ -1,0 +1,5 @@
+# Intentionally minimal. The fixture's archive includes are supplied by
+# `ci-build produce` through a generated tool config, exactly as they are for a
+# real package — declaring them here instead would test the wrong mechanism.
+[profile.default]
+fail-fast = false

@@ -1,0 +1,236 @@
+# After-evidence — `sniff --perf` AFTER the corrected-perf-flag fix
+
+Captured on macOS (Darwin 27.0.0, arm64) from the `feat/better-sniff`
+worktree with a `cargo build -p sniff-cli` debug binary, 2026-09-15 —
+the same host, binary profile, and repository under observation as
+`baseline-before.txt`. Wall-clock figures differ between the two captures
+because they are separate runs; the **shape** is the subject of the
+comparison.
+
+## Invocations
+
+| Command | stdout | stderr |
+|---|---|---|
+| `sniff --perf` | clap help text; **still no `## Performance` section at all** | empty |
+| `sniff --json --perf` | one JSON document (5,564,257 bytes) with a `performance` field | `## Performance` human report (6,392 bytes styled / 5,628 plain) |
+| `sniff filesystem --perf` | report + `## Performance` appended (12,078 bytes) | empty |
+| `sniff os --perf --plain` | report + `## Performance` appended (1,130 bytes) | empty |
+
+Unchanged from the baseline: the stream split, the heading, and the
+bare-`--perf`-is-help behavior. What changed is the text between them.
+
+## Structured report is unchanged (spec R1, Non-Goals)
+
+- `total_duration_ms`: 721.761208 (baseline run: 722.7065)
+- stage keys: **33** (baseline: 33)
+- counter keys: **34** (baseline: 34)
+
+Same key sets, same schema, same collection. The fix is renderer-only.
+
+## Verbatim human report from `sniff os --perf --plain` (stdout)
+
+Compare against the same section in `baseline-before.txt`, which emitted
+`Total: 0.63 ms`, a `Stages:` header over eight flat
+`- <full.dotted.key>: N ms total (…)` bullets, and a `Counters:` header over
+two more.
+
+```text
+## Performance
+
+Total                            618.0µs  100%
+└─ detect                        513.0µs   83%
+   └─ os                         513.0µs   83% ▇ HOT
+      ├─ package_managers        346.0µs   56%
+      ├─ command_exists_in_path  271.0µs   44%
+      │  ├─ port                 201.0µs   33%
+      │  └─ fink                  69.0µs   11%
+      ├─ time                     98.0µs   16%
+      ├─ locale                   20.0µs    3%
+      └─ identity                  3.0µs   <1%
+
+Concurrent, nested, and repeated stages may overlap; their durations do not sum to wall-clock time.
+
+Counters                      108  100%
+└─ os                         108     —
+   └─ path                    108     —
+      ├─ directories_scanned  106     —
+      └─ command_misses         2     —
+```
+
+## Verbatim human report from `sniff --json --perf --plain` (stderr)
+
+```text
+
+## Performance
+
+Total                                  719.5ms  100%
+└─ detect                                1.1s    99%
+   ├─ filesystem                       719.4ms   99%
+   │  ├─ file_inventory                900.0ms   99%
+   │  │  ├─ classify                   456.6ms   63%
+   │  │  │  ├─ fallback                358.0ms   50%  ×1603
+   │  │  │  ├─ hyperpolyglot            87.6ms   12%  ×1547
+   │  │  │  ├─ extension                 8.7ms    1%  ×8087
+   │  │  │  ├─ framework               911.0µs   <1%  ×15
+   │  │  │  ├─ embedded_language_hint  801.0µs   <1%  ×14
+   │  │  │  ├─ binary_signature        236.0µs   <1%
+   │  │  │  ├─ exact_filename          198.0µs   <1%  ×293
+   │  │  │  └─ shebang                  90.0µs   <1%  ×2
+   │  │  └─ walk                       443.3ms   62%
+   │  │     └─ entry                   443.3ms   62%  ×10000
+   │  ├─ git                           691.9ms   96%
+   │  ├─ repo                          349.8ms   49%
+   │  ├─ shared_walk                   214.0ms   30%
+   │  │  └─ docs                         1.3s    99%  ×4286 ▇ HOT
+   │  ├─ docs                           21.4ms    3%
+   │  ├─ inventory                       3.9ms   <1%
+   │  └─ formatting                     88.0µs   <1%
+   ├─ hardware                         264.1ms   37%
+   │  ├─ audio                         263.7ms   37%
+   │  ├─ storage                        23.4ms    3%
+   │  ├─ gpu                             1.5ms   <1%
+   │  └─ core                          309.0µs   <1%
+   ├─ network                           70.3ms   10%
+   │  ├─ wan_ip                         70.2ms   10%
+   │  └─ local_interfaces                2.6ms   <1%
+   └─ os                               585.0µs   <1%
+      ├─ package_managers              346.0µs   <1%
+      ├─ command_exists_in_path        277.0µs   <1%
+      │  ├─ port                       193.0µs   <1%
+      │  └─ fink                        83.0µs   <1%
+      ├─ time                          164.0µs   <1%
+      ├─ locale                         15.0µs   <1%
+      └─ identity                        4.0µs   <1%
+
+Concurrent, nested, and repeated stages may overlap; their durations do not sum to wall-clock time.
+
+Counters                                    63176367  100%
+├─ filesystem                               63154346     —
+│  ├─ io                                    63100217     —
+│  │  ├─ bytes_read                         63084992     —
+│  │  ├─ file_opens                             7610     —
+│  │  ├─ metadata_probes                        6544     —
+│  │  ├─ canonicalizations                       882     —
+│  │  └─ read_dirs                               189     —
+│  ├─ file_inventory                           32328     —
+│  │  ├─ files_accepted                        10000     —
+│  │  ├─ files_classified                      10000     —
+│  │  ├─ classified_extension                   8087     —
+│  │  ├─ classified_fallback                    1603     —
+│  │  ├─ files_classified_by_content            1550     —
+│  │  ├─ entries_over_cap                        778     —
+│  │  ├─ classified_exact_filename               293     —
+│  │  ├─ classified_embedded_language_hint        14     —
+│  │  ├─ classified_shebang                        2     —
+│  │  └─ classified_binary_signature               1     —
+│  ├─ walk                                     13062     —
+│  │  ├─ entries_visited                       13061     —
+│  │  └─ walks_started                             1     —
+│  ├─ docs                                      8572     —
+│  │  └─ documents_parsed                       8572     —
+│  └─ repo                                       167     —
+│     ├─ manifest_parses                          84     —
+│     ├─ package_enrichments                      80     —
+│     ├─ lockfile_parses                           2     —
+│     └─ root_config_probes                        1     —
+├─ git                                         21910     —
+│  ├─ commit_visits                            21865     —
+│  ├─ blob_loads                                  35     —
+│  ├─ file_diffs                                   5     —
+│  ├─ status_walks                                 2     —
+│  ├─ ref_walks                                    1     —
+│  ├─ repository_discoveries                       1     —
+│  └─ repository_opens                             1     —
+├─ os                                            108     —
+│  └─ path                                       108     —
+│     ├─ directories_scanned                     106     —
+│     └─ command_misses                            2     —
+├─ network                                         2     —
+│  └─ wan_ip                                       2     —
+│     ├─ cache_misses                              1     —
+│     └─ endpoint_attempts                         1     —
+└─ process                                         1     —
+   └─ spawns                                       1     —
+```
+
+## Verbatim human report from `sniff filesystem --perf --plain` (stdout)
+
+```text
+## Performance
+
+Total                                  662.1ms  100%
+└─ detect                              661.9ms   99%
+   └─ filesystem                       661.9ms   99%
+      ├─ git                           634.8ms   96%
+      ├─ file_inventory                461.0ms   70%
+      │  ├─ classify                   255.2ms   39%
+      │  │  ├─ fallback                168.5ms   25%  ×1602
+      │  │  ├─ hyperpolyglot            77.2ms   12%  ×1547
+      │  │  ├─ extension                 7.9ms    1%  ×8084
+      │  │  ├─ framework               634.0µs   <1%  ×15
+      │  │  ├─ embedded_language_hint  586.0µs   <1%  ×14
+      │  │  ├─ exact_filename          190.0µs   <1%  ×297
+      │  │  ├─ shebang                  68.0µs   <1%  ×2
+      │  │  └─ binary_signature         22.0µs   <1%
+      │  └─ walk                       205.8ms   31%
+      │     └─ entry                   205.8ms   31%  ×10000
+      ├─ repo                          280.6ms   42%
+      ├─ shared_walk                   149.5ms   23%
+      │  └─ docs                       993.7ms   99%  ×4286 ▇ HOT
+      ├─ docs                           21.2ms    3%
+      ├─ inventory                       4.0ms   <1%
+      └─ formatting                    116.0µs   <1%
+
+Concurrent, nested, and repeated stages may overlap; their durations do not sum to wall-clock time.
+
+Counters                                    63174885  100%
+├─ filesystem                               63152975     —
+│  ├─ io                                    63098846     —
+│  │  ├─ bytes_read                         63083622     —
+│  │  ├─ file_opens                             7609     —
+│  │  ├─ metadata_probes                        6544     —
+│  │  ├─ canonicalizations                       882     —
+│  │  └─ read_dirs                               189     —
+│  ├─ file_inventory                           32328     —
+│  │  ├─ files_accepted                        10000     —
+│  │  ├─ files_classified                      10000     —
+│  │  ├─ classified_extension                   8084     —
+│  │  ├─ classified_fallback                    1602     —
+│  │  ├─ files_classified_by_content            1550     —
+│  │  ├─ entries_over_cap                        778     —
+│  │  ├─ classified_exact_filename               297     —
+│  │  ├─ classified_embedded_language_hint        14     —
+│  │  ├─ classified_shebang                        2     —
+│  │  └─ classified_binary_signature               1     —
+│  ├─ walk                                     13062     —
+│  │  ├─ entries_visited                       13061     —
+│  │  └─ walks_started                             1     —
+│  ├─ docs                                      8572     —
+│  │  └─ documents_parsed                       8572     —
+│  └─ repo                                       167     —
+│     ├─ manifest_parses                          84     —
+│     ├─ package_enrichments                      80     —
+│     ├─ lockfile_parses                           2     —
+│     └─ root_config_probes                        1     —
+└─ git                                         21910     —
+   ├─ commit_visits                            21865     —
+   ├─ blob_loads                                  35     —
+   ├─ file_diffs                                   5     —
+   ├─ status_walks                                 2     —
+   ├─ ref_walks                                    1     —
+   ├─ repository_discoveries                       1     —
+   └─ repository_opens                             1     —
+```
+
+## Definition-of-Success items visible above
+
+1. Hierarchical, unit-aligned timing tree with a synthetic `Total` root,
+   detection-domain re-parenting (`filesystem.*` below `detect.filesystem`),
+   generic dotted nesting (`classify.fallback`), duration-descending sibling
+   order, `×N` call counts, and exactly one `▇ HOT` row.
+2. Counters render as a separate `Counters` tree; no counter appears in the
+   timing tree.
+3. The single HOT row is `shared_walk → docs` — the greatest measured
+   non-root stage, exactly as ruling R-4 predicted.
+5. `--plain` output holds no escape sequence; connector and marker glyphs
+   still follow the detected terminal, not the `--plain` flag.

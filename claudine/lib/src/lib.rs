@@ -25,6 +25,7 @@ pub mod permissions;
 pub mod protect;
 pub mod provider;
 pub mod provider_id;
+pub mod provider_overlay;
 pub mod render;
 pub mod reporting;
 pub mod runaway;

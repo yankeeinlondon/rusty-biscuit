@@ -1,10 +1,12 @@
 use std::path::Path;
 
+use claudine::invocation_context::EnvBaseline;
 use claudine::provider::Provider;
 use claudine::provider::SystemPromptSpec;
 use claudine::provider::{
     PROVIDER_COUNT, PromptArgConventions, ResumeSupport, YoloSupport, provider_info,
 };
+use claudine::provider_overlay::OverlayPlan;
 use claudine::stream::StreamProtocol;
 use claudine::system_prompt::PreparedSystemPrompt;
 use color_eyre::eyre::{Result, bail};
@@ -29,13 +31,11 @@ mod pi;
 mod qwen;
 mod resolve;
 
-pub(crate) use self::resolve::{
-    NoModelProvided, OpenCodeEnvSnapshot, OpenCodeModelSource, apply_opencode_model_resolution,
-    extract_prompt_source_from_passthrough, require_prompt_present, resolve_opencode_model,
-};
 pub(crate) use self::antigravity::AntigravityWrapper;
 pub(crate) use self::claude::ClaudeWrapper;
 pub(crate) use self::codex::CodexWrapper;
+#[cfg(test)]
+pub(crate) use self::codex::launch_sqlite_home as codex_launch_sqlite_home;
 pub(crate) use self::gemini::GeminiWrapper;
 pub(crate) use self::goose::GooseWrapper;
 pub(crate) use self::kilo::KiloWrapper;
@@ -43,6 +43,10 @@ pub(crate) use self::kimi::KimiWrapper;
 pub(crate) use self::opencode::OpencodeWrapper;
 pub(crate) use self::pi::PiWrapper;
 pub(crate) use self::qwen::QwenWrapper;
+pub(crate) use self::resolve::{
+    ConfiguredModel, ModelSource, extract_prompt_source_from_passthrough, no_model_error,
+    require_prompt_present, resolve_model_source,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OutputFormat {
@@ -365,6 +369,18 @@ pub(crate) trait WrapperProfile: Send + Sync {
         Ok(())
     }
 
+    /// The model the provider would run on its own when no explicit model is
+    /// given, read from the provider's configuration.
+    ///
+    /// Consulted by the shared model stage only for providers whose catalog
+    /// sets `model_required_in_non_tty`. The discovered value is then delivered
+    /// through [`WrapperProfile::apply_model`] like any other source: it is read
+    /// in Claudine's environment, and the child's may not be the same one.
+    /// Default: `None` (no discoverable default).
+    fn configured_default_model(&self) -> Option<ConfiguredModel> {
+        None
+    }
+
     // -- Universal --model flag ----------------------------------------------
 
     /// Map the universal `--model <value>` to provider-specific flags/env.
@@ -443,7 +459,9 @@ pub(crate) trait WrapperProfile: Send + Sync {
     ///
     /// Default: the central catalog's curated suppression list.
     fn stdout_noise_prefixes(&self) -> &'static [&'static str] {
-        provider_info(self.provider()).display_policy.stdout_noise_prefixes
+        provider_info(self.provider())
+            .display_policy
+            .stdout_noise_prefixes
     }
 
     // -- Captured output (compose mode) ----------------------------------------
@@ -480,7 +498,9 @@ pub(crate) trait WrapperProfile: Send + Sync {
     ///
     /// Default: the central catalog's curated suppression list.
     fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
-        provider_info(self.provider()).display_policy.stderr_noise_prefixes
+        provider_info(self.provider())
+            .display_policy
+            .stderr_noise_prefixes
     }
 
     /// When true, structured non-interactive runs buffer filtered stderr and
@@ -489,6 +509,28 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Default: reads the central catalog.
     fn suppress_structured_stderr_on_success(&self) -> bool {
         provider_info(self.provider()).suppress_structured_stderr_on_success
+    }
+
+    // -- Provider overlay -----------------------------------------------------
+
+    /// Complete a provider overlay plan with this provider's own path
+    /// construction and side effects.
+    ///
+    /// Whether an overlay is possible at all is policy and lives in generated
+    /// metadata; this hook is only for what a provider's own layout requires —
+    /// content that must be a real copy rather than a mirror link, and live
+    /// state that must be pinned outside the overlay through a provider-native
+    /// state selector.
+    ///
+    /// `env` is the invocation's launch baseline. Resolve a pre-overlay
+    /// location from it rather than from the assembled child environment: once
+    /// the plan's selector is applied, the child's copy of that variable names
+    /// the overlay, and reading it back would recurse the provider's state into
+    /// the overlay it was meant to stay out of.
+    ///
+    /// Default: no-op.
+    fn overlay_strategy(&self, _plan: &mut OverlayPlan, _env: &EnvBaseline) -> Result<()> {
+        Ok(())
     }
 
     // -- Prompt-file delivery -------------------------------------------------
@@ -649,10 +691,6 @@ pub(crate) fn profile_for_provider(provider: Provider) -> Option<&'static dyn Wr
     WRAPPER_REGISTRY[provider as usize]
 }
 
-fn non_empty_env_var(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|value| !value.is_empty())
-}
-
 fn has_any_flag(args: &[String], primary: &str, aliases: &[&str]) -> bool {
     if has_flag(args, primary) {
         return true;
@@ -740,5 +778,6 @@ mod tests {
     mod apply_output_format;
     mod apply_yolo;
     mod native_output;
+    mod overlay_strategy;
     mod positional;
 }

@@ -13,6 +13,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
+// Every `Instant` reader in this file is a Unix-only reap or interrupt test;
+// the `cmd` twins state their budgets as literals.
+#[cfg(unix)]
+use std::time::Instant;
 
 use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::terminal::Terminal;
@@ -54,6 +58,123 @@ fn agent_cwd_echo_source() -> &'static str {
 #[cfg(not(windows))]
 fn agent_cwd_echo_source() -> &'static str {
     "printf %s \"$AGENT_CWD\""
+}
+
+/// A unique path a surviving descendant would write to.
+fn marker_path(tag: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "claudine-{tag}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+    ))
+}
+
+// -- backgrounded-descendant observation ------------------------------------
+
+
+/// A backgrounded descendant that publishes its own pid before it waits, so
+/// the reap that kills it is observable rather than inferred.
+///
+/// Every reap contract below is a *negative* — no late file, no late frame —
+/// and a negative can only be inferred by waiting past the moment a survivor
+/// would have acted. Watching the pid makes it positive: once the process is
+/// gone it can neither write nor reach the stream, so the assertion lands as
+/// soon as the kill lands instead of a fixed margin past a write time the
+/// descendant never reached. A survivor still fails, and fails naming the pid
+/// that outlived its command.
+#[cfg(unix)]
+struct BackgroundedDescendant {
+    pid_path: PathBuf,
+}
+
+#[cfg(unix)]
+impl BackgroundedDescendant {
+    /// How long the reap may take once `run` has returned. Generous by two
+    /// orders of magnitude over the observed cost (the kill has normally
+    /// already landed), because the only thing this bound is protecting
+    /// against is a genuinely unreaped tree.
+    const REAP_DEADLINE: Duration = Duration::from_secs(10);
+
+    fn new(tag: &str) -> Self {
+        Self {
+            pid_path: marker_path(&format!("{tag}-pid")),
+        }
+    }
+
+    /// A shell fragment that backgrounds `body` in a process that records its
+    /// pid, and does not return until that pid is on disk.
+    ///
+    /// `body` runs under its own `/bin/sh -c` rather than in a `( … )`
+    /// subshell because POSIX `$$` inside a subshell expands to the *parent*
+    /// shell's pid — the command shell, which exits on its own and would prove
+    /// nothing about the descendant.
+    ///
+    /// The command shell then waits for the pid file. Without that wait the
+    /// fixture races the contract under test: for a command as short as
+    /// `printf 'now\n'` the reap lands within a few milliseconds, and under
+    /// full-suite load the descendant had not yet reached its first statement
+    /// — so the test failed at its own deadline rather than on the behavior.
+    /// Making publication a precondition of the command completing also
+    /// removes the vacuous case where nothing was ever backgrounded. `exit 90`
+    /// bounds the wait at ~10 s so a broken fixture fails loudly instead of
+    /// hanging.
+    fn background(&self, body: &str) -> String {
+        format!(
+            "/bin/sh -c 'echo $$ > \"{pid}\"; {body}' & \
+             attempts=0; while [ ! -s \"{pid}\" ]; do \
+             attempts=$((attempts + 1)); [ $attempts -lt 1000 ] || exit 90; \
+             sleep 0.01; done;",
+            pid = self.pid_path.display(),
+        )
+    }
+
+    /// Block until the recorded process is gone, then drop the pid file.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if the pid was never published, or if the process is still alive
+    /// at [`Self::REAP_DEADLINE`].
+    fn assert_reaped(&self) {
+        let stop = Instant::now() + Self::REAP_DEADLINE;
+        let pid = loop {
+            if let Ok(text) = fs::read_to_string(&self.pid_path)
+                && let Ok(pid) = text.trim().parse::<i32>()
+            {
+                break pid;
+            }
+            assert!(
+                Instant::now() < stop,
+                "the descendant never published its pid to {}, so nothing was \
+                 backgrounded and the reap assertion would be vacuous",
+                self.pid_path.display(),
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        while process_is_alive(pid) && Instant::now() < stop {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let alive = process_is_alive(pid);
+        let _ = fs::remove_file(&self.pid_path);
+        assert!(
+            !alive,
+            "the backgrounded descendant (pid {pid}) outlived its command by \
+             more than {:?}",
+            Self::REAP_DEADLINE,
+        );
+    }
+}
+
+/// Whether `pid` still names a live or not-yet-reaped process.
+///
+/// `kill(pid, 0)` performs the permission and existence checks without
+/// delivering a signal; it keeps succeeding while the process is a zombie,
+/// which is why callers poll rather than sample once.
+#[cfg(unix)]
+fn process_is_alive(pid: i32) -> bool {
+    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 // -- fixtures ---------------------------------------------------------------
@@ -118,7 +239,11 @@ impl Fixture {
     /// Build the preflight graph for a sequence document and capture the
     /// effective state its first step composes against.
     fn build(dir: TempDir, source: &str) -> Result<Self, CompositionError> {
-        let resolved = crate::composition::resolve_composition_source(source)?;
+        // Anchored on the fixture directory. The `ComposeContext` below is
+        // already demand-driven for the same reason, but `resolve_composition_source`
+        // walks the *process* CWD's repository topology before either of them
+        // runs, which under nextest is the monorepo checkout.
+        let resolved = crate::composition::resolve_fixture_source(source)?;
         let plan = resolve_sequence_plan(&resolved)?.expect("fixture declares a sequence");
         // Demand-driven: no fixture references `ctx.*`, so the preflight walk is
         // handed a date/time-only context instead of probing git, the repo, the
@@ -1363,22 +1488,39 @@ mod shell_tasks {
     #[cfg(unix)]
     #[test]
     fn the_system_shell_interrupts_a_running_tree() {
+        // The interrupt has to reach a *running* tree, so the setter observes
+        // the readiness it needs — the tree's first command has run — instead
+        // of guessing a delay that is either too short to have spawned
+        // anything or a margin the test always pays in full.
+        let ready = marker_path("interrupt-ready");
+        let watched = ready.clone();
         let flag = Arc::new(AtomicBool::new(false));
         let setter = Arc::clone(&flag);
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(300));
+        let readiness = std::thread::spawn(move || {
+            let stop = Instant::now() + Duration::from_secs(30);
+            while !watched.exists() && Instant::now() < stop {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let observed = watched.exists();
             setter.store(true, std::sync::atomic::Ordering::SeqCst);
+            observed
         });
 
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let output = SystemTaskShell::default()
             .run(
-                "(sleep 300) & sleep 300",
+                &format!("touch \"{}\"; (sleep 300) & sleep 300", ready.display()),
                 Duration::from_secs(300),
                 Some(&flag),
                 None,
             )
             .unwrap();
+        assert!(
+            readiness.join().expect("readiness watcher must not panic"),
+            "the interrupt fired on a timeout rather than on a running tree, \
+             so it discriminates nothing",
+        );
+        let _ = fs::remove_file(&ready);
 
         assert!(start.elapsed() < NON_HANG_BOUND, "the call must not hang");
         assert!(output.interrupted, "the interrupt flag must end the tree");
@@ -1476,20 +1618,6 @@ mod shell_tasks {
         );
     }
 
-    /// A unique path a surviving descendant would write to. Asserting its
-    /// absence *after* the descendant's write time is what proves the reap:
-    /// process liveness itself is unobservable once the pid is gone.
-    fn marker_path(tag: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "claudine-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-        ))
-    }
-
     /// Review 6 finding 2, success-path policy: a command that *succeeds* but
     /// backgrounded work has that work reaped at completion, on every
     /// platform, rather than surviving into later tasks.
@@ -1497,9 +1625,13 @@ mod shell_tasks {
     #[test]
     fn a_successful_command_reaps_its_backgrounded_descendant() {
         let marker = marker_path("success-reap");
+        let descendant = BackgroundedDescendant::new("success-reap");
         let output = SystemTaskShell::default()
             .run(
-                &format!("(sleep 1; echo late > '{}') & echo done", marker.display()),
+                &format!(
+                    "{} echo done",
+                    descendant.background(&format!("sleep 1; echo late > \"{}\"", marker.display())),
+                ),
                 Duration::from_secs(30),
                 None,
                 None,
@@ -1509,12 +1641,10 @@ mod shell_tasks {
         assert_eq!(output.exit_code, 0);
         assert!(!output.timed_out);
         assert_eq!(output.stdout.trim_end(), "done");
-        // Past the descendant's write time: if it survived completion, the
-        // marker exists by now.
-        std::thread::sleep(Duration::from_millis(1600));
+        descendant.assert_reaped();
         assert!(
             !marker.exists(),
-            "the backgrounded descendant outlived its completed command"
+            "the reaped descendant still wrote its marker"
         );
     }
 
@@ -1538,6 +1668,10 @@ mod shell_tasks {
 
         assert_eq!(output.exit_code, 0);
         assert!(!output.timed_out);
+        // The Unix twin observes the descendant's pid instead. `cmd` has no
+        // portable way to publish a backgrounded process's own pid, so this
+        // arm keeps the wait: 1 s is the descendant's write time and the
+        // remaining 600 ms is the margin a loaded runner needs to reach it.
         std::thread::sleep(Duration::from_millis(1600));
         assert!(
             !marker.exists(),
@@ -1547,17 +1681,20 @@ mod shell_tasks {
 
     /// Review 6 finding 2: an early wait error must still reap the whole tree
     /// — through the shared epilogue's tree teardown, not a leaked survivor.
-    /// The leading `echo` feeds the injection seam, which arms only once a
-    /// stdout byte has been captured.
+    /// The `echo` feeds the injection seam, which arms only once a stdout byte
+    /// has been captured — so the descendant is backgrounded *before* it, or
+    /// the teardown races the fixture into existence and the reap assertion
+    /// fails on a descendant that never started.
     #[cfg(unix)]
     #[test]
     fn an_early_wait_error_still_reaps_the_whole_tree() {
         let marker = marker_path("wait-error-reap");
-        let start = std::time::Instant::now();
+        let descendant = BackgroundedDescendant::new("wait-error-reap");
+        let start = Instant::now();
         let result = SystemTaskShell::failing_wait().run(
             &format!(
-                "echo started; (sleep 1; echo late > '{}') & sleep 300",
-                marker.display(),
+                "{} echo started; sleep 300",
+                descendant.background(&format!("sleep 1; echo late > \"{}\"", marker.display())),
             ),
             Duration::from_secs(300),
             None,
@@ -1569,7 +1706,7 @@ mod shell_tasks {
             matches!(result, Err(TaskShellError::Wait(_))),
             "the injected wait failure must surface as the wait error it models: {result:?}"
         );
-        std::thread::sleep(Duration::from_millis(1600));
+        descendant.assert_reaped();
         assert!(!marker.exists(), "a wait error left the tree running");
     }
 
@@ -1592,13 +1729,27 @@ mod shell_tasks {
         );
     }
 
-    /// The fail-closed path kills what it refused to run, descendants
-    /// included.
+    /// The fail-closed path leaves no work running behind the command it
+    /// refused.
+    ///
+    /// Unlike its siblings this one cannot watch a descendant's pid, and the
+    /// reason is the contract itself: the injected failure fires on the
+    /// statement after `spawn`, so the kill normally reaches the shell before
+    /// it has executed its first command and there is no descendant to
+    /// observe. (Converting it to [`BackgroundedDescendant`] fails on exactly
+    /// that — "the descendant never published its pid".) So the wait stays,
+    /// and with it the honest limit of what this test proves: on Unix the
+    /// direct child is not suspended, so "no descendant ran" is what usually
+    /// happens rather than what is guaranteed, and the marker is here to catch
+    /// the case where one did.
+    ///
+    /// Budget: the fixture writes at 1 s, so the 600 ms remainder is the
+    /// margin a loaded runner has to reach that write before the assertion.
     #[cfg(unix)]
     #[test]
     fn a_failed_ownership_setup_kills_the_spawned_command() {
         let marker = marker_path("isolation-reap");
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let result = SystemTaskShell::failing_isolation().run(
             &format!("(sleep 1; echo late > '{}') & sleep 300", marker.display()),
             Duration::from_secs(300),
@@ -1829,10 +1980,14 @@ mod shell_streaming {
     fn no_frames_arrive_after_a_command_completes() {
         let sink = TimedSink::new();
         let stream = live("task", TaskBar::for_index(0), &sink);
+        let descendant = BackgroundedDescendant::new("no-frames-after-completion");
 
         let output = SystemTaskShell::default()
             .run(
-                "(sleep 1; printf 'late\\n') & printf 'now\\n'",
+                &format!(
+                    "{} printf 'now\\n'",
+                    descendant.background("sleep 1; printf 'late\\n'"),
+                ),
                 Duration::from_secs(30),
                 None,
                 Some(&stream),
@@ -1842,9 +1997,9 @@ mod shell_streaming {
 
         assert_eq!(output.exit_code, 0);
         assert_eq!(output.stdout.trim_end(), "now");
-        // Past the descendant's write time: a survivor would have emitted by
-        // now.
-        std::thread::sleep(Duration::from_millis(1600));
+        // The descendant is what could still emit; once it is gone, its end of
+        // the inherited pipe is closed and no further frame is possible.
+        descendant.assert_reaped();
         let data = sink.payloads(Channel::Data);
         assert!(
             data.iter().any(|line| line.contains("now")),
@@ -1871,7 +2026,9 @@ mod shell_streaming {
     /// The injection seam arms on the first captured stdout byte, so
     /// `buffered` is deterministically in flight when the wait error fires;
     /// the backgrounded `late` writer models the descendant a bypassed
-    /// epilogue would have left draining behind the footer.
+    /// epilogue would have left draining behind the footer. It is backgrounded
+    /// *before* `buffered` for that reason: the seam arms on that byte, so a
+    /// descendant staged after it races the teardown into existence.
     #[cfg(unix)]
     #[test]
     fn a_wait_error_settles_readers_before_returning_and_nothing_follows_the_footer() {
@@ -1879,9 +2036,13 @@ mod shell_streaming {
         let stream = live("task", TaskBar::for_index(0), &sink);
         stream.open();
 
+        let descendant = BackgroundedDescendant::new("wait-error-footer");
         let started = Instant::now();
         let result = SystemTaskShell::failing_wait().run(
-            "printf 'buffered\\n'; (sleep 1; printf 'late\\n') & sleep 300",
+            &format!(
+                "{} printf 'buffered\\n'; sleep 300",
+                descendant.background("sleep 1; printf 'late\\n'"),
+            ),
             Duration::from_secs(300),
             None,
             Some(&stream),
@@ -1913,9 +2074,10 @@ mod shell_streaming {
             "the close must have written a footer for the assertion to bound"
         );
 
-        // Past the descendant's write time: a reader still draining behind
-        // the returned error would have appended by now.
-        std::thread::sleep(Duration::from_millis(1600));
+        // The only thing that could still append behind the footer is the
+        // descendant holding the inherited write end; once it is gone the
+        // reader has seen EOF and the frame count is final.
+        descendant.assert_reaped();
         assert_eq!(
             sink.writes().len(),
             frames_at_footer,
@@ -2111,14 +2273,14 @@ mod side_effect_tasks {
         assert_eq!(runtime.output_count(), 1);
     }
 
-    /// `set` returns the value it replaced — nothing, on a first write — so the
-    /// task still contributes exactly one (empty) entry.
+    /// `set` returns one prior-value mapping, using null for a first write, so
+    /// the task contributes exactly one serialized object entry.
     #[test]
-    fn a_side_effect_with_no_textual_return_appends_the_empty_string() {
+    fn a_mapping_set_appends_its_prior_value_object() {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(
             dir.path(),
-            json!({ "name": "alpha", "side_effect": { "set": ["ready", "{{ true }}"] } }),
+            json!({ "name": "alpha", "side_effect": { "set": {"ready": "{{ true }}"} } }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
@@ -2130,13 +2292,108 @@ mod side_effect_tasks {
         let outcome = fixture.execute(&wiring);
 
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
-        assert_eq!(outcome.stdout, "");
-        assert_eq!(runtime.last_output_text().as_deref(), Some(""));
+        assert_eq!(outcome.stdout, "{\"ready\":null}");
+        assert_eq!(runtime.last_output_text().as_deref(), Some("{\"ready\":null}"));
         assert_eq!(
             runtime.snapshot().mutations.get("ready"),
             Some(&Value::Bool(true)),
             "whole-value typing survives the action grammar",
         );
+    }
+
+    #[test]
+    fn a_mapping_set_retains_authored_order_in_text_and_outputs() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("seq.md");
+        fs::write(
+            &path,
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    side_effect:\n",
+                "      set:\n",
+                "        z_last_lexically: true\n",
+                "        a_first_lexically: false\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        )
+        .unwrap();
+        let source = path.display().to_string();
+        let resolved = crate::composition::resolve_fixture_source(&source).unwrap();
+        assert_eq!(
+            resolved
+                .markdown
+                .frontmatter()
+                .mapping_key_order("/sequence/0/side_effect/set"),
+            Some(["z_last_lexically".to_string(), "a_first_lexically".to_string()].as_slice()),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(
+            outcome.stdout,
+            "{\"z_last_lexically\":null,\"a_first_lexically\":null}",
+        );
+        assert_eq!(
+            runtime.outputs_value().to_string(),
+            "[\"{\\\"z_last_lexically\\\":null,\\\"a_first_lexically\\\":null}\"]",
+        );
+    }
+
+    #[test]
+    fn a_failed_nested_mapping_set_projects_one_path_and_commits_nothing() {
+        use biscuit_terminal::errors::BlockError;
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "side_effect": { "set": {
+                    "stable": "changed",
+                    "metadata": {"files": ["{{unknown_root}}"]}
+                } },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+        let info = &outcome.error.as_ref().expect("task failure is reported").info;
+        let expected = "tasks[0].side_effect.set.metadata.files[0]";
+        assert_eq!(info.property.as_deref(), Some(expected));
+        assert_eq!(info.variant, "set");
+
+        let snapshot = info.snapshot.as_ref().expect("set failures are typed");
+        assert_eq!(snapshot.code, "composition.lifecycle_invalid");
+        assert_eq!(snapshot.detail["property"], json!(expected));
+        assert!(snapshot.message.contains(&source), "{}", snapshot.message);
+        let err_value = info.to_value();
+        assert_eq!(err_value["detail"]["property"], snapshot.detail["property"]);
+        assert_eq!(err_value["code"], json!(snapshot.code));
+
+        let restored = crate::diagnostics::RestoredDiagnostic::new((**snapshot).clone());
+        let rendered = strip_escape_codes(restored.report_block_error_optimistic(Some(200)));
+        assert!(rendered.contains(expected), "{rendered}");
+        assert!(rendered.contains(&source), "{rendered}");
     }
 
     #[test]
@@ -2146,8 +2403,8 @@ mod side_effect_tasks {
             dir.path(),
             json!({
                 "name": "alpha",
-                "side_effect": { "set": ["stage", "primary"] },
-                "setup": [{ "action": { "set": ["stage", "setup"] } }],
+                "side_effect": { "set": {"stage": "primary"} },
+                "setup": [{ "action": { "set": {"stage": "setup"} } }],
             }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -2169,8 +2426,8 @@ mod side_effect_tasks {
             "the delta is measured against the layer as it stood before the task",
         );
         assert_eq!(
-            outcome.stdout, "setup",
-            "the primary `set` returns what the setup stage wrote",
+            outcome.stdout, "{\"stage\":\"setup\"}",
+            "the primary `set` returns the prior mapping from the setup stage",
         );
     }
 
@@ -2205,7 +2462,7 @@ mod side_effect_tasks {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(
             dir.path(),
-            json!({ "name": "alpha", "side_effect": { "set": ["outputs", "hijacked"] } }),
+            json!({ "name": "alpha", "side_effect": { "set": {"outputs": "hijacked"} } }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
@@ -2223,6 +2480,751 @@ mod side_effect_tasks {
             failure_message(&outcome),
         );
         assert_eq!(runtime.output_count(), 0);
+    }
+}
+
+// -- authored set order -----------------------------------------------------
+
+/// Every task source the shared lifecycle grammar accepts must reach its
+/// `set:` mapping's authored key order, not the canonical order a
+/// `serde_json::Map` would impose.
+///
+/// Each case authors `z_last_lexically` before `a_first_lexically`, so a
+/// lexical-order implementation produces the exact reverse of the asserted
+/// output and cannot pass.
+mod authored_set_order {
+    use super::*;
+
+    /// The serialized prior-value object authored order produces.
+    const EXPECTED_OUTPUT: &str = "{\"z_last_lexically\":null,\"a_first_lexically\":null}";
+
+    /// Write a document verbatim.
+    ///
+    /// The file-scope `write_source`/`write_yaml` helpers serialize through
+    /// `serde_json`, whose maps are already in the canonical order these tests
+    /// have to distinguish themselves from.
+    fn write_authored(dir: &Path, name: &str, text: &str) -> String {
+        let path = dir.join(name);
+        fs::write(&path, text).unwrap();
+        path.display().to_string()
+    }
+
+    /// Run the fixture's single step and return the accumulated outputs.
+    fn outputs_of(fixture: &Fixture) -> Value {
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        runtime.outputs_value()
+    }
+
+    #[test]
+    fn an_inline_group_member_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    group:\n",
+                "      name: bundle\n",
+                "      tasks:\n",
+                "        - side_effect:\n",
+                "            set:\n",
+                "              z_last_lexically: true\n",
+                "              a_first_lexically: false\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
+    fn an_external_group_member_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "group.yaml",
+            concat!(
+                "kind: group\n",
+                "name: bundle\n",
+                "tasks:\n",
+                "  - side_effect:\n",
+                "      set:\n",
+                "        z_last_lexically: true\n",
+                "        a_first_lexically: false\n",
+            ),
+        );
+        let source = one_step_source(
+            dir.path(),
+            json!({ "name": "alpha", "group": "group.yaml" }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
+    fn a_catalog_group_member_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "catalog.yaml",
+            concat!(
+                "kind: group-catalog\n",
+                "groups:\n",
+                // The selected group is the *second* entry, so a pointer left
+                // at the file root reads the wrong subtree and finds no order.
+                "  - name: decoy\n",
+                "    tasks:\n",
+                "      - shell: \"true\"\n",
+                "  - name: bundle\n",
+                "    tasks:\n",
+                "      - side_effect:\n",
+                "          set:\n",
+                "            z_last_lexically: true\n",
+                "            a_first_lexically: false\n",
+            ),
+        );
+        let source = one_step_source(
+            dir.path(),
+            json!({ "name": "alpha", "group": "bundle@catalog.yaml" }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
+    fn an_externalized_task_document_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "task.yaml",
+            concat!(
+                "kind: task\n",
+                "side_effect:\n",
+                "  set:\n",
+                "    z_last_lexically: true\n",
+                "    a_first_lexically: false\n",
+            ),
+        );
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.yaml" }));
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
+    fn a_json_task_document_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "task.json",
+            concat!(
+                "{\"kind\": \"task\", \"side_effect\": {\"set\": {",
+                "\"z_last_lexically\": true, \"a_first_lexically\": false",
+                "}}}\n",
+            ),
+        );
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.json" }));
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
+    fn a_json5_task_document_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "task.json5",
+            concat!(
+                "{\n",
+                "  kind: 'task',\n",
+                "  side_effect: {set: {\n",
+                "    z_last_lexically: true,\n",
+                "    a_first_lexically: false,\n",
+                "  }},\n",
+                "}\n",
+            ),
+        );
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.json5" }));
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
+    fn a_json_group_member_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "group.json",
+            concat!(
+                "{\"kind\": \"group\", \"name\": \"bundle\", \"tasks\": [",
+                "{\"side_effect\": {\"set\": {",
+                "\"z_last_lexically\": true, \"a_first_lexically\": false",
+                "}}}]}\n",
+            ),
+        );
+        let source = one_step_source(
+            dir.path(),
+            json!({ "name": "alpha", "group": "group.json" }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    #[test]
+    fn a_referenced_formal_sequence_retains_authored_order() {
+        let dir = TempDir::new().unwrap();
+        write_authored(
+            dir.path(),
+            "steps.yaml",
+            concat!(
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    side_effect:\n",
+                "      set:\n",
+                "        z_last_lexically: true\n",
+                "        a_first_lexically: false\n",
+            ),
+        );
+        // The invoking document declares no `set:` of its own, so the order can
+        // only have come from the referenced document.
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[("sequence", json!("steps.yaml"))],
+            "Document body.\n",
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+
+        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+    }
+
+    /// Order is not only a serialization concern: the executor commits a `set:`
+    /// in its mapping's order and returns at the first failure, so the key the
+    /// diagnostic names *is* the first authored one.
+    #[test]
+    fn a_task_setup_stack_diagnoses_the_first_authored_failure() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    shell: \"true\"\n",
+                "    setup:\n",
+                "      - action:\n",
+                "          set:\n",
+                "            z_last_lexically: \"{{ z_unknown_root }}\"\n",
+                "            a_first_lexically: \"{{ a_unknown_root }}\"\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        let info = &outcome.error.as_ref().expect("setup failure is reported").info;
+        let property = info.property.as_deref().expect("a set failure names its key");
+        assert!(
+            property.ends_with(".z_last_lexically"),
+            "the first authored assignment must be the diagnosed one, got `{property}`",
+        );
+        assert!(
+            !property.contains("a_first_lexically"),
+            "lexical order would have diagnosed the second authored assignment: `{property}`",
+        );
+        assert_eq!(info.variant, "set");
+        // Atomic: a failed mapping commits nothing and the primary never ran.
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert!(shell.commands().is_empty());
+    }
+}
+
+// -- task stack diagnostics -------------------------------------------------
+
+/// A task's `setup:`/`teardown:` stack is parsed and run under a *synthetic*
+/// lifecycle signal, so left alone its diagnostics name `start.stack[n]` — a
+/// location no author can find. Every case here proves the stack is rooted at
+/// the authored task property instead, in the document that authored it.
+mod task_stack_diagnostics {
+    use super::*;
+
+    /// The failing `set:` mapping, indented to `indent` columns so it nests
+    /// under whichever `action:` key the calling fixture authored.
+    ///
+    /// Its innermost element cannot resolve, so the failure carries the
+    /// object-key plus array-index suffix R5 requires.
+    fn failing_set(indent: usize) -> String {
+        let pad = " ".repeat(indent);
+        [
+            "set:",
+            "  stable: changed",
+            "  metadata:",
+            "    files:",
+            "      - \"{{unknown_root}}\"",
+        ]
+        .iter()
+        .map(|line| format!("{pad}{line}\n"))
+        .collect()
+    }
+
+    fn write_authored(dir: &Path, name: &str, text: &str) -> String {
+        let path = dir.join(name);
+        fs::write(&path, text).unwrap();
+        path.display().to_string()
+    }
+
+    /// Run the fixture's single step with runtime state wired and a TTY
+    /// terminal, so excerpt capture is exercised rather than skipped.
+    fn run(fixture: &mut Fixture) -> (TaskOutcome, Arc<RuntimeState>, Vec<String>) {
+        fixture.term.is_tty = true;
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute(&wiring);
+        (outcome, runtime, shell.commands())
+    }
+
+    /// Assert the one effective diagnostic every projection selects: the
+    /// authored document, the exact property, terminal/`err.*`/machine parity,
+    /// and the absence of any synthetic event spelling.
+    fn assert_stack_failure(
+        outcome: &TaskOutcome,
+        expected_source: &Path,
+        expected_property: &str,
+        expected_excerpt: Option<&str>,
+    ) {
+        use biscuit_terminal::errors::BlockError;
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        let info = &outcome.error.as_ref().expect("the stack failure is reported").info;
+        let snapshot = info.snapshot.as_ref().expect("stack failures are typed");
+        let err_value = info.to_value();
+        let source = biscuit_file::to_portable_string(expected_source);
+
+        // `info.property` is the executor's own finding, so only a runtime
+        // failure has one; a parse failure's path lives in the typed snapshot
+        // alone, which is what every projection reads.
+        if let Some(property) = info.property.as_deref() {
+            assert_eq!(property, expected_property);
+        }
+        assert_eq!(snapshot.detail["property"], json!(expected_property));
+        assert_eq!(err_value["detail"]["property"], snapshot.detail["property"]);
+        assert_eq!(err_value["code"], json!(snapshot.code));
+        assert_eq!(err_value["msg"], json!(snapshot.message));
+        assert!(snapshot.message.contains(&source), "{}", snapshot.message);
+
+        let restored = crate::diagnostics::RestoredDiagnostic::new((**snapshot).clone());
+        let rendered = strip_escape_codes(restored.report_block_error_optimistic(Some(200)));
+        assert!(rendered.contains(expected_property), "{rendered}");
+        assert!(rendered.contains(&source), "{rendered}");
+        for synthetic in ["start.stack", "finalize.stack"] {
+            assert!(
+                !rendered.contains(synthetic)
+                    && !snapshot.message.contains(synthetic)
+                    && !err_value.to_string().contains(synthetic),
+                "the synthetic signal location leaked as `{synthetic}`: {rendered}",
+            );
+        }
+        match expected_excerpt {
+            Some(value) => {
+                assert!(
+                    snapshot.frontmatter_excerpt.is_some(),
+                    "a locatable frontmatter value must carry an excerpt",
+                );
+                assert!(rendered.contains(value), "{rendered}");
+            }
+            None => assert!(snapshot.frontmatter_excerpt.is_none()),
+        }
+    }
+
+    /// A stack whose `set:` is not a mapping at all is rejected before the task
+    /// starts, so the rebased root has to survive the *parse* path too.
+    #[test]
+    fn a_malformed_setup_mapping_is_rejected_at_the_task_rooted_property() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    shell: \"true\"\n",
+                "    setup:\n",
+                "      - action:\n",
+                "          set: ready\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, commands) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].setup[0].action[0].set",
+            Some("set: ready"),
+        );
+        // A stack that will not parse fails the task before setup starts.
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+        assert!(commands.is_empty());
+    }
+
+    /// A removed positional `set: [key, value]` in a group member's
+    /// `teardown:` is rejected at parse time — before the member's primary
+    /// runs — at the member's nested stack root.
+    #[test]
+    fn a_removed_teardown_form_in_a_group_member_is_rejected_at_its_nested_root() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    group:\n",
+                "      name: bundle\n",
+                "      tasks:\n",
+                "        - shell: \"true\"\n",
+                "          teardown:\n",
+                "            - action:\n",
+                "                set: [ready, \"yes\"]\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, commands) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].group.tasks[0].teardown[0].action[0].set",
+            Some("set: [ready, \"yes\"]"),
+        );
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+        assert!(commands.is_empty(), "the member never started: {commands:?}");
+    }
+
+    /// An external `kind: task` document is its own root, so a malformed
+    /// stack there is `setup[n]` in *that* file, not the invoking sequence.
+    #[test]
+    fn a_malformed_external_task_setup_names_the_owning_document() {
+        let dir = TempDir::new().unwrap();
+        let task_path = dir.path().join("task.yaml");
+        write_authored(
+            dir.path(),
+            "task.yaml",
+            concat!(
+                "kind: task\n",
+                "shell: \"true\"\n",
+                "setup:\n",
+                "  - action:\n",
+                "      set: ready\n",
+            ),
+        );
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.yaml" }));
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, commands) = run(&mut fixture);
+
+        // A YAML data document has no frontmatter block to excerpt.
+        assert_stack_failure(&outcome, &task_path, "setup[0].action[0].set", None);
+        assert!(
+            !failure_message(&outcome).contains("seq.md"),
+            "the invoking sequence is not the authoring document: {}",
+            failure_message(&outcome),
+        );
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn a_setup_evaluation_failure_keeps_its_authored_document_and_property() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            &format!(
+                concat!(
+                    "---\n",
+                    "sequence:\n",
+                    "  - name: alpha\n",
+                    "    shell: \"true\"\n",
+                    "    setup:\n",
+                    "      - action:\n",
+                    "{}",
+                    "---\n\n",
+                    "Document body.\n",
+                ),
+                failing_set(10),
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, commands) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].setup[0].action[0].set.metadata.files[0]",
+            Some("{{unknown_root}}"),
+        );
+        assert_eq!(outcome.error.as_ref().unwrap().stage, TaskStage::Setup);
+        // Atomic: neither half of the mapping commits, and the primary never ran.
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn a_teardown_evaluation_failure_keeps_its_authored_document_and_property() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            &format!(
+                concat!(
+                    "---\n",
+                    "sequence:\n",
+                    "  - name: alpha\n",
+                    "    shell: \"true\"\n",
+                    "    teardown:\n",
+                    "      - action:\n",
+                    "{}",
+                    "---\n\n",
+                    "Document body.\n",
+                ),
+                failing_set(10),
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, commands) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].teardown[0].action[0].set.metadata.files[0]",
+            Some("{{unknown_root}}"),
+        );
+        assert_eq!(outcome.error.as_ref().unwrap().stage, TaskStage::Teardown);
+        // The primary ran and succeeded; the teardown mapping still commits
+        // nothing, and the failed task contributes no output.
+        assert_eq!(commands, vec!["true".to_string()]);
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+    }
+
+    /// The owning document, not the invoking sequence: an external task file
+    /// supplies both the source and the property root, so `setup` is already
+    /// source-rooted there.
+    #[test]
+    fn an_external_task_setup_failure_names_the_owning_document() {
+        let dir = TempDir::new().unwrap();
+        let task_path = dir.path().join("task.yaml");
+        write_authored(
+            dir.path(),
+            "task.yaml",
+            &format!(
+                concat!(
+                    "kind: task\n",
+                    "shell: \"true\"\n",
+                    "setup:\n",
+                    "  - action:\n",
+                    "{}",
+                ),
+                failing_set(6),
+            ),
+        );
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.yaml" }));
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, commands) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            &task_path,
+            "setup[0].action[0].set.metadata.files[0]",
+            // An external task document is data, not Markdown, so there is no
+            // frontmatter block to excerpt — the same outcome the file-backed
+            // group cases record. Enrichment still has to run against *this*
+            // document, which the source assertions above prove.
+            None,
+        );
+        assert!(
+            !failure_message(&outcome).contains("seq.md"),
+            "the invoking sequence is not the authoring document: {}",
+            failure_message(&outcome),
+        );
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert!(commands.is_empty());
+    }
+
+    /// A group member is reached through the group, so its stack root carries
+    /// the whole nested path.
+    #[test]
+    fn an_inline_group_member_setup_failure_carries_the_nested_task_root() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            &format!(
+                concat!(
+                    "---\n",
+                    "sequence:\n",
+                    "  - name: alpha\n",
+                    "    group:\n",
+                    "      name: bundle\n",
+                    "      tasks:\n",
+                    "        - shell: \"true\"\n",
+                    "          setup:\n",
+                    "            - action:\n",
+                    "{}",
+                    "---\n\n",
+                    "Document body.\n",
+                ),
+                failing_set(16),
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, _) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].group.tasks[0].setup[0].action[0].set.metadata.files[0]",
+            Some("{{unknown_root}}"),
+        );
+        assert!(runtime.snapshot().mutations.is_empty());
+    }
+    /// A primary `side_effect:` is one action, not a stack, so its parse
+    /// failure hangs off the task's own `side_effect` property with no
+    /// `action[0]` segment — the same root its evaluation failures use.
+    #[test]
+    fn a_malformed_primary_side_effect_mapping_is_rejected_at_the_task_rooted_property() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    side_effect:\n",
+                "      set: ready\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, _) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].side_effect.set",
+            Some("set: ready"),
+        );
+        assert_eq!(outcome.error.as_ref().unwrap().stage, TaskStage::Primary);
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+    }
+
+    #[test]
+    fn a_removed_primary_side_effect_form_in_a_group_member_is_rejected_at_its_nested_root() {
+        let dir = TempDir::new().unwrap();
+        let source = write_authored(
+            dir.path(),
+            "seq.md",
+            concat!(
+                "---\n",
+                "sequence:\n",
+                "  - name: alpha\n",
+                "    group:\n",
+                "      name: bundle\n",
+                "      tasks:\n",
+                "        - side_effect:\n",
+                "            set: [ready, \"yes\"]\n",
+                "---\n\n",
+                "Document body.\n",
+            ),
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, _) = run(&mut fixture);
+
+        assert_stack_failure(
+            &outcome,
+            Path::new(&source),
+            "tasks[0].group.tasks[0].side_effect.set",
+            Some("set: [ready, \"yes\"]"),
+        );
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+    }
+
+    /// An external `kind: task` document is its own root, so the property is a
+    /// bare `side_effect.set` in *that* file, and a YAML data document has no
+    /// frontmatter block to excerpt.
+    #[test]
+    fn a_malformed_external_task_side_effect_names_the_owning_document() {
+        let dir = TempDir::new().unwrap();
+        let task_path = dir.path().join("task.yaml");
+        write_authored(
+            dir.path(),
+            "task.yaml",
+            concat!("kind: task\n", "side_effect:\n", "  set: ready\n"),
+        );
+        let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.yaml" }));
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+
+        let (outcome, runtime, _) = run(&mut fixture);
+
+        assert_stack_failure(&outcome, &task_path, "side_effect.set", None);
+        assert!(
+            !failure_message(&outcome).contains("seq.md"),
+            "the invoking sequence is not the authoring document: {}",
+            failure_message(&outcome),
+        );
+        assert!(runtime.snapshot().mutations.is_empty());
     }
 }
 
@@ -2707,6 +3709,52 @@ mod outcome_contract {
 mod serial_groups {
     use super::*;
 
+    fn assert_group_set_failure(
+        outcome: &TaskOutcome,
+        runtime: &RuntimeState,
+        expected_source: &Path,
+        expected_property: &str,
+        expected_excerpt: Option<&str>,
+    ) {
+        use biscuit_terminal::errors::BlockError;
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(runtime.snapshot().mutations.is_empty());
+        assert_eq!(runtime.output_count(), 0);
+
+        let info = &outcome.error.as_ref().expect("group failure is reported").info;
+        let snapshot = info.snapshot.as_ref().expect("set failures are typed");
+        let err_value = info.to_value();
+        let source = biscuit_file::to_portable_string(expected_source);
+
+        assert_eq!(info.property.as_deref(), Some(expected_property));
+        assert_eq!(snapshot.detail["property"], json!(expected_property));
+        assert_eq!(err_value["detail"]["property"], snapshot.detail["property"]);
+        assert_eq!(err_value["code"], json!(snapshot.code));
+        assert_eq!(err_value["msg"], json!(snapshot.message));
+        assert!(
+            serde_json::to_value(&**snapshot)
+                .unwrap()
+                .get("frontmatter_excerpt")
+                .is_none(),
+            "source excerpts stay out of the machine projection",
+        );
+        assert!(snapshot.message.contains(&source), "{}", snapshot.message);
+
+        let restored = crate::diagnostics::RestoredDiagnostic::new((**snapshot).clone());
+        let rendered = strip_escape_codes(restored.report_block_error_optimistic(Some(200)));
+        assert!(rendered.contains(expected_property), "{rendered}");
+        assert!(rendered.contains(&source), "{rendered}");
+        match expected_excerpt {
+            Some(value) => {
+                assert!(snapshot.frontmatter_excerpt.is_some());
+                assert!(rendered.contains(value), "{rendered}");
+            }
+            None => assert!(snapshot.frontmatter_excerpt.is_none()),
+        }
+    }
+
     /// The two-task bundle every definition site defines.
     fn bundle_tasks() -> Value {
         json!([
@@ -2792,6 +3840,118 @@ mod serial_groups {
         }
     }
 
+    #[test]
+    fn an_inline_group_set_failure_keeps_its_authored_document_and_property() {
+        let dir = TempDir::new().unwrap();
+        let source_path = dir.path().join("seq.md");
+        fs::write(
+            &source_path,
+            "---\nsequence:\n    - name: alpha\n      group:\n        name: bundle\n        tasks:\n            - side_effect:\n                set:\n                    stable: changed\n                    metadata:\n                        files:\n                            - \"{{unknown_root}}\"\n---\n\nDocument body.\n",
+        )
+        .unwrap();
+        let source = source_path.display().to_string();
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+        fixture.term.is_tty = true;
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_group_set_failure(
+            &outcome,
+            &runtime,
+            Path::new(&source),
+            "tasks[0].group.tasks[0].side_effect.set.metadata.files[0]",
+            Some("{{unknown_root}}"),
+        );
+    }
+
+    #[test]
+    fn an_external_group_set_failure_keeps_its_authored_document_and_property() {
+        let dir = TempDir::new().unwrap();
+        let group_path = dir.path().join("group.yaml");
+        write_yaml(
+            dir.path(),
+            "group.yaml",
+            &json!({
+                "kind": "group",
+                "name": "bundle",
+                "tasks": [{
+                    "side_effect": { "set": {
+                        "stable": "changed",
+                        "metadata": {"files": ["{{unknown_root}}"]}
+                    } }
+                }],
+            }),
+        );
+        let source = one_step_source(
+            dir.path(),
+            json!({ "name": "alpha", "group": "group.yaml" }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_group_set_failure(
+            &outcome,
+            &runtime,
+            &group_path,
+            "tasks[0].side_effect.set.metadata.files[0]",
+            None,
+        );
+    }
+
+    #[test]
+    fn an_externalized_group_task_set_failure_uses_the_task_document_root() {
+        let dir = TempDir::new().unwrap();
+        let task_path = dir.path().join("task.yaml");
+        write_yaml(
+            dir.path(),
+            "task.yaml",
+            &json!({
+                "kind": "task",
+                "side_effect": { "set": {
+                    "stable": "changed",
+                    "metadata": {"files": ["{{unknown_root}}"]}
+                } }
+            }),
+        );
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "group": {
+                    "name": "bundle",
+                    "tasks": [{ "task": "task.yaml" }],
+                },
+            }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute(&wiring);
+
+        assert_group_set_failure(
+            &outcome,
+            &runtime,
+            &task_path,
+            "side_effect.set.metadata.files[0]",
+            None,
+        );
+    }
+
     /// A serial group grows `outputs` entry by entry. It never adds a wrapper
     /// entry of its own on top of its members'.
     #[test]
@@ -2841,7 +4001,7 @@ mod serial_groups {
                         {
                             "name": "writer",
                             "shell": "one",
-                            "teardown": [{ "action": { "set": ["marker", "written"] } }],
+                            "teardown": [{ "action": { "set": {"marker": "written"} } }],
                         },
                         {
                             "name": "reader",
@@ -3312,8 +4472,8 @@ mod parallel_groups {
                     "name": "bundle",
                     "execution": "parallel",
                     "tasks": [
-                        { "name": "writer", "shell": "write", "setup": [{ "action": [{ "set": ["marker", "written"] }] }] },
-                        { "name": "reader", "shell": "read", "teardown": [{ "action": [{ "set": ["observed", "{{ marker }}"] }] }] },
+                        { "name": "writer", "shell": "write", "setup": [{ "action": [{ "set": {"marker": "written"} }] }] },
+                        { "name": "reader", "shell": "read", "teardown": [{ "action": [{ "set": {"observed": "{{ marker }}"} }] }] },
                     ],
                 },
             }])),
@@ -3435,8 +4595,8 @@ mod parallel_groups {
                     "name": "bundle",
                     "execution": "parallel",
                     "tasks": [
-                        { "name": "left", "shell": "l", "setup": [{ "action": [{ "set": ["left_key", "L"] }] }] },
-                        { "name": "right", "shell": "r", "setup": [{ "action": [{ "set": ["right_key", "R"] }] }] },
+                        { "name": "left", "shell": "l", "setup": [{ "action": [{ "set": {"left_key": "L"} }] }] },
+                        { "name": "right", "shell": "r", "setup": [{ "action": [{ "set": {"right_key": "R"} }] }] },
                     ],
                 },
             }),
@@ -3476,8 +4636,8 @@ mod parallel_groups {
                     "name": "bundle",
                     "execution": "parallel",
                     "tasks": [
-                        { "name": "early", "shell": "e", "setup": [{ "action": [{ "set": ["shared", "from-early"] }] }] },
-                        { "name": "late", "shell": "l", "setup": [{ "action": [{ "set": ["shared", "from-late"] }] }] },
+                        { "name": "early", "shell": "e", "setup": [{ "action": [{ "set": {"shared": "from-early"} }] }] },
+                        { "name": "late", "shell": "l", "setup": [{ "action": [{ "set": {"shared": "from-late"} }] }] },
                     ],
                 },
             }),
@@ -3528,7 +4688,7 @@ mod parallel_groups {
                     "name": "bundle",
                     "execution": "parallel",
                     "tasks": [
-                        { "name": "a", "shell": "a", "setup": [{ "action": [{ "set": ["touched", "yes"] }] }] },
+                        { "name": "a", "shell": "a", "setup": [{ "action": [{ "set": {"touched": "yes"} }] }] },
                         { "name": "b", "shell": "b" },
                     ],
                 },
@@ -3576,9 +4736,9 @@ mod parallel_groups {
                         "name": "bundle",
                         "execution": "parallel",
                         "tasks": [
-                            { "name": "one", "shell": "one", "setup": [{ "action": [{ "set": ["k1", 1] }] }] },
-                            { "name": "two", "shell": "two", "setup": [{ "action": [{ "set": ["k2", 2] }] }] },
-                            { "name": "three", "shell": "three", "setup": [{ "action": [{ "set": ["k3", 3] }] }] },
+                            { "name": "one", "shell": "one", "setup": [{ "action": [{ "set": {"k1": 1} }] }] },
+                            { "name": "two", "shell": "two", "setup": [{ "action": [{ "set": {"k2": 2} }] }] },
+                            { "name": "three", "shell": "three", "setup": [{ "action": [{ "set": {"k3": 3} }] }] },
                         ],
                     },
                 }),

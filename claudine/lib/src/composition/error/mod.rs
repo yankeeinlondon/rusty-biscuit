@@ -601,28 +601,33 @@ pub enum CompositionError {
     #[error("lifecycle property `{0}` references unknown sound effect `{1}`")]
     LifecycleUnknownEffect(String, String),
 
-    /// A rendered lifecycle string still contains a recognized `{{ … }}`
-    /// interpolation span after composition.
+    /// A single-pass lifecycle expression authors a `{{ … }}` span inside a
+    /// quoted string literal.
     ///
-    /// This guards against Darkmatter's default lenient behavior
-    /// (`fail_fast = false`), which leaves malformed or unresolvable
-    /// expressions in place instead of failing composition. Catching the
-    /// leak here prevents raw template syntax from reaching user-visible
-    /// side effects (Discord, Slack, TTS, stderr, desktop notifications).
+    /// A whole-value communication field, a `when`/`while`/`until` predicate, a
+    /// stack action operand, and a `proxy … with` value are each evaluated
+    /// exactly once, so the nested span can never interpolate: it would reach
+    /// the side effect as raw text. Raised at prepare time, or for a referenced
+    /// sequence document by the preflight pre-scan before shell approval, so no
+    /// provider process exists yet.
     #[error(
-        "lifecycle interpolation leaked in `{property}`: {expression} ({source_path})",
+        "lifecycle property `{property}` nests `{nested}` inside the string literal {literal} ({source_path})",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
-    LifecycleInterpolationLeak {
-        /// The composed prompt file whose lifecycle frontmatter leaked.
+    LifecycleNestedSpanInLiteral {
+        /// The prompt file whose lifecycle frontmatter holds the literal.
         source_path: PathBuf,
-        /// Dotted lifecycle key path, e.g. `"start.message"`.
+        /// Dotted lifecycle key path, e.g. `success.say` or
+        /// `finalize.stack[0].when`.
         property: String,
-        /// Raw offending span text, e.g. `"{{ parent_dir(review)) }}"`.
-        expression: String,
-        /// Parse/eval failure reason from the compose report's warnings, when
-        /// available. Empty when the span is unrecognized entirely.
-        reason: String,
+        /// The authored literal, quotes included.
+        literal: String,
+        /// The nested span as authored, e.g. `{{ctx.repo_name}}`.
+        nested: String,
+        /// The complete bare-expression rewrite from Darkmatter's lint, when
+        /// one can be proven equivalent. Illustrative: it carries no YAML
+        /// quoting and no `{{ }}` wrapper.
+        suggestion: Option<String>,
     },
 
     /// A lifecycle string references a bare `{{ variable }}` that is undefined
@@ -817,6 +822,75 @@ pub enum CompositionError {
         verb: String,
     },
 
+    /// The removed positional lifecycle `set: [key, value]` form was used.
+    #[error(
+        "lifecycle `{property}.{path}` uses the removed positional `set` form ({source_path}); \
+         use `set: {{property: value}}`",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleSetPositionalRemoved {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event, indexed stack item, or task `side_effect` property.
+        property: String,
+        /// Path within the stack item, rooted at `action[N].set`; a task's single
+        /// `side_effect` action has no index, so its path is rooted at `set`.
+        path: String,
+    },
+
+    /// The removed `{action: set, key: ..., value: ...}` form was used.
+    #[error(
+        "lifecycle `{property}.{path}` uses the removed long-form `set` action ({source_path}); \
+         use `set: {{property: value}}`",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleSetLongFormRemoved {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event, indexed stack item, or task `side_effect` property.
+        property: String,
+        /// Path within the stack item, rooted at `action[N].set`; a task's single
+        /// `side_effect` action has no index, so its path is rooted at `set`.
+        path: String,
+    },
+
+    /// Lifecycle `set:` received a non-mapping payload.
+    #[error(
+        "lifecycle `{property}.{path}` must be a mapping, got {actual} ({source_path}); \
+         use `set: {{property: value}}`",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleSetNotMapping {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event, indexed stack item, or task `side_effect` property.
+        property: String,
+        /// Path within the stack item, rooted at `action[N].set`; a task's single
+        /// `side_effect` action has no index, so its path is rooted at `set`.
+        path: String,
+        /// The authored payload type or named unsupported whole-value form.
+        actual: String,
+    },
+
+    /// A lifecycle `set:` destination key is empty or dynamic.
+    #[error(
+        "lifecycle `{property}.{path}` has invalid destination key `{key}`: {message} \
+         ({source_path}); use literal non-empty keys in `set: {{property: value}}`",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleSetInvalidKey {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event, indexed stack item, or task `side_effect` property.
+        property: String,
+        /// The deepest representable `set` path.
+        path: String,
+        /// The invalid key, verbatim.
+        key: String,
+        /// Why the key is invalid.
+        message: String,
+    },
+
     /// A key/value lifecycle action parameter received a direct YAML map value.
     ///
     /// Object-valued side-effect arguments must be passed through a whole-value
@@ -997,8 +1071,8 @@ pub enum CompositionError {
         verb: String,
     },
 
-    /// A lifecycle control action was used in an event where the spec's
-    /// "Where valid" matrix forbids it (e.g. `Skip` outside `initialize`).
+    /// An action was used in a forbidden event: a shell in `initialize`, or
+    /// a lifecycle control outside its placement matrix.
     ///
     /// Raised at parse time after the action identity is known, so the
     /// diagnostic can name both the action and the event.
@@ -1389,7 +1463,8 @@ pub enum CompositionError {
     /// (`initialize`/`start`/`blocked`) routes it through `failure`/`finalize`
     /// like any other setup failure.
     #[error(
-        "lifecycle `{event}` evaluation error in `{surface}`: {message} ({source_path})",
+        "lifecycle `{event}` evaluation error in `{location}`: {message} ({source_path})",
+        location = property.as_deref().unwrap_or(surface),
         source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleEvaluationError {
@@ -1402,6 +1477,14 @@ pub enum CompositionError {
         surface: String,
         /// The raised expression's message.
         message: String,
+        /// Source-rooted semantic property that raised (`success.say`,
+        /// `failure.stack[0].when`,
+        /// `start.stack[1].action[0].set.metadata.files[2]`), when the executor
+        /// located it.
+        property: Option<String>,
+        /// Why evaluation failed; selects the remediation hint. Boxed to keep
+        /// `CompositionError` within `clippy::result_large_err`.
+        reason: Box<LifecycleEvaluationReason>,
     },
 
     // -- Sequence errors -------------------------------------------------------
@@ -2997,11 +3080,20 @@ impl CompositionError {
         source_path: impl Into<PathBuf>,
         info: &super::lifecycle_context::LifecycleErrorInfo,
     ) -> Self {
+        let message = info
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.detail.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or(&info.msg)
+            .to_string();
         Self::LifecycleEvaluationError {
             source_path: source_path.into(),
             event: event.into(),
             surface: info.variant.clone(),
-            message: info.msg.clone(),
+            message,
+            property: info.property.clone(),
+            reason: Box::new(info.reason.clone()),
         }
     }
 
@@ -3101,7 +3193,7 @@ impl CompositionError {
                 }
                 _ => Some(FrontmatterHighlight::BlockOnly),
             },
-            CompositionError::LifecycleInterpolationLeak { property, .. }
+            CompositionError::LifecycleNestedSpanInLiteral { property, .. }
             | CompositionError::LifecycleUndefinedVariable { property, .. }
             | CompositionError::LifecycleInvalid { property, .. }
             | CompositionError::LifecycleStackInvalidShape { property, .. }
@@ -3127,6 +3219,10 @@ impl CompositionError {
             | CompositionError::LifecycleTransitionUnownedAtStage { property, .. } => {
                 Some(FrontmatterHighlight::Property(property.clone()))
             }
+            CompositionError::LifecycleEvaluationError {
+                property: Some(property),
+                ..
+            } => Some(FrontmatterHighlight::Property(property.clone())),
             CompositionError::InvalidFileReference { context, .. } => {
                 Some(FrontmatterHighlight::Property(context.property.clone()))
             }
@@ -3136,7 +3232,11 @@ impl CompositionError {
             CompositionError::LifecycleProxyWithNotMapping { property, path, .. }
             | CompositionError::LifecycleProxyWithWholeMapping { property, path, .. }
             | CompositionError::LifecycleProxyWithDynamicKey { property, path, .. }
-            | CompositionError::LifecycleProxyWithEvaluationFailed { property, path, .. } => {
+            | CompositionError::LifecycleProxyWithEvaluationFailed { property, path, .. }
+            | CompositionError::LifecycleSetPositionalRemoved { property, path, .. }
+            | CompositionError::LifecycleSetLongFormRemoved { property, path, .. }
+            | CompositionError::LifecycleSetNotMapping { property, path, .. }
+            | CompositionError::LifecycleSetInvalidKey { property, path, .. } => {
                 Some(FrontmatterHighlight::Property(format!("{property}.{path}")))
             }
             CompositionError::LifecycleSayConflict(property)
@@ -3220,6 +3320,22 @@ impl CompositionError {
             _ => None,
         }
     }
+}
+
+/// Why an event-time lifecycle evaluation failed.
+///
+/// Typed so the renderer chooses a remediation without matching message text.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum LifecycleEvaluationReason {
+    /// An expression raised: an unknown root, a malformed span, or a function
+    /// error.
+    #[default]
+    Expression,
+    /// Resolution finished but a `{{ … }}` span survived in the rendered text.
+    SurvivingSpan {
+        /// The first surviving span, braces included.
+        span: String,
+    },
 }
 
 /// How a frontmatter-rooted error should be highlighted in the captured excerpt.

@@ -731,7 +731,7 @@ functions:
     /// the catalog output exactly.
     #[test]
     fn narrative_doc_function_table_matches_catalog() {
-        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest_dir = biscuit_test_harness::manifest_dir!();
         let doc_path = manifest_dir
             .join("../../darkmatter/docs/topics/darkmatter-expressions.md");
         let content = std::fs::read_to_string(&doc_path)
@@ -776,7 +776,7 @@ functions:
 
         // The link is authored sibling-relative, so it resolves against the
         // topic doc's own directory.
-        let doc_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        let doc_path = biscuit_test_harness::manifest_dir!()
             .join("../../darkmatter/docs/topics/darkmatter-expressions.md");
         let content = std::fs::read_to_string(&doc_path)
             .expect("darkmatter-expressions.md should be readable");
@@ -988,10 +988,12 @@ mod typed_signature_tests {
         }
     }
 
-    /// The six D4 list formatters are all present, take a single `any[]`, and
-    /// return `string | error`.
+    /// The eight list formatters are all present, take a single `any[]`, and
+    /// return `string | error`. The two serializers carry executable examples;
+    /// the multi-line renderers are verified through their example files.
     #[test]
     fn list_formatting_functions_are_typed() {
+        use crate::catalog::ExampleVerification;
         let expected = [
             "as_line_separated(list)",
             "as_csv(list)",
@@ -999,6 +1001,8 @@ mod typed_signature_tests {
             "as_space_separated(list)",
             "as_unordered_list(list)",
             "as_ordered_list(list)",
+            "as_json(list)",
+            "as_json5(list)",
         ];
         for signature in expected {
             let d = expression_function_descriptors()
@@ -1011,6 +1015,14 @@ mod typed_signature_tests {
             assert!(d.parameters[0].array, "list parameter must be an array");
             assert_eq!(d.returns.value, ReturnValueType::Data(DataType::String));
             assert!(d.returns.fallible, "list formatters are fallible");
+        }
+        for signature in ["as_json(list)", "as_json5(list)"] {
+            let example = expression_function_descriptors()
+                .iter()
+                .find(|d| d.signature == signature)
+                .and_then(|d| d.example())
+                .unwrap_or_else(|| panic!("{signature} must carry an example"));
+            assert_eq!(example.verification, ExampleVerification::Executable);
         }
         let csv = expression_function_descriptors()
             .iter()
@@ -1081,7 +1093,7 @@ mod list_formatting_example_files {
     /// `returns` string — the verified-example requirement (spec E3 / task 7).
     #[test]
     fn example_files_evaluate_to_their_declared_returns() {
-        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest_dir = biscuit_test_harness::manifest_dir!();
         let dir = manifest_dir
             .join("../features/_completed/2026-07-08-single-sourcing-schema/examples");
         let files = [

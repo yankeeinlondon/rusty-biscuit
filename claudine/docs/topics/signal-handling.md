@@ -42,7 +42,7 @@ share the same SIGTERM → SIGKILL escalation but classify differently:
 
 | `ProcessTermination` | Meaning | Failure routing |
 |---|---|---|
-| `Completed` | Child exited on its own (exit code may still be non-zero) | `AgentFailure` only if exit ≠ 0 |
+| `Completed` | Child exited on its own (exit code may still be non-zero) | `AgentFailure` when exit ≠ 0 **or** the stream summary set `is_error` |
 | `Interrupted` | User pressed Ctrl+C — no synthesized `error_kind` | suppressed (no recovery) |
 | `TimedOut` | `timeout` / `step_timeout` watchdog kill | `Timeout` → `failure` stack `Retry`/`Resume` |
 | `Aborted` | A claudine **content guard** tripped (exit-expression, runaway-repetition, or volume cap — see [timeouts.md](timeouts.md#content-guards-runaway-output)) | `AgentFailure` → `failure` fail-fast |
@@ -294,6 +294,15 @@ requests through a channel when `timeout` (wall-clock) or `step_timeout`
 sends `SIGTERM` to the child's process group, waits a configurable
 grace period (default `10s`, override via `CLAUDINE_KILL_GRACE`), then
 escalates to `SIGKILL`.
+
+The ladder is armed from the moment the child is spawned, not from its
+first output. `step_timeout` measures silence from the newest of the
+spawn instant, the last stream event, and the last non-whitespace byte,
+so a child that starts successfully and then says nothing reaches this
+same escalation on budget. It arrives as an ordinary
+`ProcessTermination::TimedOut` breach — nothing about the ladder, the
+grace period, or the Windows Ctrl+Break → `TerminateJobObject`
+equivalent below is special-cased for it.
 
 These signals are wrapper-initiated and are independent of any user
 SIGINT. The synthesized `session_end` JSONL event records the breach as

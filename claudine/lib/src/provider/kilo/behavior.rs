@@ -8,10 +8,12 @@
 //! path always knows the provider from the `claudine kilo` subcommand.
 //! Plugin-bus hooks are wired via `KiloConfigurator`, which emits an
 //! OpenCode-style bridge plugin using Kilo's `@kilocode/plugin` package.
-//! Native MCP is not wired yet; see the M-Kilo graduation report.
+//! Runtime MCP arrives inline through `KILO_CONFIG_CONTENT`; MCP import, sync,
+//! and export are not wired.
 
 use crate::hook_adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
+use crate::mcp::inject::{KiloInjector, McpInjector};
 use crate::provider::behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
 };
@@ -44,6 +46,10 @@ impl ProviderBehavior for KiloProvider {
 impl McpBehavior for KiloProvider {
     fn provider_for_error(&self) -> Provider {
         Provider::Kilo
+    }
+
+    fn runtime_injector(&self) -> Option<Box<dyn McpInjector>> {
+        Some(Box::new(KiloInjector))
     }
 }
 impl AdapterBehavior for KiloProvider {

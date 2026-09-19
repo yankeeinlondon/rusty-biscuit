@@ -56,8 +56,9 @@ SCOPE_NOTES_REF = f"{NOTES_PREFIX}/scope"
 assert "scope" not in ENVIRONMENTS
 
 #: Tiers the JUnit staging manifest records, and therefore the gates a local
-#: run can publish a measured outcome for. `lint` and `check` produce no report
-#: and are never reusable from a local receipt.
+#: run can publish a measured outcome for. `lint` and `check` produce no report;
+#: a `check` cell is satisfied only through its package's L1 receipt
+#: (`affected_scope.check_evidence`).
 RECORDABLE_GATES = ("L1", "L2", "browser")
 
 
@@ -104,31 +105,105 @@ def gate_global_inputs(gate: str) -> list[str]:
     *equivalence* the opposite is true: a resolved dependency change makes an
     older result describe a different build, so the lockfile has to move the
     identity.
+
+    The planner's orchestration files (`ORCHESTRATION_PATHS`) are left out for
+    the opposite reason: they decide what CI runs, not what a local gate
+    produces, so an older result under a different workflow still describes
+    the same build.
+
+    The Just files are not paths here at all. They enter the identity by
+    recipe through [`just_gate_inputs`], exactly as they enter selection: the
+    root justfile and `just/` hold some 7,000 lines, and a whole-file identity
+    made an edit to a planning or notification recipe invalidate every
+    published cell while the planner, reading the same edit by recipe,
+    scheduled nothing.
     """
-    planner_gate = gate if gate in ("lint", "check") else "test"
+    planner_gate = planner_gate_of(gate)
     paths = set(affected_scope.GLOBAL_PATHS_ALL_GATES)
     paths |= set(affected_scope.GLOBAL_PATHS_BY_GATE[planner_gate])
-    paths |= set(affected_scope.JUST_PATHS)
     paths |= {prefix.rstrip("/") for prefix in affected_scope.GLOBAL_PREFIXES_ALL_GATES}
-    paths |= {prefix.rstrip("/") for prefix in affected_scope.JUST_PREFIXES}
     paths.add(affected_scope.LOCKFILE_PATH)
+    paths -= set(affected_scope.ORCHESTRATION_PATHS)
+    paths -= {prefix.rstrip("/") for prefix in affected_scope.ORCHESTRATION_PREFIXES}
     return sorted(paths)
 
 
-def gate_input_identity(paths: list[str] | tuple[str, ...], ref: str) -> str:
-    """The identity of `paths` as they stand at `ref`.
+def planner_gate_of(gate: str) -> str:
+    """The planner's gate a cell gate is scheduled under: `L1`, `L2`, and
+    `browser` are all `test`."""
+    return gate if gate in ("lint", "check") else "test"
 
-    Git's own hashing boundary is the whole rule: the identity is over the
+
+def just_sources_at_ref(ref: str) -> dict[str, str]:
+    """The root justfile and the `just/*.just` modules as they stand at `ref`.
+
+    The same file set `affected_scope.just_sources` reads from disk, taken
+    from the tree instead so two revisions can be compared without checking
+    either out. A file absent at `ref` is absent from the result.
+    """
+    listing = git_optional("ls-tree", "-r", "--name-only", "--full-tree", ref, "--", "justfile", "just")
+    sources: dict[str, str] = {}
+    for path in sorted((listing or "").splitlines()):
+        path = path.strip()
+        is_module = path.startswith("just/") and path.endswith(".just") and path.count("/") == 1
+        if path != "justfile" and not is_module:
+            continue
+        text = git_optional("show", f"{ref}:{path}")
+        if text is not None:
+            sources[path] = text
+    return sources
+
+
+def just_gate_inputs(gate: str, ref: str) -> list[str]:
+    """The Just text that decides what `gate` executes, as it stands at `ref`.
+
+    One rule with the planner's `just_change_gates`, read from the tree: the
+    recipes reachable from the gate's CI entry recipes (`CI_RECIPES_BY_GATE`
+    and `CI_RECIPES_ALL_GATES`) through header dependencies and `just <name>`
+    calls, with comments and blank lines dropped, plus every line outside a
+    recipe (settings, imports, assignments), which is conservatively global to
+    every gate. A recipe nothing in CI reaches — `pre-push`, `cross-check`,
+    the whole of `just/plan.just` — contributes nothing, so editing it leaves
+    every published cell reusable.
+
+    Order is preserved inside a recipe: swapping two commands is a different
+    recipe, and a set would call it the same one.
+    """
+    recipes: dict[str, dict[str, Any]] = {}
+    entries: list[str] = []
+    for path, text in sorted(just_sources_at_ref(ref).items()):
+        parsed, other = affected_scope.parse_just_recipes(text)
+        recipes.update(parsed)
+        entries.extend(f"{path}: {line}" for line in other)
+    entries_recipes = (
+        *affected_scope.CI_RECIPES_ALL_GATES,
+        *affected_scope.CI_RECIPES_BY_GATE[planner_gate_of(gate)],
+    )
+    for name in sorted(affected_scope.just_recipe_closure(recipes, entries_recipes)):
+        recipe = recipes.get(name)
+        if recipe is not None:
+            entries.extend(f"{name}: {line}" for line in recipe["lines"])
+    return entries
+
+
+def gate_input_identity(
+    paths: list[str] | tuple[str, ...], ref: str, gate: str | None = None
+) -> str:
+    """The identity of `paths` as they stand at `ref`, plus the Just recipes
+    `gate` executes there when a gate is named.
+
+    Git's own hashing boundary is the rule for paths: the identity is over the
     `git ls-tree` entries — mode, type, object ID, path — for each input, so
     two trees agree exactly when Git says the content agrees. A path absent at
     `ref` contributes nothing, which is what makes an input that exists on
-    neither side identical on both.
+    neither side identical on both. The Just recipes are the one input read
+    finer than a file: see [`just_gate_inputs`].
 
     ## Examples
 
     ```python
-    before = gate_input_identity(["claudine/lib"], "HEAD~1")
-    after = gate_input_identity(["claudine/lib"], "HEAD")
+    before = gate_input_identity(["claudine/lib"], "HEAD~1", "L1")
+    after = gate_input_identity(["claudine/lib"], "HEAD", "L1")
     ```
     """
     entries: list[str] = []
@@ -136,7 +211,10 @@ def gate_input_identity(paths: list[str] | tuple[str, ...], ref: str) -> str:
         listing = git_optional("ls-tree", "-r", "--full-tree", ref, "--", path)
         if listing:
             entries.extend(line for line in listing.splitlines() if line.strip())
-    return schema.identity("\n".join(sorted(set(entries))))
+    ordered = sorted(set(entries))
+    if gate is not None:
+        ordered.extend(just_gate_inputs(gate, ref))
+    return schema.identity("\n".join(ordered))
 
 
 def cell_input_paths(plan: dict[str, Any], package: str, gate: str) -> list[str] | None:
@@ -338,8 +416,8 @@ def verify_cells(
                             "with this head cannot be established"
                         )
                         continue
-                    if gate_input_identity(paths, note_commit) != gate_input_identity(
-                        paths, head_sha
+                    if gate_input_identity(paths, note_commit, cell["gate"]) != gate_input_identity(
+                        paths, head_sha, cell["gate"]
                     ):
                         rejections.append(
                             f"gate-inputs-changed: {label} was tested on {note_commit[:9]}, "
@@ -499,13 +577,20 @@ def record_scope(plan_path: str, scope_path: str, base: str, head: str) -> str:
     return schema.canonical(document)
 
 
-def verify_scope(base: str, head: str) -> tuple[dict[str, Any] | None, str]:
+def verify_scope(
+    base: str, head: str, event: str | None = None
+) -> tuple[dict[str, Any] | None, str]:
     """The scope receipt that binds exactly `{base, head, head tree}`, or why not.
 
     Read from the event head only — scope binds to an exact head, so an older
     commit's note can never stand in. Checked in R3's order: schema, head,
-    tree, base, then structure. Every miss fails safe: the caller calculates
-    scope itself.
+    tree, base, event, then structure. Every miss fails safe: the caller
+    calculates scope itself.
+
+    `event` is the GitHub event the caller is running for. A receipt's plan
+    schedules the environments of the event it was planned for, so a plan for
+    another event — or for none — cannot stand in and misses as
+    `scope-event-mismatch`.
 
     ## Returns
 
@@ -543,6 +628,14 @@ def verify_scope(base: str, head: str) -> tuple[dict[str, Any] | None, str]:
             return None, (
                 f"{code}: the scope note on {head_sha[:9]} declares {field} "
                 f"{str(declared)[:9]}, the event's is {expected[:9]}"
+            )
+    if event is not None:
+        plan = document.get("plan")
+        planned_event = plan.get("event") if isinstance(plan, dict) else None
+        if planned_event != event:
+            return None, (
+                f"scope-event-mismatch: the scope note on {head_sha[:9]} was planned "
+                f"for event {planned_event!r}, this run is {event!r}"
             )
     problems = schema.validate_scope_receipt(document)
     if problems:
@@ -701,7 +794,7 @@ def receipt_cell(
         "counts": counts,
         "duration_s": record.get("duration_s", 0),
         "gate_input_identity": (
-            gate_input_identity(paths, head) if paths else schema.identity(f"{package}/{gate}")
+            gate_input_identity(paths, head, gate) if paths else schema.identity(f"{package}/{gate}")
         ),
         "backends": backends,
         "report": record.get("xml", ""),
@@ -924,8 +1017,15 @@ def record_cross_check(
     head: str,
     environment: str = "wsl2-ubuntu",
     host_label: str = "",
+    build_key: str = "",
+    build_digest: str = "",
 ) -> str:
     """The receipt for a qualifying `cross-check` run.
+
+    `build_key` and `build_digest` are the manifest the remote consumer
+    VERIFIED, not the plan's expectation of it: a receipt that named a key
+    nothing checked would be a claim rather than evidence. Both or neither —
+    a half-named build is recorded as no build at all.
 
     ## Errors
 
@@ -972,6 +1072,8 @@ def record_cross_check(
             f"the remote run produced no usable report for {package}; nothing is "
             "published"
         )
+    if build_key and build_digest:
+        cell["build"] = {"key": build_key, "digest": build_digest}
     return assemble_receipt(
         plan,
         environment,
@@ -1127,6 +1229,8 @@ def parse_args() -> argparse.Namespace:
     cross.add_argument("--head", required=True)
     cross.add_argument("--environment", default="wsl2-ubuntu", choices=ENVIRONMENTS)
     cross.add_argument("--host-label", default="")
+    cross.add_argument("--build-key", default="")
+    cross.add_argument("--build-digest", default="")
 
     scope_recorder = subparsers.add_parser(
         "scope-record", help="emit a scope receipt for one committed base..head"
@@ -1146,6 +1250,11 @@ def parse_args() -> argparse.Namespace:
     scope_verifier.add_argument("--scope-out", required=True, metavar="FILE")
     scope_verifier.add_argument(
         "--reason-out", metavar="FILE", help="write the coded miss reason here"
+    )
+    scope_verifier.add_argument(
+        "--event",
+        choices=affected_scope.EVENT_NAMES,
+        help="the GitHub event this run is for; a receipt planned for another misses",
     )
 
     verifier = subparsers.add_parser("verify")
@@ -1189,7 +1298,7 @@ def main() -> None:
         print(record_scope(args.plan, args.scope, args.base, args.head))
         return
     if args.command == "scope-verify":
-        receipt, reason = verify_scope(args.base, args.head)
+        receipt, reason = verify_scope(args.base, args.head, args.event)
         if receipt is None:
             if args.reason_out:
                 Path(args.reason_out).write_text(reason + "\n", encoding="utf-8")
@@ -1217,6 +1326,8 @@ def main() -> None:
                     args.head,
                     args.environment,
                     args.host_label,
+                    args.build_key,
+                    args.build_digest,
                 )
             )
         except (OSError, ValueError) as refusal:

@@ -73,6 +73,8 @@ Each top-level key is classified as one of:
 - **Templated value**: the value tree contains at least one interpolation expression somewhere
 
 Only seed values participate in lookup for the frontmatter interpolation pass.
+A templated key joins them once it has resolved — see
+[Chained References](#chained-references).
 
 ### What Counts As Templated
 
@@ -178,9 +180,21 @@ The `ctx.*` namespace provides 70+ runtime variables organized into demand-drive
 | Gpu | `gpu` |
 
 List-valued variables (e.g. `packages`, `dirty_files`) are captured as real
-arrays; render them with the list-formatting functions (`as_csv`,
-`as_unordered_list`, `as_ordered_list`, …) or rely on the default line-separated
-rendering of a bare `{{ ctx.foo }}`. DateTime variables have `_utc` counterparts.
+arrays. Embedded in surrounding text, a bare `{{ ctx.foo }}` renders as compact
+JSON (`["a","b","c"]`, and `[]` when empty); `as_json` is the explicit spelling
+of that default, and the other list-formatting functions (`as_csv`,
+`as_line_separated`, `as_unordered_list`, `as_ordered_list`, `as_json5`, …)
+render the other shapes. A value that is _exactly_ one span is unaffected — see
+the [whole-value exception](#whole-values-keep-their-type), which keeps the
+array typed rather than stringifying it. DateTime variables have `_utc`
+counterparts.
+
+> **Migration.** A bare `{{ ctx.foo }}` in text previously rendered
+> newline-joined. Documents that relied on that move to
+> `{{ as_line_separated(ctx.foo) }}`, which is unchanged, or to whichever
+> explicit function matches the intent — `as_unordered_list` for Markdown
+> bullets, `as_csv` for a prose list, `as_json` / `as_json5` when the structure
+> is the point.
 
 ## Supported Value Shapes
 

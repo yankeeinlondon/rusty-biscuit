@@ -113,6 +113,7 @@ CLI commands for desktop notifications:
 - `messenger dismiss <receipt>` — dismiss a delivered desktop notification using a saved receipt
 - `messenger info [--json]` — show host OS, detected helpers, election order, and configured routes
 - `messenger install [--yes] [--helper <name>…] [--dry-run]` — install missing notification helpers via the host package manager
+- `messenger research validate|generate [--check]|report|recover` — offline research-contract maintenance; `prepare|check-run|runs|promote|reject|cleanup` — the refresh and review lifecycle (see [Research Contract](research-contract.md)). Package-area `just research-*` recipes wrap them; only `just research-refresh` runs agents
 
 Discord ships with two adapters behind a single `discord` feature: `DiscordProvider` (bot token, full capability) and `DiscordWebhookProvider` (webhook URL, notification-only). The webhook adapter rejects `reply_to` at plan time with `MessengerError::UnsupportedFeature { feature: "replies" }` — no network call is made.
 Both Discord adapters render Markdown through the same Discord renderer; the transport and capability differences live in the provider layer, not in a second markup dialect.
@@ -155,6 +156,7 @@ messenger/
     src/
       provider/  # Discord, Discord-Webhook, Slack, Slack-Webhook, Signal, WhatsApp, Telegram, Desktop, APNs, FCM adapters
       markdown/  # AST, parser, per-provider renderers
+      research/  # `research` feature: typed loader, semantic rules, catalog, delta, reports, snapshot publication, refresh lifecycle
       tests/     # Unit + wiremock integration tests
   cli/           # messenger binary (send, setup, completions)
     src/
@@ -163,19 +165,22 @@ messenger/
       install.rs # Interactive helper installation via sniff
       setup.rs   # Interactive provider setup
       receipt_store.rs
+      research.rs # `messenger research` maintenance commands
+      research_lifecycle.rs # prepare, check-run, runs, promote, reject, cleanup
   docs/research/ # Provider research and API design notes
 ```
 
-Local L1 enables only the `desktop` feature used by the package-area contract.
-CI retains `all-features` coverage for every provider; the separate
-`local-features` metadata prevents root local testing from inheriting that
-provider-wide graph.
+Local L1 enables only the `desktop` and `research` features used by the
+package-area contract. CI retains `all-features` coverage for every provider;
+the separate `local-features` metadata prevents root local testing from
+inheriting that provider-wide graph.
 
 ## Detailed Documentation
 
 - [Providers Reference](providers.md) - Provider trait, adapter implementations, config structs, capabilities
 - [Markdown Rendering](markdown-rendering.md) - AST, parser, per-provider renderers, supported constructs
 - [CLI Reference](cli-reference.md) - Commands, route resolution, config format, receipts, setup flow
+- [Research Contract](research-contract.md) - Provider research roster, frozen schema v1, fleet prompt, fixtures, snapshot publication, catalog/report/delta consumers, the Claudine refresh budget, and gotchas
 - [User Guide](../../../messenger/docs/user-guide.md) - Platform setup walkthroughs, CLI config schema, library usage examples
 
 ## Related Packages

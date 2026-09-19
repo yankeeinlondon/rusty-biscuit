@@ -252,12 +252,7 @@ pub fn execute_versioned_install_captured(
     version: &str,
     opts: &InstallOptions,
 ) -> InstallCapturedOutcome {
-    execute_versioned_install_captured_with_runner(
-        method,
-        version,
-        opts,
-        &run_command_with_timeout,
-    )
+    execute_versioned_install_captured_with_runner(method, version, opts, &run_command_with_timeout)
 }
 
 fn execute_versioned_install_captured_with_runner(
@@ -452,8 +447,7 @@ fn execute_uv_with_install_captured_with_runner(
 mod tests {
     use super::*;
 
-    const INSTALL_TIMEOUT_CHILD: &str =
-        "programs::install::execute::tests::install_timeout_child";
+    const INSTALL_TIMEOUT_CHILD: &str = "programs::install::execute::tests::install_timeout_child";
 
     fn fixture_args() -> Vec<std::ffi::OsString> {
         [INSTALL_TIMEOUT_CHILD, "--exact", "--ignored", "--nocapture"]
@@ -598,7 +592,9 @@ mod tests {
                 assert_eq!(manager, "brew");
                 assert_eq!(timeout_secs, 0);
             }
-            other => panic!("timeout must not be conflated with a package-manager failure: {other}"),
+            other => {
+                panic!("timeout must not be conflated with a package-manager failure: {other}")
+            }
         }
     }
 

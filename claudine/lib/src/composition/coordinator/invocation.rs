@@ -98,7 +98,7 @@ pub struct InvocationInputsDraft {
     pub sandbox: bool,
     /// Ambient working directory at command invocation time.
     pub launch_cwd: PathBuf,
-    /// Restrict to repo-scoped resources via a shadow HOME.
+    /// Restrict to repo-scoped resources via a provider overlay.
     pub repo: bool,
     /// Launch-CWD discovery taken once during prep and reused everywhere.
     ///

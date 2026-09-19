@@ -35,6 +35,25 @@
 //! **Finalization** (root-only serial):
 //! 16. **Link Normalization** - Convert absolute paths back to portable forms
 //!
+//! ## Frontmatter-surface projection
+//!
+//! [`ComposeOptions::only_frontmatter_surface`] composes a document's effective
+//! frontmatter — interpolation, schema coercion (and verdict, unless deferred),
+//! and approved `$(...)` expansion — while leaving the body exactly as authored.
+//! It never dereferences a `::file`/`::url`/`::code` transclusion or a
+//! prologue/epilogue, never parses or runs `::shell`/`::shell-block`, never
+//! evaluates `::block when`, and never prefetches remote transclusions; its
+//! pre-approval check uses [`collect_frontmatter_shell_commands`] instead of
+//! the condition-blind graph walk. Keys excluded by the caller keep their
+//! `{{ }}` spans.
+//!
+//! It serves staged initialization: a caller reads the frontmatter (for
+//! example a lifecycle surface) that drives a step which creates files the body
+//! will include, runs that step, and only then composes the full document. The
+//! projected body is not a prompt. Full composition and
+//! [`Markdown::compose_preflight`] are unchanged and still fail on a missing
+//! transclusion target.
+//!
 //! ## Examples
 //!
 //! ```
@@ -119,7 +138,7 @@ pub use frontmatter_shell_expansion::{
     FrontmatterShellAction, FrontmatterShellBody, FrontmatterShellPipeline, FrontmatterShellSuffix,
     FrontmatterShellTernary, FrontmatterShellValue, parse_frontmatter_shell_value_spanned,
 };
-pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, PreflightApprovalStats, collect_shell_commands};
+pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, PreflightApprovalStats, collect_frontmatter_shell_commands, collect_shell_commands};
 pub use shell_blocks::ShellBlockError;
 pub use shell_expansion::ShellCommandOrigin;
 pub use shell_expansion::ShellExpansionError;
